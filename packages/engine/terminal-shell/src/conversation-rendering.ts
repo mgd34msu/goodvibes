@@ -1,6 +1,5 @@
 import { stringToLine } from './renderer/string-to-line.js';
 import { renderUserMessage } from './renderer/user-message.js';
-import { peekSystemMessagePresentation } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 import { activeTheme, activeTokens } from './renderer/theme.js';
 import type { ToolCall } from '@goodvibes-jev/engine/platform/platform/types';
 import { renderSystemMessage } from './renderer/system-message.js';
@@ -50,15 +49,16 @@ export interface ConversationPresentation {
     readonly compactionPreview: string;
     readonly compactionSpacing: 'leading' | 'trailing';
 }
-export function isNavigableSystemContent(content: string): boolean {
-    return peekSystemMessagePresentation(content)?.severity === 'error';
+/** Under severity navigation, a notice is a stop when its writer stored it as an error. */
+export function isNavigableSystemContent(severity: 'error' | 'warning' | 'info' | undefined): boolean {
+    return severity === 'error';
 }
 export function createConversationRenderer(presentation: ConversationPresentation) {
     function messageBar(width: number, text: string, bg = activeTokens().backgroundPanel, fg = activeTokens().text, bar = activeTokens().secondary, strikethrough = false): Line[] {
         return renderUserMessage(text, width, { bg, text: fg, bar, strikethrough });
     }
-    function navigable(context: ConversationRenderContext, index: number, content: string): boolean {
-        return presentation.systemNavigation === 'kind' ? isNavigableSystemMessage(context, index) : isNavigableSystemContent(content);
+    function navigable(context: ConversationRenderContext, index: number, severity: 'error' | 'warning' | 'info' | undefined): boolean {
+        return presentation.systemNavigation === 'kind' ? isNavigableSystemMessage(context, index) : isNavigableSystemContent(severity);
     }
     /** Whether a system message at `msgIdx` is navigable for error navigation. */
     function isNavigableSystemMessage(context: Pick<ConversationRenderContext, 'messageKindRegistry'>, msgIdx: number): boolean {
@@ -92,7 +92,7 @@ export function createConversationRenderer(presentation: ConversationPresentatio
         context.history.addLines(sysLines);
         // Resolve navigability from the stored kind, defaulting to 'system'
         // (navigable) for messages added without an explicit kind tag.
-        if (navigable(context, msgIdx, message.content)) {
+        if (navigable(context, msgIdx, message.presentation?.severity)) {
             context.errorLineRegistry.push(sysStartLine);
         }
     }
@@ -132,9 +132,9 @@ export function createConversationRenderer(presentation: ConversationPresentatio
         for (const notice of model.notices) {
             lines.push(createEmptyLine(width));
             messageLines.set(notice.messageIndex, lines.length);
-            if (navigable(context, notice.messageIndex, notice.content))
+            if (navigable(context, notice.messageIndex, notice.severity))
                 errorLines.push(lines.length);
-            lines.push(...renderSystemMessage(notice.content, width, undefined, presentation.rows.systemAccent));
+            lines.push(...renderSystemMessage(notice.content, width, notice.severity, presentation.rows.systemAccent));
         }
         return { ...render, lines, errorLines, messageLines, trailingSeparator: true };
     }

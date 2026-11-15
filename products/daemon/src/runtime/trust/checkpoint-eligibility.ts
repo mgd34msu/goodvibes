@@ -1,13 +1,13 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolveWorkspaceRegisterReadPath } from '@goodvibes-jev/engine/platform/platform/workspace';
 import type { ShellPathService } from '../index.js';
 import {
-  createCheckpointEligibilityChecker,
-  readCheckpointEligibilitySync,
-  readWorkspaceRegisterSync,
-  type CheckpointEligibility,
+  normalizeWorkspaceRoot,
+  probeWorktreeLink,
+  resolveWorkspaceRegistration,
   type DeclinedWorkspaceRecord,
   type RegisteredWorkspaceRecord,
+  type WorkspaceCoverageStatus,
   type WorkspaceGitMetadata,
   type WorkspaceResolution,
 } from '@goodvibes-jev/engine/platform/platform/workspace';
@@ -26,9 +26,7 @@ import {
  * store as it is on disk RIGHT NOW, registering a workspace while the daemon is
  * running has to take effect on the next eligible event, not on the next
  * restart. The platform's resolver is pure, so the only I/O is one small JSON read
- * plus a single git worktree probe amortized at construction. The register is
- * parsed by the platform store's own reader, so this gate and the workspaces.*
- * verbs always agree on what it says.
+ * plus a single git worktree probe amortized at construction.
  */
 
 export type StoreShellPaths = Pick<ShellPathService, 'resolveUserPath' | 'homeDirectory'>;
@@ -53,49 +51,107 @@ export function sharedWorkspaceRegistrationStorePath(shellPaths: StoreShellPaths
   return resolveWorkspaceRegisterReadPath(shellPaths, existsSync);
 }
 
-/**
- * The shared register's coverage rows, through the store's own parser (legacy
- * v1 or native v2). A missing register is empty; an unreadable one is reported
- * by {@link resolveCheckpointEligibility} rather than read as empty here.
- */
-export function readSharedWorkspaceRegistrationSnapshotSync(shellPaths: StoreShellPaths): {
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function readString(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function parseRegisteredRecord(value: unknown): RegisteredWorkspaceRecord | null {
+  if (!isRecord(value)) return null;
+  const root = readString(value.root);
+  const registeredAt = readString(value.registeredAt);
+  if (!root || !registeredAt || Number.isNaN(Date.parse(registeredAt))) return null;
+  const label = readString(value.label);
+  const origin = readString(value.origin);
+  return {
+    root: normalizeWorkspaceRoot(root),
+    registeredAt,
+    ...(label ? { label } : {}),
+    ...(origin ? { origin } : {}),
+    // Strictly `true` only; any other value (including absent) is not eligible.
+    ...(value.checkpointEligible === true ? { checkpointEligible: true } : {}),
+  };
+}
+
+function parseDeclinedRecord(value: unknown): DeclinedWorkspaceRecord | null {
+  if (!isRecord(value)) return null;
+  const root = readString(value.root);
+  const declinedAt = readString(value.declinedAt);
+  if (!root || !declinedAt || Number.isNaN(Date.parse(declinedAt))) return null;
+  return { root: normalizeWorkspaceRoot(root), declinedAt };
+}
+
+interface SharedRegistrationSnapshot {
   readonly workspaces: readonly RegisteredWorkspaceRecord[];
   readonly declines: readonly DeclinedWorkspaceRecord[];
-} {
-  const read = readWorkspaceRegisterSync(sharedWorkspaceRegistrationStorePath(shellPaths));
-  return read.state === 'ok' ? { workspaces: read.workspaces, declines: read.declines } : { workspaces: [], declines: [] };
-}
-
-/** Checkpoint eligibility of `path`, or the reason the register cannot be read. */
-export function resolveCheckpointEligibility(shellPaths: StoreShellPaths, path: string, git?: WorkspaceGitMetadata): CheckpointEligibility {
-  return readCheckpointEligibilitySync(sharedWorkspaceRegistrationStorePath(shellPaths), path, git);
 }
 
 /**
- * Resolve `path` against ONLY the checkpoint-eligible registrations. An
- * unreadable register resolves as not covered; callers that must say why use
- * {@link resolveCheckpointEligibility}.
+ * Synchronous read of the shared store's on-disk JSON, mirroring the store's own
+ * coverage rows from legacy v1 or native v2. Checkpoint eligibility still comes
+ * only from an explicit boolean checkpointEligible flag; native incarnations
+ * are not checkpoint grants. Native execution authority has its own strict
+ * WorkspaceRegistrationStore.currentScope reader. A missing or unparsable file
+ * reads as empty, never throws.
+ */
+export function readSharedWorkspaceRegistrationSnapshotSync(shellPaths: StoreShellPaths): SharedRegistrationSnapshot {
+  const path = sharedWorkspaceRegistrationStorePath(shellPaths);
+  if (!existsSync(path)) return { workspaces: [], declines: [] };
+  try {
+    const parsed = JSON.parse(readFileSync(path, 'utf-8')) as unknown;
+    if (!isRecord(parsed) || (parsed.version !== 1 && parsed.version !== 2) || !Array.isArray(parsed.workspaces)) {
+      return { workspaces: [], declines: [] };
+    }
+    const workspaces = parsed.workspaces
+      .map(parseRegisteredRecord)
+      .filter((entry): entry is RegisteredWorkspaceRecord => entry !== null);
+    const declineList = Array.isArray(parsed.declines) ? parsed.declines : [];
+    const declines = declineList
+      .map(parseDeclinedRecord)
+      .filter((entry): entry is DeclinedWorkspaceRecord => entry !== null);
+    return { workspaces, declines };
+  } catch {
+    return { workspaces: [], declines: [] };
+  }
+}
+
+/**
+ * Resolve `path` against ONLY the checkpoint-eligible registrations, the
+ * boundary the automatic and explicit checkpoint gates consume. Worktree-link
+ * inheritance still applies: a linked worktree of a checkpoint-eligible main
+ * repository resolves as covered.
  */
 export function resolveCheckpointEligibilitySync(
   shellPaths: StoreShellPaths,
   path: string,
   git?: WorkspaceGitMetadata,
 ): WorkspaceResolution {
-  const eligibility = resolveCheckpointEligibility(shellPaths, path, git);
-  return eligibility.state === 'readable' ? eligibility.resolution : {
-    path, status: 'unknown', coveredBy: null, declinedRoot: null, viaWorktreeLink: false,
-    reason: `the workspace register cannot be read: ${eligibility.reason}`,
-  };
+  const snapshot = readSharedWorkspaceRegistrationSnapshotSync(shellPaths);
+  const eligible = snapshot.workspaces.filter((entry) => entry.checkpointEligible === true);
+  const gitMeta = git ?? probeWorktreeLink(path);
+  return resolveWorkspaceRegistration({
+    path,
+    git: gitMeta,
+    registrations: eligible,
+    declines: snapshot.declines,
+  });
 }
 
 /**
- * A cheap, repeatable live checkpoint-eligibility checker for one fixed
- * workspace root: the git worktree probe runs once, each call re-reads the
- * shared register, cheap enough for every turn and agent-run event.
+ * Build a cheap, repeatable live checkpoint-eligibility checker for one fixed
+ * workspace root. `probeWorktreeLink` (a `git` subprocess spawn) runs ONCE here,
+ * since a long-running process's working directory and its git-worktree
+ * relationship do not change mid-launch; every subsequent call only re-reads the
+ * shared registration JSON file, which is cheap enough to call on every
+ * turn/agent-lifecycle event.
  */
 export function createWorkspaceRegistrationLiveChecker(
   shellPaths: StoreShellPaths,
   path: string,
-): () => CheckpointEligibility {
-  return createCheckpointEligibilityChecker(() => sharedWorkspaceRegistrationStorePath(shellPaths), path);
+): () => WorkspaceCoverageStatus {
+  const git = probeWorktreeLink(path);
+  return () => resolveCheckpointEligibilitySync(shellPaths, path, git).status;
 }

@@ -17,9 +17,7 @@ export function noticeParts(text: string, severity?: 'error' | 'warning' | 'info
   return { ...parts(text), level: severity === 'error' ? 'critical' : severity === 'warning' ? 'warning' : 'info' };
 }
 const publish = createNoticePublisher({
-  severity: 'presentation',
   screenBeforeLocalPublication: false,
-  retainOnDecorationError: true,
   resolveEvent(text, provenance) {
     const event = delegatedTaskEventOfNotice(text) ?? runtimeEventOfNotice(text, provenance);
     return event ? { ...event, key: runtimeEventKey(event.type, provenance) } : undefined;

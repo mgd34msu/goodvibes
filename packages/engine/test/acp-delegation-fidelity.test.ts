@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
+import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import type { AcpManager, SubagentTask } from '../platform/src/platform/acp/index.js';
 import { ConfigManager } from '../platform/src/platform/config/index.js';
 import { ConversationManager } from '../platform/src/platform/core/conversation.js';
@@ -38,6 +38,7 @@ function fixture() {
 test.each([false, true])('ACP delegation judges the actual captured owner request before launching (refused=%s)', async refused => {
   const h = fixture(), request = 'Read review.md without changing any files.';
   const fake = fakePort((name, question, state) => {
+    if (name === 'conflicting_requirement') return choiceAnswer(question, 'r1', .99);
     if (question.type !== 'noul' || !['scope_conflict', 'constraint_conflict', 'delegation_forbidden'].includes(name)) throw new Error('Unexpected ACP fidelity reading');
     expect((state as { originalUserRequest: string }).originalUserRequest).toBe(request);
     return noulAnswer(refused && name === 'constraint_conflict' ? .99 : .01);

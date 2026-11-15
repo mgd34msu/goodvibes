@@ -7,10 +7,12 @@ beforeEach(() => {
   resetTestRuntimeServices();
 });
 
-// The bus refuses an unregistered sender and reserves broadcast for coordinators, so agent-a is registered as one.
+// The bus refuses an unregistered sender or recipient and reserves broadcast for coordinators,
+// so agent-a is registered as one and agent-b as an ordinary agent.
 async function busWithSender(): Promise<AgentMessageBus> {
   const bus = await getTestAgentMessageBus();
   bus.registerAgent({ agentId: 'agent-a', role: 'orchestrator' });
+  bus.registerAgent({ agentId: 'agent-b', role: 'general' });
   return bus;
 }
 

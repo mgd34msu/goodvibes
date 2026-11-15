@@ -178,7 +178,8 @@ export class TerminalConversationManager extends PlatformConversationManager {
                 throw new JudgmentAuthorityRetiredError();
         };
         try {
-            const result = sink(message.content, { restored, runtimeEvent: message.runtimeEvent, ...(message.notice ? { notice: message.notice } : {}), signal: lifetime.signal, assertCurrent });
+            // A line whose writer declared no level is information: the sink reads nothing to colour it.
+            const result = sink(message.content, { restored, runtimeEvent: message.runtimeEvent, notice: message.notice ?? { level: 'info' }, signal: lifetime.signal, assertCurrent });
             if (result) {
                 // Unavailable or retired readings leave the original message saved;
                 // neither a guessed severity nor an unhandled rejection is emitted.

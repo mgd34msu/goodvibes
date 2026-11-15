@@ -105,6 +105,13 @@ export interface BatteryDefinition<Items extends BatteryItems> {
   readonly name: string;
   readonly version: number;
   readonly description: string;
+  /**
+   * Evaluator rules every question of this battery shares, written once here
+   * instead of in each item. A System One server reads the state with each
+   * question on its own, so the request places this text ahead of every asked
+   * question's instructions.
+   */
+  readonly context?: string;
   readonly items: Items;
   readonly fixtures: readonly Fixture<Items>[];
   /** Share of fixture expectations calibration must meet, in (0, 1]. */
@@ -209,7 +216,17 @@ function questionsFor<Items extends BatteryItems>(battery: string, items: Items,
   );
 }
 
-export function defineBattery<const Items extends BatteryItems>(definition: BatteryDefinition<Items>): Battery<Items> {
+/** The items with the battery's shared context placed ahead of each question's instructions. */
+function withContext<Items extends BatteryItems>(items: Items, context: string | undefined): Items {
+  if (!context) return items;
+  return Object.fromEntries(Object.entries(items).map(([itemName, item]) => [itemName,
+    typeof item.question.instructions === 'string' ? { ...item, question: { ...item.question, instructions: context + item.question.instructions } } : item,
+  ])) as unknown as Items;
+}
+
+export function defineBattery<const Items extends BatteryItems>(declared: BatteryDefinition<Items>): Battery<Items> {
+  // Every path that asks a battery (run, judge, fan-out, calibration) reads `items`, so the shared context is placed once, here.
+  const definition: BatteryDefinition<Items> = { ...declared, items: withContext(declared.items, declared.context) };
   const { name, items, fixtures } = definition;
   const header = decisionHeader(definition);
   if (Object.keys(items).length === 0) throw new RangeError(`battery ${name}: needs at least one question`);

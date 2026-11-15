@@ -197,7 +197,7 @@ test('worker acceptance details reach both the provider and its independent comp
     const checks = fake.requests.filter(request => request.context?.battery === 'engine.core.response-completion');
     expect(checks).toHaveLength(2);
     expect((checks[0]!.state as never as { requirements: unknown }).requirements).toEqual({ successCriteria: criteria, requiredEvidence: evidence, writeScope });
-    expect(requests[1]!.systemPrompt).toContain('[Response completion check]');
+    expect(JSON.stringify(requests[1]!.messages.at(-1))).toContain('[Response completion check]');
     expect(record.fullOutput).toContain('source line references');
     const journal = readFileSync(join(dir, '.goodvibes/sessions/agents/worker-acceptance.jsonl'), 'utf8')
       .trim().split('\n').map(line => JSON.parse(line));

@@ -4,6 +4,7 @@ export type AgentCommunicationRole =
   | 'orchestrator'
   | 'planner'
   | 'engineer'
+  | 'tester'
   | 'reviewer'
   | 'researcher'
   | 'integrator'
@@ -21,6 +22,10 @@ export function communicationRoleForTemplate(template?: string): AgentCommunicat
   switch (template) {
     case 'orchestrator':
       return 'orchestrator';
+    case 'planner':
+      return 'planner';
+    case 'tester':
+      return 'tester';
     case 'engineer':
       return 'engineer';
     case 'reviewer':

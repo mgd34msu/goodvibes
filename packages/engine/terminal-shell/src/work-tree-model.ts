@@ -139,6 +139,8 @@ export interface TurnModel {
     readonly notices: ReadonlyArray<{
         readonly messageIndex: number;
         readonly content: string;
+        /** The level stored on the notice by its writer. */
+        readonly severity?: 'error' | 'warning' | 'info' | undefined;
     }>;
 }
 /** A contiguous stretch of the transcript: one user message, one turn, or one standalone system message. */
@@ -588,6 +590,7 @@ export function buildTurnModel(input: BuildTurnInput): TurnModel {
     const notices: Array<{
         messageIndex: number;
         content: string;
+        severity?: 'error' | 'warning' | 'info' | undefined;
     }> = [];
     const calledIds = new Set<string>();
     for (let abs = unit.start; abs <= unit.end; abs++) {
@@ -609,7 +612,7 @@ export function buildTurnModel(input: BuildTurnInput): TurnModel {
             continue;
         }
         if (m.role === 'system') {
-            notices.push({ messageIndex: abs, content: m.content });
+            notices.push({ messageIndex: abs, content: m.content, severity: m.presentation?.severity });
             continue;
         }
         if (m.role !== 'assistant')

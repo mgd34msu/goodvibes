@@ -8,9 +8,8 @@ import { describe, expect, test } from 'bun:test';
 import { CONTRACT_CHECKS_FOLLOW, renderAgentCompletionAnswer } from '../platform/src/platform/agents/completion-answer.js';
 
 describe('renderAgentCompletionAnswer', () => {
-  test('a completed run says its output, then its streamed content', () => {
+  test('a completed run says its output', () => {
     expect(renderAgentCompletionAnswer({ status: 'completed', fullOutput: ' The answer. ' })).toBe('The answer.');
-    expect(renderAgentCompletionAnswer({ status: 'completed', streamingContent: 'Streamed.' })).toBe('Streamed.');
   });
 
   test('nothing produced is silence, except a contract unit agent whose contract still checks the work', () => {

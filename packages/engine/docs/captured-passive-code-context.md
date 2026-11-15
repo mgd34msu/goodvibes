@@ -55,17 +55,21 @@ metadata, while query, cache-result, stats and provider-delivery boundaries
 revalidate the whole admitted index input. Every guard retains the existing
 root/receipt integrity checks. Guards do not cache permission decisions.
 
-A provider turn owns one generation. The runner revalidates it for every
-provider attempt and after the response, then releases it before tool mutation.
-The next turn builds a fresh generation. Content/generation-aware code IDs
+A captured (read-only) contract input cannot change under the run, so its
+generation is indexed once per run and serves every turn; each check against it
+is one `lstat` per indexed file and directory, not a re-read. A mutable input
+still owns one generation per provider turn: the runner revalidates it for every
+provider attempt and after the response, then releases it before tool mutation,
+and the next turn builds a fresh generation. Content/generation-aware code IDs
 prevent same-line edits or rebind from reusing stale pointer blocks. Project
 memory keeps its independent retrieval and retention semantics.
 
 ## Bounds and availability
 
-The adapter caps discovery at 1,024 entries, 64 files, 128 KiB per file, 1 MiB of
-source and 128 chunks. Preparation and query/currentness operations each have a
-15-second cancellation deadline, with elapsed-time checks before later work.
+The adapter caps discovery at 20,000 entries, 4,000 files, 128 KiB per file,
+32 MiB of source and 4,096 chunks, sized so an ordinary repository is indexed.
+Preparation has a 120-second cancellation deadline and each query or
+currentness check a 15-second one, with elapsed-time checks before later work.
 Existing synchronous host-integrity operations retain their own finite bounds;
 an elapsed deadline stops subsequent work rather than weakening validation.
 A file over the per-file size is left out of the index. Exceeding any other cap, or

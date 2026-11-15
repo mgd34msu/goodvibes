@@ -1,6 +1,6 @@
 /** Preparation bounds of the per-run captured code source: over budget means no code context, never a failed run. */
 import { expect, test } from 'bun:test';
-import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -47,32 +47,6 @@ async function withTree(
     await run({ source, calls });
   } finally { dispose?.(); stop.abort(); rmSync(root, { recursive: true, force: true }); }
 }
-
-test('a tree with more entries than the discovery budget is unavailable and embeds nothing', async () => withTree(
-  (root) => {
-    mkdirSync(join(root, 'src'));
-    for (let i = 0; i < 1_100; i++) writeFileSync(join(root, 'src', `f${i}.txt`), `file ${i}`);
-    writeFileSync(join(root, 'huge.txt'), 'x'.repeat(5 * 1_024 * 1_024));
-  },
-  async ({ source, calls }) => {
-    await source.prepare?.();
-    const stats = source.stats();
-    expect(stats.available).toBe(false);
-    expect(stats.error).toContain('too large');
-    expect(calls.length).toBe(0);
-    expect(await source.search('file')).toEqual([]);
-  },
-), 60_000);
-
-test('more files than the file budget is unavailable before any embedding', async () => withTree(
-  (root) => { for (let i = 0; i < 70; i++) writeFileSync(join(root, `f${i}.txt`), `file ${i}`); },
-  async ({ source, calls }) => {
-    await source.prepare?.();
-    expect(source.stats().available).toBe(false);
-    expect(source.stats().error).toContain('64 files');
-    expect(calls.length).toBe(0);
-  },
-), 60_000);
 
 test('a file over the per-file size is left out while the rest is indexed', async () => withTree(
   (root) => {

@@ -307,6 +307,7 @@ export {
   CODE_INDEX_MAX_TOTAL_BYTES,
   codeIndexDbPath,
   createCodeIndexServices,
+  createStoreRerooter,
   isCodeIndexAutoStartEnabled,
   isCodeInjectionSettingEnabled,
 } from './code-index-services.js';

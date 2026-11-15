@@ -198,6 +198,7 @@ function makeHarness(opts: { known: number | null; messageCount: number }) {
   const conversation = {
     getMessagesForLLM: () => messages,
     addSystemMessage: (msg: string) => { systemMessages.push(msg); },
+    addNotice: (msg: string) => { systemMessages.push(msg); },
     replaceMessagesForLLM: () => { state.replaced += 1; },
     compact: async () => { state.compactCalls += 1; },
   } as unknown as ConversationManager;

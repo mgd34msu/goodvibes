@@ -40,6 +40,7 @@ function makeConversation(tokens: number) {
   const conversation = {
     getMessagesForLLM: () => messages,
     addSystemMessage: (message: string) => { systemMessages.push(message); },
+    addNotice: (message: string) => { systemMessages.push(message); },
     replaceMessagesForLLM: () => {},
     compact: async (_registry: unknown, _modelId: string, _trigger: string, _provider: string, context?: CompactionContext) => {
       state.compactCalls += 1;

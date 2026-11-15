@@ -4,7 +4,7 @@ import { prepareDecisionRouterTurn, describeDecisionRoute, chatWithDecisionRoute
 import { assertDecisionAvailable } from '../routing/decision-availability.js';
 import { hasContractPlanConsumer } from '../tools/agent/contract-binding.js';
 import { setTimeout as waitForRetry } from 'node:timers/promises';
-import { prepareProjectFramework, readRepeatedCalls, captureOrchestratorObservationOwner, OrchestratorObservationHeldError, type RetainedToolObservation } from './orchestrator-observations.js';
+import { prepareProjectFramework, readRepeatedCalls, OrchestratorObservationHeldError, type RetainedToolObservation } from './orchestrator-observations.js';
 import { captureAutonomousSource } from '../permissions/autonomous.js';
 // OrchestratorRunner, single-agent turn loop coordinator.
 //
@@ -25,7 +25,7 @@ import { createVerificationWriter } from '../core/verification/writer.js';
 import { VerificationStore } from '../core/verification/store.js';
 import { appendVerificationObservation, beginVerificationConversation } from '../core/verification/archive.js';
 import { failureEvidence, isBillingOrCreditError, isRateLimitOrQuotaError, isContextSizeExceededError, isNetworkTransportError } from '../types/errors.js';
-import { readFailure } from '@goodvibes-jev/engine/errors';
+import { classifyFailure, readFailure } from '@goodvibes-jev/engine/errors';
 import { AgentSession } from './session.js';
 import {
   estimateTokens,
@@ -125,9 +125,6 @@ function resolveRunTurnBudget(context: AgentOrchestratorRunContext, record: Agen
   });
 }
 
-// This generation authorizes only fixed cancellation bookkeeping in the local
-// conversation. It never authorizes a tool effect, payload, or semantic decision.
-const cancellationConversationGenerations = new WeakMap<AgentRecord, object>();
 const terminalRunGenerations = new WeakMap<AgentRecord, object>();
 
 function workerAcceptanceDetails(record: AgentRecord) {
@@ -139,76 +136,39 @@ function workerAcceptanceDetails(record: AgentRecord) {
   };
 }
 
-/** Fixed terminal bookkeeping owns the run, independently of semantic readers. */
+/**
+ * Terminal bookkeeping for this run. Two facts decide whether the run may still
+ * settle and publish: it is still the record's current run (a newer run of the
+ * same record replaces the generation), and its abort signal is the one it
+ * started with and is not aborted unless the record already reads cancelled.
+ */
 function captureAgentRunTerminal(context: AgentOrchestratorRunContext, record: AgentRecord): AgentRunTerminal & { readonly releaseSharedSources: () => void } {
   const generation = {};
   terminalRunGenerations.set(record, generation);
-  const id = record.id, task = record.task, startedAt = record.startedAt, cwd = context.workingDirectory;
-  const journalRoot = context.journalRoot;
-  const assignment = JSON.stringify(workerAcceptanceDetails(record));
-  const getSignal = context.getCancellationSignal, signal = getSignal?.call(context, id);
-  const failed = context.emitAgentFailedEvent, completed = context.emitAgentCompletedEvent, cancelled = context.emitAgentCancelledEvent;
-  const processManager = context.processManager, list = processManager?.list, stop = processManager?.stop, hasBoundaryOwner = processManager?.hasBoundaryOwner;
-  const beforeSettlement = context.beforeRunSettlement, runtimeBus = context.runtimeBus;
-  const releaseConversation = context.releaseConversationSource, codeIndex = context.codeIndex;
-  const prepareIndex = codeIndex?.prepare, disposeIndex = codeIndex?.dispose;
-  const assertIdentity = () => {
-    if (terminalRunGenerations.get(record) !== generation || record.id !== id || record.task !== task || record.startedAt !== startedAt
-      || JSON.stringify(workerAcceptanceDetails(record)) !== assignment
-      || context.workingDirectory !== cwd || context.journalRoot !== journalRoot || context.getCancellationSignal !== getSignal
-      || context.emitAgentFailedEvent !== failed || context.emitAgentCompletedEvent !== completed || context.emitAgentCancelledEvent !== cancelled
-      || context.runtimeBus !== runtimeBus || context.processManager !== processManager || processManager?.list !== list
-      || processManager?.stop !== stop || processManager?.hasBoundaryOwner !== hasBoundaryOwner || context.beforeRunSettlement !== beforeSettlement
-      || (signal?.aborted && record.status !== 'cancelled')) throw new OrchestratorObservationHeldError();
-  };
+  const id = record.id;
+  const signal = context.getCancellationSignal?.(id);
   const assertCurrent = () => {
-    assertIdentity();
-    const currentSignal = getSignal?.call(context, id);
-    assertIdentity();
-    if (currentSignal !== signal) throw new OrchestratorObservationHeldError();
+    if (terminalRunGenerations.get(record) !== generation || (signal?.aborted && record.status !== 'cancelled')) throw new OrchestratorObservationHeldError();
   };
   let settlement: Promise<void> | undefined;
   const settle = () => {
     assertCurrent();
-    if (settlement) return settlement;
-    const held = Promise.withResolvers<void>();
-    settlement = held.promise;
-    try {
-      assertCurrent();
-      const pending = beforeSettlement?.call(context);
-      assertCurrent();
-      Promise.resolve(pending).then(() => {
-        try { assertCurrent(); held.resolve(); } catch (failure) { held.reject(failure); }
-      }, held.reject);
-    } catch (failure) { held.reject(failure); }
+    settlement ??= Promise.resolve(context.beforeRunSettlement?.()).then(assertCurrent);
     return settlement;
   };
-  const ownsSharedSources = () => terminalRunGenerations.get(record) === generation && record.id === id && record.startedAt === startedAt
-    && context.releaseConversationSource === releaseConversation && context.codeIndex === codeIndex
-    && codeIndex?.prepare === prepareIndex && codeIndex?.dispose === disposeIndex;
   const releaseSharedSources = () => {
-    if (!ownsSharedSources()) return;
-    if (prepareIndex) disposeIndex?.call(codeIndex);
-    if (ownsSharedSources()) releaseConversation?.call(context, id);
+    if (terminalRunGenerations.get(record) !== generation) return;
+    if (context.codeIndex?.prepare) context.codeIndex.dispose?.();
+    context.releaseConversationSource?.(id);
   };
   return { assertCurrent, settle, releaseSharedSources };
 }
 
+/** Whether cancellation bookkeeping may close this run's conversation: the run is current and was cancelled. */
 function captureCancelledConversationOwner(context: AgentOrchestratorRunContext, record: AgentRecord): () => boolean {
-  const generation = {};
-  cancellationConversationGenerations.set(record, generation);
-  const id = record.id, task = record.task, startedAt = record.startedAt;
-  const getSignal = context.getCancellationSignal, signal = getSignal?.(id);
-  const cwd = context.workingDirectory, registerConversation = context.registerConversationSource;
-  return () => {
-    try {
-      return signal?.aborted === true && record.status === 'cancelled'
-        && cancellationConversationGenerations.get(record) === generation
-        && record.id === id && record.task === task && record.startedAt === startedAt
-        && context.getCancellationSignal === getSignal && getSignal?.(id) === signal
-        && context.workingDirectory === cwd && context.registerConversationSource === registerConversation;
-    } catch { return false; }
-  };
+  const generation = terminalRunGenerations.get(record);
+  const signal = context.getCancellationSignal?.(record.id);
+  return () => signal?.aborted === true && record.status === 'cancelled' && terminalRunGenerations.get(record) === generation;
 }
 
 async function executeToolCalls(
@@ -220,7 +180,6 @@ async function executeToolCalls(
   callHistory: RetainedToolObservation[],
   callHistoryWindow: number,
   context: AgentOrchestratorRunContext,
-  assertObservationCurrent: () => void,
   onToolSettled: (result: ToolResult) => void,
 ): Promise<ToolResult[]> {
   // Capture before any asynchronous admission work; a later lookup can belong
@@ -234,19 +193,11 @@ async function executeToolCalls(
   // Admission runs per call, side by side; an ask to the owner waits in the host's own queue of cards.
   const definitions = new Map((toolRegistry.list?.() ?? []).map(tool => [tool.definition.name, tool.definition]));
 
-  const runCall = async (originalCall: (typeof toolCalls)[number], index: number, signal: AbortSignal | undefined): Promise<void> => {
-    assertObservationCurrent();
-    const call = originalCall;
-    const originalTool = toolRegistry.list?.().find(tool => tool.definition.name === call.name);
-    const originalExecute = originalTool?.execute;
-    const originalDefinition = JSON.stringify(originalTool?.definition);
+  // The call objects are this run's own clones and the registry is the run's own:
+  // the two facts that matter per call are the abort signal and the arguments
+  // the permission gate approved, which are the ones executed.
+  const runCall = async (call: (typeof toolCalls)[number], index: number, signal: AbortSignal | undefined): Promise<void> => {
     const requestedArguments = JSON.stringify(call.arguments);
-    const assertCallCurrent = () => {
-      assertObservationCurrent();
-      if (toolRegistry.list?.().find(tool => tool.definition.name === call.name) !== originalTool
-        || originalTool?.execute !== originalExecute || JSON.stringify(originalTool?.definition) !== originalDefinition
-        || JSON.stringify(call.arguments) !== requestedArguments) throw new OrchestratorObservationHeldError();
-    };
     const argsSummary = summarizeToolArgs(call.arguments as Record<string, unknown>);
     // The tool trace: for the TUI's activity surfaces, never for a channel.
     setAgentProgress(record, `Turn ${turn} · ${call.name}${argsSummary}`, 'operator');
@@ -257,7 +208,7 @@ async function executeToolCalls(
     // The session log otherwise records a call only when it settles, which
     // leaves a hung call invisible.
     session.appendMessage({ type: 'tool_started', turn, toolName: call.name, toolCallId: call.id,
-      args: JSON.stringify(call.arguments).slice(0, 500), timestamp: new Date().toISOString() });
+      args: requestedArguments.slice(0, 500), timestamp: new Date().toISOString() });
     const publishLiveness = (): void => { context.emitAgentProgress(record.id, record.progress ?? '', 'operator'); };
     // A tool that reports progress (output arrived, a step finished) is not silent: the silence watchdog
     // counts each report as liveness. Reports can come per output chunk, so they are published at most once per interval.
@@ -271,11 +222,10 @@ async function executeToolCalls(
     const stopLongCallNotice = surfaceLongToolCall(record, turn, call.name,
       selfBoundedCallDeadline(call.name, call.arguments, Date.now()), publishLiveness);
 
-    const callSig = `${call.name}::${JSON.stringify(call.arguments)}`;
+    const callSig = `${call.name}::${requestedArguments}`;
     // Push a result AND log the matching session record, so the denied /
     // executed / threw branches below stay uniform.
     const recordResult = (result: ToolResult, argsJson: string, toolName = call.name): void => {
-      assertCallCurrent();
       results[index] = result;
       staged[index] = Object.freeze({ signature: callSig, requested: structuredClone(call), executed: Object.freeze({ name: toolName, arguments: argsJson }), result: structuredClone(result) });
       session.appendMessage({
@@ -288,13 +238,12 @@ async function executeToolCalls(
         resultPreview: (result.output ?? result.error ?? '').slice(0, 500),
         timestamp: new Date().toISOString(),
       });
-      assertCallCurrent();
       onToolSettled({ ...result });
     };
     try {
       if (call.argumentError !== undefined) {
         // The provider could not read this call's arguments; running it with empty ones would act on a request the model never made.
-        recordResult({ callId: call.id, success: false, error: call.argumentError }, JSON.stringify(call.arguments));
+        recordResult({ callId: call.id, success: false, error: call.argumentError }, requestedArguments);
       } else if (context.autonomousSource !== undefined || (context.permissionManager?.admitAutonomous && context.permissionManager.autonomousPreparation)) {
         const manager = context.permissionManager;
         if (!manager?.admitAutonomous || !manager.autonomousPreparation) throw new Error('Native contract tool execution requires its autonomous permission owner');
@@ -306,7 +255,7 @@ async function executeToolCalls(
         // source getter is a construction binding, not agent prose or AgentInput.
         const [result] = await withCallingAgent(record.id, () => executeAutonomousToolCalls({
           autonomousSource: context.autonomousSource ?? (() => ({ goal: record.task, criteria: [] })),
-          autonomousPort: context.autonomousPort, turnSignal: signal, toolRegistry, assertCurrent: assertCallCurrent,
+          autonomousPort: context.autonomousPort, turnSignal: signal, toolRegistry,
           permissionManager: { check: manager.check.bind(manager), checkDetailed: manager.checkDetailed.bind(manager),
             admitAutonomous, autonomousPreparation,
             ...(manager.prepareAutonomousOwner ? { prepareAutonomousOwner: manager.prepareAutonomousOwner.bind(manager) } : {}),
@@ -319,7 +268,6 @@ async function executeToolCalls(
           emitterContext: () => context.emitterContext(record.id),
           toolBudget: () => toolBudgetFromConfig(context.configManager),
           onToolExecuted(name, args, success) {
-            assertObservationCurrent();
             executedName = name; executedArgs = args;
             context.onToolExecuted?.(name, args, success);
           },
@@ -330,27 +278,20 @@ async function executeToolCalls(
       // Background permission gate: consult the session permission mode exactly
       // like the foreground turn loop (denials return a structured ToolDenial).
       assertPermissionActive(signal);
-      assertCallCurrent();
       const permissionOutcome = await gateBackgroundToolCall(context, record, call.name, call.arguments as Record<string, unknown>, signal);
       assertPermissionActive(signal);
-      assertCallCurrent();
       if (!permissionOutcome.approved) {
         recordResult(
           { callId: call.id, success: false, error: permissionOutcome.error, decision: permissionOutcome.decision, denial: permissionOutcome.denial },
-          JSON.stringify(call.arguments),
+          requestedArguments,
         );
       } else {
+        // The approved arguments, captured once: this object is what executes and what is recorded.
         const effectiveArgs = captureProjectionArgs(permissionOutcome.modifiedArgs ?? call.arguments, call.name);
-        const approvedArguments = JSON.stringify(effectiveArgs);
-        const assertEffectiveCurrent = (executedArgs?: Record<string, unknown>) => {
-          assertCallCurrent();
-          if (JSON.stringify(effectiveArgs) !== approvedArguments || (executedArgs && JSON.stringify(executedArgs) !== approvedArguments)) throw new OrchestratorObservationHeldError();
-        };
         const budget = toolBudgetFromConfig(context.configManager);
         const executeStartedAt = performance.now();
         const executed = await withExecutionMode(context.permissionManager?.getMode?.(),
-          () => withCallingAgent(record.id, () => toolRegistry.execute(call.id, call.name, effectiveArgs, { signal, assertCurrent: assertEffectiveCurrent, onProgress: reportToolProgress })));
-        assertEffectiveCurrent();
+          () => withCallingAgent(record.id, () => toolRegistry.execute(call.id, call.name, effectiveArgs, { signal, onProgress: reportToolProgress })));
         // A cancelled call keeps its cancelled result; only a finished call is judged against the budget.
         const result = capToolResultOutput(call.name, effectiveArgs,
           signal?.aborted ? executed : applyToolBudget(budget, call.name, performance.now() - executeStartedAt, executed));
@@ -364,11 +305,10 @@ async function executeToolCalls(
       }
       }
     } catch (err) {
-      assertCallCurrent();
       assertDecisionAvailable(err);
       if (err instanceof OrchestratorObservationHeldError || (err instanceof Error && err.cause instanceof OrchestratorObservationHeldError)) throw new OrchestratorObservationHeldError();
       const toolErr = signal?.aborted ? 'cancelled by user' : summarizeError(err);
-      recordResult({ callId: call.id, success: false, error: toolErr, ...(signal?.aborted ? { cancelled: true } : {}) }, JSON.stringify(call.arguments));
+      recordResult({ callId: call.id, success: false, error: toolErr, ...(signal?.aborted ? { cancelled: true } : {}) }, requestedArguments);
     } finally {
       stopLongCallNotice();
       const runProcessIds = runProcessesByRecord.get(record);
@@ -412,13 +352,9 @@ async function finalizeAgentRun(
   session: AgentSession | null,
   runProcessIds: ReadonlySet<string>,
   terminal: AgentRunTerminal,
-  assertObservationCurrent?: () => void,
   assertCompletionCurrent?: () => void,
 ): Promise<void> {
   await terminal.settle();
-  terminal.assertCurrent();
-  if (record.status === 'running') assertObservationCurrent?.();
-  terminal.assertCurrent();
   const statusAfterLoop = (record as { status: string }).status;
   if (statusAfterLoop !== 'failed' && statusAfterLoop !== 'cancelled') {
     if ((!record.contractUnitId || !context.contractHooks) && !hasContractPlanConsumer(record)) {
@@ -481,16 +417,9 @@ async function handleAgentRunFailure(
   if ((record as { status: string }).status === 'cancelled') return finishCancelledRun(context, record, session, runProcessIds, undefined, terminal);
   const nativeHeld = err instanceof OrchestratorObservationHeldError;
   const completionHeld = err instanceof ResponseCompletionError;
-  const failureOwner = nativeHeld || completionHeld ? terminal.assertCurrent : captureOrchestratorObservationOwner(context, record);
   const signal = context.getCancellationSignal?.(record.id);
-  const provider = record.provider, settlement = context.beforeRunSettlement, publishFailure = context.emitAgentFailedEvent;
-  const assertFailureCurrent = () => {
-    terminal.assertCurrent();
-    failureOwner();
-    if (!nativeHeld && (record.provider !== provider || context.beforeRunSettlement !== settlement || context.emitAgentFailedEvent !== publishFailure))
-      throw new OrchestratorObservationHeldError();
-    failureOwner();
-  };
+  const provider = record.provider, publishFailure = context.emitAgentFailedEvent;
+  const assertFailureCurrent = terminal.assertCurrent;
   let message: string;
   try {
     message = nativeHeld ? new OrchestratorObservationHeldError().message : completionHeld ? err.message : (await readNormalizedError(err, {
@@ -547,6 +476,26 @@ async function handleAgentRunFailure(
 export async function shouldWaitOutRateLimit(err: unknown): Promise<boolean> {
   return await isRateLimitOrQuotaError(err, 'agents.orchestrator-runner.rate-limit-retry')
     && !(await isBillingOrCreditError(err, 'agents.orchestrator-runner.rate-limit-retry'));
+}
+
+/**
+ * Which transient wait a failed provider call earns, if any. The status, errno
+ * and code tables decide first (no model request); wording is read only when
+ * the error carries none of them. `retryAfterMs` is the provider's own hint.
+ */
+async function transientRetryKind(err: unknown): Promise<{ kind: 'network' | 'rate-limit' | 'service'; retryAfterMs?: number } | undefined> {
+  const known = classifyFailure(err);
+  if (known) {
+    if (!known.retryable) return undefined;
+    // A provider reports a spent account under a 429 too; that never clears by waiting.
+    if (known.category === 'rate_limit' && await isBillingOrCreditError(err, 'agents.orchestrator-runner.rate-limit-retry')) return undefined;
+    const kind = known.category === 'rate_limit' ? 'rate-limit' : known.category === 'network' ? 'network' : 'service';
+    return known.retryAfterMs === undefined ? { kind } : { kind, retryAfterMs: known.retryAfterMs };
+  }
+  if (await isNetworkTransportError(err, 'agents.orchestrator-runner.network-retry')) return { kind: 'network' };
+  if (await shouldWaitOutRateLimit(err)) return { kind: 'rate-limit' };
+  const category = (await readFailure(failureEvidence(err instanceof Error ? err : new Error(String(err))), 'agents.orchestrator-runner.response-retry')).category;
+  return ['service', 'protocol', 'timeout'].includes(category) ? { kind: 'service' } : undefined;
 }
 
 /**
@@ -614,12 +563,19 @@ async function runAgentTaskWithPolicy(context: AgentOrchestratorRunContext, reco
     const currentModel = lazyCurrentModel(providerRegistry);
     const primaryRoute = context.resolveProviderForRecord(providerRegistry, record, currentModel);
     const routingSignal = context.getCancellationSignal?.(record.id);
-    const decisionRoute = await prepareDecisionRouterTurn(primaryRoute.provider, {
-      messages: [{ role: 'user', content: record.task }], context: { turnId: record.id, prompt: record.task },
-      ...(routingSignal === undefined ? {} : { signal: routingSignal }),
-      assertCurrent: () => terminal.assertCurrent(),
-      ...(context.beforeProviderRequest === undefined ? {} : { beforeAttempt: () => context.beforeProviderRequest?.() }),
-    });
+    // The spawn's start-up readings (route, test framework, knowledge selection,
+    // knowledge packet) depend on nothing but the record, so they run together.
+    const [decisionRoute, projectFramework, , preparedPromptContext] = await Promise.all([
+      prepareDecisionRouterTurn(primaryRoute.provider, {
+        messages: [{ role: 'user', content: record.task }], context: { turnId: record.id, prompt: record.task },
+        ...(routingSignal === undefined ? {} : { signal: routingSignal }),
+        assertCurrent: () => terminal.assertCurrent(),
+        ...(context.beforeProviderRequest === undefined ? {} : { beforeAttempt: () => context.beforeProviderRequest?.() }),
+      }),
+      prepareProjectFramework(context, record),
+      resolveSpawnKnowledgeInjections(record, context),
+      prepareOrchestratorPromptContext(record, context, routingSignal),
+    ]);
     terminal.assertCurrent();
     let activeRoute = decisionRoute ? { ...primaryRoute, provider: decisionRoute.provider, modelId: decisionRoute.model.id } : primaryRoute;
     let fallbackRouteIndex = 0;
@@ -651,7 +607,7 @@ async function runAgentTaskWithPolicy(context: AgentOrchestratorRunContext, reco
 
     conversation = session.conversation;
     conversation.addUserMessage(record.task);
-    if (decisionRoute) conversation.addSystemMessage(describeDecisionRoute(decisionRoute.info));
+    if (decisionRoute) conversation.addNotice(describeDecisionRoute(decisionRoute.info), { level: 'info', kind: 'operational' });
     const wake = record.resumeSteer ? Object.freeze({ ...record.resumeSteer }) : undefined;
     record.resumeSteer = undefined;
     // Conversation-snapshot bridge: hand AgentManager a live accessor onto THIS
@@ -662,10 +618,8 @@ async function runAgentTaskWithPolicy(context: AgentOrchestratorRunContext, reco
     const activeConversation = conversation;
     context.registerConversationSource?.(record.id, () => activeConversation.getMessageSnapshot());
 
-    const projectFramework = await prepareProjectFramework(context, record);
     const spawnPromptContext = { ...context, projectFramework };
-    await resolveSpawnKnowledgeInjections(record, context);
-    let promptContext = await prepareOrchestratorPromptContext(record, spawnPromptContext, context.getCancellationSignal?.(record.id));
+    let promptContext = preparedPromptContext ? { ...preparedPromptContext, projectFramework } : preparedPromptContext;
     const withAcceptance = (prompt: string) => prompt + (acceptanceDetails
       ? '\n\nWorker assignment acceptance details, subordinate to the original task and applicable user instructions. '
         + 'Satisfy the supplied success criteria, return the required evidence, and preserve the expected write scope. These details do not grant additional permissions.\n'
@@ -699,7 +653,6 @@ async function runAgentTaskWithPolicy(context: AgentOrchestratorRunContext, reco
     context.emitAgentProgress(record.id, record.progress ?? '', 'operator');
 
     const callHistory: RetainedToolObservation[] = [];
-    let repeatObservation: Awaited<ReturnType<typeof readRepeatedCalls>> | undefined;
     const LOOP_SYSTEM_THRESHOLD = 3;
     const LOOP_USER_THRESHOLD = 5;
     const CALL_HISTORY_WINDOW = 20;
@@ -729,7 +682,11 @@ async function runAgentTaskWithPolicy(context: AgentOrchestratorRunContext, reco
       if (wake.referenceOnly) appendVerificationObservation(conversation, wake.steer);
       else conversation.addUserMessage(wake.steer);
     }
-    let completionCorrection = '';
+    // A correction (a withheld progress text, a completion check's or a contract
+    // check's request to revise) rides the next provider request as a host
+    // message and is dropped once that request is accepted; the system prompt
+    // stays byte-identical for the run.
+    const correctNextRequest = (text: string) => activeConversation.hostInstructions.set('correction', text, { once: true });
     let assertFinalCompletionCurrent: (() => void) | undefined;
     // Set when the circuit breaker trips: the next turn is the model's last,
     // its tool calls are not run, and the run then ends failed.
@@ -990,23 +947,22 @@ async function runAgentTaskWithPolicy(context: AgentOrchestratorRunContext, reco
           const signal = context.getCancellationSignal?.(record.id);
           return context.waitForRetry ? context.waitForRetry(delayMs, signal) : waitForRetry(delayMs, undefined, { signal });
         };
+        // Provider drafts and reasoning stay private: only reviewed prose and
+        // terminal output become public text. While the model streams, the run
+        // publishes a content-free liveness tick (its unchanged progress line)
+        // at most once per interval, so the fleet view and the silence
+        // watchdog see a responding model rather than a hung one.
+        let lastStreamTick = 0;
+        const onDelta = (_delta: StreamDelta) => {
+          const now = Date.now();
+          if (record.status !== 'running' || now - lastStreamTick < TOOL_PROGRESS_PUBLISH_INTERVAL_MS) return;
+          lastStreamTick = now;
+          context.emitAgentProgress(record.id, record.progress ?? '', 'operator');
+        };
         while (response === undefined) {
           terminal.assertCurrent();
-          record.streamingContent = undefined;
-
-          const onDelta = (delta: StreamDelta) => {
-            terminal.assertCurrent();
-            projectFramework.assertCurrent();
-            repeatObservation?.assertCurrent();
-            terminal.assertCurrent();
-            // Keep provider drafts and reasoning private. Only reviewed prose
-            // and successful terminal output may become public text.
-            context.emitStreamDelta(record.id, '', '');
-          };
 
           await context.beforeProviderRequest?.();
-          projectFramework.assertCurrent();
-          repeatObservation?.assertCurrent();
           assertOrchestratorKnowledgeCurrent(record, promptContext);
           // Read the live construction binding for every attempt. The private
           // transcript and diff exist only on this provider request, never the agent's
@@ -1028,8 +984,6 @@ async function runAgentTaskWithPolicy(context: AgentOrchestratorRunContext, reco
             try { await codeAuthorityForAttempt?.(); } catch (error) { throw new ProviderAttemptDeniedError(error); }
             await capturedCode?.assertCurrent?.(capturedCodeGeneration);
             await context.beforeProviderRequest?.();
-            projectFramework.assertCurrent();
-            repeatObservation?.assertCurrent();
             assertOrchestratorKnowledgeCurrent(record, promptContext);
             if (nativeSource && (!context.autonomousSource || JSON.stringify(captureAutonomousSource(context.autonomousSource())) !== JSON.stringify(nativeSource)))
               throw new Error('Native provider source changed before retry');
@@ -1045,20 +999,17 @@ async function runAgentTaskWithPolicy(context: AgentOrchestratorRunContext, reco
             const chat = decisionRoute ? (request: ChatRequest) => chatWithDecisionRoute(decisionRoute, request) : (request: ChatRequest) => activeRoute.provider.chat(request);
             response = await chat({
               model: activeRoute.modelId,
-              messages: conversation.getMessagesForLLM(),
+              messages: conversation.getMessagesForRequest(),
               tools: toolDefinitions.length > 0 ? toolDefinitions : undefined,
-              systemPrompt: composeTurnSystemPrompt(systemPrompt)
-                + (completionCorrection ? `\n\n${completionCorrection}` : '') + privateContextBlock,
-              ...((codeAuthorityForAttempt || nativeSource || projectFramework || promptContext?.preparedKnowledgePrompt || context.beforeProviderRequest) ? { beforeAttempt: assertNativeProviderSource } : {}),
+              systemPrompt: composeTurnSystemPrompt(systemPrompt) + privateContextBlock,
+              ...((codeAuthorityForAttempt || nativeSource || promptContext?.preparedKnowledgePrompt || context.beforeProviderRequest) ? { beforeAttempt: assertNativeProviderSource } : {}),
               ...(decisionRoute ? { reasoningEffort: decisionRoute.effort.value, reasoningEffortSpec: decisionRoute.effort.spec }
                 : record.reasoningEffort ? { reasoningEffort: record.reasoningEffort } : {}),
               ...(cancelSignal ? { signal: cancelSignal } : {}),
               onDelta,
             });
             terminal.assertCurrent();
-            projectFramework.assertCurrent();
-            repeatObservation?.assertCurrent();
-            terminal.assertCurrent();
+            conversation.hostInstructions.delivered();
             break;
           } catch (chatErr) {
             terminal.assertCurrent();
@@ -1116,60 +1067,28 @@ async function runAgentTaskWithPolicy(context: AgentOrchestratorRunContext, reco
               record.provider = activeRoute.provider.name;
               setAgentProgress(record, `Model fallback → ${activeRouteId}`, 'owner'); // their reply, not the machine
               context.emitAgentProgress(record.id, record.progress ?? '', 'owner');
-            } else if (await isNetworkTransportError(chatErr, 'agents.orchestrator-runner.network-retry')) {
-              const delayMs = NETWORK_RETRY_DELAYS_MS[Math.min(networkAttempt, NETWORK_RETRY_DELAYS_MS.length - 1)]!;
-              const delaySec = Math.round(delayMs / 1000);
-              reserveRetryWait(delayMs, chatErr);
-              logger.warn(
-                `Agent ${record.id}: network error on turn ${turn}, retrying in ${delaySec}s (attempt ${networkAttempt + 1})`,
-                { error: chatErr instanceof Error ? chatErr.message : String(chatErr) },
-              );
-              setAgentProgress(record, `Network error, retrying in ${delaySec}s…`, 'owner'); // owed the reason it is late
-              context.emitAgentProgress(record.id, record.progress ?? '', 'owner');
-              networkAttempt++;
-              await pauseBeforeRetry(delayMs);
-              if ((record as { status: string }).status === 'cancelled') {
-                throw new Error('Agent cancelled during network retry');
-              }
-            // A spent account matches the quota wording here but never clears by
-            // waiting: excluded, it falls to `throw` with its own `billing`
-            // category, instead of waiting for a temporary limit to clear.
-            } else if (await shouldWaitOutRateLimit(chatErr)) {
-              const delaySec = Math.round(RATE_LIMIT_RETRY_DELAY_MS / 1000);
-              reserveRetryWait(RATE_LIMIT_RETRY_DELAY_MS, chatErr);
-              logger.warn(
-                `Agent ${record.id}: rate limited on turn ${turn}, retrying in ${delaySec}s (attempt ${rateLimitAttempt + 1})`,
-                { error: chatErr instanceof Error ? chatErr.message : String(chatErr) },
-              );
-              setAgentProgress(record, `Rate limited, retrying in ${delaySec}s…`, 'owner'); // as the network retry
-              context.emitAgentProgress(record.id, record.progress ?? '', 'owner');
-              rateLimitAttempt++;
-              await pauseBeforeRetry(RATE_LIMIT_RETRY_DELAY_MS);
-              if ((record as { status: string }).status === 'cancelled') {
-                throw new Error('Agent cancelled during rate limit retry');
-              }
-            } else if (['service', 'protocol', 'timeout'].includes((await readFailure(
-              failureEvidence(chatErr instanceof Error ? chatErr : new Error(String(chatErr))),
-              'agents.orchestrator-runner.response-retry',
-            )).category)) {
-              const delayMs = NETWORK_RETRY_DELAYS_MS[Math.min(networkAttempt++, NETWORK_RETRY_DELAYS_MS.length - 1)]!;
-              const delaySec = Math.round(delayMs / 1000);
-              reserveRetryWait(delayMs, chatErr);
-              logger.warn(`Agent ${record.id}: provider response failed on turn ${turn}, retrying in ${delaySec}s`, {
-                error: chatErr instanceof Error ? chatErr.message : String(chatErr),
-              });
-              setAgentProgress(record, `Provider error, retrying in ${delaySec}s…`, 'owner');
-              context.emitAgentProgress(record.id, record.progress ?? '', 'owner');
-              await pauseBeforeRetry(delayMs);
-              if ((record as { status: string }).status === 'cancelled') throw new Error('Agent cancelled during provider retry');
             } else {
-              throw chatErr;
+              const transient = await transientRetryKind(chatErr);
+              if (transient === undefined) throw chatErr;
+              const delayMs = transient.kind === 'rate-limit'
+                ? Math.max(transient.retryAfterMs ?? RATE_LIMIT_RETRY_DELAY_MS, 1_000)
+                : Math.max(NETWORK_RETRY_DELAYS_MS[Math.min(networkAttempt, NETWORK_RETRY_DELAYS_MS.length - 1)]!, transient.retryAfterMs ?? 0);
+              if (transient.kind === 'rate-limit') rateLimitAttempt++; else networkAttempt++;
+              const delaySec = Math.round(delayMs / 1000);
+              reserveRetryWait(delayMs, chatErr);
+              const label = transient.kind === 'network' ? 'Network error' : transient.kind === 'rate-limit' ? 'Rate limited' : 'Provider error';
+              logger.warn(`Agent ${record.id}: ${label.toLowerCase()} on turn ${turn}, retrying in ${delaySec}s (attempt ${transient.kind === 'rate-limit' ? rateLimitAttempt : networkAttempt})`,
+                { error: chatErr instanceof Error ? chatErr.message : String(chatErr) });
+              // The owner is owed the reason the reply is late.
+              setAgentProgress(record, `${label}, retrying in ${delaySec}s…`, 'owner');
+              context.emitAgentProgress(record.id, record.progress ?? '', 'owner');
+              await pauseBeforeRetry(delayMs);
+              if ((record as { status: string }).status === 'cancelled') throw new Error(`Agent cancelled during ${transient.kind} retry`);
             }
           }
         }
         // The emergency prompt served only the retry; later turns carry the full prompt again.
         if (promptBeforeEmergency !== undefined) { systemPrompt = promptBeforeEmergency; promptContext = promptContextBeforeEmergency; }
-        record.streamingContent = undefined;
         setAgentProgress(record, `Turn ${turn} · Thinking…`, 'operator');
       }
 
@@ -1178,9 +1097,6 @@ async function runAgentTaskWithPolicy(context: AgentOrchestratorRunContext, reco
       await capturedCode?.assertCurrent?.();
       terminal.assertCurrent();
       capturedCode?.finishTurn?.();
-
-      projectFramework.assertCurrent();
-      repeatObservation?.assertCurrent();
       terminal.assertCurrent();
 
       // Honest "consumed at boundary" signal, emitted here (not at drain time
@@ -1204,8 +1120,6 @@ async function runAgentTaskWithPolicy(context: AgentOrchestratorRunContext, reco
         }
       }
 
-      projectFramework.assertCurrent();
-      repeatObservation?.assertCurrent();
       // Cache reads are logged per turn (null: the provider reported none) so how much of each prompt was reused can be measured.
       session.appendMessage({ type: 'llm_response', turn, contentLength: response.content.length, toolCallCount: response.toolCalls.length, usage: response.usage,
         cacheReadTokens: response.usage.cacheReadTokens ?? null, cacheWriteTokens: response.usage.cacheWriteTokens ?? null, timestamp: new Date().toISOString() });
@@ -1258,14 +1172,10 @@ async function runAgentTaskWithPolicy(context: AgentOrchestratorRunContext, reco
             };
           }
           else {
-            completionCorrection = publication.correction + '\nUnpublished progress text (quoted data):\n' + JSON.stringify(response.content);
+            correctNextRequest(publication.correction + '\nUnpublished progress text (quoted data):\n' + JSON.stringify(response.content));
             response = { ...response, content: '' };
           }
         }
-        repeatObservation?.assertCurrent();
-        const precedingRepeat = repeatObservation;
-        precedingRepeat?.retainForTools();
-        const assertToolObservationCurrent = () => { projectFramework.assertCurrent(); precedingRepeat?.assertCurrent(); };
         // Apply the existing delegated exec defaults before the immutable
         // projection, history publication, progress and permission readers.
         const ingress = captureToolInputCalls(response.toolCalls).map(call => {
@@ -1283,11 +1193,7 @@ async function runAgentTaskWithPolicy(context: AgentOrchestratorRunContext, reco
         });
         const inputSignal = context.getCancellationSignal?.(record.id);
         const batch = typeof toolRegistry.projectCall === 'function'
-          ? await projectToolInputBatch(toolRegistry, ingress, { signal: inputSignal, assertCurrent() {
-            inputSignal?.throwIfAborted();
-            assertToolObservationCurrent();
-            if (context.getCancellationSignal?.(record.id) !== inputSignal) throw new Error('Delegated input lifetime changed');
-          } }) : undefined;
+          ? await projectToolInputBatch(toolRegistry, ingress, { signal: inputSignal, assertCurrent() { inputSignal?.throwIfAborted(); } }) : undefined;
         response = { ...response, toolCalls: batch?.calls ?? ingress };
         let results: ToolResult[];
         // Capture only IDs before execution; cancellation must never publish a
@@ -1298,15 +1204,14 @@ async function runAgentTaskWithPolicy(context: AgentOrchestratorRunContext, reco
         try {
           try {
             batch?.assertCurrent();
-            assertToolObservationCurrent();
             try { assertProgressPublicationCurrent?.(); }
-            catch { terminal.assertCurrent(); assertToolObservationCurrent(); response = { ...response, content: '' }; }
+            catch { terminal.assertCurrent(); response = { ...response, content: '' }; }
             conversation.addAssistantMessage(response.content, { toolCalls: response.toolCalls, usage: response.usage });
             assistantPublished = true;
             // Bound here: the closure below runs later, after `response` and `session` could have been reassigned.
             const batchCalls = response.toolCalls;
             const batchSession = session;
-            const executeBatch = () => executeToolCalls(batchCalls, toolRegistry, batchSession, turn, record, callHistory, CALL_HISTORY_WINDOW, context, assertToolObservationCurrent,
+            const executeBatch = () => executeToolCalls(batchCalls, toolRegistry, batchSession, turn, record, callHistory, CALL_HISTORY_WINDOW, context,
               result => { settledResults.push(result); });
             // The context_accounting tool answers for this worker, not for whichever run bound the shared holder last.
             const accounting = context.contextAccountingHolder;
@@ -1316,7 +1221,6 @@ async function runAgentTaskWithPolicy(context: AgentOrchestratorRunContext, reco
               ...(context.agentManager === undefined ? {} : { activeChildren: () => context.agentManager!.list().filter((child) => child.parentAgentId === record.id && (child.status === 'running' || child.status === 'pending')).length }),
             }), executeBatch));
           } finally { await batch?.release(); }
-          assertToolObservationCurrent();
         } catch (error) {
           // Preserve only receipts that crossed their original per-call
           // fences before cancellation. The unfinished calls receive fixed
@@ -1335,14 +1239,11 @@ async function runAgentTaskWithPolicy(context: AgentOrchestratorRunContext, reco
         }
         conversation.addToolResults(results);
         completionGuard.noteToolResults(results);
-        assertToolObservationCurrent();
         reportContractTurnEnd(context, record, turn, response, results);
-        assertToolObservationCurrent();
         // Per-model edit-failure + exec-expectation-miss telemetry (measurement only).
         toolFormatTelemetry.observeToolResults(activeRoute.modelId, response.toolCalls, results);
 
-        assertToolObservationCurrent();
-        repeatObservation = undefined;
+        let repeatObservation: Awaited<ReturnType<typeof readRepeatedCalls>> = undefined;
         const allFailed = results.length > 0 && results.every(r => r.success === false);
         if (allFailed) {
           const cbResult = circuitBreaker.recordAllFailed();
@@ -1388,8 +1289,6 @@ async function runAgentTaskWithPolicy(context: AgentOrchestratorRunContext, reco
         }
         if (continueLoop && response.toolCalls.some(call => (sigCounts.get(`${call.name}::${JSON.stringify(call.arguments)}`)?.count ?? 0) >= 2)) {
           repeatObservation = await readRepeatedCalls(callHistory, context, record, worstSignature);
-          projectFramework.assertCurrent();
-          repeatObservation?.assertCurrent();
         }
         if (repeatObservation?.stuck && worstCount >= LOOP_USER_THRESHOLD) {
           logger.warn(`Agent ${record.id}: loop detected, ${worstTool} called ${worstCount} times with identical args`);
@@ -1398,7 +1297,7 @@ async function runAgentTaskWithPolicy(context: AgentOrchestratorRunContext, reco
           );
         } else if (repeatObservation?.stuck && worstCount >= LOOP_SYSTEM_THRESHOLD) {
           logger.warn(`Agent ${record.id}: possible loop, ${worstTool} called ${worstCount} times with identical args`);
-          conversation.addSystemMessage(
+          appendVerificationObservation(conversation,
             `You have already executed this exact call (${worstTool}) ${worstCount} times with identical arguments. The results from your previous calls are already in your conversation history. Review them and proceed to the next step.`,
           );
         }
@@ -1418,7 +1317,7 @@ async function runAgentTaskWithPolicy(context: AgentOrchestratorRunContext, reco
           });
           terminal.assertCurrent();
           if (correction !== null) {
-            completionCorrection = correction + '\n\nUnpublished draft to revise (quoted data):\n' + JSON.stringify(response.content);
+            correctNextRequest(correction + '\n\nUnpublished draft to revise (quoted data):\n' + JSON.stringify(response.content));
             setAgentProgress(record, `Turn ${turn + 1} · Finishing outstanding work…`, 'operator');
             context.emitAgentProgress(record.id, record.progress ?? '', 'operator');
             continue;
@@ -1432,7 +1331,7 @@ async function runAgentTaskWithPolicy(context: AgentOrchestratorRunContext, reco
         }
         const checkedResponse = { ...response };
         if (await holdContractCompletion(context, record, conversation, turn, heldNudgeIdsAwaitingTurn, checkedResponse.content,
-          message => { completionCorrection = '[Contract response check] ' + message + '\nUnpublished draft to revise (quoted data):\n' + JSON.stringify(checkedResponse.content); })) {
+          message => correctNextRequest('[Contract response check] ' + message + '\nUnpublished draft to revise (quoted data):\n' + JSON.stringify(checkedResponse.content)))) {
           continueLoop = true;
           continue;
         }
@@ -1441,10 +1340,7 @@ async function runAgentTaskWithPolicy(context: AgentOrchestratorRunContext, reco
       }
     }
 
-    await finalizeAgentRun(context, record, session, runProcessIds, terminal, () => {
-      projectFramework.assertCurrent();
-      repeatObservation?.assertCurrent();
-    }, assertFinalCompletionCurrent);
+    await finalizeAgentRun(context, record, session, runProcessIds, terminal, assertFinalCompletionCurrent);
   } catch (err) {
     await handleAgentRunFailure(context, record, conversation, session, runProcessIds, terminal, err);
   } finally {

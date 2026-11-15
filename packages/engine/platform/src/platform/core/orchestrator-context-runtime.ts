@@ -265,8 +265,9 @@ export async function checkContextWindowPreflight(
         deps.setIsCompacting(false);
         logger.info('Orchestrator: Pre:compact:preflight denied by hook - skipping preflight compact', { reason: preResult.reason });
         // The provider's context-full report stays set so the next turn tries again.
-        deps.conversation.addSystemMessage(
-          `Auto-compaction was skipped because a Pre:compact:preflight hook denied it${preResult.reason ? ` (${preResult.reason})` : ''}. The request is sent without compacting${estimatedTokens > contextWindow && knownWindow !== null ? ' and may exceed the context window' : ''}.`
+        deps.conversation.addNotice(
+          `Auto-compaction was skipped because a Pre:compact:preflight hook denied it${preResult.reason ? ` (${preResult.reason})` : ''}. The request is sent without compacting${estimatedTokens > contextWindow && knownWindow !== null ? ' and may exceed the context window' : ''}.`,
+          { level: 'warning' }
         );
         deps.requestRender();
         return 'ok';
@@ -288,10 +289,11 @@ export async function checkContextWindowPreflight(
       reason: forcedByModelWarning ? 'model-warning' : preflightDecision.reason,
       ...(modelWarning?.providerStopReason ? { providerStopReason: modelWarning.providerStopReason } : {}),
     });
-    deps.conversation.addSystemMessage(
+    deps.conversation.addNotice(
       forcedByModelWarning && modelWarning
         ? `${describeModelContextWarning(modelWarning)}. Auto-compacting before the next request, regardless of ${knownWindow === null ? 'the unknown context window' : `the ~${Math.round(preflightDecision.usagePct)}% estimated usage`}...`
-        : `Context pre-check: request is at ${Math.round(preflightDecision.usagePct)}% (${estimatedTokens}/${contextWindow} tokens), ${formatAutoCompactTrigger(preflightDecision)}. Auto-compacting...`
+        : `Context pre-check: request is at ${Math.round(preflightDecision.usagePct)}% (${estimatedTokens}/${contextWindow} tokens), ${formatAutoCompactTrigger(preflightDecision)}. Auto-compacting...`,
+      { level: 'info' }
     );
     deps.requestRender();
 
@@ -322,7 +324,7 @@ export async function checkContextWindowPreflight(
       // An applied compaction is always announced, even when the turn was cancelled meanwhile.
       if (preflightReceipt) emitReceipt(deps, turnId, preflightReceipt);
       deps.signal?.throwIfAborted();
-      deps.conversation.addSystemMessage('Context compacted. Retrying request...');
+      deps.conversation.addNotice('Context compacted. Retrying request...', { level: 'info' });
       if (deps.hookDispatcher) {
         deps.hookDispatcher.fire({
           path: 'Post:compact:preflight',
@@ -349,7 +351,7 @@ export async function checkContextWindowPreflight(
       const msg = compactErr instanceof Error ? compactErr.message : String(compactErr);
       logger.error('Orchestrator: pre-flight compact failed', { error: msg });
       emitCompactionFailureReceipt(deps, turnId, compactErr, 'auto', 'structured');
-      deps.conversation.addSystemMessage(`Auto-compact failed: ${msg}.`);
+      deps.conversation.addNotice(`Auto-compact failed: ${msg}.`, { level: 'error' });
       if (deps.hookDispatcher) {
         deps.hookDispatcher.fire({
           path: 'Fail:compact:preflight',
@@ -409,7 +411,7 @@ export async function checkContextWindowPreflight(
 }
 
 export function emitContextOverflowError(
-  conversation: { addSystemMessage: (message: string) => void },
+  conversation: Pick<ConversationManager, 'addNotice'>,
   requestRender: () => void,
   _turnId: string,
   estimatedTokens: number,
@@ -438,7 +440,7 @@ export function emitContextOverflowError(
     alternatives: alternatives.map(a => a.id),
   });
 
-  conversation.addSystemMessage(msg);
+  conversation.addNotice(msg, { level: 'error' });
   requestRender();
 }
 
@@ -465,6 +467,8 @@ export type PostTurnContextDeps = {
   getSystemPrompt?: ((signal?: AbortSignal) => string | Promise<string>) | undefined;
   signal?: AbortSignal | undefined;
   getActiveSkillFrontmatter?: (() => string | null | undefined) | undefined;
+  /** The `behavior.compactionStrategy` setting, read the same way as the pre-request check reads it. */
+  getCompactionStrategy?: (() => CompactionStrategyChoice) | undefined;
   /** The session's CompactionManager; each compaction's lifecycle runs through it. */
   compactionManager?: CompactionLifecycleOwner | null | undefined;
 };
@@ -550,8 +554,9 @@ export async function handlePostTurnContextMaintenance(
         skipAutoCompact = true;
         logger.info('Orchestrator: Pre:compact:auto denied by hook - skipping auto-compact', { reason: preAutoResult.reason });
         // The provider's context-full report stays set so the next turn tries again.
-        deps.conversation.addSystemMessage(
-          `Auto-compaction was skipped because a Pre:compact:auto hook denied it${preAutoResult.reason ? ` (${preAutoResult.reason})` : ''}.`
+        deps.conversation.addNotice(
+          `Auto-compaction was skipped because a Pre:compact:auto hook denied it${preAutoResult.reason ? ` (${preAutoResult.reason})` : ''}.`,
+          { level: 'warning' }
         );
         deps.requestRender();
       }
@@ -560,10 +565,11 @@ export async function handlePostTurnContextMaintenance(
       // Only a compaction that will really run consumes the provider's warning
       // and announces itself.
       deps.clearModelContextWarning?.();
-      deps.conversation.addSystemMessage(
+      deps.conversation.addNotice(
         forcedByModelWarning && modelWarning
           ? `${describeModelContextWarning(modelWarning)}. Auto-compacting now, regardless of ${knownWindow === null ? `the unknown context window (${totalTokens} tokens in use)` : `the ~${usagePct}% estimated usage (${totalTokens}/${maxTokens} tokens)`}...`
-          : `Context usage at ${usagePct}% (${totalTokens}/${maxTokens} tokens), ${formatAutoCompactTrigger(autoDecision)}. Auto-compacting conversation...`
+          : `Context usage at ${usagePct}% (${totalTokens}/${maxTokens} tokens), ${formatAutoCompactTrigger(autoDecision)}. Auto-compacting conversation...`,
+        { level: 'info' }
       );
       deps.requestRender();
     }
@@ -608,7 +614,7 @@ export async function handlePostTurnContextMaintenance(
           deps.setIsCompacting(false);
           deps.setLastWarningBracket(0);
           if (smallWindowReceipt) emitReceipt(deps, turnId, smallWindowReceipt);
-          deps.conversation.addSystemMessage(`Context auto-compacted (small window mode). Kept last ${SMALL_WINDOW_KEEP_RECENT} messages.`);
+          deps.conversation.addNotice(`Context auto-compacted (small window mode). Kept last ${SMALL_WINDOW_KEEP_RECENT} messages.`, { level: 'success' });
           deps.requestRender();
         } catch (err: unknown) {
           deps.setIsCompacting(false);
@@ -616,7 +622,7 @@ export async function handlePostTurnContextMaintenance(
           const msg = summarizeError(err);
           logger.error('Orchestrator: small-window auto-compact failed', { error: msg });
           emitCompactionFailureReceipt(deps, turnId, err, 'auto', 'small-window');
-          deps.conversation.addSystemMessage(`Auto-compact failed: ${msg}. Use /compact to retry manually.`);
+          deps.conversation.addNotice(`Auto-compact failed: ${msg}. Use /compact to retry manually.`, { level: 'error' });
           deps.requestRender();
         }
       } else if (!skipAutoCompact) {
@@ -646,7 +652,7 @@ export async function handlePostTurnContextMaintenance(
           deps.signal?.throwIfAborted();
           deps.setIsCompacting(false);
           deps.setLastWarningBracket(0);
-          deps.conversation.addSystemMessage('Context auto-compacted. Conversation history summarized to free context window.');
+          deps.conversation.addNotice('Context auto-compacted. Conversation history summarized to free context window.', { level: 'success' });
           deps.requestRender();
           logger.info('Orchestrator: auto-compact complete', {
             modelId: currentModel.registryKey,
@@ -686,7 +692,7 @@ export async function handlePostTurnContextMaintenance(
           const msg = summarizeError(err);
           logger.error('Orchestrator: auto-compact failed', { error: msg });
           emitCompactionFailureReceipt(deps, turnId, err, 'auto', 'structured');
-          deps.conversation.addSystemMessage(`Auto-compact failed: ${msg}. Use /compact to retry manually.`);
+          deps.conversation.addNotice(`Auto-compact failed: ${msg}. Use /compact to retry manually.`, { level: 'error' });
           deps.requestRender();
           if (deps.hookDispatcher) {
             deps.hookDispatcher.fire({
@@ -716,13 +722,13 @@ export async function handlePostTurnContextMaintenance(
       deps.setIsCompacting(false);
       if (deps.signal?.aborted) {
         // Close the "Auto-compacting..." notice above rather than leave it open-ended.
-        deps.conversation.addSystemMessage('Auto-compaction cancelled.');
+        deps.conversation.addNotice('Auto-compaction cancelled.', { level: 'info' });
         deps.requestRender();
         deps.signal.throwIfAborted();
       }
       logger.error('Auto-compact failed', { error: String(compactErr) });
       emitCompactionFailureReceipt(deps, turnId, compactErr, 'auto', 'structured');
-      deps.conversation.addSystemMessage(`[Compact] Auto-compaction failed: ${String(compactErr)}`);
+      deps.conversation.addNotice(`[Compact] Auto-compaction failed: ${String(compactErr)}`, { level: 'error' });
       deps.requestRender();
     }
   } else if (
@@ -732,8 +738,9 @@ export async function handlePostTurnContextMaintenance(
     bracket > deps.lastWarningBracket
   ) {
     deps.setLastWarningBracket(bracket);
-    deps.conversation.addSystemMessage(
-      `Context usage at ${usagePct}% (${totalTokens}/${maxTokens} tokens). Auto-compact will trigger at ${configuredThreshold}% or when the ${COMPACTION_BUFFER_TOKENS.toLocaleString()} token safety buffer is reached.`
+    deps.conversation.addNotice(
+      `Context usage at ${usagePct}% (${totalTokens}/${maxTokens} tokens). Auto-compact will trigger at ${configuredThreshold}% or when the ${COMPACTION_BUFFER_TOKENS.toLocaleString()} token safety buffer is reached.`,
+      { level: 'warning' }
     );
     if (deps.runtimeBus) {
       emitOpsContextWarning(deps.runtimeBus, deps.emitterContext(turnId), {

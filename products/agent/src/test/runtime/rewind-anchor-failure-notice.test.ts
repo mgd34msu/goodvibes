@@ -13,7 +13,7 @@ function conversation(notices: string[]) {
   return {
     getLastUserMessage: () => 'rewrite the parser',
     getMessageCount: (): number => { throw new Error('conversation unavailable'); },
-    addSystemMessage: (message: string) => { notices.push(message); },
+    addNotice: (message: string) => { notices.push(message); },
   };
 }
 
@@ -40,7 +40,7 @@ describe('rewind anchor recording failures', () => {
       writeFileSync(blocker, '');
       const surface = { sessionsDir: join(blocker, 'sessions') } as SessionSurface;
       const notices: string[] = [];
-      const view = { getLastUserMessage: () => 'fix the build', getMessageCount: () => 4, addSystemMessage: (m: string) => { notices.push(m); } };
+      const view = { getLastUserMessage: () => 'fix the build', getMessageCount: () => 4, addNotice: (m: string) => { notices.push(m); } };
 
       recordCompletedTurnAnchor({ sessionId: 'sess-unwritable', turnId: 't1', conversation: view, surface });
       recordCompletedTurnAnchor({ sessionId: 'sess-unwritable', turnId: 't2', conversation: view, surface });

@@ -86,9 +86,11 @@ export function routeConversationCompaction(
   conversation: { getMessagesForLLM(): ProviderMessage[] },
   execute: (lifetime: { signal?: AbortSignal | undefined; assertCurrent: () => void }) => Promise<CompactionReceipt | undefined>,
 ): Promise<CompactionReceipt | undefined> {
-  const originalMessages = JSON.stringify(run.messages);
+  // The conversation hands out one array per revision, so the same array means nothing changed;
+  // only a different array is compared by content.
   const assertInputCurrent = () => {
-    if (JSON.stringify(conversation.getMessagesForLLM()) !== originalMessages) throw new Error('Conversation changed before compaction');
+    const current = conversation.getMessagesForLLM();
+    if (current !== run.messages && JSON.stringify(current) !== JSON.stringify(run.messages)) throw new Error('Conversation changed before compaction');
   };
   const assertCurrent = () => { run.signal?.throwIfAborted(); };
   assertCurrent();

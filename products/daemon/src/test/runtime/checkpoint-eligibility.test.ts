@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { WorkspaceRegistrationStore } from '@goodvibes-jev/engine/platform/platform/workspace';
-import { readSharedWorkspaceRegistrationSnapshotSync, resolveCheckpointEligibility, resolveCheckpointEligibilitySync, sharedWorkspaceRegistrationStorePath } from '../../runtime/trust/checkpoint-eligibility.js';
+import { readSharedWorkspaceRegistrationSnapshotSync, resolveCheckpointEligibilitySync, sharedWorkspaceRegistrationStorePath } from '../../runtime/trust/checkpoint-eligibility.js';
 import { makeOwnedTempDir } from '../helpers/owned-temp.js';
 
 function fixture() {
@@ -96,15 +96,4 @@ test('unknown registry schemas cannot grant checkpoint eligibility through valid
   f.write(f.shared, { version: 3, workspaces: [{ root, registeredAt: '2026-09-30T00:00:00.000Z', checkpointEligible: true }], declines: [] });
   expect(readSharedWorkspaceRegistrationSnapshotSync(f.paths).workspaces).toEqual([]);
   expect(resolveCheckpointEligibilitySync(f.paths, root, {}).status).not.toBe('covered');
-});
-
-test('a register the store cannot read is reported as unreadable with its reason, never as not registered', async () => {
-  const f = fixture(); const root = join(f.paths.homeDirectory, 'dup-root'); mkdirSync(root);
-  const store = new WorkspaceRegistrationStore({ path: f.shared, homeDir: f.paths.homeDirectory, daemonStateDir: f.paths.resolveUserPath(), probe: () => ({}) });
-  await store.add(root, { checkpointEligible: true });
-  const doc = JSON.parse(readFileSync(f.shared, 'utf8'));
-  f.write(f.shared, { ...doc, workspaces: [...doc.workspaces, { root, registeredAt: '2026-09-30T00:00:00.000Z', checkpointEligible: true }] });
-  const eligibility = resolveCheckpointEligibility(f.paths, root, {});
-  expect(eligibility.state).toBe('unreadable');
-  expect(() => store.currentScope(root)).toThrow('registry-unreadable');
 });

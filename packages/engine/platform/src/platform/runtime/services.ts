@@ -7,7 +7,7 @@ import { resolveSecretInput } from '../config/secret-refs.js';
 import { createRuntimeSecretsManager } from './secrets-composition.js';
 import { ServiceRegistry } from '../config/service-registry.js';
 import { SubscriptionManager, sharedSubscriptionsPath } from '../config/subscriptions.js';
-import { AutomationDeliveryManager, AutomationManager, AutomationRouteStore, createAutomationAgentControls } from '../automation/index.js';
+import { AutomationDeliveryManager, AutomationManager, AutomationRouteStore, automationActionBinding } from '../automation/index.js';
 import { ChannelPluginRegistry, ChannelPolicyManager, RouteBindingManager, SurfaceRegistry } from '../channels/index.js';
 import { ChannelDeliveryRouter } from '../channels/delivery-router.js';
 import { ApprovalBroker, GatewayMethodCatalog, SessionLiveTurnControlsHolder, SharedSessionBroker, registerGatewayVerbGroups, registerNativeAutomationGatewayMethods, controlPlaneStorePath } from '../control-plane/index.js';
@@ -158,6 +158,7 @@ import { composeContractRunner, resumeContracts } from './contract-composition.j
 import { createContractOperatorService, type ContractOperatorService } from '../contract/operator-service.js';
 import type { SessionSnapshot } from './session-persistence-scope.js';
 import { makeRuntimeFleetProbe } from './orchestration/fleet-count.js';
+import { rollBack as rollBackStore } from './code-index-services.js';
 import {
   CacheRegistry,
   PauseController,
@@ -422,6 +423,8 @@ export interface RuntimeServices {
   readonly fileUndoManager: FileUndoManager;
   readonly workspaceCheckpointManager: WorkspaceCheckpointManager;
   readonly integrationHelpers: IntegrationHelperService;
+  /** Re-root path-bound services to a new working directory (WorkspaceSwapManager). MemoryStore + ProjectIndex re-root in-process; others warn and keep their path until restart. Reports the subsystems that keep the old root until restart; throwing fails the swap with REROOT_FAILED. */
+  rerootStores(newWorkingDir: string): Promise<void | { readonly requiresRestart: readonly string[] }>;
   /**
    * Stop every poller this graph started (config watch, fleet tick, memory
    * governor, watcher registry, cross-session sweep, orchestration writer, push
@@ -671,6 +674,8 @@ function buildRuntimeGraph(product: ProductComposition, disposalScope: AsyncDisp
     admitExpensiveWorkRef.current?.(label) ?? { allowed: true };
   const codeIndexStore = new CodeIndexStore(workingDirectory, codeIndexDbPath, memoryEmbeddingRegistry);
   disposalScope.registry.add('code index store', () => codeIndexStore.close());
+  /** Where the workspace stores live now; a failed swap returns them here. */
+  let storesRootedAt = workingDirectory;
   // init never rejects; it is async because a failed extension load is read
   // by Jev (sqlite-vec-loader.ts). The build starts once the store is open.
   void codeIndexStore.init().then(() => {
@@ -681,8 +686,7 @@ function buildRuntimeGraph(product: ProductComposition, disposalScope: AsyncDisp
   const codeInjectionSettingEnabled = (): boolean => options.autoStartCodeIndex === true;
   const codeIndexReindexScheduler = new CodeIndexReindexScheduler({
     target: codeIndexStore,
-    // The working directory is fixed for the life of the process; a change applies at the next start.
-    workingDirectory: () => workingDirectory,
+    workingDirectory: () => storesRootedAt,
     // Honor governor backpressure: a paused code-index reindex job stops
     // scheduling new work until the governor resumes it, and the critical
     // memory tier refuses new reindex work outright.
@@ -772,9 +776,22 @@ function buildRuntimeGraph(product: ProductComposition, disposalScope: AsyncDisp
     deliveryManager,
     featureFlags,
     providerRegistry,
-    // The run's agent is how a run ends: the manager reads its status to
-    // settle the run and stops it to cancel the run or end it at its timeout.
-    ...createAutomationAgentControls(agentManager),
+    spawnTask: (input) => {
+      const record = agentManager.spawn({
+        mode: 'spawn',
+        task: input.prompt,
+        ...(input.modelId ? { model: input.modelId } : {}),
+        ...(input.modelProvider ? { provider: input.modelProvider } : {}),
+        ...(input.fallbackModels !== undefined ? { fallbackModels: [...input.fallbackModels] } : {}),
+        ...(input.routing ? { routing: input.routing } : {}),
+        ...(input.executionIntent ? { executionIntent: input.executionIntent } : {}),
+        ...(input.template ? { template: input.template } : {}),
+        ...(input.reasoningEffort ? { reasoningEffort: input.reasoningEffort } : {}),
+        ...(input.toolAllowlist?.length ? { tools: [...input.toolAllowlist], restrictTools: true } : {}),
+        ...(input.context ? { context: input.context } : {}),
+      }, automationActionBinding(input));
+      return record.id;
+    },
   });
   const knowledgeStore = createConfiguredPlanningStore(configManager, REGULAR_KNOWLEDGE_DB_FILE, { nativeDataWriter: options.nativeDataWriter ?? configManager.getNativeDataWriter(), family: 'wiki' });
   disposalScope.registry.add('knowledge store', () => knowledgeStore.close());
@@ -1375,5 +1392,72 @@ function buildRuntimeGraph(product: ProductComposition, disposalScope: AsyncDisp
     integrationHelpers,
     dispose: (): void => { stopRequests.request(); disposalScope.dispose(); },
     close: (): Promise<void> => { stopRequests.request(); return disposalScope.close(); },
+    async rerootStores(newWorkingDir: string): Promise<{ readonly requiresRestart: readonly string[] }> {
+      const previousDir = storesRootedAt;
+      const codeIndexPath = (dir: string): string => join(dir, '.goodvibes', surfaceRoot, 'code-index.sqlite');
+      const indexStats = codeIndexStore.stats();
+      const codeIndexWasBuilt = codeIndexStore.isBuilding() || indexStats.lastBuild !== null || indexStats.indexedChunks > 0;
+      // A failure part-way returns every store already moved, so a swap that
+      // reports failure leaves nothing reading or writing the other tree.
+      const moved: Array<{ readonly name: string; readonly restore: () => Promise<unknown> }> = [];
+      try {
+        // Only a per-project memory store follows the workspace; a home or explicit one stays where it is.
+        if (product.memoryStore === 'project') {
+          await memoryStore.reroot(projectMemoryDbPath(newWorkingDir, surfaceRoot));
+          moved.push({ name: 'memory store', restore: () => memoryStore.reroot(projectMemoryDbPath(previousDir, surfaceRoot)) });
+        }
+        // Re-root the code index alongside memory. Otherwise it keeps
+        // pointing at the old tree after a workspace swap.
+        await codeIndexStore.reroot(newWorkingDir, codeIndexPath(newWorkingDir));
+        moved.push({ name: 'code index', restore: () => codeIndexStore.reroot(previousDir, codeIndexPath(previousDir)) });
+        await projectIndex.reroot(newWorkingDir);
+        await fileWatcher.reroot(newWorkingDir);
+      } catch (error) {
+        let failure: unknown = error;
+        for (const store of moved.reverse()) {
+          try {
+            await rollBackStore(store.name, store.restore, failure);
+          } catch (combined) {
+            failure = combined;
+          }
+        }
+        if (codeIndexWasBuilt) codeIndexStore.scheduleBuild();
+        throw failure;
+      }
+      storesRootedAt = newWorkingDir;
+      // reroot() leaves the build decision to the caller; an index that was
+      // in use is rebuilt rather than left silently empty.
+      if (codeIndexWasBuilt || options.autoStartCodeIndex) codeIndexStore.scheduleBuild();
+
+      // Subsystems that cannot be live-rerooted emit a warn log.
+      // They continue operating at their current root path until the next process restart,
+      // at which point --working-dir / daemon-settings.json points to the new path.
+      // This is acceptable because: (a) the swap endpoint is daemon-token-gated,
+      // (b) these services primarily write user-scoped state (auth, bookmarks, profiles)
+      // that is not workspace-scoped, and (c) knowledge/artifact stores resolve paths
+      // through configManager which does not hot-reload during a running session.
+      const cannotReroot = [
+        'knowledgeStore (SQLite at configManager-resolved path, restart required)',
+        'sessionManager (initialised with fixed workingDirectory)',
+        'sessionOrchestration (task-graph.json path fixed at init)',
+        'artifactStore (resolves rootDir via configManager.getControlPlaneConfigDir)',
+        'hookDispatcher (projectRoot fixed at init)',
+        'sandboxSessionRegistry (workingDirectory fixed at init)',
+        'agentOrchestrator (workingDirectory fixed at init)',
+        'contractRunner (projectRoot and contract store fixed at init)',
+        'overflowHandler (baseDir fixed at init)',
+        'replayEngine (workingDirectory fixed at init)',
+        'planManager (workingDirectory fixed at init)',
+        'workspaceCheckpointManager (side git GIT_DIR fixed at init)',
+        'externalPermissionHost (workspaceRoot fixed at init)',
+        'remoteRunnerRegistry (workingDirectory fixed at init)',
+        'worktreeRegistry (repository root fixed at init)',
+        'projectPlanningService (work plan store fixed at init)',
+      ];
+      for (const name of cannotReroot) {
+        logger.warn('[rerootStores] subsystem requires restart to reroot', { subsystem: name, newWorkingDir });
+      }
+      return { requiresRestart: cannotReroot.map(name => name.replace(/ \(.*$/, '')) };
+    },
   };
 }

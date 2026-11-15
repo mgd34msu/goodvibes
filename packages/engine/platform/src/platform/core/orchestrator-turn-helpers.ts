@@ -95,18 +95,20 @@ export async function prepareConversationForTurn(
 ): Promise<ExecutionPlan | null> {
   const nativeTurn = isNativeConversationTurn();
   const preTurnPlan = nativeTurn ? null : planManager?.getActive(sessionId) ?? null;
+  // The active plan reaches the model once per user turn, on its first request; the person sees it as before.
   if (preTurnPlan && planManager) {
     const planMd = planManager.toMarkdown(preTurnPlan);
-    conversation.addSystemMessage(
-      `## Current Execution Plan\n${planMd}\n\nRefer to this plan. Update item statuses as you complete work.`
-    );
-  }
+    const planText = `## Current Execution Plan\n${planMd}\n\nRefer to this plan. Update item statuses as you complete work.`;
+    conversation.hostInstructions.set('plan', planText, { once: true });
+    conversation.addNotice(planText, { level: 'info', kind: 'system' });
+  } else conversation.hostInstructions.clear('plan');
 
   if (content && content.some(p => p.type === 'image')) {
     const model = providerRegistry.getCurrentModel();
     if (!model.capabilities.multimodal) {
-      conversation.addSystemMessage(
-        `Warning: ${model.displayName} does not support image input. Images have been removed from this message.`
+      conversation.addNotice(
+        `Warning: ${model.displayName} does not support image input. Images have been removed from this message.`,
+        { level: 'warning' },
       );
       const textOnly = content
         .filter((p): p is { type: 'text'; text: string } => p.type === 'text')
@@ -141,12 +143,12 @@ export function primeConversationForTurn(conversation: ConversationManager, clas
   if (isNativeConversationTurn() || isClassicOperation()) return;
   if (!activePlan && classification.needsPlan.verdict === 'yes' && classification.needsPlan.outcome === 'act') {
     classification.recordAction('inject specification and execution-plan instruction');
-    conversation.addSystemMessage(
-      '[Project mode] This request warrants a specification and execution plan. ' +
+    const instruction = '[Project mode] This request warrants a specification and execution plan. ' +
       'Before executing, write a brief spec (goals, constraints, non-goals) ' +
       'and an execution plan (phases and tasks). ' +
-      'Use the execution plan format: ## Phase [STATUS] / - [x] Task - STATUS.'
-    );
+      'Use the execution plan format: ## Phase [STATUS] / - [x] Task - STATUS.';
+    conversation.hostInstructions.set('mode', instruction, { once: true });
+    conversation.addNotice(instruction, { level: 'info', kind: 'system' });
   } else {
     classification.recordAction(activePlan ? 'use the existing execution plan' : `no automatic plan priming: ${classification.needsPlan.verdict} (${classification.needsPlan.outcome})`);
   }
@@ -361,18 +363,21 @@ async function handleOwnedToolResponseOutcome(args: ToolResponseOutcomeArgs): Pr
   const startedContract = spawnedAgents && results.some(toolResultStartedContract);
 
   if (spawnedAgents) {
-    args.conversation.addSystemMessage(startedContract ? CONTRACT_STARTED_NOTE
-      : 'You spawned agents for part of the task. You retain responsibility for the complete request. Incorporate their results, recover failures, and continue any remaining work.');
+    // Said to the model on its next request, and shown to the person as before.
+    const note = startedContract ? CONTRACT_STARTED_NOTE
+      : 'You spawned agents for part of the task. You retain responsibility for the complete request. Incorporate their results, recover failures, and continue any remaining work.';
+    args.conversation.hostInstructions.set('delegation', note, { once: true });
+    args.conversation.addNotice(note, { level: 'info', kind: 'operational' });
     // Every additional assignment must pass normal tool admission and appear
     // in the retained delegation evidence; no hidden plan-based spawns here.
     args.requestRender();
     return { continueLoop: true, results };
   }
 
+  // A request to the model only: it no longer adds a transcript line after every tool round.
   if (!isNativeConversationTurn() && args.planManager?.getActive(args.sessionId)) {
-    args.conversation.addSystemMessage(
-      'Update the execution plan to reflect completed work. Mark items as COMPLETE or IN_PROGRESS with the agent ID.'
-    );
+    args.conversation.hostInstructions.set('plan',
+      'Update the execution plan to reflect completed work. Mark items as COMPLETE or IN_PROGRESS with the agent ID.', { once: true, append: true });
   }
 
   return { continueLoop: true, results };
@@ -459,7 +464,7 @@ async function handleFinalPlanOutcome(args: FinalResponseOutcomeArgs): Promise<f
       // Cancellation belongs to the turn; all other failures retain the shell
       // and do not enter the timer fallback or leak provider/source material.
       args.signal?.throwIfAborted(); args.assertCurrent?.();
-      args.conversation.addSystemMessage('[Plan] Status reading is unavailable or the plan changed. The existing plan was retained. Retry the plan update when ready.');
+      args.conversation.addNotice('[Plan] Status reading is unavailable or the plan changed. The existing plan was retained. Retry the plan update when ready.', { level: 'warning' });
       return false;
     }
     if (parsed.items && parsed.items.length > 0) {
@@ -472,16 +477,18 @@ async function handleFinalPlanOutcome(args: FinalResponseOutcomeArgs): Promise<f
         logger.warn('Orchestrator: the plan could not be reloaded after its items were saved; it stays awaiting its items', { planId: args.preTurnPlan.id });
       }
       if (parsed.parseIssues?.length) {
-        args.conversation.addSystemMessage(
-          `[Plan] Parsed ${parsed.items.length} item(s) with ${parsed.parseIssues.length} formatting warning(s); unrecognized item statuses were marked pending.`
+        args.conversation.addNotice(
+          `[Plan] Parsed ${parsed.items.length} item(s) with ${parsed.parseIssues.length} formatting warning(s); unrecognized item statuses were marked pending.`,
+          { level: 'warning' },
         );
       }
-      args.conversation.addSystemMessage(
-        `[Plan] Parsed ${parsed.items.length} item(s). Execution remains subject to the original request and normal checked agent admission.`
+      args.conversation.addNotice(
+        `[Plan] Parsed ${parsed.items.length} item(s). Execution remains subject to the original request and normal checked agent admission.`,
+        { level: 'success' },
       );
       args.requestRender();
     } else {
-      args.conversation.addSystemMessage('[Plan] No items could be read from the reply; the plan is still awaiting its items.');
+      args.conversation.addNotice('[Plan] No items could be read from the reply; the plan is still awaiting its items.', { level: 'warning' });
       args.requestRender();
     }
   }
@@ -504,10 +511,10 @@ export function emitMalformedToolUseWarning(args: {
     stopReason: 'tool_call',
   });
   if (args.isReconciliationEnabled) {
-    args.conversation.addSystemMessage(
-      '[Tool Reconciliation] Provider returned stop_reason=tool_use but no tool calls were included in the response. ' +
-      'This is a malformed provider response. If this repeats, try switching models.',
-    );
+    const reconciliation = '[Tool Reconciliation] Provider returned stop_reason=tool_use but no tool calls were included in the response. ' +
+      'This is a malformed provider response. If this repeats, try switching models.';
+    args.conversation.addNotice(reconciliation, { level: 'warning' });
+    args.conversation.hostInstructions.set('correction', reconciliation, { once: true, append: true });
     if (args.runtimeBus) {
       emitToolReconciled(args.runtimeBus, args.emitterContext(args.turnId), {
         turnId: args.turnId,

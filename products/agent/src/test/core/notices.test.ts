@@ -68,14 +68,14 @@ describe('system notices become toasts and history entries', () => {
   });
 
   test('a legacy WRFC notice remains intact without inventing a current contract event', () => {
-    const { conversation, feed, toasts } = wired();
+    const { conversation, feed } = wired();
     const legacy = '[WRFC] ✗ Chain wrfc-e9823b8 FAILED: legacy failure detail';
     conversation.addSystemMessage(legacy);
     expect(feed.list()).toHaveLength(1);
     expect(feed.list()[0]!.title).toBe(legacy);
     expect(feed.list()[0]!.body).toBeUndefined();
-    expect(feed.list()[0]!.severityPending).toBe(true);
-    expect(toasts.visible()).toEqual([]);
+    expect(feed.list()[0]!.level).toBe('info');
+    expect(feed.list()[0]!.severityPending).toBeFalsy();
     expect(text(conversation.getDisplayBlocks())).not.toContain(legacy);
   });
 

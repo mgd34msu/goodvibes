@@ -290,6 +290,8 @@ export interface RuntimeServices {
    * background permission gate) or refused without a word.
    */
   readonly permissionManager: PermissionManager;
+  /** Re-root path-bound stores (MemoryStore, ProjectIndex) to a new working directory, called by WorkspaceSwapManager after verification; stores needing a process restart just warn-log and keep serving the old path until the daemon restarts with the new --working-dir. */
+  rerootStores(newWorkingDir: string): Promise<void>;
   /**
    * Cancel the agent runs this graph is hosting, returning how many.
    *

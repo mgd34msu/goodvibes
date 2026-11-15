@@ -20,17 +20,20 @@ interface Snapshot { readonly path: string; readonly mtimeMs: number; readonly f
 interface Generation { readonly files: readonly Snapshot[]; readonly directories: ReadonlyMap<string, string>; readonly id: string }
 
 /**
- * Preparation budget. These bound what one turn sends to the embedding provider
- * and how long the turn waits on it. A file over the per-file size is left out;
+ * Preparation budget. A captured (immutable) contract input is indexed once per
+ * run and the index serves every turn, so these bound one preparation per run,
+ * sized for an ordinary repository. A file over the per-file size is left out;
  * exceeding a count or byte total makes the code source unavailable with the cap
  * named, and the run continues without code context.
  */
-const MAX_DISCOVERY_ENTRIES = 1_024;
-const MAX_FILES = 64;
+const MAX_DISCOVERY_ENTRIES = 20_000;
+const MAX_FILES = 4_000;
 const MAX_FILE_BYTES = 128 * 1_024;
-const MAX_SOURCE_BYTES = 1_024 * 1_024;
-const MAX_CHUNKS = 128;
-const OPERATION_TIMEOUT_MS = 15_000;
+const MAX_SOURCE_BYTES = 32 * 1_024 * 1_024;
+const MAX_CHUNKS = 4_096;
+const OPERATION_TIMEOUT_MS = 120_000;
+/** The deadline of one search, ranking or check against a prepared index. */
+const CALL_TIMEOUT_MS = 15_000;
 class CodeContextTooLarge extends Error {}
 const CHUNK_BUDGET_MESSAGE = 'Authorized code index chunk budget exceeded';
 
@@ -61,6 +64,10 @@ export function createCapturedCodeContext(input: {
   readonly signal?: AbortSignal | undefined;
 }): TurnCodeIndexSource {
   const { authority, root, readAccessFilter, registry } = input;
+  // A captured input cannot change under the run (read authority compares every
+  // read with the capture), so its generation is prepared once and kept for
+  // every turn. A mutable input is re-proved before its text reaches a provider.
+  const immutable = !contractInputAuthorityMutable(authority);
   let store: CodeIndexStore | undefined;
   const closeIndex = () => { const selected = store; store = undefined; selected?.close(); };
   let cachedStats: ReturnType<TurnCodeIndexSource['stats']> | undefined;
@@ -107,6 +114,14 @@ export function createCapturedCodeContext(input: {
   const assertGeneration = async (generation: Generation, signal: AbortSignal, onlyPath?: string): Promise<void> => withContractInputReadBatch(authority, async () => {
     checkProvider();
     await authorize(root, signal);
+    if (immutable) {
+      // A captured file is never rewritten by the run; one lstat per entry catches tampering
+      // without re-authorising and re-reading every file on every check.
+      for (const [path, fp] of generation.directories) if (fingerprint(lstatSync(path, { bigint: true })) !== fp) throw new Error('captured code directory generation changed');
+      for (const file of generation.files) if ((onlyPath === undefined || file.path === onlyPath) && fingerprint(lstatSync(join(root, file.path), { bigint: true })) !== file.fingerprint) throw new Error('captured code generation changed');
+      checkProvider();
+      return;
+    }
     for (const [path, fp] of generation.directories) {
       if (fingerprint(lstatSync(path, { bigint: true })) !== fp) throw new Error('captured code directory generation changed');
     }
@@ -129,13 +144,15 @@ export function createCapturedCodeContext(input: {
     checkSignal();
     if (!operation) throw new Error('captured code operation is unavailable');
     const owner = operation;
-    const signal = AbortSignal.any([...(input.signal ? [input.signal] : []), owner.signal, AbortSignal.timeout(OPERATION_TIMEOUT_MS)]);
+    const signal = AbortSignal.any([...(input.signal ? [input.signal] : []), owner.signal, AbortSignal.timeout(CALL_TIMEOUT_MS)]);
     return executePolicyCheck(() => work(signal), signal);
   };
   const source: TurnCodeIndexSource = {
     async prepare() {
       input.signal?.throwIfAborted();
       if (disposed) throw new Error('captured code context is closed');
+      // The run's captured generation is already indexed: every later turn reuses it.
+      if (immutable && current && store && operation) { assertReadingCurrent = undefined; return; }
       assertReadingCurrent = undefined; current = undefined; cachedStats = undefined; operation?.abort(); closeIndex();
       const owner = new AbortController(); operation = owner;
       const deadline = AbortSignal.timeout(OPERATION_TIMEOUT_MS);
@@ -273,13 +290,16 @@ export function createCapturedCodeContext(input: {
         };
         // Each hit file is re-read once here; the ranking asks assertCurrent once
         // before its request and the caller once more at consumption.
-        const snapshots = hits.map(hit => {
+        const snapshots: { hit: (typeof hits)[number]; code: string }[] = [];
+        for (const hit of hits) {
           const file = selected.files.find(file => file.path === hit.chunk.path);
           if (!file || hit.chunk.fileRevision !== selected.id) throw new Error('captured code hit is stale');
+          // The live read policy still decides each file whose text is about to be quoted.
+          await authorize(join(root, file.path), signal);
           const content = bytes(join(root, file.path), file.fingerprint).content;
           if (file.content !== undefined && content !== file.content) throw new Error('captured code hit changed');
-          return { hit, code: content };
-        });
+          snapshots.push({ hit, code: content });
+        }
         const reading = await rankCodeInjectionSnapshots(query, snapshots, { signal, assertCurrent });
         assertReadingCurrent = reading.assertCurrent;
         return reading;
@@ -298,7 +318,11 @@ export function createCapturedCodeContext(input: {
       const reading = assertReadingCurrent;
       await bounded(async signal => { if (reading) await reading(); else await assertGeneration(selected, signal); });
     },
-    finishTurn() { assertReadingCurrent = undefined; cachedStats = undefined; current = undefined; const finished = operation; operation = undefined; finished?.abort(); closeIndex(); },
+    finishTurn() {
+      assertReadingCurrent = undefined;
+      if (immutable && current) return;
+      cachedStats = undefined; current = undefined; const finished = operation; operation = undefined; finished?.abort(); closeIndex();
+    },
     dispose() { unregisterAssertion(); assertReadingCurrent = undefined; cachedStats = undefined; disposed = true; operation?.abort(); current = undefined; closeIndex(); },
   };
   return source;

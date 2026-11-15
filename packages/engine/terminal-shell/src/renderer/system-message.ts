@@ -1,4 +1,3 @@
-import { peekSystemMessagePresentation, prepareSystemMessagePresentation } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 import { type Line } from '@goodvibes-jev/engine/platform/platform/types';
 import { BORDERS } from './layout.js';
 import { renderConversationNotice } from './conversation-surface.js';
@@ -7,13 +6,9 @@ import { activeUiTones } from './theme.js';
 /** Exported for use by typeOverride callers and tests. */
 export type SystemMessageType = 'error' | 'warning' | 'info';
 
-/** Explicit preparation for callers that need a semantic severity. */
-export async function classifySystemMessage(content: string): Promise<SystemMessageType | undefined> {
-  return (await prepareSystemMessagePresentation(content)).severity;
-}
-
 /**
- * Render a system message with a colored left border.
+ * Render a system message with a colored left border. Its colour is the level
+ * its writer stored on the message (`typeOverride`); no model reads the text.
  */
 export function renderSystemMessage(
   content: string,
@@ -21,7 +16,7 @@ export function renderSystemMessage(
   typeOverride?: SystemMessageType,
   unclassifiedAccent: 'muted' | 'info' = 'muted',
 ): Line[] {
-  const msgType = typeOverride ?? peekSystemMessagePresentation(content)?.severity;
+  const msgType = typeOverride;
   // System-message notices paint the ▌ marker and body text on the TRANSPARENT
   // terminal background (renderConversationNotice passes no bodyBg), so the
   // accent and dim text resolve per-render through activeUiTones() to stay

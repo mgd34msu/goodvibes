@@ -1,6 +1,5 @@
 import { BatteryRegistry } from '@goodvibes-jev/judgment';
 import { clusterJoinGroup } from './batteries/cluster-join-group.js';
-import { noticeSeverity } from './batteries/notice-severity.js';
 import { processOutputError, processOutputEndpoint } from './batteries/process-output.js';
 
 /**
@@ -11,6 +10,5 @@ import { processOutputError, processOutputEndpoint } from './batteries/process-o
 export const registry = new BatteryRegistry();
 
 registry.register(clusterJoinGroup);
-registry.register(noticeSeverity);
 registry.register(processOutputError);
 registry.register(processOutputEndpoint);

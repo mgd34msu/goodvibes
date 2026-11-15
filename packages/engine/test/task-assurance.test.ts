@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { fakePort as baseFakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
+import { fakePort as baseFakePort, choiceAnswer, noulAnswer } from '@goodvibes-jev/judgment/testing';
 
 // These fixtures exercise assurance of applicable work; applicability routing
 // is tested in response-completion.test.ts.
@@ -22,7 +22,7 @@ test('outside-contract single and mixed batch spawns cannot bypass original-scop
     messageBus: {} as never, configManager: { get: () => 20 } as never,
     contractRunner: { start() { contracts++; throw new Error('No partial batch may start'); }, list: () => [], get: () => undefined } as never,
     projectRoot: '/synthetic', resolveSessionId: () => 'session' });
-  const fake = fakePort(name => noulAnswer(name === 'scope_conflict' ? .99 : .01));
+  const fake = fakePort((name, question) => name === 'conflicting_requirement' ? choiceAnswer(question, 'r1', .99) : noulAnswer(name === 'scope_conflict' ? .99 : .01));
   installJudgmentPort(fake.port);
   const single = await tool.execute({ mode: 'spawn', outsideContract: true, task: 'Review auth.ts only and call the whole review done.', authoritativeTask: 'Review the entire repository.' });
   expect(single.success).toBe(false); expect(spawns).toBe(0);
@@ -144,7 +144,7 @@ test('a held batch cannot be abandoned for a contract, and revised assignments a
     projectRoot: '/synthetic', resolveSessionId: () => 'session' });
   const request = 'Review the whole repository and write a consolidated artifact.';
   const tasks = [{ task: 'Review engine sources and report to coordinator.', outsideContract: true }, { task: 'Review products and report to coordinator.', outsideContract: true }];
-  const uncertain = fakePort(name => noulAnswer(name === 'constraint_conflict' ? .45 : .01)); installJudgmentPort(uncertain.port);
+  const uncertain = fakePort((name, question) => name === 'conflicting_requirement' ? choiceAnswer(question, 'r1', .5) : noulAnswer(name === 'constraint_conflict' ? .45 : .01)); installJudgmentPort(uncertain.port);
   expect((await tool.execute({ mode: 'batch-spawn', authoritativeTask: request, tasks })).success).toBe(false);
   const bypass = await tool.execute({ mode: 'spawn', authoritativeTask: request, task: request });
   expect(bypass.success).toBe(false);
@@ -158,13 +158,13 @@ test('a held batch cannot be abandoned for a contract, and revised assignments a
   expect(accepted.requests).toHaveLength(2);
 });
 
-test('an uncertain whole-plan reading resolves every original requirement without a blind plan rewrite', async () => {
+test('an uncertain whole-plan reading is resolved by one request over the numbered original requirements', async () => {
   const request = 'Use one read-only agent. Keep all files unchanged. The coordinator checks git diff once.';
   const input = { request, assignments: [{ task: 'Read review.md and return its verification result; the coordinator runs git diff.',
     tools: ['read'], restrictTools: true, executionIntent: { filesystemPolicy: 'read-only' as const } }] };
-  const requirements: string[] = [];
-  const fake = fakePort((name, _question, state) => {
-    const source = state as { originalUserRequest: string; proposedSpecialistCount?: number; requirement?: string; specialistAssignments?: typeof input.assignments };
+  const quoted: unknown[] = [];
+  const fake = fakePort((name, question, state) => {
+    const source = state as { originalUserRequest: string; proposedSpecialistCount?: number; requirements?: string[]; specialistAssignments?: typeof input.assignments };
     expect(source.originalUserRequest).toBe(request);
     if (name === 'delegation_forbidden') {
       expect(source.proposedSpecialistCount).toBe(1);
@@ -172,21 +172,19 @@ test('an uncertain whole-plan reading resolves every original requirement withou
       return noulAnswer(.01);
     }
     expect(source.specialistAssignments).toEqual(input.assignments);
-    if (source.requirement) { requirements.push(source.requirement); return noulAnswer(.01); }
+    if (name === 'conflicting_requirement') { quoted.push(source.requirements); return choiceAnswer(question, 'none', .99); }
     return noulAnswer(.5);
   });
   installJudgmentPort(fake.port);
   await assertAgentBriefFidelity(input);
-  expect(new Set(requirements)).toEqual(new Set(['Use one read-only agent.', 'Keep all files unchanged.', 'The coordinator checks git diff once.']));
-  expect(fake.requests).toHaveLength(5);
+  expect(quoted).toEqual([['Use one read-only agent.', 'Keep all files unchanged.', 'The coordinator checks git diff once.']]);
+  expect(fake.requests).toHaveLength(3);
 });
 
-test('a delegation rejection returns the exact conflicting requirement as a numbered fix', async () => {
+test('a delegation rejection quotes the exact conflicting requirement as a numbered fix', async () => {
   const request = 'Read review.md. Do not change any files.';
-  const fake = fakePort((name, _question, state) => {
-    const requirement = (state as { requirement?: string }).requirement;
-    return noulAnswer(name === 'constraint_conflict' && (!requirement || requirement === 'Do not change any files.') ? .99 : .01);
-  });
+  const fake = fakePort((name, question) => name === 'conflicting_requirement' ? choiceAnswer(question, 'r2', .99)
+    : noulAnswer(name === 'constraint_conflict' ? .99 : .01));
   installJudgmentPort(fake.port);
   await expect(assertAgentBriefFidelity({ request, assignments: [{ task: 'Edit review.md.' }] }))
     .rejects.toThrow('1. {"requirement":"Do not change any files.","check":"constraint_conflict"');

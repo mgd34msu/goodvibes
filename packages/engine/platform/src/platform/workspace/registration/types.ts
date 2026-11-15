@@ -15,8 +15,6 @@
  * (its `workspaces` array drops straight into this store's `workspaces`).
  */
 
-import { refusal, type Refusal } from '@goodvibes-jev/engine/errors';
-
 /** An explicitly registered workspace root. Field-compatible with the agent registry record. */
 export interface RegisteredWorkspaceRecord {
   /** Normalized absolute path (see normalizeWorkspaceRoot): coverage flows DOWN this subtree. */
@@ -56,39 +54,10 @@ export interface NativeWorkspaceScope {
   readonly scopeRevision: string;
 }
 
-/**
- * Why native work cannot use a workspace scope, each with its own way out:
- * register the workspace, clear a decline, repair the register, use an existing
- * directory, register again to grant a native scope, start the step again, or
- * simply retry.
- */
-export type NativeWorkspaceScopeReason =
-  | 'not-registered' | 'declined' | 'registry-unreadable' | 'root-missing' | 'unmigrated' | 'changed' | 'retry';
-
 export class NativeWorkspaceScopeError extends Error {
-  readonly reason: NativeWorkspaceScopeReason;
-  /** The same facts in the shared refusal shape (`readRefusal` finds it). */
-  readonly refusal: Refusal;
-  readonly retryable: boolean;
-  constructor(
-    readonly code: 'unavailable' | 'unmigrated' | 'changed' | 'callback',
-    detail: { readonly reason: NativeWorkspaceScopeReason; readonly state: string; readonly next: readonly string[] } = {
-      reason: code === 'unmigrated' ? 'unmigrated' : code === 'unavailable' ? 'registry-unreadable' : 'changed',
-      state: `native workspace scope ${code}`, next: [],
-    },
-  ) {
-    super(`Native workspace scope: ${code} (${detail.reason}): ${detail.state}.${detail.next[0] ? ` ${detail.next[0]}` : ''}`);
+  constructor(readonly code: 'unavailable' | 'unmigrated' | 'changed' | 'callback') {
+    super(`Native workspace scope: ${code}`);
     this.name = 'NativeWorkspaceScopeError';
-    this.reason = detail.reason;
-    this.retryable = detail.reason === 'retry' || detail.reason === 'changed';
-    this.refusal = refusal({
-      code: `WORKSPACE_SCOPE_${detail.reason.toUpperCase().replace(/-/g, '_')}`,
-      state: detail.state,
-      reason: 'Native work cannot run in this workspace',
-      next: detail.next,
-      retryable: this.retryable,
-      status: detail.reason === 'retry' || detail.reason === 'changed' ? 409 : detail.reason === 'registry-unreadable' ? 500 : 403,
-    });
   }
 }
 
@@ -104,7 +73,7 @@ export interface DeclinedWorkspaceRecord {
   readonly declinedAt: string;
 }
 
-/** Public coverage snapshot. Registry generations remain store-owned. */
+/** Public coverage snapshot. Registry generations and removal tombstones remain store-owned. */
 export interface WorkspaceRegistrySnapshot {
   readonly workspaces: readonly RegisteredWorkspaceRecord[];
   readonly declines: readonly DeclinedWorkspaceRecord[];

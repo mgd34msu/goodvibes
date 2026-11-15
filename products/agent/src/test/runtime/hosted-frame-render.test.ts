@@ -38,7 +38,7 @@ function recorder(): { conversation: HostedFrameConversation; entries: Recorded[
     addToolResults: (results) => {
       entries.push({ kind: 'tool-results', results: results as unknown as readonly RecordedToolResult[] });
     },
-    addSystemMessage: (content) => { entries.push({ kind: 'system', content }); },
+    addNotice: (content) => { entries.push({ kind: 'system', content }); },
     startStreamingBlock: () => { entries.push({ kind: 'stream-start' }); },
     updateStreamingBlock: (content) => { entries.push({ kind: 'stream-update', content }); },
     finalizeStreamingBlock: () => { entries.push({ kind: 'stream-final' }); },

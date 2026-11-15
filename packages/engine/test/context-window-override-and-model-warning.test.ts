@@ -257,6 +257,7 @@ function makeConversationStub(): ConversationStub {
   const conversation = {
     getMessagesForLLM: () => [{ role: 'user', content: 'short message' }],
     addSystemMessage: (msg: string) => { systemMessages.push(msg); },
+    addNotice: (msg: string) => { systemMessages.push(msg); },
     replaceMessagesForLLM: () => {},
     compact: async (_registry: unknown, _modelId: string, _trigger: string, _provider: string, context?: CompactionContext) => {
       state.compactCalls += 1;

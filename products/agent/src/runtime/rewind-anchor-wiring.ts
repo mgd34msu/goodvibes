@@ -26,8 +26,8 @@ import type { SessionSurface } from '@/runtime/index.ts';
 export interface RewindAnchorConversationView {
   getLastUserMessage(): string | null | undefined;
   getMessageCount(): number;
-  /** When present, said once per session if a rewind point could not be saved. */
-  addSystemMessage?(message: string): void;
+  /** When present, said once per session, as a warning, if a rewind point could not be saved. */
+  addNotice?(message: string, meta: { readonly level: 'warning' }): void;
 }
 
 /** Sessions already told that a rewind point could not be saved, so one failure streak says it once. */
@@ -70,9 +70,10 @@ function tellOnceThatAnchorWasNotSaved(
   if (sessionsToldOfAnchorFailure.has(input.sessionId)) return;
   sessionsToldOfAnchorFailure.add(input.sessionId);
   try {
-    input.conversation.addSystemMessage?.(
+    input.conversation.addNotice?.(
       `A rewind point for this turn could not be saved (${cause}). `
       + `${consequence}; later turns are still recorded.`,
+      { level: 'warning' },
     );
   } catch {
     // The notice is a courtesy; the warning already carries the cause.

@@ -24,7 +24,6 @@ export {
 export interface McpWorkspaceForm extends McpWorkspaceFormBase {
   confirm: string;
 }
-import { prepareSystemMessagePresentation } from '@goodvibes-jev/engine/platform/platform/runtime';
 
 import type { McpServerConfig } from '@goodvibes-jev/engine/platform/platform/mcp';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
@@ -69,21 +68,22 @@ export class McpWorkspace extends McpWorkspaceState<CommandContext, McpWorkspace
     this.status = text;
   }
 
-  private statusReading: AbortController | undefined;
   private statusValue = 'Ready. Inspect MCP servers and tools. Config writes/reloads require explicit workspace confirmation.';
+  private statusToneValue: 'info' | 'warning' | 'error' = 'info';
   public get status(): string {
     return this.statusValue;
   }
+  /** A status line set this way is information; a warning or failure is set with `setStatus`. */
   public set status(value: string) {
-    this.statusValue = value;
-    this.statusReading?.abort();
-    const controller = new AbortController();
-    this.statusReading = controller;
-    void prepareSystemMessagePresentation(value, controller.signal)
-      .then(() => {
-        if (!controller.signal.aborted && this.statusValue === value) this.context?.renderRequest();
-      })
-      .catch(() => {});
+    this.setStatus(value);
+  }
+  /** The level the line's writer gave it; the renderer colours by it and reads nothing. */
+  public get statusTone(): 'info' | 'warning' | 'error' {
+    return this.statusToneValue;
+  }
+  private setStatus(text: string, tone: 'info' | 'warning' | 'error' = 'info'): void {
+    this.statusValue = text;
+    this.statusToneValue = tone;
   }
 
   /**
@@ -92,7 +92,6 @@ export class McpWorkspace extends McpWorkspaceState<CommandContext, McpWorkspace
    */
 
   close(): void {
-    this.statusReading?.abort();
     super.close();
   }
 
@@ -161,7 +160,7 @@ export class McpWorkspace extends McpWorkspaceState<CommandContext, McpWorkspace
     if (!this.context) return;
     try {
       if (!isAffirmative(this.form.confirm)) {
-        this.status = 'MCP server add/update not confirmed. Type yes on the Confirm field, then press Enter on Save server.';
+        this.setStatus('MCP server add/update not confirmed. Type yes on the Confirm field, then press Enter on Save server.', 'warning');
         this.context.renderRequest();
         return;
       }
@@ -180,7 +179,7 @@ export class McpWorkspace extends McpWorkspaceState<CommandContext, McpWorkspace
       }
     } catch (error) {
       this.lastError = summarizeError(error);
-      this.status = `MCP server save failed before dispatch: ${this.lastError}`;
+      this.setStatus(`MCP server save failed before dispatch: ${this.lastError}`, 'error');
       this.context.renderRequest();
     }
   }
@@ -199,7 +198,7 @@ export class McpWorkspace extends McpWorkspaceState<CommandContext, McpWorkspace
   private async dispatchMcpCommand(args: readonly string[], summary: string): Promise<boolean> {
     const context = this.context;
     if (!context?.executeCommand) {
-      this.status = `${summary} blocked: command dispatch is unavailable in this workspace.`;
+      this.setStatus(`${summary} blocked: command dispatch is unavailable in this workspace.`, 'error');
       this.lastError = 'Command dispatch is unavailable.';
       context?.renderRequest();
       return false;
@@ -214,11 +213,11 @@ export class McpWorkspace extends McpWorkspaceState<CommandContext, McpWorkspace
     try {
       if (!outcome.ok) {
         this.lastError = summarizeError(outcome.error);
-        this.status = `${summary} failed: ${this.lastError}`;
+        this.setStatus(`${summary} failed: ${this.lastError}`, 'error');
         return false;
       }
       if (!outcome.value) {
-        this.status = `${summary} failed: the command router did not handle /mcp.`;
+        this.setStatus(`${summary} failed: the command router did not handle /mcp.`, 'error');
         this.lastError = 'Command router did not handle /mcp.';
         return false;
       }
@@ -227,7 +226,7 @@ export class McpWorkspace extends McpWorkspaceState<CommandContext, McpWorkspace
       if (capturedOutputReportsFailure(outcome.lines)) {
         const reported = firstFailureLine(outcome.lines);
         this.lastError = reported;
-        this.status = `${summary} failed: ${reported}`;
+        this.setStatus(`${summary} failed: ${reported}`, 'error');
         return false;
       }
       this.status = `${summary} completed through MCP workspace.`;

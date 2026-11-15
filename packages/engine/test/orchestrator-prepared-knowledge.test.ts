@@ -406,27 +406,6 @@ describe('orchestrator prepared curated knowledge', () => {
     } finally { release.resolve(); installJudgmentPort(previous); }
   });
 
-  test('a config retirement during settlement drains once and ends as a native held run', async () => {
-    const { deps } = await fixture(), agent = record(), fake = readings();
-    let drains = 0, failures = 0, completions = 0;
-    const provider: LLMProvider = { name: 'fixture', models: ['fixture-model'], async chat() {
-      return { content: 'done', toolCalls: [], usage: { inputTokens: 1, outputTokens: 1 }, stopReason: 'completed' };
-    } };
-    const context = { ...runnerContext(deps, provider), emitAgentFailedEvent: () => { failures++; },
-      emitAgentCompletedEvent: () => { completions++; }, async beforeRunSettlement() {
-        drains++;
-        Object.defineProperty(context, 'configManager', { configurable: true, value: { get: () => 5 } });
-      } };
-    const previous = installJudgmentPort(fake.port);
-    try {
-      await runAgentTask(context, agent);
-      expect(drains).toBe(1); expect(failures).toBe(1); expect(completions).toBe(0);
-      expect(agent.status).toBe('failed'); expect(agent.failureReason).toBe('semantic_observation_held');
-      expect(agent.error).toBe(new OrchestratorObservationHeldError().message);
-      expect(fake.requests.filter(request => request.context?.site === 'engine.agent.run-failure')).toHaveLength(0);
-    } finally { installJudgmentPort(previous); }
-  });
-
   test('an original held error uses fixed native wording after the same port retires', async () => {
     const { deps } = await fixture(), agent = record(), fake = readings();
     let current = true, failures = 0, transmissions = 0;

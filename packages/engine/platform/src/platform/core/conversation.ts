@@ -2,7 +2,7 @@ import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { providerConversation, withHostMessage } from './conversation-provider-projection.js';
 import { HostInstructionChannel, type HostInstructions } from './host-instructions.js';
 import { declaredNoticePresentation } from '../runtime/runtime-event-notices.js';
-import { prepareSystemMessagePresentation, type SystemMessagePresentation } from '../runtime/system-message-presentation.js';
+import type { SystemMessagePresentation } from '../runtime/system-message-presentation.js';
 import type { SystemMessageKind, SystemMessagePriorityLevel } from '../runtime/system-message-policy.js';
 import type { RuntimeEventProvenance } from '../../events/occurrence.js';
 import type { ProviderMessage, ContentPart } from '../providers/interface.js';
@@ -56,6 +56,9 @@ export interface NoticeMeta {
   readonly kind?: NoticeKind | undefined;
   readonly priority?: SystemMessagePriorityLevel | undefined;
 }
+
+/** The level a line takes when its writer declared nothing: shown as information, never read by a model. */
+export const INFO_NOTICE: NoticeMeta = Object.freeze({ level: 'info' });
 
 /** The transcript colour of a declared notice. */
 export function noticePresentation(notice: NoticeMeta): SystemMessagePresentation {
@@ -164,7 +167,6 @@ function isRedeliveredAssistantMessage(
 }
 
 export class ConversationManager {
-  private presentationLifetime = new AbortController();
   private messages: Message[] = [];
   private _title = '';
   private _titleSource: ConversationTitleSource = 'system';
@@ -354,11 +356,15 @@ export class ConversationManager {
     this._messagesRevision++;
   }
 
+  /**
+   * A line for the person restating a runtime event the producer declared
+   * (agent finished, turn cancelled, contract state). Its level comes from the
+   * declared event; any other line is information. No model reads it.
+   * A writer that knows its line's level uses `addNotice`.
+   */
   public addSystemMessage(content: string, runtimeEvent?: RuntimeEventProvenance): void {
-    const presentation = declaredNoticePresentation(content, runtimeEvent);
-    if (!presentation) void prepareSystemMessagePresentation(content, this.presentationLifetime.signal).catch(() => {});
-    this.messages.push({ role: 'system', content,
-      ...(presentation ? { presentation } : {}),
+    const presentation = declaredNoticePresentation(content, runtimeEvent) ?? noticePresentation(INFO_NOTICE);
+    this.messages.push({ role: 'system', content, presentation,
       ...(runtimeEvent ? { runtimeEvent: { type: runtimeEvent.type, occurrenceId: runtimeEvent.occurrenceId } } : {}),
     });
     this._messagesRevision++;
@@ -567,8 +573,6 @@ export class ConversationManager {
 
   public resetAll(): void {
     resetVerificationArchives(this);
-    this.presentationLifetime.abort();
-    this.presentationLifetime = new AbortController();
     this.hostInstructions.reset();
     this.messages = [];
     this._title = '';
@@ -671,11 +675,14 @@ export class ConversationManager {
     return true;
   }
 
-  /** A restored line keeps its declared level; only an undeclared, unstructured line is read. */
+  /**
+   * A restored line keeps its declared level, or the level of its declared
+   * runtime event; a line saved before levels were stored shows as information.
+   * Restoring or branching asks no model about any line.
+   */
   private presentStoredSystemMessage(message: Extract<Message, { role: 'system' }>): void {
-    const presentation = message.notice ? noticePresentation(message.notice) : declaredNoticePresentation(message.content, message.runtimeEvent);
-    if (presentation) message.presentation = presentation;
-    else { delete message.presentation; void prepareSystemMessagePresentation(message.content, this.presentationLifetime.signal).catch(() => {}); }
+    message.presentation = message.notice ? noticePresentation(message.notice)
+      : declaredNoticePresentation(message.content, message.runtimeEvent) ?? noticePresentation(INFO_NOTICE);
   }
 
   public getCurrentBranch(): string {

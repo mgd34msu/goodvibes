@@ -14,7 +14,6 @@ import ambientDraftGate from '../fixtures/e2e-judgments/ambient-draft-gate.json'
 import tuiCompletionTools from '../fixtures/e2e-judgments/tui-completion-tools.json';
 import { checkAnswers, type Questions } from '@goodvibes-jev/judgment';
 import { redactionCredential, residualCredential } from '@goodvibes-jev/engine/platform/platform/utils';
-import { noticeSeverity } from '@goodvibes-jev/engine/terminal-shell';
 
 /** Keep recorded old envelopes intact; derive this adapter's current subjects. */
 function currentTargets<T extends { questions: Record<string, { instructions: { nativeTargets: object } }> }>(captured: T): T {
@@ -36,7 +35,8 @@ const diagnosticQuestions: Readonly<Record<string, Questions>> = {
     lineHasCredential: redactionCredential.items.lineHasCredential.question,
     spanIsCredential: redactionCredential.items.spanIsCredential.question,
   },
-  'diagnostic-severity': { severity: noticeSeverity.items.severity.question },
+  // The notice-severity reading no longer exists (a notice carries the level its writer gave it); its recorded readings are kept as recorded.
+  'diagnostic-severity': diagnostics.contracts.find(contract => contract.kind === 'diagnostic-severity')?.questions as unknown as Questions,
 };
 
 test('recorded previous-session notice varies only its generated native identity', () => {
@@ -68,7 +68,7 @@ test('standalone previous-session severity retains the exact complete notice and
         expect((await ask({ ...body, state: { text } })).status).toBe(422);
       }
       expect((await ask({ ...body, model: 'another-model' })).status).toBe(422);
-      expect((await ask({ ...body, questions: { severity: { ...noticeSeverity.items.severity.question, instructions: 'Changed question' } } })).status).toBe(422);
+      expect((await ask({ ...body, questions: { severity: { ...diagnosticQuestions['diagnostic-severity']!.severity!, instructions: 'Changed question' } } })).status).toBe(422);
     }
   } finally { await server.stop(); }
 });

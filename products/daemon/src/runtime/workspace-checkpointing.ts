@@ -1,4 +1,4 @@
-import { WorkspaceCheckpointManager, checkpointEligibilityRefusal } from '@goodvibes-jev/engine/platform/platform/workspace';
+import { WorkspaceCheckpointManager } from '@goodvibes-jev/engine/platform/platform/workspace';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { RuntimeEventBus, SessionSurface } from './index.js';
 import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
@@ -53,12 +53,9 @@ export function createWorkspaceCheckpointing(opts: {
   /** Stamps automatic snapshots with the live session id, so a checkpoint made this launch is found by the session-scoped restore lookup. */
   readonly resolveSessionId?: (ctx: { readonly turnId?: string | undefined; readonly agentId?: string | undefined }) => string | undefined;
 }): WorkspaceCheckpointing {
-  const registration = createWorkspaceRegistrationLiveChecker(opts.shellPaths, opts.workspaceRoot);
-  const guarded = (): boolean => readCheckpointRegistrationSetting(opts.configManager) === 'guarded';
-  const currentlyAllowed = (): boolean => {
-    const eligibility = registration();
-    return (eligibility.state === 'readable' && eligibility.resolution.status === 'covered') || guarded();
-  };
+  const registrationStatus = createWorkspaceRegistrationLiveChecker(opts.shellPaths, opts.workspaceRoot);
+  const currentlyAllowed = (): boolean =>
+    registrationStatus() === 'covered' || readCheckpointRegistrationSetting(opts.configManager) === 'guarded';
 
   const manager = new WorkspaceCheckpointManager({
     workspaceRoot: opts.workspaceRoot,
@@ -88,10 +85,12 @@ export function createWorkspaceCheckpointing(opts: {
     restore: manager.restore.bind(manager),
     sessionChanges: manager.sessionChanges.bind(manager),
     create: (createOpts) => {
-      const eligibility = registration();
-      if (!(eligibility.state === 'readable' && eligibility.resolution.status === 'covered') && !guarded()) {
-        // Names the real state: not registered, declined, or a register that cannot be read.
-        throw new Error(checkpointEligibilityRefusal(eligibility, opts.workspaceRoot));
+      if (!currentlyAllowed()) {
+        throw new Error(
+          `Checkpoints are off for this workspace: ${opts.workspaceRoot} is not registered. `
+          + 'Register it first, then retry (or set checkpoints.unregisteredWorkspaces to "guarded" '
+          + 'to opt this workspace out of the registration gate).',
+        );
       }
       // Default the session stamp from the live resolver when the caller omits
       // it, the resolveSessionId hook only auto-stamps automatic snapshots, so

@@ -3,15 +3,10 @@ import type { ShellPathService } from '@/runtime/index.ts';
 import { writeStoreJson } from '@/utils/store-file.ts';
 import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import {
-  openWorkspaceRegistrationStore,
-  normalizeLegacyRegisterRows,
-  type WorkspaceRegistrationStore,
+  WorkspaceRegistrationStore,
   withWorkspaceRegistrationWriteLockSync,
   readWorkspaceRegisterSync,
-  readCheckpointEligibilitySync,
-  createCheckpointEligibilityChecker,
   broadRootReason,
-  type CheckpointEligibility,
   type RegisterWorkspaceResult,
   type WorkspaceRegisterRead,
   resolveWorkspaceRegistration,
@@ -19,6 +14,7 @@ import {
   probeWorktreeLink,
   type RegisteredWorkspaceRecord,
   type DeclinedWorkspaceRecord,
+  type WorkspaceCoverageStatus,
   type WorkspaceGitMetadata,
   type WorkspaceResolution,
 } from '@goodvibes-jev/engine/platform/platform/workspace';
@@ -103,9 +99,9 @@ export function sharedWorkspaceRegistrationStorePath(shellPaths: StoreShellPaths
   return resolveWorkspaceRegisterReadPath(shellPaths, existsSync);
 }
 
-/** This process's store over the shared file, for callers that can go async (CLI commands, interactive prompts). */
+/** Construct a store instance over the shared file, for callers that can go async (CLI commands, interactive prompts). */
 export function createWorkspaceRegistrationStore(shellPaths: StoreShellPaths): WorkspaceRegistrationStore {
-  return openWorkspaceRegistrationStore({
+  return new WorkspaceRegistrationStore({
     // WRITES go to the shared tier, always; reads fall back to the pre-split
     // location until the daemon's boot fold has moved it.
     path: sharedWorkspaceRegisterPath(shellPaths),
@@ -123,19 +119,53 @@ function readString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
-/**
- * Synchronous read of the shared store's coverage rows, through the store's
- * own parser (v1 rows normalized, or native v2). This is not a native authority
- * reader; only WorkspaceRegistrationStore.currentScope can establish that. A
- * missing or unreadable file reads as empty here; the checkpoint gate reads the
- * unreadable case itself (resolveCheckpointEligibility) so it can say so.
- */
-export function readSharedWorkspaceRegistrationSnapshotSync(shellPaths: StoreShellPaths): {
+function parseRegisteredRecord(value: unknown): RegisteredWorkspaceRecord | null {
+  if (!isRecord(value)) return null;
+  const root = readString(value.root);
+  const registeredAt = readString(value.registeredAt);
+  if (!root || !registeredAt || Number.isNaN(Date.parse(registeredAt))) return null;
+  const label = readString(value.label);
+  const origin = readString(value.origin);
+  return {
+    root: normalizeWorkspaceRoot(root),
+    registeredAt,
+    ...(label ? { label } : {}),
+    ...(origin ? { origin } : {}),
+    // Strictly `true` only; any other value (including absent) is not eligible.
+    ...(value.checkpointEligible === true ? { checkpointEligible: true } : {}),
+  };
+}
+
+function parseDeclinedRecord(value: unknown): DeclinedWorkspaceRecord | null {
+  if (!isRecord(value)) return null;
+  const root = readString(value.root);
+  const declinedAt = readString(value.declinedAt);
+  if (!root || !declinedAt || Number.isNaN(Date.parse(declinedAt))) return null;
+  return { root: normalizeWorkspaceRoot(root), declinedAt };
+}
+
+interface SharedRegistrationSnapshot {
   readonly workspaces: readonly RegisteredWorkspaceRecord[];
   readonly declines: readonly DeclinedWorkspaceRecord[];
-} {
+}
+
+/**
+ * Synchronous read of the shared store's coverage rows, through the store's
+ * own parser (v1 or native v2). This is not a native authority reader; only
+ * WorkspaceRegistrationStore.currentScope can establish that. A missing or
+ * unreadable file reads as empty, never throws.
+ */
+export function readSharedWorkspaceRegistrationSnapshotSync(shellPaths: StoreShellPaths): SharedRegistrationSnapshot {
   const read = readWorkspaceRegisterSync(sharedWorkspaceRegistrationStorePath(shellPaths));
-  return read.state === 'ok' ? { workspaces: read.workspaces, declines: read.declines } : { workspaces: [], declines: [] };
+  if (read.state !== 'ok') return { workspaces: [], declines: [] };
+  return {
+    workspaces: read.workspaces
+      .map(parseRegisteredRecord)
+      .filter((entry): entry is RegisteredWorkspaceRecord => entry !== null),
+    declines: read.declines
+      .map(parseDeclinedRecord)
+      .filter((entry): entry is DeclinedWorkspaceRecord => entry !== null),
+  };
 }
 
 /**
@@ -177,16 +207,15 @@ export function resolveCheckpointEligibilitySync(
   path: string,
   git?: WorkspaceGitMetadata,
 ): WorkspaceResolution {
-  const eligibility = resolveCheckpointEligibility(shellPaths, path, git);
-  return eligibility.state === 'readable' ? eligibility.resolution : {
-    path, status: 'unknown', coveredBy: null, declinedRoot: null, viaWorktreeLink: false,
-    reason: `the workspace register cannot be read: ${eligibility.reason}`,
-  };
-}
-
-/** Checkpoint eligibility of `path`, or the reason the register cannot be read (the platform's shared reader). */
-export function resolveCheckpointEligibility(shellPaths: StoreShellPaths, path: string, git?: WorkspaceGitMetadata): CheckpointEligibility {
-  return readCheckpointEligibilitySync(sharedWorkspaceRegistrationStorePath(shellPaths), path, git);
+  const snapshot = readSharedWorkspaceRegistrationSnapshotSync(shellPaths);
+  const eligible = snapshot.workspaces.filter((entry) => entry.checkpointEligible === true);
+  const gitMeta = git ?? probeWorktreeLink(path);
+  return resolveWorkspaceRegistration({
+    path,
+    git: gitMeta,
+    registrations: eligible,
+    declines: snapshot.declines,
+  });
 }
 
 /**
@@ -209,8 +238,9 @@ export function resolveCheckpointEligibility(shellPaths: StoreShellPaths, path: 
 export function createWorkspaceRegistrationLiveChecker(
   shellPaths: StoreShellPaths,
   path: string,
-): () => CheckpointEligibility {
-  return createCheckpointEligibilityChecker(() => sharedWorkspaceRegistrationStorePath(shellPaths), path);
+): () => WorkspaceCoverageStatus {
+  const git = probeWorktreeLink(path);
+  return () => resolveCheckpointEligibilitySync(shellPaths, path, git).status;
 }
 
 // ---------------------------------------------------------------------------
@@ -476,10 +506,12 @@ export function migrateLegacyWorkspaceRegistryIfNeeded(
       return null;
     }
 
-    // Legacy rows pass the store's one definition of a valid row on the way in.
-    const legacyRecords = normalizeLegacyRegisterRows(readLegacyRegistryRows(legacyPath), []).workspaces;
-    const existingRoots = new Set(register.workspaces.map((entry) => entry.root));
-    // Existing rows are carried through as the store read them.
+    const legacyRecords = readLegacyRegistryRows(legacyPath)
+      .map(parseRegisteredRecord)
+      .filter((entry): entry is RegisteredWorkspaceRecord => entry !== null);
+    const existingRoots = new Set(register.workspaces.map((entry) => normalizeWorkspaceRoot(readString(entry.root))));
+    // Existing rows are carried through as read, so fields another product
+    // wrote on its own records survive this rewrite.
     const merged: RegisteredWorkspaceRecord[] = [...register.workspaces];
     let migrated = 0;
     let alreadyPresent = 0;

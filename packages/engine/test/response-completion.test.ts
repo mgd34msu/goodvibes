@@ -23,7 +23,11 @@ import { verificationWriter } from './_helpers/verification.js';
 function fakePort(answer: Parameters<typeof baseFakePort>[0]) {
   return baseFakePort((name, question, state) => {
     if (name === 'completion_required') return noulAnswer(.99);
-    if (question.type === 'choice') return choiceAnswer(question, Object.keys(question.criteria)[0]!, .99);
+    if (question.type === 'choice') {
+      // A test may locate the unsupported passage itself; any other choice takes its first option.
+      const given = name === 'unsupported_passage' ? answer(name, question, state) as { type?: string } : undefined;
+      return given?.type === 'choice' ? given as never : choiceAnswer(question, Object.keys(question.criteria)[0]!, .99);
+    }
     return answer(name, question, state);
   });
 }
@@ -124,25 +128,20 @@ test('historical answer fields cannot replace the exact current candidate and a 
   expect(await guard.check({ ...input, response: 'MISSING-TEST-PROOF: all runtime tests passed.' })).not.toBeNull();
 });
 
-test('compound claim uncertainty is settled against every exact answer passage without another model draft', async () => {
-  const fake = fakePort((name, _question, input) => noulAnswer(name === 'unsupported' && !(input as never as { nativeAnswerRange?: unknown }).nativeAnswerRange ? .4 : .01));
+test('compound claim uncertainty is settled by one request over the numbered answer passages without another model draft', async () => {
+  const fake = fakePort((name, question) => name === 'unsupported_passage' ? choiceAnswer(question, 'none', .99) : noulAnswer(name === 'unsupported' ? .4 : .01));
   installJudgmentPort(fake.port);
   const input = source('Inspected parser.ts.\n\nWrote review.md. Application files were unchanged.');
   const guard = new ResponseCompletionGuard();
   expect(await guard.check(input)).toBeNull();
-  const atomic = fake.requests.filter(request => (request.state as never as { nativeAnswerRange?: unknown }).nativeAnswerRange);
-  expect(atomic.every(request => (request.state as never as { response: string }).response.trim().length > 0)).toBe(true);
-  expect(atomic.map(request => (request.state as never as { response: string }).response).join('').replaceAll(/\s+/g, ' '))
-    .toBe(input.response.replaceAll(/\s+/g, ' '));
-  expect(atomic).toHaveLength(3);
+  const located = fake.requests.filter(request => 'unsupported_passage' in request.questions);
+  expect(located).toHaveLength(1);
+  expect((located[0]!.state as never as { passages: string[] }).passages.join('')).toBe(input.response);
   expect(() => guard.beginFinalization({ content: input.response })).not.toThrow();
 });
 
-test('a false claim in one exact answer passage cannot be hidden by supported neighboring passages', async () => {
-  const fake = fakePort((name, _question, input) => {
-    const state = input as never as { nativeAnswerRange?: unknown; response: string };
-    return noulAnswer(name === 'unsupported' ? state.nativeAnswerRange ? state.response.includes('All tests passed') ? .99 : .01 : .4 : .01);
-  });
+test('a false claim in one answer passage cannot be hidden by supported neighboring passages', async () => {
+  const fake = fakePort((name, question) => name === 'unsupported_passage' ? choiceAnswer(question, 'p2', .99) : noulAnswer(name === 'unsupported' ? .4 : .01));
   installJudgmentPort(fake.port);
   const input = source('Inspected parser.ts. All tests passed. Wrote review.md.');
   const guard = new ResponseCompletionGuard();
@@ -385,7 +384,7 @@ function loop(replies: string[]) {
   const model = { id: 'test-model', provider: 'test', registryKey: 'test:test-model', displayName: 'Test', description: '',
     capabilities: { toolCalling: true, codeEditing: true, reasoning: false, multimodal: false }, contextWindow: 0, selectable: true };
   const provider = { name: 'test', models: ['test-model'], chat: async (request: { systemPrompt?: string | undefined }) => {
-    if (requests.length) expect(request.systemPrompt).toContain('[Response completion check]');
+    if (requests.length) expect(JSON.stringify(request.messages.at(-1))).toContain('[Response completion check]');
     const response = replies.shift(); if (response === undefined) throw new Error('Unexpected extra provider call');
     requests.push(response);
     return { content: response, toolCalls: [], usage: { inputTokens: 1, outputTokens: 1 }, stopReason: 'completed' as const };
@@ -441,10 +440,11 @@ test('one rejected draft gives a concrete repair list, executes the repair and d
     requests.push(request);
     const index = requests.length - 1;
     if (index > 0) {
-      expect(request.systemPrompt).toContain('[Response completion check]');
-      expect(request.systemPrompt).toContain('Unpublished draft to revise');
-      expect(request.systemPrompt).toContain('resolvedWhen');
-      expect(request.systemPrompt).toContain('Fix list');
+      const hostMessage = JSON.stringify(request.messages.at(-1));
+      expect(hostMessage).toContain('[Response completion check]');
+      expect(hostMessage).toContain('Unpublished draft to revise');
+      expect(hostMessage).toContain('resolvedWhen');
+      expect(hostMessage).toContain('Fix list');
     }
     expect(JSON.stringify(conversation.getMessageSnapshot())).not.toContain('DRAFT_');
     expect(JSON.stringify(conversation.toJSON())).not.toContain('[Response completion check]');
@@ -755,7 +755,7 @@ test('a contract handoff stays in the actual main loop, recovers a failed planne
   const provider = { name: 'test', models: ['test'], chat: async (request: ChatRequest) => {
     requests.push(request);
     if (requests.length === 2) expect(JSON.stringify(request.messages)).toContain('planner failed');
-    if (requests.length === 3) expect(request.systemPrompt).toContain('[Response completion check]');
+    if (requests.length === 3) expect(JSON.stringify(request.messages.at(-1))).toContain('[Response completion check]');
     const response = responses.shift(); if (!response) throw new Error('Unexpected provider call'); return response;
   } };
   f.context.toolRegistry.register({ definition: { name: 'agent', description: 'Start contract work', parameters: { type: 'object' } },

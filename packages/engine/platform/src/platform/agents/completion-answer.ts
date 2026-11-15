@@ -14,7 +14,6 @@
 export interface AgentCompletionRecordView {
   readonly status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
   readonly fullOutput?: string | undefined;
-  readonly streamingContent?: string | undefined;
   readonly error?: string | undefined;
   readonly contractId?: string | undefined;
   readonly contractRole?: 'owner' | 'unit' | 'planner' | undefined;
@@ -39,7 +38,7 @@ export const CONTRACT_CHECKS_FOLLOW = "The contract's checks will follow.";
  */
 export function renderAgentCompletionAnswer(record: AgentCompletionRecordView): string {
   if (record.status === 'completed') {
-    const answer = (record.fullOutput ?? record.streamingContent ?? '').trim();
+    const answer = (record.fullOutput ?? '').trim();
     if (answer) return answer;
     // A run that owes a PERSON an answer cannot arrive here empty: the agent
     // runtime regenerates the reply once and then substitutes a plain notice

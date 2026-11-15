@@ -76,7 +76,7 @@ import {
   registerRewindConversationHostGatewayMethods,
 } from './rewind-conversation-hosts.js';
 import { registerWorkspacesGatewayMethods } from './workspaces.js';
-import { openWorkspaceRegistrationStore } from '../../workspace/registration/index.js';
+import { WorkspaceRegistrationStore } from '../../workspace/registration/index.js';
 import { UnifiedRewindService } from '../../rewind/index.js';
 import type { RewindConversationPort } from '../../rewind/index.js';
 import { createEventEnvelope } from '../../runtime/events/index.js';
@@ -441,9 +441,7 @@ export function registerGatewayVerbGroups(catalog: GatewayMethodCatalog, deps: G
   // itself (~/.goodvibes); its parent (the home directory) is refused as an
   // absurdly broad root by the same guard checkpointing uses.
   const daemonStateDir = deps.shellPaths.resolveUserPath();
-  // The process's one store for this file, shared with native work and the
-  // registration prompt, so its queue orders every reader and writer here.
-  const workspaceRegistrationStore = openWorkspaceRegistrationStore({
+  const workspaceRegistrationStore = new WorkspaceRegistrationStore({
     // SHARED TIER, not surface-scoped, three products read this register. See workspace/registration/shared-register-path.ts.
     path: sharedWorkspaceRegisterPath(deps.shellPaths),
     fallbackReadPath: legacyWorkspaceRegisterPath(deps.shellPaths),
@@ -500,9 +498,11 @@ export function registerGatewayVerbGroups(catalog: GatewayMethodCatalog, deps: G
 
   // `channels.routing.*` and `channels.drafts.*` are NOT served from here. The
   // daemon host attaches them (channels/host-routing, channels/host-drafts) over
-  // its own stores with the confirmation gate and encrypted draft bodies. In a
-  // process that composes these groups but not the host, those verbs answer
-  // 501 NOT_INVOKABLE.
+  // its own stores with the confirmation gate and encrypted draft bodies; a
+  // second implementation here (routes/channel-sync.ts over channel-sync.json)
+  // would answer, without that gate, in any process that composes these groups
+  // but not the host, and its data would be invisible to the host. Those verbs
+  // answer 501 NOT_INVOKABLE until a host registers them.
 
   // Wire the inbound-intake enrichment onto the transport intake chokepoint: from
   // here on, every channel-originated session is attributed to its sending
@@ -722,9 +722,9 @@ export function registerGatewayVerbGroups(catalog: GatewayMethodCatalog, deps: G
 
   // Feature-flag graduation report: a read-only view over the static flag
   // registry + owner graduation annotations. Needs no runtime dependency (the
-  // registry is static module data), so it is always registered. The daemon
-  // holds no divergence readings (`/policy simulate` runs in the terminal app),
-  // so instrumented flags report that no evidence was collected.
+  // registry is static module data), so it is always registered. No live
+  // evidence provider is threaded here yet, flags with instrumentation report
+  // "no evidence collected this run" rather than a fabricated readiness.
   registerFlagsGraduationGatewayMethods(catalog);
 
   // runtime.metrics.get, the process-wide RuntimeMeter snapshot plus per-model

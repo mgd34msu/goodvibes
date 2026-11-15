@@ -384,7 +384,7 @@ export class Orchestrator {
       getQueuedUserMessageCount: () => this.messageQueue.length,
       routeLowPriorityMessage: (message) => {
         if (this.systemMessageRouter) this.systemMessageRouter.low(message);
-        else this.conversation.addSystemMessage(message);
+        else this.conversation.addNotice(message, { level: 'info', priority: 'low' });
       },
       resumeWork: (items, signal) => this.resumeBackgroundWork(items, signal),
     });
@@ -549,7 +549,8 @@ export class Orchestrator {
       : lastUser.content.filter(part => part.type === 'text').map(part => part.text).join('\n');
     const evidence = '[Background work evidence] ' + JSON.stringify(items)
       + '\nReconcile these outcomes with the original request. Recover unfinished authorized work using tools and deliver all requested output. An internal failure does not cancel the request.';
-    this.conversation.addSystemMessage(evidence);
+    // Shown here; the recovery turn below carries the same evidence to the model.
+    this.conversation.addNotice(evidence, { level: 'info', kind: 'operational' });
     // Native execution still requires its owning host's live permit; a background
     // notice can never manufacture a fresh native grant.
     if (this.nativeConversationProjectId) { this.requestRender(); return; }
@@ -884,9 +885,10 @@ export class Orchestrator {
       if (nativeTurn) await withNativeConversationTurn(nativeTurn.permit, execute);
       else await withoutNativeConversationTurn(execute);
     }, state => {
-      this.conversation.addSystemMessage(`[Decision policy] ${state.reason === 'unavailable'
+      this.conversation.addNotice(`[Decision policy] ${state.reason === 'unavailable'
         ? 'Preferred: decision models are unavailable; continuing this operation in Classic.'
-        : 'Classic - Off: decision models are disabled.'} Tools use the selected permission policy. Responses have no independent semantic verification.`);
+        : 'Classic - Off: decision models are disabled.'} Tools use the selected permission policy. Responses have no independent semantic verification.`,
+      { level: 'warning', kind: 'operational' });
       this.requestRender();
     });
   }
@@ -1196,6 +1198,11 @@ export class Orchestrator {
       getSystemPrompt: this.getSystemPrompt,
       signal: this.abortController?.signal,
       compactionManager: this.getCompactionManager(),
+      // Both compaction entry points (the pre-request check and the post-turn one) honour the strategy setting.
+      getCompactionStrategy: () => resolveCompactionStrategy(
+        configManager.get('behavior.compactionStrategy'),
+        this.flagManager?.isEnabled('compaction-distiller-strategy') ?? false,
+      ),
     };
   }
 
@@ -1242,7 +1249,7 @@ export class Orchestrator {
         ? { provider: providerRegistry.getCurrentModel().provider, source: 'provider' as const }
         : {}),
     });
-    this.conversation.addSystemMessage(msg);
+    this.conversation.addNotice(msg, { level: 'error' });
     this.requestRender();
     // Graceful degradation, suggest alternative when provider fails non-transiently
     const autoSwitch = configManager.get('behavior.suggestAlternativeOnProviderFail') as boolean;
@@ -1250,7 +1257,7 @@ export class Orchestrator {
       const currentModel = providerRegistry.getCurrentModel();
       const alt = currentModel ? providerRegistry.findAlternativeModel(currentModel.registryKey) : null;
       if (alt) {
-        this.conversation.addSystemMessage(`[Provider] ${currentModel?.provider ?? 'Unknown'} failed. Alternative available: ${alt.displayName} (${alt.provider}). Use /model to switch.`);
+        this.conversation.addNotice(`[Provider] ${currentModel?.provider ?? 'Unknown'} failed. Alternative available: ${alt.displayName} (${alt.provider}). Use /model to switch.`, { level: 'info' });
       }
     }
     this._turnFailed = true;
@@ -1324,10 +1331,12 @@ export class Orchestrator {
     if (eventsToReplay.length > 0) {
       const messages = this.replayQueue.formatReplays(eventsToReplay);
       for (const msg of messages) {
+        // The model hears each replayed event on its next request; the person sees it in the feed.
+        this.conversation.hostInstructions.set('replay', msg, { once: true, append: true });
         if (this.systemMessageRouter) {
           this.systemMessageRouter.low(msg);
         } else {
-          this.conversation.addSystemMessage(msg);
+          this.conversation.addNotice(msg, { level: 'info', priority: 'low' });
         }
       }
       for (const event of eventsToReplay) {
@@ -1351,10 +1360,6 @@ export class Orchestrator {
     try {
       result = await checkContextWindowPreflight({
         ...this.contextMaintenanceDeps(requireConfigManager(this.coreServices), requireProviderRegistry(this.coreServices)),
-        getCompactionStrategy: () => resolveCompactionStrategy(
-          requireConfigManager(this.coreServices).get('behavior.compactionStrategy'),
-          this.flagManager?.isEnabled('compaction-distiller-strategy') ?? false,
-        ),
       }, turnId, model);
     } finally { this.settleCompacting(); }
     // Compaction replaced the transcript, so the old turn-start position no

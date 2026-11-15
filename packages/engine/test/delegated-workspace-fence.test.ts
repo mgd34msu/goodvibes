@@ -14,12 +14,12 @@ import type { DelegatedTelegramIntake } from '../platform/src/platform/daemon/de
 import { composeDelegatedTelegramIntake } from '../platform/src/platform/daemon/facade-delegated-telegram.js';
 import type { ResolvedDaemonFacadeRuntime } from '../platform/src/platform/daemon/facade-types.js';
 import type { WorkspaceSwapManagerLike } from '../daemon-api/src/system-route-types.js';
-import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.js';
+import { RuntimeEventBus, createEventEnvelope } from '../platform/src/platform/runtime/events/index.js';
 import { createShellPathService } from '../platform/src/platform/runtime/shell-paths.js';
 import type { NativeExecutionAuthority, NativePairedSnapshot } from '../platform/src/platform/security/http-auth.js';
 import { createNativeDataWriteOwner, assertNativeReaderCompatible, NativeDataCompatibilityError, NATIVE_READER_REQUIREMENT_FILE } from '../platform/src/platform/runtime/native-reader-compatibility.js';
 import { realUpdateFileIo } from '../platform/src/platform/runtime/self-update.js';
-import { WorkspaceSwapManager } from '../platform/src/platform/workspace/workspace-swap-manager.js';
+import { WorkspaceSwapManager, type WorkspaceSwapResult } from '../platform/src/platform/workspace/workspace-swap-manager.js';
 
 const cleanups: Array<() => void | Promise<void>> = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
@@ -56,7 +56,11 @@ async function fixture(beforeWrite?: () => void) {
     authorityRevision: 'synthetic-workspace-owner', scopes: ['read:work-ledger', 'write:work-ledger'] };
   const authority: NativeExecutionAuthority = { current: () => owner,
     withCurrent: async (_expected, use) => use(() => owner) };
-  const manager = new WorkspaceSwapManager(initialRoot, { runtimeBus, daemonHomeDir: join(directory, 'daemon') });
+  let reroot: (path: string) => void | Promise<void> = () => {};
+  const rerootCalls: string[] = [];
+  const manager = new WorkspaceSwapManager(initialRoot, { runtimeBus, daemonHomeDir: join(directory, 'daemon'),
+    getBusySessionCount: () => broker.countBusySessions(),
+    rerootStores: async path => { rerootCalls.push(path); await reroot(path); } });
   const execPath = join(directory, 'goodvibes-daemon');
   const nativeDataWriter = createNativeDataWriteOwner({ execPath, version: '3.1.2', assertCurrent: () => { beforeWrite?.(); } });
   const construct = (workspaceRoot = manager.getCurrentWorkingDir(), swapManager: WorkspaceSwapManagerLike | null = manager) => {
@@ -82,18 +86,169 @@ async function fixture(beforeWrite?: () => void) {
     expect(await host.status(pending.ref, authority, true)).toMatchObject({ source: 'available-in-memory', original: { text: original } });
     return pending;
   };
-  return { directory, execPath, initialRoot, replacementRoot, authority, broker, construct, accept, approve, runtimeBus, manager };
+  const emitStarted = async (to = replacementRoot) => {
+    runtimeBus.emit('workspace', createEventEnvelope('WORKSPACE_SWAP_STARTED', {
+      type: 'WORKSPACE_SWAP_STARTED' as const, from: manager.getCurrentWorkingDir(), to,
+    }, { sessionId: '', source: 'synthetic-workspace-transition' }));
+    // RuntimeEventBus deliberately delivers subscribers in microtasks.
+    await Promise.resolve();
+  };
+  return { directory, execPath, initialRoot, replacementRoot, authority, broker, construct, accept, approve, emitStarted, runtimeBus, manager, rerootCalls,
+    onReroot: (callback: typeof reroot) => { reroot = callback; } };
 }
 
-test('a working-directory change, saved or refused, leaves delegated intake open in this process', async () => {
+test('real workspace swap retires approved originals synchronously before reroot starts or bus listeners run', async () => {
+  const f = await fixture(); const host = f.construct();
+  const configured = await host.configure(configuration, f.authority); const pending = await f.approve(host);
+  const before = await host.status(pending.ref, f.authority, true) as { record: { workspaceRevision: string } };
+  expect(f.broker.countBusySessions()).toBe(0);
+  let noticeDelivered = false;
+  const unsubscribe = f.runtimeBus.on('WORKSPACE_SWAP_STARTED', () => { noticeDelivered = true; });
+  cleanups.push(unsubscribe);
+  f.onReroot(path => {
+    expect(path).toBe(f.replacementRoot);
+    expect(f.manager.getCurrentWorkingDir()).toBe(f.initialRoot);
+    expect(noticeDelivered).toBe(false);
+    // revoke is synchronous: this cannot pass by yielding to the bus callback.
+    expect(() => host.revoke((configured as { configurationId: string }).configurationId, f.authority)).toThrow('fresh workspace construction');
+  });
+  expect(await f.manager.requestSwap(f.replacementRoot)).toMatchObject({ ok: true, previous: f.initialRoot, current: f.replacementRoot });
+  expect(noticeDelivered).toBe(true);
+  await expect(host.status(pending.ref, f.authority, true)).rejects.toThrow('fresh workspace construction');
+  await expect(host.list(f.authority)).rejects.toThrow('fresh workspace construction');
+  let reads = 0;
+  expect(await f.accept(host, () => { reads++; return original; })).toMatchObject({ outcome: 'held' });
+  expect(reads).toBe(0);
+  expect(await host.selects('42')).toBe(true);
+
+  host.startLifecycle();
+  await expect(host.configure(configuration, f.authority)).rejects.toThrow('fresh workspace construction');
+  await expect(host.status(pending.ref, f.authority, true)).rejects.toThrow('fresh workspace construction');
+
+  const fresh = f.construct();
+  expect(await fresh.list(f.authority)).toMatchObject({ records: [], pending: [] });
+  expect(await fresh.selects('42')).toBe(false);
+  await fresh.configure(configuration, f.authority); const next = await f.approve(fresh);
+  const after = await fresh.status(next.ref, f.authority, true) as { record: { workspaceRevision: string } };
+  expect(after.record.workspaceRevision).not.toBe(before.record.workspaceRevision);
+});
+
+test('current-root mismatch fences the host even when no workspace event was observed', async () => {
+  const f = await fixture(); let currentRoot = f.initialRoot;
+  const host = f.construct(f.initialRoot, { getCurrentWorkingDir: () => currentRoot,
+    getWorkspaceRevision: () => f.manager.getWorkspaceRevision(),
+    subscribeBeforeSwap: listener => f.manager.subscribeBeforeSwap(listener), requestSwap: path => f.manager.requestSwap(path) });
+  await host.configure(configuration, f.authority); const pending = await f.approve(host);
+  currentRoot = f.replacementRoot;
+  await expect(host.status(pending.ref, f.authority, true)).rejects.toThrow('fresh workspace construction');
+  currentRoot = f.initialRoot; host.startLifecycle();
+  await expect(host.configure(configuration, f.authority)).rejects.toThrow('fresh workspace construction');
+  await expect(host.list(f.authority)).rejects.toThrow('fresh workspace construction');
+});
+
+test('same-root stop/start supports fresh approval and reinstalls workspace invalidation', async () => {
+  const f = await fixture(); const host = f.construct();
+  await host.configure(configuration, f.authority); const first = await f.approve(host);
+  host.close(); host.startLifecycle();
+  expect(await host.status(first.ref, f.authority, true)).toMatchObject({ source: 'expired-or-lost', recovery: 'new-original-required' });
+  let reads = 0;
+  expect(await f.accept(host, () => { reads++; return original; })).toMatchObject({ outcome: 'held' });
+  expect(reads).toBe(0);
+  const configured = await host.configure(configuration, f.authority); const next = await f.approve(host);
+  f.onReroot(() => {
+    expect(() => host.revoke((configured as { configurationId: string }).configurationId, f.authority)).toThrow('fresh workspace construction');
+  });
+  // A real reroot is a transition even if its pathname is unchanged.
+  expect(await f.manager.requestSwap(f.initialRoot)).toMatchObject({ ok: true, current: f.initialRoot });
+  await expect(host.status(next.ref, f.authority, true)).rejects.toThrow('fresh workspace construction');
+  host.startLifecycle();
+  await expect(host.configure(configuration, f.authority)).rejects.toThrow('fresh workspace construction');
+});
+
+test('failed reroot cannot revive a host even though the manager retains its original root', async () => {
+  const f = await fixture(); const host = f.construct();
+  const configured = await host.configure(configuration, f.authority); const pending = await f.approve(host);
+  // Recorded inside the reroot and asserted after it: the reroot is expected to
+  // fail, so an assertion thrown inside it would be swallowed as that failure.
+  let revokeDuringReroot: unknown = null;
+  f.onReroot(() => {
+    try { host.revoke((configured as { configurationId: string }).configurationId, f.authority); } catch (error) { revokeDuringReroot = error; }
+    throw new Error('Synthetic reroot failure');
+  });
+  expect(await f.manager.requestSwap(f.replacementRoot)).toMatchObject({ ok: false, code: 'REROOT_FAILED' });
+  expect(revokeDuringReroot).toBeInstanceOf(Error);
+  expect((revokeDuringReroot as Error).message).toContain('fresh workspace construction');
+  expect(f.manager.getCurrentWorkingDir()).toBe(f.initialRoot);
+  host.startLifecycle();
+  await expect(host.status(pending.ref, f.authority, true)).rejects.toThrow('fresh workspace construction');
+  await expect(host.configure(configuration, f.authority)).rejects.toThrow('fresh workspace construction');
+  const fresh = f.construct();
+  expect(await fresh.status(pending.ref, f.authority, true)).toMatchObject({ source: 'expired-or-lost' });
+  await fresh.configure(configuration, f.authority); await f.approve(fresh);
+});
+
+test('a throwing synchronous fence prevents workspace mutation and reports failure', async () => {
+  const f = await fixture(); const notices: string[] = [];
+  const unsubscribe = f.runtimeBus.onDomain('workspace', envelope => { notices.push(envelope.type); });
+  cleanups.push(unsubscribe);
+  const detach = f.manager.subscribeBeforeSwap(() => { throw new Error('Synthetic fence failure'); });
+  expect(await f.manager.requestSwap(f.replacementRoot)).toMatchObject({ ok: false,
+    reason: 'Workspace transition fence failed; no workspace stores were re-rooted.' });
+  expect(f.manager.getWorkspaceRevision()).toBe(1);
+  expect(f.rerootCalls).toEqual([]);
+  expect(existsSync(f.replacementRoot)).toBe(false);
+  expect(f.manager.getCurrentWorkingDir()).toBe(f.initialRoot);
+  expect(notices).toEqual(['WORKSPACE_SWAP_FAILED']);
+  detach();
+  let nested: Promise<WorkspaceSwapResult> | undefined;
+  f.manager.subscribeBeforeSwap(() => { nested = f.manager.requestSwap(f.initialRoot); });
+  expect(await f.manager.requestSwap(f.replacementRoot)).toMatchObject({ ok: true });
+  expect(f.manager.getWorkspaceRevision()).toBe(2);
+  expect(await nested).toMatchObject({ ok: false, code: 'WORKSPACE_BUSY' });
+  expect(f.rerootCalls).toEqual([f.replacementRoot]);
+});
+
+test('a busy refusal preserves intake because no workspace transition was admitted', async () => {
+  const f = await fixture(); const host = f.construct();
+  await host.configure(configuration, f.authority); const pending = await f.accept(host) as PendingSource;
+  expect(await f.manager.requestSwap(f.replacementRoot)).toMatchObject({ ok: false, code: 'WORKSPACE_BUSY' });
+  expect(f.manager.getWorkspaceRevision()).toBe(0);
+  expect(f.rerootCalls).toEqual([]);
+  expect(await host.decide({ ref: pending.ref, approvalId: pending.approvalId, approved: true, choices }, f.authority)).toMatchObject({ outcome: 'transferred' });
+  expect(await host.status(pending.ref, f.authority, true)).toMatchObject({ source: 'available-in-memory' });
+});
+
+test('mutable managers without a synchronous hook cannot create a delegated grant', async () => {
+  const f = await fixture();
+  const host = f.construct(f.initialRoot, { getCurrentWorkingDir: () => f.initialRoot,
+    getWorkspaceRevision: () => f.manager.getWorkspaceRevision(), requestSwap: path => f.manager.requestSwap(path) });
+  await expect(host.configure(configuration, f.authority)).rejects.toThrow('fresh workspace construction');
+  let reads = 0;
+  expect(await f.accept(host, () => { reads++; return original; })).toMatchObject({ outcome: 'held' });
+  expect(reads).toBe(0);
+});
+
+test('mutable managers without a revision fence cannot create a delegated grant', async () => {
+  const f = await fixture();
+  const host = f.construct(f.initialRoot, { getCurrentWorkingDir: () => f.initialRoot,
+    subscribeBeforeSwap: listener => f.manager.subscribeBeforeSwap(listener), requestSwap: path => f.manager.requestSwap(path) });
+  await expect(host.configure(configuration, f.authority)).rejects.toThrow('fresh workspace construction');
+});
+
+test.each(['same-root', 'round-trip'] as const)('a stopped host cannot revive after an unobserved %s workspace transition', async kind => {
   const f = await fixture(); const host = f.construct();
   await host.configure(configuration, f.authority); const pending = await f.approve(host);
-  const saved = await f.manager.requestSwap(f.replacementRoot);
-  expect(saved.ok && saved.restartRequired).toBe(true);
-  expect((await f.manager.requestSwap('')).ok).toBe(false);
-  expect(await f.manager.requestSwap(f.initialRoot)).toMatchObject({ ok: true, restartRequired: false });
-  expect(await host.status(pending.ref, f.authority, true)).toMatchObject({ source: 'available-in-memory', original: { text: original } });
-  await f.approve(host);
+  expect(f.manager.getWorkspaceRevision()).toBe(0);
+  host.close();
+  if (kind === 'round-trip') expect(await f.manager.requestSwap(f.replacementRoot)).toMatchObject({ ok: true });
+  expect(await f.manager.requestSwap(f.initialRoot)).toMatchObject({ ok: true });
+  expect(f.manager.getCurrentWorkingDir()).toBe(f.initialRoot);
+  expect(f.manager.getWorkspaceRevision()).toBe(kind === 'same-root' ? 1 : 2);
+  host.startLifecycle();
+  await expect(host.configure(configuration, f.authority)).rejects.toThrow('fresh workspace construction');
+  await expect(host.status(pending.ref, f.authority, true)).rejects.toThrow('fresh workspace construction');
+  const fresh = f.construct();
+  await fresh.configure(configuration, f.authority); await f.approve(fresh);
 });
 
 test('a fixed-root host without a swap manager can still explicitly configure and approve', async () => {
@@ -101,6 +256,14 @@ test('a fixed-root host without a swap manager can still explicitly configure an
   expect(await host.configure(configuration, f.authority)).toHaveProperty('configurationId');
   await f.approve(host);
 });
+
+test('the async workspace notice remains a defensive fence for transitions outside the manager', async () => {
+  const f = await fixture(); const host = f.construct();
+  await host.configure(configuration, f.authority); const pending = await f.approve(host);
+  await f.emitStarted();
+  await expect(host.status(pending.ref, f.authority, true)).rejects.toThrow('fresh workspace construction');
+});
+
 
 test('real delegated composition publishes a reader requirement before its first explicit-owner receipt', async () => {
   const f = await fixture(); const host = f.construct();

@@ -270,13 +270,14 @@ export async function runTestCommand(
     // it does not survive the next full rebuildHistory() (which rebuilds
     // strictly from conversationManager.getMessageSnapshot()), the very next
     // dirty render silently wipes it back to how the transcript looked before
-    // /test ran. addSystemMessage persists the same content as a real message
+    // /test ran. addNotice persists the same content as a real message
     // (same durable pattern as /rewind's confirm notice in
     // checkpoint-runtime.ts) so the timeout outcome survives like any other
     // command's output. The streamed output during the run is allowed to stay
     // transient, only this final state needs to persist.
-    ctx.session.conversationManager.addSystemMessage(
+    ctx.session.conversationManager.addNotice(
       `[Test] Timed out after ${timeoutSeconds}s and was killed.`,
+      { level: 'error' }
     );
     ctx.renderRequest();
     return;
@@ -306,11 +307,11 @@ export async function runTestCommand(
     }
     // See the timeout branch's comment above: logToolResultBlock's tool-styled
     // render is display-only and does not survive the next full history
-    // rebuild. addSystemMessage persists the pass/fail summary AND the
+    // rebuild. addNotice persists the pass/fail summary AND the
     // failing-file detail as a real message so both remain in the transcript
     // after the command completes, not just during the ~1s before the next
     // render wipes the display-only copy.
-    ctx.session.conversationManager.addSystemMessage(durableLines.join('\n'));
+    ctx.session.conversationManager.addNotice(durableLines.join('\n'), { level: ok ? 'success' : 'error' });
   } else {
     ctx.session.conversationManager.logToolResultBlock(
       toolCall,
@@ -321,8 +322,9 @@ export async function runTestCommand(
     );
     const tail = combinedOutput.split('\n').slice(-RAW_TAIL_LINES).join('\n');
     ctx.print(`(could not parse structured test results; showing raw tail)\n${tail}`);
-    ctx.session.conversationManager.addSystemMessage(
+    ctx.session.conversationManager.addNotice(
       `[Test] exit code ${exitCode} (could not parse structured test results)`,
+      { level: ok ? 'info' : 'error' }
     );
   }
 

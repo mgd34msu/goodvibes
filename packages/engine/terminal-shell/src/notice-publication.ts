@@ -1,13 +1,10 @@
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 /** System notices retain their full text in saved conversation history.
  * Declared runtime occurrences publish immediately and deduplicate with the bus.
- * Unstructured notices appear neutrally while their semantic severity is read.
+ * Every other notice publishes at the level its writer stored on it (information
+ * when it stored none); no model reads a notice.
  * Restored notices enter history without another toast.
  */
-import { readNoticeSeverity, type NoticeSeverityReading } from './notice-severity.js';
-import { prepareSystemMessagePresentation } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
-import { captureJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { decisionOrClassic } from '@goodvibes-jev/engine/platform/platform/runtime';
 import { snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
 import { JudgmentAuthorityRetiredError, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
 import { runtimeEventOfNotice, type RuntimeEventProvenance } from '@goodvibes-jev/engine/platform/platform/runtime/bootstrap';
@@ -64,27 +61,7 @@ export interface NoticePublicationPolicy {
           }
         | undefined)
     | undefined;
-  readonly severity: 'notice' | 'presentation';
   readonly screenBeforeLocalPublication: boolean;
-  readonly retainOnDecorationError: boolean;
-}
-async function presentationSeverity(text: string, options: NoticeOptions): Promise<NoticeSeverityReading> {
-  return decisionOrClassic(() => decisionPresentationSeverity(text, options), () => {
-    const current = () => { options.signal?.throwIfAborted(); options.assertCurrent?.(); };
-    current();
-    return { provenance: 'classic', severity: 'info', assertCurrent: current, recordPublication: current };
-  });
-}
-
-async function decisionPresentationSeverity(text: string, options: NoticeOptions): Promise<NoticeSeverityReading> {
-  const owner = captureJudgmentPort('terminal-shell.notice-presentation', options);
-  const presentation = await prepareSystemMessagePresentation(text, owner.signal);
-  owner.assertCurrent();
-  return {
-    severity: presentation.severity === 'error' ? 'critical' : presentation.severity,
-    assertCurrent: owner.assertCurrent,
-    recordPublication: owner.assertCurrent,
-  };
 }
 export function createNoticePublisher(policy: NoticePublicationPolicy) {
   return function publishNotice(feed: NotificationFeed, text: string, options: NoticeOptions = {}): void | Promise<void> {
@@ -136,34 +113,6 @@ export function createNoticePublisher(policy: NoticePublicationPolicy) {
       });
       return;
     }
-    if (options.notice) {
-      feed.recordNotice({ ...parts, level: FEED_LEVEL[options.notice.level], timestamp, restored });
-      return;
-    }
-    const pending = feed.recordNotice({ ...parts, timestamp, restored, severityPending: true });
-    const revokePending = () => {
-      if (feed.list().includes(pending)) feed.dismiss(pending.key);
-    };
-    signal.addEventListener('abort', revokePending, { once: true });
-    if (signal.aborted) revokePending();
-    return (async () => {
-      try {
-        current();
-        const reading = await (policy.severity === 'presentation' ? presentationSeverity : readNoticeSeverity)(text, {
-          signal,
-          assertCurrent: current,
-        });
-        reading.assertCurrent();
-        if (reading.severity === undefined) return;
-        reading.recordPublication();
-        current();
-        reading.assertCurrent();
-        feed.settleNoticeSeverity(pending, reading.severity);
-      } catch (error) {
-        if (!policy.retainOnDecorationError) throw error;
-      } finally {
-        signal.removeEventListener('abort', revokePending);
-      }
-    })();
+    feed.recordNotice({ ...parts, level: FEED_LEVEL[options.notice?.level ?? 'info'], timestamp, restored });
   };
 }

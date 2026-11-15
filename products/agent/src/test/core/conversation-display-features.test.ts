@@ -233,15 +233,11 @@ describe('ConversationManager.getErrorLines: notices leave the transcript', () =
     expect(cm.getErrorLines()).toHaveLength(0);
   });
 
-  test('settled error presentation is navigable; benign reports are not', () => {
-    expect(isNavigableSystemContent('Error: command not found')).toBe(true);
-    expect(isNavigableSystemContent('error: lowercase error')).toBe(true);
-    expect(isNavigableSystemContent('ERROR! uppercase variant')).toBe(true);
-    expect(isNavigableSystemContent('[Error] Connection refused')).toBe(true);
-    // [Critical] is emitted by the cascading-unhandled-rejection handler in main.ts.
-    expect(isNavigableSystemContent('[Critical] Multiple errors detected (4 in 10s) ...')).toBe(true);
-    expect(isNavigableSystemContent('No errors found in codebase')).toBe(false);
-    expect(isNavigableSystemContent('Scanning... recovered from terror')).toBe(false);
+  test('a notice its writer stored as an error is navigable; other levels are not', () => {
+    expect(isNavigableSystemContent('error')).toBe(true);
+    expect(isNavigableSystemContent('warning')).toBe(false);
+    expect(isNavigableSystemContent('info')).toBe(false);
+    expect(isNavigableSystemContent(undefined)).toBe(false);
   });
 
   test('where notices are drawn (a context without systemNotices, as an agent view), error notices register error lines', () => {
@@ -257,10 +253,10 @@ describe('ConversationManager.getErrorLines: notices leave the transcript', () =
     };
     appendConversationMessages(context, [
       { role: 'user', content: 'start' },
-      { role: 'system', content: 'Error: first failure' },
+      { role: 'system', content: 'Error: first failure', presentation: { severity: 'error' } },
       { role: 'user', content: 'retry' },
-      { role: 'system', content: 'No errors found in codebase' },
-      { role: 'system', content: '[Critical] second failure' },
+      { role: 'system', content: 'No errors found in codebase', presentation: { severity: 'info' } },
+      { role: 'system', content: '[Critical] second failure', presentation: { severity: 'error' } },
     ], 80, []);
     expect(errorLineRegistry).toHaveLength(2);
   });

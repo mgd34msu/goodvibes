@@ -60,7 +60,8 @@ export interface HostedFrameConversation {
     },
   ): void;
   addToolResults(results: ToolResult[]): void;
-  addSystemMessage(content: string): void;
+  /** A line for the person at the level this mapping knows; no model reads it. */
+  addNotice(content: string, meta: { readonly level: 'info' | 'success' | 'warning' | 'error' }): void;
   startStreamingBlock(): void;
   updateStreamingBlock(content: string): void;
   finalizeStreamingBlock(): void;
@@ -317,7 +318,7 @@ export function createHostedFrameRenderer(
         flush(accumulated, { final: true });
         closeStream();
         const reason = readString(payload, 'error') ?? readString(payload, 'reason') ?? 'no reason was given';
-        conversation.addSystemMessage(`The hosting daemon reported this turn failed: ${reason}`);
+        conversation.addNotice(`The hosting daemon reported this turn failed: ${reason}`, { level: 'error' });
         requestRender();
         finish({
           status: 'error',
@@ -330,7 +331,7 @@ export function createHostedFrameRenderer(
       case 'TURN_CANCEL': {
         flush(accumulated, { final: true });
         closeStream();
-        conversation.addSystemMessage('This turn was cancelled on the hosting daemon.');
+        conversation.addNotice('This turn was cancelled on the hosting daemon.', { level: 'info' });
         requestRender();
         finish({
           status: 'cancelled',
@@ -357,7 +358,7 @@ export function createHostedFrameRenderer(
       // because the connection died would lose work the daemon actually did.
       flush(accumulated, { final: true });
       closeStream();
-      conversation.addSystemMessage(reason);
+      conversation.addNotice(reason, { level: 'warning' });
       requestRender();
       finish({ status: 'abandoned', response: turnText, error: reason, stopReason: 'stream_ended' });
     },

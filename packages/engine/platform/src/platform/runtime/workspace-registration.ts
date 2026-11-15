@@ -7,11 +7,13 @@
  * registry, owned by the platform.
  *
  * SINGLE SOURCE OF TRUTH. Resolution and mutation both go through the platform's
- * shared WorkspaceRegistrationStore, the store the daemon composes its
- * `workspaces.*` gateway verbs over (openWorkspaceRegistrationStore, one per
- * register file per process, over the shared-tier path with the same roots), so
- * whether the daemon's `workspaces.resolve` verb reads it over the wire or we
- * read it in-process, both operate on ONE persisted document. This is
+ * shared WorkspaceRegistrationStore, the exact class the daemon composes its
+ * `workspaces.*` gateway verbs over (control-plane/routes/register-gateway-verb-
+ * groups.ts constructs `new WorkspaceRegistrationStore({ path: resolveUserPath(
+ * 'control-plane', 'workspace-registrations.json'), homeDir: dirname(daemonState
+ * Dir), daemonStateDir })`). We point an in-process store at that identical path
+ * and roots, so whether the daemon's `workspaces.resolve` verb reads it over the
+ * wire or we read it in-process, both operate on ONE persisted document. This is
  * not a divergent reimplementation: same platform store class, same file, same
  * root-guard. In-process (rather than an RPC to a composed daemon) because the
  * first-open prompt renders synchronously at startup and must not depend on a
@@ -27,8 +29,7 @@ import { dirname } from 'node:path';
 import { legacyWorkspaceRegisterPath, sharedWorkspaceRegisterPath } from '../workspace/registration/shared-register-path.js';
 import { broadRootReason } from '../workspace/checkpoint/root-guard.js';
 import {
-  openWorkspaceRegistrationStore,
-  type WorkspaceRegistrationStore,
+  WorkspaceRegistrationStore,
   WorkspaceRegistrationError,
   normalizeWorkspaceRoot,
   type WorkspaceCoverageStatus,
@@ -90,7 +91,7 @@ export class WorkspaceRegistrationManager {
     this.homeDir = dirname(this.daemonStateDir);
     this.store =
       options.store ??
-      openWorkspaceRegistrationStore({
+      new WorkspaceRegistrationStore({
         // Shared tier, see registration/shared-register-path.ts. Writes go
         // there; reads fall back to the pre-split path until the daemon's boot
         // fold has run, so an updated product never reports an empty register.

@@ -1,4 +1,5 @@
 import { withExternalOperationSource } from '../permissions/external-operation-scope.js';
+import type { ConversationManager } from './conversation.js';
 import { assertDecisionAvailable } from '../routing/decision-availability.js';
 import { isClassicOperation } from '../runtime/decision-policy.js';
 import { decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
@@ -764,7 +765,7 @@ async function executeToolCallsInMode(
 }
 
 export type ReconciliationDeps = {
-  conversation: { addToolResults: (results: ToolResult[]) => void; addSystemMessage: (message: string) => void };
+  conversation: Pick<ConversationManager, 'addToolResults' | 'addNotice' | 'hostInstructions'>;
   runtimeBus: RuntimeEventBus | null;
   emitterContext: EmitterContextFactory;
   isReconciliationEnabled: () => boolean;
@@ -815,11 +816,12 @@ export function reconcileUnresolvedToolCalls(
     }
   }
 
-  deps.conversation.addSystemMessage(
-    `[Tool Reconciliation] ${unresolved.length} tool call(s) (${unresolved.map((c) => `'${c.name}'`).join(', ')}) were not executed before ` +
+  const reconciliation = `[Tool Reconciliation] ${unresolved.length} tool call(s) (${unresolved.map((c) => `'${c.name}'`).join(', ')}) were not executed before ` +
     `the turn ended. Synthetic error results have been injected. ` +
-    `Review the situation and avoid repeating the same tool calls if the root cause has not changed.`,
-  );
+    `Review the situation and avoid repeating the same tool calls if the root cause has not changed.`;
+  deps.conversation.addNotice(reconciliation, { level: 'warning' });
+  // Reconciliation can close a turn, so this rides the next request whichever turn makes it.
+  deps.conversation.hostInstructions.set('replay', reconciliation, { once: true, append: true });
 
   if (deps.runtimeBus) {
     emitToolReconciled(deps.runtimeBus, deps.emitterContext(turnId), {

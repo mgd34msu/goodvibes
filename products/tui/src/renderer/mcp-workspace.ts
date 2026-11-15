@@ -7,6 +7,5 @@ export const { renderMcpWorkspace } = createMcpWorkspaceRenderer({
   reloadHelp: '',
   browseEnter: 'edit or run',
   freshnessLabel: 'schema',
-  semanticStatus: false,
   originLabel: (source) => source,
 });

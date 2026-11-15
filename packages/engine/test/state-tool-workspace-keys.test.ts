@@ -23,7 +23,7 @@ function tempDir(): string {
 function makeStateTool(
   workingDir: string,
   daemonHomeDir: string,
-  swapManager?: { requestSwap(newDir: string): Promise<{ ok: boolean; reason?: string; code?: string; current?: string; previous?: string; restartRequired?: boolean; requiresRestart?: readonly string[]; note?: string }> },
+  swapManager?: { requestSwap(newDir: string): Promise<{ ok: boolean; reason?: string; code?: string; persisted?: boolean; requiresRestart?: readonly string[] }> },
 ) {
   const memDir = join(tempDir(), 'memory');
   mkdirSync(memDir, { recursive: true });
@@ -80,20 +80,19 @@ describe('state tool: runtime.workingDir set', () => {
     expect(calls).toEqual(['/xyz']);
   });
 
-  test('a saved change says the host keeps its directory until it restarts', async () => {
-    const tool = makeStateTool('/abc', '/def', { requestSwap: async () => ({
-      ok: true, previous: '/abc', current: '/xyz', restartRequired: true, requiresRestart: ['sessions'], note: 'Saved.' }) });
+  test('a swap that did not save, or left subsystems on the old root, says so', async () => {
+    const tool = makeStateTool('/abc', '/def', { requestSwap: async () => ({ ok: true, persisted: false, requiresRestart: ['code index'] }) });
     const result = await tool.execute({ mode: 'set', values: { 'runtime.workingDir': '/xyz' } });
     expect(result.success).toBe(true);
-    expect(JSON.parse(result.output!)).toMatchObject({ saved: true, workingDir: '/abc', savedWorkingDir: '/xyz', restartRequired: true });
+    expect(JSON.parse(result.output!)).toMatchObject({ swapped: true, persisted: false, requiresRestart: ['code index'] });
   });
 
-  test('a refused change names the code and that nothing changed', async () => {
-    const tool = makeStateTool('/abc', '/def', { requestSwap: async () => ({ ok: false, code: 'INVALID_PATH', reason: 'not a directory' }) });
+  test('a failed re-root names the code and tells the caller to check which root is in effect', async () => {
+    const tool = makeStateTool('/abc', '/def', { requestSwap: async () => ({ ok: false, code: 'REROOT_FAILED', reason: 'store would not reopen' }) });
     const result = await tool.execute({ mode: 'set', values: { 'runtime.workingDir': '/xyz' } });
     expect(result.success).toBe(false);
-    expect(result.error).toContain('INVALID_PATH');
-    expect(result.error).toContain('not changed');
+    expect(result.error).toContain('REROOT_FAILED');
+    expect(result.error).toContain('read runtime.workingDir');
   });
 
   test('set runtime.workingDir without swap manager returns error', async () => {

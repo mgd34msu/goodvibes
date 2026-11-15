@@ -9,7 +9,10 @@ import { CompletionEvidenceProjection } from './response-completion-evidence.js'
 import { CompletionEvidenceBudgetError } from './response-completion-budget.js';
 import { captureStrictJudgmentJson, JudgmentResultAdmissionError, prepareJudgmentResult, retainStrictJudgmentJson } from '../gate/judgment-result.js';
 import { captureConversationEvidence, type ConversationManager, type ConversationMessageSnapshot } from './conversation.js';
-import { responseCompletion, completionApplicability } from './batteries/response-completion.js';
+import { responseCompletion, completionApplicability, MAX_ANSWER_PASSAGES } from './batteries/response-completion.js';
+
+/** The questions of the response-completion battery asked of every checked draft. */
+const RESPONSE_COMPLETION_CHECKS = ['false_blocker', 'unfinished', 'unsupported', 'unanswered', 'unnecessary_permission'] as const;
 import { delegationConsolidation } from './batteries/delegation-consolidation.js';
 import { executionAssurance } from './batteries/execution-assurance.js';
 import type { AgentManager } from '../tools/agent/manager.js';
@@ -707,7 +710,7 @@ export class ResponseCompletionGuard {
     }
     let failure: { readonly error: unknown } | undefined;
     const checks = await Promise.allSettled([
-      responseCompletion.run(port, state as never, { ...readingOptions, site: responseCompletion.name }),
+      responseCompletion.run(port, state as never, { ...readingOptions, only: RESPONSE_COMPLETION_CHECKS, site: responseCompletion.name }),
       hasDelegatedEvidence ? delegationConsolidation.run(port, state as never,
         { ...readingOptions, site: delegationConsolidation.name }) : Promise.resolve(null),
       this.hasToolEvidence || source.snapshot.transcript.some(message => message.role === 'tool') || source.snapshot.delegated.length || source.snapshot.completedWork.length
@@ -748,25 +751,16 @@ export class ResponseCompletionGuard {
     let unsupportedAccepted = qualifications.completion.has('unsupported');
     if (!unsupportedAccepted && unsupported.outcome !== 'act' && typeof (state as { response?: unknown }).response === 'string') {
       const response = (state as { response: string }).response;
-      const passages = typeof Intl.Segmenter === 'function' ? [...new Intl.Segmenter(undefined, { granularity: 'sentence' }).segment(response)].map(({ index, segment }) => ({ index, segment })) : [];
-      if (passages.length > 1 && passages.length <= 24 && passages.map(passage => passage.segment).join('') === response
-        && passages.every((passage, index) => passage.index === passages.slice(0, index).reduce((length, prior) => length + prior.segment.length, 0))) {
-        const checked = await mapLimit(passages, 3, async passage => {
-          // Whitespace has no factual claim. Keep its original range in the
-          // complete answer, without asking a semantic reader to classify it.
-          if (!passage.segment.trim()) return true;
-          try {
-            const atomic = await responseCompletion.run(port, { ...state as object, response: passage.segment, entireProposedAnswer: response,
-              nativeAnswerRange: { start: passage.index, end: passage.index + passage.segment.length },
-              focus: 'Judge execution claims in this EXACT current-answer passage only. The entire answer resolves pronouns and context; other passages are checked separately. All passages together preserve every original character. The source observations and original requirement are unchanged.' } as never,
-              { ...readingOptions, only: ['unsupported'], site: responseCompletion.name });
-            const reading = atomic.readings.unsupported;
-            const accepted = reading.verdict === 'no' && reading.outcome === 'act';
-            atomic.recordAction(accepted ? 'This exact answer passage has no unsupported execution claim; all other passages and publication checks remain required.' : 'Retain this specific passage for primary retrieval or repair.');
-            return accepted;
-          } catch (error) { batch.abort(); throw error; }
-        });
-        unsupportedAccepted = checked.every(Boolean);
+      const passages = typeof Intl.Segmenter === 'function' ? [...new Intl.Segmenter(undefined, { granularity: 'sentence' }).segment(response)].map(({ segment }) => segment) : [];
+      // One request over the whole answer names the first unsupported passage, with the evidence sent once.
+      if (passages.length > 1 && passages.length <= MAX_ANSWER_PASSAGES && passages.join('') === response) {
+        const located = await responseCompletion.run(port, { ...state as object, passages } as never,
+          { ...readingOptions, only: ['unsupported_passage'], site: responseCompletion.name })
+          .catch((error: unknown) => { batch.abort(); throw error; });
+        const reading = located.readings.unsupported_passage;
+        unsupportedAccepted = reading.outcome === 'act' && reading.choice === 'none';
+        located.recordAction(unsupportedAccepted ? 'No passage of the answer has an unsupported execution claim; all other publication checks remain required.'
+          : 'Retain the named passage for primary retrieval or repair.');
         if (unsupportedAccepted) qualifications.completion.add('unsupported');
       }
     }
@@ -950,6 +944,7 @@ export async function waitForResponseDelegates(conversation: ConversationManager
   delegates = collectResponseDelegates(conversation, { list: () => manager.list() }, knownAgentIds);
   const evidence = '[Delegated work state] ' + JSON.stringify(delegates.map(({ evidence: _evidence, ...agent }) => agent))
     + '\nReview these results against the original request. Recover failed or incomplete work, consolidate findings, and produce every requested deliverable. Delegation itself does not complete the task.';
-  conversation.addSystemMessage(evidence);
+  // Shown here; the caller carries the same evidence to the model on its next request.
+  conversation.addNotice(evidence, { level: 'info', kind: 'operational' });
   return evidence;
 }

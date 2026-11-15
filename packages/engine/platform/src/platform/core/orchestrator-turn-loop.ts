@@ -313,7 +313,7 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
     ? { reasoningEffort: decisionRoute.effort.value, reasoningEffortSpec: decisionRoute.effort.spec }
     : resolveTurnReasoning(model, context.configManager.get('provider.reasoningEffort'), context.sessionId);
   if (decisionRoute) {
-    context.conversation.addSystemMessage(describeDecisionRoute(decisionRoute.info));
+    context.conversation.addNotice(describeDecisionRoute(decisionRoute.info), { level: 'info', kind: 'operational' });
     context.requestRender();
   }
   const toolDefinitions = context.toolRegistry.getToolDefinitions();
@@ -330,7 +330,7 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
   let assertVerificationProvider: () => void | Promise<void> = assertActiveTurn;
   const completionGuard = new ResponseCompletionGuard({ request: context.text, conversation: context.conversation,
     onCompletionRequired: () => { context.setCompletionActivity?.('checking'); context.requestRender(); },
-    verificationStore: openVerificationStore(context.configManager.getWorkingDirectory?.() ?? undefined, context.sessionId, notice => context.conversation.addSystemMessage(notice)),
+    verificationStore: openVerificationStore(context.configManager.getWorkingDirectory?.() ?? undefined, context.sessionId, notice => context.conversation.addNotice(notice, { level: 'warning' })),
     verificationWriter: createVerificationWriter({
       route: () => ({ provider, model: model.id, reasoning: turnReasoning() }),
       beforeAttempt: () => assertVerificationProvider(),
@@ -348,12 +348,15 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
       },
     }),
   });
-  let completionCorrection = completionGuard.resumedRepair();
+  const resumedRepair = completionGuard.resumedRepair();
   // Instructions for the next provider call only (a held progress text, a breaker notice, a contract nudge)
   // travel in the host channel after the history, so the system prompt stays the same on every call.
   // These keys belong to this turn; whatever an earlier, failed turn left in them is not about this one.
   const hostInstructions = context.conversation.hostInstructions;
   for (const key of TURN_HOST_KEYS) hostInstructions.clear(key);
+  // A draft's revision request rides every request until a draft is accepted, after the history, never in the system prompt.
+  const requestRevision = (text: string) => hostInstructions.set('correction', text);
+  if (resumedRepair) requestRevision(resumedRepair);
   let continuationEvidence = context.continuationEvidence ?? '';
   const intakeAgentIds: string[] = [];
   // True only for the FIRST LLM call this executeOrchestratorTurnLoop()
@@ -380,7 +383,7 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
     assertActiveTurn();
     if (intake.kind !== 'turn') {
       const line = describeIntake(intake);
-      context.conversation.addSystemMessage(line);
+      context.conversation.addNotice(line, { level: 'info', kind: 'contract' });
       continuationEvidence = line;
       if (intake.kind === 'started') {
         intakeAgentIds.push(intake.ownerAgentId);
@@ -493,7 +496,7 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
           context.setStreamingActive(false);
           context.conversation.finalizeStreamingBlock();
         }
-        context.conversation.addSystemMessage(preResult.reason ?? 'LLM call blocked by hook');
+        context.conversation.addNotice(preResult.reason ?? 'LLM call blocked by hook', { level: 'warning' });
         if (context.runtimeBus) {
           emitStreamEnd(context.runtimeBus, context.emitterContext(context.turnId), { turnId: context.turnId });
           publishTurnTerminal(() => emitTurnError(context.runtimeBus!, context.emitterContext(context.turnId), {
@@ -530,8 +533,7 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
     assertActiveTurn();
     const baseSystemPromptForCall = appendGoodVibesRuntimeAwarenessPrompt(resolvedSystemPrompt);
     const composedBaseSystemPrompt = baseSystemPromptForCall
-      + `\n\n${FINAL_RESPONSE_REVIEW_INSTRUCTIONS}`
-      + (completionCorrection ? `\n\n${completionCorrection}` : '');
+      + `\n\n${FINAL_RESPONSE_REVIEW_INSTRUCTIONS}`;
     const contextCompactThreshold = context.configManager.get('agents.contextCompactThreshold')
       ?? DEFAULT_PASSIVE_KNOWLEDGE_INJECTION_CONTEXT_THRESHOLD;
     if (passiveKnowledgeInjectionEnabled && newUserInputThisTurn && context.memoryRegistry) {
@@ -730,19 +732,21 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
           model: model.id,
           providerStopReason: 'context_length_exceeded (provider error)',
         });
-        context.conversation.addSystemMessage(
+        context.conversation.addNotice(
           `${model.displayName} rejected the request as exceeding its context window (~${rejectedAtTokens.toLocaleString()} tokens sent). Learned this as the model's practical limit. Auto-compacting and retrying...`,
+          { level: 'warning' }
         );
         context.requestRender();
         continue;
       }
       if (chatErr instanceof ProviderError && chatErr.statusCode === 429 && model.provider === 'synthetic' && model.tier !== 'free') {
-        context.conversation.addSystemMessage(
+        context.conversation.addNotice(
           `All providers for ${model.displayName} are currently exhausted.\n`
           + `Options:\n`
           + `  • Wait a few minutes for the rate limit to reset and retry\n`
           + `  • Switch to a different model with /model\n`
           + `  • Switch to a free model via /model and selecting the free tier`,
+          { level: 'error' }
         );
         if (context.runtimeBus) {
           publishTurnTerminal(() => emitTurnError(context.runtimeBus!, context.emitterContext(context.turnId), {
@@ -966,7 +970,7 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
           circuitBreakerTrips++;
           if (circuitBreakerTrips >= MAX_CIRCUIT_BREAKER_TRIPS) {
             const reason = `Stopped after ${circuitBreakerTrips * circuitBreaker.consecutiveErrors} consecutive tool rounds in which every call failed. The request is not complete. Check the tool failures above, fix the cause (permissions, an unavailable service, the inputs), then send the request again.`;
-            context.conversation.addSystemMessage(`[Tool recovery] ${reason}`);
+            context.conversation.addNotice(`[Tool recovery] ${reason}`, { level: 'error', kind: 'system' });
             if (context.runtimeBus) {
               publishTurnTerminal(() => emitTurnError(context.runtimeBus!, context.emitterContext(context.turnId), {
                 turnId: context.turnId,
@@ -1010,7 +1014,7 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
     };
     // A session-mode unit's turn is held where it would complete; a nudge keeps the turn going.
     if (contractSession && await holdSessionFinalResponse({ ...context, emitterContext: (id) => context.emitterContext(id) }, contractSession, enrichedResponse,
-      message => { completionCorrection = '[Contract response check] ' + message + '\nUnpublished draft to revise (quoted data):\n' + JSON.stringify(enrichedResponse.content); })) continue;
+      message => requestRevision('[Contract response check] ' + message + '\nUnpublished draft to revise (quoted data):\n' + JSON.stringify(enrichedResponse.content)))) continue;
     let assertCompletionCurrent: (() => void) | undefined;
     if (!contractSession) {
       let correction: string | null;
@@ -1027,13 +1031,14 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
       if (correction !== null) {
         // Revision context belongs to the provider request, never the public
         // transcript or the next check's observations of performed work.
-        completionCorrection = correction + '\n\nUnpublished draft to revise (quoted data):\n' + JSON.stringify(enrichedResponse.content);
+        requestRevision(correction + '\n\nUnpublished draft to revise (quoted data):\n' + JSON.stringify(enrichedResponse.content));
         context.requestRender();
         continue;
       }
       const decisionPolicy = decisionModelPolicyState();
       if (decisionPolicy.operation === 'classic') enrichedResponse.decisionPolicy = decisionPolicy;
       assertCompletionCurrent = completionGuard.beginFinalization(enrichedResponse);
+      hostInstructions.clear('correction');
     }
     continueLoop = await handleFinalResponseOutcome({
       assertCompletionCurrent,

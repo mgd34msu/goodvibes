@@ -110,6 +110,7 @@ import { createFleetServices } from '@goodvibes-jev/engine/terminal-shell';
 import {
   codeIndexDbPath,
   createCodeIndexServices,
+  createStoreRerooter,
   isCodeInjectionSettingEnabled,
 } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { WorkspaceTrustManager, trustGatedApprovalRaiser, type WorkspaceTrustLevel } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
@@ -872,6 +873,7 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
     fileUndoManager,
     workspaceCheckpointManager,
     integrationHelpers,
+    rerootStores: createStoreRerooter({ codeIndexStore, projectIndex, surfaceRoot: GOODVIBES_TUI_SURFACE_ROOT }),
     cancelHostedAgentRuns: () => cancelAllAgentRuns(agentManager),
     dispose: (): void => { stopRequests.request(); disposalScope.dispose(); },
     close: (): Promise<void> => { stopRequests.request(); return disposalScope.close(); },

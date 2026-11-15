@@ -58,39 +58,54 @@ describe('required native workspace publication durability', () => {
     }
   });
 
-  test('a failed write fails that call only; the next read confirms the visible bytes and uses them', async () => {
+  test('add rejects a post-rename sync failure and the same owner refuses visible scope until an actual durable mutation', async () => {
     const f = fixture(); const store = f.make(); const failure = failDirectorySync(dirname(f.path));
     try { await expect(store.add(f.root)).rejects.toThrow('directory sync failed after rename'); } finally { failure.mockRestore(); }
-    // New bytes may be visible: they are never rolled back or deleted.
+    // New bytes may be visible: the fix must not roll them back or delete them.
     const visible = JSON.parse(readFileSync(f.path, 'utf8'));
+    expect(visible.workspaces[0].root).toBe(f.root);
     expect(visible.workspaces[0].nativeScope.id).toMatch(/^workspace:/);
+    expect(() => store.currentScope(f.root)).toThrow('unavailable');
+    await store.add(f.root); // Idempotent, no durable mutation, no recovery.
+    expect(() => store.currentScope(f.root)).toThrow('unavailable');
+    await store.add(f.other); // Explicit new event commits the visible state durably.
     expect(store.currentScope(f.root).scopeId).toBe(visible.workspaces[0].nativeScope.id);
   });
 
-  test('a failed removal fails that call only; other scopes stay usable and a new registration is a new scope', async () => {
+  test('failed removal is never acknowledged or rolled back, and its owner fences other scopes too', async () => {
     const f = fixture(); const store = f.make(); await store.add(f.root); await store.add(f.other);
     const old = store.currentScope(f.root); const other = store.currentScope(f.other);
     const failure = failDirectorySync(dirname(f.path));
     try { await expect(store.remove(f.root)).rejects.toThrow('directory sync failed after rename'); } finally { failure.mockRestore(); }
-    expect(JSON.parse(readFileSync(f.path, 'utf8')).workspaces.some((row: { root: string }) => row.root === f.root)).toBe(false);
-    expect(store.currentScope(f.other).scopeId).toBe(other.scopeId);
-    await store.add(f.root);
+    const visible = JSON.parse(readFileSync(f.path, 'utf8'));
+    expect(visible.workspaces.some((row: { root: string }) => row.root === f.root)).toBe(false);
+    expect(visible.scopeTombstones.some((row: { scopeId?: string }) => row.scopeId === old.scopeId)).toBe(true);
+    expect(() => store.currentScope(f.other)).toThrow('unavailable');
+    expect((await store.remove(f.root)).removed).toBe(false); // No-op cannot clear the fence.
+    expect(() => store.currentScope(f.other)).toThrow('unavailable');
+    await store.add(f.root); // Explicit recovery is a NEW incarnation, never the removed one.
     expect(store.currentScope(f.root).scopeId).not.toBe(old.scopeId);
+    expect(store.currentScope(f.other).scopeId).toBe(other.scopeId);
   });
 
-  test('a failed durability confirmation refuses that read only, as retryable', async () => {
-    const f = fixture(); await f.make().add(f.root);
-    const store = f.make();
-    const confirmation = spyOn(atomic, 'confirmFileDurable').mockImplementation(() => { throw new Error('fixture durability uncertainty'); });
+  test('a restarted owner must confirm visible authority durability and remains fenced if confirmation fails', async () => {
+    const f = fixture(); const failedWriter = f.make(); const failure = failDirectorySync(dirname(f.path));
+    try { await expect(failedWriter.add(f.root)).rejects.toThrow('directory sync failed after rename'); } finally { failure.mockRestore(); }
+    const visible = JSON.parse(readFileSync(f.path, 'utf8'));
+    const restarted = f.make();
+    const confirmation = spyOn(atomic, 'confirmFileDurable').mockImplementation(() => { throw new Error('fixture restart durability uncertainty'); });
     try {
-      let refusal: unknown;
-      try { store.currentScope(f.root); } catch (error) { refusal = error; }
-      expect(refusal).toMatchObject({ reason: 'retry', retryable: true });
+      expect(() => restarted.currentScope(f.root)).toThrow('unavailable');
+      expect(confirmation).toHaveBeenCalledWith(f.path);
     } finally { confirmation.mockRestore(); }
-    expect(store.currentScope(f.root).root).toBe(f.root);
+    expect(() => restarted.currentScope(f.root)).toThrow('unavailable');
+    expect(f.make().currentScope(f.root).scopeId).toBe(visible.workspaces[0].nativeScope.id);
+    // Recovery explicitly commits the state, rather than retrying an ambiguous read.
+    await restarted.add(f.other);
+    expect(restarted.currentScope(f.root).scopeId).toBe(visible.workspaces[0].nativeScope.id);
   });
 
-  test('bytes replaced during confirmation are refused for that read', async () => {
+  test('confirmation of replaced bytes cannot attest the snapshot read before it', async () => {
     const f = fixture(); const store = f.make(); await store.add(f.root);
     const confirm = atomic.confirmFileDurable;
     const changed = spyOn(atomic, 'confirmFileDurable').mockImplementation((path) => {
@@ -99,20 +114,6 @@ describe('required native workspace publication durability', () => {
       bytes.scopeGeneration += 1;
       writeFileSync(path, JSON.stringify(bytes)); // Owned fixture simulates another writer.
     });
-    try { expect(() => f.make().currentScope(f.root)).toThrow('retry'); } finally { changed.mockRestore(); }
-  });
-
-  test('durability is confirmed once per register file, not on every read', async () => {
-    const f = fixture(); await f.make().add(f.root);
-    const store = f.make();
-    const confirmation = spyOn(atomic, 'confirmFileDurable');
-    try {
-      store.currentScope(f.root); store.currentScope(f.root); store.currentScope(f.root);
-      expect(confirmation).toHaveBeenCalledTimes(1);
-      await store.add(f.other); // a new file: the next read confirms it once
-      confirmation.mockClear();
-      store.currentScope(f.root); store.currentScope(f.root);
-      expect(confirmation).toHaveBeenCalledTimes(1);
-    } finally { confirmation.mockRestore(); }
+    try { expect(() => f.make().currentScope(f.root)).toThrow('unavailable'); } finally { changed.mockRestore(); }
   });
 });

@@ -25,7 +25,7 @@ function caller(content = '# Plan\n## Phase 1\n- [ ] Build -- All done') {
   const controller = new AbortController();
   const args: Parameters<typeof handleFinalResponseOutcome>[0] = {
     signal: controller.signal,
-    conversation: { addAssistantMessage() {}, addSystemMessage: (text: string) => { messages.push(text); } } as never,
+    conversation: { addAssistantMessage() {}, addSystemMessage: (text: string) => { messages.push(text); }, addNotice: (text: string) => { messages.push(text); } } as never,
     agentManager: { list: () => [], spawn: () => { throw new Error('final-response handling must not spawn agents'); } } as never,
     planManager, preTurnPlan: plan,
     configManager: { get: (key: string) => key === 'orchestration.recursionEnabled' ? enabled : 10 } as never,

@@ -413,11 +413,8 @@ export async function compactMessages(
   ctx: CompactionContext,
   registry: ProviderRegistry,
 ): Promise<CompactionResult> {
-  const sourceRevision = JSON.stringify(ctx);
-  const work = new OwnedJudgmentWork({ signal: ctx.signal, assertCurrent: () => {
-    ctx.assertCurrent?.();
-    if (JSON.stringify(ctx) !== sourceRevision) throw new Error('Compaction source changed; original conversation must be retained.');
-  } });
+  // The caller's own check (the conversation revision) says whether the source moved; the context is not re-serialised.
+  const work = new OwnedJudgmentWork({ signal: ctx.signal, assertCurrent: () => { ctx.assertCurrent?.(); } });
   try { return await runCompaction(ctx, registry, work); }
   finally { work.retire(); }
 }

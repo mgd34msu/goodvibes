@@ -130,6 +130,7 @@ describe('handleFinalResponseOutcome: the real turn-completion emit site', () =>
         conversation: {
           addAssistantMessage: (content: string) => { conversationCalls.push(content); },
           addSystemMessage: () => undefined,
+          addNotice: () => undefined,
         } as never,
         agentManager: { list: () => [], spawn: () => { throw new Error('unused'); } } as never,
         planManager: null,

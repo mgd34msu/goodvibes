@@ -1,149 +1,220 @@
 /**
  * workspace-swap-manager.ts
  *
- * Changes the daemon's working directory (`runtime.workingDir`), set through
- * POST /config {key:"runtime.workingDir", value:"<path>"} or the state tool.
+ * Manages mutable runtime.workingDir transitions.
  *
- * A change is saved and takes effect when the host next starts; nothing in the
- * running process moves. Sessions, hooks, the permission scope, contracts,
- * worktrees, checkpoints, the code and project indexes, the file watcher and
- * native work intake are all built for the root the process started on, and
- * moving only some of them would leave one process answering from two
- * directories. So the running process stays whole on its start root until it
- * restarts, every result says so, and no authority is revoked: nothing it was
- * granted for changes while it runs.
+ * The working directory hosts all conversation-scoped state:
+ * sessions, memory, logs, artifacts, knowledge stores. It can be swapped
+ * at runtime via POST /config {key:"runtime.workingDir", value:"<path>"}.
  *
- *   - Returns INVALID_PATH when the path is empty or cannot be created.
- *   - Returns REROOT_FAILED when the new path could not be saved; nothing
- *     changed and the saved working directory is what it was.
- *   - Requesting the root the process runs on cancels a saved, not yet applied
- *     change; requesting the already saved root changes nothing.
- *   - On success the result has `restartRequired` and the services that move
- *     at the next start (`requiresRestart`).
+ * Swap policy:
+ *   - Refused with WORKSPACE_BUSY when any session has pendingInputCount > 0.
+ *   - Returns INVALID_PATH when the new path cannot be created.
+ *   - Returns REROOT_FAILED when the stores could not be re-opened at the new
+ *     path, or when a before-swap fence listener threw (a daemon-side failure,
+ *     not a bad path). The previous workspace stays current. Fences that already
+ *     ran stay revoked: authority is dropped, never silently re-granted, and the
+ *     next admitted swap or a restart re-arms it.
+ *   - On success, persists the new path to <daemonHomeDir>/daemon-settings.json
+ *     and reports `persisted` and the subsystems that keep the old root until
+ *     the next restart (`requiresRestart`).
  *
  * Events emitted on runtimeBus (domain: 'workspace'):
- *   WORKSPACE_SWAP_COMPLETED, after the new path is saved
- *   WORKSPACE_SWAP_FAILED   , when the path cannot be created or saved
+ *   WORKSPACE_SWAP_STARTED  , before swap begins
+ *   WORKSPACE_SWAP_REFUSED  , when swap is rejected
+ *   WORKSPACE_SWAP_COMPLETED, after all stores re-rooted
+ *   WORKSPACE_SWAP_FAILED   , when mkdir or rerootStores fails
  */
 
-import { mkdirSync, statSync } from 'node:fs';
-import { isAbsolute, resolve } from 'node:path';
-import { readDaemonSetting, writeDaemonSetting } from './daemon-home.js';
+import { mkdirSync, existsSync } from 'node:fs';
+import { isAbsolute, resolve, join } from 'node:path';
+import { writeDaemonSetting } from './daemon-home.js';
 import type { WorkspaceEvent } from '../../events/workspace.js';
 import type { RuntimeEventBus } from '../runtime/events/index.js';
 import { createEventEnvelope } from '../runtime/events/index.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 
-/** The services bound to the working directory at start, in product terms; all of them move at the next start. */
-export const WORKSPACE_ROOT_BOUND_SERVICES: readonly string[] = Object.freeze([
-  'sessions', 'hooks', 'permission scope', 'contracts', 'worktrees', 'checkpoints',
-  'code index', 'project index', 'file watcher', 'native work intake',
-]);
+// ---------------------------------------------------------------------------
+// Minimal interface requirements (avoids coupling to full store types)
+// ---------------------------------------------------------------------------
 
 export interface WorkspaceSwapDeps {
   readonly runtimeBus: RuntimeEventBus | null;
   readonly daemonHomeDir: string;
   /**
-   * The start option that sets the working directory ahead of the saved
-   * setting (`--working-dir`, `GOODVIBES_WORKING_DIR`), when this process was
-   * started with one: a saved change only applies once that option is changed
-   * or removed, and the result says so.
+   * Called by the manager to check whether any session currently has pending
+   * input (i.e. `pendingInputCount > 0`). Returns the count of busy sessions.
    */
-  readonly startOverride?: string | undefined;
+  readonly getBusySessionCount: () => number;
+  /**
+   * Called after the manager validates the new path.
+   * Implementations must close existing stores and re-open them at newWorkingDir.
+   * May throw; the manager catches and returns REROOT_FAILED. May report the
+   * subsystems that cannot follow a live swap and keep the old root.
+   */
+  readonly rerootStores: (newWorkingDir: string) => Promise<void | WorkspaceRerootOutcome>;
 }
+
+export interface WorkspaceRerootOutcome {
+  /** Subsystems still bound to the previous working directory until the next restart. */
+  readonly requiresRestart?: readonly string[] | undefined;
+}
+
+// ---------------------------------------------------------------------------
+// Result types
+// ---------------------------------------------------------------------------
 
 export type WorkspaceSwapResult =
   | {
     ok: true;
-    /** The root this process runs on, until it restarts. */
     previous: string;
-    /** The saved root the next start uses. */
     current: string;
-    /** Always true on success: the change was saved. */
+    /** False when the new path could not be saved, so it will not survive a restart. */
     persisted: boolean;
-    /** True when the saved root differs from the running one, so a restart applies it. */
-    restartRequired: boolean;
-    /** The services that move to `current` at the next start; empty when nothing changes. */
+    /** Subsystems that keep using the previous working directory until restart. */
     requiresRestart: readonly string[];
-    /** What the person or agent should know or do next, in product terms. */
-    note: string;
   }
+  | { ok: false; code: 'WORKSPACE_BUSY'; reason: string; retryAfter: number }
   | { ok: false; code: 'INVALID_PATH'; reason: string }
   | { ok: false; code: 'REROOT_FAILED'; reason: string };
 
+// ---------------------------------------------------------------------------
+// WorkspaceSwapManager
+// ---------------------------------------------------------------------------
+
 export class WorkspaceSwapManager {
-  private readonly liveWorkingDir: string;
-  private savedWorkingDir: string | null;
+  private currentWorkingDir: string;
+  private workspaceRevision = 0;
+  private swapInProgress = false;
+  private readonly beforeSwapListeners = new Set<() => void>();
 
   constructor(
     initialWorkingDir: string,
     private readonly deps: WorkspaceSwapDeps,
   ) {
-    this.liveWorkingDir = initialWorkingDir;
-    const saved = readDaemonSetting(deps.daemonHomeDir, 'runtime.workingDir');
-    this.savedWorkingDir = typeof saved === 'string' && saved !== initialWorkingDir ? saved : null;
+    this.currentWorkingDir = initialWorkingDir;
   }
 
-  /** The root this process runs on. It does not change while the process runs. */
   getCurrentWorkingDir(): string {
-    return this.liveWorkingDir;
+    return this.currentWorkingDir;
   }
 
-  /** The saved root the next start will use, when it differs from the running one. */
-  getPendingWorkingDir(): string | null {
-    return this.savedWorkingDir;
+  /** Every admitted transition retires the old epoch, including failed or same-path reroots. */
+  getWorkspaceRevision(): number {
+    return this.workspaceRevision;
+  }
+
+  /**
+   * True from admission until the swap finishes. Input intake can read this to
+   * hold new turns while stores move; the busy-session check only sees input
+   * that was pending when the swap was requested.
+   */
+  isSwapping(): boolean {
+    return this.swapInProgress;
+  }
+
+  /** Synchronous authority fences run before any workspace mutation or async event dispatch. */
+  subscribeBeforeSwap(listener: () => void): () => void {
+    this.beforeSwapListeners.add(listener);
+    return () => { this.beforeSwapListeners.delete(listener); };
   }
 
   async requestSwap(newWorkingDir: string): Promise<WorkspaceSwapResult> {
+    if (this.swapInProgress) {
+      return { ok: false, code: 'WORKSPACE_BUSY', reason: 'Another workspace swap is already in progress.', retryAfter: 1 };
+    }
+    // Set admission before invoking callbacks, which may themselves request a swap.
+    this.swapInProgress = true;
+    try {
+      return await this._requestSwapInner(newWorkingDir);
+    } finally {
+      this.swapInProgress = false;
+    }
+  }
+
+  private async _requestSwapInner(newWorkingDir: string): Promise<WorkspaceSwapResult> {
     const raw = newWorkingDir.trim();
     if (!raw) {
-      return { ok: false, code: 'INVALID_PATH', reason: 'Working directory path must not be empty. Nothing changed.' };
-    }
-    const from = this.liveWorkingDir;
-    const to = isAbsolute(raw) ? resolve(raw) : resolve(from, raw);
-    const pendingBefore = this.savedWorkingDir;
-    const target = to === from ? null : to;
-
-    if (target === pendingBefore) {
-      return this.success(from, to, target !== null);
+      return { ok: false, code: 'INVALID_PATH', reason: 'Working directory path must not be empty.' };
     }
 
-    if (target !== null) {
-      try {
-        mkdirSync(to, { recursive: true });
-        if (!statSync(to).isDirectory()) throw new Error('it exists and is not a directory');
-      } catch (err: unknown) {
-        const reason = `Cannot use '${to}' as the working directory: ${err instanceof Error ? err.message : String(err)}. Nothing changed; the daemon keeps working in '${from}'. Choose a directory that exists or can be created.`;
-        this._emit({ type: 'WORKSPACE_SWAP_FAILED', from, to, code: 'INVALID_PATH', reason });
-        return { ok: false, code: 'INVALID_PATH', reason };
-      }
+    const resolved = isAbsolute(raw) ? resolve(raw) : resolve(this.currentWorkingDir, raw);
+    const from = this.currentWorkingDir;
+    const to = resolved;
+
+    // Check busy sessions BEFORE emitting STARTED. Don't emit STARTED if we'll immediately refuse.
+    const busyCount = this.deps.getBusySessionCount();
+    if (busyCount > 0) {
+      const reason = `${busyCount} session(s) have pending input. Retry after active inputs complete.`;
+      this._emit({ type: 'WORKSPACE_SWAP_REFUSED', from, to, reason, retryAfter: 5 });
+      return { ok: false, code: 'WORKSPACE_BUSY', reason, retryAfter: 5 };
     }
 
+    // RuntimeEventBus listeners are microtask-dispatched. Authority must be
+    // revoked synchronously before rerootStores can start, not by that notice.
+    // Advance before callbacks so detached consumers also detect this transition.
+    this.workspaceRevision++;
     try {
-      writeDaemonSetting(this.deps.daemonHomeDir, 'runtime.workingDir', to);
+      for (const listener of [...this.beforeSwapListeners]) listener();
     } catch (err: unknown) {
-      logger.warn('[WorkspaceSwap] saving runtime.workingDir failed', { error: summarizeError(err), daemonHomeDir: this.deps.daemonHomeDir, to });
-      const reason = `Could not save the working directory to the daemon settings in '${this.deps.daemonHomeDir}': ${summarizeError(err)}. Nothing changed; the daemon keeps working in '${from}'. Make that directory writable, then retry.`;
+      const reason = 'Workspace transition fence failed; no workspace stores were re-rooted.';
+      logger.warn('[WorkspaceSwap] before-swap fence threw', { error: summarizeError(err), from, to });
+      // REROOT_FAILED is the existing daemon-side failure code (HTTP 500), so the caller is not told to fix a path that is fine.
       this._emit({ type: 'WORKSPACE_SWAP_FAILED', from, to, code: 'REROOT_FAILED', reason });
       return { ok: false, code: 'REROOT_FAILED', reason };
     }
-    this.savedWorkingDir = target;
-    this._emit({ type: 'WORKSPACE_SWAP_COMPLETED', from, to, persistedInDaemonSettings: true });
-    return this.success(from, to, target !== null);
-  }
 
-  private success(from: string, to: string, restartRequired: boolean): WorkspaceSwapResult {
-    const override = this.deps.startOverride
-      ? ` This daemon was started with ${this.deps.startOverride}, which wins over the saved setting: change or remove it before restarting.`
-      : '';
-    const note = restartRequired
-      ? `Saved. The daemon keeps working in '${from}' until it restarts; after a restart every service uses '${to}'.${override}`
-      : `The daemon already works in '${from}'; no change is waiting for a restart.`;
-    return {
-      ok: true, previous: from, current: to, persisted: true, restartRequired,
-      requiresRestart: restartRequired ? WORKSPACE_ROOT_BOUND_SERVICES : [], note,
-    };
+    // Swap is proceeding, emit STARTED now that busy check and fences passed.
+    this._emit({ type: 'WORKSPACE_SWAP_STARTED', from, to });
+
+    // Validate and create directory
+    try {
+      mkdirSync(join(resolved, '.goodvibes', 'sessions'), { recursive: true });
+      mkdirSync(join(resolved, '.goodvibes', 'memory'), { recursive: true });
+      mkdirSync(join(resolved, '.goodvibes', 'logs'), { recursive: true });
+    } catch (err: unknown) {
+      const reason = `Cannot create workspace directory at '${resolved}': ${
+        err instanceof Error ? err.message : String(err)
+      }`;
+      // emit WORKSPACE_SWAP_FAILED so subscribers that saw STARTED get terminal resolution
+      this._emit({ type: 'WORKSPACE_SWAP_FAILED', from, to, code: 'INVALID_PATH', reason });
+      return { ok: false, code: 'INVALID_PATH', reason };
+    }
+
+    // Re-root all stores
+    let requiresRestart: readonly string[] = [];
+    try {
+      const outcome = await this.deps.rerootStores(resolved);
+      if (outcome) requiresRestart = outcome.requiresRestart ?? [];
+    } catch (err: unknown) {
+      const reason = `Failed to re-initialize stores at '${resolved}': ${
+        err instanceof Error ? err.message : String(err)
+      }`;
+      // emit WORKSPACE_SWAP_FAILED so subscribers that saw STARTED get terminal resolution
+      this._emit({ type: 'WORKSPACE_SWAP_FAILED', from, to, code: 'REROOT_FAILED', reason });
+      return { ok: false, code: 'REROOT_FAILED', reason };
+    }
+
+    this.currentWorkingDir = resolved;
+
+    // Persist to daemon settings
+    let persistedInDaemonSettings = false;
+    try {
+      writeDaemonSetting(this.deps.daemonHomeDir, 'runtime.workingDir', resolved);
+      persistedInDaemonSettings = true;
+    } catch (err: unknown) {
+      // Swap succeeded but persistence failed. Log so ops can diagnose.
+      logger.warn('[WorkspaceSwap] daemon settings persistence failed, workingDir will not survive restart', {
+        error: summarizeError(err),
+        daemonHomeDir: this.deps.daemonHomeDir,
+        resolvedPath: resolved,
+      });
+    }
+
+    this._emit({ type: 'WORKSPACE_SWAP_COMPLETED', from, to: resolved, persistedInDaemonSettings });
+
+    return { ok: true, previous: from, current: resolved, persisted: persistedInDaemonSettings, requiresRestart };
   }
 
   private _emit(payload: WorkspaceEvent): void {

@@ -50,6 +50,9 @@ const OPERATOR_SENDER_ID = 'operator';
 const BUILT_IN_IDENTITIES: ReadonlySet<string> = new Set(['orchestrator', OPERATOR_SENDER_ID]);
 
 const UNREGISTERED_SENDER_REASON = 'the sender is not a registered agent; register it before it sends';
+const UNKNOWN_RECIPIENT_REASON = 'no such agent (it may have finished); list running agents and send to one of them';
+const EXPIRED_REASON = 'not delivered: it expired before the recipient took it into a turn; send it again if it still applies';
+const RECIPIENT_GONE_REASON = 'not delivered: the recipient finished before taking it into a turn';
 
 export class AgentMessageBus {
   private messages = new Map<string, AgentMessage[]>();
@@ -59,6 +62,8 @@ export class AgentMessageBus {
     [OPERATOR_SENDER_ID, { agentId: OPERATOR_SENDER_ID, role: 'orchestrator' }],
   ]);
   private runtimeBus: RuntimeEventBus | null = null;
+  /** Direct messages the recipient took into a turn; a discarded message not in here was never delivered. */
+  private delivered = new Set<string>();
 
   setRuntimeBus(runtimeBus: RuntimeEventBus | null): void {
     this.runtimeBus = runtimeBus;
@@ -89,6 +94,7 @@ export class AgentMessageBus {
   unregisterAgent(agentId: string): void {
     if (BUILT_IN_IDENTITIES.has(agentId)) return;
     this.identities.delete(agentId);
+    this.discard(this.messages.get(agentId) ?? [], RECIPIENT_GONE_REASON);
     this.messages.delete(agentId);
   }
 
@@ -128,18 +134,21 @@ export class AgentMessageBus {
       this.emitBlocked(crypto.randomUUID(), fromId, toId, content, options, UNREGISTERED_SENDER_REASON, undefined, toMeta);
       return false;
     }
-    if (toMeta) {
-      const decision = evaluateCommunicationRoute({
-        from: fromMeta,
-        to: toMeta,
-        kind: options.kind!,
-        scope: 'direct',
-      });
-      if (!decision.allowed) {
-        const blockedId = crypto.randomUUID();
-        this.emitBlocked(blockedId, fromId, toId, content, options, decision.reason ?? 'communication blocked by policy', fromMeta, toMeta);
-        return false;
-      }
+    // A message to an id nobody holds (a finished agent, a mistyped id) would wait unread until it expired.
+    if (!toMeta) {
+      this.emitBlocked(crypto.randomUUID(), fromId, toId, content, options, UNKNOWN_RECIPIENT_REASON, fromMeta);
+      return false;
+    }
+    const decision = evaluateCommunicationRoute({
+      from: fromMeta,
+      to: toMeta,
+      kind: options.kind!,
+      scope: 'direct',
+    });
+    if (!decision.allowed) {
+      const blockedId = crypto.randomUUID();
+      this.emitBlocked(blockedId, fromId, toId, content, options, decision.reason ?? 'communication blocked by policy', fromMeta, toMeta);
+      return false;
     }
 
     const message: AgentMessage = {
@@ -266,7 +275,9 @@ export class AgentMessageBus {
    */
   markDelivered(agentId: string, messageId: string): void {
     const message = [...(this.messages.get(agentId) ?? []), ...(this.messages.get('*') ?? [])].find((candidate) => candidate.id === messageId);
-    if (message) this.emitDelivered(message);
+    if (!message) return;
+    if (message.scope === 'direct') this.delivered.add(message.id);
+    this.emitDelivered(message);
   }
 
   private emitDelivered(message: AgentMessage): void {
@@ -348,11 +359,27 @@ export class AgentMessageBus {
     const now = Date.now();
     for (const [key, messages] of this.messages) {
       const alive = messages.filter((message) => now - message.timestamp < message.ttlMs);
+      if (alive.length !== messages.length) this.discard(messages.filter((message) => !alive.includes(message)), EXPIRED_REASON);
       if (alive.length === 0) {
         this.messages.delete(key);
         continue;
       }
       this.messages.set(key, alive);
+    }
+  }
+
+  /**
+   * Messages leaving the store. A direct message its recipient never took into a
+   * turn ends with a blocked event naming why, so the sender's last word on it
+   * is not "sent". Broadcasts have no single recipient and end silently.
+   */
+  private discard(messages: readonly AgentMessage[], reason: string): void {
+    for (const message of messages) {
+      if (message.scope !== 'direct') continue;
+      if (this.delivered.delete(message.id)) continue;
+      this.emitBlocked(message.id, message.from, message.to, message.content,
+        { ttlMs: message.ttlMs, kind: message.kind, scope: message.scope, cohort: message.cohort, contractId: message.contractId, parentAgentId: message.parentAgentId },
+        reason, this.identities.get(message.from), this.identities.get(message.to));
     }
   }
 

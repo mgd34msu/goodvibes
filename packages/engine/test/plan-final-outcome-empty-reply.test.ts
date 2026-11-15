@@ -12,7 +12,7 @@ function outcomeArgs(parsed: { items?: unknown[] }, messages: string[]): Paramet
     save: () => {},
   };
   return {
-    conversation: { addAssistantMessage() {}, addSystemMessage: (text: string) => { messages.push(text); } } as never,
+    conversation: { addAssistantMessage() {}, addSystemMessage: (text: string) => { messages.push(text); }, addNotice: (text: string) => { messages.push(text); } } as never,
     agentManager: { list: () => [], spawn: () => { throw new Error('no spawn'); } } as never,
     planManager: planManager as never,
     preTurnPlan: plan as never,

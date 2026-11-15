@@ -278,7 +278,7 @@ for (const directResult of [false, true]) {
     const checked = fake.requests.filter(request => request.context?.battery === 'engine.core.response-completion');
     expect(checked).toHaveLength(2);
     expect(JSON.stringify(checked[0]?.state)).toContain('Review the full repository');
-    expect(f.requests[1]?.systemPrompt).toContain('[Response completion check]');
+    expect(JSON.stringify(f.requests[1]?.messages.at(-1))).toContain('[Response completion check]');
     expect(JSON.stringify(f.requests[0]?.messages)).toContain('Contract planning failed');
     expect(f.conversation.getMessageSnapshot().filter(message => message.role === 'user')).toHaveLength(1);
     expect(f.conversation.getMessageSnapshot().at(-1)).toMatchObject({ role: 'assistant', content: 'Recovered and finished the original request.' });

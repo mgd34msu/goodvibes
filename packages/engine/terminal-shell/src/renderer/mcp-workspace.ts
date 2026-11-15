@@ -1,5 +1,4 @@
 import { formRows, maskLaunchArgs } from './mcp-form-rows.js';
-import { peekSystemMessagePresentation } from '@goodvibes-jev/engine/platform/platform/runtime';
 import type { RegisteredTool } from '@goodvibes-jev/engine/platform/platform/mcp';
 import type { McpWorkspaceRow, McpWorkspaceServerRow, McpWorkspaceFormField } from '../mcp-workspace-model.js';
 import { activeTokens } from './theme.js';
@@ -32,7 +31,6 @@ export function createMcpWorkspaceRenderer(policy: {
   readonly reloadHelp: string;
   readonly browseEnter: string;
   readonly freshnessLabel: string;
-  readonly semanticStatus: boolean;
   readonly originLabel: (source: McpWorkspaceServerRow['source']) => string;
 }) {
   function serverOriginLabel(source: McpWorkspaceServerRow['source']): string {
@@ -114,14 +112,6 @@ export function createMcpWorkspaceRenderer(policy: {
         hintsFor({ mode } as McpWorkspaceView).map(([, action]) => action),
       ),
     ].join('\n');
-  }
-
-  function statusColor(text: string): string {
-    const t = activeTokens();
-    const severity = peekSystemMessagePresentation(text)?.severity;
-    if (severity === 'error') return t.error;
-    if (severity === 'warning') return t.warning;
-    return t.textMuted;
   }
 
   function browseRows(workspace: McpWorkspaceView): KitRow[] {
@@ -268,13 +258,11 @@ export function createMcpWorkspaceRenderer(policy: {
       {
         text: `Status: ${workspace.status}`,
         style: {
-          fg: policy.semanticStatus
-            ? statusColor(workspace.status)
-            : workspace.statusTone === 'error'
-              ? t.error
-              : workspace.statusTone === 'warning'
-                ? t.warning
-                : t.textMuted,
+          fg: workspace.statusTone === 'error'
+            ? t.error
+            : workspace.statusTone === 'warning'
+              ? t.warning
+              : t.textMuted,
         },
       },
     ];

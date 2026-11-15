@@ -30,6 +30,7 @@ import { bridgeNotificationFeedToToasts, getSharedToastCenter } from '../rendere
 import { getSharedNotificationFeed } from '../views/notifications-feed.ts';
 import { categorizeBuiltinCommands } from '../input/commands.ts';
 import { syncServiceSettingToPlatform } from './service-settings-sync.ts';
+import { classifyServiceSettingChange } from '@goodvibes-jev/engine/terminal-shell/service-setting-change';
 import { setActiveThemeMode, setActiveThemeName } from '../renderer/theme.ts';
 import { THEME_MODE_CONFIG_KEY, THEME_NAME_CONFIG_KEY, coerceThemeModeSetting } from '../renderer/theme-mode-config.ts';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
@@ -37,6 +38,9 @@ import { buildFirstOpenItems, decodeFirstOpenChoice, selfRecordWorkspaceRegistra
 import type { SettingsDaemonCredentialWriter } from '../input/settings-modal-secrets.ts';
 import type { DaemonOwnedConfigWriter } from '../input/settings-modal-mutations.ts';
 import type { WorkspaceTrustLevel } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+
+/** Longer than one frame of the render coalescer (16 ms), so the "applying" message is on screen first. */
+const SERVICE_APPLY_AFTER_PAINT_MS = 20;
 
 type WireShellUiOpenersOptions = {
   commandContext: CommandContext;
@@ -300,7 +304,24 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
           }
           const builtinSetting = configManager.getSchema().find((setting) => setting.key === change.key);
           if (!builtinSetting) return;
-          return syncServiceSettingToPlatform({ configManager, workingDirectory, homeDirectory }, { ...change, key: builtinSetting.key });
+          const serviceChange = { ...change, key: builtinSetting.key };
+          const serviceRuntime = { configManager, workingDirectory, homeDirectory };
+          if (classifyServiceSettingChange(serviceChange) !== 'changed') return syncServiceSettingToPlatform(serviceRuntime, serviceChange);
+          // The service manager's commands are synchronous (each one time-bounded),
+          // so they run after the "applying" frame is painted rather than inside
+          // this key handler; the result then replaces that message.
+          setTimeout(() => {
+            const result = syncServiceSettingToPlatform(serviceRuntime, serviceChange);
+            const modal = input.settingsModal;
+            if (modal.active) {
+              modal.lastSettingEffectMessage = result.message ?? null;
+              modal.refreshPickerValues();
+            } else if (result.message) {
+              commandContext.print?.(result.message);
+            }
+            render();
+          }, SERVICE_APPLY_AFTER_PAINT_MS);
+          return { message: 'Applying the service change…' };
         },
       });
     },
@@ -367,38 +388,9 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
     if (!registry) return;
     const top = input.surfaceModals.top();
     if (top instanceof CommandPalette) return;
-    const commands = registry.getAll();
-    const bindings = commands.map((command) => ({
-      handler: command.handler,
-      name: command.name,
-      description: command.description,
-      argsHint: command.argsHint,
-      usage: command.usage,
-      aliases: JSON.stringify(command.aliases),
-    }));
     const palette = new CommandPalette({
-      entries: buildPaletteEntries(commands, getCommandCategoryMap()),
+      entries: buildPaletteEntries(registry.getAll(), getCommandCategoryMap()),
       onChanged: render,
-      assertCurrent: () => {
-        const current = registry.getAll();
-        if (
-          current.length !== commands.length ||
-          current.some((command, index) => {
-            const binding = bindings[index]!;
-            return (
-              command !== commands[index] ||
-              command.handler !== binding.handler ||
-              command.name !== binding.name ||
-              command.description !== binding.description ||
-              command.argsHint !== binding.argsHint ||
-              command.usage !== binding.usage ||
-              JSON.stringify(command.aliases) !== binding.aliases
-            );
-          })
-        ) {
-          throw new Error('Command registry changed.');
-        }
-      },
       describe: (id) => (id === 'model' ? commandContext.session.runtime.model || undefined : undefined),
       onRun: (entry, mode) => {
         if (mode === 'run' && commandContext.executeCommand) {

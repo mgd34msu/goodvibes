@@ -18,7 +18,6 @@
  */
 
 import { readCommandDiscovery, type CommandDiscoveryReading } from '@goodvibes-jev/engine/platform/platform/routing';
-import { retainStrictJudgmentJson, assertJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
 import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
 import type { SlashCommand } from './command-registry.ts';
 import type { SurfaceModal, SurfaceModalHost } from '@goodvibes-jev/engine/terminal-shell/surface-modal-host';
@@ -170,8 +169,6 @@ export function paletteScore(entry: PaletteEntry, query: string): number {
 export interface CommandPaletteOptions {
   readonly entries: readonly PaletteEntry[];
   readonly onChanged?: () => void;
-  /** Bind suggestions to the same registered commands and handlers. */
-  readonly assertCurrent?: () => void;
   /** Run or fill the composer with a command; the palette has already closed. */
   readonly onRun: (entry: PaletteEntry, mode: PaletteRunMode) => void;
   /** Optional live note for a row (e.g. the current model), shown muted after its title. */
@@ -204,7 +201,6 @@ export class CommandPalette implements SurfaceModal, PaletteView {
 
   /** The groups shown for the current query. */
   sections(): PaletteSection[] {
-    try { this.semantic?.assertCurrent(); } catch { this.semantic = undefined; this.sectionsCache = null; }
     if (this.sectionsCache?.query === this.query) return this.sectionsCache.sections;
     const sections: PaletteSection[] = [];
     if (this.query.trim().length === 0) {
@@ -261,17 +257,20 @@ export class CommandPalette implements SurfaceModal, PaletteView {
     }, 250);
   }
 
+  /**
+   * The entries are fixed when the palette opens, and a suggestion only names a
+   * command: running it resolves the name against the live registry, which
+   * reports a command that has gone since by name. So the one check is that
+   * this search is still the palette's current one.
+   */
   private async findSemanticCommands(query: string, controller: AbortController): Promise<void> {
     const current = () => {
       controller.signal.throwIfAborted();
       if (this.closed || this.query !== query || this.searchController !== controller) throw new Error('Command search changed.');
-      this.options.assertCurrent?.();
     };
     try {
-      const source = retainStrictJudgmentJson(this.entries);
-      assertJudgmentInput(source.snapshot);
-      const request = { query, commands: source.snapshot.map(({ id, title, description, aliases, keywords }) => ({ id, title, description, aliases, keywords })) };
-      const reading = await readCommandDiscovery(request, { signal: controller.signal, assertCurrent: () => { current(); source.assertCurrent(); } });
+      const commands = this.entries.map(({ id, title, description, aliases, keywords }) => ({ id, title, description, aliases, keywords }));
+      const reading = await readCommandDiscovery({ query, commands }, { signal: controller.signal, assertCurrent: current });
       current();
       this.semantic = reading;
       this.sectionsCache = null;

@@ -77,23 +77,21 @@ test('a pending semantic search cannot delay literal search or publish after a q
   expect(p.flat().map(entry => entry.id)).toEqual(['clear']);
 });
 
-test('closing cancels scheduled work, and changed command ownership blocks settled suggestions', async () => {
+test('closing cancels scheduled work, and a settled suggestion runs by its command name', async () => {
   const fake = selectedPort(); installJudgmentPort(fake.port);
   const closed = palette(); closed.setQuery('make the dialogue take less room');
   expect(timers.armed).toBe(1);
   closed.onClose();
   expect(timers.armed).toBe(0);
   expect(fake.requests).toHaveLength(0);
-  let active = true; const ran: string[] = [];
+  const ran: string[] = [];
   const change = nextChange();
-  const p = palette({ assertCurrent: () => { if (!active) throw new Error('changed'); }, onRun: entry => { ran.push(entry.id); }, onChanged: change.onChanged });
+  const p = palette({ onRun: entry => { ran.push(entry.id); }, onChanged: change.onChanged });
   p.setQuery('make the dialogue take less room');
   timers.fire();
   await change.promise;
   expect(p.getSelected()?.id).toBe('compact');
-  active = false;
   const host = new SurfaceModalHost(); host.push(p);
   host.handleToken({ type: 'key', logicalName: 'enter' } as InputToken);
-  expect(ran).toEqual([]);
-  expect(p.flat()).toEqual([]);
+  expect(ran).toEqual(['compact']);
 });

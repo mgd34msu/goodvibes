@@ -4,11 +4,10 @@ import {
   type ServiceSettingResult,
 } from '@goodvibes-jev/engine/terminal-shell/service-setting-change';
 import { mkdirSync } from 'node:fs';
-import { spawnSync } from 'node:child_process';
 import type { ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
 import type { ManagedServiceStatus } from '@goodvibes-jev/engine/platform/platform/daemon';
 import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-import { createPlatformServiceManager, getServiceStateRoot, resolveCliServiceName, type CliServiceRuntime } from '../cli/service-posture.ts';
+import { createPlatformServiceManager, getServiceStateRoot, type CliServiceRuntime } from '../cli/service-posture.ts';
 
 type ManagedServiceAction = 'install' | 'uninstall' | 'start' | 'stop' | 'restart' | 'status';
 
@@ -21,22 +20,26 @@ export interface ServiceManagerLike {
   restart(): ManagedServiceStatus;
 }
 
-export interface CommandResult {
-  readonly status: number | null;
-  readonly stdout?: string;
-  readonly stderr?: string;
-}
-
 export type ServiceSettingsSyncChange = ServiceSettingChange;
 
 export interface ServiceSettingsSyncResult extends ServiceSettingResult<ManagedServiceAction | 'install-start' | 'disable'> {
   readonly status?: ManagedServiceStatus;
 }
 
+/**
+ * The service manager owns every platform command line (systemctl, launchctl,
+ * schtasks) and the time limit on each; this file only decides which manager
+ * action a setting change needs and reports the state the manager returns.
+ */
 export interface ServiceSettingsSyncOptions {
   readonly createManager?: (runtime: CliServiceRuntime) => ServiceManagerLike;
-  readonly runCommand?: (command: string, args: readonly string[]) => CommandResult;
   readonly mkdir?: typeof mkdirSync;
+}
+
+/** The two keys whose values say whether an OS service should exist, as they were before the change. */
+interface ServiceKeys {
+  readonly autostart: unknown;
+  readonly enabled: unknown;
 }
 
 const SERVICE_DEFINITION_KEYS = new Set<ConfigKey>([
@@ -46,115 +49,103 @@ const SERVICE_DEFINITION_KEYS = new Set<ConfigKey>([
   'service.logPath',
 ] as ConfigKey[]);
 
-function runCommand(command: string, args: readonly string[], options: ServiceSettingsSyncOptions): CommandResult {
-  if (options.runCommand) return options.runCommand(command, args);
-  return spawnSync(command, [...args], { stdio: 'pipe', encoding: 'utf-8' });
+function restoreKeys(runtime: CliServiceRuntime, keys: ServiceKeys): void {
+  runtime.configManager.setDynamic('service.autostart', keys.autostart === true);
+  runtime.configManager.setDynamic('service.enabled', keys.enabled === true);
 }
 
-function commandError(result: CommandResult): string | null {
-  if ((result.status ?? 1) === 0) return null;
-  return ((result.stderr ?? '') || (result.stdout ?? '') || `command exited with ${result.status}`).trim();
+function withLingerNote(message: string, status: ManagedServiceStatus): string {
+  return status.lingerNote ? `${message}; ${status.lingerNote}` : message;
 }
 
-function serviceName(runtime: CliServiceRuntime): string {
-  return resolveCliServiceName(runtime.configManager);
-}
-
-function runSystemd(runtime: CliServiceRuntime, args: readonly string[], options: ServiceSettingsSyncOptions): string | null {
-  const result = runCommand('systemctl', ['--user', ...args], options);
-  return commandError(result);
-}
-
-function reloadSystemdIfNeeded(
-  runtime: CliServiceRuntime,
-  status: ManagedServiceStatus,
-  options: ServiceSettingsSyncOptions,
-): string | null {
-  if (status.platform !== 'systemd') return null;
-  return runSystemd(runtime, ['daemon-reload'], options);
-}
-
+/**
+ * A failed disable leaves the settings as they were before the change: the
+ * toggle reads ON while the machine may still run the service, and turning it
+ * off again retries.
+ */
 function disableSystemService(
   runtime: CliServiceRuntime,
   manager: ServiceManagerLike,
-  options: ServiceSettingsSyncOptions,
+  keysBefore: ServiceKeys,
 ): ServiceSettingsSyncResult {
   const before = manager.status();
-  let disableError: string | null = null;
-  if (before.platform === 'systemd') {
-    disableError =
-      before.installed || before.running ? runSystemd(runtime, ['disable', '--now', `${serviceName(runtime)}.service`], options) : null;
-    if (disableError) {
-      logger.warn('Settings service sync: systemd disable failed', { error: disableError });
-    }
-  } else if (before.running || before.installed) {
-    const stopped = manager.stop();
-    if (stopped.actionError) {
-      return {
-        handled: true,
-        action: 'stop',
-        status: stopped,
-        message: `Service disable failed: ${stopped.actionError}`,
-        error: stopped.actionError,
-      };
-    }
+  let status = before;
+  let action: 'stop' | 'disable' = 'disable';
+  let error: string | undefined;
+  // uninstall() stops what its definition names; a manual-platform process, or
+  // a unit whose definition is already gone, is stopped by name first.
+  if (before.running && (before.platform === 'manual' || !before.installed)) {
+    status = manager.stop();
+    action = 'stop';
+    error = status.actionError ?? undefined;
   }
-
-  const uninstalled = manager.uninstall();
-  const reloadError = reloadSystemdIfNeeded(runtime, uninstalled, options);
-  const error = uninstalled.actionError ?? reloadError ?? disableError ?? undefined;
+  if (!error && before.installed) {
+    status = manager.uninstall();
+    action = 'disable';
+    error = status.actionError ?? undefined;
+  }
+  if (!error) return { handled: true, action: 'disable', status, message: 'OS service disabled' };
+  restoreKeys(runtime, keysBefore);
   return {
     handled: true,
-    action: 'disable',
-    status: uninstalled,
-    message: error ? `Service disable failed: ${error}` : 'OS service disabled',
-    ...(error ? { error } : {}),
+    action,
+    status,
+    message: `Service disable failed: ${error}. ${status.running ? 'The service is still running, so the' : 'The'} setting stays on; turning it off again retries`,
+    error,
   };
 }
 
-function installAndStartSystemService(
+/**
+ * Turning the service on saves the setting before the OS install runs. When the
+ * install or start fails, the definition install wrote is removed again and the
+ * settings go back to where they were, so the toggle never reads OFF over an
+ * installed service and turning it on again retries. When that removal fails
+ * too, the settings stay on, because a service is installed.
+ */
+function enableSystemService(
   runtime: CliServiceRuntime,
   manager: ServiceManagerLike,
   options: ServiceSettingsSyncOptions,
+  keysBefore: ServiceKeys,
 ): ServiceSettingsSyncResult {
   (options.mkdir ?? mkdirSync)(getServiceStateRoot(runtime), { recursive: true });
   const installed = manager.install();
-  if (installed.actionError) {
+  const failed = installed.actionError ? { action: 'install' as const, label: 'install', status: installed } : undefined;
+  const started = failed ? undefined : manager.start();
+  const failure = failed ?? (started?.actionError ? { action: 'install-start' as const, label: 'start', status: started } : undefined);
+  if (!failure) {
     return {
       handled: true,
-      action: 'install',
-      status: installed,
-      message: `Service install failed: ${installed.actionError}`,
-      error: installed.actionError,
+      action: 'install-start',
+      status: started!,
+      message: withLingerNote('OS service installed and started', installed),
     };
   }
 
-  const reloadError = reloadSystemdIfNeeded(runtime, installed, options);
-  if (reloadError) {
+  const error = failure.status.actionError!;
+  const removed = failure.status.installed ? manager.uninstall() : failure.status;
+  if (failure.status.installed && removed.actionError) {
     return {
       handled: true,
-      action: 'install',
-      status: installed,
-      message: `Service install failed: ${reloadError}`,
-      error: reloadError,
+      action: failure.action,
+      status: removed,
+      message: `Service ${failure.label} failed: ${error}. The service is installed but could not be removed (${removed.actionError}), so the setting stays on`,
+      error,
     };
   }
-
-  const started = manager.start();
-  const error = started.actionError ?? undefined;
+  restoreKeys(runtime, keysBefore);
   return {
     handled: true,
-    action: 'install-start',
-    status: started,
-    message: error ? `Service start failed: ${error}` : 'OS service installed and started',
-    ...(error ? { error } : {}),
+    action: failure.action,
+    status: removed,
+    message: `Service ${failure.label} failed: ${error}; the setting was turned back off, so turning it on again retries`,
+    error,
   };
 }
 
 function refreshInstalledSystemService(
   runtime: CliServiceRuntime,
   manager: ServiceManagerLike,
-  options: ServiceSettingsSyncOptions,
 ): ServiceSettingsSyncResult {
   const before = manager.status();
   if (!before.installed && runtime.configManager.get('service.autostart') !== true) {
@@ -177,42 +168,15 @@ function refreshInstalledSystemService(
     };
   }
 
-  const reloadError = reloadSystemdIfNeeded(runtime, installed, options);
-  if (reloadError) {
-    return {
-      handled: true,
-      action: 'install',
-      status: installed,
-      message: `Service update failed: ${reloadError}`,
-      error: reloadError,
-    };
-  }
-
   const next = before.running ? manager.restart() : manager.start();
   const error = next.actionError ?? undefined;
   return {
     handled: true,
     action: before.running ? 'restart' : 'start',
     status: next,
-    message: error ? `Service update failed: ${error}` : 'OS service updated',
+    message: error ? `Service update failed: ${error}` : withLingerNote('OS service updated', installed),
     ...(error ? { error } : {}),
   };
-}
-
-/**
- * Turning the service on saves the setting before the OS install runs. When the
- * install or start fails, leave the settings where they were so the toggle does
- * not read ON with no service behind it (and so turning it on again retries).
- */
-function revertEnableOnError(
-  runtime: CliServiceRuntime,
-  result: ServiceSettingsSyncResult,
-  before: { readonly autostart: unknown; readonly enabled: unknown },
-): ServiceSettingsSyncResult {
-  if (!result.error) return result;
-  runtime.configManager.setDynamic('service.autostart', before.autostart === true);
-  runtime.configManager.setDynamic('service.enabled', before.enabled === true);
-  return { ...result, message: `${result.message}; the setting was turned back off, so turning it on again retries` };
 }
 
 export function syncServiceSettingToPlatform(
@@ -225,33 +189,32 @@ export function syncServiceSettingToPlatform(
   if (classification === 'unchanged') return { handled: true, message: 'Service setting unchanged' };
 
   const manager = options.createManager?.(runtime) ?? createPlatformServiceManager(runtime);
+  const config = runtime.configManager;
+  // A manager action that throws (service management turned off, an unwritable
+  // definition path) changed nothing on the machine, so the toggle goes back.
+  let keysToRestore: ServiceKeys | undefined;
 
   try {
     if (change.key === 'service.autostart') {
+      // The change is already saved, so its previous value is the one to restore.
+      keysToRestore = { autostart: change.previousValue, enabled: config.get('service.enabled') };
       if (change.value === true) {
-        // The change is already saved, so its previous value is the one to restore.
-        const before = { autostart: change.previousValue, enabled: runtime.configManager.get('service.enabled') };
-        if (runtime.configManager.get('service.enabled') !== true) {
-          runtime.configManager.setDynamic('service.enabled', true);
-        }
-        return revertEnableOnError(runtime, installAndStartSystemService(runtime, manager, options), before);
+        if (config.get('service.enabled') !== true) config.setDynamic('service.enabled', true);
+        return enableSystemService(runtime, manager, options, keysToRestore);
       }
-      return disableSystemService(runtime, manager, options);
+      return disableSystemService(runtime, manager, keysToRestore);
     }
 
     if (change.key === 'service.enabled') {
+      const keysBefore = { autostart: config.get('service.autostart'), enabled: change.previousValue };
       if (change.value === false) {
-        if (runtime.configManager.get('service.autostart') === true) {
-          runtime.configManager.setDynamic('service.autostart', false);
-        }
-        return disableSystemService(runtime, manager, options);
+        keysToRestore = keysBefore;
+        if (config.get('service.autostart') === true) config.setDynamic('service.autostart', false);
+        return disableSystemService(runtime, manager, keysBefore);
       }
-      if (runtime.configManager.get('service.autostart') === true) {
-        return revertEnableOnError(
-          runtime,
-          installAndStartSystemService(runtime, manager, options),
-          { autostart: runtime.configManager.get('service.autostart'), enabled: change.previousValue },
-        );
+      if (config.get('service.autostart') === true) {
+        keysToRestore = keysBefore;
+        return enableSystemService(runtime, manager, options, keysBefore);
       }
       return {
         handled: true,
@@ -262,8 +225,8 @@ export function syncServiceSettingToPlatform(
     }
 
     if (SERVICE_DEFINITION_KEYS.has(change.key)) {
-      if (runtime.configManager.get('service.enabled') === true && runtime.configManager.get('service.autostart') === true) {
-        return refreshInstalledSystemService(runtime, manager, options);
+      if (config.get('service.enabled') === true && config.get('service.autostart') === true) {
+        return refreshInstalledSystemService(runtime, manager);
       }
       return {
         handled: true,
@@ -275,11 +238,14 @@ export function syncServiceSettingToPlatform(
   } catch (error) {
     const summarized = summarizeError(error);
     logger.error('Settings service sync failed', { key: change.key, error: summarized });
+    if (keysToRestore) restoreKeys(runtime, keysToRestore);
+    let status: ManagedServiceStatus | undefined;
+    try { status = manager.status(); } catch { /* the error above is the account */ }
     return {
       handled: true,
       action: 'status',
-      status: manager.status(),
-      message: `Service sync failed: ${summarized}`,
+      ...(status ? { status } : {}),
+      message: `Service sync failed: ${summarized}${keysToRestore ? '; the setting was put back' : ''}`,
       error: summarized,
     };
   }

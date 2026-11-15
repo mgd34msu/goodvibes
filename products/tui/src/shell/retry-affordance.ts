@@ -1,123 +1,85 @@
 /**
- * retry-affordance.ts, the one-key retry/switch-model affordance shown
- * right after a user-visible TURN_ERROR: 'r' re-submits on the current
- * provider, 'm' opens the model picker, any other key disarms it silently.
+ * retry-affordance.ts, the two actions the shell offers after something it
+ * did: retry the turn that just failed, and open a fix session that was just
+ * started for the owner (a CI fix session, a conflict-resolution session).
  *
- * Rendered as a transient FOOTER status line (see retryAffordanceHint,
- * wired into ShellFooterBuildOptions.retryHint in shell-surface.ts) rather
- * than a permanent transcript message, it disappears the moment it's
- * disarmed, instead of sitting in the scrollback claiming an affordance
- * that no longer does anything. Extracted from main.ts to keep the
- * entrypoint under the architecture line cap.
- *
- * The affordance is also time-bounded: arming starts a disarm timer so a
- * stray 'r' hours later can never fire a real, paid retry against the
- * provider. The timer's window is exactly what the footer hint's visibility
- * implies, when it fires, the state disarms AND retryAffordanceHint(state)
- * goes back to null in the same tick, so the key dies at the same moment
- * the hint disappears.
+ * Each is reached by a chord that can never be typed text, Alt+R and Alt+J,
+ * so a sentence that starts with "r" or "j", or `j` pressed to move down a
+ * list, always goes where it was typed. While an action is on offer the
+ * footer says so (actionHint); the offer stays until it is used, replaced by
+ * a newer one, or (for retry) a new prompt is sent, so the hint on screen is
+ * always the action the chord will run.
  */
 
-/** How long the affordance stays armed with no keypress before it silently expires. */
-export const RETRY_AFFORDANCE_WINDOW_MS = 60_000;
-
-/** Timer primitives injectable for tests, so arming doesn't require a real 60s wait. */
-export interface RetryAffordanceSchedule {
-  readonly setTimeout: (cb: () => void, ms: number) => ReturnType<typeof setTimeout>;
-  readonly clearTimeout: (handle: ReturnType<typeof setTimeout>) => void;
+/** Alt+<letter> in both encodings a terminal sends: ESC-prefixed, or CSI-u with the Alt modifier (kitty keyboard protocol). */
+function isAltChord(data: string, letter: string): boolean {
+  return data === `\x1b${letter}` || data === `\x1b[${letter.charCodeAt(0)};3u`;
 }
 
-const REAL_SCHEDULE: RetryAffordanceSchedule = {
-  setTimeout: (cb, ms) => setTimeout(cb, ms),
-  clearTimeout: (handle) => clearTimeout(handle),
-};
+export const RETRY_CHORD_LABEL = 'Alt+R';
+export const FIX_SESSION_CHORD_LABEL = 'Alt+J';
 
-export interface RetryAffordanceState {
-  armed: boolean;
-  exhausted: boolean;
-  /** Internal: the pending disarm timer's handle, or null while unarmed. */
-  timer: ReturnType<typeof setTimeout> | null;
-  /** Internal: injected timer primitives, real setTimeout/clearTimeout in production. */
-  readonly schedule: RetryAffordanceSchedule;
-  /** Internal: the disarm window in ms. */
-  readonly windowMs: number;
-  /** Internal: invoked after the timer disarms the state, so the render loop can repaint the footer. */
-  readonly onExpire?: () => void;
+export interface ShellActionOffers {
+  /** A failed turn can be sent again; `exhausted` when automatic failover already tried every provider. */
+  retry: { readonly exhausted: boolean } | null;
+  /** The newest started fix session the owner has not opened yet. */
+  fixSessionId: string | null;
 }
 
-export interface CreateRetryAffordanceStateOptions {
-  /** Overridable for tests; defaults to RETRY_AFFORDANCE_WINDOW_MS (60s). */
-  readonly windowMs?: number;
-  /** Overridable for tests so the disarm timer doesn't require a real 60s wait. */
-  readonly schedule?: RetryAffordanceSchedule;
-  /** Called once the window elapses with no keypress and the state has been disarmed, main.ts hooks this to its render loop so the footer hint clears the instant the key goes dead. */
-  readonly onExpire?: () => void;
+export function createShellActionOffers(): ShellActionOffers {
+  return { retry: null, fixSessionId: null };
 }
 
-export function createRetryAffordanceState(options: CreateRetryAffordanceStateOptions = {}): RetryAffordanceState {
-  return {
-    armed: false,
-    exhausted: false,
-    timer: null,
-    schedule: options.schedule ?? REAL_SCHEDULE,
-    windowMs: options.windowMs ?? RETRY_AFFORDANCE_WINDOW_MS,
-    onExpire: options.onExpire,
-  };
-}
-
-function clearPendingTimer(state: RetryAffordanceState): void {
-  if (state.timer !== null) {
-    state.schedule.clearTimeout(state.timer);
-    state.timer = null;
+/** The footer line while an action is on offer; null when nothing is. */
+export function actionHint(offers: ShellActionOffers): string | null {
+  const parts: string[] = [];
+  if (offers.retry) {
+    parts.push(`${RETRY_CHORD_LABEL} retry${offers.retry.exhausted ? ' same provider' : ''} · /model switch model`);
   }
+  if (offers.fixSessionId) parts.push(`${FIX_SESSION_CHORD_LABEL} open fix session`);
+  return parts.length > 0 ? `[Next] ${parts.join(' · ')}` : null;
 }
 
-/** Arm the affordance, call only when a retry is actually possible (a live retryCtx).
- *  Starts (or restarts, if already armed) the disarm timer. */
-export function armRetryAffordance(state: RetryAffordanceState, exhausted: boolean): void {
-  clearPendingTimer(state);
-  state.armed = true;
-  state.exhausted = exhausted;
-  const timer = state.schedule.setTimeout(() => {
-    state.timer = null;
-    state.armed = false;
-    state.onExpire?.();
-  }, state.windowMs);
-  // Never let this timer hold the process open, a background retry-window
-  // countdown is not a reason to keep the event loop alive.
-  (timer as unknown as { unref?: () => void }).unref?.();
-  state.timer = timer;
-}
-
-/** Disarm the affordance, any key other than the ones it recognizes disarms it,
- *  and cancels the pending disarm timer so it never fires on a state that's
- *  already been reset (or re-armed by a subsequent error). */
-export function disarmRetryAffordance(state: RetryAffordanceState): void {
-  clearPendingTimer(state);
-  state.armed = false;
-}
-
-/** The transient footer hint text while armed; null once disarmed. */
-export function retryAffordanceHint(state: RetryAffordanceState): string | null {
-  if (!state.armed) return null;
-  return state.exhausted
-    ? '[Retry] r retry same provider · m switch model'
-    : '[Retry] r retry · m switch model';
-}
-
-/** Arm the affordance whenever a user-visible error surfaces AND a retry is
- *  actually possible, wired here (not inline in main.ts) to keep the
- *  entrypoint under the architecture line cap. */
-export function wireRetryAffordanceOnError(
+/** Offer the retry whenever a user-visible error surfaces and a retry is actually possible. */
+export function wireRetryOfferOnError(
   onErrorSurfaced: (cb: (exhausted: boolean) => void) => void,
-  state: RetryAffordanceState,
+  offers: ShellActionOffers,
   hasRetryCtx: () => boolean,
   render: () => void,
 ): void {
   onErrorSurfaced((exhausted) => {
-    if (hasRetryCtx()) {
-      armRetryAffordance(state, exhausted);
-      render();
-    }
+    if (!hasRetryCtx()) return;
+    offers.retry = { exhausted };
+    render();
   });
+}
+
+export interface ShellActionChordDeps {
+  /** Send the failed turn again (rolls the transcript back to before it). */
+  readonly retry: () => void;
+  /** Open (resume) the session with this id. */
+  readonly openSession: (sessionId: string) => void;
+  readonly render: () => void;
+}
+
+/**
+ * Run the action a chord names when that action is on offer. Returns true when
+ * the chunk was the chord and was consumed; every other chunk, including a
+ * chord with nothing on offer, is left for normal input.
+ */
+export function handleShellActionChord(data: string, offers: ShellActionOffers, deps: ShellActionChordDeps): boolean {
+  if (offers.retry && isAltChord(data, 'r')) {
+    offers.retry = null;
+    deps.retry();
+    deps.render();
+    return true;
+  }
+  if (offers.fixSessionId && isAltChord(data, 'j')) {
+    const sessionId = offers.fixSessionId;
+    offers.fixSessionId = null;
+    deps.openSession(sessionId);
+    deps.render();
+    return true;
+  }
+  return false;
 }

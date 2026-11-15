@@ -164,9 +164,8 @@ export function registerCiRuntimeCommands(registry: CommandRegistry): void {
             lines.push(`notified: ${result.notified ? 'yes' : 'no'}${result.notificationId ? ` (${result.notificationId})` : ''}`);
             lines.push(`fix-session triggered: ${result.fixSessionTriggered ? 'yes' : 'no'}`);
             ctx.print(lines.join('\n'));
-            // Route the spawned session through the shared one-key jump affordance
-            // instead of printing the id for the user to retype, same attach flow
-            // as every other fix-session start.
+            // Offer the spawned session through the shell's Alt+J action, the
+            // same open flow as every other fix-session start.
             if (result.fixSessionId) ctx.armFixSessionAttach?.(result.fixSessionId);
           } catch (error) {
             ctx.print(`[ci watches run] ${describeOperatorRpcError(error)}`);

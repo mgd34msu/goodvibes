@@ -10,7 +10,7 @@ import { wireHostPairingShell } from './shell/host-pairing-shell.ts';
 import type { HostPairingController } from './shell/host-pairing-controller.ts';
 import { isConversationUsageAvailable, isConversationContextAvailable } from './core/conversation-usage.ts';
 import type { NativeConversationIntakeState } from './runtime/native-conversation-intake.ts';
-import { captureNativeConversationInput, type ProductInputContext } from './runtime/native-conversation-input.ts';
+import { captureNativeConversationInput, type ProductInputContext } from '@goodvibes-jev/engine/terminal-shell/native';
 import { dispatchNativeConversationTurn, describeFailedNativeDispatch } from './runtime/native-conversation-ingress.ts';
 import { readTuiConfigValue, subscribeTuiConfigValue } from './config/host-settings.ts';
 import { resolveGoodVibesDaemonHome, resolveGoodVibesHome } from '@goodvibes-jev/engine/platform/platform/config';
@@ -35,8 +35,6 @@ import {
   sweepBrokerApprovals,
   createApprovalCardQueue,
   settledAskDecision,
-  buildFixSessionAffordance,
-  handleFixSessionAttachKey,
 } from './permissions/broker-approval-card.ts';
 import './input/command-registry.ts';
 
@@ -73,12 +71,12 @@ import { startRecoveryOffer } from './runtime/recovery-prompt.ts';
 import { createStartupTypeaheadGate } from './runtime/startup-typeahead-gate.ts';
 import { buildRecoveryOfferWiring } from './runtime/recovery-offer-wiring.ts';
 import { handleBlockingShellInput, type PendingPermissionState } from './shell/blocking-input.ts';
-import { handleErrorAffordanceKey } from './shell/recovery-input-helpers.ts';
 import {
-  createRetryAffordanceState,
-  disarmRetryAffordance,
-  retryAffordanceHint,
-  wireRetryAffordanceOnError,
+  actionHint,
+  createShellActionOffers,
+  FIX_SESSION_CHORD_LABEL,
+  handleShellActionChord,
+  wireRetryOfferOnError,
 } from './shell/retry-affordance.ts';
 import { wireShellUiOpeners } from './shell/ui-openers.ts';
 import { deriveComposerState } from './core/composer-state.ts';
@@ -250,21 +248,18 @@ async function main() {
   let inputEpoch = 0;
   let submissionStatus: string | null = null;
   let hostPairing: HostPairingController | null = null;
-  // One-key jump/attach to a spawned CI fix-session: the affordance ARMS the id; the next 'j' runs the resume so the user never retypes it.
-  let fixSessionAttachArmed: string | null = null;
-  const attachToFixSession = (fixSessionId: string) => {
-    void commandContext.executeCommand?.('session', ['resume', fixSessionId]);
+  // Actions offered after something the shell did (retry a failed turn, open a
+  // started fix session): each runs only on its chord, and the footer shows
+  // what is on offer (shell/retry-affordance.ts).
+  const actionOffers = createShellActionOffers();
+  const offeredFixSessions = new Set<string>();
+  commandContext.armFixSessionAttach = (fixSessionId) => {
+    if (offeredFixSessions.has(fixSessionId)) return; // a repeated run result offers it once
+    offeredFixSessions.add(fixSessionId);
+    actionOffers.fixSessionId = fixSessionId;
+    systemMessageRouter.high(`[CI] Fix session ready: ${FIX_SESSION_CHORD_LABEL} opens it (or /session resume ${fixSessionId}).`);
+    render();
   };
-  const onFixSessionStarted = buildFixSessionAffordance({
-    notify: (message) => {
-      systemMessageRouter.high(message);
-      render();
-    },
-    arm: (fixSessionId) => {
-      fixSessionAttachArmed = fixSessionId;
-    },
-  });
-  commandContext.armFixSessionAttach = onFixSessionStarted;
   type LocalCard = { readonly request: Parameters<typeof buildPendingPermissionExtras>[0]; readonly resolve: Parameters<typeof buildPendingPermissionExtras>[1]; readonly queuedAt: number };
   const localCards = createApprovalCardQueue<LocalCard>({
     getPending: () => pendingPermission,
@@ -560,6 +555,7 @@ async function main() {
     if (shouldSendAfterCapture(capture, Boolean(content))) {
       // A fresh prompt supersedes provider recovery for the previous submission.
       streamResult.clearFailoverVisited();
+      actionOffers.retry = null;
       const epoch = ++inputEpoch;
       submissionStatus = null;
       const inputOptions = options.spokenOutput ? createSpokenTurnInputOptions() : undefined;
@@ -984,7 +980,7 @@ async function main() {
       contextWindow: knownContextWindow,
       contextStatusHint,
       submissionStatus,
-      retryHint: retryAffordanceHint(retryAffordance),
+      retryHint: actionHint(actionOffers),
       scriptableStatusLine: scriptableStatusline.current(),
       // behavior.autoCompactThreshold is stored as a percent integer (e.g. 80);
       // the bar expects a fraction [0..1]. Clamp to [0,1] to guard nonsense values.
@@ -1267,12 +1263,6 @@ async function main() {
   // Stable turn context for failover retry, set in submitInput, read by retryTurn.
   let retryCtx: { count: number; text: string; content?: ContentPart[]; opts?: Parameters<typeof orchestrator.handleUserInput>[2] } | null =
     null;
-  // One-key retry affordance, active right after a user-visible TURN_ERROR: 'r' re-submits on the
-  // current provider, 'm' opens the model picker, any other character clears it and routes normally.
-  // Surfaced as a transient FOOTER hint (see retryAffordanceHint below), not a transcript message.
-  // Time-bounded: onExpire repaints once the 60s disarm timer fires, so a stray keypress hours
-  // later can never trigger a real retry, see retry-affordance.ts.
-  const retryAffordance = createRetryAffordanceState({ onExpire: render });
   const retryTurn = (notice?: string, isCurrent: () => boolean = () => true, recoverySignal?: AbortSignal): boolean => {
     if (!retryCtx) return false; // nothing to roll back to; the caller narrates instead
     const { count, text, content: rContent, opts: rOpts } = retryCtx;
@@ -1319,8 +1309,8 @@ async function main() {
     isApprovalPending: () => pendingPermission !== null,
   });
   unsubs.push(...streamResult.unsubs);
-  // Activate one-key retry affordance when a user-visible error surfaces.
-  wireRetryAffordanceOnError(streamResult.onErrorSurfaced, retryAffordance, () => retryCtx !== null, render);
+  // Offer Alt+R when a user-visible error surfaces and the turn can be sent again.
+  wireRetryOfferOnError(streamResult.onErrorSurfaced, actionOffers, () => retryCtx !== null, render);
 
   // Crash/termination handlers register BEFORE raw mode so a throw during setup or the initial
   // render still restores the terminal; 'exit' is the final safety net.
@@ -1338,7 +1328,7 @@ async function main() {
     enter: () => lifecycle.enterTerminal(),
   });
   // forced dark/light applies before first paint; auto (TTY only) repaints once if the OSC 11 probe says light. probePalette adds OSC 10 + OSC 4;0..15
-  // and retries until the terminal answers (terminal-palette-reader.ts); the `system` theme re-themes when it arrives. filterInput strips replies from stdin.
+  // and retries until the terminal answers (the shared terminal-palette reader); the `system` theme re-themes when it arrives. filterInput strips replies from stdin.
   registerThemeRefresh(() => conversation.clearLineCache()); // theme/mode change: cached transcript lines re-render in the new colours
   const themeProbe = installBackgroundThemeProbe({
     configManager,
@@ -1394,32 +1384,21 @@ async function main() {
       pendingPermission,
       render,
       abortTurn: () => orchestrator.abort(),
+      // A card that opens over a draft leaves the keys with the composer until Tab.
+      composerEmpty: input.prompt.length === 0,
     });
     pendingPermission = blocking.pendingPermission;
     localCards.next();
     if (blocking.handled) {
       return;
     }
-    // One-key retry affordance: armed after a user-visible TURN_ERROR; any key other than r/m dismisses it and routes normally.
-    if (retryAffordance.armed) {
-      disarmRetryAffordance(retryAffordance);
-      if (
-        handleErrorAffordanceKey(data, {
-          retryArmed: retryCtx !== null,
-          retry: retryTurn,
-          openModelPicker: () => commandContext.openModelPicker?.(),
-          render,
-        })
-      )
-        return;
-      render(); // disarm must repaint immediately so the footer hint clears even when the key fell through
-    }
-    // One-key jump to a spawned CI fix-session: 'j' attaches, any other key dismisses and routes normally.
-    if (fixSessionAttachArmed !== null) {
-      const armedFixSessionId = fixSessionAttachArmed;
-      fixSessionAttachArmed = null;
-      if (handleFixSessionAttachKey(data, { armedFixSessionId, attach: attachToFixSession, render })) return;
-    }
+    // Alt+R retries a failed turn, Alt+J opens a started fix session; plain
+    // letters always go to the composer or the open view.
+    if (handleShellActionChord(data, actionOffers, {
+      retry: () => { retryTurn(); },
+      openSession: (sessionId) => { void commandContext.executeCommand?.('session', ['resume', sessionId]); },
+      render,
+    })) return;
 
     input.feed(data);
   };

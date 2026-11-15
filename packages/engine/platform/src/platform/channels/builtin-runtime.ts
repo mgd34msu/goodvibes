@@ -428,6 +428,7 @@ export class BuiltinChannelRuntime {
   registerPlugins(): void {
     registerBuiltinChannelPlugins({
       deps: this.deps,
+      telegramBotId: () => this.telegramIngress?.servingBotId ?? null,
       observeRuntime: (surface) => this.observeSurfaceRuntime(surface),
       buildAccount: (surface) => this.buildAccount(surface),
       resolveAccount: (surface, accountId) => this.resolveAccount(surface, accountId),

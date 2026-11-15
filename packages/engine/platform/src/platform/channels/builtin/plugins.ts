@@ -36,6 +36,8 @@ import type { BuiltinChannelRuntimeDeps, ManagedSurface } from './shared.js';
 
 interface BuiltinPluginRegistrationContext {
   readonly deps: BuiltinChannelRuntimeDeps;
+  /** The numeric id of the Telegram bot this node's ingress started for, or null when it has none. */
+  readonly telegramBotId?: (() => string | null) | undefined;
   readonly buildAccount: (surface: ChannelSurface) => Promise<ChannelAccountRecord>;
   readonly resolveAccount: (surface: ChannelSurface, accountId: string) => Promise<ChannelAccountRecord | null>;
   readonly listCapabilities: (surface: ChannelSurface) => Promise<ChannelCapabilityDescriptor[]>;
@@ -259,7 +261,10 @@ export function registerBuiltinChannelPlugins(context: BuiltinPluginRegistration
   const telegramSourceAccounts = context.deps.telegramSourceAccounts;
   const authorizeTelegramWebhook = telegramSourceAccounts?.authorizeWebhook?.bind(telegramSourceAccounts);
   registerRouterBackedPlugin(context, 'telegram', 'Telegram', ['ingress', 'egress', 'threaded_reply', 'interactive_actions', 'account_lifecycle', 'target_resolution', 'agent_tools'], '/webhook/telegram',
-    (req, adapterContext) => handleTelegramSurfaceWebhook(req, adapterContext, { authorizeWebhook: authorizeTelegramWebhook }));
+    (req, adapterContext) => handleTelegramSurfaceWebhook(req, adapterContext, {
+      authorizeWebhook: authorizeTelegramWebhook,
+      botId: context.telegramBotId?.() ?? undefined,
+    }));
   registerRouterBackedPlugin(context, 'homeassistant', 'Home Assistant', ['ingress', 'egress', 'threaded_reply', 'interactive_actions', 'session_binding', 'account_lifecycle', 'target_resolution', 'agent_tools'], '/webhook/homeassistant', handleHomeAssistantSurfaceWebhook);
   registerRouterBackedPlugin(context, 'google-chat', 'Google Chat', ['ingress', 'egress', 'threaded_reply', 'interactive_actions', 'account_lifecycle', 'target_resolution', 'agent_tools'], '/webhook/google-chat', handleGoogleChatSurfaceWebhook);
   registerRouterBackedPlugin(context, 'signal', 'Signal', ['ingress', 'egress', 'account_lifecycle', 'target_resolution', 'agent_tools'], '/webhook/signal', handleSignalSurfaceWebhook);

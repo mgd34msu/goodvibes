@@ -270,6 +270,16 @@ export class TelegramIngressSupervisor {
     return token !== (this.startedToken ?? '');
   }
 
+  /**
+   * The numeric id of the bot the latest start() resolved a token for, read
+   * from the token itself, or null when no usable token was resolved. Known
+   * before getMe answers, and whether or not it ever does.
+   */
+  get servingBotId(): string | null {
+    const id = this.startedToken?.split(':')[0] ?? '';
+    return /^[1-9]\d*$/.test(id) ? id : null;
+  }
+
   /** The resolved bot identity, or null when getMe has not succeeded yet. */
   get identity(): TelegramBotIdentity | null {
     return this.botIdentity;
@@ -1108,6 +1118,7 @@ export class TelegramIngressSupervisor {
       try {
         const response = await processTelegramUpdate(update, context, {
           sendMessage: (input) => api.sendMessage(input),
+          botId: api.botId,
           ...(sourceAccount ? { acquireSourceAccount: sourceAccount.acquire } : {}),
         });
         const outcome = ingressOutcome(response);
@@ -1151,9 +1162,9 @@ export class TelegramIngressSupervisor {
    * username, it means nobody typed one in. Telegram's getMe returns the
    * handle, id and display name for any valid token, so the daemon asks instead
    * of degrading: without a handle, @mentions in groups are not recognised,
-   * `/goodvibes@thebot` is not stripped correctly, `/start@someotherbot` in a
-   * shared group is answered as if it were ours, and route bindings from two
-   * different bots collide on the literal surfaceId 'telegram'.
+   * `/goodvibes@thebot` is not stripped correctly, and `/start@someotherbot`
+   * in a shared group is answered as if it were ours. (Route bindings do not
+   * depend on the handle: they are keyed on the bot id from the token.)
    *
    * Rules:
    * - An explicitly configured username WINS for the bot it was set for. A

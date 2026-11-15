@@ -219,9 +219,8 @@ export class TelegramBotApi {
    * identifies the bot and Telegram hands back the handle for free. Making the
    * user type it, and degrading silently when they do not, is the product
    * declining to answer a question it can answer itself. An empty handle breaks
-   * @mention matching in groups, mis-strips `/goodvibes@thebot`, answers
-   * `/start@someotherbot` as if addressed to us, and collapses every bot's route
-   * bindings onto the literal surfaceId 'telegram'.
+   * @mention matching in groups, mis-strips `/goodvibes@thebot`, and answers
+   * `/start@someotherbot` as if addressed to us.
    */
   async getMe(): Promise<TelegramBotIdentity> {
     const result = readRecord(await this.call('getMe', {}));

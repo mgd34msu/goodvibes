@@ -456,25 +456,6 @@ describe('an inactive supervisor comes back when the cause is fixed', () => {
   });
 });
 
-describe('notices switched off clear a latched notice refusal', () => {
-  test('mode none does not keep reporting a refusal the owner opted out of', async () => {
-    const noticeHealth = createInboundNoticeHealth({ log: () => undefined });
-    noticeHealth.refused({ reason: 'no-route-binding', detail: 'No route.', fix: 'Connect one.', at: T0.toISOString() });
-    const rig = buildRig({ sources: factoryFor(new RecordingSource(HEALTHY, { kind: 'push' })), noticeHealth });
-    await rig.supervisor.start();
-    expect(rig.supervisor.health().state).toBe('degraded');
-
-    rig.config['surfaces.email.inbound.notice.mode'] = 'none';
-    expect(rig.supervisor.health().state).toBe('healthy');
-    expect(rig.supervisor.status.reason).not.toContain('NOT being announced');
-    // Dropped, not hidden: switching notices back on does not revive it.
-    expect(noticeHealth.get()).toBeNull();
-    rig.config['surfaces.email.inbound.notice.mode'] = 'all';
-    expect(rig.supervisor.health().state).toBe('healthy');
-    await rig.supervisor.stop();
-  });
-});
-
 // ---------------------------------------------------------------------------
 // Boot rehydration (§9, §9.2)
 // ---------------------------------------------------------------------------

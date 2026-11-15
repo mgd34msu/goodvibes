@@ -33,6 +33,13 @@ export interface UpsertRouteBindingInput {
   readonly kind: AutomationRouteBinding['kind'];
   readonly surfaceKind: AutomationRouteBinding['surfaceKind'];
   readonly surfaceId: string;
+  /**
+   * Surface ids this same conversation may have been bound under before. When
+   * nothing is bound under `surfaceId`, a binding under one of these is moved
+   * to `surfaceId` and keeps its id and session, instead of a second binding
+   * being created for the conversation.
+   */
+  readonly formerSurfaceIds?: readonly string[] | undefined;
   readonly externalId: string;
   readonly sessionPolicy?: AutomationRouteBinding['sessionPolicy'] | undefined;
   readonly threadPolicy?: AutomationRouteBinding['threadPolicy'] | undefined;
@@ -339,7 +346,16 @@ export class RouteBindingManager {
     this.requireEnabled('upsert route bindings');
     await this.start();
     const now = Date.now();
-    const knownId = input.id ?? this.byNaturalKey.get(routeNaturalKey(input));
+    let knownId = input.id ?? this.byNaturalKey.get(routeNaturalKey(input));
+    if (!knownId && input.formerSurfaceIds) {
+      // Only a conversation with no binding under its current key gets here, so
+      // an established conversation pays nothing for this.
+      for (const former of input.formerSurfaceIds) {
+        if (former === input.surfaceId) continue;
+        knownId = this.byNaturalKey.get(routeNaturalKey({ ...input, surfaceId: former }));
+        if (knownId) break;
+      }
+    }
     const previous = knownId ? this.bindings.get(knownId) : undefined;
     const binding: AutomationRouteBinding = {
       id: input.id ?? previous?.id ?? `route-${randomUUID()}`,
@@ -368,7 +384,8 @@ export class RouteBindingManager {
     // and per-message values moved. Those stay in memory (written within a
     // minute); the file is written only when something durable changed.
     const changedFields = previous ? changedBindingFields(previous, binding) : [];
-    if (previous && changedFields.length === 0 && previous.surfaceId === binding.surfaceId && previous.kind === binding.kind) {
+    if (previous && previous.surfaceId !== binding.surfaceId) changedFields.push('surfaceId');
+    if (previous && changedFields.length === 0 && previous.kind === binding.kind) {
       this.place(binding);
       this.markDirty();
     } else {

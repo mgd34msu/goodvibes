@@ -17,6 +17,12 @@ import type { TelegramReceiveScope } from '../../channels/telegram/receive-progr
  */
 export interface TelegramUpdateDeps {
   readonly signal?: AbortSignal | undefined;
+  /**
+   * The numeric id of the bot these updates belong to (the part of the token
+   * before the colon). Route bindings are keyed on it, so it is passed by
+   * whoever holds the token rather than looked up per update.
+   */
+  readonly botId?: string | undefined;
   readonly acquireSourceAccount?: (() => Promise<TelegramSourceAccountHandle | null>) | undefined;
   /** Payment-only ingress proof; does not opt HTTP into delegated work intake. */
   readonly acquirePaymentSourceAccount?: (() => Promise<TelegramSourceAccountHandle | null>) | undefined;
@@ -59,6 +65,19 @@ function escapeRegExp(value: string): string {
 
 function normalizeBotUsername(value?: string): string {
   return value ? value.replace(/^@/, '').trim() : '';
+}
+
+/**
+ * The surface id a Telegram conversation is bound under.
+ *
+ * The bot's numeric id, which the token always carries. Not the bot's handle:
+ * that is discovered later (or typed in, or changed), and a key that moves
+ * when it becomes known gives every existing chat a second binding and drops
+ * its session link. A caller that holds no token binds under the fixed
+ * 'telegram'.
+ */
+function telegramBindingSurfaceId(botId: string | undefined): string {
+  return botId !== undefined && /^[1-9]\d*$/.test(botId) ? botId : 'telegram';
 }
 
 function extractTelegramTask(message: Record<string, unknown>, botUsername?: string): string {
@@ -140,7 +159,7 @@ export async function handleTelegramSurfaceWebhook(
   // Only the acknowledged original registration lends payment proof. Neither
   // the configured shared secret nor an accidental polling capability does so.
   return processTelegramUpdate(payload, context, {
-    sendMessage: deps.sendMessage, signal: req.signal,
+    sendMessage: deps.sendMessage, signal: req.signal, botId: deps.botId,
     ...(registration ? { acquirePaymentSourceAccount: registration.acquire.bind(registration) } : {}),
   });
 }
@@ -248,7 +267,10 @@ export async function processTelegramUpdate(
   const binding = await context.routeBindings.upsertBinding({
     kind: threadId ? 'thread' : 'channel',
     surfaceKind: 'telegram',
-    surfaceId: botUsername || 'telegram',
+    surfaceId: telegramBindingSurfaceId(deps.botId),
+    // Bindings made before the bot id was the key sit under the handle, or
+    // under 'telegram' when no handle was known yet; they are moved, not doubled.
+    formerSurfaceIds: [...new Set([botUsername, botHandle, 'telegram'].filter((id): id is string => Boolean(id)))],
     externalId: threadId ?? chatId,
     channelId: chatId,
     threadId,

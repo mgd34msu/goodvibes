@@ -175,7 +175,7 @@ export interface InboundMailSupervisorDeps {
    * behaves exactly as before. The composition root passes the same instance it
    * gives the intake.
    */
-  readonly noticeHealth?: (Pick<InboundNoticeHealth, 'get'> & Partial<Pick<InboundNoticeHealth, 'clear' | 'refused'>>) | undefined;
+  readonly noticeHealth?: (Pick<InboundNoticeHealth, 'get'> & Partial<Pick<InboundNoticeHealth, 'refused'>>) | undefined;
   readonly observer?: InboundMailObserver | undefined;
   readonly now?: (() => number) | undefined;
   /**
@@ -288,13 +288,10 @@ export class InboundMailSupervisor {
   private noticeRefusal(): InboundNoticeRefusalState | null {
     // An owner who switched notices off is not being refused anything, and a
     // refusal latched before the switch would otherwise stay `degraded` until
-    // a notice was delivered, which with notices off is never.
-    if (this.deps.config.get('surfaces.email.inbound.notice.mode') === 'none') {
-      // Dropped, not merely hidden: switching notices back on must not revive a
-      // refusal from before the switch that no pass has re-observed.
-      this.deps.noticeHealth?.clear?.('notices were switched off');
-      return null;
-    }
+    // a notice was delivered, which with notices off is never. Reading status
+    // changes nothing: the intake drops the latch when the next message
+    // arrives with notices off.
+    if (this.deps.config.get('surfaces.email.inbound.notice.mode') === 'none') return null;
     return this.deps.noticeHealth?.get() ?? null;
   }
 

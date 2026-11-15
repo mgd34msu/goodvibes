@@ -194,6 +194,14 @@ export interface ConnectedHostClientOptions {
   readonly fetchImpl?: typeof fetch | undefined;
   readonly readDeadlineMs?: number | undefined;
   readonly writeDeadlineMs?: number | undefined;
+  /**
+   * Check each answer against the method's output schema (the default). A
+   * result-value face whose callers read the answer field by field themselves
+   * (the daemon-backed stores, operator actions) turns this off: the check then
+   * costs a schema walk per answer and turns a host that adds or drops one
+   * field into a failed call although the host acted.
+   */
+  readonly validateResponses?: boolean | undefined;
 }
 
 // ── Resolution ────────────────────────────────────────────────────────────
@@ -310,18 +318,18 @@ type FetchLike = typeof fetch;
 const clientCache = new WeakMap<FetchLike, Map<string, OperatorApiClient>>();
 const CLIENT_CACHE_LIMIT = 4;
 
-function clientFor(baseUrl: string, token: string, fetchImpl: FetchLike): OperatorApiClient {
+function clientFor(baseUrl: string, token: string, fetchImpl: FetchLike, validateResponses: boolean): OperatorApiClient {
   let clients = clientCache.get(fetchImpl);
   if (!clients) {
     clients = new Map();
     clientCache.set(fetchImpl, clients);
   }
-  const key = `${baseUrl}\n${token}`;
+  const key = `${baseUrl}\n${token}\n${validateResponses ? 'validated' : 'raw'}`;
   let client = clients.get(key);
   if (!client) {
     // A redirect would carry the credential to wherever the host points; refuse it.
     const noRedirect = (input: string | URL | Request, init?: RequestInit) => fetchImpl(input, { ...init, redirect: 'error' });
-    client = createOperatorApiClient({ baseUrl, authToken: token, fetchImpl: noRedirect, retry: { maxAttempts: 1 } });
+    client = createOperatorApiClient({ baseUrl, authToken: token, fetchImpl: noRedirect, retry: { maxAttempts: 1 }, validateResponses });
     clients.set(key, client);
     if (clients.size > CLIENT_CACHE_LIMIT) {
       const oldest = clients.keys().next().value;
@@ -609,7 +617,7 @@ export function createConnectedHost(
     };
     let client: OperatorApiClient;
     try {
-      client = clientFor(resolved.baseUrl, resolved.token, fetchImpl);
+      client = clientFor(resolved.baseUrl, resolved.token, fetchImpl, options.validateResponses !== false);
     } catch (error) {
       return failWith(error, facts);
     }

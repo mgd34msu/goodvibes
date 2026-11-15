@@ -17,7 +17,6 @@ import {
   removeChannelProfileRouteEverywhere,
   syncChannelProfileRoutes,
 } from '../../agent/channel-profile-routing.ts';
-import { readChannelRoutingSyncReceipts } from '../../agent/channel-routing-sync-receipts.ts';
 import type { DaemonOperatorInvoke } from '../../agent/daemon-operator-client.ts';
 
 let root: string;
@@ -109,7 +108,7 @@ describe('a daemon call in flight does not undo other writers', () => {
     expect(calls.some((c) => c.methodId === CHANNEL_ROUTING_DELETE_METHOD && c.input.assignmentId === 'daemon-GONE')).toBe(true);
   });
 
-  test('a withdrawal the daemon refuses or fails is receipted and reported, not dropped', async () => {
+  test('a withdrawal the daemon refuses or fails is reported, not dropped', async () => {
     for (const failure of ['refused', 'threw'] as const) {
       const gone = await assignChannelToProfile(shellPaths, { surfaceKind: 'slack', routeId: `GONE-${failure}`, profileId: 'work' }, { invoke: down });
       const invoke: DaemonOperatorInvoke = async (methodId, input = {}) => {
@@ -124,8 +123,6 @@ describe('a daemon call in flight does not undo other writers', () => {
       const report = await syncChannelProfileRoutes(shellPaths, invoke);
 
       expect(report.withdrawFailed).toEqual([{ routeId: gone.route.id, assignmentId: `daemon-GONE-${failure}`, error: failure === 'threw' ? 'socket closed' : 'daemon busy' }]);
-      const receipt = readChannelRoutingSyncReceipts(shellPaths).receipts.find((r) => r.routeId === gone.route.id && r.outcome === 'withdraw_failed');
-      expect(receipt).toMatchObject({ outcome: 'withdraw_failed', daemonAssignmentId: `daemon-GONE-${failure}` });
     }
   });
 

@@ -11,7 +11,6 @@ import { createShellPathService } from '@/runtime/index.ts';
 import { AgentCalendarRegistry } from '../../agent/calendar-registry.ts';
 import { AgentDocumentRegistry, documentStorePath } from '../../agent/document-registry.ts';
 import { agentChannelDeliveryReceiptPath, readAgentChannelDeliveryReceipts, recordAgentChannelDeliveryReceipt } from '../../agent/channel-delivery-receipts.ts';
-import { appendChannelRoutingSyncReceipts, channelRoutingSyncReceiptPath, readChannelRoutingSyncReceipts } from '../../agent/channel-routing-sync-receipts.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
 const SRC_ROOT = join(import.meta.dir, '..', '..');
@@ -21,88 +20,87 @@ function unreadableCopies(path: string): string[] {
 }
 
 describe('a write does not erase an entry the parser rejected', () => {
-  test('a delivery receipt file with one damaged entry is kept beside the file before the new receipt is written', () => {
+  const SEND: Parameters<typeof recordAgentChannelDeliveryReceipt>[1] = {
+    source: 'command',
+    deliveryInput: { message: 'hello', channel: 'slack:ops' },
+    result: { message: 'hello', title: 'Hello', target: { kind: 'surface', surfaceKind: 'slack', routeId: 'ops' }, strategyCount: 1 },
+  };
+
+  test('a delivery receipt this version cannot read stays in the file, unchanged, beside the new receipt', () => {
     const root = makeProjectTempDir('gv-loss-receipts');
     try {
       const paths = createShellPathService({ workingDirectory: root, homeDirectory: root });
       const path = agentChannelDeliveryReceiptPath(paths);
       mkdirSync(dirname(path), { recursive: true });
-      const damaged = `${JSON.stringify({ version: 1, receipts: [{ version: 1, id: 'half-written' }] })}\n`;
-      writeFileSync(path, damaged);
+      const damaged = { version: 1, id: 'half-written' };
+      writeFileSync(path, `${JSON.stringify({ version: 1, receipts: [damaged] })}\n`);
 
-      recordAgentChannelDeliveryReceipt(paths, {
-        source: 'command',
-        deliveryInput: { message: 'hello', channel: 'slack:ops' },
-        result: { message: 'hello', title: 'Hello', target: { kind: 'surface', surfaceKind: 'slack', routeId: 'ops' }, strategyCount: 1 },
-      });
+      const receipt = recordAgentChannelDeliveryReceipt(paths, SEND);
 
       expect(readAgentChannelDeliveryReceipts(paths).receipts).toHaveLength(1);
-      const copies = unreadableCopies(path);
-      expect(copies).toHaveLength(1);
-      expect(readFileSync(join(dirname(path), copies[0]!), 'utf8')).toBe(damaged);
+      expect(JSON.parse(readFileSync(path, 'utf8')).receipts).toEqual([JSON.parse(JSON.stringify({ ...receipt, storeNote: undefined })), damaged]);
+      expect(receipt.storeNote).toContain('left as found');
+      expect(unreadableCopies(path)).toEqual([]);
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 
-  test('a routing sync receipt file that is not valid JSON is kept before it is replaced', () => {
-    const root = makeProjectTempDir('gv-loss-sync-receipts');
+  test('a store file that is not valid JSON is copied aside before it is replaced', () => {
+    const root = makeProjectTempDir('gv-loss-not-json');
     try {
       const paths = createShellPathService({ workingDirectory: root, homeDirectory: root });
-      const path = channelRoutingSyncReceiptPath(paths);
+      const path = agentChannelDeliveryReceiptPath(paths);
       mkdirSync(dirname(path), { recursive: true });
-      writeFileSync(path, '{"version":1,"receipts":[{"id":"crs-1",');
+      writeFileSync(path, '{"version":1,"receipts":[{"id":"r-1",');
 
-      appendChannelRoutingSyncReceipts(paths, [{
-        version: 1, id: 'crs-2', createdAt: '2026-01-01T00:00:00.000Z', routeId: 'r', surfaceKind: 'slack', profileId: 'p',
-        previousSyncState: 'pending', outcome: 'synced', methodId: 'channels.routing.assign',
-      }]);
+      const receipt = recordAgentChannelDeliveryReceipt(paths, SEND);
 
-      expect(readChannelRoutingSyncReceipts(paths).receipts).toHaveLength(1);
-      expect(readFileSync(join(dirname(path), unreadableCopies(path)[0]!), 'utf8')).toContain('crs-1');
+      expect(readAgentChannelDeliveryReceipts(paths).receipts).toHaveLength(1);
+      expect(readFileSync(join(dirname(path), unreadableCopies(path)[0]!), 'utf8')).toContain('r-1');
+      expect(receipt.storeNote).toContain(unreadableCopies(path)[0]!);
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 
-  test('a clean receipt file leaves no copy behind', () => {
-    const root = makeProjectTempDir('gv-loss-clean');
-    try {
-      const paths = createShellPathService({ workingDirectory: root, homeDirectory: root });
-      const receipt = {
-        version: 1 as const, id: 'crs-1', createdAt: '2026-01-01T00:00:00.000Z', routeId: 'r', surfaceKind: 'slack', profileId: 'p',
-        previousSyncState: 'pending', outcome: 'synced' as const, methodId: 'channels.routing.assign',
-      };
-      appendChannelRoutingSyncReceipts(paths, [receipt]);
-      appendChannelRoutingSyncReceipts(paths, [{ ...receipt, id: 'crs-2' }]);
-
-      expect(unreadableCopies(channelRoutingSyncReceiptPath(paths))).toEqual([]);
-    } finally { rmSync(root, { recursive: true, force: true }); }
-  });
-
-  test('a document the parser rejects is kept in a copy when another document is written', () => {
+  test('a document the parser rejects stays in the file when another document is written', () => {
     const root = makeProjectTempDir('gv-loss-docs');
     try {
       const paths = createShellPathService({ workingDirectory: root, homeDirectory: root });
       const registry = AgentDocumentRegistry.fromShellPaths(paths);
       const path = documentStorePath(paths);
       mkdirSync(dirname(path), { recursive: true });
-      const original = `${JSON.stringify({ version: 1, documents: [{ id: 'empty-body', title: 'Empty body', body: '' }] })}\n`;
-      writeFileSync(path, original);
+      const rejected = { id: 'empty-body', title: 'Empty body', body: '' };
+      writeFileSync(path, `${JSON.stringify({ version: 1, documents: [rejected] })}\n`);
 
       registry.create({ title: 'Fresh', body: 'Some text.' });
 
       expect(registry.list().map((d) => d.id)).toEqual(['fresh']);
-      expect(readFileSync(join(dirname(path), unreadableCopies(path)[0]!), 'utf8')).toBe(original);
+      expect(JSON.parse(readFileSync(path, 'utf8')).documents.at(-1)).toEqual(rejected);
+      expect(registry.lastWriteReport()?.keptAsFound).toBe(1);
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 
-  test('a calendar entry the parser rejects is kept in a copy when another event is written', () => {
+  test('a calendar entry the parser rejects stays in the file when another event is written', () => {
     const root = makeProjectTempDir('gv-loss-cal');
     try {
       const path = join(root, 'calendar.json');
-      const original = `${JSON.stringify({ version: 1, events: [{ id: 'no-title', start: '2026-01-01' }] })}\n`;
-      writeFileSync(path, original);
+      const rejected = { id: 'no-title', start: '2026-01-01' };
+      writeFileSync(path, `${JSON.stringify({ version: 1, events: [rejected] })}\n`);
 
       new AgentCalendarRegistry(path).create({ title: 'Dentist', start: '2026-02-01' });
 
-      expect(readFileSync(join(root, unreadableCopies(path)[0]!), 'utf8')).toBe(original);
+      expect(JSON.parse(readFileSync(path, 'utf8')).events).toContainEqual(rejected);
+      expect(unreadableCopies(path)).toEqual([]);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  test('a store a newer version wrote is not changed', () => {
+    const root = makeProjectTempDir('gv-loss-newer');
+    try {
+      const path = join(root, 'calendar.json');
+      const newer = `${JSON.stringify({ version: 2, events: [] })}\n`;
+      writeFileSync(path, newer);
+
+      expect(() => new AgentCalendarRegistry(path).create({ title: 'Dentist', start: '2026-02-01' })).toThrow('newer GoodVibes');
+      expect(readFileSync(path, 'utf8')).toBe(newer);
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 });

@@ -14,10 +14,9 @@
  * - Otherwise the call goes to the connected host over the operator gateway,
  *   the same path `profile`, `ci`, `principals` and `channel-profiles` use.
  *
- * Written as a deliberate copy of owner-profile-gateway.ts rather than a shared
- * generic: the two families differ in which verbs exist and what a failure
- * means, and the one thing they must share, the route decision, is four lines
- * that read better twice than they do behind an abstraction.
+ * The route decision, the checks and the connected-host call are shared with
+ * owner-profile-gateway.ts (`invokeFamilyGatewayMethod` in
+ * operator-gateway-call.ts); this module names the verbs.
  *
  * The catalog is asked with `hasHandler`, not `get`: a descriptor with no
  * handler answers "not invokable", and silently degrading to that would look
@@ -33,23 +32,17 @@
  * daemon, most dangerously the rule that a nudge never carries the date.
  */
 
-import { captureOccasionsGatewayTarget, type GatewayMethodCatalog } from '@goodvibes-jev/engine/platform/platform/control-plane';
-import { assertCurrentProfileDelegation, bindProfileMutationOptionsToInvocation } from '@goodvibes-jev/engine/platform/platform/owner-profile';
+import { captureOccasionsGatewayTarget } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import { dirname } from 'node:path';
 import type { OccasionMutationOptions } from '@goodvibes-jev/engine/platform/platform/occasions';
-import type { GatewayMethodInvocation } from '@goodvibes-jev/engine/platform/platform/control-plane';
-import { captureCatalogMethods } from '../tools/agent-harness-catalog-ranking.ts';
-import { captureOperatorConnection } from './operator-connection-owner.ts';
 import type { OperatorMethodId, OperatorMethodInput } from '@goodvibes-jev/engine/platform/contracts';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { OCCASIONS_METHOD_IDS, type OccasionsMethodId } from '../tools/agent-occasions-types.ts';
 import {
-  formatOperatorGatewayFailure,
-  invokeOperatorGatewayMethod,
+  captureFamilyGatewayRoute,
+  invokeFamilyGatewayMethod,
+  operatorRouteLabel,
+  type FamilyGatewayOptions,
 } from './operator-gateway-call.ts';
-import {
-  type AgentConnectedHostConfigReader,
-} from './routine-schedule-promotion.ts';
 
 export interface OccasionsGatewayResult {
   readonly ok: boolean;
@@ -77,12 +70,7 @@ export type OccasionsGatewayInvoke = <TMethodId extends OccasionsMethodId>(
   options?: OccasionMutationOptions,
 ) => Promise<OccasionsGatewayResult>;
 
-export interface OccasionsGatewayOptions {
-  /** This process's own catalog, when it carries the occasions handlers. */
-  readonly gatewayMethods?: GatewayMethodCatalog | undefined;
-  readonly configManager: AgentConnectedHostConfigReader;
-  readonly homeDirectory: string;
-}
+export type OccasionsGatewayOptions = FamilyGatewayOptions;
 
 /**
  * The sixteen ids are in the generated operator contract, so `OccasionsMethodId`
@@ -92,93 +80,25 @@ export interface OccasionsGatewayOptions {
 const _occasionsIdsAreOperatorIds: readonly OperatorMethodId[] = Object.values(OCCASIONS_METHOD_IDS);
 void _occasionsIdsAreOperatorIds;
 
-/** Informational labels only; the platform resolves the real binding from the contract. */
-const OCCASIONS_ROUTES: Readonly<Record<OccasionsMethodId, string>> = {
-  'occasions.list': 'GET /api/occasions',
-  'occasions.pending': 'GET /api/occasions/pending',
-  'occasions.state': 'GET /api/occasions/state',
-  'occasions.sweep': 'POST /api/occasions/sweep',
-  'occasions.propose': 'POST /api/occasions/propose',
-  'occasions.confirm': 'POST /api/occasions/confirm',
-  'occasions.remove': 'POST /api/occasions/remove',
-  'occasions.answer': 'POST /api/occasions/answer',
-  'occasions.interview.get': 'GET /api/occasions/interview',
-  'occasions.interview.answer': 'POST /api/occasions/interview/answer',
-  'occasions.interview.record': 'POST /api/occasions/interview/record',
-  'occasions.gifts': 'GET /api/occasions/gifts',
-  'occasions.conflict.resolve': 'POST /api/occasions/conflict/resolve',
-  'occasions.plans.list': 'GET /api/occasions/plans',
-  'occasions.plans.propose': 'POST /api/occasions/plans/propose',
-  'occasions.plans.confirm': 'POST /api/occasions/plans/confirm',
-};
-
+/** The contract's route for an occasions verb, for messages and help. */
 export function occasionsRouteLabel(methodId: OccasionsMethodId): string {
-  return OCCASIONS_ROUTES[methodId];
+  return operatorRouteLabel(methodId);
 }
 
 export function createOccasionsGatewayInvoke(
   options: OccasionsGatewayOptions,
 ): OccasionsGatewayInvoke {
-  const invoke: OccasionsGatewayInvoke = async (methodId, body, lifetime = {}) => {
-    const scope = captureOccasionsGatewayCurrent(invoke, methodId);
-    const assertCurrent = () => { lifetime.signal?.throwIfAborted(); lifetime.assertCurrent?.();
-      if (lifetime.delegation) assertCurrentProfileDelegation(lifetime.delegation); scope(); };
-    assertCurrent();
-    const catalog = options.gatewayMethods;
-    if (catalog?.hasHandler(methodId)) {
-      try {
-        const invocation: GatewayMethodInvocation = {
-          body,
-          signal: lifetime.signal,
-          isAuthorized: () => { assertCurrent(); return true; },
-          context: { clientKind: 'goodvibes-agent', principalKind: 'service' },
-        };
-        bindProfileMutationOptionsToInvocation(lifetime, invocation);
-        const data = await catalog.invoke(methodId, invocation);
-        assertCurrent(); return { ok: true, data, route: 'in-process' };
-      } catch (error) {
-        // An abort or a changed owner is a cancellation, not a handler failure: throw it.
-        assertCurrent();
-        return { ok: false, data: null, error: summarizeError(error), route: 'in-process' };
-      }
-    }
-
-    const connection = captureOperatorConnection(options, options.configManager, assertCurrent);
-    assertCurrent();
-    const remoteBody = lifetime.delegation ? { ...body, admission: 'autonomous' } : body;
-    const result = await invokeOperatorGatewayMethod(
-      connection,
-      methodId,
-      occasionsRouteLabel(methodId),
-      remoteBody,
-      { signal: lifetime.signal, assertCurrent },
-    );
-    assertCurrent();
-    if (!result.ok) {
-      return { ok: false, data: null, error: formatOperatorGatewayFailure(result), route: 'connected-host' };
-    }
-    return { ok: true, data: result.data, route: 'connected-host' };
-  };
+  const invoke: OccasionsGatewayInvoke = (methodId, body, lifetime = {}) =>
+    invokeFamilyGatewayMethod(options, methodId, body, lifetime, 'service');
   gatewayOwners.set(invoke, options);
   return invoke;
 }
 
 const gatewayOwners = new WeakMap<OccasionsGatewayInvoke, OccasionsGatewayOptions>();
-/** Capture native routing descriptors and private credential identity before admission. */
+
+/** That a prepared occasions call will still take the route (in-process or connected host) it was prepared for. */
 export function captureOccasionsGatewayCurrent(invoke: OccasionsGatewayInvoke, methodId?: OccasionsMethodId): () => void {
-  const options = gatewayOwners.get(invoke);
-  if (!options) return () => {};
-  const optionsCurrent = captureCatalogMethods(options, ['gatewayMethods', 'configManager', 'homeDirectory']);
-  const catalog = options.gatewayMethods, config = options.configManager, home = options.homeDirectory;
-  const catalogCurrent = catalog && captureCatalogMethods(catalog, ['get', 'hasHandler', 'invoke']);
-  const descriptor = methodId && catalog?.get(methodId);
-  const inProcess = methodId !== undefined && catalog?.hasHandler(methodId);
-  const connection = inProcess ? undefined : captureOperatorConnection(options, config, () => {});
-  return () => {
-    optionsCurrent(); catalogCurrent?.(); connection?.assertCurrent();
-    if (options.gatewayMethods !== catalog || options.configManager !== config || options.homeDirectory !== home
-      || (methodId && (catalog?.get(methodId) !== descriptor || catalog?.hasHandler(methodId) !== inProcess))) throw new Error('Occasion gateway owner changed.');
-  };
+  return captureFamilyGatewayRoute(gatewayOwners.get(invoke), methodId, 'occasions');
 }
 
 /** The registrar owns native file selection; caller arguments never supply these paths. */

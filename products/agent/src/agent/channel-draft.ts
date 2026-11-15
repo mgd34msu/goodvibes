@@ -31,9 +31,15 @@
 
 import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import { channelDraftWireReference, createChannelDraftWireReference, historicalChannelDraftWireReference, isNativeDraftWireReference, matchesHistoricalDraftWireReference } from '@goodvibes-jev/engine/platform/platform/channels';
-import { existsSync, readFileSync } from 'node:fs';
 import type { ShellPathService } from '@/runtime/index.ts';
-import { runStoreFileUpdateSync, writeStoreFile } from '@/utils/store-file.ts';
+import {
+  prepareJsonStoreWrite,
+  readJsonStore,
+  runStoreFileUpdateSync,
+  writeStoreFile,
+  type JsonStoreContents,
+  type JsonStoreSpec,
+} from '@/utils/store-file.ts';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { retainChannelStoreSource, type ChannelStoreEffectOptions } from './channel-store-lifetime.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
@@ -140,6 +146,8 @@ export interface ChannelDraftSnapshot {
   readonly exists: boolean;
   readonly drafts: readonly ChannelDraft[];
   readonly parseError?: string;
+  /** Stored drafts this version cannot read; they stay in the file as found. */
+  readonly unreadableEntries?: number;
 }
 
 export interface ChannelDraftSaveResult {
@@ -167,11 +175,6 @@ export interface ChannelDraftQueueResult {
 // ---------------------------------------------------------------------------
 // Internal file model
 // ---------------------------------------------------------------------------
-
-interface ChannelDraftFile {
-  readonly version: 1;
-  readonly drafts: readonly ChannelDraft[];
-}
 
 type ShellPaths = Pick<ShellPathService, 'resolveUserPath'>;
 
@@ -254,48 +257,53 @@ function persistableDraft(draft: ChannelDraft): ChannelDraft {
   return rest;
 }
 
-function parseDraftFile(raw: unknown): ChannelDraftFile {
-  if (!isRecord(raw)) return { version: DRAFT_FILE_VERSION, drafts: [] };
-  const drafts = Array.isArray(raw.drafts)
-    ? raw.drafts.map(parseDraft).filter((d): d is ChannelDraft => d !== null)
-    : [];
-  return { version: DRAFT_FILE_VERSION, drafts };
-}
+const DRAFT_STORE: JsonStoreSpec<ChannelDraft> = {
+  label: 'channel draft store',
+  entriesKey: 'drafts',
+  version: DRAFT_FILE_VERSION,
+  parseEntry: parseDraft,
+};
 
 // ---------------------------------------------------------------------------
 // Read / write helpers
 // ---------------------------------------------------------------------------
 
+/** What each snapshot was read from, so its writer keeps the entries this version could not read. */
+const snapshotSources = new WeakMap<ChannelDraftSnapshot, JsonStoreContents<ChannelDraft>>();
+
 export function readChannelDrafts(shellPaths: ShellPaths): ChannelDraftSnapshot {
   const path = channelDraftFilePath(shellPaths);
-  if (!existsSync(path)) return { path, exists: false, drafts: [] };
-  try {
-    const parsed: unknown = JSON.parse(readFileSync(path, 'utf-8'));
-    if (!isRecord(parsed) || parsed.version !== DRAFT_FILE_VERSION || !Array.isArray(parsed.drafts)) throw new Error('Unsupported draft file');
-    return { path, exists: true, drafts: parseDraftFile(parsed).drafts };
-  } catch (error) {
-    return {
-      path,
-      exists: true,
-      drafts: [],
-      parseError: error instanceof Error ? error.message : String(error),
-    };
-  }
-}
-
-function writableDraftSnapshot(paths: ShellPaths): ChannelDraftSnapshot {
-  const snapshot = readChannelDrafts(paths);
-  if (snapshot.parseError !== undefined) throw new ToolInputProjectionError('held');
+  const contents = readJsonStore(path, DRAFT_STORE);
+  const parseError = contents.unreadable
+    ?? (contents.newerVersion === undefined ? undefined : `written by a newer GoodVibes (file version ${contents.newerVersion})`);
+  const snapshot: ChannelDraftSnapshot = {
+    path,
+    exists: contents.exists,
+    drafts: contents.entries,
+    ...(parseError === undefined ? {} : { parseError }),
+    ...(contents.keptAsFound.length > 0 ? { unreadableEntries: contents.keptAsFound.length } : {}),
+  };
+  snapshotSources.set(snapshot, contents);
   return snapshot;
 }
 
-function writeDrafts(path: string, drafts: readonly ChannelDraft[], assertCurrent?: () => void,
+/** A snapshot to write over. A file a newer build wrote is refused here, before any daemon call is built on it. */
+function writableDraftSnapshot(paths: ShellPaths): ChannelDraftSnapshot {
+  const snapshot = readChannelDrafts(paths);
+  const contents = snapshotSources.get(snapshot);
+  if (contents?.newerVersion !== undefined) {
+    throw new Error(`The channel draft store at ${snapshot.path} was written by a newer GoodVibes (file version ${contents.newerVersion}), so no draft was changed. Update GoodVibes, then retry.`);
+  }
+  return snapshot;
+}
+
+/** Write `drafts` over the file `from` was read from; drafts this version cannot read are written back as found. */
+function writeDrafts(from: ChannelDraftSnapshot, drafts: readonly ChannelDraft[], assertCurrent?: () => void,
   options: ChannelStoreEffectOptions = {}): void {
-  const file: ChannelDraftFile = {
-    version: DRAFT_FILE_VERSION,
-    drafts: drafts.slice(0, DRAFT_LIMIT).map(persistableDraft),
-  };
-  const contents = `${JSON.stringify(file, null, 2)}\n`, prepare = options.preparePublication;
+  const path = from.path;
+  const read = snapshotSources.get(from) ?? readJsonStore(path, DRAFT_STORE);
+  const contents = prepareJsonStoreWrite(read, DRAFT_STORE, { entries: drafts.slice(0, DRAFT_LIMIT).map(persistableDraft) }).text;
+  const prepare = options.preparePublication;
   assertCurrent?.();
   const adoption = prepare?.(path, contents);
   if (prepare && typeof adoption !== 'function') throw new ToolInputProjectionError('held');
@@ -513,7 +521,7 @@ export async function saveDraft(
       ? fresh.drafts.map((d, i) => (i === freshIndex ? merged : d))
       // Prepend new draft (most recent first)
       : [merged, ...fresh.drafts];
-    writeDrafts(path, updatedDrafts, assertCurrent, options);
+    writeDrafts(fresh, updatedDrafts, assertCurrent, options);
     return merged;
   });
   if (webhook.discardKey && webhook.discardKey !== stored.webhookSecretKey) {
@@ -598,7 +606,7 @@ export async function adoptDaemonDraft(
     const fresh = writableDraftSnapshot(shellPaths);
     const index = matchingDraftIndex(fresh.drafts, draftId);
     if (index >= 0) return fresh.drafts[index]!;
-    writeDrafts(path, [adopted, ...fresh.drafts], assertCurrent, options);
+    writeDrafts(fresh, [adopted, ...fresh.drafts], assertCurrent, options);
     return adopted;
   });
 }
@@ -707,7 +715,7 @@ export async function deleteDraft(
     const selectedIndex = matchingDraftIndex(snapshot.drafts, draftId);
     const updated = snapshot.drafts.filter((_d, index) => index !== selectedIndex);
     if (updated.length === before) return false;
-    writeDrafts(path, updated);
+    writeDrafts(snapshot, updated);
     return true;
   });
   // The webhook URL goes with the draft; a store that will not delete it leaves a secret
@@ -763,7 +771,7 @@ export async function syncChannelDrafts(
   const path = channelDraftFilePath(shellPaths);
   runStoreFileUpdateSync(path, () => {
     const fresh = writableDraftSnapshot(shellPaths);
-    writeDrafts(path, fresh.drafts.map((draft) => {
+    writeDrafts(fresh, fresh.drafts.map((draft) => {
       const result = updatedById.get(draft.id);
       return result && result.offered.updatedAt === draft.updatedAt && result.offered.status === draft.status
         ? withDraftSyncOutcome(draft, result.outcome)
@@ -886,7 +894,7 @@ export function markDraftSent(
       ...(responseId ? { sentResponseId: responseId } : {}),
     };
     const updatedDrafts = snapshot.drafts.map((d) => (d.id === existing.id ? patched : d));
-    writeDrafts(path, updatedDrafts, assertCurrent, options);
+    writeDrafts(snapshot, updatedDrafts, assertCurrent, options);
     return patched;
   });
 }
@@ -917,7 +925,7 @@ export function markDraftFailed(
       sendError: error,
     };
     const updatedDrafts = snapshot.drafts.map((d) => (d.id === existing.id ? patched : d));
-    writeDrafts(path, updatedDrafts, assertCurrent, options);
+    writeDrafts(snapshot, updatedDrafts, assertCurrent, options);
     return patched;
   });
 }
@@ -955,6 +963,7 @@ export function formatChannelDraftList(snapshot: ChannelDraftSnapshot): string {
     `  total: ${snapshot.drafts.length}`,
     `  status: ${snapshot.parseError ? 'attention' : snapshot.exists ? 'ready' : 'empty'}`,
     ...(snapshot.parseError ? [`  parse error: ${snapshot.parseError}`] : []),
+    ...(snapshot.unreadableEntries ? [`  kept as found: ${snapshot.unreadableEntries} stored draft${snapshot.unreadableEntries === 1 ? '' : 's'} this version cannot read`] : []),
     '  policy: the daemon holds the drafts; this file is the outbox for ones it has not taken yet. Sends require queueDraftToSend + deliverAgentChannelMessage with explicit user confirmation',
     '',
   ];

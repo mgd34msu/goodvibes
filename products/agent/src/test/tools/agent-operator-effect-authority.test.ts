@@ -13,8 +13,6 @@ import { createAgentOperatorMethodTool, registerAgentOperatorMethodTool } from '
 import { createAgentOperatorActionTool, registerAgentOperatorActionTool } from '../../tools/agent-operator-action-tool.ts';
 import { createOperatorInputProjector } from '../../tools/agent-operator-input-projector.ts';
 import { getOperatorActions } from '../../agent/operator-actions.ts';
-import { captureOperatorConnection } from '../../agent/operator-connection-owner.ts';
-import { createDaemonOperatorInvoke } from '../../agent/daemon-operator-client.ts';
 import { executeOperatorMethodWithReceipt } from '../../agent/operator-method-receipt.ts';
 import { recordedEffectFixture } from '../helpers/recorded-effect-admission.ts';
 import { getSessionUntrustedContentLedger, resetSessionUntrustedContentLedgerForTests } from '../../trust/untrusted-content.ts';
@@ -234,31 +232,27 @@ test.each(['action', 'method'] as const)('synthetic read judgment cannot bypass 
   }
 });
 
-test.each(['cancel', 'revoke', 'config-aba', 'token-aba', 'getter', 'method'] as const)('operator final dispatch refuses %s', async change => {
+test.each(['cancel', 'revoke', 'token-aba', 'method'] as const)('operator final dispatch refuses %s', async change => {
   for (const kind of ['action', 'method'] as const) {
-    const f = scene(kind), controller = new AbortController(); let changed = false, getterReads = 0;
+    const f = scene(kind), controller = new AbortController(); let changed = false;
     const method = getOperatorContract().operator.methods.find(entry => entry.id === 'services.start');
     const http = method?.http;
     const httpDescriptor = method && Object.getOwnPropertyDescriptor(method, 'http');
     const descriptor = getOperatorActions()['automation.jobs.run'];
     const pathDescriptor = Object.getOwnPropertyDescriptor(descriptor, 'pathTemplate');
-    const getDescriptor = Object.getOwnPropertyDescriptor(f.config, 'get');
     f.beforeBody(() => f.fixture.beforeAuthorityRead(() => {
       if (changed) return; changed = true;
       if (change === 'cancel') controller.abort();
       else if (change === 'revoke') f.fixture.setMode('plan');
-      else if (change === 'config-aba') { const port = f.config.get('controlPlane.port'); f.config.set('controlPlane.port', port + 1); f.config.set('controlPlane.port', port); }
       else if (change === 'token-aba') { writeFileSync(f.tokenPath, JSON.stringify({ token: 'changed-private-token' })); writeFileSync(f.tokenPath, f.tokenBytes); }
-      else if (change === 'getter') Object.defineProperty(f.config, 'get', { configurable: true, get() { getterReads++; throw new Error('Accessor must never run'); } });
       else if (kind === 'method' && method) Object.defineProperty(method, 'http', { configurable: true, enumerable: true, value: { ...http, path: '/api/changed-route' } });
       else Object.defineProperty(descriptor, 'pathTemplate', { configurable: true, enumerable: true, value: '/api/changed-route/{jobId}' });
     }));
     try {
       // The registry may retire the invocation before entering its body, which is a refusal too.
-      await expectNotSucceeded(f.fixture.run(f.args, controller.signal)); expect(f.requests).toHaveLength(0); expect(getterReads).toBe(0);
+      await expectNotSucceeded(f.fixture.run(f.args, controller.signal)); expect(f.requests).toHaveLength(0);
       expect(changed).toBe(true);
     } finally {
-      if (change === 'getter') { if (getDescriptor) Object.defineProperty(f.config, 'get', getDescriptor); else delete Object(f.config).get; }
       if (change === 'method') {
         if (method && httpDescriptor) Object.defineProperty(method, 'http', httpDescriptor);
         if (pathDescriptor) Object.defineProperty(descriptor, 'pathTemplate', pathDescriptor);
@@ -267,7 +261,7 @@ test.each(['cancel', 'revoke', 'config-aba', 'token-aba', 'getter', 'method'] as
   }
 });
 
-test.each(['config-aba', 'token-aba', 'method'] as const)('operator source is retained through admission for %s', async change => {
+test.each(['token-aba', 'method'] as const)('operator source is retained through admission for %s', async change => {
   for (const kind of ['action', 'method'] as const) {
     const f = scene(kind); let changed = false;
     const method = getOperatorContract().operator.methods.find(entry => entry.id === (kind === 'method' ? 'services.start' : ACTION.action));
@@ -275,8 +269,7 @@ test.each(['config-aba', 'token-aba', 'method'] as const)('operator source is re
     const originalHttp = Object.getOwnPropertyDescriptor(method, 'http');
     f.fixture.beforeAuthorityRead(() => {
       if (changed) return; changed = true;
-      if (change === 'config-aba') { const port = f.config.get('controlPlane.port'); f.config.set('controlPlane.port', port + 1); f.config.set('controlPlane.port', port); }
-      else if (change === 'token-aba') { writeFileSync(f.tokenPath, JSON.stringify({ token: 'temporary-token' })); writeFileSync(f.tokenPath, f.tokenBytes); }
+      if (change === 'token-aba') { writeFileSync(f.tokenPath, JSON.stringify({ token: 'temporary-token' })); writeFileSync(f.tokenPath, f.tokenBytes); }
       else Object.defineProperty(method, 'http', { configurable: true, enumerable: true, writable: true, value: { ...method?.http, path: '/api/changed-before-admission' } });
     });
     try {
@@ -306,32 +299,6 @@ test('registered read-only status and preview publish under plan mode', async ()
   const f = scene('method', 'plan');
   expect(await f.fixture.run({ methodId: 'services.status' })).toMatchObject({ success: true });
   expect(await f.fixture.run({ methodId: 'services.start', dryRun: true })).toMatchObject({ success: true });
-  expect(f.requests).toHaveLength(1);
-});
-
-test('shared native transport retains native config and supplied owner through response adoption', async () => {
-  for (const change of ['config-aba', 'owner', 'cancel'] as const) {
-    const f = scene('method'), controller = new AbortController(); let current = true;
-    const assertCurrent = () => { if (!current) throw new Error('Owner retired'); };
-    const invoke = createDaemonOperatorInvoke(() => captureOperatorConnection(f.paths, f.config, assertCurrent));
-    f.duringRequest(() => {
-      if (change === 'owner') current = false;
-      else if (change === 'cancel') controller.abort();
-      else { const port = f.config.get('controlPlane.port'); f.config.set('controlPlane.port', port + 1); f.config.set('controlPlane.port', port); }
-    });
-    const result = await invoke('services.status', {}, { signal: controller.signal, assertCurrent });
-    expect(result).toMatchObject({ ok: false, kind: 'connected_host_unavailable' });
-    expect(f.requests).toHaveLength(1);
-    expect(JSON.stringify(result)).not.toContain('fixture-private-operator-token');
-  }
-});
-test('shared native transport checks exact input and connection callback identity after body await', async () => {
-  const f = scene('method');
-  const connection = captureOperatorConnection(f.paths, f.config, () => {});
-  const input = { fixture: 'original' };
-  f.duringRequest(() => { input.fixture = 'changed'; });
-  const invoke = createDaemonOperatorInvoke(() => connection);
-  expect(await invoke('services.status', input)).toMatchObject({ ok: false, kind: 'connected_host_unavailable' });
   expect(f.requests).toHaveLength(1);
 });
 

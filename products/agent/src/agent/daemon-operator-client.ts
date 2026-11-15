@@ -1,43 +1,48 @@
-import { readConnectedHostOperatorToken } from '../runtime/connected-host-auth.ts';
 /**
- * daemon-operator-client.ts, calling an operator method on the connected host.
- *
- * The route comes from the contract (operator-contract-routes.ts); this module
- * is the wire: the bearer token, the verb, the body-or-query split, and an
- * honest classification of what came back.
+ * daemon-operator-client.ts, the result-value face of the connected-host client
+ * for the Agent's daemon-backed stores (drafts, channel routing, the inbound
+ * feed, schedule targets).
  *
  * Every failure is a VALUE, never a throw. The callers are stores that must
  * keep working when the daemon is not reachable, a laptop away from the LAN, a
  * daemon mid-restart, a token that has not been minted yet, and a store that
- * threw on an unreachable peer would take the whole feature down with it. The
- * four kinds are the same ones the read-route helper and the operator-action
- * poster already report, so a caller that can render one can render all of them.
+ * threw on an unreachable peer would take the whole feature down with it.
+ *
+ * The wire, the deadline and what a failure means belong to the one
+ * connected-host client (connected-host-client.ts): a failure here carries the
+ * same kind, the same `<what failed>: <cause>; <next step>` message and the same
+ * refusal as every other connected-host call. The caller's currency check runs
+ * once, before the request leaves; a response cannot be un-sent, so nothing is
+ * checked after it. The answer is handed back as the host sent it; each store
+ * reads the fields it needs and says when one is missing.
  *
  * The `fetch` implementation is injectable so tests drive the adopted path and
  * the unreachable path without a network, a port, or a live daemon.
  */
 
-import { connectedHostBaseUrl } from '../config/connected-host-dial.ts';
-import { captureStrictJudgmentJson } from '@goodvibes-jev/engine/platform/platform/gate';
-import { isDeepStrictEqual } from 'node:util';
+import type { OperatorMethodId, OperatorMethodInput } from '@goodvibes-jev/engine/platform/contracts';
 import {
-  READ_ONLY_HTTP_METHODS,
-  operatorRequestPath,
-  prepareOperatorRequest,
-  findOperatorContractMethod,
-  type JsonRecord,
-} from './operator-contract-routes.ts';
+  createConnectedHost,
+  isHostFailure,
+  resolveConnectedHost,
+  EXPLICIT_USER_REQUEST_HEADER,
+  type ConnectedHostSource,
+  type ConnectedHostUnavailable,
+  type HostCallApplied,
+  type HostFailure,
+  type HostFailureKind,
+  type HostRefusal,
+} from './connected-host-client.ts';
+import { findOperatorHttpBinding, type JsonRecord } from './operator-contract-routes.ts';
 
-export type DaemonInvokeFailureKind =
-  | 'auth_required'
-  | 'connected_host_unavailable'
-  | 'connected_host_route_unavailable'
-  | 'connected_host_error';
+export { EXPLICIT_USER_REQUEST_HEADER };
+
+export type DaemonInvokeFailureKind = HostFailureKind;
 
 export interface DaemonInvokeSuccess {
   readonly ok: true;
   readonly methodId: string;
-  /** "POST /api/channels/routing", what was actually called. */
+  /** "POST /api/channels/routing", the contract's route for the method. */
   readonly route: string;
   readonly body: unknown;
 }
@@ -47,13 +52,19 @@ export interface DaemonInvokeFailure {
   readonly methodId: string;
   readonly route: string;
   readonly kind: DaemonInvokeFailureKind;
+  /** `<what failed>: <cause>; <next step>`. */
   readonly error: string;
+  /** State, reason and next steps, for a caller that renders them itself. */
+  readonly refusal?: HostRefusal;
+  /** Whether the host may have acted: `unknown` for a write that was sent and not answered. */
+  readonly applied?: HostCallApplied;
 }
 
 export type DaemonInvokeResult = DaemonInvokeSuccess | DaemonInvokeFailure;
 
 export interface DaemonInvokeOptions {
   readonly signal?: AbortSignal | undefined;
+  /** The caller's currency check, run once before the request leaves. */
   readonly assertCurrent?: (() => void) | undefined;
   /**
    * Whether a person asked for this, right now.
@@ -74,14 +85,16 @@ export type DaemonOperatorInvoke = (
   options?: DaemonInvokeOptions,
 ) => Promise<DaemonInvokeResult>;
 
-/** The header the daemon reads the explicit-user-request claim from. */
-export const EXPLICIT_USER_REQUEST_HEADER = 'x-goodvibes-explicit-user-request';
-
 export interface DaemonOperatorConnection {
   readonly baseUrl: string;
   readonly token: string | null;
+  /** Where the credential was looked for, safe to show. */
   readonly tokenPath?: string;
+  /** The owner's check that this connection is still the one selected, run once before the request leaves. */
   readonly assertCurrent?: (() => void) | undefined;
+  readonly source?: ConnectedHostSource;
+  /** Why there is no usable credential, when `token` is null. */
+  readonly unavailable?: ConnectedHostUnavailable;
 }
 
 export interface DaemonOperatorConfigReader {
@@ -90,61 +103,53 @@ export interface DaemonOperatorConfigReader {
 
 type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 
-/**
- * Where the daemon is and what proves this process may talk to it.
- *
- * Same host/port config keys and same token file the read-route helper and the
- * schedule promoter already read, one daemon, one address, one token.
- */
+/** Where the daemon is and what proves this process may talk to it: the Agent's one resolution. */
 export function resolveDaemonOperatorConnection(
   configManager: DaemonOperatorConfigReader,
   homeDirectory: string,
 ): DaemonOperatorConnection {
-  const baseUrl = connectedHostBaseUrl(
-    configManager.get('controlPlane.host'),
-    configManager.get('controlPlane.port'),
-  );
-  const credential = readConnectedHostOperatorToken(homeDirectory, baseUrl);
-  return { baseUrl, token: credential.token, tokenPath: credential.path };
+  const resolved = resolveConnectedHost({ configManager, homeDirectory });
+  return {
+    baseUrl: resolved.baseUrl,
+    token: resolved.token,
+    tokenPath: resolved.credential,
+    ...(resolved.source === undefined ? {} : { source: resolved.source }),
+    ...(resolved.unavailable === undefined ? {} : { unavailable: resolved.unavailable }),
+  };
 }
 
-async function readResponseBody(response: Response): Promise<unknown> {
-  const text = await response.text();
-  if (!text.trim()) return {};
-  try {
-    return JSON.parse(text) as unknown;
-  } catch {
-    return text;
-  }
-}
-
-/** The most of the daemon's own reason that is passed on to a caller. */
-const DAEMON_REASON_LIMIT = 200;
+/** The most of the host's own words passed on to a caller. */
+const HOST_REASON_LIMIT = 200;
 
 /**
- * The daemon's stated reason for a refusal, bounded and with addresses and
- * control characters removed, so a refused draft says why instead of just
- * "HTTP 422". Returns '' when the body carries no readable message.
+ * The host's reason with addresses removed and bounded: a refused draft's
+ * webhook address is a bearer secret, and the host may echo it.
  */
-function daemonReason(body: unknown): string {
-  const record = body && typeof body === 'object' && !Array.isArray(body) ? body as Record<string, unknown> : undefined;
-  const raw = typeof body === 'string' ? body
-    : typeof record?.error === 'string' ? record.error
-    : typeof record?.message === 'string' ? record.message
-    : '';
-  const cleaned = raw
+function scrubReason(reason: string): string {
+  const cleaned = reason
     // eslint-disable-next-line no-control-regex
     .replace(/[\u0000-\u001f\u007f]+/g, ' ')
     .replace(/\b[a-z][a-z0-9+.-]*:\/\/\S+/gi, '[address]')
     .replace(/\s+/g, ' ')
     .trim();
-  return cleaned.length > DAEMON_REASON_LIMIT ? `${cleaned.slice(0, DAEMON_REASON_LIMIT)}...` : cleaned;
+  return cleaned.length > HOST_REASON_LIMIT ? `${cleaned.slice(0, HOST_REASON_LIMIT)}...` : cleaned;
 }
 
-function classifyStatus(status: number): DaemonInvokeFailureKind {
-  if (status === 401 || status === 403) return 'auth_required';
-  if (status === 404) return 'connected_host_route_unavailable';
-  return 'connected_host_error';
+/** The host's own words from its error body (`error` or `message`), with the status; otherwise the client's reading. */
+function hostReason(failure: HostFailure): string {
+  const body = (failure.cause as { body?: unknown } | undefined)?.body;
+  const record = body && typeof body === 'object' && !Array.isArray(body) ? body as Record<string, unknown> : undefined;
+  const stated = typeof record?.error === 'string' ? record.error
+    : typeof record?.message === 'string' ? record.message
+    : typeof body === 'string' ? body
+    : '';
+  const status = failure.refusal.status;
+  return stated.trim() && status !== undefined ? scrubReason(`${stated} (HTTP ${status})`) : scrubReason(failure.refusal.reason);
+}
+
+function routeOf(methodId: string): string {
+  const binding = findOperatorHttpBinding(methodId);
+  return binding ? `${binding.httpMethod} ${binding.pathTemplate}` : methodId;
 }
 
 /**
@@ -156,102 +161,49 @@ function classifyStatus(status: number): DaemonInvokeFailureKind {
  */
 export function createDaemonOperatorInvoke(
   resolveConnection: () => DaemonOperatorConnection,
-  fetchImpl: FetchLike = fetch,
+  fetchImpl?: FetchLike,
 ): DaemonOperatorInvoke {
   return async (methodId, input = {}, options = {}) => {
-    let request: ReturnType<typeof prepareOperatorRequest>;
-    let method: ReturnType<typeof findOperatorContractMethod>;
-    let methodSnapshot: ReturnType<typeof findOperatorContractMethod>;
-    let inputSnapshot: JsonRecord;
-    const signal = options.signal, ownerCurrent = options.assertCurrent;
-    try {
-      signal?.throwIfAborted(); ownerCurrent?.();
-      method = findOperatorContractMethod(methodId);
-      methodSnapshot = captureStrictJudgmentJson(method);
-      inputSnapshot = captureStrictJudgmentJson(input);
-      request = prepareOperatorRequest(methodId, inputSnapshot);
-    } catch {
-      return {
-        ok: false,
-        methodId,
-        route: methodId,
-        kind: 'connected_host_route_unavailable',
-        error: 'Connected-host method input or authority is unavailable.',
-      };
-    }
-    const requestPath = operatorRequestPath(request);
-    const route = `${request.httpMethod} ${requestPath}`;
+    const route = routeOf(methodId);
     let connection: DaemonOperatorConnection;
-    try { connection = resolveConnection(); } catch {
-      return { ok: false, methodId, route, kind: 'connected_host_unavailable', error: 'Connected-host connection is no longer current.' };
-    }
-    if (!connection.token) {
-      return {
-        ok: false,
-        methodId,
-        route,
-        kind: 'auth_required',
-        error: connection.tokenPath
-          ? `no connected-host operator token found at ${connection.tokenPath}`
-          : 'no connected-host operator token found',
-      };
-    }
-    const isRead = READ_ONLY_HTTP_METHODS.has(request.httpMethod);
-    const selected = { baseUrl: connection.baseUrl, token: connection.token, tokenPath: connection.tokenPath, assertCurrent: connection.assertCurrent };
-    const assertCurrent = () => {
-      signal?.throwIfAborted(); ownerCurrent?.();
-      if (options.signal !== signal || options.assertCurrent !== ownerCurrent
-        || findOperatorContractMethod(methodId) !== method
-        || !isDeepStrictEqual(captureStrictJudgmentJson(method), methodSnapshot)
-        || !isDeepStrictEqual(captureStrictJudgmentJson(input), inputSnapshot)
-        || connection.baseUrl !== selected.baseUrl || connection.token !== selected.token
-        || connection.tokenPath !== selected.tokenPath || connection.assertCurrent !== selected.assertCurrent) {
-        throw new Error('Connected-host invocation is no longer current.');
-      }
-      selected.assertCurrent?.(); signal?.throwIfAborted(); ownerCurrent?.();
-    };
     try {
-      const init: RequestInit = {
-        signal,
-        redirect: 'error',
-        method: request.httpMethod,
-        headers: {
-          authorization: `Bearer ${connection.token}`,
-          ...(isRead ? {} : { 'content-type': 'application/json' }),
-          ...(options.explicitUserRequest === undefined
-            ? {}
-            : { [EXPLICIT_USER_REQUEST_HEADER]: String(options.explicitUserRequest) }),
-        },
-        ...(isRead ? {} : { body: JSON.stringify(request.payload) }),
+      options.signal?.throwIfAborted();
+      options.assertCurrent?.();
+      connection = resolveConnection();
+      connection.assertCurrent?.();
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      return {
+        ok: false, methodId, route, kind: 'cancelled', applied: 'no',
+        error: `${methodId} was not sent: ${reason}`,
+        refusal: { code: 'not_current', state: 'the request was not sent', reason, next: ['repeat the request if it is still wanted'], retryable: false },
       };
-      assertCurrent();
-      const response = await fetchImpl(`${selected.baseUrl}${requestPath}`, init);
-      assertCurrent();
-      const body = await readResponseBody(response);
-      assertCurrent();
-      if (!response.ok) {
-        return {
-          ok: false,
-          methodId,
-          route,
-          kind: classifyStatus(response.status),
-          error: (() => { const reason = daemonReason(body); return reason ? `HTTP ${response.status}: ${reason}` : `HTTP ${response.status}`; })(),
-        };
-      }
+    }
+    // A test stub supplies only the call signature; the client reads nothing else from it.
+    const host = createConnectedHost(() => ({
+      baseUrl: connection.baseUrl,
+      token: connection.token,
+      credential: connection.tokenPath ?? 'the connected-host credential',
+      ...(connection.source === undefined ? {} : { source: connection.source }),
+      ...(connection.unavailable === undefined ? {} : { unavailable: connection.unavailable }),
+    }), { validateResponses: false, ...(fetchImpl ? { fetchImpl: fetchImpl as typeof fetch } : {}) });
+    try {
+      const body: unknown = await host.invoke(
+        methodId as OperatorMethodId,
+        input as OperatorMethodInput<OperatorMethodId>,
+        { signal: options.signal, ...(options.explicitUserRequest === undefined ? {} : { explicitUserRequest: options.explicitUserRequest }) },
+      );
       return { ok: true, methodId, route, body };
     } catch (error) {
-      // A call the caller cancelled is not a dead host; say which it was.
-      const cancelled = signal?.aborted === true
-        || (error instanceof Error && (error.name === 'AbortError' || error.name === 'TimeoutError'));
-      return {
-        ok: false,
-        methodId,
-        route,
-        kind: 'connected_host_unavailable',
-        error: cancelled
-          ? 'Connected-host call was cancelled or timed out before the daemon answered.'
-          : 'Connected-host invocation failed or its authority changed.',
-      };
+      if (isHostFailure(error)) {
+        const refusal = { ...error.refusal, reason: hostReason(error) };
+        const next = refusal.next[0];
+        return {
+          ok: false, methodId, route: error.route, kind: error.kind, refusal, applied: error.applied,
+          error: `${methodId} on the connected host failed: ${refusal.reason}${next ? `; ${next}` : ''}`,
+        };
+      }
+      return { ok: false, methodId, route, kind: 'connected_host_error', applied: 'unknown', error: `${methodId} on the connected host failed: ${scrubReason(error instanceof Error ? error.message : String(error))}` };
     }
   };
 }

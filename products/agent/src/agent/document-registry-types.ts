@@ -24,6 +24,8 @@ export interface AgentDocumentSuggestion {
   readonly title: string;
   readonly body: string;
   readonly tags: readonly string[];
+  /** The document version the suggestion was written against; accepting it over a later version is refused. */
+  readonly baseVersionId?: string;
   readonly documentStatus?: AgentDocumentStatus;
   readonly summary: string;
   readonly rationale: string;

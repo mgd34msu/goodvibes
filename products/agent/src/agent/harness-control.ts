@@ -1,4 +1,4 @@
-import { readExecutionMode, setExecutionMode } from '../permissions/execution-mode.ts';
+import { hasActiveExecutionMode, readExecutionMode, setExecutionMode } from '../permissions/execution-mode.ts';
 import { captureModelReadingInput } from '../tools/agent-harness-model-reading-source.ts';
 import { types as nodeTypes } from 'node:util';
 import type { Ranked } from '@goodvibes-jev/judgment';
@@ -22,6 +22,7 @@ import { rankHarnessCatalog, captureCatalogData, type CatalogRankingOptions } fr
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import {
   agentDaemonConfigClient,
+  agentDaemonConfigClientInstalled,
   agentDaemonConfigClientRevision,
   configKeyScope,
   openEffectiveConfigView,
@@ -155,6 +156,8 @@ export interface HarnessSettingMutationResult {
    * key itself IS changed; repeating the same set repairs the companion.
    */
   readonly alsoSetFailed?: string | undefined;
+  /** Set when a reset setting's stored secret could not be deleted; the setting itself IS reset. */
+  readonly secretNotDeleted?: string | undefined;
 }
 
 /**
@@ -777,7 +780,7 @@ export async function setHarnessSetting(
     const previous = readExecutionMode(configManager);
     const mode = coerceHarnessSettingValue(setting, value);
     await setExecutionMode(configManager, mode);
-    return { key: setting.key, action: 'set', previous, current: readExecutionMode(configManager) };
+    return { key: setting.key, action: 'set', previous, current: readExecutionMode(configManager), ...executionModeDestination(configManager) };
   }
   const previous = configManager.getStored(setting.key);
   const coerced = coerceHarnessSettingValue(setting, value);
@@ -804,6 +807,7 @@ export async function setHarnessSetting(
       action: 'set',
       previous: redactHarnessSettingValue(setting.key, previous),
       current: redactHarnessSettingValue(setting.key, current),
+      ...secretBackedDestination(setting.key),
     };
   }
 
@@ -852,7 +856,7 @@ export async function resetHarnessSetting(
   if (setting.key === 'permissions.mode') {
     const previous = readExecutionMode(configManager);
     await setExecutionMode(configManager, setting.default);
-    return { key: setting.key, action: 'reset', previous, current: readExecutionMode(configManager) };
+    return { key: setting.key, action: 'reset', previous, current: readExecutionMode(configManager), ...executionModeDestination(configManager) };
   }
   if (setting.kind === 'host') {
     const handle = configManager.getHostBooleanSetting(setting.key);
@@ -862,26 +866,25 @@ export async function resetHarnessSetting(
     return { key: setting.key, action: 'reset', previous, current: handle.get() };
   }
   const previous = configManager.getStored(setting.key);
-  if (isSecretConfigKey(setting.key)) {
-    if (typeof previous === 'string' && isSecretReferenceValue(previous) && !secretsManager?.delete) {
-      throw new Error(`Cannot reset ${setting.key}: secrets manager is unavailable to delete the stored secret.`);
-    }
-    // The scope the value was WRITTEN at, or the reset clears nothing: a
-    // daemon-owned key's secret lives in the daemon tier, and deleting the
-    // user-tier copy would report the setting reset while the live credential
-    // stayed exactly where it was, a credential the operator believes is gone.
-    await secretsManager?.delete?.(buildGoodVibesSecretKey(setting.key), { scope: defaultSecretBackedScope(setting.key) });
+  const deletesSecret = isSecretConfigKey(setting.key);
+  if (deletesSecret && typeof previous === 'string' && isSecretReferenceValue(previous) && !secretsManager?.delete) {
+    throw new Error(`Cannot reset ${setting.key}: secrets manager is unavailable to delete the stored secret.`);
   }
+  // The setting is reset first and the secret deleted only after that worked:
+  // the other order leaves a setting pointing at a secret that no longer exists
+  // whenever the reset fails (an unreachable daemon), and the channel stops
+  // authenticating while the reset is reported as failed.
   // A daemon-owned key is reset where the daemon reads it, exactly as set
   // routes it: clearing the agent's local copy would report "reset" while the
   // daemon kept running on the old value. The schema default is written over
   // the owner's route, and an unreachable daemon throws rather than succeeding.
+  let result: HarnessSettingMutationResult;
   if (configKeyScope(setting.key) === 'daemon') {
     const outcome = await routeConfigWrite(configManager, setting.key, setting.default, {
       homeDir: configManager.getHomeDirectory() ?? undefined,
       ...routing,
     });
-    return {
+    result = {
       key: setting.key,
       action: 'reset',
       previous: redactHarnessSettingValue(setting.key, previous),
@@ -890,14 +893,53 @@ export async function resetHarnessSetting(
       appliedBy: outcome.appliedBy,
       persistedTo: outcome.persistedTo,
     };
+  } else {
+    configManager.reset(setting.key);
+    result = {
+      key: setting.key,
+      action: 'reset',
+      previous: redactHarnessSettingValue(setting.key, previous),
+      current: redactHarnessSettingValue(setting.key, configManager.getStored(setting.key)),
+      scope: configKeyScope(setting.key),
+      appliedBy: 'local',
+    };
   }
-  configManager.reset(setting.key);
-  return {
-    key: setting.key,
-    action: 'reset',
-    previous: redactHarnessSettingValue(setting.key, previous),
-    current: redactHarnessSettingValue(setting.key, configManager.getStored(setting.key)),
-  };
+  if (deletesSecret) {
+    // The scope the value was WRITTEN at, or the reset clears nothing: a
+    // daemon-owned key's secret lives in the daemon tier, and deleting the
+    // user-tier copy would report the setting reset while the live credential
+    // stayed exactly where it was, a credential the operator believes is gone.
+    const secretKey = buildGoodVibesSecretKey(setting.key);
+    try {
+      await secretsManager?.delete?.(secretKey, { scope: defaultSecretBackedScope(setting.key) });
+    } catch {
+      // Store errors may echo credential material, so none is included.
+      return {
+        ...result,
+        secretNotDeleted: `${setting.key} was reset, but its stored secret ${secretKey} could not be deleted. Remove it with /secrets delete ${secretKey}.`,
+      };
+    }
+  }
+  return result;
+}
+
+/** Where a `permissions.mode` write landed: the hosted session that owns the mode, or this Agent's settings. */
+function executionModeDestination(configManager: ConfigManager): Pick<HarnessSettingMutationResult, 'scope' | 'appliedBy' | 'persistedTo'> {
+  return hasActiveExecutionMode(configManager)
+    ? { scope: 'client', appliedBy: 'daemon', persistedTo: 'the hosted session on the connected host' }
+    : { scope: 'client', appliedBy: 'local', persistedTo: 'this Agent\'s settings' };
+}
+
+/**
+ * Where a secret-backed setting landed. A daemon-owned key goes to the daemon
+ * when this process has a connected host wired; otherwise the reference stays in
+ * this Agent's settings and the value in its secret store.
+ */
+function secretBackedDestination(key: Parameters<typeof defaultSecretBackedScope>[0]): Pick<HarnessSettingMutationResult, 'scope' | 'appliedBy' | 'persistedTo'> {
+  const scope = configKeyScope(key);
+  return scope === 'daemon' && agentDaemonConfigClientInstalled()
+    ? { scope, appliedBy: 'daemon', persistedTo: 'the connected host\'s own settings and secret store' }
+    : { scope, appliedBy: 'local', persistedTo: `this Agent's settings, with the value in its ${defaultSecretBackedScope(key)} secret store` };
 }
 
 /**

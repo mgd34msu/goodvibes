@@ -1,8 +1,13 @@
-import { existsSync, readFileSync } from 'node:fs';
 import { defineLifecycle } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { ShellPathService } from '@/runtime/index.ts';
-import { runStoreFileUpdateSync, writeStoreFile } from '@/utils/store-file.ts';
-import { keepUnreadableStoreCopy } from './unreadable-store-copy.ts';
+import {
+  readJsonStore,
+  runStoreFileUpdateSync,
+  writeJsonStore,
+  type JsonStoreContents,
+  type JsonStoreSpec,
+  type JsonStoreWriteReport,
+} from '@/utils/store-file.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import { assertNoSecretLikeText } from './persona-registry.ts';
 import type {
@@ -172,11 +177,13 @@ function parseSuggestion(value: unknown): AgentDocumentSuggestion | null {
   if (!id || !title || !body || !summary) return null;
   const createdAt = readString(value.createdAt, nowIso());
   const resolvedAt = readString(value.resolvedAt).trim();
+  const baseVersionId = readString(value.baseVersionId).trim();
   return {
     id,
     title,
     body,
     tags: readStringArray(value.tags),
+    ...(baseVersionId ? { baseVersionId } : {}),
     ...(value.documentStatus === undefined ? {} : { documentStatus: documentStatus(value.documentStatus) }),
     summary,
     rationale: readString(value.rationale).trim(),
@@ -251,15 +258,16 @@ function parseDocument(value: unknown): AgentDocumentRecord | null {
   };
 }
 
-function parseStore(raw: string): DocumentStoreFile {
-  const parsed: unknown = JSON.parse(raw);
-  if (!isRecord(parsed)) return { version: STORE_VERSION, documents: [] };
-  return {
-    version: STORE_VERSION,
-    documents: Array.isArray(parsed.documents)
-      ? parsed.documents.map(parseDocument).filter((entry): entry is AgentDocumentRecord => entry !== null)
-      : [],
-  };
+const DOCUMENT_STORE: JsonStoreSpec<AgentDocumentRecord> = {
+  label: 'document store',
+  entriesKey: 'documents',
+  version: STORE_VERSION,
+  parseEntry: parseDocument,
+};
+
+/** The version a document is at now. */
+function currentVersionId(document: AgentDocumentRecord): string {
+  return document.versions.at(-1)?.id ?? 'v1';
 }
 
 /**
@@ -274,10 +282,6 @@ function nextVersionId(versions: readonly AgentDocumentVersion[]): string {
     if (number !== undefined) highest = Math.max(highest, Number(number));
   }
   return `v${highest + 1}`;
-}
-
-function formatStore(store: DocumentStoreFile): string {
-  return `${JSON.stringify(store, null, 2)}\n`;
 }
 
 function compactExportLine(value: string): string {
@@ -296,6 +300,7 @@ function renderSuggestionSummary(suggestion: AgentDocumentSuggestion): string {
     `Title: ${suggestion.title}`,
     suggestion.tags.length > 0 ? `Tags: ${suggestion.tags.join(', ')}` : '',
     suggestion.documentStatus ? `Status after accept: ${suggestion.documentStatus}` : '',
+    suggestion.baseVersionId ? `Proposed against: ${suggestion.baseVersionId}` : '',
     suggestion.resolvedAt ? `Resolved: ${suggestion.resolvedAt}` : '',
   ].filter(Boolean);
   return parts.join(' | ');
@@ -359,6 +364,9 @@ export function renderAgentDocumentMarkdown(document: AgentDocumentRecord): stri
 }
 
 export class AgentDocumentRegistry {
+  private held: JsonStoreContents<AgentDocumentRecord> | null = null;
+  private lastWrite: JsonStoreWriteReport | undefined;
+
   public constructor(private readonly storePath: string, private readonly assertWriteCurrent?: () => void) {}
 
   public static fromShellPaths(shellPaths: AgentDocumentStorePaths, assertWriteCurrent?: () => void): AgentDocumentRegistry {
@@ -461,14 +469,13 @@ export class AgentDocumentRegistry {
       const duplicate = store.documents.find((document) => document.id !== existing.id && document.title.toLowerCase() === title.toLowerCase());
       if (duplicate) throw new Error(`Document already exists ${duplicate.id}`);
       const timestamp = nowIso();
-      const version: AgentDocumentVersion = {
-        id: nextVersionId(existing.versions),
-        title,
-        body,
-        summary,
-        createdAt: timestamp,
-      };
-      const versions = [...existing.versions, version].slice(-MAX_VERSIONS);
+      // A version records content; a change of status or artifact alone adds none,
+      // so marking a document reviewed does not push its history out of the window.
+      const contentChanged = title !== existing.title || body !== existing.body
+        || tags.length !== existing.tags.length || tags.some((tag, index) => tag !== existing.tags[index]);
+      const versions = contentChanged
+        ? [...existing.versions, { id: nextVersionId(existing.versions), title, body, summary, createdAt: timestamp }].slice(-MAX_VERSIONS)
+        : existing.versions;
       const updated: AgentDocumentRecord = {
         ...existing,
         title,
@@ -577,6 +584,7 @@ export class AgentDocumentRegistry {
         title,
         body,
         tags,
+        baseVersionId: currentVersionId(existing),
         ...(input.status === undefined ? {} : { documentStatus: input.status }),
         summary,
         rationale,
@@ -607,6 +615,12 @@ export class AgentDocumentRegistry {
       if (target.status === 'accepted') return existing;
       const move = agentDocumentSuggestionLifecycle.check(target.status, 'accepted');
       if (!move.ok) throw new Error(`Document suggestion ${target.id}: ${move.reason}.`);
+      // A suggestion is a whole replacement written against one version; accepting it
+      // over a later version would silently undo the edits made in between.
+      const current = currentVersionId(existing);
+      if (target.baseVersionId && target.baseVersionId !== current) {
+        throw new Error(`Document suggestion ${target.id} was proposed against ${target.baseVersionId}, and ${existing.id} is now at ${current}; accepting it would undo the changes made since. Propose the revision again against ${current}, or reject ${target.id}.`);
+      }
       const timestamp = nowIso();
       const version: AgentDocumentVersion = {
         id: nextVersionId(existing.versions),
@@ -720,26 +734,31 @@ export class AgentDocumentRegistry {
     });
   }
 
-  private readStore(): DocumentStoreFile {
-    if (!existsSync(this.storePath)) return { version: STORE_VERSION, documents: [] };
-    try {
-      return parseStore(readFileSync(this.storePath, 'utf-8'));
-    } catch (error) {
-      throw new Error(`Could not read Agent document store: ${error instanceof Error ? error.message : String(error)}`);
-    }
+  /** What the last write reported: documents this version cannot read that were kept, or a copy of an unreadable file. */
+  public lastWriteReport(): JsonStoreWriteReport | undefined {
+    return this.lastWrite;
   }
 
-  /** One read-modify-write at a time across the CLI and every agent process using this file. */
+  private readStore(): DocumentStoreFile {
+    const store = this.held ?? readJsonStore(this.storePath, DOCUMENT_STORE);
+    return { version: STORE_VERSION, documents: store.entries };
+  }
+
+  /** One read-modify-write at a time across the CLI and every agent process; the file is read once per operation. */
   private locked<T>(update: () => T): T {
-    return runStoreFileUpdateSync(this.storePath, update);
+    return runStoreFileUpdateSync(this.storePath, () => {
+      this.held = readJsonStore(this.storePath, DOCUMENT_STORE);
+      try {
+        return update();
+      } finally {
+        this.held = null;
+      }
+    });
   }
 
   private writeStore(store: DocumentStoreFile): void {
     this.assertWriteCurrent?.();
-    // An entry the parser rejects was not carried into `store`; keep the file
-    // as it was before this write drops it.
-    keepUnreadableStoreCopy(this.storePath, 'documents', parseDocument);
-    writeStoreFile(this.storePath, formatStore(store));
+    this.lastWrite = writeJsonStore(this.held ?? readJsonStore(this.storePath, DOCUMENT_STORE), DOCUMENT_STORE, { entries: store.documents });
   }
 
   private validateRequired(title: string, body: string): void {

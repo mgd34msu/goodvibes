@@ -15,7 +15,8 @@
  * those moments is still the operator's instruction, and dropping it because
  * the peer was busy would be worse than holding it. Held assignments carry
  * `daemonSyncState: 'pending'` with the reason the daemon gave, and are
- * offered again when the channel is assigned again.
+ * offered again when the channel is assigned again, and whenever another
+ * assignment reaches the daemon (`syncChannelProfileRoutes`).
  * Removing a route the daemon holds removes it from the daemon too:
  * `removeChannelProfileRouteEverywhere`.
  *
@@ -24,16 +25,17 @@
  */
 
 import { agentRecordNonce } from '../utils/record-nonce.ts';
-import { existsSync, readFileSync } from 'node:fs';
 import type { ShellPathService } from '@/runtime/index.ts';
-import { runStoreFileUpdateSync, writeStoreJson } from '@/utils/store-file.ts';
+import {
+  readJsonStore,
+  runStoreFileUpdateSync,
+  writeJsonStore,
+  type JsonStoreContents,
+  type JsonStoreSpec,
+} from '@/utils/store-file.ts';
 import { retainChannelStoreSource, type ChannelStoreEffectOptions } from './channel-store-lifetime.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import type { DaemonInvokeFailureKind, DaemonOperatorInvoke } from './daemon-operator-client.ts';
-import {
-  appendChannelRoutingSyncReceipts,
-  type ChannelRoutingSyncReceipt,
-} from './channel-routing-sync-receipts.ts';
 
 /** The daemon method that owns the routing table. */
 export const CHANNEL_ROUTING_ASSIGN_METHOD = 'channels.routing.assign';
@@ -87,6 +89,8 @@ export interface ChannelProfileRouteSnapshot {
   readonly exists: boolean;
   readonly routes: readonly ChannelProfileRoute[];
   readonly parseError?: string;
+  /** Stored routes this version cannot read; they stay in the file as found. */
+  readonly unreadableEntries?: number;
 }
 
 export interface ChannelProfileRouteAssignResult {
@@ -95,6 +99,8 @@ export interface ChannelProfileRouteAssignResult {
   readonly created: boolean;
   /** What the daemon said when this assignment was offered to it. */
   readonly daemon: ChannelProfileRouteSyncOutcome;
+  /** Held assignments offered again because the daemon answered this one; absent when none were held. */
+  readonly heldOffered?: ChannelProfileRouteSyncReport;
 }
 
 /** The result of offering one assignment to the daemon. */
@@ -107,11 +113,6 @@ export type ChannelProfileRouteSyncOutcome =
 // ---------------------------------------------------------------------------
 // Internal file model
 // ---------------------------------------------------------------------------
-
-interface ChannelProfileRouteFile {
-  readonly version: 1;
-  readonly routes: readonly ChannelProfileRoute[];
-}
 
 type ShellPaths = Pick<ShellPathService, 'resolveUserPath'>;
 
@@ -177,40 +178,45 @@ function parseRoute(value: unknown): ChannelProfileRoute | null {
   };
 }
 
-function parseRouteFile(raw: unknown): ChannelProfileRouteFile {
-  if (!isRecord(raw)) return { version: ROUTE_FILE_VERSION, routes: [] };
-  const routes = Array.isArray(raw.routes)
-    ? raw.routes.map(parseRoute).filter((r): r is ChannelProfileRoute => r !== null)
-    : [];
-  return { version: ROUTE_FILE_VERSION, routes };
-}
+const ROUTE_STORE: JsonStoreSpec<ChannelProfileRoute> = {
+  label: 'channel routing store',
+  entriesKey: 'routes',
+  version: ROUTE_FILE_VERSION,
+  parseEntry: parseRoute,
+};
 
 // ---------------------------------------------------------------------------
 // Read / write
 // ---------------------------------------------------------------------------
 
-export function readChannelProfileRoutes(shellPaths: ShellPaths): ChannelProfileRouteSnapshot {
-  const path = channelProfileRouteFilePath(shellPaths);
-  if (!existsSync(path)) return { path, exists: false, routes: [] };
-  try {
-    const parsed = JSON.parse(readFileSync(path, 'utf-8')) as unknown;
-    return { path, exists: true, routes: parseRouteFile(parsed).routes };
-  } catch (error) {
-    return {
-      path,
-      exists: true,
-      routes: [],
-      parseError: error instanceof Error ? error.message : String(error),
-    };
-  }
+function toSnapshot(contents: JsonStoreContents<ChannelProfileRoute>): ChannelProfileRouteSnapshot {
+  const parseError = contents.unreadable
+    ?? (contents.newerVersion === undefined ? undefined : `written by a newer GoodVibes (file version ${contents.newerVersion})`);
+  return {
+    path: contents.path,
+    exists: contents.exists,
+    routes: contents.entries,
+    ...(parseError === undefined ? {} : { parseError }),
+    ...(contents.keptAsFound.length > 0 ? { unreadableEntries: contents.keptAsFound.length } : {}),
+  };
 }
 
-function writeRoutes(path: string, routes: readonly ChannelProfileRoute[], assertCurrent?: () => void): void {
-  const file: ChannelProfileRouteFile = {
-    version: ROUTE_FILE_VERSION,
-    routes: routes.slice(0, ROUTE_LIMIT),
-  };
-  writeStoreJson(path, file, { assertCurrent });
+export function readChannelProfileRoutes(shellPaths: ShellPaths): ChannelProfileRouteSnapshot {
+  return toSnapshot(readJsonStore(channelProfileRouteFilePath(shellPaths), ROUTE_STORE));
+}
+
+/** One locked read-modify-write of the routing file; routes this version cannot read are written back as found. */
+function updateRoutes<T>(
+  path: string,
+  mutate: (routes: readonly ChannelProfileRoute[]) => { readonly value: T; readonly routes?: readonly ChannelProfileRoute[] },
+  assertCurrent?: () => void,
+): T {
+  return runStoreFileUpdateSync(path, () => {
+    const read = readJsonStore(path, ROUTE_STORE);
+    const change = mutate(read.entries);
+    if (change.routes !== undefined) writeJsonStore(read, ROUTE_STORE, { entries: change.routes.slice(0, ROUTE_LIMIT) }, { assertCurrent });
+    return change.value;
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -347,44 +353,20 @@ export async function assignChannelToProfile(
   // The daemon call above can take a while. Merge this assignment into the file
   // as it is now, not the snapshot from before the await, so a route removed or
   // assigned by another writer in the meantime is not undone.
-  const stored = runStoreFileUpdateSync(path, () => {
-    const fresh = readChannelProfileRoutes(shellPaths);
-    if (fresh.parseError !== undefined) throw new Error(`The routing file cannot be read (${fresh.parseError}), so the assignment was not saved.`);
-    const freshIndex = fresh.routes.findIndex((r) => r.id === route.id || (r.surfaceKind === surfaceKind && r.routeId === routeId));
-    const merged = freshIndex >= 0 ? { ...route, id: fresh.routes[freshIndex]!.id, createdAt: fresh.routes[freshIndex]!.createdAt } : route;
+  const stored = updateRoutes(path, (fresh) => {
+    const freshIndex = fresh.findIndex((r) => r.id === route.id || (r.surfaceKind === surfaceKind && r.routeId === routeId));
+    const merged = freshIndex >= 0 ? { ...route, id: fresh[freshIndex]!.id, createdAt: fresh[freshIndex]!.createdAt } : route;
     const updatedRoutes = freshIndex >= 0
-      ? fresh.routes.map((r, i) => (i === freshIndex ? merged : r))
-      : [merged, ...fresh.routes];
-    writeRoutes(path, updatedRoutes, assertCurrent);
-    return merged;
-  });
-  return { route: stored, path, created, daemon };
-}
-
-/**
- * The `daemonSyncState` values as they sit on disk, keyed by record id.
- *
- * Read raw rather than through `parseRoute`, which normalizes the retired
- * `local_only` to `pending`. A migration receipt has to name the state the
- * record was ACTUALLY in, and after normalization that information is gone.
- */
-function readOnDiskSyncStates(shellPaths: ShellPaths): Map<string, string> {
-  const states = new Map<string, string>();
-  const path = channelProfileRouteFilePath(shellPaths);
-  if (!existsSync(path)) return states;
-  try {
-    const parsed = JSON.parse(readFileSync(path, 'utf-8')) as unknown;
-    if (!isRecord(parsed) || !Array.isArray(parsed.routes)) return states;
-    for (const entry of parsed.routes) {
-      if (!isRecord(entry)) continue;
-      const id = readString(entry.id);
-      if (id) states.set(id, readString(entry.daemonSyncState) || 'unknown');
-    }
-  } catch {
-    // A file that will not parse has no states to report; the snapshot reader
-    // is what surfaces the parse error to a caller.
-  }
-  return states;
+      ? fresh.map((r, i) => (i === freshIndex ? merged : r))
+      : [merged, ...fresh];
+    return { value: merged, routes: updatedRoutes };
+  }, assertCurrent);
+  // The daemon just answered, so assignments held while it could not be reached
+  // are offered now instead of waiting for the operator to repeat each one.
+  const heldOffered = daemon.synced && options.invoke
+    ? await syncChannelProfileRoutes(shellPaths, options.invoke, { signal: options.signal, assertCurrent: options.assertCurrent })
+    : undefined;
+  return { route: stored, path, created, daemon, ...(heldOffered && heldOffered.attempted > 0 ? { heldOffered } : {}) };
 }
 
 export interface ChannelProfileRouteSyncReport {
@@ -392,64 +374,41 @@ export interface ChannelProfileRouteSyncReport {
   readonly synced: number;
   readonly refused: number;
   readonly routes: readonly ChannelProfileRoute[];
-  /** Where the receipts for this run were written, when any were. */
-  readonly receiptPath?: string;
   /** Routes removed locally while offered whose withdrawal from the daemon failed; the daemon may still route on them. */
   readonly withdrawFailed: readonly { readonly routeId: string; readonly assignmentId: string; readonly error: string }[];
 }
 
 /**
- * Offer every assignment the daemon does not hold, and receipt what happened.
+ * Offer every assignment the daemon does not hold.
  *
  * This is both the retry for an assignment made while the daemon was
  * unreachable and the migration for records written before the daemon held
- * this table at all. The two are the same operation: a record the daemon does
- * not have, offered to it.
- *
- * Records that came from a build that wrote `daemonSyncState: 'local_only'`
- * carried a `daemonMethodNeeded` flag naming the method that did not exist.
- * The method exists now, so the flag is retired, with a receipt naming the
- * record and the daemon's answer, rather than by deleting the field and
- * leaving nothing behind.
+ * this table at all (the retired `local_only` state reads as pending). Each
+ * row's own `daemonSyncState` and `syncError` record the outcome; the report
+ * says what happened in this run.
  */
 export async function syncChannelProfileRoutes(
   shellPaths: ShellPaths,
   invoke: DaemonOperatorInvoke,
+  options: Pick<ChannelStoreEffectOptions, 'signal' | 'assertCurrent'> = {},
 ): Promise<ChannelProfileRouteSyncReport> {
   const snapshot = readChannelProfileRoutes(shellPaths);
-  const previousStates = readOnDiskSyncStates(shellPaths);
   const pending = snapshot.routes.filter((route) => route.daemonSyncState !== 'synced');
   if (pending.length === 0) {
     return { attempted: 0, synced: 0, refused: 0, routes: snapshot.routes, withdrawFailed: [] };
   }
 
-  const receipts: ChannelRoutingSyncReceipt[] = [];
   const updatedById = new Map<string, ChannelProfileRoute>();
   const pendingById = new Map(pending.map((route) => [route.id, route] as const));
-  const now = new Date().toISOString();
   let synced = 0;
   let refused = 0;
 
   for (const route of pending) {
     // The store syncing itself is not a person asking, so it does not claim to be.
-    const outcome = await offerRouteToDaemon(invoke, route, { explicitUserRequest: false });
-    const next = withSyncOutcome(route, outcome);
-    updatedById.set(route.id, next);
+    const outcome = await offerRouteToDaemon(invoke, route, { ...options, explicitUserRequest: false });
+    updatedById.set(route.id, withSyncOutcome(route, outcome));
     if (outcome.synced) synced += 1;
     else refused += 1;
-    receipts.push({
-      version: 1,
-      id: `crs-${agentRecordNonce()}`,
-      createdAt: now,
-      routeId: route.id,
-      surfaceKind: route.surfaceKind,
-      profileId: route.profileId,
-      previousSyncState: previousStates.get(route.id) ?? 'unknown',
-      outcome: outcome.synced ? 'synced' : 'refused',
-      methodId: CHANNEL_ROUTING_ASSIGN_METHOD,
-      ...(route.routeId ? { channelRouteId: route.routeId } : {}),
-      ...(outcome.synced ? { daemonAssignmentId: outcome.assignmentId } : { error: outcome.error }),
-    });
   }
 
   // Apply each outcome to the file as it is after the awaits: a route removed
@@ -457,53 +416,43 @@ export async function syncChannelProfileRoutes(
   // keeps its newer content. The outcome describes the copy that was offered.
   const path = channelProfileRouteFilePath(shellPaths);
   const vanished: { readonly route: ChannelProfileRoute; readonly assignmentId: string }[] = [];
-  const routes = runStoreFileUpdateSync(path, () => {
-    const fresh = readChannelProfileRoutes(shellPaths);
-    if (fresh.parseError !== undefined) throw new Error(`The routing file cannot be read (${fresh.parseError}), so sync results were not saved.`);
+  const routes = updateRoutes(path, (fresh) => {
     for (const [id, next] of updatedById) {
-      if (next.daemonSyncState === 'synced' && next.daemonAssignmentId && !fresh.routes.some((r) => r.id === id)) vanished.push({ route: next, assignmentId: next.daemonAssignmentId });
+      if (next.daemonSyncState === 'synced' && next.daemonAssignmentId && !fresh.some((r) => r.id === id)) vanished.push({ route: next, assignmentId: next.daemonAssignmentId });
     }
-    const merged = fresh.routes.map((route) => {
+    const merged = fresh.map((route) => {
       const offered = pendingById.get(route.id);
       return offered && offered.updatedAt === route.updatedAt && offered.profileId === route.profileId
         ? (updatedById.get(route.id) ?? route)
         : route;
     });
-    writeRoutes(path, merged);
-    return merged;
+    return { value: merged, routes: merged };
   });
   // A route removed locally while its offer was in flight can still have been
-  // taken by the daemon; withdraw it there so the removal is not undone.
-  // A withdrawal that fails leaves the daemon routing on a route the operator removed and no
-  // local row to retry from, so the failure is receipted and reported with the assignment id.
+  // taken by the daemon; withdraw it there so the removal is not undone. A
+  // withdrawal that fails is reported with the assignment id, since no local
+  // row is left to retry from.
   const withdrawFailed: { routeId: string; assignmentId: string; error: string }[] = [];
   for (const { route, assignmentId } of vanished) {
     let error: string | undefined;
     try {
-      const result = await invoke(CHANNEL_ROUTING_DELETE_METHOD, { assignmentId, confirm: true }, { explicitUserRequest: false });
+      const result = await invoke(CHANNEL_ROUTING_DELETE_METHOD, { assignmentId, confirm: true }, { ...options, explicitUserRequest: false });
       if (!result.ok) error = result.error;
     } catch (thrown) {
       error = thrown instanceof Error ? thrown.message : String(thrown);
     }
-    if (error === undefined) continue;
-    withdrawFailed.push({ routeId: route.id, assignmentId, error });
-    receipts.push({
-      version: 1,
-      id: `crs-${agentRecordNonce()}`,
-      createdAt: now,
-      routeId: route.id,
-      surfaceKind: route.surfaceKind,
-      profileId: route.profileId,
-      previousSyncState: 'removed locally while offered',
-      outcome: 'withdraw_failed',
-      methodId: CHANNEL_ROUTING_DELETE_METHOD,
-      ...(route.routeId ? { channelRouteId: route.routeId } : {}),
-      daemonAssignmentId: assignmentId,
-      error,
-    });
+    if (error !== undefined) withdrawFailed.push({ routeId: route.id, assignmentId, error });
   }
-  const receiptPath = appendChannelRoutingSyncReceipts(shellPaths, receipts);
-  return { attempted: pending.length, synced, refused, routes, receiptPath, withdrawFailed };
+  return { attempted: pending.length, synced, refused, routes, withdrawFailed };
+}
+
+/** One line per outcome of a sync run, for a caller to print. */
+export function formatChannelProfileRouteSyncReport(report: ChannelProfileRouteSyncReport): string {
+  if (report.attempted === 0 && report.withdrawFailed.length === 0) return 'No held channel routes to offer.';
+  return [
+    `Held channel routes offered to the daemon: ${report.attempted} (${report.synced} taken, ${report.refused} still held)`,
+    ...report.withdrawFailed.map((failure) => `  route ${failure.routeId} was removed here but the daemon still holds assignment ${failure.assignmentId}: ${failure.error}`),
+  ].join('\n');
 }
 
 /** List all channel-to-profile assignments, optionally filtered by profileId. */
@@ -566,14 +515,10 @@ export function removeChannelProfileRoute(
 ): boolean {
   const path = channelProfileRouteFilePath(shellPaths);
   const assertCurrent = retainChannelStoreSource(path, options);
-  return runStoreFileUpdateSync(path, () => {
-    const snapshot = readChannelProfileRoutes(shellPaths);
-    const before = snapshot.routes.length;
-    const updated = snapshot.routes.filter((r) => r.id !== routeId);
-    if (updated.length === before) return false;
-    writeRoutes(path, updated, assertCurrent);
-    return true;
-  });
+  return updateRoutes(path, (routes) => {
+    const updated = routes.filter((r) => r.id !== routeId);
+    return updated.length === routes.length ? { value: false } : { value: true, routes: updated };
+  }, assertCurrent);
 }
 
 /** What happened to the daemon's copy of a route being removed. */
@@ -636,6 +581,7 @@ export function formatChannelProfileRoutes(snapshot: ChannelProfileRouteSnapshot
     `  daemon: ${snapshot.routes.length - pending} synced, ${pending} awaiting ${CHANNEL_ROUTING_ASSIGN_METHOD}`,
     `  status: ${snapshot.parseError ? 'attention' : snapshot.exists ? 'ready' : 'empty'}`,
     ...(snapshot.parseError ? [`  parse error: ${snapshot.parseError}`] : []),
+    ...(snapshot.unreadableEntries ? [`  kept as found: ${snapshot.unreadableEntries} stored route${snapshot.unreadableEntries === 1 ? '' : 's'} this version cannot read`] : []),
     '',
   ];
   if (snapshot.routes.length === 0) {

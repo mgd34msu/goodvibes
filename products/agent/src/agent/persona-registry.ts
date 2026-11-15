@@ -1,7 +1,14 @@
 import { freshReviewPatch, parseAgentReviewState, reviewedReviewPatch, staleReviewPatch } from './review-state.ts';
-import { existsSync, readFileSync } from 'node:fs';
 import type { ShellPathService } from '@/runtime/index.ts';
-import { runStoreFileUpdateSync, writeStoreFile } from '@/utils/store-file.ts';
+import {
+  readJsonStore,
+  runStoreFileUpdateSync,
+  writeJsonStore,
+  type JsonStoreContents,
+  type JsonStoreSpec,
+  type JsonStoreWriteReport,
+  writeStoreFile,
+} from '@/utils/store-file.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import { formatAgentRecordReviewState } from './record-labels.ts';
 import { containsSecretLikeText } from './memory-safety.ts';
@@ -166,26 +173,21 @@ function parsePersona(value: unknown): AgentPersonaRecord | null {
   };
 }
 
-function parseStore(raw: string, forWrite = false): PersonaStoreFile {
-  const parsed: unknown = JSON.parse(raw);
-  if (!isRecord(parsed)) {
-    if (forWrite) assertStoreRewritable(parsed, 'personas', 0, STORE_VERSION);
-    return { version: STORE_VERSION, activePersonaId: null, personas: [] };
-  }
-  const personas = Array.isArray(parsed.personas)
-    ? parsed.personas.map(parsePersona).filter((entry): entry is AgentPersonaRecord => entry !== null)
-    : [];
-  if (forWrite) assertStoreRewritable(parsed, 'personas', personas.length, STORE_VERSION);
-  const activePersonaId = readString(parsed.activePersonaId).trim() || null;
+const PERSONA_STORE: JsonStoreSpec<AgentPersonaRecord> = {
+  label: 'persona store',
+  entriesKey: 'personas',
+  version: STORE_VERSION,
+  parseEntry: parsePersona,
+};
+
+function toPersonaStore(contents: JsonStoreContents<AgentPersonaRecord>): PersonaStoreFile {
+  const personas = [...contents.entries];
+  const activePersonaId = readString(contents.fields.activePersonaId).trim() || null;
   return {
     version: STORE_VERSION,
     activePersonaId: activePersonaId && personas.some((persona) => persona.id === activePersonaId) ? activePersonaId : null,
     personas,
   };
-}
-
-function formatStore(store: PersonaStoreFile): string {
-  return `${JSON.stringify(store, null, 2)}\n`;
 }
 
 type AgentLocalStorePaths = Pick<ShellPathService, 'resolveUserPath'>;
@@ -195,6 +197,9 @@ export function personaStorePath(shellPaths: AgentLocalStorePaths): string {
 }
 
 export class AgentPersonaRegistry {
+  private held: JsonStoreContents<AgentPersonaRecord> | null = null;
+  private lastWrite: JsonStoreWriteReport | undefined;
+
   public constructor(private readonly storePath: string, private readonly effects?: Parameters<typeof writeStoreFile>[2]) {}
 
   public static fromShellPaths(shellPaths: AgentLocalStorePaths, effects?: Parameters<typeof writeStoreFile>[2]): AgentPersonaRegistry {
@@ -238,8 +243,8 @@ export class AgentPersonaRegistry {
   }
 
   public create(input: AgentPersonaCreateInput): AgentPersonaRecord {
-    return runLockedStoreUpdate(this.storePath, this.effects, () => {
-      const store = this.readStore(true);
+    return this.locked(() => {
+      const store = this.readStore();
       const name = normalizeName(input.name);
       const description = input.description.trim();
       const body = input.body.trim();
@@ -267,8 +272,8 @@ export class AgentPersonaRegistry {
   }
 
   public update(idOrName: string, input: AgentPersonaUpdateInput): AgentPersonaRecord {
-    return runLockedStoreUpdate(this.storePath, this.effects, () => {
-      const store = this.readStore(true);
+    return this.locked(() => {
+      const store = this.readStore();
       const existing = this.findInStore(store, idOrName);
       if (!existing) throw new Error(`Unknown persona ${idOrName}`);
       const name = input.name === undefined ? existing.name : normalizeName(input.name);
@@ -298,8 +303,8 @@ export class AgentPersonaRegistry {
   }
 
   public setActive(idOrName: string): AgentPersonaRecord {
-    return runLockedStoreUpdate(this.storePath, this.effects, () => {
-      const store = this.readStore(true);
+    return this.locked(() => {
+      const store = this.readStore();
       const persona = this.findInStore(store, idOrName);
       if (!persona) throw new Error(`Unknown persona ${idOrName}`);
       this.writeStore({ ...store, activePersonaId: persona.id });
@@ -308,15 +313,15 @@ export class AgentPersonaRegistry {
   }
 
   public clearActive(): void {
-    return runLockedStoreUpdate(this.storePath, this.effects, () => {
-      const store = this.readStore(true);
+    return this.locked(() => {
+      const store = this.readStore();
       this.writeStore({ ...store, activePersonaId: null });
     });
   }
 
   public markReviewed(idOrName: string): AgentPersonaRecord {
-    return runLockedStoreUpdate(this.storePath, this.effects, () => {
-      const store = this.readStore(true);
+    return this.locked(() => {
+      const store = this.readStore();
       const existing = this.findInStore(store, idOrName);
       if (!existing) throw new Error(`Unknown persona ${idOrName}`);
       const updated: AgentPersonaRecord = {
@@ -333,8 +338,8 @@ export class AgentPersonaRegistry {
   }
 
   public markStale(idOrName: string, reason: string): AgentPersonaRecord {
-    return runLockedStoreUpdate(this.storePath, this.effects, () => {
-      const store = this.readStore(true);
+    return this.locked(() => {
+      const store = this.readStore();
       const existing = this.findInStore(store, idOrName);
       if (!existing) throw new Error(`Unknown persona ${idOrName}`);
       const updated: AgentPersonaRecord = {
@@ -351,8 +356,8 @@ export class AgentPersonaRegistry {
   }
 
   public deletePersona(idOrName: string): AgentPersonaRecord {
-    return runLockedStoreUpdate(this.storePath, this.effects, () => {
-      const store = this.readStore(true);
+    return this.locked(() => {
+      const store = this.readStore();
       const existing = this.findInStore(store, idOrName);
       if (!existing) throw new Error(`Unknown persona ${idOrName}`);
       this.writeStore({
@@ -387,17 +392,33 @@ export class AgentPersonaRegistry {
     return store.personas.find((persona) => persona.id.toLowerCase() === lookup || persona.name.toLowerCase() === lookup) ?? null;
   }
 
-  private readStore(forWrite = false): PersonaStoreFile {
-    if (!existsSync(this.storePath)) return { version: STORE_VERSION, activePersonaId: null, personas: [] };
-    try {
-      return parseStore(readFileSync(this.storePath, 'utf-8'), forWrite);
-    } catch (error) {
-      throw new Error(`Could not read Agent persona store ${error instanceof Error ? error.message : String(error)}`);
-    }
+  /** What the last write reported: personas this version cannot read that were kept, or a copy of an unreadable file. */
+  public lastWriteReport(): JsonStoreWriteReport | undefined {
+    return this.lastWrite;
+  }
+
+  private readStore(): PersonaStoreFile {
+    return toPersonaStore(this.held ?? readJsonStore(this.storePath, PERSONA_STORE));
+  }
+
+  /** One locked read-modify-write; the file is read once and entries this version cannot read are written back as found. */
+  private locked<T>(update: () => T): T {
+    return runLockedStoreUpdate(this.storePath, this.effects, () => {
+      this.held = readJsonStore(this.storePath, PERSONA_STORE);
+      try {
+        return update();
+      } finally {
+        this.held = null;
+      }
+    });
   }
 
   private writeStore(store: PersonaStoreFile): void {
-    writeStoreFile(this.storePath, formatStore(store), this.effects);
+    const read = this.held ?? readJsonStore(this.storePath, PERSONA_STORE);
+    this.lastWrite = writeJsonStore(read, PERSONA_STORE, {
+      entries: store.personas,
+      fields: { ...read.fields, activePersonaId: store.activePersonaId },
+    }, this.effects);
   }
 }
 

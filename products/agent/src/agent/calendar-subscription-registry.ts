@@ -1,7 +1,6 @@
-import { existsSync, readFileSync } from 'node:fs';
 import { postToPublicWebhook } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { ShellPathService } from '@/runtime/index.ts';
-import { runStoreFileUpdate, writeStoreJson } from '@/utils/store-file.ts';
+import { readJsonStore, runStoreFileUpdate, writeJsonStore, type JsonStoreContents, type JsonStoreSpec } from '@/utils/store-file.ts';
 import {
   SubscriptionStore,
   expandEvent,
@@ -389,7 +388,8 @@ export class CalendarSubscriptionRegistry {
     const events = store.events(sub.name);
 
     return this.withMutationLock(async () => {
-      const file = this.readStore();
+      const read = this.readContents();
+      const file = toStoreFile(read);
       const secretKey = secretKeyForName(sub.name);
       // Names that differ only in case or punctuation share one secret key, and
       // a second subscription would overwrite the first one's feed URL. Names
@@ -414,7 +414,7 @@ export class CalendarSubscriptionRegistry {
         eventCount: events.length,
         events: [...events],
       };
-      this.writeStore({ version: STORE_VERSION, subscriptions: [...file.subscriptions, meta] });
+      this.writeStore(read, [...file.subscriptions, meta]);
       return { ok: true as const, name: sub.name, eventCount: events.length, refreshIntervalMs: sub.refreshIntervalMs };
     });
   }
@@ -437,7 +437,8 @@ export class CalendarSubscriptionRegistry {
    */
   public async unsubscribeWithReport(name: string): Promise<UnsubscribeReport> {
     return this.withMutationLock(async () => {
-      const file = this.readStore();
+      const read = this.readContents();
+      const file = toStoreFile(read);
       const target = file.subscriptions.find((s) => s.name.toLowerCase() === name.trim().toLowerCase());
       if (!target) return { removed: false, secret: 'none' as const };
       let secret: UnsubscribeReport['secret'] = 'unsupported';
@@ -450,7 +451,7 @@ export class CalendarSubscriptionRegistry {
         try { await this.secrets.delete(target.secretKey); secret = 'deleted'; }
         catch (error) { secret = 'failed'; secretError = error instanceof Error ? error.message : String(error); }
       }
-      this.writeStore({ version: STORE_VERSION, subscriptions: file.subscriptions.filter((s) => s !== target) });
+      this.writeStore(read, file.subscriptions.filter((s) => s !== target));
       return { removed: true, secret, secretKey: target.secretKey, ...(secretError === undefined ? {} : { secretError }) };
     });
   }
@@ -517,7 +518,8 @@ export class CalendarSubscriptionRegistry {
     if (refreshedByName.size === 0) return outcomes;
 
     await this.withMutationLock(() => {
-      const fresh = this.readStore();
+      const read = this.readContents();
+      const fresh = toStoreFile(read);
       // A subscription unsubscribed and created again under the same name during
       // the fetch is a different record: it has another fetch time, and its
       // cached events must not be replaced by the old feed's.
@@ -525,7 +527,7 @@ export class CalendarSubscriptionRegistry {
         const base = baseByName.get(s.name);
         return base && base.secretKey === s.secretKey && base.lastFetchedAt === s.lastFetchedAt ? (refreshedByName.get(s.name) ?? s) : s;
       });
-      this.writeStore({ version: STORE_VERSION, subscriptions: merged });
+      this.writeStore(read, merged);
     });
     return outcomes;
   }
@@ -675,21 +677,29 @@ export class CalendarSubscriptionRegistry {
     return s.lastDetail;
   }
 
-  private readStore(): SubscriptionStoreFile {
-    if (!existsSync(this.storePath)) return { version: STORE_VERSION, subscriptions: [] };
-    try {
-      const parsed: unknown = JSON.parse(readFileSync(this.storePath, 'utf-8'));
-      if (!isRecord(parsed) || !Array.isArray(parsed.subscriptions)) return { version: STORE_VERSION, subscriptions: [] };
-      const subscriptions = parsed.subscriptions.filter(isRecord).map(coerceMeta).filter((m): m is SubscriptionMeta => m !== null);
-      return { version: STORE_VERSION, subscriptions };
-    } catch (error) {
-      throw new Error(`Could not read calendar subscription store: ${error instanceof Error ? error.message : String(error)}`);
-    }
+  private readContents(): JsonStoreContents<SubscriptionMeta> {
+    return readJsonStore(this.storePath, SUBSCRIPTION_STORE);
   }
 
-  private writeStore(file: SubscriptionStoreFile): void {
-    writeStoreJson(this.storePath, file);
+  private readStore(): SubscriptionStoreFile {
+    return toStoreFile(this.readContents());
   }
+
+  /** Writes over what `read` found, so a record this version cannot read keeps its cached events and feed pointer. */
+  private writeStore(read: JsonStoreContents<SubscriptionMeta>, subscriptions: readonly SubscriptionMeta[]): void {
+    writeJsonStore(read, SUBSCRIPTION_STORE, { entries: subscriptions });
+  }
+}
+
+const SUBSCRIPTION_STORE: JsonStoreSpec<SubscriptionMeta> = {
+  label: 'calendar subscription store',
+  entriesKey: 'subscriptions',
+  version: STORE_VERSION,
+  parseEntry: (value) => (isRecord(value) ? coerceMeta(value) : null),
+};
+
+function toStoreFile(read: JsonStoreContents<SubscriptionMeta>): SubscriptionStoreFile {
+  return { version: STORE_VERSION, subscriptions: read.entries };
 }
 
 function coerceMeta(value: Record<string, unknown>): SubscriptionMeta | null {

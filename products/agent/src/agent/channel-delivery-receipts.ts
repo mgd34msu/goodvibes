@@ -1,8 +1,6 @@
 import { agentRecordNonce } from '../utils/record-nonce.ts';
-import { existsSync, readFileSync } from 'node:fs';
 import type { ShellPathService } from '@/runtime/index.ts';
-import { writeStoreJson } from '@/utils/store-file.ts';
-import { keepUnreadableStoreCopy } from './unreadable-store-copy.ts';
+import { formatJsonStoreWriteReport, readJsonStore, updateJsonStore, type JsonStoreSpec } from '@/utils/store-file.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import type { AgentChannelDeliveryInput, AgentChannelDeliveryResult } from './channel-delivery.ts';
 
@@ -42,11 +40,6 @@ export interface AgentChannelDeliveryReceiptSnapshot {
   readonly exists: boolean;
   readonly receipts: readonly AgentChannelDeliveryReceipt[];
   readonly parseError?: string;
-}
-
-interface AgentChannelDeliveryReceiptFile {
-  readonly version: 1;
-  readonly receipts: readonly AgentChannelDeliveryReceipt[];
 }
 
 type AgentChannelDeliveryReceiptShellPaths = Pick<ShellPathService, 'resolveUserPath'>;
@@ -200,13 +193,12 @@ function parseReceipt(value: unknown): AgentChannelDeliveryReceipt | null {
   };
 }
 
-function parseReceiptFile(value: unknown): AgentChannelDeliveryReceiptFile {
-  if (!isRecord(value)) return { version: RECEIPT_VERSION, receipts: [] };
-  const receipts = Array.isArray(value.receipts)
-    ? value.receipts.map(parseReceipt).filter((entry): entry is AgentChannelDeliveryReceipt => entry !== null)
-    : [];
-  return { version: RECEIPT_VERSION, receipts };
-}
+const RECEIPT_STORE: JsonStoreSpec<AgentChannelDeliveryReceipt> = {
+  label: 'channel delivery receipts',
+  entriesKey: 'receipts',
+  version: RECEIPT_VERSION,
+  parseEntry: parseReceipt,
+};
 
 export function agentChannelDeliveryReceiptPath(shellPaths: AgentChannelDeliveryReceiptShellPaths): string {
   return shellPaths.resolveUserPath(GOODVIBES_AGENT_SURFACE_ROOT, 'channels', 'delivery-receipts.json');
@@ -214,18 +206,13 @@ export function agentChannelDeliveryReceiptPath(shellPaths: AgentChannelDelivery
 
 export function readAgentChannelDeliveryReceipts(shellPaths: AgentChannelDeliveryReceiptShellPaths): AgentChannelDeliveryReceiptSnapshot {
   const path = agentChannelDeliveryReceiptPath(shellPaths);
-  if (!existsSync(path)) return { path, exists: false, receipts: [] };
-  try {
-    const parsed = JSON.parse(readFileSync(path, 'utf-8')) as unknown;
-    return { path, exists: true, receipts: parseReceiptFile(parsed).receipts };
-  } catch (error) {
-    return {
-      path,
-      exists: true,
-      receipts: [],
-      parseError: error instanceof Error ? error.message : String(error),
-    };
-  }
+  const store = readJsonStore(path, RECEIPT_STORE);
+  return {
+    path,
+    exists: store.exists,
+    receipts: store.entries,
+    ...(store.unreadable === undefined ? {} : { parseError: store.unreadable }),
+  };
 }
 
 export function recordAgentChannelDeliveryReceipt(
@@ -235,7 +222,7 @@ export function recordAgentChannelDeliveryReceipt(
     readonly deliveryInput: AgentChannelDeliveryInput;
     readonly result: AgentChannelDeliveryResult;
   },
-): AgentChannelDeliveryReceipt {
+): AgentChannelDeliveryReceipt & { readonly storeNote?: string } {
   const path = agentChannelDeliveryReceiptPath(shellPaths);
   const title = previewMessage(input.result.title || 'GoodVibes Agent message');
   const receipt: AgentChannelDeliveryReceipt = {
@@ -254,14 +241,13 @@ export function recordAgentChannelDeliveryReceipt(
     userRoute: `/channels send --title "${safeRouteArg(title)}" ${targetInput(input.deliveryInput)} --message "[redacted]" --yes`,
     modelRoute: 'agent_channel_send explicitUserRequest:"..."',
   };
-  const current = readAgentChannelDeliveryReceipts(shellPaths).receipts;
-  const next: AgentChannelDeliveryReceiptFile = {
-    version: RECEIPT_VERSION,
-    receipts: [receipt, ...current].slice(0, RECEIPT_LIMIT),
-  };
-  keepUnreadableStoreCopy(path, 'receipts', parseReceipt);
-  writeStoreJson(path, next);
-  return receipt;
+  // Under the store's lock like every other store, so a CLI send and a running Agent's send both keep their receipt.
+  const { write } = updateJsonStore(path, RECEIPT_STORE, (store) => ({
+    value: undefined,
+    entries: [receipt, ...store.entries].slice(0, RECEIPT_LIMIT),
+  }));
+  const storeNote = formatJsonStoreWriteReport(write, 'delivery receipt');
+  return storeNote ? { ...receipt, storeNote } : receipt;
 }
 
 export function formatAgentChannelDeliveryReceiptLine(receipt: AgentChannelDeliveryReceipt): string {

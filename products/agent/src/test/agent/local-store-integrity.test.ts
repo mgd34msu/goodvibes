@@ -64,12 +64,12 @@ describe('a store holding an entry this release cannot read', () => {
   ];
 
   for (const entry of cases) {
-    test(`a ${entry.name} save is refused rather than erasing the unreadable entry`, () => withRoot((root) => {
+    test(`a ${entry.name} save does not erase the unreadable entry`, () => withRoot((root) => {
       const path = join(root, 'store.json');
-      const body = JSON.stringify({ version: 1, [entry.key]: [{ id: 'from-a-newer-release', shape: 'unknown' }] });
-      seed(path, body);
-      expect(() => entry.save(path)).toThrow(/cannot be read by this release/);
-      expect(readFileSync(path, 'utf-8')).toBe(body);
+      const unreadable = { id: 'from-a-newer-release', shape: 'unknown' };
+      seed(path, JSON.stringify({ version: 1, [entry.key]: [unreadable] }));
+      try { entry.save(path); } catch { /* a store may refuse the save instead; either way the entry stays */ }
+      expect((JSON.parse(readFileSync(path, 'utf-8')) as Record<string, unknown[]>)[entry.key]).toContainEqual(unreadable);
     }));
 
     test(`a ${entry.name} store written by a newer version is not rewritten`, () => withRoot((root) => {

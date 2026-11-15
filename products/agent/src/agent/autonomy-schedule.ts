@@ -1,7 +1,6 @@
-import { createBrowserGoodVibesPlatform } from '@goodvibes-jev/engine/platform/browser';
 import type { OperatorMethodInput, OperatorMethodOutput } from '@goodvibes-jev/engine/platform/contracts';
+import { createConnectedSchedule } from './connected-schedule.ts';
 import {
-  classifyConnectedHostScheduleError,
   resolveAgentConnectedHostConnection,
   ROUTINE_SCHEDULE_METHOD,
   ROUTINE_SCHEDULE_ROUTE,
@@ -61,6 +60,8 @@ export interface AutonomyScheduleSuccess {
   readonly successCriteria: string;
   readonly schedule: ScheduleCreateOutput;
   readonly request: ScheduleCreateInput;
+  /** True when an earlier create already made this schedule (its answer was lost); nothing new was created. */
+  readonly alreadyExisted?: boolean;
 }
 
 export interface AutonomyScheduleFailure {
@@ -320,40 +321,30 @@ export function buildAutonomySchedulePreview(parsed: ParsedAutonomyScheduleArgs)
   };
 }
 
-const INCOMPATIBLE_MESSAGE =
-  'Connected GoodVibes host compatibility does not satisfy Agent schedule requirements; automation.schedules.create is unavailable.';
-
+/**
+ * Create the autonomous schedule on the connected host. A retry after a lost
+ * answer returns the schedule the first attempt made instead of adding a second
+ * one that would run the same task twice on every tick.
+ */
 export async function createAutonomySchedule(
   connection: AgentConnectedHostConnection,
   preview: AutonomySchedulePreview,
+  options: { readonly signal?: AbortSignal | undefined } = {},
 ): Promise<AutonomyScheduleResult> {
-  if (!connection.token) {
-    return {
-      ok: false,
-      kind: 'auth_required',
-      error: `No connected-host operator token found at ${connection.tokenPath}`,
-      route: AUTONOMY_SCHEDULE_ROUTE,
-      baseUrl: connection.baseUrl,
-    };
+  const created = await createConnectedSchedule(connection, preview.payload, options);
+  if (!created.ok) {
+    return { ok: false, kind: created.kind, error: created.error, route: AUTONOMY_SCHEDULE_ROUTE, baseUrl: created.baseUrl };
   }
-  try {
-    const platformClient = createBrowserGoodVibesPlatform({ baseUrl: connection.baseUrl, authToken: connection.token });
-    const schedule = await platformClient.operator.invoke(AUTONOMY_SCHEDULE_METHOD, preview.payload);
-    return {
-      ok: true,
-      kind: AUTONOMY_SCHEDULE_METHOD,
-      route: AUTONOMY_SCHEDULE_ROUTE,
-      task: preview.task,
-      successCriteria: preview.successCriteria,
-      schedule,
-      request: preview.payload,
-    };
-  } catch (error) {
-    return classifyConnectedHostScheduleError(error, connection, {
-      route: AUTONOMY_SCHEDULE_ROUTE,
-      incompatibleMessage: INCOMPATIBLE_MESSAGE,
-    });
-  }
+  return {
+    ok: true,
+    kind: AUTONOMY_SCHEDULE_METHOD,
+    route: AUTONOMY_SCHEDULE_ROUTE,
+    task: preview.task,
+    successCriteria: preview.successCriteria,
+    schedule: created.schedule,
+    request: preview.payload,
+    ...(created.alreadyExisted ? { alreadyExisted: true } : {}),
+  };
 }
 
 export function resolveAutonomyConnectedHostConnection(configManager: AgentConnectedHostConfigReader, homeDirectory: string): AgentConnectedHostConnection {

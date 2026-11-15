@@ -1,4 +1,5 @@
 import type { OperatorMethodInput } from '@goodvibes-jev/engine/platform/contracts';
+import { createConnectedHost, isHostFailure, type HostCallApplied, type HostFailureKind, type HostRefusal } from './connected-host-client.ts';
 import { assertSafeOperatorPathValue, requireOperatorHttpBinding } from './operator-contract-routes.ts';
 import { scheduleNextRouteLines } from './schedule-next-routes.ts';
 
@@ -59,12 +60,13 @@ export interface OperatorActionSuccess {
 
 export interface OperatorActionFailure {
   readonly ok: false;
-  readonly kind:
-    | 'auth_required'
-    | 'connected_host_unavailable'
-    | 'connected_host_route_unavailable'
-    | 'connected_host_error';
+  readonly kind: HostFailureKind;
+  /** `<what failed>: <cause>; <next step>`. */
   readonly error: string;
+  /** State, reason and next steps. */
+  readonly refusal?: HostRefusal;
+  /** Whether the host may have acted: `unknown` when the action was sent and no answer came back. */
+  readonly applied?: HostCallApplied;
   readonly methodId: OperatorActionId;
   readonly httpMethod: OperatorActionHttpMethod;
   readonly path: string;
@@ -236,42 +238,12 @@ export function buildOperatorActionRequest(rawArgs: unknown): OperatorActionPars
   };
 }
 
-async function readResponseBody(response: Response): Promise<unknown> {
-  const text = await response.text();
-  if (!text.trim()) return {};
-  try {
-    return JSON.parse(text) as unknown;
-  } catch {
-    return text;
-  }
-}
-
-function summarizeError(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
-function classifyHttpFailure(
-  methodId: OperatorActionId,
-  httpMethod: OperatorActionHttpMethod,
-  path: string,
-  status: number,
-  body: unknown,
-): OperatorActionFailure {
-  const detail = isRecord(body) && typeof body.error === 'string' ? body.error : '';
-  return {
-    ok: false,
-    methodId,
-    httpMethod,
-    path,
-    kind: status === 401 || status === 403
-      ? 'auth_required'
-      : status === 404
-        ? 'connected_host_route_unavailable'
-        : 'connected_host_error',
-    error: `HTTP ${status}${detail ? `: ${detail}` : ''}`,
-  };
-}
-
+/**
+ * Send one operator action through the connected-host client: its deadline,
+ * its refusal shape and its reading of whether the host acted. The caller's
+ * currency check runs once, immediately before the action leaves; an action is
+ * never retried.
+ */
 export async function postOperatorAction(
   connection: OperatorActionConnection,
   request: OperatorActionRequest,
@@ -279,53 +251,33 @@ export async function postOperatorAction(
 ): Promise<OperatorActionResult> {
   const path = renderOperatorActionPath(request.descriptor, request.targetId);
   const httpMethod = operatorActionHttpMethod(request.descriptor);
-  const token = connection.token;
-  if (!token) {
-    return {
-      ok: false,
-      methodId: request.descriptor.action,
-      httpMethod,
-      path,
-      kind: 'auth_required',
-      error: connection.tokenPath ? `no connected-host operator token found at ${connection.tokenPath}` : 'no connected-host operator token found',
-    };
-  }
-  const headers: HeadersInit = {
-    authorization: `Bearer ${token}`,
-  };
-  const init: RequestInit = {
-    method: httpMethod,
-    headers,
-    signal: options.signal,
-    redirect: 'error',
-  };
-  if (request.body) {
-    headers['content-type'] = 'application/json';
-    init.body = JSON.stringify(request.body);
-  }
+  const methodId = request.descriptor.action;
   try {
-    options.signal?.throwIfAborted(); options.assertCurrent?.();
-    const response = await fetch(`${connection.baseUrl}${path}`, init);
-    options.signal?.throwIfAborted(); options.assertCurrent?.();
-    const body = await readResponseBody(response);
-    options.signal?.throwIfAborted(); options.assertCurrent?.();
-    if (!response.ok) return classifyHttpFailure(request.descriptor.action, httpMethod, path, response.status, body);
-    return {
-      ok: true,
-      methodId: request.descriptor.action,
-      httpMethod,
-      path,
-      body,
-    };
+    options.signal?.throwIfAborted();
+    options.assertCurrent?.();
   } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
     return {
-      ok: false,
-      methodId: request.descriptor.action,
-      httpMethod,
-      path,
-      kind: 'connected_host_unavailable',
-      error: summarizeError(error),
+      ok: false, methodId, httpMethod, path, kind: 'cancelled', applied: 'no',
+      error: `${methodId} was not sent: ${reason}`,
+      refusal: { code: 'not_current', state: 'the action was not sent', reason, next: ['repeat the action if it is still wanted'], retryable: false },
     };
+  }
+  const host = createConnectedHost(() => ({
+    baseUrl: connection.baseUrl,
+    token: connection.token,
+    credential: connection.tokenPath ?? 'the connected-host credential',
+  }), { validateResponses: false });
+  const input = { ...(request.body ?? {}), [request.descriptor.targetField]: request.targetId };
+  try {
+    // The action ids are contract ids; their inputs are the target field plus the approval note and remember flag.
+    const body: unknown = await host.invoke(methodId, input as OperatorMethodInput<typeof methodId>, { signal: options.signal });
+    return { ok: true, methodId, httpMethod, path, body };
+  } catch (error) {
+    if (isHostFailure(error)) {
+      return { ok: false, methodId, httpMethod, path, kind: error.kind, error: error.message, refusal: error.refusal, applied: error.applied };
+    }
+    return { ok: false, methodId, httpMethod, path, kind: 'connected_host_error', applied: 'unknown', error: `${methodId} on the connected host failed: ${error instanceof Error ? error.message : String(error)}` };
   }
 }
 
@@ -344,6 +296,8 @@ function formatOperatorActionFailureKind(kind: OperatorActionFailure['kind']): s
   if (kind === 'auth_required') return 'authorization required';
   if (kind === 'connected_host_unavailable') return 'connected host unavailable';
   if (kind === 'connected_host_route_unavailable') return 'connected host route unavailable';
+  if (kind === 'connected_host_incompatible') return 'connected host is a different version';
+  if (kind === 'cancelled') return 'cancelled';
   return 'connected host error';
 }
 
@@ -370,6 +324,7 @@ export function formatOperatorActionFailure(result: OperatorActionFailure): stri
     `  method: ${result.methodId}`,
     `  route: ${result.httpMethod} ${result.path}`,
     `  error: ${result.error}`,
+    ...(result.applied === 'unknown' ? ['  outcome: unknown; the host may have applied it, so read the current state before repeating it'] : []),
   ].join('\n');
 }
 

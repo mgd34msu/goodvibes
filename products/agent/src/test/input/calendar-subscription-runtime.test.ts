@@ -156,7 +156,7 @@ describe('/calendar import honest report', () => {
     ].join('\r\n'), 'utf-8');
     runCalendarRuntimeCommand(['import', icsPath, '--yes'], ctx);
     const out = output();
-    expect(out).toContain('recurrence not fully expanded');
+    expect(out).toContain('does not expand');
     expect(out).toContain('Monthly bill');
   });
 });

@@ -1,18 +1,16 @@
-import {
-  categoryForCode, categoryForStatus, GoodVibesError, httpStatusOf,
-  isKnownErrorCode, readFailure, EngineErrorCodes, type ErrorCategory,
-} from '@goodvibes-jev/engine/errors';
+/**
+ * connected-host-failure.ts, the result-value reading of a failed connected-host
+ * call for the schedule clients that still build their own platform client.
+ *
+ * It reads the same facts the connected-host client does (connected-host-client.ts):
+ * the HTTP status, the errno code and the error's own structured fields. Never a
+ * model, never the wording. A 404 gets one `/status` probe, bounded at 3 s, to
+ * tell a host older than this Agent from nothing listening at all.
+ */
+import { categoryForCode, categoryForStatus, EngineErrorCodes, GoodVibesError, httpStatusOf } from '@goodvibes-jev/engine/errors';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { isHostFailure } from './connected-host-client.ts';
 import type { AgentConnectedHostConnection } from './routine-schedule-promotion.ts';
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-}
-
-function readString(record: Record<string, unknown>, key: string): string | null {
-  const value = record[key];
-  return typeof value === 'string' ? value : null;
-}
 
 /** Why a connected-host call failed, shared by schedules and operator gateway callers. */
 export interface ConnectedHostFailure<Route extends string> {
@@ -23,98 +21,70 @@ export interface ConnectedHostFailure<Route extends string> {
     | 'connected_host_incompatible'
     | 'connected_host_route_unavailable'
     | 'connected_host_error';
+  /** `<what failed>: <cause>; <next step>`. */
   readonly error: string;
   readonly route: Route;
   readonly baseUrl?: string;
 }
 
-async function fetchConnectedHostStatus(connection: AgentConnectedHostConnection): Promise<{
-  readonly ok: boolean;
-  readonly status: number;
-  readonly body: unknown;
-}> {
+const STATUS_PROBE_DEADLINE_MS = 3_000;
+
+async function hostAnswersStatus(connection: AgentConnectedHostConnection): Promise<boolean> {
   try {
     const response = await fetch(`${connection.baseUrl}/status`, {
       headers: connection.token ? { authorization: `Bearer ${connection.token}` } : undefined,
+      redirect: 'error',
+      signal: AbortSignal.timeout(STATUS_PROBE_DEADLINE_MS),
     });
-    const text = await response.text();
-    let body: unknown = text;
-    try {
-      body = text.trim() ? JSON.parse(text) as unknown : {};
-    } catch {
-      body = text;
-    }
-    return { ok: response.ok, status: response.status, body };
-  } catch (error) {
-    return { ok: false, status: 0, body: summarizeError(error) };
+    await response.body?.cancel();
+    return response.ok;
+  } catch {
+    return false;
   }
 }
 
-/** Structure is authoritative; only otherwise unclassified wording needs judgment. */
-async function connectedHostFailureCategory(error: unknown, message: string, site: string): Promise<ErrorCategory> {
-  const record = isRecord(error) ? error : {};
-  const code = readString(record, 'code') ?? undefined;
-  const cause = isRecord(record.cause) ? record.cause : {};
-  // Cancellation is an explicit stop, never evidence of a dead host or permission to retry.
-  if (code === EngineErrorCodes.CANCELLED || record.name === 'AbortError'
-    || cause.code === EngineErrorCodes.CANCELLED || cause.name === 'AbortError') return 'unknown';
-  const status = httpStatusOf(error);
-  if (status !== undefined) return categoryForStatus(status) ?? 'unknown';
-  switch (code) {
-    case EngineErrorCodes.AUTH_REQUIRED:
-    case EngineErrorCodes.TOKEN_EXPIRED: return 'authentication';
-    case EngineErrorCodes.PERMISSION_DENIED: return 'authorization';
-    case EngineErrorCodes.NOT_FOUND:
-    case EngineErrorCodes.METHOD_NOT_FOUND: return 'not_found';
-    case EngineErrorCodes.NETWORK_UNREACHABLE: return 'network';
-    case EngineErrorCodes.TIMEOUT: return 'timeout';
+function errnoCode(error: unknown): string | undefined {
+  for (const value of [(error as { cause?: unknown } | null)?.cause, error]) {
+    const code = (value as { code?: unknown } | null)?.code;
+    if (typeof code === 'string' && code) return code;
   }
-  if (error instanceof GoodVibesError && error.category !== 'unknown') return error.category;
-  const errnoCategory = categoryForCode(code) ?? categoryForCode(readString(cause, 'code') ?? undefined);
-  if (errnoCategory !== undefined) return errnoCategory;
-  if (record.name === 'TimeoutError') return 'timeout';
-  // Other declared platform failures (validation, billing, conflict, etc.) are not transport failures.
-  if (code !== undefined && isKnownErrorCode(code) && code !== EngineErrorCodes.UNKNOWN) return 'unknown';
-  if (!message.trim()) return 'unknown';
-  try {
-    return (await readFailure({
-      message,
-      code,
-      errorName: readString(record, 'name') ?? undefined,
-    }, site)).category;
-  } catch {
-    // Reporting a failed connected-host call must still work before bootstrap or if judgment is unavailable.
-    // Keep the original failure observable; do not guess, retry or grant authority.
-    return 'unknown';
-  }
+  return undefined;
 }
 
 /**
- * Connected-host callers share typed engine failure classification. A missing
- * route gets one read-only status probe to distinguish an old host from an
- * unavailable route; no failure classification retries the mutation.
+ * Classify a failed connected-host call from its status, errno and structured
+ * fields. An error that carries none of them is reported verbatim as a host
+ * error. No failure classification retries the call.
  */
 export async function classifyConnectedHostError<Route extends string>(
   error: unknown,
   connection: AgentConnectedHostConnection,
-  options: { readonly route: Route; readonly incompatibleMessage: string; readonly site: string },
+  options: { readonly route: Route; readonly incompatibleMessage: string; readonly site?: string },
 ): Promise<ConnectedHostFailure<Route>> {
-  const message = summarizeError(error);
-  const category = await connectedHostFailureCategory(error, message, options.site);
-  const base = { ok: false, error: message, route: options.route, baseUrl: connection.baseUrl } as const;
+  const base = { ok: false as const, route: options.route, baseUrl: connection.baseUrl };
+  // A cancelled call is reported as a host error here: this shape predates the cancelled kind and its callers render by kind.
+  if (isHostFailure(error)) return { ...base, kind: error.kind === 'cancelled' ? 'connected_host_error' : error.kind, error: error.message };
+  const cause = summarizeError(error);
+  const record = (error ?? {}) as { name?: unknown; code?: unknown };
+  if (record.name === 'AbortError' || record.code === EngineErrorCodes.CANCELLED) {
+    return { ...base, kind: 'connected_host_error', error: `${options.route}: the call was cancelled (${cause}); repeat it if it is still wanted` };
+  }
+  const status = httpStatusOf(error);
+  const category = status !== undefined
+    ? categoryForStatus(status)
+    : error instanceof GoodVibesError && error.category !== 'unknown'
+      ? error.category
+      : categoryForCode(errnoCode(error)) ?? (record.name === 'TimeoutError' ? 'timeout' : undefined);
   if (category === 'authentication' || category === 'authorization' || category === 'permission') {
-    return { ...base, kind: 'auth_required' };
+    return { ...base, kind: 'auth_required', error: `${options.route}: the connected host refused the credential (${cause}); pair this Agent with the host again or provision a fresh connected-host token, then retry` };
   }
   if (category === 'not_found') {
-    const connectedHost = await fetchConnectedHostStatus(connection);
-    if (connectedHost.ok) {
-      return { ...base, kind: 'connected_host_incompatible', error: options.incompatibleMessage };
-    }
-    return { ...base, kind: 'connected_host_route_unavailable' };
+    return await hostAnswersStatus(connection)
+      ? { ...base, kind: 'connected_host_incompatible', error: `${options.incompatibleMessage} (${cause}); update GoodVibes on the host to the version this Agent was built with` }
+      : { ...base, kind: 'connected_host_route_unavailable', error: `${options.route}: nothing at ${connection.baseUrl} served the route or /status (${cause}); check controlPlane.host and controlPlane.port` };
   }
   if (category === 'network' || category === 'timeout') {
-    return { ...base, kind: 'connected_host_unavailable' };
+    return { ...base, kind: 'connected_host_unavailable', error: `${options.route}: the connected host at ${connection.baseUrl} could not be reached (${cause}); start the GoodVibes daemon or check controlPlane.host and controlPlane.port, then check whether the change happened before repeating it` };
   }
-  return { ...base, kind: 'connected_host_error' };
+  return { ...base, kind: 'connected_host_error', error: `${options.route}: ${cause}` };
 }
-

@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
-import { AgentCalendarRegistry } from '../../agent/calendar-registry.ts';
-import { parseIcs } from '../../agent/ics-calendar.ts';
-import { parseIcs as parseIcsHonest } from '@goodvibes-jev/engine/platform/platform/calendar';
+import { AgentCalendarRegistry, localIsoDate, UNTITLED_EVENT_TITLE } from '../../agent/calendar-registry.ts';
+import { parseIcs } from '@goodvibes-jev/engine/platform/platform/calendar';
+import { formatJsonStoreWriteReport } from '@/utils/store-file.ts';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { parseAgentLocalLibraryArgs, resolveCommandFilePath } from './agent-local-library-args.ts';
 import { requireShellPaths } from './runtime-services.ts';
@@ -19,13 +19,13 @@ import {
   sourceLabel,
 } from './calendar-connect-runtime.ts';
 
-/** Today's date as 'YYYY-MM-DD' (UTC), for windowed occurrence expansion. */
+/** Today's local calendar date, 'YYYY-MM-DD', the convention stored wall-clock times use. */
 function todayIsoDate(): string {
-  return new Date().toISOString().slice(0, 10);
+  return localIsoDate(new Date());
 }
 
 function addDaysIsoDate(days: number): string {
-  return new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10);
+  return localIsoDate(new Date(Date.now() + days * 86_400_000));
 }
 
 /** Append the merged, source-labeled subscribed section to a local-events block. */
@@ -116,7 +116,11 @@ export async function runCalendarRuntimeCommand(args: readonly string[], ctx: Co
     // list / upcoming
     if (sub === 'list' || sub === 'all') {
       const snap = registry.snapshot();
-      const local = renderEventList([...snap.events], snap.path);
+      const unreadable = [
+        snap.unreadable ? `  The store file cannot be read (${snap.unreadable}); the next change keeps a copy of it before replacing it.` : '',
+        snap.unreadableEntries > 0 ? `  ${snap.unreadableEntries} stored entr${snap.unreadableEntries === 1 ? 'y' : 'ies'} this version cannot read ${snap.unreadableEntries === 1 ? 'is' : 'are'} kept as found and not shown.` : '',
+      ].filter(Boolean);
+      const local = [renderEventList([...snap.events], snap.path), ...unreadable].join('\n');
       const subscribed = subs ? renderSubscribedSection(subs.seeds()) : '';
       ctx.print(withSubscribedSection(local, subscribed));
       return;
@@ -163,40 +167,38 @@ export async function runCalendarRuntimeCommand(args: readonly string[], ctx: Co
         return;
       }
       const content = readFileSync(sourcePath, 'utf-8');
-      // The platform reader says what the local store cannot use: entries it
-      // could not parse, and recurring events whose RRULE this build does not
-      // fully expand (imported as a single seed, never silently dropped or
-      // mis-expanded). The preview and the receipt both report from it so they
-      // cannot disagree on what an event is.
-      const honest = parseIcsHonest(content);
-      const unsupportedRecurring = honest.events.filter((e) => e.recurrence?.expansion === 'unsupported');
-      const readerNotes = [
-        honest.skipped.length > 0 ? `Could not parse ${honest.skipped.length} entr${honest.skipped.length === 1 ? 'y' : 'ies'}: ${honest.skipped[0]?.message ?? ''}` : '',
-        unsupportedRecurring.length > 0
-          ? `${unsupportedRecurring.length} recurring event${unsupportedRecurring.length === 1 ? '' : 's'} imported as a single date only (recurrence not fully expanded): ${unsupportedRecurring.slice(0, 3).map((e) => e.summary).join(', ')}${unsupportedRecurring.length > 3 ? ', ...' : ''}`
-          : '',
-      ];
       if (!parsed.yes) {
+        // The same reader the import uses, so the preview and the receipt agree on what an event is.
         const preview = parseIcs(content);
+        const untitled = preview.events.filter((e) => e.summary === '(no title)' || !e.summary.trim()).length;
+        const unexpanded = preview.events.filter((e) => e.recurrence?.expansion === 'unsupported');
         ctx.print([
           'Calendar import preview',
           `  file ${sourcePath}`,
-          `  events found ${preview.length}`,
-          ...preview.slice(0, 5).map((e) => `  - ${e.summary} (${e.dtstart})`),
-          preview.length > 5 ? `  ... and ${preview.length - 5} more` : '',
-          ...readerNotes.map((note) => (note ? `  ${note}` : '')),
+          `  events found ${preview.events.length}`,
+          ...preview.events.slice(0, 5).map((e) => `  - ${e.summary} (${e.start.value})${e.recurrence ? ' repeats' : ''}`),
+          preview.events.length > 5 ? `  ... and ${preview.events.length - 5} more` : '',
+          untitled > 0 ? `  ${untitled} event${untitled === 1 ? ' has' : 's have'} no title and will be imported as "${UNTITLED_EVENT_TITLE}"` : '',
+          preview.skipped.length > 0 ? `  ${preview.skipped.length} entr${preview.skipped.length === 1 ? 'y' : 'ies'} cannot be read and will not be imported: ${preview.skipped[0]?.message ?? ''}` : '',
+          unexpanded.length > 0 ? `  ${unexpanded.length} repeating event${unexpanded.length === 1 ? '' : 's'} use a rule this version does not expand and will show on the first date only: ${unexpanded.slice(0, 3).map((e) => e.summary).join(', ')}${unexpanded.length > 3 ? ', ...' : ''}` : '',
           '  rerun with --yes to import',
         ].filter(Boolean).join('\n'));
         return;
       }
-      const { imported, skipped, secretSkipped } = registry.importIcs(content);
+      const result = registry.importIcs(content);
+      const { imported } = result;
       ctx.print([
         `Imported ${imported.length} event${imported.length === 1 ? '' : 's'} from ${sourcePath}`,
-        ...imported.slice(0, 10).map((e) => `  ${e.id}  ${e.start}  ${e.title}`),
+        ...imported.slice(0, 10).map((e) => `  ${e.id}  ${e.start}  ${e.title}${e.recurrence ? '  (repeats)' : ''}`),
         imported.length > 10 ? `  ... and ${imported.length - 10} more` : '',
-        skipped > 0 ? `Skipped ${skipped} event${skipped === 1 ? '' : 's'} that already exist.` : '',
-        secretSkipped > 0 ? `Skipped ${secretSkipped} event${secretSkipped === 1 ? '' : 's'} for safety.` : '',
-        ...readerNotes,
+        result.duplicates > 0 ? `Skipped ${result.duplicates} event${result.duplicates === 1 ? '' : 's'} already in the calendar from an earlier import.` : '',
+        result.secretSkipped > 0 ? `Did not import ${result.secretSkipped} event${result.secretSkipped === 1 ? '' : 's'} with a secret-looking field; remove the sensitive text from the file to import ${result.secretSkipped === 1 ? 'it' : 'them'}.` : '',
+        result.untitled > 0 ? `${result.untitled} event${result.untitled === 1 ? ' had' : 's had'} no title and ${result.untitled === 1 ? 'was' : 'were'} imported as "${UNTITLED_EVENT_TITLE}".` : '',
+        result.notParsed.length > 0 ? `Could not read ${result.notParsed.length} entr${result.notParsed.length === 1 ? 'y' : 'ies'}: ${result.notParsed[0] ?? ''}` : '',
+        result.unexpandedSeries.length > 0
+          ? `${result.unexpandedSeries.length} repeating event${result.unexpandedSeries.length === 1 ? '' : 's'} use a rule this version does not expand and show on the first date only: ${result.unexpandedSeries.slice(0, 3).join(', ')}${result.unexpandedSeries.length > 3 ? ', ...' : ''}`
+          : '',
+        formatJsonStoreWriteReport(result.write, 'calendar'),
       ].filter(Boolean).join('\n'));
       return;
     }

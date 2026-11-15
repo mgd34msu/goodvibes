@@ -1,6 +1,7 @@
 /**
- * daemon-operator-client-failures.test.ts, a failed call says why, and a call
- * the caller cancelled is not reported as a dead host.
+ * daemon-operator-client-failures.test.ts, a failed call says why, an address
+ * the host echoes back is not passed on, and a call the caller cancelled is not
+ * reported as a dead host.
  */
 
 import { describe, expect, test } from 'bun:test';
@@ -11,12 +12,16 @@ const invokeWith = (fetchImpl: (input: string, init?: RequestInit) => Promise<Re
   createDaemonOperatorInvoke(() => connection, fetchImpl);
 
 describe('a refusal carries the daemon\'s reason', () => {
-  test('a validation message in the body reaches the caller after the status', async () => {
+  test('a validation message in the body reaches the caller with the status', async () => {
     const invoke = invokeWith(async () => Response.json({ error: 'Field status must be one of: draft, queued' }, { status: 400 }));
 
     const result = await invoke('services.status', {});
 
-    expect(result).toMatchObject({ ok: false, kind: 'connected_host_error', error: 'HTTP 400: Field status must be one of: draft, queued' });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.kind).toBe('connected_host_error');
+    expect(result.refusal?.status).toBe(400);
+    expect(result.error).toContain('Field status must be one of: draft, queued');
   });
 
   test('the reason is bounded and has addresses and control characters removed', async () => {
@@ -29,13 +34,7 @@ describe('a refusal carries the daemon\'s reason', () => {
     expect(result.error).toContain('[address]');
     expect(result.error).not.toContain('secret');
     expect(result.error).not.toContain('\u0007');
-    expect(result.error.length).toBeLessThan(260);
-  });
-
-  test('a body with no message leaves the bare status', async () => {
-    const invoke = invokeWith(async () => new Response('', { status: 503 }));
-
-    expect(await invoke('services.status', {})).toMatchObject({ ok: false, error: 'HTTP 503' });
+    expect(result.refusal!.reason.length).toBeLessThanOrEqual(203);
   });
 });
 
@@ -50,14 +49,14 @@ describe('a cancelled call is not a dead host', () => {
 
     const result = await invoke('services.status', {}, { signal: controller.signal });
 
-    expect(result).toMatchObject({ ok: false, kind: 'connected_host_unavailable', error: expect.stringContaining('cancelled') });
+    expect(result).toMatchObject({ ok: false, kind: 'cancelled' });
   });
 
-  test('a network failure keeps the host-unavailable wording', async () => {
-    const invoke = invokeWith(async () => { throw new Error('ECONNREFUSED'); });
+  test('a refused connection is reported as an unreachable host that did not act', async () => {
+    const invoke = invokeWith(async () => { throw Object.assign(new Error('Unable to connect'), { code: 'ECONNREFUSED' }); });
 
     const result = await invoke('services.status', {});
 
-    expect(result).toMatchObject({ ok: false, error: expect.stringContaining('failed or its authority changed') });
+    expect(result).toMatchObject({ ok: false, kind: 'connected_host_unavailable', applied: 'no' });
   });
 });

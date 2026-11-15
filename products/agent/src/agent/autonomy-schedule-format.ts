@@ -68,7 +68,9 @@ export function formatAutonomyScheduleSuccess(result: AutonomyScheduleSuccess): 
   const id = readString(record, 'id') ?? '(unknown)';
   const status = readString(record, 'status') ?? (record.enabled === false ? 'paused' : 'enabled');
   return [
-    'Created GoodVibes schedule for autonomous Agent work',
+    result.alreadyExisted
+      ? 'GoodVibes schedule for autonomous Agent work already exists (an earlier request created it); nothing new was created'
+      : 'Created GoodVibes schedule for autonomous Agent work',
     `  schedule ${id}`,
     `  status ${status}`,
     `  route ${result.kind} ${result.route}`,

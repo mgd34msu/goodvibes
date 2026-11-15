@@ -35,7 +35,7 @@ describe('AgentCalendarRegistry', () => {
     const e1 = reg.create({ title: 'Planning', start: '2024-01-01' });
     const e2 = reg.create({ title: 'Planning', start: '2024-02-01' });
     expect(e1.id).toBe('planning');
-    expect(e2.id).toBe('planning-2');
+    expect(e2.id).toMatch(/^planning-[0-9a-f]{6}$/);
   });
 
   test('rejects events with secret-looking values', () => {
@@ -74,6 +74,30 @@ describe('AgentCalendarRegistry', () => {
     expect(upcoming60.some((e) => e.title === 'Far Event')).toBe(true);
   });
 
+  test('an imported weekly event lists each of its occurrences in the window, without the excluded one', () => {
+    const reg = tempRegistry();
+    reg.importIcs([
+      'BEGIN:VCALENDAR',
+      'BEGIN:VEVENT',
+      'UID:weekly@test',
+      'SUMMARY:Stand-up',
+      'DTSTART:20261105T090000',
+      'RRULE:FREQ=WEEKLY',
+      'EXDATE:20261119T090000',
+      'END:VEVENT',
+      'END:VCALENDAR',
+    ].join('\r\n'));
+    const starts = reg.upcoming(21, new Date(2026, 10, 10, 12)).map((event) => event.start);
+    expect(starts).toEqual(['2026-11-12T09:00:00', '2026-11-26T09:00:00']);
+  });
+
+  test('upcoming counts days in the local calendar, so an event tonight is listed', () => {
+    const reg = tempRegistry();
+    const now = new Date(2026, 10, 14, 23, 0);
+    reg.create({ title: 'Late', start: '2026-11-14T23:30:00' });
+    expect(reg.upcoming(1, now).map((event) => event.title)).toEqual(['Late']);
+  });
+
   test('importIcs imports events from iCalendar content', () => {
     const reg = tempRegistry();
     const ics = [
@@ -90,7 +114,7 @@ describe('AgentCalendarRegistry', () => {
 
     const result = reg.importIcs(ics);
     expect(result.imported).toHaveLength(1);
-    expect(result.skipped).toBe(0);
+    expect(result.duplicates).toBe(0);
     expect(result.secretSkipped).toBe(0);
     expect(result.imported[0]!.title).toBe('Imported Meeting');
     expect(result.imported[0]!.sourceProvenance).toBe('import-test@example.com');
@@ -113,7 +137,7 @@ describe('AgentCalendarRegistry', () => {
     const result = reg.importIcs(ics);
     expect(result.imported).toHaveLength(0);
     expect(result.secretSkipped).toBe(1);
-    expect(result.skipped).toBe(0);
+    expect(result.duplicates).toBe(0);
     expect(reg.list()).toHaveLength(0);
   });
 
@@ -177,7 +201,7 @@ describe('AgentCalendarRegistry', () => {
     const result = reg.importIcs(ics);
     expect(result.imported).toHaveLength(1);
     expect(result.imported[0]!.title).toBe('Clean Event');
-    expect(result.skipped).toBe(1);
+    expect(result.duplicates).toBe(1);
     expect(result.secretSkipped).toBe(1);
     // Registry has the pre-seeded + the one clean import.
     expect(reg.list()).toHaveLength(2);

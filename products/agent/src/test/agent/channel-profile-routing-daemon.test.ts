@@ -19,8 +19,7 @@
  *
  * The retry path (`syncChannelProfileRoutes`) is the same operation applied to
  * records the daemon does not hold, including records written by a build from
- * before the daemon held this table at all, which is why the receipts assert on
- * the state those records were actually in.
+ * before the daemon held this table at all.
  */
 
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
@@ -35,7 +34,6 @@ import {
   formatChannelProfileRoutes,
   CHANNEL_ROUTING_ASSIGN_METHOD,
 } from '../../agent/channel-profile-routing.ts';
-import { readChannelRoutingSyncReceipts } from '../../agent/channel-routing-sync-receipts.ts';
 import { snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
 import type { DaemonInvokeResult, DaemonOperatorInvoke } from '../../agent/daemon-operator-client.ts';
 
@@ -325,39 +323,15 @@ describe('records written before the daemon held this table', () => {
     expect(raw).not.toContain('local_only');
   });
 
-  test('the migration leaves a receipt naming the state the record was in', async () => {
+  test("a refused migration stays held with the daemon's reason, not dropped", async () => {
     seedLegacyFile();
 
-    await syncChannelProfileRoutes(shellPaths, acceptingDaemon([], 'assign-legacy'));
+    const report = await syncChannelProfileRoutes(shellPaths, unreachableDaemon([]));
 
-    const receipts = readChannelRoutingSyncReceipts(shellPaths).receipts;
-    expect(receipts).toHaveLength(1);
-    expect(receipts[0]?.id).toMatch(/^crs-[a-p]{32}$/);
-    expect(snapshotJudgmentInput(receipts[0])).toEqual(receipts[0]);
-    expect(receipts[0]).toMatchObject({
-      routeId: 'cpr-legacy-1',
-      surfaceKind: 'slack',
-      channelRouteId: 'C9',
-      profileId: 'work',
-      previousSyncState: 'local_only',
-      outcome: 'synced',
-      daemonAssignmentId: 'assign-legacy',
-      methodId: CHANNEL_ROUTING_ASSIGN_METHOD,
-    });
-  });
-
-  test('a refused migration is receipted as refused rather than dropped', async () => {
-    seedLegacyFile();
-
-    await syncChannelProfileRoutes(shellPaths, unreachableDaemon([]));
-
-    const receipts = readChannelRoutingSyncReceipts(shellPaths).receipts;
-    expect(receipts).toHaveLength(1);
-    expect(receipts[0]!.outcome).toBe('refused');
-    expect(receipts[0]!.previousSyncState).toBe('local_only');
-    expect(receipts[0]!.error).toContain('ECONNREFUSED');
-    // Still live locally, a refusal is not a deletion.
-    expect(readChannelProfileRoutes(shellPaths).routes).toHaveLength(1);
+    expect(report.refused).toBe(1);
+    const [route] = readChannelProfileRoutes(shellPaths).routes;
+    expect(route!.daemonSyncState).toBe('pending');
+    expect(route!.syncError).toContain('ECONNREFUSED');
   });
 });
 

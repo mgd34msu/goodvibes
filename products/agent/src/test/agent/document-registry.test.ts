@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { createShellPathService } from '@/runtime/index.ts';
 import { AgentDocumentRegistry, agentDocumentCommentLifecycle, agentDocumentLifecycle, agentDocumentSuggestionLifecycle, documentStorePath, renderAgentDocumentMarkdown } from '../../agent/document-registry.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
@@ -56,7 +56,8 @@ describe('AgentDocumentRegistry', () => {
 
     expect(reviewed.status).toBe('reviewed');
     expect(markdown).toContain('# Brief');
-    expect(markdown).toContain('Version: v2');
+    // A status change records no new version; only content does.
+    expect(markdown).toContain('Version: v1');
     expect(markdown).toContain('Status: reviewed');
     expect(markdown).toContain('Reviewed body.');
   });
@@ -114,16 +115,29 @@ describe('AgentDocumentRegistry', () => {
     expect(markdown).toContain('a1: Reviewed chart (artifact-123, chart.png / image/png / image)');
   });
 
-  test('corrupt store throws plain-language error', () => {
+  test('a store that is not JSON is copied aside before the next write, not lost', () => {
     const root = makeProjectTempDir('goodvibes-agent-documents-corrupt');
     const shellPaths = createShellPathService({ workingDirectory: root, homeDirectory: root });
     const storePath = documentStorePath(shellPaths);
     const documents = AgentDocumentRegistry.fromShellPaths(shellPaths);
-    // seed a record so the store file exists
     documents.create({ title: 'Init Doc', body: 'Body.' });
-    // corrupt it
     writeFileSync(storePath, '{corrupt json', 'utf-8');
-    expect(() => documents.list()).toThrow('Could not read Agent document store');
+
+    documents.create({ title: 'Next Doc', body: 'Body.' });
+
+    const copyPath = documents.lastWriteReport()?.copyPath;
+    expect(copyPath).toBeDefined();
+    expect(readFileSync(copyPath!, 'utf-8')).toBe('{corrupt json');
+  });
+
+  test('accepting a suggestion written against an older version is refused, naming both versions', () => {
+    const documents = registry();
+    const created = documents.create({ title: 'Plan', body: 'A' });
+    documents.suggestUpdate(created.id, { body: 'Suggested', summary: 'Rewrite.' });
+    documents.update(created.id, { body: 'B' });
+
+    expect(() => documents.acceptSuggestion(created.id, 's1')).toThrow(/proposed against v1.*now at v2/);
+    expect(documents.get(created.id)?.body).toBe('B');
   });
 
   test('stores accepts and rejects AI suggestions through explicit review', () => {

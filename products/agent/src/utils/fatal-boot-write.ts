@@ -26,13 +26,12 @@ const STDERR_FD = 2;
 /**
  * Write `line` to `fd`, looping until every byte is accepted.
  *
- * The loop is a deliberate local difference from the platform's copy, which issues
- * one `writeSync` because it only ever carries a short fatal line. This repo
- * also routes `--help`, `--version`, completion scripts and the whole `status`
- * render through these functions, and a single `writeSync` of several kilobytes
- * into a pipe can return a short count, which would truncate the output rather
- * than silence it, a quieter version of the same defect. Keep the loop when the
- * platform export is adopted, or move it upstream.
+ * The Agent routes `--help`, `--version`, completion scripts and the whole
+ * `status` render through these functions, so the payload can be several
+ * kilobytes: a single `writeSync` into a pipe can return a short count, and a
+ * pipe whose reader is slow can refuse with EAGAIN. Both would cut the output
+ * off without a sign. The platform's copy (daemon `fatal-boot-report.ts`) loops
+ * on short counts only, because it carries one short fatal line.
  */
 function writeLineToFd(fd: number, line: string): void {
   try {
@@ -44,12 +43,19 @@ function writeLineToFd(fd: number, line: string): void {
   }
 }
 
-/** A non-blocking pipe whose reader is slow reports EAGAIN until it drains. */
+/**
+ * A non-blocking pipe whose reader is slow reports EAGAIN until it drains. The
+ * pause grows 5 ms per refusal and resets on progress, so a reader that stops
+ * reading costs at most about 4 s before the write gives up; a normal write
+ * never pauses.
+ */
 const MAX_EAGAIN_RETRIES = 40;
 const EAGAIN_BACKOFF_MS = 5;
+let pauseCell: Int32Array | undefined;
 
 function pauseSync(ms: number): void {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+  pauseCell ??= new Int32Array(new SharedArrayBuffer(4));
+  Atomics.wait(pauseCell, 0, 0, ms);
 }
 
 /**

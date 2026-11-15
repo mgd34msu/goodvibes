@@ -5,7 +5,7 @@
 
 # Command Reference
 
-GoodVibes ships **162** built-in slash commands across **75** categories. Every command below is generated directly from the command registry, so this list is always complete and current. Type a command in the composer prefixed with `/`, or press `Ctrl+K` (or run `/palette`) to search them all in the command palette.
+GoodVibes ships **164** built-in slash commands across **75** categories. Every command below is generated directly from the command registry, so this list is always complete and current. Type a command in the composer prefixed with `/`, or press `Ctrl+K` (or run `/palette`) to search them all in the command palette.
 
 ## Categories
 
@@ -50,7 +50,7 @@ GoodVibes ships **162** built-in slash commands across **75** categories. Every 
 - [Operator](#operator): 10
 - [Owner Profile](#owner-profile): 1
 - [Payments](#payments): 1
-- [Permissions](#permissions): 1
+- [Permissions](#permissions): 3
 - [Planning](#planning): 2
 - [Platform](#platform): 1
 - [Platform Access](#platform-access): 5
@@ -380,7 +380,9 @@ GoodVibes ships **162** built-in slash commands across **75** categories. Every 
 
 | Command | Aliases | Usage | Description |
 | --- | --- | --- | --- |
+| `/decisions` | None | `[<count>]` | What was decided on your inbox: the answer, who gave it and from where |
 | `/permissions` | `/perms` | `[rules \| revoke <rule-id>]` | Show permission settings and provenance, and list or revoke remembered approval rules |
+| `/questions` | `/inbox` | `[all] \| show <id> \| answer <id> <choice\|text> [note]` | What waits on you: permission asks, questions agents left, claims, purchase windows; answer one |
 
 ## Planning
 

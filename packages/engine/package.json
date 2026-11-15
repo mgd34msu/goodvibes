@@ -1733,6 +1733,11 @@
       "types": "./terminal-shell/dist/context-window-command.d.ts",
       "import": "./terminal-shell/dist/context-window-command.js"
     },
+    "./terminal-shell/owner-inbox-command": {
+      "bun": "./terminal-shell/src/owner-inbox-command.ts",
+      "types": "./terminal-shell/dist/owner-inbox-command.d.ts",
+      "import": "./terminal-shell/dist/owner-inbox-command.js"
+    },
     "./terminal-shell/transcript-reading": {
       "bun": "./terminal-shell/src/transcript-reading.ts",
       "types": "./terminal-shell/dist/transcript-reading.d.ts",

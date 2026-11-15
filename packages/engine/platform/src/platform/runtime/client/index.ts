@@ -53,6 +53,9 @@ export type {
   SettingsPreconditionReceipt,
 } from '../../config/settings-precondition-client.js';
 
+export { createOwnerInboxClient } from './owner-inbox-client.js';
+export type { OwnerInboxClient } from './owner-inbox-client.js';
+
 export { createDaemonCredentialsClient } from './credentials-client.js';
 export type { CredentialWriteReceipt, DaemonCredentialsClient } from './credentials-client.js';
 

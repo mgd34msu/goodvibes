@@ -39,6 +39,7 @@ import { WorktreeRegistry } from '../../runtime/worktree/registry.js';
 import { resolveEffectiveWorktreeSetup } from '../../runtime/worktree/setup.js';
 import { registerCostGatewayMethods } from './cost.js';
 import { registerPermissionRulesGatewayMethods } from './permission-rules.js';
+import { registerOwnerInboxGatewayMethods, type OwnerInboxGatewayService } from './owner-inbox.js';
 import type { UserPermissionRuleStore } from '../../permissions/user-rule-store.js';
 import { registerMemoryProjectionsGatewayMethods, type MemoryProjectionSource } from './memory-projections.js';
 import {
@@ -332,6 +333,11 @@ export interface GatewayVerbGroupDeps extends FleetCheckpointsSearchGatewayDeps,
    * decide verbs are unaffected.
    */
   readonly approvalRaise?: ApprovalRaiseService | undefined;
+  /**
+   * The composition's one owner inbox (control-plane/owner-inbox.ts), built over
+   * the same approval broker. Absent → inbox.* stay cataloged-but-unhandled.
+   */
+  readonly ownerInbox?: OwnerInboxGatewayService | undefined;
 }
 
 /** Adapt a fleet event payload down to the structural notice the push source needs. */
@@ -698,6 +704,12 @@ export function registerGatewayVerbGroups(catalog: GatewayMethodCatalog, deps: G
   // the broker is wired.
   if (deps.approvalRaise) {
     registerApprovalRaiseGatewayMethods(catalog, deps.approvalRaise);
+  }
+
+  // inbox.*, the owner inbox: approvals plus questions, claims, purchase
+  // windows and queued actions, answered once from any surface.
+  if (deps.ownerInbox) {
+    registerOwnerInboxGatewayMethods(catalog, deps.ownerInbox);
   }
 
   // Memory projection read verbs (memory.projections.list/get) over the canonical

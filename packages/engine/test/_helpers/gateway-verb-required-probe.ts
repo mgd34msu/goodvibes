@@ -76,6 +76,7 @@ import { registerMemoryProjectionsGatewayMethods } from '../../platform/src/plat
 import { registerPairingGatewayMethods } from '../../platform/src/platform/control-plane/routes/pairing.js';
 import { registerPairingHandoffGatewayMethods } from '../../platform/src/platform/control-plane/routes/pairing-handoff.js';
 import { registerPermissionRulesGatewayMethods } from '../../platform/src/platform/control-plane/routes/permission-rules.js';
+import { registerOwnerInboxGatewayMethods } from '../../platform/src/platform/control-plane/routes/owner-inbox.js';
 import { registerPowerGatewayMethods } from '../../platform/src/platform/control-plane/routes/power.js';
 import { registerPrincipalsGatewayMethods } from '../../platform/src/platform/control-plane/routes/principals.js';
 import { registerPushGatewayMethods } from '../../platform/src/platform/control-plane/routes/push.js';
@@ -152,6 +153,7 @@ const ROUTE_REGISTRARS: ReadonlyArray<readonly [string, (catalog: GatewayMethodC
   ['pairing', (catalog) => registerPairingGatewayMethods(catalog, stubDeps())],
   ['pairing-handoff', (catalog) => registerPairingHandoffGatewayMethods(catalog, stubDeps())],
   ['permission-rules', (catalog) => registerPermissionRulesGatewayMethods(catalog, stubDeps())],
+  ['owner-inbox', (catalog) => registerOwnerInboxGatewayMethods(catalog, stubDeps())],
   ['power', (catalog) => registerPowerGatewayMethods(catalog, stubDeps())],
   ['principals', (catalog) => registerPrincipalsGatewayMethods(catalog, stubDeps())],
   ['push', (catalog) => registerPushGatewayMethods(catalog, stubDeps())],
@@ -235,6 +237,7 @@ export const EXPECTED_ROUTE_REGISTRARS: readonly string[] = [
   'registerPairingGatewayMethods',
   'registerPairingHandoffGatewayMethods',
   'registerPermissionRulesGatewayMethods',
+  'registerOwnerInboxGatewayMethods',
   'registerPowerGatewayMethods',
   'registerPrincipalsGatewayMethods',
   'registerPushGatewayMethods',

@@ -12,7 +12,7 @@ import { join } from 'node:path';
 import { ServiceRegistry, SubscriptionManager, ToolLLM, resolveSecretInput, sharedSubscriptionsPath } from '@goodvibes-jev/engine/platform/platform/config';
 import { AutomationDeliveryManager, AutomationManager, automationActionBinding } from '@goodvibes-jev/engine/platform/platform/automation';
 import { ChannelPolicyManager } from '@goodvibes-jev/engine/platform/platform/channels';
-import { ApprovalBroker, GatewayMethodCatalog, SharedSessionBroker, controlPlaneStorePath } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import { ApprovalBroker, GatewayMethodCatalog, SharedSessionBroker, controlPlaneStorePath, createOwnerInbox } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import { AcpHostService } from '@goodvibes-jev/engine/platform/platform/acp';
 import { createMcpAutonomousElicitationHandler } from '@goodvibes-jev/engine/platform/platform/mcp';
 import { PersonalCaptureHolder } from '@goodvibes-jev/engine/platform/platform/personal-capture';
@@ -270,6 +270,13 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
     const approvalBroker = new ApprovalBroker({
       storePath: shellPaths.resolveProjectPath(GOODVIBES_DAEMON_SURFACE_ROOT, 'control-plane', 'approvals.json'),
     });
+    // The one owner inbox: this broker's asks plus questions, claims, purchase
+    // windows and queued actions. Its log opens on first use, not at start-up.
+    const ownerInbox = createOwnerInbox({
+      approvals: approvalBroker,
+      questionsPath: controlPlaneStorePath(shellPaths, GOODVIBES_DAEMON_SURFACE_ROOT, 'owner-inbox.jsonl'),
+    });
+    disposalScope.registry.add('owner inbox', () => ownerInbox.dispose());
     const sessionBroker = new SharedSessionBroker({
       storePath: shellPaths.resolveProjectPath(GOODVIBES_DAEMON_SURFACE_ROOT, 'control-plane', 'sessions.json'),
       routeBindings,
@@ -649,6 +656,8 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
       // verb is cataloged and unhandled, and a client whose prompt runs outside
       // this process has no way to raise one.
       approvalRaise: approvalBroker,
+      // inbox.*, the owner inbox every surface lists and answers.
+      ownerInbox,
       // credentials.set / credentials.delete, a credential written THROUGH the
       // control plane, so a client with no access to the daemon's settings file can
       // configure one. The value lands in the daemon's secret tier and the verb

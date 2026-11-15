@@ -22,6 +22,7 @@ import {
 import {
   builtinGatewayPermissionRuleMethodDescriptors,
 } from './method-catalog-permission-rules.js';
+import { builtinGatewayOwnerInboxMethodDescriptors } from './method-catalog-owner-inbox.js';
 import {
   builtinGatewayControlMethodDescriptors,
 } from './method-catalog-control.js';
@@ -156,6 +157,7 @@ const BUILTIN_GATEWAY_METHODS: readonly GatewayMethodDescriptor[] = [
   ...builtinGatewayChannelTestMethodDescriptors,
   ...builtinGatewayCostMethodDescriptors,
   ...builtinGatewayPermissionRuleMethodDescriptors,
+  ...builtinGatewayOwnerInboxMethodDescriptors,
   ...builtinGatewayEmailMethodDescriptors,
   ...builtinGatewayPaymentsMethodDescriptors,
   ...builtinGatewayCalendarMethodDescriptors,

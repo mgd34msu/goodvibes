@@ -285,6 +285,11 @@ const VERB_FAMILIES: readonly VerbFamily[] = [
     methodIds: ['approvals.raise'],
   },
   {
+    family: 'inbox.*',
+    reason: 'Registered because ownerInbox is threaded in service-graph.ts: the one owner inbox, built over this broker, that every surface lists and answers once.',
+    methodIds: ['inbox.list', 'inbox.answer', 'inbox.post', 'inbox.withdraw'],
+  },
+  {
     family: 'credentials.set / credentials.delete',
     reason: 'Registered because credentialWrites ({ config, secrets }) is threaded in service-graph.ts. A credential written THROUGH the control plane, so a client with no access to the daemon settings file can configure one; the value lands in the daemon secret tier and the verb never echoes it back. Absent from every conformance list before this file.',
     methodIds: ['credentials.set', 'credentials.delete'],

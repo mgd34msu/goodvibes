@@ -64,7 +64,8 @@ for (const scenario of ['complete', 'cancel', 'changed', 'native-refusal'] as co
       if (scenario === 'complete') {
         expect(contract.status).toBe('passed'); expect(unitSource).toEqual(SOURCE);
         const persisted = JSON.parse(JSON.stringify(h.store.get(contract.id)));
-        expect(findZombieCause(persisted)).toContain('original source owner is unavailable after restart');
+        // The saved source is rebound on resume, so a restart no longer reaps the contract for it.
+        expect(findZombieCause(persisted) ?? '').not.toContain('original source owner');
         await expect(automation.runNow(automation.listJobs()[0]!.id)).rejects.toThrow('original source owner is unavailable');
         await expect(automation.runNow(automation.listJobs()[0]!.id, operation)).rejects.toThrow('already claimed');
       } else {

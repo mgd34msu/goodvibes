@@ -48,7 +48,7 @@ import { prepareFixPlannerInput, type FixPlannerInput } from './fix-planner-inpu
 import { readPlannerBounds } from './planner.js';
 import { describeStall, detectStall, standingOf, type StallReason } from './progress.js';
 import { failureFromError, isAbortError, type ContractRun } from './run-context.js';
-import type { Escalations, Rejudge } from './escalation.js';
+import { buildPublicationPauseQuestion, isPublicationPause, type Escalations, type PublicationPauseInput, type Rejudge } from './escalation.js';
 import type { StepContext } from './steps.js';
 import type { ContractGroup, ContractUnit, Criterion, UnitCheck } from './types.js';
 import { addJudgmentUsage } from './usage.js';
@@ -81,6 +81,12 @@ export interface Correction {
   deliverableFailed(run: ContractRun, finding: TargetFinding): Promise<void>;
   /** A fix group passed its group check: check its target again. */
   fixGroupPassed(run: ContractRun, groupId: string): Promise<void>;
+  /**
+   * A checked result could not be published and retrying an unchanged tree
+   * cannot help: the owner is asked, through the same escalation an owner
+   * question uses, to clear the obstacle and reply "retry", or "cancel".
+   */
+  publicationPaused(run: ContractRun, input: PublicationPauseInput): void;
 }
 
 /** One line per check: each criterion's verdict at that check. */
@@ -246,7 +252,6 @@ export function createCorrection(context: StepContext, escalations: Pick<Escalat
    * run fails the contract with `planning`.
    */
   async function planFix(run: ContractRun, brief: FixBrief, round: number): Promise<void> {
-    if (run.contract.originalSource) { run.control.fail('other', 'Source-bound repair cannot enter unsupported legacy fix planning'); return; }
     const { contract } = run;
     const input = await prepareFixPlannerInput(run);
     assertNativeContractSource(contract);
@@ -487,12 +492,31 @@ export function createCorrection(context: StepContext, escalations: Pick<Escalat
   }
 
   function toOwner(run: ContractRun, scope: FixScope, targetId: string, reason: 'stalled' | 'fix-rounds-exhausted', unmet: readonly string[], unshown: readonly string[], decisionIds: readonly string[], note?: string): void {
-    if (run.contract.originalSource) { run.control.fail('other', 'Source-bound repair cannot enter an unsupported legacy owner decision'); return; }
-    escalations.raise(run, { scope, targetId, reason, unmetCriterionIds: unmet, unshownCriterionIds: unshown, decisionIds, ...(note === undefined ? {} : { note }) });
+    const budget = reason === 'fix-rounds-exhausted' ? budgetNote(run) : undefined;
+    const said = [budget, note].filter((line): line is string => line !== undefined).join(' ');
+    escalations.raise(run, { scope, targetId, reason, unmetCriterionIds: unmet, unshownCriterionIds: unshown, decisionIds, ...(said.length === 0 ? {} : { note: said }) });
+  }
+
+  /**
+   * The contract's decision-model budget (`contract.judgmentCallBudget`) is
+   * spent. Every repeating cycle (nudge, stall, fix round or fresh agent)
+   * passes through correction, so this one integer compare on the counter
+   * the checks already add to bounds what a contract can spend unattended.
+   */
+  function budgetSpent(run: ContractRun): boolean {
+    const budget = config().judgmentCallBudget;
+    return budget > 0 && run.contract.judgmentUsage.calls >= budget;
+  }
+
+  /** What was spent, for the owner's question; undefined while the budget holds. */
+  function budgetNote(run: ContractRun): string | undefined {
+    if (!budgetSpent(run)) return undefined;
+    const usage = run.contract.judgmentUsage;
+    return `This contract has spent its decision-model budget: ${usage.calls} calls (${usage.inputTokens + usage.outputTokens} tokens) of ${config().judgmentCallBudget} allowed by contract.judgmentCallBudget, so no further fix round starts without you.`;
   }
 
   function exhausted(run: ContractRun, spent: number): boolean {
-    return config().maxFixRounds > 0 && spent >= config().maxFixRounds;
+    return (config().maxFixRounds > 0 && spent >= config().maxFixRounds) || budgetSpent(run);
   }
 
   async function unitStalled(run: ContractRun, unitId: string, check: DecidedCheck): Promise<void> {
@@ -729,7 +753,23 @@ export function createCorrection(context: StepContext, escalations: Pick<Escalat
     groupFailed: (run, groupId, finding) => guarded(run, `group ${groupId}'s failed check could not be routed`, () => groupFailed(run, groupId, finding)),
     deliverableFailed: (run, finding) => guarded(run, "the deliverable's failed check could not be routed", () => deliverableFailed(run, finding)),
     fixGroupPassed: (run, groupId) => guarded(run, `fix group ${groupId}'s target could not be checked again`, () => fixGroupPassed(run, groupId)),
+    publicationPaused,
   };
+
+  function publicationPaused(run: ContractRun, input: PublicationPauseInput): void {
+    if (run.terminal || run.contract.escalations.some(isPublicationPause)) return;
+    escalations.raise(run, {
+      scope: 'deliverable',
+      targetId: run.id,
+      reason: 'owner-decision-needed',
+      unmetCriterionIds: [],
+      decisionIds: [],
+      question: buildPublicationPauseQuestion(run.contract, input),
+      retryOrCancel: true,
+    });
+    run.contract.statusLine = `Contract ${run.id} passed its checks but its result is not published (${input.note})${input.branch === undefined ? '' : `; it is kept on branch ${input.branch}`}. Clear the obstacle and reply "retry", or "cancel".`;
+    context.checkpoint?.(run);
+  }
 }
 
 /** Fails an invalid correction step; temporary reading failures recover at their exact call sites. */

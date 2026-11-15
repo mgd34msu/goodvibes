@@ -39,6 +39,12 @@ export interface ContractConfig {
   readonly planRepairLimit: number;
   /** Units per plan. */
   readonly maxUnits: number;
+  /**
+   * Decision-model calls one contract may spend (its `judgmentUsage.calls`)
+   * before the next correction goes to the owner instead of another round;
+   * 0 turns the budget off.
+   */
+  readonly judgmentCallBudget: number;
   /** Attempts per unit without an explicit ask. */
   readonly defaultAttempts: number;
   /** Contracts past `queued` at once. */
@@ -74,9 +80,12 @@ export const CONTRACT_CONFIG_DEFAULTS: ContractConfig = {
   evidenceNudgeLimit: 0,
   stallLimit: 3,
   maxNudgesPerUnit: 0,
-  maxFixRounds: 0,
-  planRepairLimit: 0,
+  // Finite by default: an unattended contract whose criterion can never be
+  // shown ends with a question to its owner, not an endless repair loop.
+  maxFixRounds: 3,
+  planRepairLimit: 3,
   maxUnits: 0,
+  judgmentCallBudget: 400,
   defaultAttempts: 1,
   maxActiveContracts: 6,
   maxParallelUnits: 64,
@@ -152,6 +161,7 @@ export function readContractConfig(configManager: ContractConfigReader): Contrac
     maxFixRounds: numberSetting('maxFixRounds'),
     planRepairLimit: numberSetting('planRepairLimit'),
     maxUnits: numberSetting('maxUnits'),
+    judgmentCallBudget: numberSetting('judgmentCallBudget'),
     defaultAttempts: numberSetting('defaultAttempts'),
     maxActiveContracts: numberSetting('maxActiveContracts'),
     maxParallelUnits: numberSetting('maxParallelUnits'),

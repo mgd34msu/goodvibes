@@ -1,4 +1,5 @@
 import { captureAutonomousSource, retainAutonomousSource } from '../permissions/autonomous.js';
+import { RefusalError, refusal } from '@goodvibes-jev/engine/errors';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { requireDecisionFeature } from '../runtime/decision-policy.js';
 import { getContractActionSource, getContractActionSignal } from '../tools/agent/contract-binding.js';
@@ -157,6 +158,36 @@ export interface ContractStartOptions {
   readonly assertCurrent?: (() => void) | undefined;
 }
 
+/** A caller's retry key for one start: the same principal and key name the same contract, across restarts. */
+export interface IdempotentStartRequest {
+  readonly principalId: string;
+  readonly key: string;
+}
+
+/** A start by retry key: the contract, its owner's id, and whether it was started by an earlier call with the key. */
+export interface IdempotentStartedContract {
+  readonly contract: ContractView;
+  readonly ownerAgentId: string;
+  readonly replayed: boolean;
+}
+
+/** The retry key was already used for a start with a different request: a refusal (state, reason, next step), status 409. */
+function idempotencyKeyReused(contractId: string): RefusalError {
+  return new RefusalError(refusal({
+    code: 'IDEMPOTENCY_KEY_REUSED',
+    state: `the key already started contract ${contractId}`,
+    reason: 'This Idempotency-Key was already used to start a contract with a different request',
+    next: ['Send a new Idempotency-Key for a different request, or repeat the first request exactly to get its contract'],
+    status: 409,
+  }));
+}
+
+/** The request a retry must repeat, in a canonical form: the same fields in any order give the same text. */
+function startFingerprint(input: StartContractInput): string {
+  const fields: Record<string, unknown> = { ask: input.ask, sessionId: input.sessionId, origin: input.origin, projectRoot: input.projectRoot, isolation: input.isolation ?? null };
+  return JSON.stringify(Object.fromEntries(Object.keys(fields).sort().map((key) => [key, fields[key]])));
+}
+
 /** The session a contract gets when an agent spawn starts it with no conversation session (AgentManager's own event session). */
 export const AGENT_MANAGER_SESSION_ID = 'agent-manager';
 
@@ -185,6 +216,16 @@ export interface ContractRunner {
   joinDurable?(key: DurableContractKey): Promise<void>;
   /** Resolves repository placement before publishing the contract and owner. */
   start(input: StartContractInput, options?: ContractStartOptions): Promise<StartedContract>;
+  /**
+   * `start` with a caller's retry key (contracts.start with an Idempotency-Key,
+   * over either HTTP path). The first call starts the contract and records
+   * the key with the contract store, so a retry, also one after a daemon
+   * restart, gets the same contract back instead of starting the work twice;
+   * the same key with a different request is refused (IDEMPOTENCY_KEY_REUSED, 409).
+   * Cost: one small file read per start, one exclusive file write per new
+   * contract. Optional for custom runners; the factory always supplies it.
+   */
+  startIdempotent?(input: StartContractInput, request: IdempotentStartRequest, options?: ContractStartOptions): Promise<IdempotentStartedContract>;
   /**
    * Starts a contract from a plan drafted before it (a launched plan proposal
    * or workstream draft): the planner keeps the drafted units and
@@ -937,6 +978,38 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
     })();
   }
 
+  const idempotentStarts = new Map<string, Promise<{ readonly fingerprint: string; readonly started: IdempotentStartedContract }>>();
+
+  async function startIdempotent(input: StartContractInput, request: IdempotentStartRequest, options: ContractStartOptions = {}): Promise<IdempotentStartedContract> {
+    const scope = `${request.principalId}\u0000${request.key}`;
+    const fingerprint = startFingerprint(input);
+    // A second call with the key while the first is still starting waits for it rather than starting again.
+    const inFlight = idempotentStarts.get(scope);
+    if (inFlight !== undefined) {
+      const first = await inFlight;
+      if (first.fingerprint !== fingerprint) throw idempotencyKeyReused(first.started.contract.id);
+      return { ...first.started, replayed: true };
+    }
+    const known = deps.store.readIdempotentStart(scope);
+    if (known !== undefined) {
+      if (known.fingerprint !== fingerprint) throw idempotencyKeyReused(known.contractId);
+      const contract = deps.store.get(known.contractId) ?? deps.store.load(known.contractId);
+      if (contract !== null) return { contract: withCheckpointWarning(structuredClone(contract)), ownerAgentId: contract.ownerAgentId, replayed: true };
+      // The contract the key started is gone (removed by hand): the key starts a new one.
+      deps.store.forgetIdempotentStart(scope);
+    }
+    const operation = (async () => {
+      const started = await start(input, options);
+      // The contract is running; a key that could not be recorded only means a retry would not find it.
+      try { deps.store.recordIdempotentStart(scope, { contractId: started.contract.id, fingerprint }); }
+      catch (error) { logger.warn('contract runner: the retry key for a started contract was not recorded', { contractId: started.contract.id, error: summarizeError(error) }); }
+      return { fingerprint, started: { contract: started.contract, ownerAgentId: started.owner.id, replayed: false } };
+    })();
+    idempotentStarts.set(scope, operation);
+    try { return (await operation).started; }
+    finally { if (idempotentStarts.get(scope) === operation) idempotentStarts.delete(scope); }
+  }
+
   function startFromPlan(input: StartFromPlanInput, options: ContractStartOptions = {}): Promise<StartedContract> {
     requireDecisionFeature('autonomous contract planning and acceptance');
     if (disposed) throw new Error('Contract runner is disposed');
@@ -1480,6 +1553,7 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
     startDurable,
     resumeDurable,
     start,
+    startIdempotent,
     startFromPlan,
     startForOwner,
     startOwnedForOwner,

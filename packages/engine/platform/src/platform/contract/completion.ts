@@ -25,9 +25,14 @@ import { assertOwnedContractSource, hasDerivedAcceptanceChecks } from './owned-s
  * - Commit: worktree mode merges the contract branch into the project's branch
  *   (no fast-forward) or applies it as uncommitted changes; shared mode commits
  *   exactly the touched paths (or everything, or nothing, by
- *   `contract.commitScope`). A failed worktree publication retains the checked
- *   work and retries after revalidation. An optional shared-tree Git commit
- *   failure is a warning because those files already reached the owner tree.
+ *   `contract.commitScope`). Acceptance is recorded on the contract (the
+ *   passing check and the git tree id of the accepted result), so a failed
+ *   worktree publication retries the publication alone: it judges again only
+ *   when the result no longer matches what was accepted, also after a restart.
+ *   When retrying cannot help, the owner is asked to clear the obstacle and
+ *   reply "retry" (or "cancel"); resuming the contracts retries too. An
+ *   optional shared-tree Git commit failure is a warning because those files
+ *   already reached the owner tree.
  *   Outside git the commit is skipped with a note.
  * - The answer goes to the owner record; the status line to the operator
  *   audience only.
@@ -65,7 +70,8 @@ import type { Correction } from './correction.js';
 import { nativeContractPort } from './native-decisions.js';
 import { assertNativeContractSource } from './native-source.js';
 import { collectChanges, commandsFromTurns, judgeEvidence, trimEvidence, type ContractTurnRecord, type EvidenceCommand } from './evidence.js';
-import { failedGates, gateEventSummary, refreshGateResults, runContractGates, unverifiedGates } from './gates.js';
+import { failedGates, gateEventSummary, refreshGateResults, runContractGates, unverifiedGates, type QualityGateResult } from './gates.js';
+import { workingTreeIdentity } from './tree-identity.js';
 import { captureGateInput, type GateSourceInputIdentity } from './gate-input.js';
 import { failureFromError, isAbortError, type ContractRun } from './run-context.js';
 import type { StepContext } from './steps.js';
@@ -95,8 +101,9 @@ export interface Completion {
   /** Judges the deliverable now. */
   judgeDeliverable(run: ContractRun, trigger: CheckTrigger): Promise<void>;
   /**
-   * The step a contract was on when a restart stopped it in `committing` (design 7.2). The accepted result's
-   * identity is held in memory only, so the deliverable is judged again first; a pass then publishes it and passes the contract.
+   * The step a contract was on when a restart stopped it in `committing` (design 7.2). When the recorded
+   * acceptance still matches the result's tree, the publication runs again with the project's gates re-run
+   * and no judgment request; otherwise the deliverable is judged again first.
    */
   commitDeliverable(run: ContractRun): Promise<void>;
 }
@@ -207,10 +214,34 @@ class PublicationPending extends Error {
   constructor(reason = 'The checked result has not reached the owner workspace.') { super(reason); }
 }
 
-/** Publication attempts with backoff before the runner waits for the project tree to change instead. */
+/** A publication that waiting and retrying can never complete: the contract fails and says where the result is. */
+class PublicationImpossible extends Error {}
+
+/** Publication attempts with backoff before the owner is asked to clear the obstacle. */
 const PUBLICATION_RETRIES = 6;
-/** How often a parked publication looks at the project tree. */
-const PARKED_PUBLICATION_POLL_MS = 30_000;
+
+/** The decision target an acceptance record is saved under. */
+const acceptanceTarget = (contractId: string): string => `${contractId}.accepted`;
+
+/** What a passing deliverable check accepted, saved on the contract's decisions so it outlives the process. */
+interface AcceptanceRecord {
+  readonly version: 1;
+  readonly checkId: string;
+  /** Git tree id of the accepted result's content. */
+  readonly tree: string;
+  /** Fix rounds spent when it was accepted: a later round means the work changed hands since. */
+  readonly fixRounds: number;
+}
+
+function readAcceptance(contract: Pick<Contract, 'id' | 'decisions'>): AcceptanceRecord | undefined {
+  const saved = contract.decisions.findLast((decision) => decision.action === 'checked' && decision.targetId === acceptanceTarget(contract.id));
+  if (saved === undefined) return undefined;
+  try {
+    const parsed = JSON.parse(saved.reason) as Partial<AcceptanceRecord>;
+    return parsed.version === 1 && typeof parsed.checkId === 'string' && typeof parsed.tree === 'string' && typeof parsed.fixRounds === 'number'
+      ? parsed as AcceptanceRecord : undefined;
+  } catch { return undefined; }
+}
 
 function abortableDelay(run: ContractRun, ms: number): Promise<void> {
   if (run.env.wait !== undefined) return run.env.wait(ms, run.abort.signal);
@@ -223,41 +254,14 @@ function abortableDelay(run: ContractRun, ms: number): Promise<void> {
   });
 }
 
-/** The owner Git operations that hold a publication back; clearing one is a change the retry must notice. */
-const OWNER_GIT_MARKERS = ['index.lock', 'MERGE_HEAD', 'CHERRY_PICK_HEAD', 'REVERT_HEAD', 'rebase-merge', 'rebase-apply', 'sequencer'];
-
-/**
- * HEAD, the working tree's status lines and which owner Git operations are in progress: what the owner changes to clear a publication obstacle.
- * With `relevantPaths`, only the status lines of those paths count: an unrelated edit does not wake a parked publication.
- */
-export function projectTreeState(root: string, relevantPaths?: ReadonlySet<string>): string {
-  const head = spawnSync('git', ['-C', root, 'rev-parse', '--verify', '--quiet', 'HEAD'], { encoding: 'utf-8' });
-  const status = spawnSync('git', ['-C', root, 'status', '--porcelain=v1', '--untracked-files=all'], { encoding: 'utf-8' });
-  const gitDir = spawnSync('git', ['-C', root, 'rev-parse', '--absolute-git-dir'], { encoding: 'utf-8' }).stdout?.trim() ?? '';
-  const operations = gitDir === '' ? '' : OWNER_GIT_MARKERS.filter(name => existsSync(join(gitDir, name))).join(',');
-  const lines = (status.stdout ?? '').split('\n');
-  // A quoted path (special characters) cannot be matched here, so it always counts: waiting on a change that was missed would never end.
-  const statusLines = relevantPaths === undefined || relevantPaths.size === 0 ? lines
-    : lines.filter(line => line.length > 3 && (line.slice(3).startsWith('"') || line.slice(3).split(' -> ').some(path => relevantPaths.has(path))));
-  return `${head.stdout ?? ''}\n${operations}\n${statusLines.join('\n')}`;
-}
-
-async function untilTreeChanges(run: ContractRun): Promise<void> {
-  // The files the contract's result touches: an owner edit there can be what blocks publication.
-  const relevant = new Set(run.contract.units.flatMap(unit => unit.touchedPaths));
-  const before = projectTreeState(run.contract.projectRoot, relevant);
-  while (!run.terminal) {
-    await abortableDelay(run, PARKED_PUBLICATION_POLL_MS);
-    if (run.terminal || projectTreeState(run.contract.projectRoot, relevant) !== before) return;
-  }
-}
-
-export function createCompletion(context: StepContext, correction: Pick<Correction, 'groupFailed' | 'deliverableFailed'>): Completion {
+export function createCompletion(context: StepContext, correction: Pick<Correction, 'groupFailed' | 'deliverableFailed' | 'publicationPaused'>): Completion {
   const config = () => readContractConfig(context.configManager);
   const pendingVerifications = new WeakMap<ContractRun, Map<string, Promise<void>>>();
   const publicationRepairs = new WeakMap<ContractRun, { evidence: JsonValue; decisionIds: readonly string[] }>();
   const publicationAssessments = new WeakMap<ContractRun, { evidence: JsonValue; decisionIds: readonly string[] }>();
-  const acceptedSources = new WeakMap<ContractRun, { checkId: string; tree: string; source: GateSourceInputIdentity }>();
+  // The in-process form of the acceptance record: the exact source observation, and the
+  // gates re-run when the acceptance was restored after a restart.
+  const acceptedSources = new WeakMap<ContractRun, { checkId: string; tree: string; source: GateSourceInputIdentity; gates?: QualityGateResult[] }>();
 
   /** A verifier failure stops after the port's configured fallback chain.
    * Only unpublished checked work retries; that wait remains owned and abortable. */
@@ -291,13 +295,11 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
             await abortableDelay(run, Math.min(30_000, 1_000 * 2 ** (failures - 1)));
             continue;
           }
-          // Retrying an unchanged tree cannot succeed: wait for the owner's tree to change (or a cancel).
-          const owner = context.getStatus(run.contract.ownerAgentId);
-          if (owner !== null && owner.status === 'running') {
-            setAgentProgress(owner, `Contract ${run.id}: publication pending (${note}); change the project tree to let it retry, or cancel the contract`, 'operator');
-          }
-          await untilTreeChanges(run);
-          if (!run.terminal) context.ownerProgress(run);
+          // Retrying an unchanged obstacle cannot succeed. The owner is asked through the escalation path
+          // (every surface that shows owner questions shows it); the reply "retry", or a resume, publishes again.
+          if (run.contract.status === 'committing') run.moveContract('judging');
+          correction.publicationPaused(run, { note, ...(run.contract.isolation === 'worktree' && run.contract.branch !== undefined ? { branch: run.contract.branch } : {}) });
+          return;
         }
       }
     });
@@ -619,14 +621,8 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
               const reading = review.readings.unsupported;
               review.recordAction(criterionVerdict(reading) === 'met' ? 'This exact passage is supported; all other passages, original requirements and publication checks remain required.' : 'Retain this exact passage and primary evidence for focused investigation; a broad suspicion is not a new drafting task.');
               if (bindNativeInput && !stateHash || !review.result.decisionId) throw new Error('Scoped answer review has no required input/decision binding');
-              if (criterionVerdict(reading) === 'unmet' && reading.outcome !== 'act' && scope.end - scope.start > 512) {
-                const children = answerClaimScopes(evidence.output, scope.start, scope.end, Math.ceil((scope.end - scope.start) / 2), outputOwnerForCurrentAnswer());
-                if (children.length > 1) {
-                  const resolved: AnswerClaimReview[] = [];
-                  for (const child of children) resolved.push(...await inspect(child));
-                  return resolved;
-                }
-              }
+              // One request per passage, never split further: an unsettled passage is handed to the
+              // correction as a passage to investigate, so the request count follows the answer's length only.
               const { probability, verdict, outcome } = reading;
               return [recordAnswerClaimReview(scope, { ...(stateHash === undefined ? {} : { stateHash }), decisionId: review.result.decisionId, reading: { probability, verdict, outcome } })];
             };
@@ -894,7 +890,14 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
         ...(passed || !bindNativeInput ? {} : { evidenceDigest: refusalDigest() }),
       };
       input.checks.push(check);
-      if (passed && source !== undefined) acceptedSources.set(run, { checkId, tree, source });
+      if (passed && source !== undefined) {
+        acceptedSources.set(run, { checkId, tree, source });
+        const treeId = workingTreeIdentity(tree);
+        if (treeId !== null) {
+          const record: AcceptanceRecord = { version: 1, checkId, tree: treeId, fixRounds: contract.fixRounds };
+          run.decide('checked', acceptanceTarget(contract.id), JSON.stringify(record), check.decisionIds);
+        }
+      }
       judgment.recordAction(`${input.scope} check ${checkId}: ${passed ? 'pass' : 'to correction'}`);
       run.decide('checked', input.targetId, `check ${checkId} (${input.trigger}): ${passed ? 'pass' : problems.join(', ')}`, check.decisionIds);
       run.emit({
@@ -980,14 +983,8 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
     if (run.terminal) return;
     assertNativeContractSource(contract);
     assertOwnedContractSource(contract);
-    if (contract.status === 'committing' && contract.commit?.status === 'failed' && contract.inputSnapshot && contract.worktreePath) {
-      try { await assertContractInputOwner(contract.inputSnapshot, run.abort.signal); }
-      catch (error) {
-        // Owner drift requires fresh integration review. A still-active Git
-        // operation cannot be repaired by repeating accepted deliverable checks.
-        if (!(error instanceof ContractInputOwnerChangedError)) throw new PublicationPending();
-      }
-    }
+    // Accepted already (a publication retry, an owner's "retry", a resume): publish again without judging.
+    if (await publishAccepted(run)) return;
     if (contract.status !== 'judging') run.moveContract('judging');
     context.ownerProgress(run);
     const judgedCriteria = judged(contract.criteria);
@@ -1022,6 +1019,41 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
     await commitDeliverable(run, answer);
   }
 
+  /**
+   * The latest deliverable check passed and what it accepted is still the
+   * result: publish it, with no judgment request. In this process that is the
+   * held source observation; after a restart it is the saved acceptance record
+   * (the result's git tree id must match, and the project's gates run again,
+   * since their earlier receipts belong to the process that ran them). A fix
+   * round since the acceptance, or a changed result, means judging again.
+   */
+  async function publishAccepted(run: ContractRun): Promise<boolean> {
+    const { contract } = run;
+    const check = contract.checks.at(-1);
+    if (check?.result !== 'pass') return false;
+    const record = readAcceptance(contract);
+    if (record === undefined || record.checkId !== check.id || record.fixRounds !== contract.fixRounds) return false;
+    if (acceptedSources.get(run)?.checkId !== check.id) {
+      const tree = contractTree(contract);
+      if (workingTreeIdentity(tree) !== record.tree) return false;
+      const source = captureGateInput(tree);
+      const gates = await runContractGates({ configManager: context.configManager, cwd: tree, runtimeBus: context.runtimeBus, sessionId: contract.sessionId, contractId: contract.id, targetId: contract.id, signal: run.abort.signal });
+      if (run.terminal) return true;
+      if (failedGates(gates).length > 0 || unverifiedGates(gates).length > 0) return false;
+      acceptedSources.set(run, { checkId: check.id, tree, source, gates });
+      run.decide('resumed', contract.id, `the accepted result (check ${check.id}) is unchanged; the gates ran again and it is published without judging again`);
+    }
+    try { assertAcceptedResultCurrent(run); }
+    catch (error) {
+      if (!(error instanceof PublicationPending)) throw error;
+      acceptedSources.delete(run);
+      return false;
+    }
+    if (contract.status !== 'judging') run.moveContract('judging');
+    await commitDeliverable(run);
+    return true;
+  }
+
   function assertAcceptedResultCurrent(run: ContractRun): void {
     const check = run.contract.checks.at(-1);
     const accepted = acceptedSources.get(run);
@@ -1030,7 +1062,7 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
     catch { throw new PublicationPending('The accepted result source is unavailable; verify its current contents before publication.'); }
     if (!accepted || accepted.checkId !== check?.id || accepted.tree !== contractTree(run.contract) || accepted.source.source !== current)
       throw new PublicationPending('The result source changed after acceptance; verify its current contents before publication.');
-    const gates = refreshGateResults(check?.gates);
+    const gates = refreshGateResults(accepted.gates ?? check?.gates);
     if (failedGates(gates).length || unverifiedGates(gates).length) {
       throw new PublicationPending('Required check evidence changed after acceptance; verify the current result before publication.');
     }
@@ -1101,7 +1133,8 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
     const root = contract.projectRoot;
     const branch = contract.branch!;
     let publication: PublicationInputAdmission | undefined;
-    if (contract.inputSnapshot === undefined) return { status: 'failed', note: `not applied: legacy contract has no recorded input receipt; the work stays on branch ${branch}` };
+    // Waiting cannot give an old contract the input receipt publication needs: end it and say where the work is.
+    if (contract.inputSnapshot === undefined) throw new PublicationImpossible(`its result cannot be published automatically: the contract was recorded without an input receipt; the work stays on branch ${branch}; merge it with: git merge ${branch}`);
     try {
       assertContractInputObjects(contract.inputSnapshot, contract.projectRoot);
       assertContractExecutionView(contract.inputSnapshot, contract.worktreePath!, branch);
@@ -1232,6 +1265,9 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
         if (outcome.status === 'committed' || outcome.status === 'applied' || outcome.status === 'skipped') {
           // The branch's work reached the project's tree: the contract worktree goes; the branch stays as the record of the work.
           await new IsolatedWorktree(contract.projectRoot, contract.worktreePath, contract.branch, contract.baseBranch ?? 'main').evict()
+            .then(({ droppedIgnored }) => {
+              if (droppedIgnored.length > 0) logger.warn('contract runner: ignored files in the contract worktree were too large to keep on its branch and were removed with it', { contractId: contract.id, dropped: droppedIgnored });
+            })
             .catch((error: unknown) => logger.warn('contract runner: the contract worktree was not removed', { contractId: contract.id, error: summarizeError(error) }));
         }
         return outcome;
@@ -1241,7 +1277,7 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
       assertAcceptedResultCurrent(run);
       return outcome;
     } catch (error) {
-      if (error instanceof PublicationPending) throw error;
+      if (error instanceof PublicationPending || error instanceof PublicationImpossible) throw error;
       const where = contract.branch === undefined ? 'the changes are left in the working tree' : `the work stays on branch ${contract.branch}`;
       return { status: 'failed', note: `commit failed: ${summarizeError(error)}; ${where}` };
     }

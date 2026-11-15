@@ -9,6 +9,11 @@ import { hasDerivedAcceptanceChecks } from './owned-source.js';
  * and not only about agent layout, each unit's role, and no unit narrows the
  * scope it serves. The readings are folded here, in code, into plan problems
  * and criterion dispositions.
+ *
+ * A planning session hands every round the same `PlanCheckCache`: a reading
+ * is keyed by the exact input it read, so a repair round asks again only about
+ * the criteria and units the planner changed (a Map lookup per item instead of
+ * a request).
  */
 import { nativeContractPort, type NativeContractServices } from './native-decisions.js';
 import type { Contract } from './types.js';
@@ -74,6 +79,31 @@ export interface PlanCheckOptions {
   /** Native trace and coverage are exact structural checks, never model-generated requirements. */
   readonly nativeSource?: NativeContractSource | undefined;
   readonly signal?: AbortSignal | undefined;
+  /** The planning session's readings by exact input; absent, every item is read. */
+  readonly cache?: PlanCheckCache | undefined;
+}
+
+/** Readings of one planning session, keyed by the exact input each read. */
+export type PlanCheckCache = Map<string, unknown>;
+
+export function createPlanCheckCache(): PlanCheckCache {
+  return new Map();
+}
+
+/**
+ * The reading for `key`: from the session's cache when this exact input was
+ * read in an earlier round, else read now and kept. `fresh` is false for a
+ * reused reading, whose request, usage and logged action belong to the round
+ * that made it.
+ */
+async function reading<T>(options: PlanCheckOptions, key: readonly unknown[], read: () => Promise<T>): Promise<{ readonly value: T; readonly fresh: boolean }> {
+  const cache = options.nativeSource === undefined ? options.cache : undefined;
+  if (cache === undefined) return { value: await read(), fresh: true };
+  const id = JSON.stringify(key);
+  if (cache.has(id)) return { value: cache.get(id) as T, fresh: false };
+  const value = await read();
+  cache.set(id, value);
+  return { value, fresh: true };
 }
 
 type Usage = { readonly inputTokens: number; readonly outputTokens: number };
@@ -116,16 +146,17 @@ function traceProblemMessage(criterion: PlannedStatedCriterion, fidelity: string
 async function checkTrace(port: JudgmentPort, plan: ContractPlan, ask: string, options: PlanCheckOptions): Promise<CheckOutput> {
   const output = emptyOutput();
   const site = PLAN_CHECK_SITES['criterion-trace'];
-  const results = await Promise.all(plan.criteria.map(async (criterion) => ({
-    criterion,
-    result: await criterionTrace.check(port, hasDerivedAcceptanceChecks(options.originalSource)
+  const results = await Promise.all(plan.criteria.map(async (criterion) => {
+    const claim = hasDerivedAcceptanceChecks(options.originalSource)
       ? `This derived acceptance check faithfully operationalizes the original goal without adding or narrowing requirements: ${criterion.text}`
-      : traceClaim(criterion.text), ask, criterion.quote, callOptions(site, options)),
-  })));
-  for (const { criterion, result } of results) {
-    record(output, result.decisionId, result.usage);
+      : traceClaim(criterion.text);
+    const read = await reading(options, ['trace', claim, ask, criterion.quote], () => criterionTrace.check(port, claim, ask, criterion.quote, callOptions(site, options)));
+    return { criterion, result: read.value, fresh: read.fresh };
+  }));
+  for (const { criterion, result, fresh } of results) {
+    record(output, result.decisionId, fresh ? result.usage : undefined);
     const traced = result.fidelity === 'supported';
-    result.recordAction(traced ? 'traced' : 'repair: untraced');
+    if (fresh) result.recordAction(traced ? 'traced' : 'repair: untraced');
     if (!traced) output.problems.push({ code: 'untraced', targetId: criterion.id, message: traceProblemMessage(criterion, result.fidelity) });
   }
   return output;
@@ -161,11 +192,12 @@ function coverageProblem(part: CoveragePart): PlanProblem {
 /** Rank the two answers; uncertainty alone is not a missing requirement. */
 async function checkCoverage(port: JudgmentPort, plan: ContractPlan, ask: string, options: PlanCheckOptions): Promise<CheckOutput> {
   const output = emptyOutput();
-  const run = await planCoverage.read(port, { request: ask, criteria: plan.criteria }, callOptions(PLAN_CHECK_SITES['plan-coverage'], options));
-  record(output, run.decisionId, run.usage);
+  const read = await reading(options, ['coverage', ask, plan.criteria], () => planCoverage.read(port, { request: ask, criteria: plan.criteria }, callOptions(PLAN_CHECK_SITES['plan-coverage'], options)));
+  const run = read.value;
+  record(output, run.decisionId, read.fresh ? run.usage : undefined);
   const open = run.parts.filter((part) => part.reading.probability > 0.5);
   output.problems.push(...open.map(coverageProblem));
-  run.recordAction(open.length > 0 ? `repair: uncovered requirement (${open.length} of ${run.parts.length} parts)` : `covered`);
+  if (read.fresh) run.recordAction(open.length > 0 ? `repair: uncovered requirement (${open.length} of ${run.parts.length} parts)` : `covered`);
   return output;
 }
 
@@ -199,23 +231,24 @@ async function readCriterionShapes(
 ): Promise<CheckOutput & { readonly dispositions: Map<string, CriterionDispositionRuling> }> {
   const output = { ...emptyOutput(), dispositions: new Map<string, CriterionDispositionRuling>() };
   const site = PLAN_CHECK_SITES['criterion-shape'];
-  const runs = await Promise.all(plan.criteria.map(async (criterion) => ({
-    criterion,
-    run: await criterionShape.run(port, { request: ask, criterion: criterion.text, ...(options.nativeSource === undefined ? options.originalSource ? { originalSource: { goal: options.originalSource.goal, criteria: [...options.originalSource.criteria] } } : {} : { nativeSource: nativeContractSourceData(options.nativeSource) }) }, callOptions(site, options)),
-  })));
-  for (const { criterion, run } of runs) {
-    record(output, run.result.decisionId, run.result.usage);
+  const runs = await Promise.all(plan.criteria.map(async (criterion) => {
+    const state = { request: ask, criterion: criterion.text, ...(options.nativeSource === undefined ? options.originalSource ? { originalSource: { goal: options.originalSource.goal, criteria: [...options.originalSource.criteria] } } : {} : { nativeSource: nativeContractSourceData(options.nativeSource) }) };
+    const read = await reading(options, ['shape', state], () => criterionShape.run(port, state, callOptions(site, options)));
+    return { criterion, run: read.value, fresh: read.fresh };
+  }));
+  for (const { criterion, run, fresh } of runs) {
+    record(output, run.result.decisionId, fresh ? run.result.usage : undefined);
     const { checkable, topology_only: topologyOnly, solo } = run.readings;
     // A topology-only criterion is met or missed by the plan's shape, so it is
     // never judged; that it cannot be checked from the work is expected.
     if (options.nativeSource === undefined && options.originalSource === undefined && topologyOnly.verdict === 'yes' && topologyOnly.outcome === 'act') {
       const ruling = topologyRuling(plan, shape, solo);
       output.dispositions.set(criterion.id, ruling);
-      run.recordAction(ruling.disposition);
+      if (fresh) run.recordAction(ruling.disposition);
       continue;
     }
     const notCheckable = checkable.probability < 0.5;
-    run.recordAction(notCheckable ? 'repair: not checkable' : 'judged');
+    if (fresh) run.recordAction(notCheckable ? 'repair: not checkable' : 'judged');
     if (notCheckable) {
       output.problems.push({
         code: 'not-checkable',
@@ -260,12 +293,14 @@ function narrowsProblem(unit: PlannedUnit, leaning: readonly RequirementReading[
 async function checkUnits(port: JudgmentPort, plan: ContractPlan, options: PlanCheckOptions): Promise<CheckOutput> {
   const output = emptyOutput();
   const site = PLAN_CHECK_SITES['unit-shape'];
-  const runs = await Promise.all(planUnits(plan).map(async (unit) => ({
-    unit,
-    run: await unitShape.read(port, { ...unitShapeState(plan, unit), ...(plan.reviewExclusions ? { reviewExclusions: plan.reviewExclusions } : {}), ...(options.nativeSource === undefined ? options.originalSource ? { originalSource: { goal: options.originalSource.goal, criteria: [...options.originalSource.criteria] } } : {} : { nativeSource: nativeContractSourceData(options.nativeSource) }) }, callOptions(site, options)),
-  })));
-  for (const { unit, run } of runs) {
-    record(output, run.decisionId, run.usage);
+  const runs = await Promise.all(planUnits(plan).map(async (unit) => {
+    const state = { ...unitShapeState(plan, unit), ...(plan.reviewExclusions ? { reviewExclusions: plan.reviewExclusions } : {}), ...(options.nativeSource === undefined ? options.originalSource ? { originalSource: { goal: options.originalSource.goal, criteria: [...options.originalSource.criteria] } } : {} : { nativeSource: nativeContractSourceData(options.nativeSource) }) };
+    // The unit's rendered input (its brief, its criteria, the other units and the criteria it serves) is the key.
+    const read = await reading(options, ['unit', state], () => unitShape.read(port, state, callOptions(site, options)));
+    return { unit, run: read.value, fresh: read.fresh };
+  }));
+  for (const { unit, run, fresh } of runs) {
+    record(output, run.decisionId, fresh ? run.usage : undefined);
     const { role, narrows, acceptanceProblem } = run;
     const found: PlanProblem[] = [];
     if (acceptanceProblem.probability > 0.5) {
@@ -282,7 +317,7 @@ async function checkUnits(port: JudgmentPort, plan: ContractPlan, options: PlanC
     const unresolved = narrows.filter(entry => entry.reading.probability > 0.5
       && !(entry.hostCovered?.verdict === 'yes' && entry.hostCovered.outcome === 'act'));
     if (unresolved.length > 0) found.push(narrowsProblem(unit, unresolved));
-    run.recordAction(found.length === 0 ? 'unit accepted' : `repair: ${found.map((entry) => entry.code).join(', ')}`);
+    if (fresh) run.recordAction(found.length === 0 ? 'unit accepted' : `repair: ${found.map((entry) => entry.code).join(', ')}`);
     output.problems.push(...found);
   }
   return output;

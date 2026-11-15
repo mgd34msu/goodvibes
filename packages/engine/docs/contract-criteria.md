@@ -165,7 +165,7 @@ The final status line counts excluded criteria, for example "1 excluded".
 
 ### Repair and the owner
 
-Every problem goes back to the planner in one repair request, up to `contract.planRepairLimit` repairs (default 0, no limit: repairs continue until the plan passes or a repair repeats the same unresolved problems; set a positive number to hand it to the owner sooner). When problems remain, the contract waits on the owner with a `plan-unresolved` escalation that lists them. The owner can approve the plan as it stands, amend it (the reply goes to the planner as an instruction), or stop the contract.
+Every problem goes back to the planner in one repair request, up to `contract.planRepairLimit` repairs (default 3; 0 removes the limit, and repairs then stop when a repair repeats the same unresolved problems). A repair whose problems all name the same problem and target as the round before goes to the owner at once, since the planner is not converging. Each criterion and unit reading is kept for the planning session by the exact text it read, so a repair round asks again only about what the planner changed. When problems remain, the contract waits on the owner with a `plan-unresolved` escalation that lists them. The owner can approve the plan as it stands, amend it (the reply goes to the planner as an instruction), or stop the contract.
 
 ---
 
@@ -200,7 +200,7 @@ The brief never asks the agent to list constraints or review itself. The criteri
 
 | Trigger | When | Evidence |
 |---|---|---|
-| `turn-end` | A turn whose tool calls include `write`, `edit` or `exec`, when `contract.midRunChecks` is on | diff and commands; no gates or claims yet |
+| `turn-end` | A turn whose tool calls include `write`, `edit` or `exec`, when `contract.midRunChecks` is on and an earlier check read one of the unit's criteria as met (before that, nothing can regress, so no check runs) | diff and commands; no gates or claims yet |
 | `completion` | The agent tries to finish; the runner holds it at that point | diff, claim verification, gates, output |
 | `agent-failed` | The agent hit its turn budget or a circuit breaker, or the watchdog stopped a silent agent | full |
 | `fix-passed` | The unit's planned-fix group passed | full |
@@ -229,7 +229,7 @@ Code applies these in order:
 
 1. A `turn-end` check is recorded; it nudges only for a regression or a mid-run quality problem at act.
 2. A failed gate is a nudge, whatever the readings say.
-3. Unverified claims (files reported as created that are not on disk) are a nudge.
+3. Unverified claims (files reported as created or modified that the unit did not change since its baseline; a path outside the working tree cannot be confirmed) are a nudge.
 4. Any unmet criterion, unmet goal or quality problem is a nudge.
 5. Anything `unshown` is a nudge asking for evidence, until `contract.evidenceNudgeLimit` consecutive unsettled checks; then the owner is asked (`unsettled`).
 6. Every judged criterion met, goal met, quality clean, gates passed and claims verified: `pass`, and the hold releases.
@@ -279,7 +279,7 @@ Empty sections are left out. The "Already met" list restates every criterion who
 - **Progress**: more criteria met than the previous check, or fewer failing gates, quality problems or claim failures.
 - **Stall**: `contract.stallLimit` consecutive checks without progress (turn-end checks do not count), the same criterion regressed twice, or `contract.maxNudgesPerUnit` nudges.
 
-A stalled unit is routed by `contract.stall-route` (`contract/correction.ts`): split the remaining problems into a planned-fix group whose `fix` criteria serve the unmet ones, give the unit a fresh agent, or ask the owner. After `contract.maxFixRounds` fix rounds and fresh agents, the owner is asked without a reading.
+A stalled unit is routed by `contract.stall-route` (`contract/correction.ts`): split the remaining problems into a planned-fix group whose `fix` criteria serve the unmet ones, give the unit a fresh agent, or ask the owner. After `contract.maxFixRounds` fix rounds and fresh agents (default 3), or once the contract has spent `contract.judgmentCallBudget` decision-model calls (default 400), the owner is asked without a reading; the question says what was spent and what is still unmet.
 
 ### The owner
 

@@ -1,11 +1,11 @@
 /**
  * Claim verification (contract/claims.ts): reading the report the agent
  * dictates (none is invented), the plan role that decides whether claims are
- * checked, the on-disk check, and corroboration from the unit's own
+ * checked, membership in the unit's changed paths, and corroboration from the unit's own
  * baseline-scoped changed paths, every result kind.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { CompletionReport, EngineerReport } from '../../platform/src/platform/agents/completion-report.js';
@@ -71,24 +71,20 @@ describe('a unit that must write', () => {
     expect(result.summary).toContain('the agent gave no completion report');
   });
 
-  test('every claimed file exists: files_verified whether or not files changed', () => {
-    mkdirSync(join(dir, 'src'), { recursive: true });
-    writeFileSync(join(dir, 'src', 'app.ts'), 'export {}');
-    const result = verifyUnitClaims(engineerReport({ filesCreated: ['src/app.ts'] }), writer());
+  test('every claimed file is one the unit changed: files_verified', () => {
+    const result = verifyUnitClaims(engineerReport({ filesCreated: ['src/app.ts'] }), writer(['src/app.ts']));
     expect(result.kind).toBe('files_verified');
     expect(result.verified).toBe(true);
     expect(result.foundPaths).toEqual(['src/app.ts']);
-    expect(result.changesDetected).toBe(false);
   });
 
-  test('a claimed file is missing and nothing changed: unverified', () => {
+  test('a claimed file that exists but was not changed is not confirmed: unverified when nothing changed', () => {
     writeFileSync(join(dir, 'index.ts'), '// existing');
-    const result = verifyUnitClaims(engineerReport({ filesModified: ['index.ts', 'missing.ts'] }), writer());
+    const result = verifyUnitClaims(engineerReport({ filesModified: ['index.ts'] }), writer());
     expect(result.kind).toBe('unverified');
     expect(result.verified).toBe(false);
-    expect(result.foundPaths).toEqual(['index.ts']);
-    expect(result.missingPaths).toEqual(['missing.ts']);
-    expect(result.summary).toContain('missing: missing.ts');
+    expect(result.missingPaths).toEqual(['index.ts']);
+    expect(result.summary).toContain('not changed by the unit: index.ts');
   });
 
   test('a claimed file is missing but the unit changed other files: git_corroborated', () => {
@@ -106,18 +102,20 @@ describe('a unit that must write', () => {
     expect(result.summary).not.toContain('no completion report');
   });
 
-  test('absolute claimed paths are checked as given', () => {
-    const absolute = join(dir, 'abs.ts');
-    writeFileSync(absolute, '// abs');
-    expect(verifyUnitClaims(engineerReport({ filesCreated: [absolute] }), writer()).kind).toBe('files_verified');
+  test('an absolute claimed path inside the tree is matched against the changed paths; one outside is unverifiable', () => {
+    expect(verifyUnitClaims(engineerReport({ filesCreated: [join(dir, 'abs.ts')] }), writer(['abs.ts'])).kind).toBe('files_verified');
+    const outside = verifyUnitClaims(engineerReport({ filesCreated: ['/etc/hosts', '../sibling.ts'] }), writer(['src/real.ts']));
+    expect(outside.kind).toBe('git_corroborated');
+    expect(outside.unverifiablePaths).toEqual(['/etc/hosts', '../sibling.ts']);
+    expect(outside.foundPaths).toEqual([]);
   });
 
   test('the claims are the report\'s file arrays whatever its archetype', () => {
-    writeFileSync(join(dir, 'made.ts'), '// made');
     const generic = { version: 1, archetype: 'researcher', summary: 'Done', filesCreated: ['made.ts', 'gone.ts'], filesModified: ['also-gone.ts'] } as CompletionReport;
-    const result = verifyUnitClaims(generic, writer());
+    const result = verifyUnitClaims(generic, writer(['made.ts']));
     expect(result.claimedPaths).toEqual(['made.ts', 'gone.ts', 'also-gone.ts']);
-    expect(result.kind).toBe('unverified');
+    expect(result.foundPaths).toEqual(['made.ts']);
+    expect(result.kind).toBe('git_corroborated');
     // A report with neither array claims nothing.
     expect(verifyUnitClaims({ version: 1, archetype: 'engineer', summary: 'Done' } as CompletionReport, writer()).claimedPaths).toEqual([]);
     // Entries that are not paths are not claims.
@@ -128,7 +126,7 @@ describe('a unit that must write', () => {
   test('the summary names at most five missing paths and counts the rest', () => {
     const missing = ['a', 'b', 'c', 'd', 'e', 'f', 'g'].map((name) => `${name}.ts`);
     const result = verifyUnitClaims(engineerReport({ filesCreated: missing }), writer());
-    expect(result.summary).toContain('missing: a.ts, b.ts, c.ts, d.ts, e.ts (+2 more)');
+    expect(result.summary).toContain('not changed by the unit: a.ts, b.ts, c.ts, d.ts, e.ts (+2 more)');
   });
 });
 

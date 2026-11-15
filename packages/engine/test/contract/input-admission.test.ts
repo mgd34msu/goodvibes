@@ -198,7 +198,7 @@ function publicationWaits() {
   return { requested, wait, releasePoll: () => polls.splice(0).forEach((resolve) => resolve()) };
 }
 
-test('an owner index lock created after capture holds apply, parks the retries after six attempts and publishes once the lock is gone', async () => {
+test('an owner index lock created after capture holds apply, asks the owner after six attempts and publishes on retry without judging again', async () => {
   const plan = oneUnitPlan(1); let index: Buffer<ArrayBuffer>;
   const waits = publicationWaits();
   const h = harness = makeHarness({ plan, wait: waits.wait, contract: { isolation: 'worktree', autoCommit: false }, scripts: { u1: finishes('export const parse = 10;') }, planner: {
@@ -221,24 +221,23 @@ test('an owner index lock created after capture holds apply, parks the retries a
   expect(done.status).not.toBe('passed');
   const checked = done.checks.length;
   const pendingDecisions = () => done.decisions.filter(decision => decision.reason.startsWith('publication pending:')).length;
-  // Six backed-off attempts, then the runner waits for the project tree instead of retrying an unchanged tree.
-  await waitFor(() => waits.requested.includes(30_000), 'the retries to park', 15_000);
-  expect(waits.requested).toEqual([1_000, 2_000, 4_000, 8_000, 16_000, 30_000]);
-  // Retries against the same obstacle add no further decision.
+  // Six backed-off attempts, then the owner is asked to clear the obstacle instead of the runner polling the tree.
+  await waitFor(() => h.store.get(contract.id)?.status === 'awaiting-owner', 'the publication pause', 15_000);
+  expect(waits.requested).toEqual([1_000, 2_000, 4_000, 8_000, 16_000]);
+  // Retries against the same obstacle add no further decision, and none of them judged the result again.
   expect(pendingDecisions()).toBe(1);
-  expect(h.manager.getStatus(done.ownerAgentId)?.progress).toContain('publication pending');
-  // An unchanged tree wakes the poll but starts no attempt.
-  waits.releasePoll();
-  await waitFor(() => waits.requested.length === 7, 'the next tree poll');
-  expect(waits.requested.at(-1)).toBe(30_000);
-  expect(done.status).not.toBe('passed');
-  expect(done.checks).toHaveLength(checked);
+  const paused = h.store.get(contract.id)!;
+  const pause = paused.escalations.find(escalation => escalation.resolvedAt === undefined)!;
+  expect(pause.failurePause).toBe(true);
+  expect(pause.question).toContain(`branch ${done.branch}`);
+  expect(paused.checks).toHaveLength(checked);
   expect(h.agentsOf('u1')).toHaveLength(1);
   expect(readFileSync(join(h.root, '.git/index.lock'), 'utf8')).toBe('owner lock\n');
-  // The owner clears the lock: the next poll sees the tree changed and publishes.
+  // The owner clears the lock and replies "retry": the accepted result is published without being judged again.
   rmSync(join(h.root, '.git/index.lock'));
-  waits.releasePoll();
+  await h.runner.reply(contract.id, pause.id, 'retry');
   await waitFor(() => terminal(h, contract.id), 'publication after the owner released its index lock', 15_000);
   expect(h.store.get(contract.id)?.status).toBe('passed');
+  expect(h.store.get(contract.id)?.checks).toHaveLength(checked);
   expect(readFileSync(join(h.root, 'src/csv.ts'), 'utf8')).toBe('export const parse = 10;\n');
 }, 30_000);

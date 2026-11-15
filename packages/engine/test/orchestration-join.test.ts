@@ -60,7 +60,7 @@ function stubIsolatedCleanup(): void {
   // Creation remains real: settlement barriers must hold resources admitted by
   // actual native Git, not a public fake that cannot issue creation receipts.
   useNativeWorktrees = true;
-  const clean = spyOn(IsolatedWorktree.prototype, 'isClean').mockResolvedValue(true);
+  const clean = spyOn(IsolatedWorktree.prototype, 'uniqueWork').mockResolvedValue(null);
   const remove = spyOn(IsolatedWorktree.prototype, 'remove').mockResolvedValue(undefined);
   cleanups.push(() => { useNativeWorktrees = false; clean.mockRestore(); remove.mockRestore(); });
 }
@@ -433,8 +433,8 @@ describe('orchestration nested work', () => {
 
   test('kept-worktree eviction is joined after the triggering cleanup has returned', async () => {
     stubIsolatedCleanup();
-    const eviction = deferred<{ preservedCommit: string | null }>();
-    const dirty = spyOn(IsolatedWorktree.prototype, 'isClean').mockResolvedValue(false);
+    const eviction = deferred<{ preservedCommit: string | null; droppedIgnored: readonly string[] }>();
+    const dirty = spyOn(IsolatedWorktree.prototype, 'uniqueWork').mockResolvedValue('it has uncommitted changes');
     const evict = spyOn(IsolatedWorktree.prototype, 'evict').mockImplementation(() => eviction.promise);
     cleanups.push(() => { dirty.mockRestore(); evict.mockRestore(); });
     const { root } = fixture();
@@ -447,7 +447,7 @@ describe('orchestration nested work', () => {
     const joined = isolation.join();
     recordSettled(joined, log);
     log.push('eviction-finishes');
-    eviction.resolve({ preservedCommit: 'saved' });
+    eviction.resolve({ preservedCommit: 'saved', droppedIgnored: [] });
     await joined;
     expect(log).toEqual(['eviction-finishes', 'joined']);
     expect(workItem.worktreePath).toBeUndefined();

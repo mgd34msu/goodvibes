@@ -193,8 +193,10 @@ function servableCriteria(run: ContractRun, escalation: Escalation): Criterion[]
  */
 export async function amendTarget(run: ContractRun, escalation: Escalation, instruction: string, context: StepContext): Promise<AmendmentOutcome> {
   const { contract } = run;
-  if (contract.nativeSource !== undefined) {
-    return { kind: 'problems', problems: ['Native corrections require registered semantic continuations; legacy owner amendments and budget resets are unavailable.'] };
+  // A contract made from a session's own request keeps that request as its
+  // requirements; the owner changes them by starting a new contract.
+  if (contract.nativeSource !== undefined || (contract.originalSource !== undefined && escalation.scope === 'deliverable')) {
+    return { kind: 'problems', problems: ['This contract\'s requirements are fixed by the original request, so a reply cannot change them. Approve or stop the work here; to change what is required, cancel this contract and start a new one with the changed request.'] };
   }
   const target = targetOf(run, escalation);
   if (target === undefined) return { kind: 'problems', problems: [`${escalation.scope} ${escalation.targetId} has no criteria to change`] };
@@ -217,8 +219,7 @@ export async function amendTarget(run: ContractRun, escalation: Escalation, inst
       goal: contract.ask,
       workingDir: workingDirectory,
       systemPrompt: buildAmendmentPrompt(),
-      userPrompt: buildAmendmentRequest(escalation, target, servable, instruction, problems)
-        + (contract.nativeSource === undefined ? '' : '\n\nImmutable native source (only derived work may change):\n' + JSON.stringify(contract.nativeSource)),
+      userPrompt: buildAmendmentRequest(escalation, target, servable, instruction, problems),
       bounds: readPlannerBounds(context.configManager),
       attempt: attempt === 0 ? 'initial' : 'repair',
       route,

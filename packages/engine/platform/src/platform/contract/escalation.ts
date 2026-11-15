@@ -168,6 +168,55 @@ export interface EscalationInput {
   readonly note?: string | undefined;
   /** The whole question, when it was built elsewhere (asking again). */
   readonly question?: string | undefined;
+  /**
+   * The question accepts only "retry" or "cancel", answered by code: a pause
+   * that approves nothing (a publication that could not reach the owner's
+   * tree). Allowed for every contract, native ones included.
+   */
+  readonly retryOrCancel?: true | undefined;
+}
+
+/** What publishing a checked result ran into, for the publication pause. */
+export interface PublicationPauseInput {
+  /** The obstacle, as the last publication attempt recorded it. */
+  readonly note: string;
+  /** The branch holding the result in worktree mode. */
+  readonly branch?: string | undefined;
+}
+
+/** The publication-pause question, built in code: the obstacle, where the result is, and the two answers. */
+export function buildPublicationPauseQuestion(contract: Contract, input: PublicationPauseInput): string {
+  return [
+    `Contract ${contract.id} passed its checks, but its result could not be published to the project: ${titleOf(input.note).slice(0, 400)}`,
+    input.branch === undefined
+      ? 'The checked changes are kept in the working tree.'
+      : `The checked result is kept on branch ${input.branch}; you can also apply it yourself with: git merge ${input.branch}`,
+    'Clear what blocks it (finish or abort your own merge or rebase, or commit or stash edits to the same files), then reply "retry" to publish it again; or reply "cancel" to stop the contract. Resuming the contracts also retries it.',
+  ].join('\n');
+}
+
+/** Whether an open escalation is a publication pause: a retry-or-cancel question about the deliverable. */
+export function isPublicationPause(escalation: Pick<Escalation, 'failurePause' | 'scope' | 'resolvedAt'>): boolean {
+  return escalation.failurePause === true && escalation.scope === 'deliverable' && escalation.resolvedAt === undefined;
+}
+
+/**
+ * Closes a publication pause as retried: the contract goes back to judging,
+ * the status it paused from. The caller then publishes (on a reply, the
+ * deliverable step, which reuses the recorded acceptance; on resume, the
+ * commit step). Returns false when the contract is not waiting on it.
+ */
+export function retryPublicationPause(run: ContractRun, escalation: Escalation, how: string): boolean {
+  if (!isPublicationPause(escalation)) return false;
+  const { contract } = run;
+  if (contract.status === 'awaiting-owner') run.moveContract(contract.statusBeforeOwner ?? 'judging');
+  contract.statusBeforeOwner = undefined;
+  contract.statusLine = undefined;
+  escalation.reply = { text: how, reading: 'amend', outcome: 'act', decisionId: undefined };
+  escalation.resolvedAt = run.env.now();
+  run.decide('owner-replied', contract.id, `${escalation.id}: retry, the checked result is published again (${how})`);
+  run.emit({ type: 'CONTRACT_OWNER_REPLIED', contractId: run.id, escalationId: escalation.id, reading: 'amend', outcome: 'act', action: 'amended' });
+  return true;
 }
 
 function titleOf(text: string): string {
@@ -294,7 +343,9 @@ export function createEscalations(context: StepContext, rejudge: Rejudge): Escal
 
   function raise(run: ContractRun, input: EscalationInput): Escalation {
     const { contract } = run;
-    if (contract.nativeSource !== undefined || contract.originalSource !== undefined) throw new Error('Source-bound contracts cannot enter owner approval');
+    // A session's own request is fixed and answered by native decisions, not owner approval. A contract started
+    // by unattended work keeps its source as the fixed root and asks its owner like any other.
+    if (contract.nativeSource !== undefined && input.retryOrCancel !== true) throw new Error('Native session contracts do not ask for owner approval');
     const question = input.question ?? buildEscalationQuestion(contract, input);
     const escalation: Escalation = {
       id: `${contract.id}.e${contract.escalations.length + 1}`,
@@ -305,6 +356,7 @@ export function createEscalations(context: StepContext, rejudge: Rejudge): Escal
       question,
       unmetCriterionIds: [...input.unmetCriterionIds],
       ...(input.decisionIds.length === 0 ? {} : { decisionIds: [...input.decisionIds] }),
+      ...(input.retryOrCancel === true ? { failurePause: true as const } : {}),
     };
     // The contract moves first: a refused contract move must not leave a unit
     // or group waiting on an owner who was never asked.
@@ -610,14 +662,23 @@ export function createEscalations(context: StepContext, rejudge: Rejudge): Escal
     }
   }
 
-  /** Retry runs the turn again; cancel stops the contract. Any other answer leaves the question open. */
+  /** Retry runs the turn (or the publication) again; cancel stops the contract. Any other answer leaves the question open. */
   function replyToFailurePause(run: ContractRun, escalation: Escalation, text: string): OwnerReplyOutcome {
-    if (run.contract.nativeSource === undefined || run.contract.sessionMode !== true) throw new OwnerReplyRefusedError(`${escalation.id} is not a failure pause of a native session contract`, 'unsupported');
+    const publication = isPublicationPause(escalation);
+    if (!publication && (run.contract.nativeSource === undefined || run.contract.sessionMode !== true)) throw new OwnerReplyRefusedError(`${escalation.id} is not a failure pause of a native session contract`, 'unsupported');
     const answer = readFailurePauseAnswer(text);
     if (answer === undefined) {
       throw new OwnerReplyRefusedError(`"${titleOf(text)}" is not an answer to ${escalation.id}: it only accepts ${FAILURE_PAUSE_ANSWERS.map((word) => `"${word}"`).join(' or ')} ("retry" runs the turn again, "cancel" stops the contract), and nothing here approves the work; the question is still open`, 'not-an-answer');
     }
     const { contract } = run;
+    if (publication && answer === 'retry') {
+      retryPublicationPause(run, escalation, text);
+      context.ownerProgress(run);
+      context.checkpoint?.(run);
+      // Publishing again reuses the recorded acceptance; it judges again only when the accepted result changed.
+      void rejudge.rejudgeDeliverable(run);
+      return { escalationId: escalation.id, reading: 'amend', outcome: 'act', action: 'amended' };
+    }
     const reading: OwnerReplyReading = answer === 'cancel' ? 'reject' : 'amend';
     const action: OwnerReplyAction = answer === 'cancel' ? 'stopped' : 'amended';
     if (answer === 'retry') {
@@ -634,7 +695,7 @@ export function createEscalations(context: StepContext, rejudge: Rejudge): Escal
     run.emit({ type: 'CONTRACT_OWNER_REPLIED', contractId: run.id, escalationId: escalation.id, reading, outcome: 'act', action });
     if (answer === 'cancel') {
       contract.failureKind = 'owner-rejected';
-      run.control.cancel('stopped by the owner after its turn kept failing');
+      run.control.cancel(publication ? 'stopped by the owner after its checked result could not be published' : 'stopped by the owner after its turn kept failing');
     } else {
       context.ownerProgress(run);
       context.checkpoint?.(run);

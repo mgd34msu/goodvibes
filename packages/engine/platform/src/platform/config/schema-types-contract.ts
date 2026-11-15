@@ -20,6 +20,7 @@ export interface ContractSettings {
   maxFixRounds: number;
   planRepairLimit: number;
   maxUnits: number;
+  judgmentCallBudget: number;
   defaultAttempts: number;
   maxActiveContracts: number;
   maxParallelUnits: number;
@@ -46,6 +47,7 @@ export type ContractConfigKey =
   | 'contract.maxFixRounds'
   | 'contract.planRepairLimit'
   | 'contract.maxUnits'
+  | 'contract.judgmentCallBudget'
   | 'contract.defaultAttempts'
   | 'contract.maxActiveContracts'
   | 'contract.maxParallelUnits'
@@ -68,6 +70,7 @@ export interface ContractConfigValueMap {
   'contract.maxFixRounds': number;
   'contract.planRepairLimit': number;
   'contract.maxUnits': number;
+  'contract.judgmentCallBudget': number;
   'contract.defaultAttempts': number;
   'contract.maxActiveContracts': number;
   'contract.maxParallelUnits': number;

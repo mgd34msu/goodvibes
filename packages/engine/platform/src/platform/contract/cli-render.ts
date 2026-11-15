@@ -1,6 +1,7 @@
 /**
  * What the contract command line prints (docs/design/contract-runner.md 10.1):
- * one plain line per contract event, a contract's tree for `status <id>`, and
+ * one plain line per contract event (an owner question follows its line), a
+ * contract's tree for `status <id>`, and
  * the table `status` and `list` print. Everything here is formatting of the
  * runner's own fields; nothing is read or decided.
  */
@@ -62,7 +63,7 @@ function describeEvent(event: ContractEvent): string {
     case 'CONTRACT_FIX_PLANNED':
       return `fix round ${event.round} planned for ${event.scope} ${event.targetId}: group ${event.groupId}, units ${listOrNone(event.unitIds)}`;
     case 'CONTRACT_ESCALATED':
-      return `asks the owner (${event.escalationId}, ${event.reason}, ${event.scope} ${event.targetId})`;
+      return [`asks the owner (${event.escalationId}, ${event.reason}, ${event.scope} ${event.targetId}):`, ...questionLines(event.question, '  ')].join('\n');
     case 'CONTRACT_OWNER_REPLIED':
       return `reply to ${event.escalationId} read as ${event.reading} (${event.outcome}): ${event.action}`;
     case 'CONTRACT_GATE_RESULT':
@@ -86,18 +87,50 @@ function describeEvent(event: ContractEvent): string {
   }
 }
 
-/** One plain line for a contract event, led by its contract id. */
+/** The question's own lines, each led by `indent`. */
+export function questionLines(question: string, indent: string): string[] {
+  return question.split('\n').map((line) => `${indent}${line}`);
+}
+
+/** An unanswered owner question, as the closing JSON line and the wait message carry it. */
+export interface OpenQuestion {
+  readonly id: string;
+  readonly reason: Escalation['reason'];
+  readonly question: string;
+}
+
+/** The contract's unanswered owner questions, oldest first. */
+export function openQuestions(contract: Pick<ContractView, 'escalations'> | null): OpenQuestion[] {
+  if (contract === null) return [];
+  return contract.escalations
+    .filter((escalation) => escalation.resolvedAt === undefined)
+    .map((escalation) => ({ id: escalation.id, reason: escalation.reason, question: escalation.question }));
+}
+
+/** One question as the tree, the wait message and the terminal prompt print it: its id, why it was asked, then the question indented. */
+export function renderQuestion(escalation: Pick<Escalation, 'id' | 'reason' | 'scope' | 'targetId' | 'question'>, indent = '  '): string[] {
+  return [`${indent}${escalation.id} (${escalation.reason}, ${escalation.scope} ${escalation.targetId}):`, ...questionLines(escalation.question, `${indent}  `)];
+}
+
+/** Every unanswered question of the contract, under an "Open questions:" heading; empty when there is none. */
+export function renderOpenQuestions(contract: Pick<ContractView, 'escalations'>): string[] {
+  const open = contract.escalations.filter((escalation) => escalation.resolvedAt === undefined);
+  return open.length === 0 ? [] : ['Open questions:', ...open.flatMap((escalation) => renderQuestion(escalation))];
+}
+
+/** One contract event, led by its contract id; an owner question follows its line, indented. */
 export function formatContractEvent(event: ContractEvent): string {
   return `[${event.contractId ?? 'contracts'}] ${describeEvent(event)}`;
 }
 
-/** The final JSON line a followed contract ends with under `--json`. */
+/** The final JSON line a followed contract ends with under `--json`; a contract that waits on its owner also carries the questions to answer. */
 export function finalJsonLine(contractId: string, contract: ContractView | null, status: string): string {
   return JSON.stringify({
     contractId,
     status,
     answer: contract?.answer ?? null,
     statusLine: contract?.statusLine ?? null,
+    ...(status === 'awaiting-owner' ? { openQuestions: openQuestions(contract) } : {}),
   });
 }
 
@@ -135,14 +168,7 @@ export function renderContractTree(contract: ContractView): string[] {
       for (const criterion of unit.criteria) lines.push(criterionLine(criterion, '    '));
     }
   }
-  const open = contract.escalations.filter((escalation) => escalation.resolvedAt === undefined);
-  if (open.length > 0) {
-    lines.push('Open questions:');
-    for (const escalation of open) {
-      lines.push(`  ${escalation.id} (${escalation.reason}, ${escalation.scope} ${escalation.targetId}):`);
-      for (const line of escalation.question.split('\n')) lines.push(`    ${line}`);
-    }
-  }
+  lines.push(...renderOpenQuestions(contract));
   if (contract.statusLine !== undefined) lines.push(`Status: ${contract.statusLine}`);
   else if (contract.error !== undefined) lines.push(`Error: ${contract.error}`);
   return lines;

@@ -46,6 +46,8 @@ import type { ContractStore } from './store.js';
 import { acquireSharedTree } from './workstreams.js';
 import { preserveDeclaredReadReceipts } from './private-read-receipts.js';
 import { changedFinalAcceptancePolicy } from './acceptance-policy.js';
+import { isPublicationPause, retryPublicationPause } from './escalation.js';
+import { rebindOwnedContractSource } from './owned-source.js';
 import { isTerminalContractStatus, isTerminalUnitStatus, reopenFailedRepairPlanning, type Contract, type ContractFailureKind, type ContractStatus, type ContractUnit } from './types.js';
 
 /** The step a resumed contract takes up. */
@@ -106,7 +108,6 @@ export function resumeStepOf(contract: Pick<Contract, 'status' | 'statusBeforeOw
  * worktree. A session-mode contract has no engine and no worktree.
  */
 export function findZombieCause(contract: Contract): string | null {
-  if (contract.originalSource) return 'original source owner is unavailable after restart';
   if (contract.isolation === 'worktree') {
     if (contract.inputSnapshot === undefined) {
       if (contract.schemaVersion >= 2 && contract.status === 'queued' && contract.resumeFrom === undefined && contract.shape === undefined) return null;
@@ -294,6 +295,15 @@ export function createContractResume(deps: ContractResumeDeps): ContractResume {
   function prepareResume(run: ContractRun): void {
     const contract = run.contract;
     preserveDeclaredReadReceipts(contract);
+    // Unattended work's contract keeps its saved source as the fixed root.
+    rebindOwnedContractSource(contract);
+    // A result that could not be published is published again on resume: the owner was told resume retries it.
+    const pause = contract.escalations.find(isPublicationPause);
+    if (pause !== undefined && contract.status === 'awaiting-owner' && retryPublicationPause(run, pause, 'retried on resume')) {
+      run.moveContract('committing');
+      deps.store.put(contract);
+      return;
+    }
     if (contract.nativeSource === undefined) {
       const pending = contract.escalations.filter(item => item.resolvedAt === undefined);
       if (contract.status === 'awaiting-owner' && contract.units.length > 0 && contract.units.every(unit => unit.status === 'passed')

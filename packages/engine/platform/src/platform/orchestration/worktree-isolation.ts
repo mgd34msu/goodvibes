@@ -324,7 +324,13 @@ export function createWorktreeIsolationManager(deps: WorktreeIsolationManagerDep
       // directory is left in place, an over-cap directory beats lost work,
       // and the tree stays kept/attributed rather than falsely announced gone.
       try {
-        preservedCommit = (await instance.evict(resourceGuards.get(instance), repositoryGuard)).preservedCommit;
+        const evicted = await instance.evict(resourceGuards.get(instance), repositoryGuard);
+        preservedCommit = evicted.preservedCommit;
+        if (evicted.droppedIgnored.length > 0) {
+          logger.warn('worktree-isolation: evicted worktree had ignored files too large to keep on its branch; they were removed with the directory', {
+            itemId: item.id, path, branch: instance.branch, dropped: evicted.droppedIgnored,
+          });
+        }
       } catch (error) {
         logger.error('worktree-isolation: eviction preservation failed; worktree left on disk', {
           itemId: item.id, path, branch: instance.branch, error: summarizeError(error),
@@ -452,18 +458,15 @@ export function createWorktreeIsolationManager(deps: WorktreeIsolationManagerDep
     if (!instance) return; // never got a worktree (failed before claim, or shared mode)
     try {
       resourceGuards.get(instance)?.();
-      const clean = await instance.isClean();
+      // One rule for "holds work that exists nowhere else": uncommitted,
+      // untracked or ignored files, or commits the base lacks. A kept tree is
+      // pruned later by the retention sweep; its branch stays.
+      const unique = await instance.uniqueWork();
       resourceGuards.get(instance)?.();
-      const unique = clean ? await instance.uniqueCommitCount() : null;
-      resourceGuards.get(instance)?.();
-      if (clean && unique === 0) {
+      if (unique === null) {
         await removeWorktree(workstream, item, instance, false);
-      } else if (clean) {
-        // Clean but carrying commits the base lacks (or git could not say): the
-        // retention sweep prunes the directory later and the branch stays.
-        keepWorktree(workstream, item, instance, unique === null ? 'git could not compare the branch with its base' : `${unique} commit(s) not merged into the base`);
       } else {
-        keepWorktree(workstream, item, instance, 'dirty tree after item failed/killed');
+        keepWorktree(workstream, item, instance, `${unique} after the item failed or was killed`);
       }
     } catch (error) {
       logger.error('worktree-isolation: cleanup-on-terminate check did not complete, keeping worktree for safety', {

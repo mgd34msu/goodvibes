@@ -1,13 +1,11 @@
-import * as fs from 'node:fs';
-import { spawnSync } from 'node:child_process';
 import * as atomic from '../../platform/src/platform/utils/atomic-json-store.js';
 import { afterEach, expect, spyOn, test } from 'bun:test';
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import * as types from '../../platform/src/platform/contract/types.js';
 import * as placement from '../../platform/src/platform/contract/git-placement.js';
-import { ContractStore, contractPath, contractCheckpointsDir, serializeContract } from '../../platform/src/platform/contract/store.js';
+import { ContractStore, contractPath, contractCheckpointsDir } from '../../platform/src/platform/contract/store.js';
 import { DurableContractAdmissions, type DurableContractRequest } from '../../platform/src/platform/contract/durable-admission.js';
 import { captureNativeSettlementPublication } from '../../platform/src/platform/workflow/work-ledger/native-settlement-types.js';
 import { makeHarness, makeRepo, oneUnitPlan, waitFor, type Harness } from './runner-support.js';
@@ -132,15 +130,6 @@ test('actual new full128 admission does not invoke historical receipt scanning, 
   expect(() => new DurableContractAdmissions(h.root).findByContractId('ctr-ffffffff')).toThrow('invalid');
 });
 
-test('independent stores share a real creation claim and release only that original claim', () => {
-  const path = root(), first = new ContractStore({ projectRoot: path }), second = new ContractStore({ projectRoot: path }); stores.push(first, second);
-  const held = first.reserveCreation(id);
-  try { expect(() => second.reserveCreation(id)).toThrow('being created'); }
-  finally { held.release(); }
-  const next = second.reserveCreation(id); next.assertCurrent(); next.release();
-  expect(readdirSync(join(path, '.goodvibes', 'contracts', '.creation-claims'))).toEqual([]);
-});
-
 test('a borrowed initial persistence hook cannot redirect the contract ID into another stored owner', () => {
   const path = root(), victim = 'ctr-1234abcd'; mkdirSync(contractCheckpointsDir(path), { recursive: true });
   writeFileSync(contractPath(path, victim), 'Original other contract checkpoint');
@@ -150,15 +139,6 @@ test('a borrowed initial persistence hook cannot redirect the contract ID into a
     expect(() => store.publishCreation(reservation, value)).toThrow();
     expect(readFileSync(contractPath(path, victim), 'utf8')).toBe('Original other contract checkpoint'); expect(existsSync(contractPath(path, id))).toBe(false); expect(store.get(victim)).toBeNull();
   } finally { reservation.release(); }
-});
-
-test('retired physical claim parents preserve a foreign replacement during failed cleanup', () => {
-  const path = root(), store = new ContractStore({ projectRoot: path }); stores.push(store);
-  const reservation = store.reserveCreation(id), directory = join(path, '.goodvibes', 'contracts', '.creation-claims');
-  renameSync(directory, directory + '.original'); mkdirSync(directory);
-  const replacement = join(directory, `${id}.lock`); writeFileSync(replacement, 'Foreign creation claim');
-  expect(() => reservation.assertCurrent()).toThrow(); expect(() => reservation.release()).toThrow();
-  expect(readFileSync(replacement, 'utf8')).toBe('Foreign creation claim');
 });
 
 test('an existing staging leaf is preserved when exclusive initial creation fails', () => {
@@ -174,47 +154,4 @@ test('a target forensic quarantine is preserved and holds that exact identity', 
   const path = root(), store = new ContractStore({ projectRoot: path }); stores.push(store);
   mkdirSync(contractCheckpointsDir(path), { recursive: true }); const forensic = contractPath(path, id) + '.unrecognized'; writeFileSync(forensic, 'Original forensic record');
   expect(() => store.reserveCreation(id)).toThrow('occupied'); expect(readFileSync(forensic, 'utf8')).toBe('Original forensic record'); expect(existsSync(contractPath(path, id))).toBe(false);
-});
-
-test('an actively publishing checkpoint is not adopted by a second reader', () => {
-  const path = root(), writer = new ContractStore({ projectRoot: path }), reader = new ContractStore({ projectRoot: path }); stores.push(writer, reader);
-  const reservation = writer.reserveCreation(id);
-  try {
-    writer.publishCreation(reservation, fixtureContract({ id, projectRoot: path }));
-    expect(() => reader.load(id)).toThrow('still being created');
-  } finally { reservation.release(); }
-  expect(reader.load(id)?.id).toBe(id);
-});
-
-test('a real dead creator claim is reclaimed when its complete checkpoint is read after restart', () => {
-  const path = root(), module = new URL('../../platform/src/platform/contract/store.ts', import.meta.url).href;
-  const text = serializeContract(fixtureContract({ id, projectRoot: path, status: 'queued' }), Date.now())!;
-  const script = `const {ContractStore}=await import(${JSON.stringify(module)});const data=JSON.parse(process.argv[1]);const store=new ContractStore({projectRoot:data.projectRoot});const claim=store.reserveCreation(data.id);store.publishCreation(claim,data);process.exit(0);`;
-  const child = spawnSync(process.execPath, ['--eval', script, JSON.stringify(JSON.parse(text).contract)], { encoding: 'utf8' });
-  expect(child.status).toBe(0);
-  const claim = join(path, '.goodvibes', 'contracts', '.creation-claims', `${id}.lock`); expect(existsSync(claim)).toBe(true);
-  const reader = new ContractStore({ projectRoot: path }); stores.push(reader);
-  expect(reader.load(id)?.id).toBe(id); expect(existsSync(claim)).toBe(false);
-});
-
-test('a real claim appearing after the initial absent probe still fences the actual checkpoint read', () => {
-  const path = root(), writer = new ContractStore({ projectRoot: path }), reader = new ContractStore({ projectRoot: path }); stores.push(writer, reader);
-  const claimPath = join(path, '.goodvibes', 'contracts', '.creation-claims', `${id}.lock`);
-  const original = fs.lstatSync, apply = Reflect.apply;
-  let injected = false, reservation: ReturnType<ContractStore['reserveCreation']> | undefined;
-  const probe = spyOn(fs, 'lstatSync').mockImplementation(((...args: Parameters<typeof fs.lstatSync>) => {
-    if (!injected && String(args[0]) === claimPath) {
-      injected = true;
-      try { return apply(original, fs, args); }
-      catch (error) {
-        reservation = writer.reserveCreation(id);
-        writer.publishCreation(reservation, fixtureContract({ id, projectRoot: path, status: 'queued' }));
-        throw error; // Preserve the real original absent observation.
-      }
-    }
-    return apply(original, fs, args);
-  }) as typeof fs.lstatSync);
-  try { expect(() => reader.load(id)).toThrow('still being created'); expect(injected).toBe(true); }
-  finally { probe.mockRestore(); reservation?.release(); }
-  expect(reader.load(id)?.id).toBe(id);
 });

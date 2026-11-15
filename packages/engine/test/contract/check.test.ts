@@ -45,7 +45,7 @@ function evidence(overrides: Partial<UnitEvidence> = {}): UnitEvidence {
     changedPaths: ['src/parser.ts'],
     diff: '+++ b/src/parser.ts\n+export function parse() {}',
     omitted: [],
-    claims: { claimedPaths: ['src/parser.ts'], foundPaths: ['src/parser.ts'], missingPaths: [], changesDetected: true, kind: 'files_verified', verified: true, summary: '1/1 claimed paths found on disk; kind: files_verified' },
+    claims: { claimedPaths: ['src/parser.ts'], foundPaths: ['src/parser.ts'], missingPaths: [], unverifiablePaths: [], changesDetected: true, kind: 'files_verified', verified: true, summary: '1/1 claimed paths found on disk; kind: files_verified' },
     gates: [{ gate: 'typecheck', passed: true, output: '', durationMs: 5, skipped: false }],
     commands: [{ command: 'bun test', success: true, head: '3 pass' }],
     ...overrides,
@@ -278,7 +278,7 @@ describe('check outcomes, in table order (4.6)', () => {
   });
 
   test('row 4: unverified claims nudge with the missing paths', async () => {
-    const claims = { claimedPaths: ['src/a.ts'], foundPaths: [], missingPaths: ['src/a.ts'], changesDetected: false, kind: 'unverified' as const, verified: false, summary: 'missing' };
+    const claims = { claimedPaths: ['src/a.ts'], foundPaths: [], missingPaths: ['src/a.ts'], unverifiablePaths: [], changesDetected: false, kind: 'unverified' as const, verified: false, summary: 'missing' };
     const outcome = await check({}, { evidence: evidence({ claims }) });
     expect(outcome.check.result).toBe('nudge');
     expect(outcome.nudge?.kinds).toEqual(['claims']);
@@ -286,7 +286,7 @@ describe('check outcomes, in table order (4.6)', () => {
   });
 
   test('row 4: no claims and no changes nudges a unit that must write, not one that reads', async () => {
-    const claims = { claimedPaths: [], foundPaths: [], missingPaths: [], changesDetected: false, kind: 'unverifiable_no_claims' as const, verified: false, summary: 'none' };
+    const claims = { claimedPaths: [], foundPaths: [], missingPaths: [], unverifiablePaths: [], changesDetected: false, kind: 'unverifiable_no_claims' as const, verified: false, summary: 'none' };
     const noWork = evidence({ claims, changedPaths: [], diff: '' });
     const writer = await check({}, { evidence: noWork });
     expect(writer.nudge?.kinds).toEqual(['claims']);

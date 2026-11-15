@@ -35,7 +35,7 @@ import { readContractConfig, type ContractConfig, type ContractConfigReader } fr
 import { nativeContractRoute, decideNativeContract, nativeContractPort, nativeDecisionState, nativeSpent, spendNative, type NativeContractServices } from './native-decisions.js';
 import { assertNativeContractSource, nativeSourcePlan } from './native-source.js';
 import { checkDraftFidelity, draftSection } from './draft-plan.js';
-import { readCriterionDispositions, runPlanChecks, type CriterionDispositionRuling, type PlanCheckUsage, type PlanVerdict } from './plan-checks.js';
+import { createPlanCheckCache, readCriterionDispositions, runPlanChecks, type CriterionDispositionRuling, type PlanCheckCache, type PlanCheckUsage, type PlanVerdict } from './plan-checks.js';
 import {
   effectiveAttempts,
   isUnitRole,
@@ -318,6 +318,8 @@ export function withOwnerWritingDecision(shape: RequestShape, forbidsWriting: bo
 class PlanningContext {
   readonly now: () => number;
   readonly config: ContractConfig;
+  /** Plan-check readings of this planning session by exact input: a repair round re-asks only what changed. */
+  readonly planChecks: PlanCheckCache = createPlanCheckCache();
 
   constructor(readonly contract: Contract, readonly deps: ContractPlannerDeps) {
     this.now = deps.now ?? Date.now;
@@ -364,7 +366,6 @@ class PlanningContext {
 
   escalate(scope: Escalation['scope'], reason: EscalationReason, question: string, decisionIds: readonly string[]): Escalation {
     const { contract } = this;
-    if (contract.originalSource) throw new Error('Source-bound repair cannot enter an unsupported legacy owner decision');
     const escalation: Escalation = {
       id: `${contract.id}.e${contract.escalations.length + 1}`,
       at: this.now(),
@@ -518,7 +519,7 @@ async function checkPlanText(context: PlanningContext, output: string, repair: n
   }
   deps.emit({ type: 'CONTRACT_PLAN_CHECKED', contractId: contract.id, check: 'structure', passed: codeProblems.length === 0, problems: codeProblems, decisionIds: [] });
   if (codeProblems.length > 0) return { plan, text, problems: codeProblems, verdict: undefined };
-  const verdict = await runPlanChecks(plan, contract.ask, shape, { signal, nativeSource: contract.nativeSource, originalSource: contract.originalSource, native: { contract, services: deps.native } });
+  const verdict = await runPlanChecks(plan, contract.ask, shape, { signal, nativeSource: contract.nativeSource, originalSource: contract.originalSource, native: { contract, services: deps.native }, cache: context.planChecks });
   context.addJudgmentUsage(verdict.usage);
   for (const entry of verdict.reports) {
     deps.emit({ type: 'CONTRACT_PLAN_CHECKED', contractId: contract.id, check: entry.check, passed: entry.passed, problems: entry.problems, decisionIds: entry.decisionIds });
@@ -532,6 +533,14 @@ async function rememberPlannerAgent(context: PlanningContext, agentId: string): 
   context.contract.plannerAgentIds.push(agentId);
   if (context.deps.onPlannerStarted) await context.deps.onPlannerStarted(agentId);
   else context.deps.native?.changed(context.contract);
+}
+
+/** Every problem of this round names a problem code and target the previous round already reported. */
+function sameProblemTargets(previous: readonly PlanProblem[] | undefined, current: readonly PlanProblem[]): boolean {
+  if (previous === undefined || previous.length === 0 || current.length === 0) return false;
+  const key = (problem: PlanProblem): string => `${problem.code}\u0000${problem.targetId ?? ''}`;
+  const before = new Set(previous.map(key));
+  return current.every((problem) => before.has(key(problem)));
 }
 
 /** Repeating an unresolved planning state cannot improve it by starting the same repair again.
@@ -691,7 +700,10 @@ export async function planContract(contract: Contract, deps: ContractPlannerDeps
       if (context.config.planRepairLimit === 0 && run.status === 'completed' && repeatsRejectedPlan(rejectedPlans, checked)) {
         return context.fail('planning', 'Planning stopped because a repair repeated the same unresolved planning state. ' + checked.problems.map(entry => entry.message).join(' '));
       }
-      if (context.config.planRepairLimit > 0 && repair >= context.config.planRepairLimit) {
+      // The same problems on the same targets two rounds running: the planner is not converging, so the
+      // owner is asked now rather than after the rest of the repair budget is spent on the same answer.
+      const stuck = run.status === 'completed' && checked.plan !== undefined && sameProblemTargets(previous?.problems, checked.problems);
+      if (stuck || (context.config.planRepairLimit > 0 && repair >= context.config.planRepairLimit)) {
         if (checked.plan === undefined) {
           return context.fail('planning', `the planner's answer was not a readable plan after ${repair} repairs: ${checked.problems.map((entry) => entry.message).join(' ')}`);
         }

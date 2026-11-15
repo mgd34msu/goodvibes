@@ -10,7 +10,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   CLI_CANCEL_REASON,
-  CLI_INTERRUPT_REASON,
   EXIT_AWAITING_OWNER,
   EXIT_FAILED,
   EXIT_INTERRUPTED,
@@ -69,7 +68,20 @@ describe('run', () => {
     expect(contract.status).toBe('awaiting-owner');
     expect(harness.runner.cancels).toEqual([]);
     expect(harness.runner.replies).toEqual([]);
-    expect(io.stderr.at(-1)).toContain(`goodvibes-contract reply ${contract.id}`);
+    expect(io.stderr.some((line) => line.includes(`goodvibes-contract reply ${contract.id}`) && line.includes(`${contract.id}.e1`))).toBe(true);
+    // The caller without a terminal is shown what is asked.
+    expect(io.stderr.some((line) => line.includes('The parser keeps failing criterion u1.c1'))).toBe(true);
+  });
+
+  test('--json waiting on the owner ends with the open questions', async () => {
+    const harness = cliHarness();
+    harness.runner.onStart = (contract) => { harness.runner.escalate(contract, 'Which database?'); };
+    const io = new FakeIo(false);
+    expect(await runContractCli(['run', ASK, '--json'], io, harness.deps)).toBe(EXIT_AWAITING_OWNER);
+    const contract = [...harness.runner.contracts.values()][0]!;
+    const last = JSON.parse(io.stdout.at(-1)!) as Record<string, unknown>;
+    expect(last['status']).toBe('awaiting-owner');
+    expect(last['openQuestions']).toEqual([{ id: `${contract.id}.e1`, reason: 'stalled', question: 'Which database?' }]);
   });
 
   test('at a terminal the question is put, the reply sent, a question put again is asked again, and the contract passes', async () => {
@@ -106,7 +118,7 @@ describe('run', () => {
     expect(harness.runner.replies).toEqual([]);
   });
 
-  test('SIGINT cancels the contract and exits 130', async () => {
+  test('SIGINT stops following, keeps the contract for resume, and exits 130', async () => {
     const harness = cliHarness();
     harness.runner.onStart = (contract) => harness.runner.move(contract, 'running');
     const io = new FakeIo(false);
@@ -115,9 +127,10 @@ describe('run', () => {
     io.interrupt();
     expect(await running).toBe(EXIT_INTERRUPTED);
     const contract = [...harness.runner.contracts.values()][0]!;
-    expect(harness.runner.cancels).toEqual([[contract.id, CLI_INTERRUPT_REASON]]);
-    expect(contract.status).toBe('cancelled');
+    expect(harness.runner.cancels).toEqual([]);
+    expect(contract.status).toBe('running');
     expect(harness.sessions.cancelled).toBe(1);
+    expect(io.stderr.at(-1)).toContain('goodvibes-contract resume');
     expect(io.interruptHandlers.size).toBe(0);
   });
 
@@ -319,18 +332,36 @@ describe('cancel and reply', () => {
     expect(await runContractCli(['cancel', 'ctr-deadbeef'], new FakeIo(false), harness.deps)).toBe(EXIT_FAILED);
   });
 
-  test('reply answers the open question (0); no open question or an unknown contract exits 1', async () => {
+  test('reply --no-follow answers the open question (0) and says resume continues it; no open question or an unknown contract exits 1', async () => {
     const harness = cliHarness();
     const contract = harness.runner.hold(makeContract({ id: 'ctr-0000000d' }));
     harness.runner.escalate(contract);
     const io = new FakeIo(false);
-    expect(await runContractCli(['reply', contract.id, 'Use the streaming reader instead.'], io, harness.deps)).toBe(EXIT_OK);
+    expect(await runContractCli(['reply', contract.id, 'Use the streaming reader instead.', '--no-follow'], io, harness.deps)).toBe(EXIT_OK);
     expect(harness.runner.replies).toEqual([[contract.id, `${contract.id}.e1`, 'Use the streaming reader instead.']]);
     expect(io.stdout[0]).toContain('was read as approve: approved');
+    expect(io.stderr.at(-1)).toContain('goodvibes-contract resume');
     const none = new FakeIo(false);
     expect(await runContractCli(['reply', contract.id, 'again'], none, harness.deps)).toBe(EXIT_FAILED);
     expect(none.stderr).toEqual([`Contract ${contract.id} has no open question.`]);
     expect(await runContractCli(['reply', 'ctr-deadbeef', 'hello'], new FakeIo(false), harness.deps)).toBe(EXIT_FAILED);
+  });
+
+  test('reply follows the contract it released as run does: its answer on stdout and its exit code', async () => {
+    const harness = cliHarness();
+    const contract = harness.runner.hold(makeContract({ id: 'ctr-0000001d' }));
+    harness.runner.escalate(contract);
+    harness.runner.onReply = (held, escalationId) => {
+      harness.runner.resolveEscalation(held, escalationId);
+      queueMicrotask(() => harness.runner.pass(held));
+      return { escalationId, reading: 'approve', outcome: 'act', action: 'approved' };
+    };
+    const io = new FakeIo(false);
+    expect(await runContractCli(['reply', contract.id, 'yes'], io, harness.deps)).toBe(EXIT_OK);
+    expect(io.stdout).toHaveLength(2);
+    expect(io.stdout[0]).toContain('was read as approve: approved');
+    expect(io.stdout[1]).toBe('The parser is written and tested.');
+    expect(harness.opened.disposed).toBe(1);
   });
 });
 
@@ -430,11 +461,15 @@ describe('usage and opening the runner', () => {
   });
 });
 
-test('every contract event formats as one plain line naming its contract', () => {
+test('every contract event formats as one plain line naming its contract; an owner question follows its line', () => {
   for (const event of ALL_CONTRACT_EVENTS) {
-    const line = formatContractEvent(event);
-    expect(line).not.toContain('\n');
-    expect(line.startsWith(`[${event.contractId ?? 'contracts'}] `)).toBe(true);
+    const text = formatContractEvent(event);
+    expect(text.startsWith(`[${event.contractId ?? 'contracts'}] `)).toBe(true);
+    if (event.type === 'CONTRACT_ESCALATED') {
+      expect(text.split('\n').slice(1)).toEqual(event.question.split('\n').map((line) => `  ${line}`));
+    } else {
+      expect(text).not.toContain('\n');
+    }
   }
 });
 

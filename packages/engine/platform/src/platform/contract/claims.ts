@@ -1,22 +1,23 @@
 /**
  * Claim verification: whether the files a unit agent reports creating or
- * changing exist, a deterministic input to a check's outcome
+ * changing are among the files the unit actually changed since its baseline,
+ * a deterministic input to a check's outcome
  * (docs/design/contract-runner.md sections 4.3 and 4.6). Reading the report
- * the agent prompt dictates and checking paths on disk are fixed formats and
- * file-system facts, so this is code, never a judgment.
+ * the agent prompt dictates and comparing it with the unit's changed paths are
+ * fixed formats and facts the check already holds, so this is code, never a
+ * judgment, and it makes no file-system call.
  */
-import { existsSync } from 'node:fs';
-import { isAbsolute, resolve } from 'node:path';
+import { isAbsolute, relative, resolve, sep } from 'node:path';
 import type { ClaimVerificationKind } from '../../events/contract.js';
 import { parseCompletionReport, type CompletionReport } from '../agents/completion-report.js';
 
 /**
  * Discriminator for a claim verification outcome:
- * - 'files_verified': claims present and all found on disk.
- * - 'git_corroborated': claims present, some missing on disk, but the unit changed files since its baseline.
+ * - 'files_verified': claims present and every one is a path the unit changed since its baseline.
+ * - 'git_corroborated': claims present and the unit changed files, but the list is wrong (a claimed path it did not change, or one outside the working tree).
  * - 'verified_empty': no claims made but the unit changed files (real work without listed files), or a read-only unit whose claims are not checked.
  * - 'unverifiable_no_claims': no claims and no changed files; for a unit that must write, a claims nudge.
- * - 'unverified': claims present but not found on disk and no changed files.
+ * - 'unverified': claims present and the unit changed no file.
  */
 export type { ClaimVerificationKind };
 
@@ -24,10 +25,12 @@ export type { ClaimVerificationKind };
 export interface ClaimVerificationResult {
   /** All paths claimed as created or modified. */
   claimedPaths: string[];
-  /** Paths that exist on disk. */
+  /** Claimed paths the unit changed since its baseline. */
   foundPaths: string[];
-  /** Paths that were claimed but not found on disk. */
+  /** Claimed paths the unit did not change, including paths outside the working tree. */
   missingPaths: string[];
+  /** Claimed paths outside the working tree, which the unit's changed paths cannot confirm (also listed in `missingPaths`). */
+  unverifiablePaths: string[];
   /** Whether the unit changed any file since its baseline: the evidence's baseline-scoped changed paths, not a diff of the whole tree. */
   changesDetected: boolean;
   /** Use this rather than `verified` to tell 'unverifiable_no_claims' from 'verified_empty'. */
@@ -71,7 +74,14 @@ function claimedFiles(report: CompletionReport | null): string[] {
   return [fields.filesCreated, fields.filesModified].flatMap((list) => (Array.isArray(list) ? list.filter((path): path is string => typeof path === 'string') : []));
 }
 
-/** The claim kind from what was claimed, what was found and whether the unit changed files. */
+/** A path relative to the working tree, or null when it points outside it. */
+function treePath(cwd: string, path: string): string | null {
+  const inside = relative(cwd, isAbsolute(path) ? path : resolve(cwd, path));
+  if (inside === '' || isAbsolute(inside) || inside === '..' || inside.startsWith(`..${sep}`)) return null;
+  return sep === '/' ? inside : inside.split(sep).join('/');
+}
+
+/** The claim kind from what was claimed, what was confirmed and whether the unit changed files. */
 function claimKind(claimed: number, missing: number, changed: boolean): ClaimVerificationKind {
   if (claimed > 0 && missing === 0) return 'files_verified';
   if (claimed > 0 && changed) return 'git_corroborated';
@@ -82,16 +92,18 @@ function claimKind(claimed: number, missing: number, changed: boolean): ClaimVer
 }
 
 /**
- * Verifies that a unit agent's self-reported work exists on disk.
+ * Verifies a unit agent's self-reported work against the paths it changed.
  *
  * - A unit that must not write (by its plan role) claims nothing to check.
  * - Otherwise the claimed paths are the report's `filesCreated` and
  *   `filesModified` whenever it carries them, whatever its archetype; with no
- *   report nothing is claimed. Every claimed path is statted (deleted files
- *   are expected to be gone and are not checked).
- * - When a claimed path is missing, or none was claimed, the unit's changed
- *   paths since its baseline corroborate the work: a non-empty list does, even
- *   when a listed path was wrong.
+ *   report nothing is claimed. A claimed path is confirmed only when it is one
+ *   of the unit's baseline-scoped changed paths (set membership): a file that
+ *   merely exists was not necessarily written by the unit. Deleted files are
+ *   not checked. A path outside the working tree cannot be confirmed and is
+ *   reported as unverifiable.
+ * - When a claimed path is not confirmed, or none was claimed, a non-empty
+ *   changed-path list still corroborates that work happened.
  */
 export function verifyUnitClaims(report: CompletionReport | null, input: ClaimCheckInput): ClaimVerificationResult {
   const changesDetected = input.changedPaths.length > 0;
@@ -100,6 +112,7 @@ export function verifyUnitClaims(report: CompletionReport | null, input: ClaimCh
       claimedPaths: [],
       foundPaths: [],
       missingPaths: [],
+      unverifiablePaths: [],
       changesDetected,
       kind: 'verified_empty',
       verified: true,
@@ -107,11 +120,18 @@ export function verifyUnitClaims(report: CompletionReport | null, input: ClaimCh
     };
   }
   const claimedPaths = claimedFiles(report);
+  const changed = new Set<string>();
+  for (const path of input.changedPaths) {
+    const inside = treePath(input.cwd, path);
+    if (inside !== null) changed.add(inside);
+  }
   const foundPaths: string[] = [];
   const missingPaths: string[] = [];
+  const unverifiablePaths: string[] = [];
   for (const path of claimedPaths) {
-    const absolute = isAbsolute(path) ? path : resolve(input.cwd, path);
-    (existsSync(absolute) ? foundPaths : missingPaths).push(path);
+    const inside = treePath(input.cwd, path);
+    if (inside === null) unverifiablePaths.push(path);
+    (inside !== null && changed.has(inside) ? foundPaths : missingPaths).push(path);
   }
 
   const kind = claimKind(claimedPaths.length, missingPaths.length, changesDetected);
@@ -120,10 +140,15 @@ export function verifyUnitClaims(report: CompletionReport | null, input: ClaimCh
   const summaryParts: string[] = [];
   if (report === null) summaryParts.push('the agent gave no completion report, so no files are claimed');
   if (claimedPaths.length > 0) {
-    summaryParts.push(`${foundPaths.length}/${claimedPaths.length} claimed paths found on disk`);
-    if (missingPaths.length > 0) {
-      const more = missingPaths.length - SUMMARY_MISSING_LIMIT;
-      summaryParts.push(`missing: ${missingPaths.slice(0, SUMMARY_MISSING_LIMIT).join(', ')}${more > 0 ? ` (+${more} more)` : ''}`);
+    summaryParts.push(`${foundPaths.length}/${claimedPaths.length} claimed paths changed by the unit`);
+    const unchanged = missingPaths.filter((path) => !unverifiablePaths.includes(path));
+    if (unchanged.length > 0) {
+      const more = unchanged.length - SUMMARY_MISSING_LIMIT;
+      summaryParts.push(`not changed by the unit: ${unchanged.slice(0, SUMMARY_MISSING_LIMIT).join(', ')}${more > 0 ? ` (+${more} more)` : ''}`);
+    }
+    if (unverifiablePaths.length > 0) {
+      const more = unverifiablePaths.length - SUMMARY_MISSING_LIMIT;
+      summaryParts.push(`outside the working tree, unverifiable: ${unverifiablePaths.slice(0, SUMMARY_MISSING_LIMIT).join(', ')}${more > 0 ? ` (+${more} more)` : ''}`);
     }
   } else if (report !== null) {
     summaryParts.push('no file paths claimed');
@@ -131,5 +156,5 @@ export function verifyUnitClaims(report: CompletionReport | null, input: ClaimCh
   summaryParts.push(`changed since baseline: ${changesDetected ? `${input.changedPaths.length} path${input.changedPaths.length === 1 ? '' : 's'}` : 'none'}`);
   summaryParts.push(`kind: ${kind}`);
 
-  return { claimedPaths, foundPaths, missingPaths, changesDetected, kind, verified, summary: summaryParts.join('; ') };
+  return { claimedPaths, foundPaths, missingPaths, unverifiablePaths, changesDetected, kind, verified, summary: summaryParts.join('; ') };
 }

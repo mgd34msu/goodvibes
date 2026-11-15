@@ -30,6 +30,23 @@ export function bindOwnedContractSource(contract: Contract, owner: object): void
     return source;
   });
 }
+/**
+ * After a restart the agent that started a source-bound contract is gone, and
+ * with it the live binding. The source itself is data saved on the contract
+ * (goal, criteria and context; it never grants authority), so the contract is
+ * rebound to that saved copy and continues with the same fixed root instead of
+ * being reaped. A contract that still has its live binding is left as it is.
+ */
+export function rebindOwnedContractSource(contract: Contract): void {
+  if (!contract.originalSource || getContractActionSource(contract)) return;
+  const source = captureAutonomousSource(contract.originalSource);
+  const sourceIsCurrent = retainAutonomousSource(source);
+  bindContractActionSource(contract, () => {
+    if (!sourceIsCurrent(contract.originalSource)) throw new Error('Original contract source changed');
+    return source;
+  });
+}
+
 export function assertOwnedContractSource(contract: Contract): void {
   if (!contract.originalSource) return;
   const sourceOf = getContractActionSource(contract);

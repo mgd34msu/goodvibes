@@ -186,6 +186,11 @@ export function createUnitCheckLoop(deps: UnitCheckLoopDeps): UnitCheckLoop {
     deps.watchdog.touch(record.id);
     if (!turn.toolCalls.some((call) => CHANGING_TOOLS.has(call.name))) return;
     if (!run.env.config().midRunChecks || !WORKING.has(unit.status)) return;
+    // A mid-run check cannot pass or fail the unit; what it exists to catch is
+    // a criterion an earlier check read as met that this turn broke. Until one
+    // was met nothing can regress, so the turn costs no judgment request and
+    // the completion check reads the work once it is offered.
+    if (!unit.criteria.some((criterion) => criterion.disposition === 'judged' && criterion.status === 'met')) return;
     if (runtime.check !== null) {
       runtime.recheckPending = true;
       return;

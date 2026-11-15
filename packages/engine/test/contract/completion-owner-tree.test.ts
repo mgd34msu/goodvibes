@@ -1,15 +1,14 @@
 /**
  * What the contract does to the owner's tree around publication, on real
  * repositories: a conflicting merge is undone (but never the owner's own
- * merge), a branch that already reached HEAD is recognised, and a parked
- * publication notices only changes that can matter.
+ * merge), and a branch that already reached HEAD is recognised.
  */
 import { afterEach, expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { abortFailedMerge, branchAlreadyPublished, ownerMergeInProgress, projectTreeState } from '../../platform/src/platform/contract/completion.js';
+import { abortFailedMerge, branchAlreadyPublished, ownerMergeInProgress } from '../../platform/src/platform/contract/completion.js';
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
@@ -89,26 +88,4 @@ test('a branch whose work is already in HEAD is published; one that is not, or t
   expect(branchAlreadyPublished(root, 'merged', base)).toBe(true);
   expect(branchAlreadyPublished(root, 'pending', base)).toBe(false);
   expect(branchAlreadyPublished(root, 'unchanged', base)).toBe(false);
-});
-
-test('a parked publication ignores edits to files the result does not touch, and notices edits to ones it does', () => {
-  const root = repo();
-  const relevant = new Set(['a.txt']);
-  const before = projectTreeState(root, relevant);
-  writeFileSync(join(root, 'other.txt'), 'unrelated edit\n');
-  expect(projectTreeState(root, relevant)).toBe(before);
-  expect(projectTreeState(root)).not.toBe(projectTreeState(root, relevant));
-  writeFileSync(join(root, 'a.txt'), 'edit to a touched file\n');
-  expect(projectTreeState(root, relevant)).not.toBe(before);
-});
-
-test('a parked publication notices the owner clearing an untracked file inside a new directory', () => {
-  const root = repo();
-  mkdirSync(join(root, 'dir'));
-  writeFileSync(join(root, 'dir', 'new.txt'), 'the owner has this file\n');
-  const relevant = new Set(['dir/new.txt']);
-  const blocked = projectTreeState(root, relevant);
-  rmSync(join(root, 'dir', 'new.txt'));
-  writeFileSync(join(root, 'dir', 'keep.txt'), 'the directory stays untracked\n');
-  expect(projectTreeState(root, relevant)).not.toBe(blocked);
 });

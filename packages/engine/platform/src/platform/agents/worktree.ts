@@ -60,6 +60,66 @@ function ignoredPaths(cwd: string, paths: readonly string[]): Promise<readonly s
   });
 }
 
+/**
+ * Why a worktree and its branch hold work that exists nowhere else, or null
+ * when nothing in them is unique: uncommitted changes, untracked files or
+ * ignored files in the tree (`git worktree remove` deletes ignored files such
+ * as `.env.local`, local databases and reports under an ignored directory,
+ * and no commit holds them), commits the base does not have in the tree or on
+ * the branch, or git state that cannot be read. A missing directory has no
+ * uncommitted changes to lose. The one rule for every worktree class.
+ */
+export async function uniqueWork(rootDir: string, worktreePath: string, branch: string, base: string): Promise<string | null> {
+  try {
+    const root = await createSimpleGit({ baseDir: rootDir });
+    const baseHead = (await root.raw(['rev-parse', '--verify', base])).trim();
+    const ahead = async (git: Awaited<ReturnType<typeof createSimpleGit>>, tip: string): Promise<number> => {
+      const count = parseInt((await git.raw(['rev-list', '--count', `${baseHead}..${tip}`])).trim(), 10);
+      if (!Number.isFinite(count)) throw new Error('commit count unreadable');
+      return count;
+    };
+    if (existsSync(worktreePath)) {
+      const tree = await createSimpleGit({ baseDir: worktreePath });
+      const status = await tree.raw(['status', '--porcelain', '--untracked-files=all', '--ignored']);
+      const lines = status.split('\n').filter((line) => line.length > 0);
+      if (lines.some((line) => !line.startsWith('!! '))) return 'it has uncommitted changes';
+      if (lines.length > 0) return `it has ignored files no commit holds (${lines.slice(0, 3).map((line) => line.slice(3)).join(', ')}${lines.length > 3 ? `, +${lines.length - 3} more` : ''})`;
+      if (await ahead(tree, 'HEAD') > 0) return 'it has commits the base branch does not have';
+    }
+    let branchExists = true;
+    try { await root.raw(['rev-parse', '--verify', '--quiet', branch]); } catch { branchExists = false; }
+    if (branchExists && await ahead(root, branch) > 0) return `branch ${branch} has commits the base branch does not have`;
+    return null;
+  } catch (error) {
+    return `its git state could not be read (${summarizeError(error)})`;
+  }
+}
+
+/** Ignored files an eviction commit carries at most, in bytes; past it the rest are listed as dropped. */
+const EVICTION_IGNORED_BYTES = 8 * 1024 * 1024;
+
+/**
+ * The paths `git status --porcelain=v1 -z` lists: every changed, deleted and
+ * untracked path, and both sides of a rename or copy (so the old side's
+ * deletion is staged with the new side).
+ */
+function changedStatusPaths(status: string): string[] {
+  const entries = status.split('\0');
+  const paths = new Set<string>();
+  for (let index = 0; index < entries.length; index += 1) {
+    const entry = entries[index]!;
+    if (entry.length < 4) continue;
+    const code = entry.slice(0, 2);
+    paths.add(entry.slice(3));
+    if (code.includes('R') || code.includes('C')) {
+      const source = entries[index + 1];
+      if (source !== undefined && source.length > 0) paths.add(source);
+      index += 1;
+    }
+  }
+  return [...paths];
+}
+
 /** A merge of an agent's branch conflicted: the worktree and branch are intact and the base tree was restored. */
 export class AgentWorktreeMergeConflictError extends Error {
   constructor(readonly branch: string, readonly worktreePath: string, readonly conflicts: readonly string[]) {
@@ -212,29 +272,27 @@ export class AgentWorktree {
       stagedPathspecs = stageable.map(path => `:(literal)${path}`);
       addFlag = '-A';
     } else {
-      const status = await git.raw([
+      // Stage exactly the paths git reports as changed (modified, deleted,
+      // renamed, untracked; ignored files are not listed), so the command line
+      // grows with the change, not with the repository. Negative pathspecs
+      // naming an ignored directory can make git add fail after staging its
+      // valid siblings, so the paths are named one by one, literally.
+      const changed = changedStatusPaths(await git.raw([
         'status',
-        '--porcelain',
+        '--porcelain=v1',
+        '-z',
         '--untracked-files=all',
         '--',
         '.',
         ':(exclude).goodvibes',
         ':(exclude).goodvibes/**',
-      ]);
+      ]));
       root.assertCurrent();
-      if (status.trim().length === 0) {
+      stagedPathspecs = changed.filter((path) => path !== '.goodvibes' && !path.startsWith('.goodvibes/')).map((path) => `:(literal)${path}`);
+      if (stagedPathspecs.length === 0) {
         logger.debug('AgentWorktree.commitWorkingTree: no direct working tree changes');
         return { hash: null, skippedIgnored };
       }
-      // Negative pathspecs naming an ignored directory can make git add fail
-      // after staging its valid siblings. Enumerate eligible entries instead;
-      // cached paths include deletions, and --exclude-standard omits ignored
-      // untracked data without forcing it into the index.
-      const eligible: string = await git.raw(['ls-files', '--cached', '--others', '--exclude-standard', '-z']);
-      root.assertCurrent();
-      stagedPathspecs = [...new Set(eligible.split('\0').filter((path) => path.length > 0 && path !== '.goodvibes' && !path.startsWith('.goodvibes/')))]
-        .map((path) => `:(literal)${path}`);
-      if (stagedPathspecs.length === 0) return { hash: null, skippedIgnored };
       addFlag = '--all';
     }
 
@@ -356,7 +414,7 @@ export class AgentWorktree {
   /**
    * Release the worktree without merging (cancel/error path). A worktree that
    * holds the only copy of anything is kept, with its branch: uncommitted changes
-   * (tracked or untracked, ignored files aside), commits the base branch does not
+   * (tracked, untracked or ignored), commits the base branch does not
    * have, or git state that cannot be read. Only a tree with nothing unique is
    * removed, and never by force.
    */
@@ -410,31 +468,9 @@ export class AgentWorktree {
     }
   }
 
-  /**
-   * Why this agent's work cannot be thrown away, or null when nothing in it is unique:
-   * its tree has uncommitted changes, it (or its branch) holds commits the base does not,
-   * or git cannot say. A missing directory has no uncommitted changes to lose.
-   */
+  /** Why this agent's work cannot be thrown away, or null when nothing in it is unique ({@link uniqueWork} against the root tree's HEAD). */
   private async _uniqueWork(worktreePath: string, branch: string): Promise<string | null> {
-    try {
-      const root = await createSimpleGit({ baseDir: this.git.getCwd() });
-      const base = (await root.raw(['rev-parse', 'HEAD'])).trim();
-      const ahead = async (git: Awaited<ReturnType<typeof createSimpleGit>>, tip: string): Promise<number> => {
-        const count = parseInt((await git.raw(['rev-list', '--count', `${base}..${tip}`])).trim(), 10);
-        if (!Number.isFinite(count)) throw new Error('commit count unreadable');
-        return count;
-      };
-      if (existsSync(worktreePath)) {
-        const tree = await createSimpleGit({ baseDir: worktreePath });
-        // --ignored: `git worktree remove` deletes ignored files (.env, local databases, build output) and no commit holds them.
-        if ((await tree.raw(['status', '--porcelain', '--untracked-files=all', '--ignored'])).trim().length > 0) return 'it has uncommitted changes or ignored files';
-        if (await ahead(tree, 'HEAD') > 0) return 'it has commits the base branch does not have';
-      }
-      if (await this._branchExists(branch) && await ahead(root, branch) > 0) return `branch ${branch} has commits the base branch does not have`;
-      return null;
-    } catch (error) {
-      return `its git state could not be read (${summarizeError(error)})`;
-    }
+    return uniqueWork(this.git.getCwd(), worktreePath, branch, 'HEAD');
   }
 
   /** Removes the worktree and its branch unless something in them is unique; never forces either. */
@@ -491,8 +527,9 @@ export type IntegrationOutcome =
  *                 the worktree (delegates to AgentWorktree.commitWorkingTree
  *                 bound to `path`, so the ignored/hallucinated/deletion
  *                 filtering is reused verbatim).
- *   isClean()  , whether the worktree's working tree has uncommitted changes
- *                 (drives the fail/kill cleanup rule: remove only if clean).
+ *   isClean()  , whether the worktree holds uncommitted, untracked or ignored files.
+ *   uniqueWork(), why the tree or branch holds work that exists nowhere else
+ *                 (drives the fail/kill cleanup rule: remove only when null).
  *   integrate(), merge `branch` into the base branch IN THE ROOT TREE. The
  *                 root tree stays checked out on base; a different branch being
  *                 merged never needs the worktree removed first. On conflict it
@@ -574,18 +611,28 @@ export class IsolatedWorktree {
     }
   }
 
-  /** True when the worktree has NO uncommitted changes (clean tree). Missing dir ⇒ treated as clean. */
+  /**
+   * True when the worktree holds nothing that removing its directory would
+   * lose: no uncommitted change, no untracked file and no ignored file
+   * (`git worktree remove` deletes ignored files and no commit holds them).
+   * Missing dir ⇒ treated as clean.
+   */
   async isClean(): Promise<boolean> {
     if (!existsSync(this.path)) return true;
     try {
       const wgit = await createSimpleGit({ baseDir: this.path });
-      const status = (await wgit.raw(['status', '--porcelain'])).trim();
+      const status = (await wgit.raw(['status', '--porcelain', '--untracked-files=all', '--ignored'])).trim();
       return status.length === 0;
     } catch (error) {
       // If we can't read status, treat as DIRTY (keep the tree), data safety.
       logger.warn('IsolatedWorktree.isClean: status failed, treating as dirty', { path: this.path, error: summarizeError(error) });
       return false;
     }
+  }
+
+  /** Why this worktree and its branch cannot be removed, or null when nothing in them is unique ({@link uniqueWork} against the base branch). */
+  async uniqueWork(): Promise<string | null> {
+    return uniqueWork(this.rootGit.getCwd(), this.path, this.branch, this.baseBranch);
   }
 
   /** How many commits the item branch carries beyond base, or null when git cannot say (callers must then keep the branch). */
@@ -683,27 +730,45 @@ export class IsolatedWorktree {
 
   /**
    * Evict this worktree under the kept-worktree cap. Eviction bounds DISK
-   * usage, never work: any uncommitted state (modified AND untracked files,
-   * unfiltered, preservation must be exact) is first committed onto the item
-   * branch, then ONLY the directory is removed. The branch is deliberately
-   * KEPT, so a conflicted/dirty tree evicted past the cap stays recoverable
-   * with `git worktree add <path> <branch>` / `git show <branch>:<file>`.
+   * usage, never work: any uncommitted state (modified and untracked files)
+   * is first committed onto the item branch, then ONLY the directory is
+   * removed. Ignored files are carried too, force-added, up to
+   * {@link EVICTION_IGNORED_BYTES} in total; an ignored directory or a file
+   * past that bound is not committed and is returned in `droppedIgnored` so
+   * the caller can say what was let go. The branch is deliberately KEPT, so a
+   * conflicted/dirty tree evicted past the cap stays recoverable with
+   * `git worktree add <path> <branch>` / `git show <branch>:<file>`.
    *
    * When the preservation commit cannot be created, the directory is NOT
    * removed (the error propagates), leaving an over-cap directory on disk is
    * always preferred over destroying uncommitted work.
    *
    * @returns the preservation commit hash, or null when the tree was already
-   *          clean (nothing needed preserving).
+   *          clean (nothing needed preserving), and the ignored paths not kept.
    */
-  async evict(beforeEvict?: () => void, beforeRepositoryWrite?: () => void): Promise<{ preservedCommit: string | null }> {
+  async evict(beforeEvict?: () => void, beforeRepositoryWrite?: () => void): Promise<{ preservedCommit: string | null; droppedIgnored: readonly string[] }> {
     beforeRepositoryWrite?.(); beforeEvict?.();
     logger.debug('IsolatedWorktree.evict', { path: this.path, branch: this.branch });
     let preservedCommit: string | null = null;
+    const droppedIgnored: string[] = [];
     if (existsSync(this.path) && !(await this.isClean())) {
       const wgit = await createSimpleGit({ baseDir: this.path });
       beforeRepositoryWrite?.(); beforeEvict?.();
       await wgit.raw(['add', '-A']);
+      const ignored = (await wgit.raw(['status', '--porcelain=v1', '-z', '--untracked-files=all', '--ignored=matching']))
+        .split('\0').filter((entry) => entry.startsWith('!! ')).map((entry) => entry.slice(3));
+      const carried: string[] = [];
+      let bytes = 0;
+      for (const path of ignored) {
+        const stats = path.endsWith('/') ? undefined : lstatSync(join(this.path, path), { throwIfNoEntry: false });
+        if (stats === undefined || !stats.isFile() || bytes + stats.size > EVICTION_IGNORED_BYTES) { droppedIgnored.push(path); continue; }
+        bytes += stats.size;
+        carried.push(path);
+      }
+      if (carried.length > 0) {
+        beforeRepositoryWrite?.(); beforeEvict?.();
+        await wgit.raw(['add', '-f', '--', ...carried.map((path) => `:(literal)${path}`)]);
+      }
       const message = 'preserve uncommitted work at kept-cap eviction';
       try {
         beforeRepositoryWrite?.(); beforeEvict?.();
@@ -721,7 +786,7 @@ export class IsolatedWorktree {
     beforeRepositoryWrite?.();
     await this.removeDirectory(beforeEvict);
     // The branch is KEPT deliberately, no `branch -D` on the eviction path.
-    return { preservedCommit };
+    return { preservedCommit, droppedIgnored };
   }
 
   /** Native plain removal protects work added after a cleanliness check.

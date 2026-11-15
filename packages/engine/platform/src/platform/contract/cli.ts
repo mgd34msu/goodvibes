@@ -9,7 +9,7 @@
  *   status [<id>] [--json]
  *   list [--all]
  *   cancel <id>
- *   reply <id> "<text>"
+ *   reply <id> "<text>" [--no-follow] [--json]
  *   resume [--json]
  *
  * Every command takes `--cwd <dir>`, the project (default: the working
@@ -23,7 +23,11 @@
  *
  * Exit codes: 0 passed or done; 1 failed, cancelled, unknown, refused; 2 a
  * contract waits on its owner and there is no terminal to ask on; 64 a usage
- * error; 130 interrupted (the followed contracts are cancelled).
+ * error; 130 interrupted. `reply` follows the contract it answered exactly as
+ * `run` does, so its exit code is the contract's, not "the reply was read".
+ *
+ * Ctrl-C stops following: the contracts keep their state in the project and
+ * `resume` continues them; `cancel <id>` is how a contract is cancelled.
  *
  * Session mode (design 6.6): a contract whose ask forbids delegation has its
  * one unit done by the session's own turns. The CLI hosts that session (the
@@ -39,7 +43,7 @@ import { resolve } from 'node:path';
 import type { ContractEvent } from '../../events/contract.js';
 import { SurfaceHomeInUseError } from '../runtime/home-single-writer.js';
 import { summarizeError } from '../utils/error-display.js';
-import { describeReply, finalJsonLine, formatContractEvent, isOpenContract, newestFirst, contractRow, renderContractTable, renderContractTree } from './cli-render.js';
+import { describeReply, finalJsonLine, formatContractEvent, isOpenContract, newestFirst, contractRow, renderContractTable, renderContractTree, renderOpenQuestions, renderQuestion } from './cli-render.js';
 import { openEscalation } from './intake-route.js';
 import type { ResumeReport } from './resume.js';
 import type { ContractRunner } from './runner.js';
@@ -102,6 +106,7 @@ export const EXIT_INTERRUPTED = 130;
 export const SESSION_CONTINUE_LINE = 'The contract\'s checks asked for more work on this request. Continue the work until every acceptance criterion is met.';
 /** The reason a cancel from the command line records. */
 export const CLI_CANCEL_REASON = 'Cancelled from the command line.';
+/** @deprecated Ctrl-C no longer cancels a followed contract; it stops following and keeps the contract for `resume`. */
 export const CLI_INTERRUPT_REASON = 'Interrupted from the command line.';
 
 export const CONTRACT_CLI_USAGE = [
@@ -112,11 +117,12 @@ export const CONTRACT_CLI_USAGE = [
   '  status [<id>] [--json]                                    one contract\'s tree, or a table of contracts',
   '  list [--all]                                              contracts not ended (--all: every contract)',
   '  cancel <id>                                               cancel a contract',
-  '  reply <id> "<text>"                                       answer a contract\'s open question',
+  '  reply <id> "<text>" [--no-follow] [--json]               answer a contract\'s open question and follow it',
   '  resume [--json]                                           resume the contracts on disk and follow them',
   '',
   'Every command takes --cwd <dir>, the project (default: the working directory).',
-  'Exit codes: 0 passed, 1 failed or refused, 2 waiting on the owner without a terminal, 64 usage, 130 interrupted.',
+  'Ctrl-C stops following and keeps the contracts as they are: resume continues them, cancel <id> cancels one.',
+  'Exit codes: 0 passed, 1 failed or refused, 2 waiting on the owner without a terminal, 64 usage, 130 stopped following.',
 ];
 
 // ── Arguments ─────────────────────────────────────────────────────────────────
@@ -129,6 +135,7 @@ interface ParsedArgs {
   readonly projectRoot: string;
   readonly json: boolean;
   readonly all: boolean;
+  readonly follow: boolean;
   readonly isolation: Isolation | undefined;
 }
 
@@ -139,7 +146,7 @@ const COMMAND_FLAGS: Readonly<Record<string, { readonly flags: readonly string[]
   status: { flags: ['--cwd', '--json'], positionals: [0, 1] },
   list: { flags: ['--cwd', '--all'], positionals: [0, 0] },
   cancel: { flags: ['--cwd'], positionals: [1, 1] },
-  reply: { flags: ['--cwd'], positionals: [2, 2] },
+  reply: { flags: ['--cwd', '--no-follow', '--json'], positionals: [2, 2] },
   resume: { flags: ['--cwd', '--json'], positionals: [0, 0] },
 };
 const VALUE_FLAGS: ReadonlySet<string> = new Set(['--cwd', '--isolation']);
@@ -194,6 +201,7 @@ function parseArgs(argv: readonly string[], cwd: string): ParsedArgs {
     projectRoot,
     json: switches.has('--json'),
     all: switches.has('--all'),
+    follow: !switches.has('--no-follow'),
     isolation: isolationValue as Isolation | undefined,
   };
 }
@@ -283,7 +291,7 @@ async function withRunner(args: ParsedArgs, io: ContractCliIo, deps: ContractCli
 // ── Commands on the live runner ───────────────────────────────────────────────
 
 async function runCommand(args: ParsedArgs, io: ContractCliIo, opened: OpenedContractRunner, sessionId: string): Promise<number> {
-  const follower = createFollower(io, opened, args.json);
+  const follower = createFollower(io, opened, args.json, args.projectRoot);
   let contractId: string;
   try {
     const started = await opened.runner.start({
@@ -321,34 +329,57 @@ async function cancelCommand(args: ParsedArgs, io: ContractCliIo, opened: Opened
   return EXIT_OK;
 }
 
+/**
+ * Answers the contract's open question, then follows it as `run` does: the
+ * work the answer released runs in this process, so leaving at once would
+ * park it again. With `--no-follow` the reply is sent and the command says
+ * that `resume` continues the contract.
+ */
 async function replyCommand(args: ParsedArgs, io: ContractCliIo, opened: OpenedContractRunner): Promise<number> {
   const [id, text] = args.positionals as [string, string];
+  const follower = args.follow ? createFollower(io, opened, args.json, args.projectRoot) : null;
   if (await opened.resumed() === null) {
+    follower?.stop();
     io.err(resumeFailedLine(args.projectRoot));
     return EXIT_FAILED;
   }
   const contract = opened.runner.get(id);
   if (contract === null) {
+    follower?.stop();
     io.err(`No contract ${id} in ${args.projectRoot}.`);
     return EXIT_FAILED;
   }
   const waiting = openEscalation([contract]);
   if (waiting === null) {
+    follower?.stop();
     io.err(`Contract ${id} has no open question.`);
     return EXIT_FAILED;
   }
   try {
     const outcome = await opened.runner.reply(id, waiting.escalation.id, text);
-    io.out(describeReply(id, outcome, waiting.escalation));
-    return EXIT_OK;
+    (args.json ? io.err : io.out)(describeReply(id, outcome, waiting.escalation));
   } catch (error) {
+    follower?.stop();
     io.err(`The reply to contract ${id} was not taken: ${summarizeError(error)}`);
     return EXIT_FAILED;
   }
+  if (follower === null) {
+    const after = opened.runner.get(id);
+    if (after !== null && !isTerminalContractStatus(after.status) && openEscalation([after]) === null) {
+      io.err(`Contract ${id} continues when it is resumed: run \`${resumeCommandLine(args.projectRoot)}\` to continue it.`);
+    }
+    return EXIT_OK;
+  }
+  return exitCodeOf(await follower.follow([id]));
+}
+
+/** The command that continues the project's contracts. */
+function resumeCommandLine(projectRoot: string): string {
+  return `goodvibes-contract resume --cwd ${JSON.stringify(projectRoot)}`;
 }
 
 async function resumeCommand(args: ParsedArgs, io: ContractCliIo, opened: OpenedContractRunner): Promise<number> {
-  const follower = createFollower(io, opened, args.json);
+  const follower = createFollower(io, opened, args.json, args.projectRoot);
   const report = await opened.resumed();
   if (report === null) {
     follower.stop();
@@ -376,7 +407,11 @@ async function resumeCommand(args: ParsedArgs, io: ContractCliIo, opened: Opened
 
 // ── Following contracts ───────────────────────────────────────────────────────
 
-/** How following a contract ended. `unfinished`: its session's turn ended before the unit's work was checked. */
+/**
+ * How following a contract ended. `unfinished`: its session's turn ended
+ * before the unit's work was checked. `interrupted`: the person stopped
+ * following; the contract keeps its state.
+ */
 type FollowEnd = 'passed' | 'failed' | 'cancelled' | 'waiting' | 'interrupted' | 'unfinished';
 
 /** Interrupted wins; then any failure (a failure is final, a wait resumes); then a wait on the owner; else passed. */
@@ -408,7 +443,7 @@ interface Follower {
  * it (start emits at once; the startup resume emits before its report) are
  * held and printed when it does.
  */
-function createFollower(io: ContractCliIo, opened: OpenedContractRunner, json: boolean): Follower {
+function createFollower(io: ContractCliIo, opened: OpenedContractRunner, json: boolean, projectRoot: string): Follower {
   const { runner, sessions } = opened;
   const followed = new Map<string, Followed>();
   const held: ContractEvent[] = [];
@@ -448,7 +483,7 @@ function createFollower(io: ContractCliIo, opened: OpenedContractRunner, json: b
         settle(state, 'failed');
         return;
       case 'CONTRACT_CANCELLED':
-        settle(state, interrupted ? 'interrupted' : 'cancelled');
+        settle(state, 'cancelled');
         return;
       case 'CONTRACT_STATUS_CHANGED':
       case 'CONTRACT_UNIT_STATUS_CHANGED':
@@ -470,7 +505,14 @@ function createFollower(io: ContractCliIo, opened: OpenedContractRunner, json: b
       io.out(contract?.answer ?? '');
       io.err(contract?.statusLine ?? `Contract ${state.id} passed.`);
     } else if (end === 'waiting') {
-      io.err(`Contract ${state.id} waits for your reply; answer with: goodvibes-contract reply ${state.id} "<text>"`);
+      const open = contract === null ? [] : contract.escalations.filter((escalation) => escalation.resolvedAt === undefined);
+      const first = open[0];
+      io.err(first === undefined
+        ? `Contract ${state.id} waits for your reply.`
+        : `Contract ${state.id} waits for your reply to ${first.id}; answer with: goodvibes-contract reply ${state.id} "<text>"`);
+      if (contract !== null) for (const line of renderOpenQuestions(contract)) io.err(line);
+    } else if (end === 'interrupted') {
+      io.err(`Stopped following contract ${state.id}; it keeps its state. Continue it with: ${resumeCommandLine(projectRoot)}; cancel it with: goodvibes-contract cancel ${state.id} --cwd ${JSON.stringify(projectRoot)}`);
     } else if (end === 'unfinished') {
       io.err(`Contract ${state.id}: the session's turn ended before its work was checked; the contract waits for a session turn, and goodvibes-contract resume takes it up again.`);
     } else {
@@ -498,8 +540,8 @@ function createFollower(io: ContractCliIo, opened: OpenedContractRunner, json: b
       if (state.end !== null || interrupted) return;
       const escalation = runner.get(state.id)?.escalations.find((candidate) => candidate.id === escalationId && candidate.resolvedAt === undefined);
       if (escalation === undefined) return;
-      talk(`Contract ${state.id} asks (${escalation.id}):`);
-      for (const line of escalation.question.split('\n')) talk(`  ${line}`);
+      talk(`Contract ${state.id} asks:`);
+      for (const line of renderQuestion(escalation)) talk(line);
       const text = await Promise.race([io.readLine('Reply> '), interruptedSignal]);
       if (interrupted || state.end !== null) return;
       if (text === null) {
@@ -563,6 +605,9 @@ function createFollower(io: ContractCliIo, opened: OpenedContractRunner, json: b
     drive(state);
   }
 
+  // Ctrl-C detaches: the turns this process drives stop, and every followed
+  // contract keeps its state for `resume`. Nothing is cancelled here; a
+  // cancel is `cancel <id>`, so getting the terminal back never destroys work.
   const interrupt = (): void => {
     if (interrupted) return;
     interrupted = true;
@@ -570,7 +615,6 @@ function createFollower(io: ContractCliIo, opened: OpenedContractRunner, json: b
     sessions.cancelAll();
     for (const state of followed.values()) {
       if (state.end !== null) continue;
-      runner.cancel(state.id, CLI_INTERRUPT_REASON);
       settle(state, 'interrupted');
     }
   };

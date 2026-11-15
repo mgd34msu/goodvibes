@@ -1,4 +1,11 @@
-/** Adopted SETTINGS transport. References are owner preconditions, not grants. */
+/**
+ * Adopted SETTINGS transport. A capture reads what a change would touch and the
+ * settings revision it was read at; the apply is one write that carries that
+ * revision, so the daemon refuses it if the settings moved in between. Nothing
+ * is held on the daemon between the two, and the write carries a request id so
+ * an answer lost in transit can be asked for again without writing twice.
+ */
+import { randomUUID } from 'node:crypto';
 import { readFileSync, statSync } from 'node:fs';
 import type { Refusal } from '@goodvibes-jev/engine/errors';
 import { daemonSecretKeyFor } from './daemon-secret-keys.js';
@@ -27,16 +34,17 @@ declare const remoteBrand: unique symbol;
 export interface RemoteSettingsPrecondition { readonly [remoteBrand]: true; }
 export interface RemoteSettingsPreconditionFacts extends SettingsPreconditionFacts {
   readonly endpoint: string;
-  readonly expiresAt: number;
 }
 interface Entry {
   readonly facts: RemoteSettingsPreconditionFacts;
-  readonly reference: string;
+  readonly request: SettingsPreconditionRequest;
+  /** The daemon serving period the facts were read in; revisions from another one never match. */
+  readonly serving: string;
+  readonly requestId: string;
   readonly url: string;
   readonly headers: Readonly<Record<string, string>>;
   readonly fetchImpl: typeof fetch;
   readonly timeoutMs: number;
-  readonly localExpiresAt: number;
   readonly assertCurrent?: () => void;
   spent: boolean;
 }
@@ -206,7 +214,6 @@ export async function captureRemoteSettingsPrecondition(
   const authHeaders = headers(endpoint);
   const fetchImpl = deps.fetchImpl ?? globalThis.fetch;
   const timeoutMs = deps.timeoutMs ?? 10_000;
-  const localExpiresAt = Date.now() + 300_000;
   let response: Response;
   try {
     response = await fetchImpl(url, { method: 'POST', headers: authHeaders, redirect: 'error',
@@ -216,20 +223,19 @@ export async function captureRemoteSettingsPrecondition(
   let payload: unknown;
   try { payload = await response.json(); } catch { throw settingsOwnerVersionMismatch(SUBJECT, 'the capture answer is not JSON', false); }
   const arm = record(payload) && record(payload.settingsPrecondition) ? payload.settingsPrecondition : undefined;
-  if (!arm || !hasFields(arm, ['version', 'action', 'reference', 'expiresAt', 'facts']) || arm.version !== 1 || arm.action !== 'captured'
-    || typeof arm.reference !== 'string' || !arm.reference || arm.reference.length > 128
-    || typeof arm.expiresAt !== 'number' || !Number.isSafeInteger(arm.expiresAt) || arm.expiresAt <= 0) {
+  if (!arm || !hasFields(arm, ['version', 'action', 'facts', 'serving']) || arm.version !== 1 || arm.action !== 'captured'
+    || typeof arm.serving !== 'string' || !arm.serving || arm.serving.length > 128) {
     throw settingsOwnerVersionMismatch(SUBJECT, 'the capture answer lacks the version 1 fields', false);
   }
   const read = readFacts(arm.facts, capturedRequest);
   if (!read) throw settingsOwnerVersionMismatch(SUBJECT, 'the captured facts do not describe this change', false);
-  if (localExpiresAt <= Date.now()) throw stale();
   // Serving normalization still traverses the same protected-input boundary.
   const safe = snapshotJudgmentInput({ mode: 'set', key: read.key, value: read.value }, 'goodvibes_settings') as { value: unknown };
-  const facts = freeze({ ...read, value: safe.value, endpoint: endpointUrl, expiresAt: arm.expiresAt });
+  const facts = freeze({ ...read, value: safe.value, endpoint: endpointUrl });
   try { deps.assertCurrent?.(); } catch { throw stale(); }
   const handle = Object.freeze({}) as RemoteSettingsPrecondition;
-  entries.set(handle, { facts, reference: arm.reference, url, headers: authHeaders, fetchImpl, timeoutMs, localExpiresAt, ...(deps.assertCurrent ? { assertCurrent: deps.assertCurrent } : {}), spent: false });
+  entries.set(handle, { facts, request: capturedRequest, serving: arm.serving as string, requestId: randomUUID(), url, headers: authHeaders, fetchImpl, timeoutMs,
+    ...(deps.assertCurrent ? { assertCurrent: deps.assertCurrent } : {}), spent: false });
   return handle;
 }
 export function inspectRemoteSettingsPrecondition(handle: RemoteSettingsPrecondition): RemoteSettingsPreconditionFacts {
@@ -238,7 +244,6 @@ export function inspectRemoteSettingsPrecondition(handle: RemoteSettingsPrecondi
 export function assertRemoteSettingsPrecondition(handle: RemoteSettingsPrecondition): void {
   const entry = entries.get(handle); if (!entry) throw stale();
   if (entry.spent) throw new SettingsRefusalError('spent', refusalText(SUBJECT, 'spent'));
-  if (entry.localExpiresAt <= Date.now()) { entry.spent = true; throw stale(); }
   try { entry.assertCurrent?.(); } catch { entry.spent = true; throw stale(); }
 }
 /** The receipt fields this build reads, with fields a newer daemon adds dropped; undefined when it cannot be read. */
@@ -266,13 +271,20 @@ export async function applyRemoteSettingsPrecondition(handle: RemoteSettingsPrec
   // be checked by the manager/registry immediately before calling this method.
   entry.spent = true;
   const none = Object.freeze([]) as readonly string[];
+  const body = JSON.stringify({ settingsPrecondition: { version: 1, action: 'write', ...entry.request,
+    ifIncarnation: entry.facts.incarnation, ifServing: entry.serving, requestId: entry.requestId } });
+  const send = () => entry.fetchImpl(entry.url, { method: 'POST', headers: entry.headers, redirect: 'error', body, signal: AbortSignal.timeout(entry.timeoutMs) });
   let response: Response;
   try {
-    response = await entry.fetchImpl(entry.url, { method: 'POST', headers: entry.headers, redirect: 'error',
-      body: JSON.stringify({ settingsPrecondition: { version: 1, action: 'apply', reference: entry.reference } }), signal: AbortSignal.timeout(entry.timeoutMs) });
+    response = await send();
   } catch (error) {
     const failure = settingsOwnerTransportFailure(SUBJECT, error, { url: entry.facts.endpoint, applying: true });
-    return Object.freeze({ status: 'unknown', completedPaths: none, ...(failure.notSent ? { refused: true as const } : {}), failure: failure.error.refusal });
+    if (failure.notSent) return Object.freeze({ status: 'unknown', completedPaths: none, refused: true as const, failure: failure.error.refusal });
+    // The write may have reached the daemon. The same request id is answered
+    // with the first result, or written once if the first never arrived.
+    try { response = await send(); } catch {
+      return Object.freeze({ status: 'unknown', completedPaths: none, failure: failure.error.refusal });
+    }
   }
   if (!response.ok || response.redirected) {
     const failure = await settingsApplyFailure(SUBJECT, response, REFUSAL_CODES);
@@ -282,8 +294,8 @@ export async function applyRemoteSettingsPrecondition(handle: RemoteSettingsPrec
   const unreadable = (detail: string): RemoteSettingsReceipt => Object.freeze({ status: 'unknown', completedPaths: none, receiptUnreadable: true,
     failure: settingsOwnerVersionMismatch(SUBJECT, detail, true).refusal });
   let payload: unknown;
-  try { payload = await response.json(); } catch { return unreadable('the apply answer is not JSON'); }
+  try { payload = await response.json(); } catch { return unreadable('the write answer is not JSON'); }
   const arm = record(payload) && record(payload.settingsPrecondition) ? payload.settingsPrecondition : undefined;
-  if (!arm || arm.version !== 1 || arm.action !== 'applied' || arm.reference !== entry.reference) return unreadable('the apply answer lacks the version 1 fields');
+  if (!arm || arm.version !== 1 || arm.action !== 'written' || arm.requestId !== entry.requestId) return unreadable('the write answer lacks the version 1 fields');
   return readReceipt(arm.receipt, entry.facts) ?? unreadable('the receipt does not match the captured destinations');
 }

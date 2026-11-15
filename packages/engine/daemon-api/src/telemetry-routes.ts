@@ -242,6 +242,20 @@ function authenticateTelemetryIngest(context: TelemetryRouteContext, req: Reques
   return principal;
 }
 
+/** No ingest sink is wired, so the records would be dropped; the exporter must not read that as stored. */
+function ingestUnavailable(): Response {
+  return jsonErrorResponse({
+    error: 'This daemon has no telemetry store to receive OTLP records.',
+    code: 'TELEMETRY_UNAVAILABLE',
+    category: DaemonErrorCategory.SERVICE,
+    source: 'runtime',
+    recoverable: true,
+    state: 'the records were not stored',
+    next: ['Send them to a daemon whose runtime is running (GET /api/v1/telemetry answers there)', 'Or keep them in the exporter and retry later'],
+    status: 503,
+  }, { status: 503 });
+}
+
 function unavailable(): Response {
   return jsonErrorResponse({
     error: 'Telemetry API unavailable',
@@ -438,7 +452,7 @@ export function createDaemonTelemetryRouteHandlers(
       const auth = authenticateTelemetryIngest(context, req);
       if (auth instanceof Response) return auth;
       const sink = context.ingestSink;
-      if (!sink) return unavailable();
+      if (!sink) return ingestUnavailable();
       const bodyOrErr = await parseOtlpBody(req, 'logs');
       if (bodyOrErr instanceof Response) return bodyOrErr;
       sink.ingestLogs(bodyOrErr);
@@ -448,7 +462,7 @@ export function createDaemonTelemetryRouteHandlers(
       const auth = authenticateTelemetryIngest(context, req);
       if (auth instanceof Response) return auth;
       const sink = context.ingestSink;
-      if (!sink) return unavailable();
+      if (!sink) return ingestUnavailable();
       const bodyOrErr = await parseOtlpBody(req, 'traces');
       if (bodyOrErr instanceof Response) return bodyOrErr;
       sink.ingestTraces(bodyOrErr);
@@ -458,7 +472,7 @@ export function createDaemonTelemetryRouteHandlers(
       const auth = authenticateTelemetryIngest(context, req);
       if (auth instanceof Response) return auth;
       const sink = context.ingestSink;
-      if (!sink) return unavailable();
+      if (!sink) return ingestUnavailable();
       const bodyOrErr = await parseOtlpBody(req, 'metrics');
       if (bodyOrErr instanceof Response) return bodyOrErr;
       sink.ingestMetrics(bodyOrErr);

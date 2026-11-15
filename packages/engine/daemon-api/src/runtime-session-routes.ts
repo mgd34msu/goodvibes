@@ -56,20 +56,21 @@ export type SharedSessionKind = 'tui' | 'agent' | 'webui' | 'companion-task' | '
 export type SharedSessionRecordResponse = {
   readonly id: string;
   /** A known kind, or any other string a newer producer registered (a read never blanks a record over its kind). */
-  readonly kind: SharedSessionKind | (string & {});
-  readonly project: string;
-  readonly title: string;
-  readonly status: 'active' | 'closed';
-  readonly createdAt: number;
-  readonly updatedAt: number;
+  readonly kind?: SharedSessionKind | (string & {}) | undefined;
+  readonly project?: string | undefined;
+  readonly title?: string | undefined;
+  readonly status?: 'active' | 'closed' | undefined;
+  readonly createdAt?: number | undefined;
+  readonly updatedAt?: number | undefined;
   readonly lastMessageAt?: number | undefined;
   readonly closedAt?: number | undefined;
-  readonly lastActivityAt: number;
-  readonly messageCount: number;
+  readonly lastActivityAt?: number | undefined;
+  readonly messageCount?: number | undefined;
   readonly retainedMessageCount?: number | undefined; // retained bodies when < messageCount
   readonly channelPermissionMode?: string | undefined;
   readonly channelPermissionModeRevision?: number | undefined;
-  readonly pendingInputCount: number;
+  /** Inputs queued or delivered and not yet ended, as the session broker counts them. */
+  readonly pendingInputCount?: number | undefined;
   readonly routeIds: readonly string[];
   readonly surfaceKinds: readonly string[];
   readonly participants: readonly SharedSessionParticipantResponse[];
@@ -120,48 +121,55 @@ async function callOrSessionClosed<T>(fn: () => Promise<T>): Promise<T | Respons
   }
 }
 
+/**
+ * The wire form of a session record. Every value comes from the record the
+ * broker holds; a field the record lacks is left out rather than filled with a
+ * plausible guess, so a damaged record never reads as a fresh active session.
+ * `options` are used only when the record itself has no value for that field.
+ */
 export function toSharedSessionRecordResponse(
   sessionId: string,
   session: unknown,
   options: {
     readonly status?: SharedSessionRecordResponse['status'] | undefined;
     readonly messageCount?: number | undefined;
-    readonly pendingInputCount?: number | undefined;
   } = {},
 ): SharedSessionRecordResponse {
   const record = isJsonRecord(session) ? session : {};
   const id = readNonEmptyString(record.id) ?? sessionId;
-  const now = Date.now();
-  const createdAt = readFiniteNumber(record.createdAt) ?? now;
-  const updatedAt = readFiniteNumber(record.updatedAt) ?? createdAt;
+  const createdAt = readFiniteNumber(record.createdAt);
+  const updatedAt = readFiniteNumber(record.updatedAt);
   const lastMessageAt = readFiniteNumber(record.lastMessageAt);
   const closedAt = readFiniteNumber(record.closedAt);
-  const lastActivityAt = readFiniteNumber(record.lastActivityAt) ?? lastMessageAt ?? updatedAt;
-  const kind = readSessionKind(record.kind);
-  const status = readSessionStatus(record.status) ?? options.status ?? 'active';
+  const lastActivityAt = readFiniteNumber(record.lastActivityAt);
+  const kind = readNonEmptyString(record.kind);
+  const project = readNonEmptyString(record.project);
+  const title = readNonEmptyString(record.title);
+  const status = readSessionStatus(record.status) ?? options.status;
   const activeAgentId = readNonEmptyString(record.activeAgentId);
   const lastAgentId = readNonEmptyString(record.lastAgentId);
   const lastError = readNonEmptyString(record.lastError);
-  const messageCount = Math.max(readFiniteNumber(record.messageCount) ?? 0, options.messageCount ?? 0);
+  const messageCount = readFiniteNumber(record.messageCount) ?? options.messageCount;
+  const pendingInputCount = readFiniteNumber(record.pendingInputCount);
   const retained = readFiniteNumber(record.retainedMessageCount);
   const permissionMode = readNonEmptyString(record.channelPermissionMode);
   const permissionRevision = readFiniteNumber(record.channelPermissionModeRevision);
   return {
     id,
-    kind,
-    project: readNonEmptyString(record.project) ?? 'unknown',
-    title: readNonEmptyString(record.title) ?? `Session ${id}`,
-    status,
-    createdAt,
-    updatedAt,
+    ...(kind ? { kind } : {}),
+    ...(project ? { project } : {}),
+    ...(title ? { title } : {}),
+    ...(status ? { status } : {}),
+    ...(createdAt !== undefined ? { createdAt } : {}),
+    ...(updatedAt !== undefined ? { updatedAt } : {}),
     ...(lastMessageAt !== undefined ? { lastMessageAt } : {}),
     ...(closedAt !== undefined ? { closedAt } : {}),
-    lastActivityAt,
-    messageCount,
-    ...(retained !== undefined && retained < messageCount ? { retainedMessageCount: retained } : {}),
+    ...(lastActivityAt !== undefined ? { lastActivityAt } : {}),
+    ...(messageCount !== undefined ? { messageCount } : {}),
+    ...(retained !== undefined && messageCount !== undefined && retained < messageCount ? { retainedMessageCount: retained } : {}),
     ...(permissionMode ? { channelPermissionMode: permissionMode } : {}),
     ...(permissionRevision !== undefined && Number.isInteger(permissionRevision) && permissionRevision >= 0 ? { channelPermissionModeRevision: permissionRevision } : {}),
-    pendingInputCount: Math.max(readFiniteNumber(record.pendingInputCount) ?? 0, options.pendingInputCount ?? 0),
+    ...(pendingInputCount !== undefined ? { pendingInputCount } : {}),
     routeIds: readStringArray(record.routeIds),
     surfaceKinds: readStringArray(record.surfaceKinds),
     participants: readParticipants(record.participants),
@@ -170,10 +178,6 @@ export function toSharedSessionRecordResponse(
     ...(lastError ? { lastError } : {}),
     metadata: isJsonRecord(record.metadata) ? record.metadata : {},
   };
-}
-
-function readSessionKind(value: unknown): SharedSessionRecordResponse['kind'] {
-  return readNonEmptyString(value) ?? 'tui';
 }
 
 function readSessionStatus(value: unknown): SharedSessionRecordResponse['status'] | undefined {
@@ -448,7 +452,7 @@ async function handleGetSharedSessionInputs(
       })
     : context.sessionBroker.getInputs(sessionId, limit);
   return Response.json({
-    session: toSharedSessionRecordResponse(sessionId, session, { pendingInputCount: inputs.length }),
+    session: toSharedSessionRecordResponse(sessionId, session),
     inputs,
   });
 }

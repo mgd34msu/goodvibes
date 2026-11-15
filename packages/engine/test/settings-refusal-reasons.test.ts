@@ -35,14 +35,11 @@ function service(hooks: { prepare?: () => void; assert?: () => void } = {}) {
 const capture = (f: ReturnType<typeof service>) => captureRemoteSettingsPrecondition(f.endpoint, { operation: 'set', key: 'controlPlane.port', value: 42 }, { fetchImpl: f.fetchImpl });
 
 describe('wire reasons', () => {
-  test('a reference used twice is refused as spent, an unknown one as stale', async () => {
+  test('a write sent with a revision the settings moved past is refused as stale', async () => {
     const f = service();
-    const captured = await f.post({ settingsPrecondition: { version: 1, action: 'capture', operation: 'set', key: 'controlPlane.port', value: 42 } });
-    const reference = ((await captured.json()) as { settingsPrecondition: { reference: string } }).settingsPrecondition.reference;
-    const apply = (ref: string) => f.post({ settingsPrecondition: { version: 1, action: 'apply', reference: ref } });
-    expect((await apply(reference)).status).toBe(200);
-    expect(await (await apply(reference)).json()).toMatchObject({ code: 'SETTINGS_PRECONDITION_STALE', reason: 'spent' });
-    expect(await (await apply('never-issued')).json()).toMatchObject({ code: 'SETTINGS_PRECONDITION_STALE', reason: 'stale' });
+    const write = (ifIncarnation: number) => f.post({ settingsPrecondition: { version: 1, action: 'write', operation: 'set', key: 'controlPlane.port', value: 42, ifIncarnation } });
+    expect((await write(0)).status).toBe(200);
+    expect(await (await write(7)).json()).toMatchObject({ code: 'SETTINGS_PRECONDITION_STALE', reason: 'stale', currentIncarnation: 0 });
   });
 
   test('a capture refused by a managed owner tells the caller to stop, not recapture', async () => {

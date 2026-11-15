@@ -1,11 +1,9 @@
 /** Source-only synthetic HTTP protocol tests: no socket, model or real credential. */
-import { afterEach, expect, spyOn, test } from 'bun:test';
+import { expect, test } from 'bun:test';
 import { createDaemonSystemRouteHandlers } from '../daemon-api/src/system-routes.js';
 import { createSettingsPreconditionHandler } from '../daemon-api/src/settings-precondition.js';
-import { captureRemoteSettingsPrecondition, applyRemoteSettingsPrecondition, inspectRemoteSettingsPrecondition, resolvePreparedConfigWriteRoute } from '../platform/src/platform/config/settings-precondition-client.js';
+import { captureRemoteSettingsPrecondition, applyRemoteSettingsPrecondition } from '../platform/src/platform/config/settings-precondition-client.js';
 
-const restores: (() => void)[] = [];
-afterEach(() => { for (const restore of restores.splice(0)) restore(); });
 const envelope = (body: Record<string, unknown>) => ({ settingsPrecondition: { version: 1, ...body } });
 function fixture() {
   let lifetime: object | null = {};
@@ -34,9 +32,13 @@ function fixture() {
       return { status: 'committed' as const, completedPaths: ['/synthetic/settings.json'], verifiedInOwningStore: true };
     },
   };
+  // Like the daemon's settings authority: the credential and the serving lifetime it was taken under.
   const service = createSettingsPreconditionHandler({ owner, lifetime: () => lifetime,
-    captureAuthority: () => admin ? authority : null,
-    withAuthority: (_req, captured, callback) => { const check = () => { if (!admin || authority !== captured) throw new Error('stale auth'); }; check(); return callback(check); },
+    captureAuthority: () => admin && lifetime ? { authority, lifetime } : null,
+    withAuthority: (_req, captured, callback) => {
+      const check = () => { if (!admin || authority !== captured.authority || lifetime !== captured.lifetime) throw new Error('stale auth'); };
+      check(); return callback(check);
+    },
   });
   const handlers = createDaemonSystemRouteHandlers({ settingsPrecondition: service,
     requireAdmin: () => admin ? null : Response.json({ error: 'admin' }, { status: 403 }),
@@ -45,175 +47,74 @@ function fixture() {
     configManager: { get: () => value, setDynamic: (_key: string, next: unknown) => { value = next; legacyEffects++; }, getAll: () => ({}) },
   } as never);
   const post = (body: unknown) => handlers.postConfig(new Request('http://synthetic.invalid/config', { method: 'POST', body: JSON.stringify(body) }));
-  const capture = async (operation = 'set', next: unknown = '42') => {
-    const response = await post(envelope({ action: 'capture', operation, key: 'controlPlane.port', ...(operation === 'set' ? { value: next } : {}) }));
-    return { response, body: await response.json() };
-  };
-  const apply = (reference: string) => post(envelope({ action: 'apply', reference }));
-  return { post, capture, apply, effects: () => effects, legacyEffects: () => legacyEffects, value: () => value,
+  const write = (fields: Record<string, unknown> = {}) => post(envelope({ action: 'write', operation: 'set', key: 'controlPlane.port', value: '42', ...fields }));
+  return { post, write, effects: () => effects, legacyEffects: () => legacyEffects, value: () => value, incarnation: () => generation,
     rotate: () => { lifetime = {}; }, stop: () => { lifetime = null; }, revoke: () => { admin = false; },
     replaceAuth: () => { authority = {}; }, mutate: () => { generation++; },
     onBegin: (callback: () => void) => { beginHook = callback; }, onParse: (callback: () => Promise<void>) => { parseHook = callback; } };
 }
 
-test('capture projects normalized owner value; apply performs exactly that effect once', async () => {
-  const f = fixture(); const { response, body } = await f.capture();
-  expect(response.status).toBe(200); expect(body.settingsPrecondition.facts.value).toBe(42); expect(f.effects()).toBe(0);
-  const applied = await f.apply(body.settingsPrecondition.reference);
-  expect(applied.status).toBe(200); expect((await applied.json()).settingsPrecondition.receipt.status).toBe('committed');
-  expect(f.value()).toBe(42); expect((await f.apply(body.settingsPrecondition.reference)).status).toBe(409); expect(f.effects()).toBe(1);
+test('a capture writes nothing; one write with the read revision writes the owner value once and answers facts and receipt', async () => {
+  const f = fixture();
+  const captured = await (await f.post(envelope({ action: 'capture', operation: 'set', key: 'controlPlane.port', value: '42' }))).json();
+  expect(captured.settingsPrecondition.facts).toMatchObject({ value: 42, incarnation: 0 }); expect(f.effects()).toBe(0);
+  const written = await f.write({ ifIncarnation: captured.settingsPrecondition.facts.incarnation });
+  expect(written.status).toBe(200);
+  expect((await written.json()).settingsPrecondition).toMatchObject({ action: 'written', facts: { value: 42 }, receipt: { status: 'committed' } });
+  expect(f.value()).toBe(42); expect(f.effects()).toBe(1);
 });
-test('remote reset captures serving schema default as a set operation', async () => {
-  const f = fixture(); const { body } = await f.capture('reset-default');
-  expect(body.settingsPrecondition.facts.value).toBe(3421); await f.apply(body.settingsPrecondition.reference); expect(f.value()).toBe(3421);
+
+test('a write whose revision moved is refused before any effect and names the current revision', async () => {
+  const f = fixture(); f.mutate();
+  const refused = await f.write({ ifIncarnation: 0 });
+  expect(refused.status).toBe(409);
+  expect(await refused.json()).toMatchObject({ code: 'SETTINGS_PRECONDITION_STALE', reason: 'stale', currentIncarnation: 1 });
+  expect(f.effects()).toBe(0);
 });
-test('legacy manual key/value remains accepted; mixed envelope never falls back', async () => {
+
+test('the same request id sent twice writes once and answers the first result', async () => {
+  const f = fixture();
+  const first = await (await f.write({ ifIncarnation: 0, requestId: 'r-1' })).json();
+  const again = await (await f.write({ ifIncarnation: 0, requestId: 'r-1' })).json();
+  expect(again).toEqual(first); expect(f.effects()).toBe(1);
+  expect((await f.write({ operation: 'reset-default', value: undefined, requestId: 'r-1' })).status).toBe(400);
+  expect(f.effects()).toBe(1);
+});
+
+test.each(['rotate', 'stop', 'revoke', 'replaceAuth', 'mutate'] as const)('%s during owner begin refuses before effect', async change => {
+  const f = fixture(); f.onBegin(f[change]); expect((await f.write()).status).toBe(409); expect(f.effects()).toBe(0);
+});
+test.each(['rotate', 'stop', 'revoke'] as const)('%s during the body await refuses before effect', async change => {
+  const f = fixture(); f.onParse(async () => { f[change](); }); expect((await f.write()).status).toBe(409); expect(f.effects()).toBe(0);
+});
+
+test('the plain key/value write stays accepted; a mixed envelope never falls back to it', async () => {
   const f = fixture(); expect((await f.post({ key: 'controlPlane.port', value: 7 })).status).toBe(200);
-  for (const malformed of [null, {}, { version: 2, action: 'capture' }, { version: 1, action: 'apply', reference: 'bad', key: 'controlPlane.port' }]) {
+  for (const malformed of [null, {}, { version: 2, action: 'capture' }, { version: 1, action: 'write', key: 'controlPlane.port' }]) {
     expect((await f.post({ key: 'controlPlane.port', value: 9, settingsPrecondition: malformed })).status).toBe(400);
   }
   expect(f.legacyEffects()).toBe(1); expect(f.value()).toBe(7);
 });
-test.each(['rotate', 'stop', 'revoke', 'replaceAuth', 'mutate'] as const)('%s between capture and apply refuses before effect', async change => {
-  const f = fixture(); const { body } = await f.capture(); f[change](); expect((await f.apply(body.settingsPrecondition.reference)).status).toBeGreaterThanOrEqual(400); expect(f.effects()).toBe(0);
-});
-test.each(['rotate', 'stop', 'revoke', 'replaceAuth', 'mutate'] as const)('%s during owner begin refuses before effect', async change => {
-  const f = fixture(); const { body } = await f.capture(); f.onBegin(f[change]); expect((await f.apply(body.settingsPrecondition.reference)).status).toBeGreaterThanOrEqual(400); expect(f.effects()).toBe(0);
-});
-test.each(['rotate', 'stop', 'revoke', 'replaceAuth'] as const)('%s during apply body await refuses before effect', async change => {
-  const f = fixture(); const { body } = await f.capture(); f.onParse(async () => { f[change](); });
-  expect((await f.apply(body.settingsPrecondition.reference)).status).toBeGreaterThanOrEqual(400); expect(f.effects()).toBe(0);
-});
-test('capture across a serving lifetime change in body await refuses', async () => {
-  const f = fixture(); f.onParse(async () => { f.rotate(); }); expect((await f.capture()).response.status).toBe(409); expect(f.effects()).toBe(0);
-});
-test('unknown, expired and bounded-evicted references refuse', async () => {
-  const f = fixture(); expect((await f.apply('unknown')).status).toBe(409);
-  const { body } = await f.capture(); const now = Date.now(); const clock = spyOn(Date, 'now').mockReturnValue(now + 300_001); restores.push(() => clock.mockRestore());
-  expect((await f.apply(body.settingsPrecondition.reference)).status).toBe(409); clock.mockRestore();
-  const first = (await f.capture()).body.settingsPrecondition.reference;
-  for (let i = 0; i < 256; i++) await f.capture();
-  expect((await f.apply(first)).status).toBe(409); expect(f.effects()).toBe(0);
-});
 
-test('strict client pins destination/token; response loss spends reference after exactly one effect', async () => {
-  const f = fixture(); const requests: { url: string; init: RequestInit | undefined }[] = [];
-  const endpoint = { baseUrl: 'http://synthetic.invalid', token: 'synthetic-operator', source: 'test' };
-  const handle = await captureRemoteSettingsPrecondition(endpoint, { operation: 'set', key: 'controlPlane.port', value: '42' }, {
-    fetchImpl: (async (url, init) => { requests.push({ url: String(url), init }); const response = await f.post(JSON.parse(String(init?.body))); if (requests.length > 1) throw new Error('response lost'); return response; }) as typeof fetch,
+test('client: a lost answer is asked for again with the same request id and the change is written once', async () => {
+  const f = fixture(); let calls = 0;
+  const handle = await captureRemoteSettingsPrecondition({ baseUrl: 'http://synthetic.invalid', source: 'test' }, { operation: 'set', key: 'controlPlane.port', value: 42 }, {
+    fetchImpl: (async (_url, init) => {
+      calls++; const response = await f.post(JSON.parse(String(init?.body)));
+      if (calls === 2) throw Object.assign(new Error('answer lost'), { name: 'TimeoutError' });
+      return response;
+    }) as typeof fetch,
   });
-  endpoint.baseUrl = 'http://other.invalid'; endpoint.token = 'changed';
-  expect(inspectRemoteSettingsPrecondition(handle).value).toBe(42);
-  expect((await applyRemoteSettingsPrecondition(handle)).status).toBe('unknown');
+  expect(await applyRemoteSettingsPrecondition(handle)).toMatchObject({ status: 'committed', verifiedInOwningStore: true });
+  expect(calls).toBe(3); expect(f.effects()).toBe(1);
   await expect(applyRemoteSettingsPrecondition(handle)).rejects.toThrow();
-  expect(f.effects()).toBe(1); expect(requests).toHaveLength(2);
-  expect(requests[1]!.url).toBe('http://synthetic.invalid/config'); expect(requests[1]!.init!.redirect).toBe('error');
-  expect(JSON.stringify(inspectRemoteSettingsPrecondition(handle))).not.toContain('synthetic-operator');
-});
-test('old server rejects nested capture and no legacy fallback request is sent', async () => {
-  let calls = 0;
-  await expect(captureRemoteSettingsPrecondition({ baseUrl: 'http://synthetic.invalid', source: 'old' }, { operation: 'set', key: 'controlPlane.port', value: 42 }, {
-    fetchImpl: (async (_url, init) => { calls++; const body = JSON.parse(String(init?.body)); expect(body.key).toBeUndefined(); expect(body.value).toBeUndefined(); return Response.json({ error: 'Missing or invalid key' }, { status: 400 }); }) as typeof fetch,
-  })).rejects.toThrow(); expect(calls).toBe(1);
-});
-test('legacy or malformed apply acknowledgments are unknown, never success', async () => {
-  for (const response of [{ success: true }, envelope({ action: 'applied', reference: 'wrong', receipt: { status: 'committed', completedPaths: [] } })]) {
-    const f = fixture(); let calls = 0;
-    const handle = await captureRemoteSettingsPrecondition({ baseUrl: 'http://synthetic.invalid', source: 'test' }, { operation: 'set', key: 'controlPlane.port', value: 42 }, {
-      fetchImpl: (async (_url, init) => { calls++; const result = await f.post(JSON.parse(String(init?.body))); return calls === 1 ? result : Response.json(response); }) as typeof fetch,
-    });
-    expect((await applyRemoteSettingsPrecondition(handle)).status).toBe('unknown'); expect(f.effects()).toBe(1); expect(calls).toBe(2);
-  }
-});
-test('preadmission route discovery defers record reaping and pins the responding endpoint', async () => {
-  let reaps = 0; const calls: string[] = [];
-  const route = await resolvePreparedConfigWriteRoute('controlPlane.port', { hostsDaemon: false, daemonHomeDir: '/synthetic',
-    readRuntimeRecord: () => ({ host: '127.0.0.1', port: 1111, pid: 123 } as never), isProcessAlive: () => true,
-    reapRuntimeRecord: () => { reaps++; }, readDaemonBinding: () => ({ hostMode: 'local', host: '127.0.0.1', port: 2222, tlsMode: 'off' } as never),
-    fetchImpl: (async url => { calls.push(String(url)); if (String(url).includes(':1111')) throw new Error('offline'); return Response.json({}); }) as typeof fetch });
-  expect(route.mode).toBe('daemon'); if (route.mode === 'daemon') expect(route.endpoint.baseUrl).toBe('http://127.0.0.1:2222'); expect(reaps).toBe(0); expect(calls).toHaveLength(2);
 });
 
-test.each([
-  { status: 'committed', completedPaths: [], verifiedInOwningStore: true },
-  { status: 'committed', completedPaths: ['/synthetic/settings.json'], uncertainPath: '/synthetic/settings.json', verifiedInOwningStore: true },
-  { status: 'partial', completedPaths: [], uncertainPath: '/synthetic/settings.json' },
-  { status: 'partial', completedPaths: ['/synthetic/settings.json'], uncertainPath: '/synthetic/settings.json' },
-  { status: 'unknown', completedPaths: ['/synthetic/settings.json'] },
-])('matching-reference malformed effect receipt $status is unknown, with no retry', async receipt => {
-  const f = fixture(); let calls = 0;
-  const handle = await captureRemoteSettingsPrecondition({ baseUrl: 'http://synthetic.invalid', source: 'test' }, { operation: 'set', key: 'controlPlane.port', value: 42 }, {
-    fetchImpl: (async (_url, init) => {
-      calls++; const response = await f.post(JSON.parse(String(init?.body)));
-      if (calls === 1) return response;
-      const body = await response.json(); body.settingsPrecondition.receipt = receipt; return Response.json(body);
-    }) as typeof fetch,
-  });
-  // The daemon answered "applied", so the change may have taken effect: unknown, and marked as an unreadable receipt.
-  expect(await applyRemoteSettingsPrecondition(handle)).toMatchObject({ status: 'unknown', completedPaths: [], receiptUnreadable: true,
-    failure: { code: 'DAEMON_VERSION_MISMATCH' } });
-  await expect(applyRemoteSettingsPrecondition(handle)).rejects.toThrow(); expect(f.effects()).toBe(1); expect(calls).toBe(2);
-});
-test.each([
-  [{ status: 'committed', completedPaths: ['/synthetic/settings.json'] }, false],
-  [{ status: 'committed', completedPaths: ['/synthetic/settings.json'], verifiedInOwningStore: true, addedByANewerDaemon: 1 }, true],
-] as const)('a committed receipt is read for the fields this build needs (%o)', async (receipt, verified) => {
-  const f = fixture(); let calls = 0;
-  const handle = await captureRemoteSettingsPrecondition({ baseUrl: 'http://synthetic.invalid', source: 'test' }, { operation: 'set', key: 'controlPlane.port', value: 42 }, {
-    fetchImpl: (async (_url, init) => {
-      calls++; const response = await f.post(JSON.parse(String(init?.body)));
-      if (calls === 1) return response;
-      const body = await response.json(); body.settingsPrecondition.receipt = receipt; return Response.json(body);
-    }) as typeof fetch,
-  });
-  expect(await applyRemoteSettingsPrecondition(handle)).toEqual({ status: 'committed', completedPaths: ['/synthetic/settings.json'], verifiedInOwningStore: verified });
-});
-test('remote reset-default cannot be reinterpreted as remove-override destinations', async () => {
-  const f = fixture();
-  await expect(captureRemoteSettingsPrecondition({ baseUrl: 'http://synthetic.invalid', source: 'test' }, { operation: 'reset-default', key: 'controlPlane.port' }, {
-    fetchImpl: (async (_url, init) => {
-      const response = await f.post(JSON.parse(String(init?.body))); const body = await response.json();
-      body.settingsPrecondition.facts.destinations[0].operation = 'remove'; return Response.json(body);
-    }) as typeof fetch,
-  })).rejects.toThrow(); expect(f.effects()).toBe(0);
-});
-
-test('malformed endpoint errors never include private URL material', async () => {
-  const marker = 'synthetic-private-endpoint-material'; let calls = 0;
-  const fetchImpl = (async (_input: Parameters<typeof fetch>[0]) => { calls++; throw new Error('Must not dispatch'); }) as unknown as typeof fetch;
-  let failure: unknown;
-  try { await captureRemoteSettingsPrecondition({ baseUrl: `invalid url ${marker}`, token: marker, source: 'test' },
-    { operation: 'set', key: 'controlPlane.port', value: 42 }, { fetchImpl }); } catch (error) { failure = error; }
-  expect(failure).toBeInstanceOf(Error);
-  expect((failure as { refusal?: { code?: string } }).refusal?.code).toBe('SETTINGS_OWNER_ENDPOINT_INVALID');
-  expect((failure as Error).message).not.toContain(marker);
-  expect(JSON.stringify(failure)).not.toContain(marker); expect(calls).toBe(0);
-});
-test('an owner refusal before any effect is reported as refused, a lost answer as unknown', async () => {
+test('client: a write refused before any effect is reported as refused', async () => {
   const f = fixture();
   const fetchImpl = (async (_url: unknown, init?: RequestInit) => f.post(JSON.parse(String(init?.body)))) as typeof fetch;
-  const endpoint = { baseUrl: 'http://synthetic.invalid', source: 'test' };
-  const stale = await captureRemoteSettingsPrecondition(endpoint, { operation: 'set', key: 'controlPlane.port', value: 42 }, { fetchImpl });
+  const stale = await captureRemoteSettingsPrecondition({ baseUrl: 'http://synthetic.invalid', source: 'test' }, { operation: 'set', key: 'controlPlane.port', value: 42 }, { fetchImpl });
   f.mutate();
-  expect(await applyRemoteSettingsPrecondition(stale)).toMatchObject({ status: 'unknown', completedPaths: [], refused: true });
+  expect(await applyRemoteSettingsPrecondition(stale)).toMatchObject({ status: 'unknown', completedPaths: [], refused: true, refusalReason: 'stale' });
   expect(f.effects()).toBe(0);
-  let calls = 0;
-  const lost = await captureRemoteSettingsPrecondition(endpoint, { operation: 'set', key: 'controlPlane.port', value: 42 }, {
-    fetchImpl: (async (url: unknown, init?: RequestInit) => ++calls === 1 ? fetchImpl(url as string, init) : new Response('', { status: 503 })) as typeof fetch,
-  });
-  const lostReceipt = await applyRemoteSettingsPrecondition(lost);
-  expect(lostReceipt).toMatchObject({ status: 'unknown', completedPaths: [], failure: { status: 503 } });
-  expect(lostReceipt.refused).toBeUndefined();
-});
-test('a capture names why the daemon could not take it: not reachable, not authorised, or a different version', async () => {
-  const endpoint = { baseUrl: 'http://synthetic.invalid', source: 'test' };
-  const request = { operation: 'set', key: 'controlPlane.port', value: 42 } as const;
-  const codeOf = async (fetchImpl: typeof fetch) => {
-    try { await captureRemoteSettingsPrecondition(endpoint, request, { fetchImpl }); return 'captured'; }
-    catch (error) { return (error as { refusal?: { code?: string } }).refusal?.code; }
-  };
-  const refused = Object.assign(new Error('connect failed'), { code: 'ECONNREFUSED' });
-  expect(await codeOf((async () => { throw refused; }) as unknown as typeof fetch)).toBe('DAEMON_UNREACHABLE');
-  expect(await codeOf((async () => new Response('{}', { status: 401 })) as unknown as typeof fetch)).toBe('DAEMON_NOT_AUTHORIZED');
-  expect(await codeOf((async () => new Response('{}', { status: 404 })) as unknown as typeof fetch)).toBe('DAEMON_VERSION_MISMATCH');
 });

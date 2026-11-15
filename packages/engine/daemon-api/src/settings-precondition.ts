@@ -1,9 +1,16 @@
-import { createSingleUseReferenceTable } from './single-use-reference-table.js';
+import { createRequestReceiptTable, servingIdOf } from './single-use-reference-table.js';
 
 /**
- * A bounded same-serving-owner precondition for the adopted SETTINGS HTTP lane.
- * This is neither a Jev grant nor persisted-file CAS. Existing persistence stays
- * last-writer-wins. The caller still needs its authentic manager/registry act.
+ * One request writes one setting. The caller sends the key, the value and the
+ * settings revision it last saw (`ifIncarnation`, with `ifServing`, the id of
+ * the daemon serving period it was read in, since a restarted daemon counts
+ * revisions again); the owner refuses when either moved, otherwise it writes
+ * and answers with what the write touched and a receipt. A `requestId` makes the request safe to send
+ * again: a repeat is answered with the first answer and never writes twice.
+ *
+ * `capture` is the read half for a caller that must show the effect before
+ * deciding (the agent's settings tool): it answers the same facts, including
+ * the revision to send back, and holds nothing on the daemon.
  */
 export interface SettingsPreconditionRequest {
   readonly operation: 'set' | 'reset-default';
@@ -40,8 +47,8 @@ export interface SettingsPreconditionReceipt {
 /**
  * Value-free reason on a refusal that happened before any effect, so a caller can
  * choose its next step without parsing text:
- * - `stale`: the capture is out of date (setting, owner or serving lifetime changed, or it expired); recapture.
- * - `spent`: this reference was already used; capture again, do not resend it.
+ * - `stale`: the settings moved since the caller read them (or the serving owner changed); read again and resend.
+ * - `spent`: this capture was already used; capture again, do not resend it.
  * - `managed`: managed policy locks the setting; stop, only the policy owner can change it.
  * - `read-only`: the settings owner is read-only here; stop, or use a writable owner.
  * - `owner-fault`: an owner store (pairing store, configuration lock) is faulted or busy; see the message; retry only for a busy lock.
@@ -55,7 +62,7 @@ export function settingsRefusalReason(error: unknown): SettingsRefusalReason | u
   return SETTINGS_REFUSAL_REASONS.find(known => known === reason);
 }
 export interface SettingsPreconditionHandler {
-  /** Capture before the body await so stop/rebind/token ABA cannot cross it. */
+  /** Read before the body await, so a stop or rebind during the read is seen. */
   lifetime(): object | null;
   handle(req: Request, payload: Record<string, unknown>, requestLifetime: object | null): Response | Promise<Response>;
 }
@@ -86,73 +93,113 @@ export function isPairingStoreFault(error: unknown): boolean {
   return error instanceof Error && (error as Error & { readonly code?: unknown }).code === 'PAIRING_STORE_FAULTED';
 }
 
-function refusal(status: number, code: string, reason?: SettingsRefusalReason): Response {
+interface Answer { readonly status: number; readonly body: Record<string, unknown> }
+function answer(status: number, body: Record<string, unknown>): Answer { return { status, body }; }
+function refusal(status: number, code: string, reason?: SettingsRefusalReason, extra: Record<string, unknown> = {}): Answer {
   // Never echo body, normalized values, credentials, paths or owner errors.
-  return Response.json({ error: 'Settings owner precondition unavailable', code, ...(reason ? { reason } : {}) }, { status });
+  return answer(status, { error: 'Settings owner precondition unavailable', code, ...(reason ? { reason } : {}), ...extra });
 }
+function staleIncarnation(current: number, serving: string): Answer {
+  return refusal(409, 'SETTINGS_PRECONDITION_STALE', 'stale', {
+    state: 'the setting is unchanged; the settings moved since the caller read them',
+    next: ['Read the setting again and resend the change with the new ifIncarnation and ifServing'],
+    currentIncarnation: current, serving,
+  });
+}
+function respond(result: Answer): Response { return Response.json(result.body, { status: result.status }); }
+
+/** The validated request in a `capture` or `write` arm, or undefined when the arm is malformed. */
+function readRequest(arm: Record<string, unknown>, extra: readonly string[]): SettingsPreconditionRequest | undefined {
+  const fields = [...(arm.operation === 'set' ? ['version', 'action', 'operation', 'key', 'value'] : ['version', 'action', 'operation', 'key']), ...extra];
+  if (Object.hasOwn(arm, 'credentialClear')) fields.push('credentialClear');
+  if (!exact(arm, fields) || (Object.hasOwn(arm, 'credentialClear') && arm.credentialClear !== true)
+    || (arm.operation !== 'set' && arm.operation !== 'reset-default')
+    || typeof arm.key !== 'string' || !arm.key || arm.key === 'runtime.workingDir') return undefined;
+  return { operation: arm.operation, key: arm.key, ...(arm.operation === 'set' ? { value: arm.value } : {}),
+    ...(arm.credentialClear === true ? { credentialClear: true as const } : {}) };
+}
+
 export function createSettingsPreconditionHandler<Prepared, Transition, Authority>(
   options: Options<Prepared, Transition, Authority>,
 ): SettingsPreconditionHandler {
-  const references = createSingleUseReferenceTable<{ prepared: Prepared; authority: Authority; lifetime: object; expiresAt: number }>();
-  const synchronize = (): object | null => {
-    const current = options.lifetime();
-    references.synchronize(current);
-    return current;
+  const answered = createRequestReceiptTable<Answer>();
+
+  const capture = (request: SettingsPreconditionRequest, requestLifetime: object | null): Answer => {
+    const lifetime = options.lifetime();
+    if (lifetime === null || lifetime !== requestLifetime) return refusal(409, 'SETTINGS_PRECONDITION_STALE', 'stale');
+    try {
+      const prepared = options.owner.prepare(request);
+      const facts = options.owner.inspect(prepared);
+      // A locked or read-only setting is refused here, before the caller decides.
+      options.owner.assert(prepared);
+      return answer(200, { settingsPrecondition: { version: 1, action: 'captured', facts, serving: servingIdOf(lifetime) } });
+    } catch (error) { return refusal(409, isPairingStoreFault(error) ? 'PAIRING_STORE_FAULTED' : 'SETTINGS_PRECONDITION_UNAVAILABLE', settingsRefusalReason(error)); }
   };
+
+  const write = async (req: Request, request: SettingsPreconditionRequest, expected: { readonly incarnation?: number; readonly serving?: string },
+    requestId: string | undefined, requestLifetime: object | null): Promise<Answer> => {
+    const lifetime = options.lifetime();
+    if (lifetime === null || lifetime !== requestLifetime) return refusal(409, 'SETTINGS_PRECONDITION_STALE', 'stale');
+    const serving = servingIdOf(lifetime);
+    let prepared: Prepared; let facts: SettingsPreconditionFacts; let authority: Authority | null;
+    try {
+      prepared = options.owner.prepare(request);
+      facts = options.owner.inspect(prepared);
+      if ((expected.serving !== undefined && expected.serving !== serving)
+        || (expected.incarnation !== undefined && facts.incarnation !== expected.incarnation)) return staleIncarnation(facts.incarnation, serving);
+      authority = options.captureAuthority(req);
+    } catch (error) { return refusal(409, isPairingStoreFault(error) ? 'PAIRING_STORE_FAULTED' : 'SETTINGS_PRECONDITION_UNAVAILABLE', settingsRefusalReason(error)); }
+    if (authority === null) return refusal(409, 'SETTINGS_PRECONDITION_STALE', 'stale');
+    const held = authority;
+    const apply = (): Answer => {
+      // Everything from here to the write is synchronous: one owner check (it
+      // also covers the lock await in withPrepared), and one authority and
+      // transition check after begin, whose validators run callbacks.
+      const receipt = options.withAuthority(req, held, (assertCurrent) => {
+        options.owner.assert(prepared);
+        const transition = options.owner.begin(prepared);
+        assertCurrent();
+        options.owner.assertTransition(prepared, transition);
+        return options.owner.finish(prepared, transition, assertCurrent);
+      });
+      // Only the physical owner's receipt is acknowledged; nothing after the effect can turn it into a refusal.
+      return answer(200, { settingsPrecondition: { version: 1, action: 'written', ...(requestId ? { requestId } : {}), facts, serving, receipt } });
+    };
+    try {
+      return options.owner.withPrepared ? await options.owner.withPrepared(prepared, apply) : apply();
+    } catch (error) { return refusal(409, 'SETTINGS_PRECONDITION_UNAVAILABLE', settingsRefusalReason(error)); }
+  };
+
   return {
     lifetime: options.lifetime,
     handle(req, payload, requestLifetime) {
       const arm = payload.settingsPrecondition;
       if (!exact(payload, ['settingsPrecondition']) || !record(arm) || arm.version !== 1) {
-        return refusal(400, 'SETTINGS_PRECONDITION_INVALID');
+        return respond(refusal(400, 'SETTINGS_PRECONDITION_INVALID'));
       }
       if (arm.action === 'capture') {
-        const fields = arm.operation === 'set' ? ['version', 'action', 'operation', 'key', 'value'] : ['version', 'action', 'operation', 'key'];
-        if (Object.hasOwn(arm, 'credentialClear')) fields.push('credentialClear');
-        if (!exact(arm, fields) || (Object.hasOwn(arm, 'credentialClear') && arm.credentialClear !== true) || (arm.operation !== 'set' && arm.operation !== 'reset-default')
-          || typeof arm.key !== 'string' || !arm.key || arm.key === 'runtime.workingDir') return refusal(400, 'SETTINGS_PRECONDITION_INVALID');
-        const lifetime = synchronize();
-        if (lifetime === null || lifetime !== requestLifetime) return refusal(409, 'SETTINGS_PRECONDITION_STALE', 'stale');
-        try {
-          const prepared = options.owner.prepare({ operation: arm.operation, key: arm.key, ...(arm.operation === 'set' ? { value: arm.value } : {}), ...(arm.credentialClear === true ? { credentialClear: true } : {}) });
-          const facts = options.owner.inspect(prepared);
-          options.owner.assert(prepared);
-          // Preparation is read-only but may validate. Capture current authority
-          // after it, rather than accepting authority observed before callbacks.
-          const authority = options.captureAuthority(req);
-          if (authority === null || options.lifetime() !== lifetime) return refusal(409, 'SETTINGS_PRECONDITION_STALE', 'stale');
-          const { reference, expiresAt } = references.issue({ prepared, authority, lifetime });
-          return Response.json({ settingsPrecondition: { version: 1, action: 'captured', reference, expiresAt, facts } });
-        } catch (error) { return refusal(409, isPairingStoreFault(error) ? 'PAIRING_STORE_FAULTED' : 'SETTINGS_PRECONDITION_UNAVAILABLE', settingsRefusalReason(error)); }
+        const request = readRequest(arm, []);
+        return respond(request ? capture(request, requestLifetime) : refusal(400, 'SETTINGS_PRECONDITION_INVALID'));
       }
-      if (arm.action !== 'apply' || !exact(arm, ['version', 'action', 'reference'])
-        || typeof arm.reference !== 'string' || !arm.reference || arm.reference.length > 128) return refusal(400, 'SETTINGS_PRECONDITION_INVALID');
-      const lifetime = synchronize();
-      // One use, including auth/currentness refusal. No same-reference retry.
-      const { entry, spent: wasSpent } = references.take(arm.reference);
-      if (!entry || lifetime === null || lifetime !== requestLifetime || entry.lifetime !== lifetime || entry.expiresAt <= Date.now()) {
-        return refusal(409, 'SETTINGS_PRECONDITION_STALE', wasSpent ? 'spent' : 'stale');
+      if (arm.action !== 'write') return respond(refusal(400, 'SETTINGS_PRECONDITION_INVALID'));
+      const extra = ['ifIncarnation', 'ifServing', 'requestId'].filter(field => Object.hasOwn(arm, field));
+      const request = readRequest(arm, extra);
+      const { ifIncarnation, ifServing, requestId } = arm;
+      if (!request || (ifIncarnation !== undefined && (!Number.isSafeInteger(ifIncarnation) || Number(ifIncarnation) < 0))
+        || (ifServing !== undefined && (typeof ifServing !== 'string' || !ifServing || ifServing.length > 128))
+        || (requestId !== undefined && (typeof requestId !== 'string' || !requestId || requestId.length > 128))) {
+        return respond(refusal(400, 'SETTINGS_PRECONDITION_INVALID'));
       }
-      const apply = (): Response => { try {
-        const receipt = options.withAuthority(req, entry.authority, (assertCurrent) => {
-          const assertBound = () => { assertCurrent(); if (options.lifetime() !== entry.lifetime || Date.now() >= entry.expiresAt) throw new Error('stale'); };
-          assertBound();
-          options.owner.assert(entry.prepared);
-          const transition = options.owner.begin(entry.prepared);
-          // begin performs all validators/invalidation subscribers. Final auth,
-          // exact owner transition and lifetime checks precede callback-free I/O.
-          assertBound();
-          options.owner.assertTransition(entry.prepared, transition);
-          if (options.lifetime() !== entry.lifetime || Date.now() >= entry.expiresAt) throw new Error('stale');
-          return options.owner.finish(entry.prepared, transition, assertBound);
-        });
-        // No post-effect auth assertion can turn a completed mutation into a
-        // refusal. Only the physical owner's truthful receipt is acknowledged.
-        return Response.json({ settingsPrecondition: { version: 1, action: 'applied', reference: arm.reference, receipt } });
-      } catch (error) { return refusal(409, 'SETTINGS_PRECONDITION_UNAVAILABLE', settingsRefusalReason(error)); } };
-      return options.owner.withPrepared
-        ? options.owner.withPrepared(entry.prepared, apply).catch((error: unknown) => refusal(409, 'SETTINGS_PRECONDITION_UNAVAILABLE', settingsRefusalReason(error)))
-        : apply();
+      const expected = { ...(ifIncarnation !== undefined ? { incarnation: Number(ifIncarnation) } : {}),
+        ...(typeof ifServing === 'string' ? { serving: ifServing } : {}) };
+      const run = () => write(req, request, expected, typeof requestId === 'string' ? requestId : undefined, requestLifetime);
+      if (typeof requestId !== 'string') return run().then(respond);
+      const remembered = answered.answer(requestId, `${request.operation}\u0000${request.key}`, run);
+      if (remembered === 'mismatch') {
+        return respond(refusal(400, 'SETTINGS_PRECONDITION_INVALID', undefined, {
+          state: 'nothing was applied', next: ['Send a new requestId for a different change'] }));
+      }
+      return remembered.then(respond);
     },
   };
 }

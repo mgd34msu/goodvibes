@@ -1,5 +1,5 @@
 /** Real installed-client and loopback transport; synthetic server owner and credentials only. */
-import { afterEach, expect, spyOn, test } from 'bun:test';
+import { afterEach, expect, test } from 'bun:test';
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
@@ -66,18 +66,11 @@ test('capture response cannot install a handle after connection replacement', as
   await expect(f.capability.capture({ operation: 'set', key: 'controlPlane.port', value: 4567 })).rejects.toThrow();
   expect(f.calls()).toBe(1); expect(f.effects()).toBe(0);
 });
-test('expired installed capture does not send an apply or change destination', async () => {
-  const f = fixture(); const prepared = await f.capability.capture({ operation: 'set', key: 'controlPlane.port', value: 4567 });
-  const clock = spyOn(Date, 'now').mockReturnValue(Date.now() + 300_001); cleanup.push(() => clock.mockRestore());
-  await expect(f.capability.apply(prepared)).rejects.toThrow(); expect(f.calls()).toBe(1); expect(f.effects()).toBe(0);
-  clock.mockRestore();
-  await expect(f.capability.apply(prepared)).rejects.toThrow(); expect(f.calls()).toBe(1);
-});
-test('response loss reports unknown after one effect, never retries', async () => {
+test('a lost answer is asked for once more with the same request id; the change is written once', async () => {
   const f = fixture(); const prepared = await f.capability.capture({ operation: 'set', key: 'controlPlane.port', value: 4567 });
   f.onResponse(() => { throw new Error('synthetic response lost'); });
   expect((await f.capability.apply(prepared)).status).toBe('unknown'); await expect(f.capability.apply(prepared)).rejects.toThrow();
-  expect(f.effects()).toBe(1); expect(f.calls()).toBe(2);
+  expect(f.effects()).toBe(1); expect(f.calls()).toBe(3);
 });
 test('client capabilities cannot exchange handles or fall back to legacy transport', async () => {
   const f = fixture(); const prepared = await f.capability.capture({ operation: 'set', key: 'controlPlane.port', value: 4567 });

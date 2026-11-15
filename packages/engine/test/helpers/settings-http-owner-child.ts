@@ -60,11 +60,11 @@ const server = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(request) 
   const body = await request.clone().json();
   const arm = body.settingsImportPrecondition ?? body.settingsPrecondition;
   if (arm?.action === 'capture') captures++;
-  else if (arm?.action === 'apply') applies++;
+  else if (arm?.action === 'apply' || arm?.action === 'write') applies++;
   else return new Response(null, { status: 400 }); // Never a fixture legacy fallback.
   const response = await router.dispatchApiRoutes(request);
   if (!response) throw new Error('Missing settings fixture route');
-  if (loseResponse && arm.action === 'apply') {
+  if (loseResponse && arm.action !== 'capture') {
     // The real effect completed. Close the owned socket before delivering its ack.
     void server.stop(true);
     return new Response(null, { status: 503 });

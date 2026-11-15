@@ -248,9 +248,8 @@ export function createDaemonSystemRouteHandlers(
       if (admin) return admin;
       const payload = await context.parseJsonBody(req);
       if (payload instanceof Response) return payload;
-      // Body parsing yields. Reacquire current admin before either effect path.
-      const currentAdmin = context.requireAdmin(req);
-      if (currentAdmin) return currentAdmin;
+      // The two owner lanes take the caller's authority themselves and check it
+      // once more immediately before the write, so they are not checked again here.
       if (Object.hasOwn(payload, 'settingsImportPrecondition')) {
         return context.settingsImportPrecondition?.handle(req, payload, importLifetime)
           ?? jsonErrorResponse({ error: 'Settings import owner unavailable', code: 'SETTINGS_IMPORT_PRECONDITION_UNSUPPORTED' }, { status: 409 });
@@ -259,6 +258,9 @@ export function createDaemonSystemRouteHandlers(
         return context.settingsPrecondition?.handle(req, payload, requestLifetime)
           ?? jsonErrorResponse({ error: 'Settings owner precondition unavailable', code: 'SETTINGS_PRECONDITION_UNSUPPORTED' }, { status: 409 });
       }
+      // Body parsing yields; the plain write has no owner lane, so the admin check is repeated before it.
+      const currentAdmin = context.requireAdmin(req);
+      if (currentAdmin) return currentAdmin;
       const { key, value } = payload;
       if (!key || typeof key !== 'string') {
         return jsonErrorResponse({ error: 'Missing or invalid key' }, { status: 400 });
@@ -489,10 +491,12 @@ async function handleRegisterWatcher(context: DaemonSystemRouteContext, req: Req
   };
   // Registering is an upsert, so a repeat would silently replace the first watcher.
   if (context.watcherRegistry.getWatcher(id)) {
-    return jsonErrorResponse(
-      { error: `Watcher ${id} already exists. PATCH it to change it, or choose a different label or id.`, code: 'WATCHER_EXISTS' },
-      { status: 409 },
-    );
+    return jsonErrorResponse({
+      error: `Watcher ${id} already exists, so registering it again would replace it.`,
+      code: 'WATCHER_EXISTS',
+      state: `watcher ${id} is unchanged`,
+      next: [`PATCH /api/watchers/${id} to change it`, 'Or register it with a different label or id'],
+    }, { status: 409 });
   }
   let record: WatcherRecord;
   try {

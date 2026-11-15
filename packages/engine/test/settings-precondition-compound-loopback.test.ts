@@ -89,10 +89,10 @@ test('revocation after the config is published reports it, leaves an orphan cred
   // The failure leaves the credential behind, never config pointing at a missing credential.
   expect(JSON.parse(readFileSync(f.credentialPath, 'utf8')).secrets[secretKey]).toBe('synthetic-daemon-value');
 });
-test('response loss after compound effect is unknown and cannot replay', async () => {
+test('response loss after compound effect is unknown, asked once more with the same request id, and cannot replay', async () => {
   const f = fixture(); const prepared = await f.capability.capture({ operation: 'set', key, value: '', credentialClear: true });
   f.loseResponse(); expect((await f.capability.apply(prepared)).status).toBe('unknown');
-  expect(f.config.get(key)).toBe(''); await expect(f.capability.apply(prepared)).rejects.toThrow(); expect(f.requests()).toBe(2);
+  expect(f.config.get(key)).toBe(''); await expect(f.capability.apply(prepared)).rejects.toThrow(); expect(f.requests()).toBe(3);
 });
 test('credential reference set is config-only and raw material never leaves the client', async () => {
   const f = fixture();

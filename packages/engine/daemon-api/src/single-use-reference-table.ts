@@ -1,7 +1,8 @@
 /**
- * The reference table behind the settings precondition lanes: a capture issues
- * a one-use reference, an apply takes it. Both lanes share this so expiry,
- * eviction and the spent-versus-stale answer cannot drift apart.
+ * The reference table behind the settings import's capture-then-apply arm: a
+ * capture issues a one-use reference, an apply takes it. A single setting no
+ * longer uses it (one `write` carries the revision instead), and an import
+ * sent as one `write` does not either.
  */
 interface ReferenceEntry {
   readonly lifetime: object;
@@ -55,4 +56,48 @@ export function createSingleUseReferenceTable<Entry extends ReferenceEntry>(): S
       return { entry, spent: wasSpent };
     },
   };
+}
+
+/**
+ * The answers to recent settings writes, by the caller's `requestId`, so a
+ * caller whose answer was lost can send the same request again and get the
+ * first answer instead of a second write. A repeat that arrives while the first
+ * is still running waits for it. Bounded by count; memory only, so a daemon
+ * restart forgets them (a repeat then meets the settings revision check).
+ */
+export interface RequestReceiptTable<Answer> {
+  /**
+   * The answer for `requestId`: the remembered one when this id was seen with
+   * the same `fingerprint`, otherwise the result of `run`, remembered.
+   * `mismatch` when the id was used for a different request.
+   */
+  answer(requestId: string, fingerprint: string, run: () => Promise<Answer>): Promise<Answer> | 'mismatch';
+}
+
+const MAX_REMEMBERED_ANSWERS = 256;
+
+export function createRequestReceiptTable<Answer>(): RequestReceiptTable<Answer> {
+  const answers = new Map<string, { readonly fingerprint: string; readonly answer: Promise<Answer> }>();
+  return {
+    answer(requestId, fingerprint, run) {
+      const known = answers.get(requestId);
+      if (known) return known.fingerprint === fingerprint ? known.answer : 'mismatch';
+      const pending = run();
+      answers.set(requestId, { fingerprint, answer: pending });
+      while (answers.size > MAX_REMEMBERED_ANSWERS) answers.delete(answers.keys().next().value!);
+      return pending;
+    },
+  };
+}
+
+const servingIds = new WeakMap<object, string>();
+/**
+ * A stable id for one serving lifetime of the settings owner. The settings
+ * revision counts from the start again in a new daemon process, so a revision
+ * read in an earlier serving period must not match one counted in this one.
+ */
+export function servingIdOf(lifetime: object): string {
+  let id = servingIds.get(lifetime);
+  if (!id) { id = crypto.randomUUID(); servingIds.set(lifetime, id); }
+  return id;
 }

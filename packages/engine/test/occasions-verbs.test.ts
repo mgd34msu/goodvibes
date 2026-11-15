@@ -318,7 +318,7 @@ describe('the verbs, invoked', () => {
   });
 });
 
-test('Classic actual occasion verbs return declared dates and explicit automatic-action hold with zero decision requests', async () => {
+test('Classic occasion verbs raise and list reminders in code with zero decision requests', async () => {
   const fake = fakePort(() => { throw new Error('Classic cannot ask'); }); const previous = installJudgmentPort(fake.port);
   try {
     await withDecisionModelPolicy(() => 'Classic - Off', async () => {
@@ -326,10 +326,12 @@ test('Classic actual occasion verbs return declared dates and explicit automatic
       const list = await catalog.invoke('occasions.list', { ...ctx, body: {} }) as { provenance: string; subjectAssessment: string; occasions: { nextOccurrence: string }[] };
       expect(list.provenance).toBe('classic'); expect(list.subjectAssessment).toBe('not-evaluated');
       expect(list.occasions[0]?.nextOccurrence).toBe('2026-03-14');
-      const sweep = await catalog.invoke('occasions.sweep', { ...ctx, body: {} }) as { hold: string; delivered: boolean; mirrored: number };
-      expect(sweep).toMatchObject({ hold: 'decision-models-disabled', delivered: false, mirrored: 0 });
-      const pending = await catalog.invoke('occasions.pending', { ...ctx, body: {} }) as { provenance: string; semanticAssessment: string; nudge: unknown };
-      expect(pending).toMatchObject({ provenance: 'classic', semanticAssessment: 'not-evaluated', nudge: null });
+      const sweep = await catalog.invoke('occasions.sweep', { ...ctx, body: {} }) as { hold: string | null; provenance: string; nudge: { subjects: { title: string }[] } | null };
+      expect(sweep).toMatchObject({ hold: null, provenance: 'classic' });
+      expect(sweep.nudge?.subjects.map((subject) => subject.title)).toEqual(["Sarah's birthday"]);
+      const pending = await catalog.invoke('occasions.pending', { ...ctx, body: {} }) as { provenance: string; semanticAssessment: string; nudge: { subjects: { title: string }[] } | null };
+      expect(pending).toMatchObject({ provenance: 'classic', semanticAssessment: 'not-evaluated' });
+      expect(pending.nudge?.subjects.map((subject) => subject.title)).toEqual(["Sarah's birthday"]);
       expect(fake.requests).toHaveLength(0);
     });
   } finally { installJudgmentPort(previous); }

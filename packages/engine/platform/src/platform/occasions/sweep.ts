@@ -17,7 +17,8 @@
  *     when the owner asks, and for nothing else.
  *  4. **Outside the lead window** → not yet. Ten days by default, overridable
  *     per occasion, because "order something and have it arrive" is not the
- *     same runway for everything.
+ *     same runway for everything. When the owner will be away on the day, the
+ *     window is measured back from the day before they leave.
  *  5. **About THE OWNER, and only to be remembered** → never pushed, ever. The
  *     owner knows when their own birthday is. The item is opened anyway, already
  *     spent, so it answers "anything coming up?" and can never speak. See
@@ -39,6 +40,7 @@ import {
   boundaryOn,
   conflictItemId,
   dayOfBoundaryDate,
+  leadWindowOpens,
   hasServed,
   interviewItemId,
   interviewResumeDate,
@@ -158,10 +160,29 @@ export function isWithinActiveHours(minutesOfDay: number, activeHours: string): 
 }
 
 /** The lead this occasion actually uses. */
-export function effectiveLead(occasion: Occasion, policy: OccasionsPolicy): number {
+export function effectiveLead(occasion: Occasion, policy: Pick<OccasionsPolicy, 'leadDays'>): number {
   const override = occasion.leadDays;
   if (override !== null && Number.isFinite(override) && override >= 0) return override;
   return Math.max(0, Math.round(policy.leadDays));
+}
+
+/**
+ * Where today sits against one occurrence: inside its lead window or not, and
+ * the day its day-of boundary falls on (moved before a trip when the owner is
+ * away on the day). The one definition the sweep and the pull share.
+ */
+export function occurrenceWindow(
+  occasion: Occasion,
+  occurrence: IsoDate,
+  today: IsoDate,
+  plans: readonly Plan[],
+  policy: Pick<OccasionsPolicy, 'leadDays' | 'awayAdjust'>,
+): { readonly inside: boolean; readonly dayOf: IsoDate; readonly daysUntil: number } {
+  const daysUntil = daysBetween(today, occurrence);
+  const dayOf = dayOfBoundaryDate(occurrence, today, plans, policy.awayAdjust);
+  const inside = Number.isFinite(daysUntil) && daysUntil >= 0
+    && today >= leadWindowOpens(occurrence, dayOf, effectiveLead(occasion, policy));
+  return { inside, dayOf, daysUntil };
 }
 
 function answerFor(
@@ -190,8 +211,8 @@ export function decideSweep(context: SweepContext): SweepDecision {
     if (occasion.kind === 'neither') continue;
     const occurrence = nextOccurrence(occasion.date, occasion.recurrence, today);
     if (occurrence === null) continue;
-    const daysUntil = daysBetween(today, occurrence);
-    if (!Number.isFinite(daysUntil) || daysUntil > effectiveLead(occasion, policy)) continue;
+    const { inside, dayOf, daysUntil } = occurrenceWindow(occasion, occurrence, today, context.plans, policy);
+    if (!inside) continue;
 
     const itemId = nudgeItemId(occasion.id, occurrence);
     const existing = itemsById.get(itemId);
@@ -230,7 +251,6 @@ export function decideSweep(context: SweepContext): SweepDecision {
     // here", a due date that cannot move past the occurrence is due forever on
     // the day itself, which is precisely how an hourly sweep turned into an
     // hourly reminder. A served boundary is spent, and there are two.
-    const dayOf = dayOfBoundaryDate(occurrence, today, context.plans, policy.awayAdjust);
     const boundary = boundaryOn(today, dayOf);
     if (existing !== undefined && hasServed(existing, boundary)) continue;
 

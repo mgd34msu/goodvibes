@@ -18,12 +18,18 @@
  *    at all; always here.
  *  - Occurrences between their two boundaries, which is most of them, most of
  *    the time.
+ *
+ * And it does not wait for a sweep: an occurrence inside its window that no
+ * sweep has opened yet (a machine that was just started, or is rarely on) is
+ * listed from the declarations, under the same rules the sweep opens by.
+ *
+ * Everything here is code. The message is composed from the subjects with no
+ * model request, so the pull answers the same with or without a decision model.
  */
-import { OccasionReadingWork } from './readings.js';
-import { composeConflictMessage, prepareNudge, subjectFor } from './nudge.js';
-import { storedAcknowledgementEvidence, storedOpenItemEvidence } from './stored-reading-evidence.js';
-import { daysBetween, type IsoDate } from './dates.js';
-import { decisionOrClassic, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
+import { prepareNudge, composeConflictMessage, subjectFor } from './nudge.js';
+import { nudgeItemId } from './cadence.js';
+import { daysBetween, nextOccurrence, type IsoDate } from './dates.js';
+import { occurrenceWindow, type OccasionsPolicy } from './sweep.js';
 import type {
   NudgeSubject,
   Occasion,
@@ -31,13 +37,15 @@ import type {
   OccasionConflict,
   OccasionNudge,
   OpenItem,
+  Plan,
 } from './types.js';
 
 /** Everything outstanding, for a surface that pulls rather than receives. */
 export interface PendingResult {
+  /** Present when decision models are off: who each date is about was taken from the line's `for me` marker only. */
   readonly provenance?: 'classic';
   readonly semanticAssessment?: 'not-evaluated';
-  /** Native pending items when no semantic nudge text was composed. */
+  /** The subjects of `nudge`, listed on their own. Internal: `occasions.pending` leaves it out, since `nudge.subjects` carries the same list. */
   readonly open?: readonly NudgeSubject[];
   readonly today: IsoDate;
   /** What is coming up and has NOT been acknowledged. */
@@ -56,15 +64,17 @@ export interface PendingResult {
 
 export interface PendingInput {
   readonly today: IsoDate;
-  readonly now: number;
-  readonly leadDays: number;
+  readonly policy: Pick<OccasionsPolicy, 'enabled' | 'leadDays' | 'awayAdjust' | 'suppressMirroredNudges'>;
   readonly occasions: readonly Occasion[];
   readonly conflicts: readonly OccasionConflict[];
+  readonly plans: readonly Plan[];
   readonly openItems: readonly OpenItem[];
   readonly acknowledgements: readonly OccasionAcknowledgement[];
   /** Whether the agent is a configured push destination. */
   readonly agentIsPushed: boolean;
 }
+
+type PreparedPending = Omit<PendingResult, 'nudge'> & { readonly nudge: Omit<OccasionNudge, 'id' | 'raisedAt'> | null };
 
 /**
  * Compose the pull. Pure: same inputs, same answer.
@@ -73,79 +83,72 @@ export interface PendingInput {
  * narrowing is load-bearing. It used to be permanent, an item the agent had
  * ever been pushed carried a stamp and never appeared here again, which was
  * survivable when a push repeated every few days and is not survivable now that
- * there are only two. Under the old rule, an occasion pushed once at the top of
- * its window would then be invisible to "anything coming up?" for the entire
- * ten days, which is the opposite of what the pull is for. Same day: do not say
- * it twice in one conversation. Any other day: of course it is listed.
+ * there are only two. Same day: do not say it twice in one conversation. Any
+ * other day: of course it is listed.
  */
-export async function composePending(input: PendingInput, supplied?: OccasionReadingWork): Promise<PendingResult> {
-  return withConfiguredDecisionModelPolicy(async () => {
-    const work = supplied ?? new OccasionReadingWork();
-    input = work.snapshot(input);
-    const prepared = await preparePending(input, work);
-    work.assertCurrent();
-    return { ...prepared, nudge: prepared.nudge === null ? null : { ...prepared.nudge, id: `occasions-pending-${input.today}`, raisedAt: input.now } };
-  });
-}
-
-type PreparedPending = Omit<PendingResult, 'nudge'> & { readonly nudge: Omit<OccasionNudge, 'id' | 'raisedAt'> | null };
-
-/** Internal service preparation keeps stored clocks local, retaining the original records. */
-export async function preparePending(input: Omit<PendingInput, 'now'>, work: OccasionReadingWork): Promise<PreparedPending> {
-  const { openItems, acknowledgements, ...source } = input;
-  const admitted = work.snapshot({
-    ...source,
-    openItems: storedOpenItemEvidence(openItems, work),
-    acknowledgements: storedAcknowledgementEvidence(acknowledgements, work),
-  });
-  const byId = new Map(admitted.occasions.map((entry) => [entry.id, entry]));
+export function preparePending(input: PendingInput): PreparedPending {
+  const byId = new Map(input.occasions.map((entry) => [entry.id, entry]));
   const ackByKey = new Map(
-    admitted.acknowledgements.map((entry) => [`${entry.occasionId}@${entry.occurrence}`, entry]),
+    input.acknowledgements.map((entry) => [`${entry.occasionId}@${entry.occurrence}`, entry]),
   );
 
   const open: NudgeSubject[] = [];
   const acknowledged: NudgeSubject[] = [];
+  const listed = new Set<string>();
 
-  for (const item of admitted.openItems) {
+  const place = (occasion: Occasion, occurrence: IsoDate, isAcknowledged: boolean): void => {
+    const daysUntil = daysBetween(input.today, occurrence);
+    const subject = subjectFor(occasion, Number.isFinite(daysUntil) ? daysUntil : input.policy.leadDays, isAcknowledged);
+    if (isAcknowledged) acknowledged.push(subject);
+    else open.push(subject);
+  };
+
+  for (const item of input.openItems) {
     if (item.kind !== 'nudge') continue;
-    if (item.occurrence < admitted.today) continue;
+    if (item.occurrence < input.today) continue;
     const occasion = byId.get(item.occasionId);
     if (occasion === undefined) continue;
+    listed.add(item.id);
 
-    const answer = ackByKey.get(`${item.occasionId}@${item.occurrence}`);
     // A `yes` or a `no` resolved the item and it would not be here; a `later`
     // is still an open question. Only an acknowledgement changes which list it
     // lands in.
-    const isAcknowledged = answer?.answer === 'acknowledged';
-    if (!isAcknowledged && admitted.agentIsPushed && item.agentPushedOn === admitted.today) continue;
-
-    const daysUntil = daysBetween(admitted.today, item.occurrence);
-    const subject = subjectFor(
-      occasion,
-      Number.isFinite(daysUntil) ? daysUntil : admitted.leadDays,
-      isAcknowledged,
-    );
-    if (isAcknowledged) acknowledged.push(subject);
-    else open.push(subject);
+    const isAcknowledged = ackByKey.get(`${item.occasionId}@${item.occurrence}`)?.answer === 'acknowledged';
+    if (!isAcknowledged && input.agentIsPushed && item.agentPushedOn === input.today) continue;
+    place(occasion, item.occurrence, isAcknowledged);
   }
 
-  const openConflictIds = new Set(
-    admitted.openItems.filter((item) => item.kind === 'conflict').map((item) => item.occasionId),
-  );
+  // Inside the window with nothing opened yet: listed by the rules the sweep
+  // opens an item by, so the answer does not depend on a sweep having run.
+  if (input.policy.enabled) {
+    for (const occasion of input.occasions) {
+      if (occasion.kind === 'neither') continue;
+      const occurrence = nextOccurrence(occasion.date, occasion.recurrence, input.today);
+      if (occurrence === null || listed.has(nudgeItemId(occasion.id, occurrence))) continue;
+      if (!occurrenceWindow(occasion, occurrence, input.today, input.plans, input.policy).inside) continue;
+      const answer = ackByKey.get(`${occasion.id}@${occurrence}`)?.answer;
+      if (answer === 'yes' || answer === 'no') continue;
+      if (answer !== 'acknowledged' && occasion.mirrored && input.policy.suppressMirroredNudges) continue;
+      place(occasion, occurrence, answer === 'acknowledged');
+    }
+  }
 
-  const conflicts = admitted.conflicts
-    .filter((conflict) => openConflictIds.has(conflict.occasionId))
+  // A conflict is read from the file on every call, so it is listed while the
+  // file holds it, whether or not a sweep has raised it yet.
+  const conflicts = input.conflicts
     .map((conflict) => ({ occasionId: conflict.occasionId, message: composeConflictMessage(conflict.title, conflict.dates) }));
-  return decisionOrClassic<PreparedPending>(async () => ({
-    today: admitted.today,
-    nudge: open.length === 0
-      ? null
-      : await prepareNudge(open, work),
+
+  return {
+    today: input.today,
+    nudge: open.length === 0 ? null : prepareNudge(open),
+    open,
     acknowledged,
     conflicts,
-  }), () => {
-    work.assertCurrent();
-    return { today: admitted.today, nudge: null, open, acknowledged, conflicts,
-      provenance: 'classic', semanticAssessment: 'not-evaluated' };
-  });
+  };
+}
+
+/** The pull with its id and clock: what `occasions.pending` answers. */
+export function composePending(input: PendingInput & { readonly now: number }): PendingResult {
+  const prepared = preparePending(input);
+  return { ...prepared, nudge: prepared.nudge === null ? null : { ...prepared.nudge, id: `occasions-pending-${input.today}`, raisedAt: input.now } };
 }

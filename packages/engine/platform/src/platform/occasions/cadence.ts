@@ -170,6 +170,18 @@ export function adjustForAway(
   return beforeDeparture >= today ? beforeDeparture : due;
 }
 
+/**
+ * The first day of an occurrence's lead window.
+ *
+ * Normally `lead` days before the occurrence. When the day-of boundary has
+ * moved earlier because the owner will be away on the day, the window is
+ * measured back from that day instead, so a reminder still reaches them before
+ * they leave even when the trip starts before the normal window would open.
+ */
+export function leadWindowOpens(occurrence: IsoDate, dayOfDate: IsoDate, lead: number): IsoDate {
+  return addDays(dayOfDate < occurrence ? dayOfDate : occurrence, -Math.max(0, lead));
+}
+
 /** True when an open item may be raised on `today`. */
 export function isDue(item: OpenItem, today: IsoDate): boolean {
   return item.dueOn <= today;

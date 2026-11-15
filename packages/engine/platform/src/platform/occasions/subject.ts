@@ -1,8 +1,21 @@
-/** Semantic subject attribution; exact selfDeclared markers remain mechanical. */
-import { occasionSubject, occasionEntry, OccasionReadingHeldError, OccasionReadingWork } from './readings.js';
+/**
+ * subject.ts, who a date line is about.
+ *
+ * The line's own `for me` marker is authoritative and read by the parser. The
+ * one case the marker does not cover and the answer changes behaviour is a
+ * `remember-only` line without it: if it is about the owner, it is never pushed
+ * (see {@link pushableSubject}). Only that case is read by a model, once per
+ * line, and the answer is stored against a key over the title, the person and
+ * the owner's declared names, so the reading is taken again only when one of
+ * those changes. Every other line is decided here without a request.
+ */
+import { createHash } from 'node:crypto';
+import { occasionSubject, occasionEntry } from './readings.js';
 import { normalizeProfileKey } from '../owner-profile/fields.js';
+import { judge } from '../runtime/judge.js';
+import { JudgmentInputError, snapshotJudgmentInput } from '../gate/judgment-input.js';
+import type { EntryType } from '@goodvibes-jev/judgment';
 import type { Occasion, OccasionSubject } from './types.js';
-import { decisionOrClassic } from '../runtime/decision-policy.js';
 
 /**
  * The words that mark a line as being about the owner himself.
@@ -17,46 +30,72 @@ export function isSelfAttribution(value: string): boolean {
   return SELF_WORDS.includes(normalizeProfileKey(value));
 }
 
+/** The decision-log site for the one attribution reading. */
+export const OCCASION_SUBJECT_SITE = 'engine.occasions.subject';
+
 /**
- * @deprecated Compatibility-only mechanical parsing utility.
- * This does not establish occasion attribution; use resolveOccasionSubject.
+ * Whether this line's subject is decided by a stored reading.
+ *
+ * False for a line that says `for me` (the marker decides) and for every kind
+ * but `remember-only`, where who it is about changes nothing.
  */
-export function possessiveSubject(title: string): string {
-  const match = /^(.+?)['’]s\s+\S/.exec(title.trim());
-  return (match?.[1] ?? '').trim();
+export function needsSubjectReading(occasion: Pick<Occasion, 'selfDeclared' | 'kind'>): boolean {
+  return !occasion.selfDeclared && occasion.kind === 'remember-only';
+}
+
+/** The subject decided from the line alone: `owner` with the marker, otherwise `unattributed`. */
+export function declaredSubject(occasion: Pick<Occasion, 'selfDeclared'>): OccasionSubject {
+  return occasion.selfDeclared ? 'owner' : 'unattributed';
 }
 
 /**
- * @deprecated Compatibility-only mechanical parsing utility.
- * This does not establish occasion attribution; use resolveOccasionSubject.
+ * The stored-reading key for one line: a digest of exactly what the reading is
+ * taken over. No line text or date goes into the state file.
  */
-export function ownerAliasSet(declaredNames: readonly string[]): ReadonlySet<string> {
-  const aliases = new Set<string>();
-  for (const raw of declaredNames) {
-    const normalized = normalizeProfileKey(raw);
-    if (normalized.length === 0) continue;
-    aliases.add(normalized);
-    const first = normalized.split(' ')[0] ?? '';
-    if (first.length > 0) aliases.add(first);
-  }
-  return aliases;
+export function attributionKey(occasion: Pick<Occasion, 'title' | 'person'>, declaredNames: readonly string[]): string {
+  return createHash('sha256')
+    .update(JSON.stringify([occasion.title.trim(), occasion.person.trim(), declaredNames.map((name) => name.trim())]))
+    .digest('hex')
+    .slice(0, 32);
 }
 
-/** Explicit schema attribution remains authoritative; all prose attribution is a reading. */
-export async function resolveOccasionSubject(
-  occasion: Pick<Occasion, 'title' | 'person' | 'selfDeclared'>,
+/**
+ * Ask once who a `remember-only` line is about.
+ *
+ * `store` is false when nothing was learned (no model, decision models off, the
+ * deadline passed or the model was unreachable): the line is treated as
+ * `unattributed` for now, the ordinary cadence, and read again next time. An
+ * answer the model gave, including one it could not settle, is stored: asking
+ * the same question again would get the same answer.
+ */
+export async function readOccasionSubject(
+  occasion: Pick<Occasion, 'title' | 'person'>,
   declaredNames: readonly string[],
-  work = new OccasionReadingWork(),
-): Promise<OccasionSubject> {
-  const source = work.snapshot({ occasion, declaredNames });
-  if (source.occasion.selfDeclared) return 'owner';
-  return decisionOrClassic<OccasionSubject>(async () => {
-    const result = await work.wait(() => occasionSubject.run(work.port, occasionEntry({ title: source.occasion.title, person: source.occasion.person, declaredNames: source.declaredNames }), { ...(work.signal ? { signal: work.signal } : {}), site: 'engine.occasions.subject' }));
-    const reading = result.readings.subject;
-    if (reading.outcome !== 'act' || !['owner', 'other', 'unknown'].includes(String(reading.choice))) throw new OccasionReadingHeldError();
-    result.recordAction('attributed occasion subject'); work.assertCurrent();
-    return reading.choice === 'owner' ? 'owner' : reading.choice === 'other' ? 'other' : 'unattributed';
-  }, () => { work.assertCurrent(); return 'unattributed'; });
+  signal?: AbortSignal,
+): Promise<{ readonly subject: OccasionSubject; readonly store: boolean }> {
+  let state: EntryType;
+  try {
+    state = occasionEntry(snapshotJudgmentInput({ title: occasion.title, person: occasion.person, declaredNames: [...declaredNames] }) as object);
+  } catch (error) {
+    // Credential or card material in a title is never sent to a model. The line
+    // keeps the ordinary cadence, and that is a settled fact for this key.
+    if (error instanceof JudgmentInputError) return { subject: 'unattributed', store: true };
+    throw error;
+  }
+  const outcome = await judge({
+    site: OCCASION_SUBJECT_SITE,
+    battery: occasionSubject,
+    state,
+    settle: (readings): OccasionSubject | undefined => {
+      const reading = readings.subject;
+      if (reading.outcome !== 'act') return undefined;
+      return reading.choice === 'owner' ? 'owner' : reading.choice === 'other' ? 'other' : reading.choice === 'unknown' ? 'unattributed' : undefined;
+    },
+    fallback: (): OccasionSubject => 'unattributed',
+    describe: (subject) => `attributed occasion subject: ${subject}`,
+    ...(signal === undefined ? {} : { signal }),
+  });
+  return { subject: outcome.value, store: outcome.source !== 'fallback' || outcome.why === 'unsure' };
 }
 
 /**

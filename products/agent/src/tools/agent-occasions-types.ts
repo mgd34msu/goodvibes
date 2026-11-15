@@ -29,6 +29,7 @@
 
 import type { OperatorMethodInput, OperatorMethodOutput } from '@goodvibes-jev/engine/platform/contracts';
 import type { AuthoritySurface } from '../trust/untrusted-content.ts';
+import type { OccasionAcknowledgeVocabulary } from '@goodvibes-jev/engine/platform/platform/occasions';
 
 /**
  * Every write takes one, and the daemon requires it, an absent authority on
@@ -133,10 +134,27 @@ export function normalizeOccasionsAction(value: unknown): OccasionsAction | null
   return null;
 }
 
-/** The three answers the owner can give. `later` is not a decline (§4.9). */
-export type OccasionsAnswerWord = 'yes' | 'no' | 'later';
+/**
+ * The answers the owner can give. `later` is not a decline (§4.9).
+ * `acknowledged` is "I know, it is in hand": the push stops for that
+ * occurrence and the date stays listed. It never replaces a yes or a no
+ * already given; the daemon answers ok:false with the reason instead.
+ */
+export type OccasionsAnswerWord = 'yes' | 'no' | 'later' | 'acknowledged';
 
-export const OCCASIONS_ANSWER_WORDS: readonly OccasionsAnswerWord[] = ['yes', 'no', 'later'];
+export const OCCASIONS_ANSWER_WORDS: readonly OccasionsAnswerWord[] = ['yes', 'no', 'later', 'acknowledged'];
+
+/**
+ * How this product records "the owner has this one in hand", in the words the
+ * reminder notice and the turn's capture policy put to the model. The platform
+ * composes the notice naming its own `profile` action; this build's sender
+ * re-addresses it to this one, so the model is never told to call an action
+ * its tools do not have.
+ */
+export const AGENT_OCCASION_ACKNOWLEDGE: OccasionAcknowledgeVocabulary = Object.freeze({
+  action: 'the `occasions` tool, action `answer` with answer `acknowledged`',
+  tool: '`occasions`',
+});
 
 export function isOccasionsAnswerWord(value: unknown): value is OccasionsAnswerWord {
   return typeof value === 'string' && (OCCASIONS_ANSWER_WORDS as readonly string[]).includes(value);

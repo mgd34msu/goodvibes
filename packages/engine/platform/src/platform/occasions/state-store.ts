@@ -42,10 +42,8 @@
  * stop.
  */
 import type { JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
-import { captureFileMutation, captureMutationDescriptors } from '../utils/file-mutation.js';
+import { captureFileMutation } from '../utils/file-mutation.js';
 import { occasionStateReceipts } from './operation.js';
-import { JudgmentInputError, type JudgmentInputProblem } from '../gate/judgment-input.js';
-import { StoredRecordAdmissionOwner, storedEvidenceProblem, storedGiftAdmission, type StoredGiftAdmission } from './stored-reading-evidence.js';
 import { PersistentStore } from '../state/persistent-store.js';
 import { StoreWriteQueue } from '../state/store-write-queue.js';
 import { logger } from '../utils/logger.js';
@@ -55,16 +53,19 @@ import {
   isOccasionAckSource,
   isOccasionAnswer,
   isRaiseBoundary,
+  OCCASION_SUBJECTS,
   type GiftRecord,
   type Interview,
   type InterviewAnswer,
   type InterviewStep,
   type OccasionAcknowledgement,
+  type OccasionAttribution,
   type OccasionMirrorRecord,
   type OccasionStateDisclosure,
   type OccasionSweepReport,
   type OpenItem,
   type OpenItemKind,
+  type OccasionSubject,
   type RaiseBoundary,
 } from './types.js';
 
@@ -76,6 +77,7 @@ export const MAX_GIFT_RECORDS = 2000;
 export const MAX_OPEN_ITEMS = 500;
 export const MAX_INTERVIEWS = 200;
 export const MAX_MIRRORS = 2000;
+export const MAX_ATTRIBUTIONS = 2000;
 
 interface OccasionStateSnapshot extends Record<string, unknown> {
   version: 1;
@@ -84,6 +86,7 @@ interface OccasionStateSnapshot extends Record<string, unknown> {
   openItems: OpenItem[];
   interviews: Interview[];
   mirrors: OccasionMirrorRecord[];
+  attributions: OccasionAttribution[];
   lastSweep: OccasionSweepReport | null;
 }
 
@@ -95,6 +98,7 @@ function emptySnapshot(): OccasionStateSnapshot {
     openItems: [],
     interviews: [],
     mirrors: [],
+    attributions: [],
     lastSweep: null,
   };
 }
@@ -257,6 +261,17 @@ function validMirror(value: unknown): OccasionMirrorRecord | null {
   return { occasionId, occurrence, externalId, mirroredAt };
 }
 
+function validAttribution(value: unknown): OccasionAttribution | null {
+  if (!isRecord(value)) return null;
+  const occasionId = str(value['occasionId']);
+  const key = str(value['key']);
+  const subject = str(value['subject']);
+  const readAt = num(value['readAt']);
+  if (occasionId === null || key === null || subject === null || readAt === null) return null;
+  if (!(OCCASION_SUBJECTS as readonly string[]).includes(subject)) return null;
+  return { occasionId, key, subject: subject as OccasionSubject, readAt };
+}
+
 function validSweepReport(value: unknown): OccasionSweepReport | null {
   if (!isRecord(value)) return null;
   const sweptAt = num(value['sweptAt']);
@@ -315,6 +330,7 @@ export function validateOccasionState(
       openItems,
       interviews: take('interviews', validInterview),
       mirrors: take('mirrors', validMirror),
+      attributions: take('attributions', validAttribution),
       lastSweep: validSweepReport(raw['lastSweep']),
     },
     dropped,
@@ -340,61 +356,8 @@ export class OccasionStateStore {
   private readonly store: PersistentStore<OccasionStateSnapshot>;
   private snapshot: OccasionStateSnapshot | null = null;
   private loading: Promise<OccasionStateSnapshot> | undefined;
+  /** Bumped on every published write; the integer a caller compares. */
   private publication = 0;
-  private readonly admissionOwner = new StoredRecordAdmissionOwner();
-
-  private ownReadingRecords(snapshot: OccasionStateSnapshot): void {
-    snapshot.gifts = this.admissionOwner.own('gifts', snapshot.gifts);
-    snapshot.openItems = this.admissionOwner.own('openItems', snapshot.openItems);
-    snapshot.acknowledgements = this.admissionOwner.own('acknowledgements', snapshot.acknowledgements);
-  }
-
-  private adoptPublishedAdmission(snapshot: OccasionStateSnapshot): void {
-    this.giftAdmission = this.admissionOwner.giftAdmission(snapshot.gifts);
-    this.pendingAdmission = this.admissionOwner.collectionProblem('openItems', snapshot.openItems)
-      ?? this.admissionOwner.collectionProblem('acknowledgements', snapshot.acknowledgements);
-  }
-
-  private giftAdmission: StoredGiftAdmission = { collectionProblem: undefined, problems: new Map(), sanitizedOccasions: new Set() };
-  private pendingAdmission: JudgmentInputProblem | undefined;
-
-  private refreshReadingAdmission(raw: unknown, normalized: OccasionStateSnapshot): void {
-    const source = isRecord(raw) ? raw : {};
-    this.giftAdmission = storedGiftAdmission(source['gifts'] ?? [], normalized.gifts);
-    this.pendingAdmission = storedEvidenceProblem('openItems', source['openItems'] ?? [])
-      ?? storedEvidenceProblem('acknowledgements', source['acknowledgements'] ?? []);
-  }
-
-  /** Value-free original-file admission survives ordinary legacy field sanitation. */
-  assertPendingReadingAdmission(): void {
-    if (this.pendingAdmission) throw new JudgmentInputError(this.pendingAdmission);
-  }
-  assertGiftReadingAdmission(occasionId: string): void {
-    const problem = this.giftAdmission.collectionProblem ?? this.giftAdmission.problems.get(occasionId);
-    if (problem) throw new JudgmentInputError(problem);
-  }
-
-  private readonly giftReads = new Map<string, { epoch: number; content: string }>();
-
-  /** Per-occasion history ownership; unrelated answers do not retire gift preparation. */
-  captureGiftRead(occasionId: string): { readonly assertCurrent: () => void } {
-    if (this.snapshot === null || this.loading) throw new Error('Occasion state is not ready.');
-    const content = JSON.stringify(this.snapshot.gifts.filter(entry => entry.occasionId === occasionId));
-    const receipt = this.giftReads.get(occasionId) ?? { epoch: 0, content };
-    this.giftReads.set(occasionId, receipt);
-    const epoch = receipt.epoch;
-    return { assertCurrent: () => {
-      if (receipt.epoch !== epoch || JSON.stringify(this.snapshot!.gifts.filter(entry => entry.occasionId === occasionId)) !== content) throw new Error('Occasion gift history changed.');
-    } };
-  }
-
-  private publishedGiftHistory(snapshot: OccasionStateSnapshot, replacedOccasion?: string): void {
-    for (const [occasionId, receipt] of this.giftReads) {
-      const content = JSON.stringify(snapshot.gifts.filter(entry => entry.occasionId === occasionId));
-      if (content !== receipt.content || occasionId === replacedOccasion || this.giftAdmission.sanitizedOccasions.has(occasionId)) receipt.epoch += 1;
-      receipt.content = content;
-    }
-  }
 
   /** Restricts a derived decision to the state it actually observed. */
   captureRead(): { readonly assertCurrent: () => void } {
@@ -454,8 +417,6 @@ export class OccasionStateStore {
       return this.snapshot;
     }
     const { snapshot, dropped, reconciled } = validateOccasionState(read.data);
-    this.refreshReadingAdmission(read.data, snapshot);
-    this.ownReadingRecords(snapshot);
     if (dropped > 0) {
       logger.warn('occasions: dropped malformed records while loading state', {
         path: this.filePath,
@@ -475,7 +436,6 @@ export class OccasionStateStore {
       // and a correction that only exists in memory is one crash away from
       // undoing itself.
       if (!readOnly) await this.persist(snapshot, assertCurrent);
-      this.adoptPublishedAdmission(snapshot);
     }
     return this.snapshot;
   }
@@ -490,52 +450,48 @@ export class OccasionStateStore {
       openItems: [...snapshot.openItems],
       interviews: [...snapshot.interviews],
       mirrors: [...snapshot.mirrors],
+      attributions: [...snapshot.attributions],
       lastSweep: snapshot.lastSweep,
     }, { assertCurrent: current, onEffect: published => { assertCurrent(); physical?.onEffect(published); } }));
   }
 
-  /** Serialize calculation as well as publication. No tentative state is visible on refusal. */
-  private async change<T>(mutate: (snapshot: OccasionStateSnapshot) => T, assertCurrent: () => void = UNRESTRICTED_OPERATION, options: { readonly publish?: (result: T) => boolean; readonly afterPublish?: () => void; readonly replacedGiftOccasion?: string } = {}): Promise<T> {
+  /**
+   * Serialize calculation as well as publication. No tentative state is visible
+   * on refusal. Records are replaced, never mutated, so the copy is shallow per
+   * collection; the loader validated every record field by field.
+   */
+  private async change<T>(mutate: (snapshot: OccasionStateSnapshot) => T, assertCurrent: () => void = UNRESTRICTED_OPERATION, options: { readonly publish?: (result: T) => boolean; readonly afterPublish?: () => void } = {}): Promise<T> {
     assertCurrent();
-    const ownerCurrent = captureMutationDescriptors(this, ['filePath', 'store', 'state', 'change']);
-    const filePath = this.filePath, store = this.store;
-    const storeCurrent = captureMutationDescriptors(store, ['persist', 'loadOrDiscard']);
-    const physical = filePath === ':memory:' || assertCurrent === UNRESTRICTED_OPERATION ? undefined : captureFileMutation(filePath);
-    const current = () => { assertCurrent(); ownerCurrent(); storeCurrent(); if (this.filePath !== filePath || this.store !== store) throw new Error('Occasion state owner changed.'); physical?.assertCurrent(); };
-    await this.state(true, current);
-    current();
+    await this.state(true, assertCurrent);
     let value!: T;
     await this.writes.run(async () => {
+      // The file is observed when this write's turn comes, so a write queued
+      // behind another of this store's own writes is not mistaken for a foreign
+      // change by the one before it.
+      const physical = this.filePath === ':memory:' || assertCurrent === UNRESTRICTED_OPERATION ? undefined : captureFileMutation(this.filePath);
+      const current = () => { assertCurrent(); physical?.assertCurrent(); };
       current();
       const receipts = occasionStateReceipts(assertCurrent);
       receipts?.onStateWriteIntent?.();
-      current();
       const previous = this.snapshot!;
-      // Reading records are owned immutable data. Keep their proof incarnations;
-      // the other records retain the previous deep-copy transaction semantics.
       const snapshot: OccasionStateSnapshot = {
         ...previous,
         acknowledgements: [...previous.acknowledgements],
         gifts: [...previous.gifts],
         openItems: [...previous.openItems],
-        interviews: structuredClone(previous.interviews),
-        mirrors: structuredClone(previous.mirrors),
-        lastSweep: structuredClone(previous.lastSweep),
+        interviews: [...previous.interviews],
+        mirrors: [...previous.mirrors],
+        attributions: [...previous.attributions],
       };
       const result = mutate(snapshot);
-      current();
       if (options.publish?.(result) === false) { value = result; return; }
-      this.ownReadingRecords(snapshot);
       Object.freeze(snapshot);
       await this.store.persist(snapshot, { assertCurrent: current, withPublication: receipts?.withPublication,
         synchronousPublish: receipts?.withPublication !== undefined, onEffect: published => {
-        receipts?.onStateEffect?.(published); assertCurrent(); physical?.onEffect(published);
+        receipts?.onStateEffect?.(published); physical?.onEffect(published);
       }, beforePublish: current, afterPublish: () => {
-        this.publishedGiftHistory(snapshot, options.replacedGiftOccasion);
-        this.adoptPublishedAdmission(snapshot);
         this.snapshot = snapshot; this.publication += 1; options.afterPublish?.();
       } });
-      current();
       value = result;
     });
     return value;
@@ -544,7 +500,7 @@ export class OccasionStateStore {
   /** A yes and its prepared interview become visible together, or neither does. */
   async recordInterviewAnswer(entry: OccasionAcknowledgement, interview: Interview, resolvedId: string, assertCurrent: () => void, afterPublish: () => void = () => {}): Promise<void> {
     assertCurrent();
-    const owned = this.admissionOwner.own('acknowledgements', [entry])[0]!;
+    const owned = entry;
     await this.change(snapshot => {
       snapshot.acknowledgements = [...snapshot.acknowledgements.filter(existing => !(existing.occasionId === owned.occasionId && existing.occurrence === owned.occurrence)), owned].slice(-MAX_ACKNOWLEDGEMENTS);
       snapshot.interviews = [...snapshot.interviews.filter(existing => existing.id !== interview.id), interview].slice(-MAX_INTERVIEWS);
@@ -582,7 +538,7 @@ export class OccasionStateStore {
     if (entry.occurrence.trim() !== entry.occurrence || !isIsoDate(entry.occurrence)) {
       throw new RangeError('An occurrence must be an ISO date (YYYY-MM-DD).');
     }
-    const owned = this.admissionOwner.own('acknowledgements', [entry])[0]!;
+    const owned = entry;
     return this.change(snapshot => {
       const kept = snapshot.acknowledgements.filter(
         (existing) => !(existing.occasionId === owned.occasionId && existing.occurrence === owned.occurrence),
@@ -591,6 +547,63 @@ export class OccasionStateStore {
       if (kept.length > MAX_ACKNOWLEDGEMENTS) kept.splice(0, kept.length - MAX_ACKNOWLEDGEMENTS);
       snapshot.acknowledgements = kept;
       return entry;
+    }, assertCurrent);
+  }
+
+  /**
+   * Record "the owner has this occurrence in hand" as ONE write: the answer and
+   * the open item it quiets change together, from the stored values, so there
+   * is no state in which one landed and the other did not.
+   *
+   * A stored `yes` or `no` already settled the occurrence and says more than an
+   * acknowledgement does, so it is left exactly as it is and nothing is written.
+   */
+  async acknowledge(
+    entry: OccasionAcknowledgement,
+    itemId: string,
+    build: (existing: OpenItem | undefined) => OpenItem,
+    assertCurrent: () => void = UNRESTRICTED_OPERATION,
+  ): Promise<{ readonly settledBy: 'yes' | 'no' | null }> {
+    assertCurrent();
+    return this.change(snapshot => {
+      const stored = snapshot.acknowledgements.find(
+        (existing) => existing.occasionId === entry.occasionId && existing.occurrence === entry.occurrence,
+      );
+      if (stored?.answer === 'yes' || stored?.answer === 'no') return { settledBy: stored.answer };
+      const kept = snapshot.acknowledgements.filter((existing) => existing !== stored);
+      kept.push(entry);
+      if (kept.length > MAX_ACKNOWLEDGEMENTS) kept.splice(0, kept.length - MAX_ACKNOWLEDGEMENTS);
+      snapshot.acknowledgements = kept;
+      const existing = snapshot.openItems.find((item) => item.id === itemId);
+      const items = snapshot.openItems.filter((item) => item.id !== itemId);
+      items.push(build(existing));
+      if (items.length > MAX_OPEN_ITEMS) items.splice(0, items.length - MAX_OPEN_ITEMS);
+      snapshot.openItems = items;
+      return { settledBy: null };
+    }, assertCurrent, { publish: (result) => result.settledBy === null });
+  }
+
+  // -------------------------------------------------------------------------
+  // Attribution: who a date line is about, read once per line
+  // -------------------------------------------------------------------------
+
+  /** Every stored attribution, as last written. */
+  async attributions(): Promise<readonly OccasionAttribution[]> {
+    return [...(await this.state()).attributions];
+  }
+
+  /**
+   * Store attributions read for lines that had none, or whose title, person or
+   * the owner's declared names changed (the key says which). One write for the
+   * whole batch, replacing any earlier reading for the same occasion.
+   */
+  async recordAttributions(entries: readonly OccasionAttribution[], assertCurrent: () => void = UNRESTRICTED_OPERATION): Promise<void> {
+    if (entries.length === 0) return;
+    await this.change(snapshot => {
+      const replaced = new Set(entries.map((entry) => entry.occasionId));
+      const kept = [...snapshot.attributions.filter((existing) => !replaced.has(existing.occasionId)), ...entries];
+      if (kept.length > MAX_ATTRIBUTIONS) kept.splice(0, kept.length - MAX_ATTRIBUTIONS);
+      snapshot.attributions = kept;
     }, assertCurrent);
   }
 
@@ -608,7 +621,7 @@ export class OccasionStateStore {
 
   async recordGift(entry: GiftRecord, assertCurrent: () => void = UNRESTRICTED_OPERATION): Promise<GiftRecord> {
     assertCurrent();
-    const owned = this.admissionOwner.own('gifts', [entry])[0]!;
+    const owned = entry;
     return this.change(snapshot => {
       const kept = snapshot.gifts.filter(
         (existing) => !(existing.occasionId === owned.occasionId && existing.occurrence === owned.occurrence),
@@ -617,7 +630,7 @@ export class OccasionStateStore {
       if (kept.length > MAX_GIFT_RECORDS) kept.splice(0, kept.length - MAX_GIFT_RECORDS);
       snapshot.gifts = kept;
       return entry;
-    }, assertCurrent, { replacedGiftOccasion: owned.occasionId });
+    }, assertCurrent);
   }
 
   // -------------------------------------------------------------------------
@@ -635,7 +648,7 @@ export class OccasionStateStore {
   /** Create or replace one open item, addressed by its id. */
   async putOpenItem(item: OpenItem, assertCurrent: () => void = UNRESTRICTED_OPERATION): Promise<OpenItem> {
     assertCurrent();
-    const owned = this.admissionOwner.own('openItems', [item])[0]!;
+    const owned = item;
     return this.change(snapshot => {
       const kept = snapshot.openItems.filter((existing) => existing.id !== owned.id);
       kept.push(owned);
@@ -648,8 +661,7 @@ export class OccasionStateStore {
   /** Publish one derived sweep batch, renewing only its own committed state receipt. */
   async putOpenItems(items: readonly OpenItem[], assertCurrent: () => void, afterPublish: () => void): Promise<void> {
     assertCurrent();
-    items = this.admissionOwner.own('openItems', items);
-    if (items.length === 0) { assertCurrent(); return; }
+    if (items.length === 0) return;
     await this.change(snapshot => {
       for (const item of items) {
         snapshot.openItems = [...snapshot.openItems.filter(existing => existing.id !== item.id), item].slice(-MAX_OPEN_ITEMS);
@@ -788,6 +800,9 @@ export class OccasionStateStore {
       snapshot.openItems = snapshot.openItems.filter((e) => e.occasionId !== occasionId);
       snapshot.interviews = snapshot.interviews.filter((e) => e.occasionId !== occasionId);
       snapshot.mirrors = snapshot.mirrors.filter((e) => e.occasionId !== occasionId);
+      // A reading about a removed line is bookkeeping, not a record the owner
+      // would count, so it goes without adding to the number reported back.
+      snapshot.attributions = snapshot.attributions.filter((e) => e.occasionId !== occasionId);
       const after = snapshot.acknowledgements.length + snapshot.gifts.length
         + snapshot.openItems.length + snapshot.interviews.length + snapshot.mirrors.length;
       return before - after;
@@ -804,7 +819,12 @@ export class OccasionStateStore {
    *    expiry and stays: "handled" is permanent for something that happens once.
    *  - State for an occasion no longer declared is orphaned and dropped. This is
    *    the safety net behind the explicit removal path, for the case where the
-   *    owner deleted the line in their editor rather than through a verb.
+   *    owner deleted the line in their editor rather than through a verb. A
+   *    line that is still there but does not parse is still declared (the
+   *    caller passes the id of every titled line), so a typo costs nothing.
+   *    Gift history is the exception: it is never reaped as an orphan, because
+   *    a retitled line would otherwise lose years of it. It leaves by age or by
+   *    an explicit removal, and stays readable under its old id until then.
    *  - An open item whose occurrence has passed stops being raised. Nothing
    *    unresolved is ever dropped WHILE IT CAN STILL MATTER; a birthday that
    *    was three weeks ago cannot.
@@ -834,10 +854,11 @@ export class OccasionStateStore {
       });
 
       snapshot.gifts = snapshot.gifts.filter((entry) => {
-        if (isOrphan(entry.occasionId)) { orphanedRecords += 1; return false; }
         if (entry.occurrence < giftCutoff) { agedGiftRecords += 1; return false; }
         return true;
       });
+
+      snapshot.attributions = snapshot.attributions.filter((entry) => !isOrphan(entry.occasionId));
 
       snapshot.openItems = snapshot.openItems.filter((entry) => {
         if (isOrphan(entry.occasionId)) { orphanedRecords += 1; return false; }
@@ -888,6 +909,7 @@ export class OccasionStateStore {
       openItems: snapshot.openItems.length,
       interviews: snapshot.interviews.length,
       mirrors: snapshot.mirrors.length,
+      attributions: snapshot.attributions.length,
       lastSweep: snapshot.lastSweep,
       reconciledOpenItems: this.reconciledOpenItems,
       corruption: this.corruption,

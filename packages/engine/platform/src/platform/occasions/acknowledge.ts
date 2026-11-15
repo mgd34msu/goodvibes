@@ -29,11 +29,12 @@
  * different instructions, and the feature previously had no way to hear the
  * first one.
  *
- * ## Three ways in, one record
+ * ## Three ways in, one record, one write
  *
  * Whichever path records it, the record is identical apart from its `source`,
  * so the sweep has one thing to check and there is no "acknowledged, but only
- * via the API" class of bug:
+ * via the API" class of bug. A stored `yes` or `no` is never replaced, by any
+ * of the three:
  *
  *  - `conversation`, the owner replied to the nudge where it landed and
  *    engaged with the occasion. The turn records it as part of answering them.
@@ -53,14 +54,13 @@ import {
   type OpenItem,
 } from './types.js';
 
-export type { OccasionAckSource } from './types.js';
-export { OCCASION_ACK_SOURCES, isOccasionAckSource } from './types.js';
-
-/** The narrow slice of the state store this path writes through. */
+/** The one store write this path makes. Satisfied by OccasionStateStore. */
 export interface AcknowledgeStore {
-  recordAnswer(entry: OccasionAcknowledgement): Promise<OccasionAcknowledgement>;
-  /** Replace one open item from the stored one, in a single write. */
-  settleOpenItem(id: string, build: (existing: OpenItem | undefined) => OpenItem | null): Promise<OpenItem | null>;
+  acknowledge(
+    entry: OccasionAcknowledgement,
+    itemId: string,
+    build: (existing: OpenItem | undefined) => OpenItem,
+  ): Promise<{ readonly settledBy: 'yes' | 'no' | null }>;
 }
 
 export interface AcknowledgeInput {
@@ -75,19 +75,21 @@ export interface AcknowledgeOutcome {
   readonly occasionId: string;
   readonly occurrence: IsoDate;
   readonly source: OccasionAckSource;
-  /** True when an open item existed and was quieted rather than created. */
-  readonly quietedExisting: boolean;
+  /**
+   * `yes` or `no` when the occurrence was already settled by that answer, in
+   * which case NOTHING was written: both say more than an acknowledgement, and
+   * a `yes` is what keeps a gift interview live.
+   */
+  readonly alreadyAnswered: 'yes' | 'no' | null;
 }
 
 /**
  * Record that the owner has this occurrence in hand.
  *
- * Two writes, in this order and for this reason. The answer goes down first
- * because it is what the sweep reads: if the process died between the two, the
- * push would already be muted and the worst outcome would be an open item that
- * is quiet but not marked spent, quiet either way. The other order could leave
- * the owner acknowledged in their own mind and pushed at by the machine, which is the
- * failure this file exists to end.
+ * One store write carries the answer and the quieted open item together, and
+ * it is the one place the rule "an acknowledgement never replaces a yes or a
+ * no" lives, so every way in (a conversation, a surface's verb, the gift flow)
+ * gets it.
  *
  * The open item is marked as having served both boundaries as well as being
  * answered. Belt and braces on purpose: the mute then survives an
@@ -99,8 +101,8 @@ export async function acknowledgeOccurrence(
   input: AcknowledgeInput,
 ): Promise<AcknowledgeOutcome> {
   const { occasion, occurrence, now } = input;
-
-  await store.recordAnswer({
+  const itemId = nudgeItemId(occasion.id, occurrence);
+  const written = await store.acknowledge({
     id: `${occasion.id}@${occurrence}`,
     occasionId: occasion.id,
     occurrence,
@@ -110,34 +112,36 @@ export async function acknowledgeOccurrence(
     // Expires with its occurrence exactly as every other answer does, so next
     // year asks fresh. "I know about it" was about THIS birthday.
     ...(occasion.recurrence === 'annual' ? { expiresAfter: occurrence } : {}),
-  });
-
-  const itemId = nudgeItemId(occasion.id, occurrence);
-  // Built from the stored item inside one write: a copy read earlier and put back
-  // later would overwrite a raise recorded in between.
-  let quietedExisting = false;
-  await store.settleOpenItem(itemId, (existing) => {
-    if (existing === undefined) {
-      // The owner acknowledged something that had not been raised yet, they got
-      // there first. The item is opened anyway, and opened quiet, so the pull can
-      // still show it and the sweep can never decide to introduce it to them.
-      return {
-        id: itemId,
-        kind: 'nudge',
-        occasionId: occasion.id,
-        occurrence,
-        openedAt: now,
-        lastRaisedAt: now,
-        raiseCount: 0,
-        servedBoundaries: [...RAISE_BOUNDARIES],
-        dueOn: occurrence,
-        expiresAfter: occurrence,
-      };
+  }, itemId, (existing) => existing === undefined
+    // The owner acknowledged something that had not been raised yet, they got
+    // there first. The item is opened anyway, and opened quiet, so the pull can
+    // still show it and the sweep can never decide to introduce it to them.
+    ? {
+      id: itemId,
+      kind: 'nudge',
+      occasionId: occasion.id,
+      occurrence,
+      openedAt: now,
+      lastRaisedAt: now,
+      raiseCount: 0,
+      servedBoundaries: [...RAISE_BOUNDARIES],
+      dueOn: occurrence,
+      expiresAfter: occurrence,
     }
-    quietedExisting = true;
-    return { ...existing, servedBoundaries: [...RAISE_BOUNDARIES] };
-  });
-  return { occasionId: occasion.id, occurrence, source: input.source, quietedExisting };
+    : { ...existing, servedBoundaries: [...RAISE_BOUNDARIES] });
+  return {
+    occasionId: occasion.id,
+    occurrence,
+    source: input.source,
+    alreadyAnswered: written.settledBy,
+  };
+}
+
+/** What to say back when the occurrence was already answered and nothing changed. */
+export function alreadyAnsweredReply(occasionTitle: string, answer: 'yes' | 'no'): string {
+  return answer === 'no'
+    ? `You already said no for ${occasionTitle} this time, so it is already quiet. Nothing changed.`
+    : `You already said yes for ${occasionTitle}, and the gift planning for it is under way. Nothing changed.`;
 }
 
 /**

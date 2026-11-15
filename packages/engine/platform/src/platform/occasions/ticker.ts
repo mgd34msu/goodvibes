@@ -28,6 +28,8 @@
  *  - **A failing sweep re-arms.** One transient error must not stop the loop for
  *    the life of the process, which is what a naive `await` inside the timer
  *    body does.
+ *  - **Start does not reset the clock.** The first pass is scheduled from the
+ *    last stored sweep (`firstDelayMs`), not one whole interval after start.
  */
 
 /** The timer surface this needs, injected so a test can drive it. */
@@ -44,6 +46,14 @@ export interface SweepTickerOptions {
   readonly scheduler?: TickerScheduler | undefined;
   /** Called when a pass throws, so the failure is on the record. */
   readonly onError?: ((error: unknown) => void) | undefined;
+  /**
+   * How long until the FIRST pass, in milliseconds. Absent, the first pass is a
+   * full interval away. The composition answers from the stored time of the
+   * last sweep, so a daemon that is restarted more often than the interval
+   * still sweeps: an overdue pass runs shortly after start, and one that is not
+   * yet due keeps its place instead of starting the wait again.
+   */
+  readonly firstDelayMs?: (() => number | Promise<number>) | undefined;
 }
 
 export interface SweepTicker {
@@ -76,11 +86,11 @@ export function startOccasionSweepTicker(options: SweepTickerOptions): SweepTick
   let running = false;
   let stopped = false;
 
-  const arm = (): void => {
+  const arm = (firstDelay?: number): void => {
     if (stopped) return;
     let delay = DEFAULT_INTERVAL_MS;
     try {
-      delay = options.intervalMs();
+      delay = firstDelay ?? options.intervalMs();
     } catch (error) {
       // A setting that cannot be read this time must not end the loop for good.
       options.onError?.(error);
@@ -108,7 +118,18 @@ export function startOccasionSweepTicker(options: SweepTickerOptions): SweepTick
     }
   };
 
-  arm();
+  if (options.firstDelayMs === undefined) arm();
+  else {
+    void (async () => {
+      let first: number | undefined;
+      try {
+        first = await options.firstDelayMs!();
+      } catch (error) {
+        options.onError?.(error);
+      }
+      arm(first !== undefined && Number.isFinite(first) ? Math.max(0, first) : undefined);
+    })();
+  }
 
   return {
     stop: (): void => {

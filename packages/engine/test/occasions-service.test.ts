@@ -592,8 +592,28 @@ describe('what is outstanding, and where it may go', () => {
     const pending = await h.service.pending();
     expect(pending.conflicts).toHaveLength(1);
 
-    expect(await h.service.resolveConflict('mum')).toBe(true);
+    // Without a date nothing changes and the recorded dates come back.
+    const asked = await h.service.resolveConflict({ occasionId: 'mum' });
+    expect(asked).toMatchObject({ resolved: false, dates: ['04-02', '04-03'], removed: [] });
+    expect((await h.service.pending()).conflicts).toHaveLength(1);
+
+    const resolved = await h.service.resolveConflict({ occasionId: 'mum', keep: '04-03', authority: 'owner-direct' });
+    expect(resolved).toMatchObject({ resolved: true, removed: ['04-02'] });
+    expect((await h.service.list()).occasions.map((view) => view.occasion.date)).toHaveLength(1);
     expect((await h.service.pending()).conflicts).toHaveLength(0);
+    expect((await h.service.sweep()).conflictMessages).toHaveLength(0);
+  });
+
+  test('a mistyped date line keeps its answers and gift history through a sweep', async () => {
+    const h = harness();
+    await h.state.recordGift({ occasionId: "sarah's birthday", occurrence: '2025-03-14', landedOn: 'a pottery course', recordedAt: 1 });
+    await h.state.recordAnswer({ id: "sarah's birthday@2026-03-14", occasionId: "sarah's birthday", occurrence: '2026-03-14', answer: 'later', answeredAt: 1 });
+    writeFileSync(h.profilePath, PROFILE.replace("- Sarah's birthday · 03-14 ·", "- Sarah's birthday · 03-1 ·"), 'utf-8');
+    h.profile.loadSync();
+    const outcome = await h.service.sweep();
+    expect(outcome.housekeeping?.orphanedRecords).toBe(0);
+    expect(await h.state.giftHistory("sarah's birthday")).toHaveLength(1);
+    expect((await h.state.answerFor("sarah's birthday", '2026-03-14'))?.answer).toBe('later');
   });
 
   test('the state disclosure names the file and counts, never contents', async () => {

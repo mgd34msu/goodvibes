@@ -49,6 +49,7 @@ export {
   type OccasionAckSource,
   type OccasionAcknowledgement,
   type OccasionAnswer,
+  type OccasionAttribution,
   type OccasionConflict,
   type OccasionDate,
   type OccasionKind,
@@ -96,6 +97,7 @@ export {
 
 export {
   AGENT_NOTICE_HEADING,
+  addressAgentNotice,
   composeAgentNotice,
   composeConflictMessage,
   composeNudge,
@@ -103,19 +105,28 @@ export {
   nameOf,
   proximityOf,
   subjectFor,
+  titleNamesPerson,
 } from './nudge.js';
 
 export {
+  PLATFORM_OCCASION_ACKNOWLEDGE,
+  occasionAcknowledgementInstruction,
+  occasionComplaintLadder,
+  type OccasionAcknowledgeVocabulary,
+} from './acknowledge-instruction.js';
+
+export {
+  attributionKey,
+  declaredSubject,
   isSelfAttribution,
-  ownerAliasSet,
-  possessiveSubject,
+  needsSubjectReading,
   pushableSubject,
-  resolveOccasionSubject,
   selfOccasionReason,
 } from './subject.js';
 
 export {
   acknowledgementReply,
+  alreadyAnsweredReply,
   type AcknowledgeOutcome,
 } from './acknowledge.js';
 
@@ -146,6 +157,7 @@ export {
 export {
   effectiveLead,
   isWithinActiveHours,
+  occurrenceWindow,
   type DueOccasion,
   type OccasionsPolicy,
   type SweepHold,
@@ -164,6 +176,7 @@ export {
   boundaryOn,
   dayOfBoundaryDate,
   hasServed,
+  leadWindowOpens,
   isSpent,
   reconcileRaiseLedger,
 } from './cadence.js';
@@ -179,6 +192,7 @@ export {
 } from './service.js';
 
 export type {
+  ConflictResolution,
   OccasionProposal,
   OccasionWriteOutcome,
 } from './capture.js';

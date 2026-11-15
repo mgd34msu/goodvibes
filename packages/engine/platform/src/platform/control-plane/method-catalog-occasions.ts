@@ -39,14 +39,17 @@ import {
   methodDescriptor,
   objectSchema,
 } from './method-catalog-shared.js';
+import { OCCASION_ACK_SOURCES, OCCASION_ANSWERS, OCCASION_KINDS, OCCASION_SUBJECTS } from '../occasions/types.js';
 
 const NULLABLE_STRING_SCHEMA: Record<string, unknown> = { anyOf: [STRING_SCHEMA, { type: 'null' }] };
 const NULLABLE_NUMBER_SCHEMA: Record<string, unknown> = { anyOf: [NUMBER_SCHEMA, { type: 'null' }] };
 
-const OCCASION_KIND_SCHEMA = { type: 'string', enum: ['gift-giving', 'remember-only', 'neither'] } as const;
-const OCCASION_ANSWER_SCHEMA = { type: 'string', enum: ['yes', 'no', 'later', 'acknowledged'] } as const;
-const OCCASION_SUBJECT_SCHEMA = { type: 'string', enum: ['owner', 'other', 'unattributed'] } as const;
-const OCCASION_ACK_SOURCE_SCHEMA = { type: 'string', enum: ['conversation', 'explicit', 'gift-flow'] } as const;
+// Built from the lists the service checks against, so the published contract
+// and the refusal a caller gets cannot name a different set.
+const OCCASION_KIND_SCHEMA = { type: 'string', enum: [...OCCASION_KINDS] } as const;
+const OCCASION_ANSWER_SCHEMA = { type: 'string', enum: [...OCCASION_ANSWERS] } as const;
+const OCCASION_SUBJECT_SCHEMA = { type: 'string', enum: [...OCCASION_SUBJECTS] } as const;
+const OCCASION_ACK_SOURCE_SCHEMA = { type: 'string', enum: [...OCCASION_ACK_SOURCES] } as const;
 const RECURRENCE_SCHEMA = { type: 'string', enum: ['annual', 'once'] } as const;
 const PROXIMITY_SCHEMA = { type: 'string', enum: ['approaching', 'soon', 'imminent'] } as const;
 
@@ -195,6 +198,11 @@ export const OCCASIONS_LIST_OUTPUT_SCHEMA = objectSchema({
   conflicts: arraySchema(OCCASION_CONFLICT_SCHEMA),
 }, ['today', 'timezone', 'occasions', 'unparsed', 'conflicts']);
 
+/** True when the date is the owner's own: written as `for me`, so it is never pushed when it is one to remember. */
+const SELF_SCHEMA: Record<string, unknown> = { type: 'boolean', description: 'True when the date is the owner\'s own (their birthday). Written as `for me`; a remember-only date of the owner\'s is kept and listed but never pushed at them.' };
+/** Everything else said about a plan, one detail per entry. */
+const PLAN_DETAILS_SCHEMA: Record<string, unknown> = { ...arraySchema(STRING_SCHEMA), description: 'Everything else the owner gave about the plan, one detail per entry: a confirmation number, a flight and its times, who is travelling, why. Stored on the line exactly; a detail the line cannot hold unchanged refuses the write.' };
+
 export const OCCASIONS_PROPOSE_INPUT_SCHEMA = objectSchema({
   title: STRING_SCHEMA,
   date: STRING_SCHEMA,
@@ -202,6 +210,7 @@ export const OCCASIONS_PROPOSE_INPUT_SCHEMA = objectSchema({
   person: STRING_SCHEMA,
   recurrence: RECURRENCE_SCHEMA,
   leadDays: NUMBER_SCHEMA,
+  self: SELF_SCHEMA,
 }, ['title', 'date']);
 
 /**
@@ -220,6 +229,7 @@ export const OCCASIONS_CONFIRM_INPUT_SCHEMA = objectSchema({
   person: STRING_SCHEMA,
   recurrence: RECURRENCE_SCHEMA,
   leadDays: NUMBER_SCHEMA,
+  self: SELF_SCHEMA,
   surface: STRING_SCHEMA,
   said: STRING_SCHEMA,
   authority: STRING_SCHEMA,
@@ -328,6 +338,7 @@ export const OCCASIONS_PLANS_PROPOSE_INPUT_SCHEMA = objectSchema({
   to: STRING_SCHEMA,
   away: BOOLEAN_SCHEMA,
   destination: STRING_SCHEMA,
+  details: PLAN_DETAILS_SCHEMA,
 }, ['title', 'from', 'to']);
 
 export const OCCASIONS_PLANS_CONFIRM_INPUT_SCHEMA = objectSchema({
@@ -337,6 +348,7 @@ export const OCCASIONS_PLANS_CONFIRM_INPUT_SCHEMA = objectSchema({
   to: STRING_SCHEMA,
   away: BOOLEAN_SCHEMA,
   destination: STRING_SCHEMA,
+  details: PLAN_DETAILS_SCHEMA,
   surface: STRING_SCHEMA,
   said: STRING_SCHEMA,
   authority: STRING_SCHEMA,
@@ -349,11 +361,19 @@ export const OCCASIONS_GIFTS_OUTPUT_SCHEMA = objectSchema({
 }, ['occasionId', 'gifts']);
 
 export const OCCASIONS_CONFLICT_RESOLVE_INPUT_SCHEMA = objectSchema({
-  admission: { type: 'string', enum: ['autonomous'] }, occasionId: STRING_SCHEMA }, ['occasionId']);
+  admission: { type: 'string', enum: ['autonomous'] },
+  occasionId: STRING_SCHEMA,
+  keep: { type: 'string', description: 'The date to keep, as recorded (MM-DD or YYYY-MM-DD). Omit to get the recorded dates back without changing anything.' },
+  authority: STRING_SCHEMA,
+}, ['occasionId']);
 export const OCCASIONS_CONFLICT_RESOLVE_OUTPUT_SCHEMA = objectSchema({
   occasionId: STRING_SCHEMA,
   resolved: BOOLEAN_SCHEMA,
-}, ['occasionId', 'resolved']);
+  reason: NULLABLE_STRING_SCHEMA,
+  dates: arraySchema(STRING_SCHEMA),
+  removed: arraySchema(STRING_SCHEMA),
+  disclosure: STRING_SCHEMA,
+}, ['occasionId', 'resolved', 'reason', 'dates', 'removed', 'disclosure']);
 
 export const OCCASIONS_STATE_INPUT_SCHEMA = EMPTY_OBJECT_SCHEMA;
 export const OCCASIONS_STATE_OUTPUT_SCHEMA = objectSchema({
@@ -363,10 +383,11 @@ export const OCCASIONS_STATE_OUTPUT_SCHEMA = objectSchema({
   openItems: NUMBER_SCHEMA,
   interviews: NUMBER_SCHEMA,
   mirrors: NUMBER_SCHEMA,
+  attributions: NUMBER_SCHEMA,
   lastSweep: { anyOf: [OCCASION_SWEEP_REPORT_SCHEMA, { type: 'null' }] },
   reconciledOpenItems: NUMBER_SCHEMA,
   corruption: NULLABLE_STRING_SCHEMA,
-}, ['path', 'acknowledgements', 'giftRecords', 'openItems', 'interviews', 'mirrors', 'lastSweep', 'reconciledOpenItems', 'corruption']);
+}, ['path', 'acknowledgements', 'giftRecords', 'openItems', 'interviews', 'mirrors', 'attributions', 'lastSweep', 'reconciledOpenItems', 'corruption']);
 
 export const OCCASIONS_ACKNOWLEDGE_INPUT_SCHEMA = objectSchema({
   admission: { type: 'string', enum: ['autonomous'] },
@@ -378,7 +399,9 @@ export const OCCASIONS_ACKNOWLEDGE_OUTPUT_SCHEMA = objectSchema({
   ok: BOOLEAN_SCHEMA,
   reason: NULLABLE_STRING_SCHEMA,
   reply: STRING_SCHEMA,
-}, ['ok', 'reason', 'reply']);
+  /** False when the occurrence was already answered yes or no and nothing was written. */
+  changed: BOOLEAN_SCHEMA,
+}, ['ok', 'reason', 'reply', 'changed']);
 
 export const builtinGatewayOccasionsMethodDescriptors: readonly GatewayMethodDescriptor[] = [
   methodDescriptor({
@@ -405,7 +428,7 @@ export const builtinGatewayOccasionsMethodDescriptors: readonly GatewayMethodDes
     id: 'occasions.confirm',
     metadata: { requiresFreshOperatorAuth: true },
     title: 'Record A Confirmed Important Date',
-    description: 'Write the confirmed occasion as one line in the owner profile, under Important dates, carrying its provenance. This is the ONE confirmation: nothing re-confirms at nudge time, because for an annual date a silent write means the mistake surfaces up to eleven months later. Refused without a kind rather than defaulting one. Goes through the owner-profile write gate, so authority, surface and a verbatim quote of what the owner said are all required.',
+    description: 'Write the confirmed occasion as one line in the owner profile, under Important dates, carrying its provenance. self:true marks the owner\'s own date (written as for me), so a remember-only one is never pushed at them. This is the ONE confirmation: nothing re-confirms at nudge time, because for an annual date a silent write means the mistake surfaces up to eleven months later. Refused without a kind rather than defaulting one. Goes through the owner-profile write gate, so authority, surface and a verbatim quote of what the owner said are all required.',
     category: 'occasions',
     scopes: ['write:occasions'],
     http: { method: 'POST', path: '/api/occasions/confirm' },
@@ -428,7 +451,7 @@ export const builtinGatewayOccasionsMethodDescriptors: readonly GatewayMethodDes
     id: 'occasions.answer',
     metadata: { requiresFreshOperatorAuth: true },
     title: 'Answer An Occasion Nudge',
-    description: 'Record yes, no, later or acknowledged for one occurrence. A no goes silent for the rest of this cycle and expires with the date, so next year asks fresh carrying no memory of the refusal. A later is NOT a decline, it comes back roughly halfway to the date. A yes on a gift-giving occasion opens the short interview and returns its first question. A yes or a no RESOLVES the open item and removes it. A later keeps the item open and moves it to its return date with its pushes available again. An answer of acknowledged leaves the item standing and quiet (the same as occasions.acknowledge).',
+    description: 'Record yes, no, later or acknowledged for one occurrence. A no goes silent for the rest of this cycle and expires with the date, so next year asks fresh carrying no memory of the refusal. A later is NOT a decline, it comes back roughly halfway to the date. A yes on a gift-giving occasion opens the short interview and returns its first question. A yes or a no RESOLVES the open item and removes it. A later keeps the item open and moves it to its return date with its pushes available again. An answer of acknowledged leaves the item standing and quiet (the same as occasions.acknowledge); on an occurrence already answered yes or no it changes nothing and ok is false with the reason.',
     category: 'occasions',
     scopes: ['write:occasions'],
     http: { method: 'POST', path: '/api/occasions/answer' },
@@ -439,7 +462,7 @@ export const builtinGatewayOccasionsMethodDescriptors: readonly GatewayMethodDes
     id: 'occasions.acknowledge',
     metadata: { requiresFreshOperatorAuth: true },
     title: 'Acknowledge An Occasion',
-    description: 'Record that the owner has one occurrence in hand, so nothing is pushed at them about it again. This is not a yes and not a no: the open item STAYS OPEN and stays enumerable, so occasions.pending still lists it, under acknowledged[] rather than in the nudge, and asking what is coming up still answers with it. Only the push stops. The record expires with its occurrence, so next year asks fresh. source names how it was recorded: conversation when the owner said so in a reply, explicit when a surface offered the action, gift-flow when the owner is already answering gift questions about it.',
+    description: 'Record that the owner has one occurrence in hand, so nothing is pushed at them about it again. This is not a yes and not a no: the open item STAYS OPEN and stays enumerable, so occasions.pending still lists it, under acknowledged[] rather than in the nudge, and asking what is coming up still answers with it. Only the push stops. The record expires with its occurrence, so next year asks fresh. An occurrence already answered yes or no is left as it is: changed is false and reply says so. source names how it was recorded: conversation when the owner said so in a reply, explicit when a surface offered the action, gift-flow when the owner is already answering gift questions about it.',
     category: 'occasions',
     scopes: ['write:occasions'],
     http: { method: 'POST', path: '/api/occasions/acknowledge' },
@@ -491,7 +514,7 @@ export const builtinGatewayOccasionsMethodDescriptors: readonly GatewayMethodDes
   methodDescriptor({
     id: 'occasions.pending',
     title: 'Pull Outstanding Occasions',
-    description: 'Return everything unresolved, without delivering anything: the batched nudge, any date conflict still open, and any interview left mid-thread. This is how a surface that is not a push destination receives a nudge, it pulls at the start of a turn rather than being pushed at, and a stored date is the prior scheduling that permits raising something unprompted. A nudge a push has already landed on the agent is left out while the agent is a configured push destination, so the push and the pull cannot raise the same thing twice; an item no push has ever landed there is still returned, so a missing sender or a failed send loses nothing. The nudge names the occasion and the person and NEVER the date: proximity is a word, not a count of days.',
+    description: 'Return everything unresolved, without delivering anything: the batched nudge, any date conflict still open, and any interview left mid-thread. This is how a surface that is not a push destination receives a nudge, it pulls at the start of a turn rather than being pushed at, and a stored date is the prior scheduling that permits raising something unprompted. A nudge a push has already landed on the agent is left out while the agent is a configured push destination, so the push and the pull cannot raise the same thing twice; an item no push has ever landed there is still returned, so a missing sender or a failed send loses nothing. An occurrence inside its window is listed even before any sweep has opened it, so a machine that was just started still answers. Composed in code, the same with or without a decision model. The nudge names the occasion and the person and NEVER the date: proximity is a word, not a count of days.',
     category: 'occasions',
     scopes: ['read:occasions'],
     http: { method: 'GET', path: '/api/occasions/pending' },
@@ -502,7 +525,7 @@ export const builtinGatewayOccasionsMethodDescriptors: readonly GatewayMethodDes
     id: 'occasions.sweep',
     metadata: { requiresFreshOperatorAuth: true },
     title: 'Run The Approach Sweep Now',
-    description: 'Run one pass immediately: reap expired and orphaned state, find the occasions entering their lead window, batch them into a single message, mirror to the calendar if that is on, and deliver. Delivery goes to every destination in occasions.nudgeChannel, a comma-separated list, so Telegram and the agent both get it, and each is attempted independently, with deliveries[] naming per destination what landed and what did not. Housekeeping runs first and unconditionally, so a machine with nudging turned off still reaps. Returns hold:"quiet-hours" or hold:"disabled" when it deliberately said nothing, nothing is dropped, it waits.',
+    description: 'Run one pass immediately: reap expired and orphaned state, find the occasions entering their lead window, batch them into a single message, mirror to the calendar if that is on, and deliver. Delivery goes to every destination in occasions.nudgeChannel, a comma-separated list, so Telegram and the agent both get it, and each is attempted independently, with deliveries[] naming per destination what landed and what did not. Housekeeping runs first and unconditionally, so a machine with nudging turned off still reaps. Returns hold:"quiet-hours" or hold:"disabled" when it deliberately said nothing, nothing is dropped, it waits. It runs the same with or without a decision model; with decision models off, provenance:"classic" says who each date is about was taken from the line\'s own for-me marker only. A push a destination accepted is recorded as sent even if settings or the profile changed during the send, so it is not pushed again next pass.',
     category: 'occasions',
     scopes: ['write:occasions'],
     http: { method: 'POST', path: '/api/occasions/sweep' },
@@ -512,8 +535,8 @@ export const builtinGatewayOccasionsMethodDescriptors: readonly GatewayMethodDes
   methodDescriptor({
     id: 'occasions.conflict.resolve',
     metadata: { requiresFreshOperatorAuth: true },
-    title: 'Close A Date Conflict',
-    description: 'Stop re-raising a conflict the owner has dealt with. The conflict itself is never resolved automatically, two different dates for one thing means only the owner knows which was right, and silently taking the newer value is the behaviour this exists to prevent.',
+    title: 'Resolve A Date Conflict',
+    description: 'Apply the owner\'s answer to "which date is right?": keep names the date to keep, the other lines for that title are removed from the owner profile through the profile write gate (so authority is required with keep), answers and gift history stay, and the conflict is not raised again. Without keep nothing changes and dates lists what is recorded, to put to the owner. A conflict is never resolved automatically: only the owner knows which date was right. When the file already holds one date (the owner fixed it by hand) the reminder is closed and resolved is true.',
     category: 'occasions',
     scopes: ['write:occasions'],
     http: { method: 'POST', path: '/api/occasions/conflict/resolve' },
@@ -544,7 +567,7 @@ export const builtinGatewayOccasionsMethodDescriptors: readonly GatewayMethodDes
     id: 'occasions.plans.confirm',
     metadata: { requiresFreshOperatorAuth: true },
     title: 'Record A Confirmed Plan',
-    description: 'Write the confirmed plan as one line in the owner profile, under Plans, carrying its provenance. Same one-confirmation rule and the same owner-profile write gate as an occasion.',
+    description: 'Write the confirmed plan as one line in the owner profile, under Plans, carrying its provenance and every entry of details (a confirmation number, flights and times, who is travelling), which occasions.plans.list returns in extras. Same one-confirmation rule and the same owner-profile write gate as an occasion.',
     category: 'occasions',
     scopes: ['write:occasions'],
     http: { method: 'POST', path: '/api/occasions/plans/confirm' },

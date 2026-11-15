@@ -36,6 +36,7 @@
  */
 
 import { resolveCaptureAuthority, type CaptureAuthorityDecision, type CaptureChannelIdentity } from './authority.js';
+import { PLATFORM_OCCASION_ACKNOWLEDGE, occasionAcknowledgementInstruction, occasionComplaintLadder } from '../occasions/acknowledge-instruction.js';
 
 /**
  * The tools a conversational turn is spawned with.
@@ -56,65 +57,11 @@ export const CONVERSATIONAL_TURN_TOOLS: readonly string[] = [
  */
 const OWNER_CHANNEL_TURN_TOOLS: readonly string[] = ['profile', 'fetch'];
 
-/**
- * What to do when the owner answers a reminder.
- *
- * The gap this closes: occasion nudges are pushed to Telegram and to the agent's
- * own conversation, so the reply to one is a SENTENCE. Nothing ever turned a
- * sentence into a record, the only thing that could write an acknowledgement
- * was a CLI/webui verb, so the owner could answer a nudge, and answer it again,
- * and from the sweep's side the owner had said nothing at all. It kept asking.
- *
- * Exported so a test can pin the wording. This is behaviour, not decoration.
- */
-export const OCCASION_ACKNOWLEDGEMENT_INSTRUCTION: readonly string[] = [
-  'When the owner responds to a reminder about an upcoming date, or mentions one you reminded',
-  'them about, and what they say means they have it in hand, record that in the same turn with',
-  'the `profile` tool, action `acknowledge_occasion`. "I know", "I\'m on it", "already sorted",',
-  '"yeah, next week", "you\'ve told me" and "stop telling me about it" all mean the same thing:',
-  'the owner has heard you. Record it and they stop being pushed about that occurrence; say',
-  'nothing and they get reminded again. Do not ask whether to record it, asking permission to',
-  'stop interrupting is another interruption.',
-  '',
-  'Acknowledging is not deleting. The date stays on the profile, it still comes back next year,',
-  'and it still answers when the owner asks what is coming up. Say that back in one clause so',
-  'the owner knows what just happened.',
-];
+/** The platform turn's reminder-acknowledgement rule, with the platform's own capture tool. */
+export const OCCASION_ACKNOWLEDGEMENT_INSTRUCTION: readonly string[] = occasionAcknowledgementInstruction(PLATFORM_OCCASION_ACKNOWLEDGE);
 
-/**
- * The remedy ladder for "your reminders are bothering me".
- *
- * The defect this closes: the owner complained, angrily, about hourly
- * reminders for ONE occasion, and the turn set `occasions.enabled = false`,
- * which also silenced their spouse's birthday, a gift-giving occasion with a
- * shopping runway, and they would not have found out until it was too late to
- * matter.
- *
- * The general rule underneath it is worth more than the specific fix: the size
- * of a remedy is matched to the size of a complaint, and turning a whole
- * capability off is never how one noisy item gets quieter.
- */
-export const OCCASION_COMPLAINT_LADDER: readonly string[] = [
-  'If the owner objects to being reminded about something, fix the SMALLEST thing that fixes',
-  'it. In order, and stop at the first rung that answers what was said:',
-  '',
-  '  1. Acknowledge that one occurrence with `profile` action `acknowledge_occasion`, so it stops',
-  '     being raised. This is almost always the right rung, and it is one tool call.',
-  '  2. Removing a date, changing how early one is raised, or turning reminders off is',
-  '     not something you can do from here. Say so plainly. To remove a date, the owner deletes',
-  '     its line in their profile document. To change the lead time or turn reminders off, they',
-  '     set occasions.leadDays or occasions.enabled in settings. Never say you removed or',
-  '     switched off something you have no tool for. "Stop reminding me about my birthday" is rung 1. It is never a reason to point at switching the whole feature',
-  '     off, and neither is a complaint with swearing in it, anger tells you how badly the',
-  '     owner wants the noise to stop, not how much of their life to switch off.',
-  '',
-  'These rungs need the `profile` tool. When this turn cannot record to the profile (stated',
-  'below), say that plainly instead of acting.',
-  '',
-  'Whatever you do, say which occasion you silenced AND that the other dates still run. The',
-  'owner cannot see the setting you changed, so an unnamed fix is indistinguishable from',
-  'having broken something they will notice in November.',
-];
+/** The platform turn's remedy ladder for a complaint about reminders. */
+export const OCCASION_COMPLAINT_LADDER: readonly string[] = occasionComplaintLadder(PLATFORM_OCCASION_ACKNOWLEDGE);
 
 export interface ConversationalSpawnContextInput {
   /** The shared session this turn belongs to. */

@@ -181,6 +181,10 @@ function createInstance(
         if (!outcome.ok) {
           return refused(outcome.reason ?? 'That occasion was not acknowledged.');
         }
+        // Already answered yes or no: nothing was written, and the reply says
+        // which answer stands, so the turn does not report a change that did
+        // not happen.
+        if (outcome.changed === false) return refused(outcome.reply, { tellOwner: outcome.reply });
         return stored({
           what: 'acknowledgement',
           id: occasionId,

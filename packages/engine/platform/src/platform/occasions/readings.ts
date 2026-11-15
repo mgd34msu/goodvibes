@@ -42,7 +42,14 @@ export const occasionSubject = defineBattery({
 export class OccasionReadingHeldError extends Error {
   constructor() { super('The occasion reading is unavailable, unsettled or no longer current.'); this.name = 'OccasionReadingHeldError'; }
 }
-/** Capture once before asynchronous source reads; retain through persistence and rendering. */
+/**
+ * The model port and lifetime for the one occasion step that still asks a model
+ * per call: planning a gift interview. Who a date is about is read once per line
+ * and stored (subject.ts); everything else on the occasions path is code.
+ *
+ * `assertCurrent` is the caller's signal and restriction, the policy captured at
+ * entry and the port's own lease: integer and identity compares, no re-reads.
+ */
 export class OccasionReadingWork {
   private readonly owner: JudgmentPortCapture | undefined;
   private readonly policy = decisionModelPolicyState().policy;
@@ -56,7 +63,6 @@ export class OccasionReadingWork {
         activateClassicFallback(error);
       }
     }
-    this.assertCurrent();
   }
   retain(check: () => void): void { check(); this.checks.push(check); }
   readonly assertCurrent = (): void => {
@@ -68,13 +74,9 @@ export class OccasionReadingWork {
     for (const check of this.checks) check();
     if (policy.operation !== 'classic') this.owner?.assertCurrent();
   };
+  /** Screened, owned copy of what goes to the model. Taken once; nothing is re-read later. */
   snapshot<T>(source: T): T {
-    this.assertCurrent();
-    const captured = snapshotJudgmentInput(source) as T;
-    const identity = JSON.stringify(captured);
-    this.retain(() => { if (JSON.stringify(snapshotJudgmentInput(source)) !== identity) throw new OccasionReadingHeldError(); });
-    this.assertCurrent();
-    return captured;
+    return snapshotJudgmentInput(source) as T;
   }
   async wait<T>(work: () => Promise<T>): Promise<T> {
     this.assertCurrent();
@@ -84,11 +86,10 @@ export class OccasionReadingWork {
   get signal(): AbortSignal | undefined { return isClassicOperation() ? this.options.signal : this.owner?.signal ?? this.options.signal; }
   get port(): JudgmentPort {
     this.assertCurrent();
-    requireDecisionFeature('semantic occasion attribution and gift planning');
+    requireDecisionFeature('gift planning');
     const owner = this.owner;
     if (!owner) throw new OccasionReadingHeldError();
     return { ...owner.port, ask: async request => {
-      this.assertCurrent();
       const response = await owner.port.ask(request);
       this.assertCurrent(); checkAnswers(request.questions, response.answers);
       if (response.requestedModel !== owner.port.model || typeof response.model !== 'string' || !response.model.trim()) throw new OccasionReadingHeldError();

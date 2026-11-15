@@ -31,13 +31,19 @@
  * "has he already been told", and the two would disagree the first time one of
  * them missed a write.
  *
- * ## The body goes in unaltered, and the title does not go in at all
+ * ## The body goes in as composed, and the title does not go in at all
  *
  * `addAssistantMessage(message.body)`, the same verbatim path the pull uses, for
  * the same reason. §4.3's rule is that a nudge never carries the date in any
  * form, the daemon composes the sentence from a day count that never leaves its
  * own module, and a surface that rewrote or decorated it would be re-deciding
  * that with worse information.
+ *
+ * One line is this product's to say: an occasion notice ends by telling the
+ * model how to record "already in hand", and the daemon names its own `profile`
+ * action there because it does not know which product lands the push. That
+ * line is re-addressed to this build's `occasions` action (`addressAgentNotice`);
+ * nothing else in the body changes, and any other message passes untouched.
  *
  * The title is metadata and is NOT prepended. For an occasion push it is generic
  * scaffolding ("A date is coming up") while the body is the composed sentence
@@ -52,7 +58,9 @@ import type {
   AgentConversationMessage,
   AgentConversationSender,
 } from '@goodvibes-jev/engine/platform/platform/channels';
+import { addressAgentNotice } from '@goodvibes-jev/engine/platform/platform/occasions';
 import type { ConversationManager } from '../core/conversation.ts';
+import { AGENT_OCCASION_ACKNOWLEDGE } from '../tools/agent-occasions-types.ts';
 import { findSessionConversation } from './conversation-rewind-port.ts';
 
 /** The landing surface: one conversation, and a render request after it. */
@@ -126,14 +134,15 @@ export function createAgentConversationSender(
       if (typeof target === 'string') throw new Error(target);
 
       const addMessage = target.conversation.addAssistantMessage;
+      const body = addressAgentNotice(message.body, AGENT_OCCASION_ACKNOWLEDGE);
       if (lifetime.signal !== undefined || lifetime.assertCurrent !== undefined || lifetime.withPublication !== undefined) {
         await runDeliveryPublication({ ...lifetime, assertCurrent() {
           assertDeliveryCurrent(lifetime);
           const current = conversationFor(message);
           if (typeof current === 'string' || current.conversation !== target.conversation
             || current.conversation.addAssistantMessage !== addMessage) throw new Error('Agent delivery conversation changed.');
-        } }, () => addMessage.call(target.conversation, message.body));
-      } else addMessage.call(target.conversation, message.body);
+        } }, () => addMessage.call(target.conversation, body));
+      } else addMessage.call(target.conversation, body);
       deps.requestRender();
       // Counts and ids only. The body is not logged at any level: a push
       // addressed here can carry closed-tier content (an occasion nudge names a

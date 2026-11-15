@@ -58,6 +58,8 @@ import { RuntimeEventBus } from '@/runtime/index.ts';
 import { createRuntimeStore } from '../../runtime/store/index.ts';
 import { authoredPrivacyAnswer, errorSpan, errorText } from '../helpers/authored-diagnostic-readings.ts';
 import { createAgentConversationSender } from '../../runtime/agent-conversation-sender.ts';
+import { createAgentOccasionsTool } from '../../tools/agent-occasions-tool.ts';
+import { AGENT_OCCASION_ACKNOWLEDGE } from '../../tools/agent-occasions-types.ts';
 
 /** A date a few days out, so it sits inside the default ten-day lead window. */
 function annualDateSoon(): string {
@@ -201,16 +203,15 @@ describe('the seeded profile is this runtime\'s own, never the real home', () =>
   });
 });
 
-test('an unavailable reading delivers nothing and cannot stamp away the later nudge', async () => {
+test('with no decision model the push still lands once and the pull goes quiet', async () => {
   const h = (await harness());
   const undo = registerSender(h);
   try {
-    await expect(h.invoke('occasions.sweep', {}, false)).rejects.toThrow(/occasion reading is unavailable/);
-    expect(h.said).toEqual([]);
-    const delivered = await h.invoke('occasions.sweep');
-    expect(delivered).toHaveProperty('delivered', true);
+    expect(await h.invoke('occasions.sweep', {}, false)).toHaveProperty('delivered', true);
     expect(h.said).toHaveLength(1);
-    expect(await h.invoke('occasions.pending')).toHaveProperty('nudge', null);
+    await h.invoke('occasions.sweep', {}, false);
+    expect(h.said).toHaveLength(1);
+    expect(await h.invoke('occasions.pending', {}, false)).toHaveProperty('nudge', null);
   } finally { undo(); }
 });
 
@@ -256,6 +257,12 @@ describe('sender registered: the push lands and the pull goes quiet', () => {
     expect(h.said[0]).toContain('Sarah');
     // Proximity is a word: no date and no day count reached the transcript (§4.3).
     expect(/\d/.test(h.said[0] ?? '')).toBe(false);
+    // "Already in hand" is recorded with an action this build's tool has.
+    expect(h.said[0]).toContain(AGENT_OCCASION_ACKNOWLEDGE.action);
+    expect(h.said[0]).not.toContain('acknowledge_occasion');
+    const tool = createAgentOccasionsTool({ invoke: (async () => ({ ok: false, data: null, route: 'unavailable' })) as never });
+    const answers = (tool.definition.parameters as { properties: { answer: { enum: string[] } } }).properties.answer.enum;
+    expect(answers).toContain('acknowledged');
   });
 
   test('and the pull then says nothing about it: one thing said once', async () => {

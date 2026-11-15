@@ -35,6 +35,11 @@
  * `src/test/runtime/conversational-capture-contract.test.ts` pins each rule so
  * neither copy can lose one quietly.
  *
+ * The one rule that is NOT restated is answering a reminder ("I know, I'm on
+ * it"): the platform writes it once with the recording call as an input, so
+ * this product passes its own (`occasions` action `answer` with
+ * `acknowledged`), and the reminder notice its sender lands names the same call.
+ *
  * ## Authority
  *
  * The Agent's surface is local: the owner is sitting at it, typing. That is the
@@ -49,6 +54,8 @@ import {
   resolveCaptureAuthority,
   type CaptureAuthorityDecision,
 } from '@goodvibes-jev/engine/platform/platform/personal-capture';
+import { occasionAcknowledgementInstruction } from '@goodvibes-jev/engine/platform/platform/occasions';
+import { AGENT_OCCASION_ACKNOWLEDGE } from '../tools/agent-occasions-types.ts';
 
 /**
  * The capture-capable tools a conversational Agent turn needs registered.
@@ -140,4 +147,8 @@ export const AGENT_CONVERSATIONAL_CAPTURE_POLICY: string = [
   '- Then say concretely what you stored: what it was, the dates, and where it went. Never "noted" and never "I\'ll remember that", he cannot tell either of those apart from nothing happening, and that is exactly what went wrong.',
   // Rule 5, a failed capture is spoken. Occasions doctrine applied here.
   '- If a capture does not complete, a refused authority, an unreachable daemon, a value you could not resolve, say so plainly in the reply and say what stopped it. Never let a failed capture pass as a friendly acknowledgement, and never retry it with a different authority to get past the refusal. Nothing unresolved drops silently.',
+  '',
+  // Answering a reminder: the platform's one statement of the rule, with this
+  // product's recording call.
+  ...occasionAcknowledgementInstruction(AGENT_OCCASION_ACKNOWLEDGE),
 ].join('\n');

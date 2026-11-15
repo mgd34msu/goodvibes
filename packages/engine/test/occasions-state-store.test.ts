@@ -252,10 +252,12 @@ describe('housekeeping', () => {
       declaredOccasionIds: new Set<string>(),
       giftHistoryYears: 10,
     });
-    expect(report.orphanedRecords).toBe(3);
+    expect(report.orphanedRecords).toBe(2);
     expect(report.droppedInterviews).toBe(1);
+    // Gift history is never reaped as an orphan: a retitled line keeps it until
+    // it ages out or the occasion is removed.
     const disclosure = await store.disclose();
-    expect(disclosure).toMatchObject({ acknowledgements: 0, giftRecords: 0, openItems: 0, interviews: 0 });
+    expect(disclosure).toMatchObject({ acknowledgements: 0, giftRecords: 1, openItems: 0, interviews: 0 });
   });
 
   test('an open item stops being raised once its occurrence has passed', async () => {

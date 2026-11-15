@@ -14,9 +14,16 @@ import { nudgeDeliveryText } from '../platform/src/platform/occasions/destinatio
 import { AGENT_NOTICE_HEADING } from '../platform/src/platform/occasions/nudge.ts';
 import { reconcileRaiseLedger } from '../platform/src/platform/occasions/cadence.ts';
 import {
+  declaredSubject,
   pushableSubject,
-  resolveOccasionSubject,
+  readOccasionSubject,
 } from '../platform/src/platform/occasions/subject.ts';
+import type { Occasion } from '../platform/src/platform/occasions/types.ts';
+
+/** The subject the stored reading settles for one line. */
+async function subjectOf(occasion: Occasion, names: readonly string[]) {
+  return occasion.selfDeclared ? declaredSubject(occasion) : (await readOccasionSubject(occasion, names)).subject;
+}
 import { parseOccasionLine } from '../platform/src/platform/occasions/grammar.ts';
 import { OCCASIONS_DEFAULTS } from '../platform/src/platform/occasions/policy.ts';
 import { PROFILE_TOOL_SCHEMA } from '../platform/src/platform/tools/profile/schema.ts';
@@ -344,32 +351,32 @@ describe('an occasion about him that he only has to remember is never pushed', (
     const hers = occasionLine("Natalie Sons's birthday · 08-20 · annual · gift-giving · for Natalie Sons");
     const names = ['Avery Chen', 'Avery'];
 
-    expect(await resolveOccasionSubject(his, names)).toBe('owner');
-    expect(await resolveOccasionSubject(hers, names)).toBe('other');
+    expect(await subjectOf(his, names)).toBe('owner');
+    expect(await subjectOf(hers, names)).toBe('other');
 
     // The same line on someone else's machine is about someone else. This is
     // what "not a name match" means: change the file, change the answer, and
     // the practical consequence is that it goes back to being pushed normally.
-    expect(await resolveOccasionSubject(his, ['Priya Raman'])).toBe('other');
-    expect(pushableSubject({ ...his, subject: await resolveOccasionSubject(his, ['Priya Raman']) }))
+    expect(await subjectOf(his, ['Priya Raman'])).toBe('other');
+    expect(pushableSubject({ ...his, subject: await subjectOf(his, ['Priya Raman']) }))
       .toBe(true);
     // With nothing declared, a possessive title still names SOMEONE, and the
     // one thing that must not happen is concluding it is him.
-    expect(await resolveOccasionSubject(his, [])).not.toBe('owner');
-    expect(pushableSubject({ ...his, subject: await resolveOccasionSubject(his, []) })).toBe(true);
+    expect(await subjectOf(his, [])).not.toBe('owner');
+    expect(pushableSubject({ ...his, subject: await subjectOf(his, []) })).toBe(true);
   });
 
   test('an unattributed line is never treated as his', async () => {
     const ours = occasionLine('Our anniversary · 09-12 · annual · gift-giving');
     const dad = occasionLine('Dad · 11-02 · annual · remember-only');
-    expect(await resolveOccasionSubject(ours, ['Avery Chen', 'Avery'])).toBe('unattributed');
-    expect(await resolveOccasionSubject(dad, ['Avery Chen', 'Avery'])).toBe('unattributed');
+    expect(await subjectOf(ours, ['Avery Chen', 'Avery'])).toBe('unattributed');
+    expect(await subjectOf(dad, ['Avery Chen', 'Avery'])).toBe('unattributed');
   });
 
   test('`for me` settles it on the line, whatever the title says', async () => {
     const explicit = occasionLine('Renew the car tax · 02-01 · annual · remember-only · for me');
     expect(explicit.selfDeclared).toBe(true);
-    expect(await resolveOccasionSubject(explicit, [])).toBe('owner');
+    expect(await subjectOf(explicit, [])).toBe('owner');
   });
 
   test('the silence is narrow: an occasion about him that wants an action still runs', async () => {

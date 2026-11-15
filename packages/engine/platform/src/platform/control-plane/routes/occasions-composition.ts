@@ -30,7 +30,8 @@
  * A loop that only runs when a verb asks it to is not proactive, and proactive
  * is the whole feature. So this arms a repeating timer, re-read from config on
  * every tick so `occasions.sweepIntervalMinutes` is a live setting rather than a
- * restart-only one.
+ * restart-only one. The first pass is timed from the last stored sweep, so a
+ * restart does not start the wait again.
  *
  * The timer is deliberately dumb, because the SWEEP is where the judgement is:
  * a tick inside quiet hours raises nothing and reaps anyway, and a tick on a day
@@ -59,6 +60,13 @@ import { controlPlaneStorePath } from '../control-plane-store-paths.js';
 import type { NativeMutationHost } from '../native-mutation.js';
 import { captureMutationDescriptors } from '../../utils/file-mutation.js';
 import { projectOccasionProfileMutation } from '../../occasions/capture.js';
+
+/**
+ * How long after start an overdue sweep runs: long enough for the delivery
+ * router's destinations (the Agent's sender among them) to register, short
+ * enough that a machine that is only on for a while still gets its reminders.
+ */
+const STARTUP_SWEEP_DELAY_MS = 15_000;
 
 /** What the composition needs from the runtime graph. */
 export interface OccasionsCompositionDeps {
@@ -187,6 +195,10 @@ export function composeOccasions(
   // The repeating pass. Its rules and the reasoning behind them live in
   // occasions/ticker.ts, which takes an injected timer so they are testable by
   // advancing a counter rather than by waiting an hour.
+  const sweepIntervalMs = (): number => readOccasionsPolicy({
+    get: (key) => deps.configManager.get(key as ConfigKey),
+    set: () => undefined,
+  }).sweepIntervalMinutes * 60_000;
   const ticker = startOccasionSweepTicker({
     sweep: async () => {
       const outcome = await service.sweep();
@@ -210,10 +222,15 @@ export function composeOccasions(
         });
       }
     },
-    intervalMs: () => readOccasionsPolicy({
-      get: (key) => deps.configManager.get(key as ConfigKey),
-      set: () => undefined,
-    }).sweepIntervalMinutes * 60_000,
+    intervalMs: sweepIntervalMs,
+    // From the last stored sweep, not from start: a daemon restarted more often
+    // than the interval still sweeps, shortly after start when one is overdue.
+    firstDelayMs: async () => {
+      const last = (await state.disclose()).lastSweep?.sweptAt;
+      const interval = sweepIntervalMs();
+      const since = last === undefined ? Number.POSITIVE_INFINITY : Date.now() - last;
+      return since >= interval ? STARTUP_SWEEP_DELAY_MS : interval - since;
+    },
     onError: (error) => {
       logger.warn('occasions: sweep failed', { error: summarizeError(error) });
     },

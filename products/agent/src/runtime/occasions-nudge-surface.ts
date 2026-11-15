@@ -90,9 +90,17 @@
  * ## What happens next is an ordinary conversation
  *
  * His reply is a normal turn. The `occasions` tool relays it, `answer` for
- * yes/no/later, the interview verbs for the short gift interview, and
- * `conflict.resolve` for a date conflict he has settled. Nothing in this file
- * interprets his words.
+ * yes/no/later and for `acknowledged` ("I know, it is in hand"), the interview
+ * verbs for the short gift interview, and `resolve_conflict` with the date he
+ * says is right. Nothing in this file interprets his words.
+ *
+ * ## A failed pull is on the record
+ *
+ * The daemon composes the pull in code, with or without a decision model, so a
+ * daemon that ANSWERED with a failure is a real fault and is logged as a
+ * warning, once per distinct failure until a pull succeeds again. No daemon to
+ * ask is the ordinary state of a surface with nothing to pull from, and stays
+ * a debug line.
  */
 
 import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
@@ -146,28 +154,36 @@ export function createOccasionsNudgeSurface(
   // carried, see occasions-nudge.ts on why this is render de-duplication and
   // not suppression policy.
   let ledger: OccasionsRaiseLedger = new Map<string, string>();
+  // The last failure warned about, so a daemon that keeps failing the same way
+  // is one warning, not one per turn. Cleared by the next good pull.
+  let warned: string | null = null;
 
   const raiseNow = async (): Promise<number> => {
     if (!deps.isEnabled()) return 0;
 
     const result = await deps.invoke(OCCASIONS_METHOD_IDS.pending, {});
     if (!result.ok) {
-      // Debug, not warn: with no daemon reachable this is the ordinary state of
-      // a surface that has nothing to pull from, and a per-turn warn would be
-      // noise. Nothing about an occasion is logged at any level either way,
-      // this whole subject is closed tier.
-      logger.debug('occasions: pending pull failed', {
-        route: result.route,
-        error: result.error ?? 'no reason given',
-      });
+      const error = result.error ?? 'no reason given';
+      // Nothing about an occasion is logged at any level, this whole subject
+      // is closed tier: the route and the daemon's error only.
+      if (result.route === 'unavailable') {
+        logger.debug('occasions: no daemon to pull reminders from', { error });
+      } else if (warned !== `${result.route}:${error}`) {
+        warned = `${result.route}:${error}`;
+        logger.warn('occasions: the reminder pull failed, so nothing coming up was raised this turn', { route: result.route, error });
+      }
       return 0;
     }
 
     const pending = narrowOccasionsPending(result.data);
     if (pending === null) {
-      logger.debug('occasions: pending answer was not a shape this build reads');
+      if (warned !== 'unreadable') {
+        warned = 'unreadable';
+        logger.warn('occasions: the reminder pull answered in a shape this build does not read');
+      }
       return 0;
     }
+    warned = null;
 
     const decision = decideOccasionsRaises(pending, ledger);
     ledger = decision.ledger;

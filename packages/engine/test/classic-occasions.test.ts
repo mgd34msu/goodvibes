@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { DecisionModelsDisabledError, decisionModelPolicyState, installJudgmentPort } from '@goodvibes-jev/engine/errors';
+import { DecisionModelsDisabledError, installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { JudgmentError, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort } from '@goodvibes-jev/judgment/testing';
 import { withDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.js';
@@ -39,23 +39,25 @@ function harness(root = mkdtempSync(join(tmpdir(), 'classic-occasions-'))) {
 }
 function readFileIfPresent(path: string): string | undefined { try { return readFileSync(path, 'utf8'); } catch { return undefined; } }
 
-test.each(['Classic - Off', 'Preferred'] as const)('%s lists explicit dates/plans and reaps without inferring subject or delivering/mirroring', async policy => {
+test.each(['Classic - Off', 'Preferred'] as const)('%s lists, raises, mirrors and delivers a date in its window from code alone', async policy => {
   const fake = fakePort(() => { throw new JudgmentError('unavailable', 'Synthetic exhausted chain'); }); install(fake.port);
   await withDecisionModelPolicy(() => policy, async () => {
     const h = harness();
     const listed = await h.service.list();
-    expect(listed).toMatchObject({ provenance: 'classic', subjectAssessment: 'not-evaluated' });
-    expect(listed.occasions[0]).toMatchObject({ nextOccurrence: '2026-03-14', daysUntil: 8,
+    expect(listed.occasions[0]).toMatchObject({ nextOccurrence: '2026-03-14', daysUntil: 8, inLeadWindow: true,
       occasion: { title: 'Annual reunion', person: 'Jo', subject: 'unattributed' } });
     expect(h.service.listPlans().plans[0]).toMatchObject({ title: 'Lisbon', from: '2026-09-12', to: '2026-09-19' });
-    const attempted = fake.requests.length;
     const sweep = await h.service.sweep();
-    expect(sweep).toMatchObject({ hold: 'decision-models-disabled', provenance: 'classic', semanticAssessment: 'not-evaluated', mirrored: 0, delivered: false });
-    expect(sweep.housekeeping?.sweptAt).toBe(now); expect(sweep.deliveries).toEqual([]);
+    expect(sweep).toMatchObject({ hold: null, mirrored: 1, delivered: true });
+    expect(sweep.nudge?.subjects.map(subject => subject.title)).toEqual(['Annual reunion']);
+    if (policy === 'Classic - Off') expect(sweep).toMatchObject({ provenance: 'classic', semanticAssessment: 'not-evaluated' });
     const pending = await h.service.pending();
-    expect(pending).toMatchObject({ provenance: 'classic', semanticAssessment: 'not-evaluated', nudge: null });
-    expect(h.effects).toEqual({ mirrors: 0, deliveries: 0 }); expect(fake.requests).toHaveLength(attempted);
-    expect(policy === 'Classic - Off' ? attempted === 0 : attempted > 0).toBe(true);
+    expect(pending.nudge?.subjects.map(subject => subject.title)).toEqual(['Annual reunion']);
+    // The lead boundary is spent: a second pass repeats neither the push nor the mirror.
+    await h.service.sweep();
+    expect(h.effects).toEqual({ mirrors: 1, deliveries: 1 });
+    // A gift-giving line is never attributed by a model.
+    expect(fake.requests).toHaveLength(0);
   });
 });
 
@@ -72,11 +74,12 @@ test('Classic explicit confirmation, no/later/ack, raw pending items and restart
     await h.state.putOpenItem({ id: 'nudge:annual reunion@2026-03-14', kind: 'nudge', occasionId: 'annual reunion', occurrence: '2026-03-14',
       openedAt: now, lastRaisedAt: now, raiseCount: 0, servedBoundaries: [], dueOn: '2026-03-06', expiresAfter: '2026-03-14' });
     const pending = await h.service.pending();
-    expect(pending.nudge).toBeNull(); expect(pending.open?.[0]).toMatchObject({ occasionId: 'annual reunion', title: 'Annual reunion' });
-    expect((await h.service.acknowledge({ occasionId: 'annual reunion', source: 'explicit' })).ok).toBe(true);
+    expect(pending.nudge?.subjects[0]).toMatchObject({ occasionId: 'annual reunion', title: 'Annual reunion' });
+    // An acknowledgement never replaces the no already given, and says so.
+    expect(await h.service.acknowledge({ occasionId: 'annual reunion', source: 'conversation' })).toMatchObject({ ok: true, changed: false });
     const restarted = harness(h.root);
     expect((await restarted.service.list()).occasions.some(entry => entry.occasion.title === 'Our anniversary')).toBe(true);
-    expect((await restarted.state.answerFor('annual reunion', '2026-03-14'))?.answer).toBe('acknowledged');
+    expect((await restarted.state.answerFor('annual reunion', '2026-03-14'))?.answer).toBe('no');
     expect((await restarted.service.giftHistory('annual reunion'))).toEqual([]);
     expect(fake.requests).toHaveLength(0); expect(h.effects).toEqual({ mirrors: 0, deliveries: 0 });
   });
@@ -93,30 +96,37 @@ test('Classic new gift planning reports its semantic limitation without writing 
   });
 });
 
-test('Preferred nudge outage retains an already completed calendar mirror and never repeats it during fallback', async () => {
-  const h = withDecisionModelPolicy(() => 'Classic - Off', () => harness());
+const REMEMBER_ONLY = profileText.replace('## Plans', "- Avery's birthday · 03-12 · annual · remember-only\n\n## Plans");
+
+test('who a remember-only line is about is read once and stored; later lists, pulls and sweeps ask nothing', async () => {
   const fake = fakePort((name, question) => {
-    if (name === 'subject') return choiceAnswer(question, 'other', 0.999);
-    throw new JudgmentError('unavailable', 'Synthetic nudge wording outage');
+    if (name === 'subject') return choiceAnswer(question, 'owner', 0.999);
+    throw new JudgmentError('unavailable', 'Only the subject reading is expected');
   }); install(fake.port);
-  await withDecisionModelPolicy(() => 'Preferred', async () => {
-    const sweep = await h.service.sweep();
-    expect(sweep).toMatchObject({ hold: 'decision-models-disabled', mirrored: 1, delivered: false, provenance: 'classic' });
-    expect(h.effects).toEqual({ mirrors: 1, deliveries: 0 });
-    expect((await h.state.mirrorFor('annual reunion', '2026-03-14'))?.externalId).toBe('synthetic-calendar-id');
-    const attempted = fake.requests.length;
-    await h.service.sweep();
-    expect(h.effects).toEqual({ mirrors: 1, deliveries: 0 }); expect(fake.requests).toHaveLength(attempted);
-  });
+  const root = mkdtempSync(join(tmpdir(), 'classic-occasions-')); writeFileSync(join(root, 'owner-profile.md'), REMEMBER_ONLY);
+  const h = harness(root);
+  const listed = await h.service.list();
+  expect(listed.occasions.find(entry => entry.occasion.id === "avery's birthday")?.occasion.subject).toBe('owner');
+  expect(fake.requests).toHaveLength(1);
+  const sweep = await h.service.sweep();
+  // The owner's own remember-only date is listed, never pushed.
+  expect(sweep.nudge?.subjects.map(subject => subject.title)).toEqual(['Annual reunion']);
+  await h.service.pending(); await h.service.list();
+  const restarted = harness(root);
+  await restarted.service.pending();
+  expect(fake.requests).toHaveLength(1);
 });
 
-for (const kind of ['rejected', 'invalid-response', 'invalid-request', 'aborted'] as const) {
-  test(`Preferred occasion ${kind} cannot become Classic semantic success or automatic effects`, async () => {
+for (const kind of ['rejected', 'invalid-response', 'invalid-request'] as const) {
+  test(`a subject reading that fails (${kind}) leaves that line unattributed and every other date raised`, async () => {
     const fake = fakePort(() => { throw new JudgmentError(kind, 'Synthetic terminal failure'); }); install(fake.port);
     await withDecisionModelPolicy(() => 'Preferred', async () => {
-      const h = harness();
-      await expect(h.service.list()).rejects.toThrow();
-      expect(decisionModelPolicyState().operation).toBe('decision'); expect(h.effects).toEqual({ mirrors: 0, deliveries: 0 });
+      const root = mkdtempSync(join(tmpdir(), 'classic-occasions-')); writeFileSync(join(root, 'owner-profile.md'), REMEMBER_ONLY);
+      const h = harness(root);
+      const listed = await h.service.list();
+      expect(listed.occasions.find(entry => entry.occasion.id === "avery's birthday")?.occasion.subject).toBe('unattributed');
+      const sweep = await h.service.sweep();
+      expect(sweep.nudge?.subjects.map(subject => subject.title).sort()).toEqual(['Annual reunion', "Avery's birthday"]);
     });
   });
 }

@@ -24,8 +24,8 @@
  * be something that needs to happen."* A gift-giving occasion asks whether the
  * owner wants to sort something. It does not suggest what.
  */
-import { occasionTitlePerson, occasionEntry, OccasionReadingHeldError, OccasionReadingWork } from './readings.js';
 import type { NudgeSubject, Occasion, OccasionNudge } from './types.js';
+import { PLATFORM_OCCASION_ACKNOWLEDGE, type OccasionAcknowledgeVocabulary } from './acknowledge-instruction.js';
 
 /**
  * How close, as a word.
@@ -56,6 +56,30 @@ export function subjectFor(
   };
 }
 
+/** Lower-cased words, with a trailing possessive dropped: "Jo’s" reads as "jo". */
+function nameWords(value: string): readonly string[] {
+  return value
+    .toLowerCase()
+    .split(/[^\p{L}\p{N}'’]+/u)
+    .map((word) => word.replace(/['’]s?$/u, '').replace(/['’]/gu, ''))
+    .filter((word) => word.length > 0);
+}
+
+/**
+ * True when the title already names the person: the person's words appear in
+ * the title as whole words, in order. "Annual reunion" does not name "Ann";
+ * "Jo’s birthday" names "Jo".
+ */
+export function titleNamesPerson(title: string, person: string): boolean {
+  const wanted = nameWords(person);
+  if (wanted.length === 0) return true;
+  const words = nameWords(title);
+  for (let start = 0; start + wanted.length <= words.length; start++) {
+    if (wanted.every((word, offset) => words[start + offset] === word)) return true;
+  }
+  return false;
+}
+
 /**
  * How one subject is named.
  *
@@ -63,17 +87,11 @@ export function subjectFor(
  * "Sarah's birthday (Sarah)" reads like a machine, and "Dad" with `for Dad`
  * would too. The plan keeps the person as a plain label rather than
  * restructuring the People section, which is prose by design, so this is the
- * one place the two are reconciled.
+ * one place the two are reconciled. A word comparison, not a model reading.
  */
-export async function nameOf(subject: NudgeSubject, work = new OccasionReadingWork()): Promise<string> {
-  subject = work.snapshot(subject);
+export function nameOf(subject: Pick<NudgeSubject, 'title' | 'person'>): string {
   const person = subject.person.trim();
-  if (person.length === 0) return subject.title;
-  const result = await work.wait(() => occasionTitlePerson.run(work.port, occasionEntry({ title: subject.title, person }), { ...(work.signal ? { signal: work.signal } : {}), site: 'engine.occasions.title-names-person' }));
-  const reading = result.readings.names;
-  if (reading.outcome !== 'act' || (reading.verdict !== 'yes' && reading.verdict !== 'no')) throw new OccasionReadingHeldError();
-  result.recordAction('composed occasion subject label'); work.assertCurrent();
-  if (reading.verdict === 'yes') return subject.title;
+  if (person.length === 0 || titleNamesPerson(subject.title, person)) return subject.title;
   return `${subject.title} (${person})`;
 }
 
@@ -98,11 +116,9 @@ function urgencyPhrase(subjects: readonly NudgeSubject[]): string {
  * is that a week holding three birthdays produces three separate interruptions
  * on the same day, which is how a useful feature becomes one the owner mutes.
  */
-export async function composeNudgeMessage(subjects: readonly NudgeSubject[], work = new OccasionReadingWork()): Promise<string> {
-  subjects = work.snapshot(subjects);
+export function composeNudgeMessage(subjects: readonly NudgeSubject[]): string {
   if (subjects.length === 0) return '';
-  const names = joinNames(await Promise.all(subjects.map(subject => nameOf(subject, work))));
-  work.assertCurrent();
+  const names = joinNames(subjects.map((subject) => nameOf(subject)));
   const urgency = urgencyPhrase(subjects);
   const gifting = subjects.some((subject) => subject.kind === 'gift-giving');
   const opening = subjects.length === 1
@@ -116,25 +132,19 @@ export async function composeNudgeMessage(subjects: readonly NudgeSubject[], wor
 }
 
 /** Build the nudge a batch of due occasions produces. */
-export async function composeNudge(input: {
+export function composeNudge(input: {
   readonly id: string;
   readonly now: number;
   readonly subjects: readonly NudgeSubject[];
-}, work = new OccasionReadingWork()): Promise<OccasionNudge> {
-  input = work.snapshot(input);
-  const prepared = await prepareNudge(input.subjects, work);
-  work.assertCurrent();
-  return { ...prepared, id: input.id, raisedAt: input.now };
+}): OccasionNudge {
+  return { ...prepareNudge(input.subjects), id: input.id, raisedAt: input.now };
 }
 
-/** Internal preparation: generated delivery ID and clock are not reading evidence. */
-export async function prepareNudge(subjects: readonly NudgeSubject[], work: OccasionReadingWork): Promise<Omit<OccasionNudge, 'id' | 'raisedAt'>> {
-  subjects = work.snapshot(subjects);
-  const message = await composeNudgeMessage(subjects, work);
-  work.assertCurrent();
+/** The nudge content; the caller adds its id and clock. */
+export function prepareNudge(subjects: readonly NudgeSubject[]): Omit<OccasionNudge, 'id' | 'raisedAt'> {
   return {
     subjects,
-    message,
+    message: composeNudgeMessage(subjects),
     answerable: subjects.some(subject => subject.kind === 'gift-giving'),
   };
 }
@@ -165,13 +175,17 @@ export const AGENT_NOTICE_HEADING = 'Occasion reminder';
  *     {@link composeNudgeMessage} rather than writing its own sentence.
  *  3. That it is unrelated to whatever is happening in the conversation.
  *  4. How the owner makes it stop, one sentence from them, recorded as an
- *     acknowledgement. An affordance they can use, not a fact they must act on.
+ *     acknowledgement with the receiving product's own tool action. An
+ *     affordance they can use, not a fact they must act on.
  *
  * It does NOT tell the model to relay it verbatim. The owner may be mid-something; the
  * turn decides when a reminder is worth raising, which is what the last line
  * is for.
  */
-export function composeAgentNotice(nudge: OccasionNudge): string {
+export function composeAgentNotice(
+  nudge: OccasionNudge,
+  acknowledge: OccasionAcknowledgeVocabulary = PLATFORM_OCCASION_ACKNOWLEDGE,
+): string {
   const message = nudge.message.trim();
   if (message.length === 0) return '';
   return [
@@ -184,11 +198,25 @@ export function composeAgentNotice(nudge: OccasionNudge): string {
     'Raise it as its own point when there is a natural moment, or hold it until the current',
     'thread finishes.',
     '',
-    'If the owner says this one is already in hand, in any words, record that with the',
-    '`profile` tool, action `acknowledge_occasion`, in the same turn. The owner will not be sent',
-    'this reminder again for this occurrence once you do. The owner will be sent it at most once',
-    'more regardless, on the day itself.',
+    acknowledgementLine(acknowledge),
+    'The owner will not be sent this reminder again for this occurrence once you do.',
   ].join('\n');
+}
+
+function acknowledgementLine(acknowledge: OccasionAcknowledgeVocabulary): string {
+  return `If the owner says this one is already in hand, in any words, record that with ${acknowledge.action}, in the same turn.`;
+}
+
+/**
+ * Re-address a notice composed here to the receiving product's own action.
+ *
+ * The daemon composes the notice before it knows which product lands it, so the
+ * product that does land it (its agent-destination sender) passes its own
+ * vocabulary. A body that is not an occasion notice is returned unchanged.
+ */
+export function addressAgentNotice(body: string, acknowledge: OccasionAcknowledgeVocabulary): string {
+  if (!body.startsWith(`[${AGENT_NOTICE_HEADING}]`)) return body;
+  return body.replace(acknowledgementLine(PLATFORM_OCCASION_ACKNOWLEDGE), acknowledgementLine(acknowledge));
 }
 
 /**

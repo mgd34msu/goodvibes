@@ -47,17 +47,22 @@ export function isOccasionKind(value: string): value is OccasionKind {
  * hourly is worse than not being told at all. That rule needs a subject, so the
  * subject is modelled rather than guessed:
  *
- *  - `owner`       , it is about them. Either the line says so (`for me`), or its
- *                     attribution resolves to a name they declared for THEMSELVES
- *                     in `Identity` (`identity.name`, `identity.goesBy`).
+ *  - `owner`       , it is about them. Either the line says so (`for me`), or a
+ *                     reading of the line against the names they declared for
+ *                     THEMSELVES in `Identity` (`identity.name`, `identity.goesBy`)
+ *                     settled that it is.
  *  - `other`       , it is about a named someone else.
  *  - `unattributed`, the line names nobody resolvable. "Our anniversary", "Dad".
  *                     Treated as normal, because guessing that an unattributed
  *                     line is about them is how their spouse's birthday goes quiet.
  *
- * There is no name literal anywhere in this module. The comparison is against
+ * There is no name literal anywhere in this module. The reading is taken against
  * what THE OWNER'S FILE says their name is, so it is right on a machine
- * belonging to anyone, and it stays right when they change what they go by.
+ * belonging to anyone. It is taken once per line and stored with a key over the
+ * title, the person and those names, so it is read again only when one of them
+ * changes, and only for the one case it decides: a `remember-only` line without
+ * `for me` (see `pushableSubject`). Every other line is `owner` when it says
+ * `for me` and `unattributed` otherwise.
  */
 export type OccasionSubject = 'owner' | 'other' | 'unattributed';
 
@@ -67,10 +72,12 @@ export const OCCASION_SUBJECTS: readonly OccasionSubject[] = ['owner', 'other', 
  * One occasion, as declared in the profile.
  *
  * `id` is derived from the title rather than minted, so the same line reloaded
- * after a hand edit is the same occasion and its acknowledgement state survives.
- * Editing the TITLE does orphan the state, and orphaned state is reaped, which
- * is the honest outcome: the owner renamed the thing, and last year's "no" was
- * about something with a different name.
+ * after a hand edit is the same occasion and its acknowledgement state survives,
+ * including while the line is mistyped and does not parse. Editing the TITLE
+ * orphans the answers and open items, which is the honest outcome: the owner
+ * renamed the thing, and last year's "no" was about something with a different
+ * name. Gift history is kept under the old id until it ages out or the occasion
+ * is removed, because years of it are not lost to a corrected spelling.
  */
 export interface Occasion {
   /** Normalised title. Stable across date, kind and lead edits. */
@@ -407,6 +414,21 @@ export interface InterviewAnswer {
   readonly answeredAt: number;
 }
 
+/**
+ * Who one date line is about, as read once and stored.
+ *
+ * `key` is a digest of the title, the person label and the owner's declared
+ * names at the time of the reading, so a change to any of them is a new key
+ * and the line is read again; nothing else about the line can change the
+ * answer. No line text and no date is stored.
+ */
+export interface OccasionAttribution {
+  readonly occasionId: string;
+  readonly key: string;
+  readonly subject: OccasionSubject;
+  readonly readAt: number;
+}
+
 /** What the acknowledgement store discloses about itself. */
 export interface OccasionStateDisclosure {
   readonly path: string;
@@ -415,6 +437,8 @@ export interface OccasionStateDisclosure {
   readonly openItems: number;
   readonly interviews: number;
   readonly mirrors: number;
+  /** Stored readings of who a date line is about. */
+  readonly attributions: number;
   /** Records dropped by the last sweep, by reason. */
   readonly lastSweep: OccasionSweepReport | null;
   /**

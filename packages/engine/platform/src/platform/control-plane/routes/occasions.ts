@@ -31,6 +31,8 @@ import { refuseNonUserRequest } from './explicit-user-request.js';
 import type { AuthoritySurface } from '../../security/untrusted-content.js';
 import { isProfileSurface, type ProfileSurface } from '../../owner-profile/index.js';
 import {
+  OCCASION_ACK_SOURCES,
+  OCCASION_ANSWERS,
   isOccasionAckSource,
   isOccasionAnswer,
   type OccasionAckSource,
@@ -86,6 +88,22 @@ function optionalNumber(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 
+/** `self: true` says the date is the owner's own; anything else is left out. */
+function readSelf(value: unknown): { readonly self?: true } {
+  if (value === undefined || value === false) return {};
+  if (value === true) return { self: true };
+  throw new GatewayVerbError('self must be true or false', 'INVALID_ARGUMENT', 400, 'self');
+}
+
+/** A plan's details, one per entry, exactly as the owner gave them. */
+function readDetails(value: unknown): { readonly details?: readonly string[] } {
+  if (value === undefined) return {};
+  if (!Array.isArray(value) || value.some((entry) => typeof entry !== 'string')) {
+    throw new GatewayVerbError('details must be a list of strings, one detail each', 'INVALID_ARGUMENT', 400, 'details');
+  }
+  return value.length === 0 ? {} : { details: value as string[] };
+}
+
 /**
  * The authority the caller claims. REQUIRED, and never defaulted.
  *
@@ -127,13 +145,6 @@ function readSurface(value: unknown): ProfileSurface {
 }
 
 /**
- * The answer, checked against the three the owner can give.
- *
- * `later` is one of them and is not a decline, a caller that sends anything
- * else is refused rather than folded into `no`, because reading an unknown word
- * as a refusal would silence an occasion the owner never declined.
- */
-/**
  * Where an acknowledgement came from, defaulting to `explicit`.
  *
  * A verb call with no source IS a surface offering the action, which is what
@@ -145,7 +156,7 @@ function readAckSource(value: unknown): OccasionAckSource {
   if (source === undefined) return 'explicit';
   if (!isOccasionAckSource(source)) {
     throw new GatewayVerbError(
-      'source must be one of conversation, explicit, gift-flow',
+      `source must be one of ${OCCASION_ACK_SOURCES.join(', ')}`,
       'INVALID_ARGUMENT',
       400,
       'source',
@@ -154,11 +165,18 @@ function readAckSource(value: unknown): OccasionAckSource {
   return source;
 }
 
+/**
+ * The answer, checked against the ones the owner can give.
+ *
+ * `later` is one of them and is not a decline, a caller that sends anything
+ * else is refused rather than folded into `no`, because reading an unknown word
+ * as a refusal would silence an occasion the owner never declined.
+ */
 function readAnswer(value: unknown): OccasionAnswer {
   const answer = requireString(value, 'answer');
   if (!isOccasionAnswer(answer)) {
     throw new GatewayVerbError(
-      'answer must be one of yes, no, later, acknowledged',
+      `answer must be one of ${OCCASION_ANSWERS.join(', ')}`,
       'INVALID_ARGUMENT',
       400,
       'answer',
@@ -176,9 +194,9 @@ export function registerOccasionsGatewayMethods(
   service: OccasionsGatewayService,
   native?: { readonly host?: NativeMutationHost | undefined; readonly target: NativeProfileTarget } | undefined,
 ): void {
-  const profileMethods = ['occasions.confirm', 'occasions.plans.confirm', 'occasions.remove'];
+  const profileMethods = ['occasions.confirm', 'occasions.plans.confirm', 'occasions.remove', 'occasions.conflict.resolve'];
   const nativeMethods = [...profileMethods, 'occasions.answer', 'occasions.acknowledge', 'occasions.interview.answer',
-    'occasions.interview.record', 'occasions.conflict.resolve', 'occasions.sweep'];
+    'occasions.interview.record', 'occasions.sweep'];
   const attach = (id: string, handler: GatewayMethodHandler): void => {
     const descriptor = catalog.get(id);
     if (descriptor) catalog.register(descriptor, nativeMethods.includes(id)
@@ -202,6 +220,7 @@ export function registerOccasionsGatewayMethods(
       ...(optionalString(params.person) === undefined ? {} : { person: optionalString(params.person) }),
       ...(optionalString(params.recurrence) === undefined ? {} : { recurrence: optionalString(params.recurrence) }),
       ...(optionalNumber(params.leadDays) === undefined ? {} : { leadDays: optionalNumber(params.leadDays) }),
+      ...readSelf(params.self),
     });
   });
 
@@ -215,6 +234,7 @@ export function registerOccasionsGatewayMethods(
       ...(optionalString(params.person) === undefined ? {} : { person: optionalString(params.person) }),
       ...(optionalString(params.recurrence) === undefined ? {} : { recurrence: optionalString(params.recurrence) }),
       ...(optionalNumber(params.leadDays) === undefined ? {} : { leadDays: optionalNumber(params.leadDays) }),
+      ...readSelf(params.self),
       surface: readSurface(params.surface),
       said: readSaid(params.said, params.authority, invocation),
       authority: readAuthority(params.authority, invocation),
@@ -285,7 +305,15 @@ export function registerOccasionsGatewayMethods(
   attach('occasions.conflict.resolve', async (invocation: GatewayMethodInvocation) => {
     const params = readInvocationParams(invocation);
     const occasionId = requireString(params.occasionId, 'occasionId');
-    return { occasionId, resolved: await service.resolveConflict(occasionId, readingOptions(invocation, catalog.get('occasions.conflict.resolve')?.scopes)) };
+    const keep = optionalString(params.keep);
+    // Naming a date removes the other lines from the owner's profile, so it is
+    // a profile write with the same admission as a removal. Without one, the
+    // call changes nothing and answers with the dates to choose from.
+    if (keep !== undefined && !profileDelegationForInvocation(invocation)) refuseNonUserRequest(invocation, 'occasions.conflict.resolve');
+    return service.resolveConflict({
+      occasionId,
+      ...(keep === undefined ? {} : { keep, authority: readAuthority(params.authority, invocation) }),
+    }, readingOptions(invocation, catalog.get('occasions.conflict.resolve')?.scopes));
   });
 
   attach('occasions.plans.propose', (invocation: GatewayMethodInvocation) => {
@@ -298,6 +326,7 @@ export function registerOccasionsGatewayMethods(
       ...(optionalString(params.destination) === undefined
         ? {}
         : { destination: optionalString(params.destination) }),
+      ...readDetails(params.details),
     });
   });
 
@@ -312,6 +341,7 @@ export function registerOccasionsGatewayMethods(
       ...(optionalString(params.destination) === undefined
         ? {}
         : { destination: optionalString(params.destination) }),
+      ...readDetails(params.details),
       surface: readSurface(params.surface),
       said: readSaid(params.said, params.authority, invocation),
       authority: readAuthority(params.authority, invocation),

@@ -85,6 +85,11 @@ A profile that declares no occasions at all (unreadable, not loaded yet, or empt
 tell "every line was removed" from "nothing could be read", so the orphan rules wait
 until at least one occasion is declared; expiry by date still runs, and removing an
 occasion through its verb still drops its own records.
+A line that is still under the heading but does not parse (a mistyped date, a
+misspelt kind) counts as declared by its title, so a typo costs none of its
+answers. Gift history is never dropped as an orphan at all: a retitled line keeps
+the old history readable through `occasions.gifts` under the old name until it
+ages out (`occasions.giftHistoryYears`) or the occasion is removed through its verb.
 Every write is ordered through `StoreWriteQueue`, because the sweep runs on a timer while
 an answer arrives over a channel, and an unordered write would put the file back
 without the answer, so the owner would be asked again about something they had
@@ -153,6 +158,21 @@ channel. `occasions.list` does return the dates, because that is the owner askin
 own system over an authenticated verb, the explicit ask that unlocks a
 closed-tier read.
 
+### 4.3a Who a date is about
+A line written with `for me` is the owner's own; nothing else is needed. The one
+case where who a date is about changes anything is a `remember-only` line
+without `for me`: if it is the owner's own (their birthday), it is listed and
+never pushed at them. Only that case is read by the decision model, once per
+line, and the answer is kept until the line's title, its person or the owner's
+declared names change, so sweeps, lists and the Agent's per-turn pull ask
+nothing when nothing changed. With no decision model, or when the reading
+cannot be taken, the line is treated as about someone else and is pushed as
+normal. Everything else about a reminder (the window, the boundaries, the
+wording) is worked out in code, so reminders are raised, pushed and listed the
+same with or without a decision model; the results then say
+`provenance: "classic"`. Saying "it's mine" at capture (`self: true` on
+`occasions.confirm`) writes `for me` and settles it for good.
+
 ### 4.4 Occasion **kind** is chosen by the owner at capture time, never inferred
 Kinds: **gift-giving**, **remember-only**, and **neither**. `occasions.confirm`
 refuses without one. A parent's death anniversary might well be worth
@@ -179,8 +199,11 @@ boundaries it served, and a served boundary is never served again, so no sweep
 interval, restart or clock change can produce a third push. A boundary counts as served
 only once a destination accepted the push: if every destination refuses, the boundary stays
 available and the next sweep tries again.
+A push a destination accepted is recorded as served even if a setting or the
+profile changed while it was being sent, so it is never pushed a second time.
 A date conflict and an unfinished gift conversation are pushed the same way, as a line that
-names the occasion and never a date.
+names the occasion and never a date, and are recorded as raised under the same rule: only
+once a destination accepted them, or at once when nothing is set up to push to.
 
 The earlier rhythm here was every `occasions.cadenceDays` days, then daily for
 the last `occasions.finalStretchDays`. That was an implementation choice rather
@@ -222,13 +245,20 @@ acknowledgement state is dropped with the occasion.
 
 ### 4.12 Conflicting dates: raise immediately, and again later if ignored
 Two different dates for one thing are both reported. The newer value is never
-taken silently.
+taken silently. The owner's answer is applied with `occasions.conflict.resolve`
+and `keep` set to the date that is right: the other lines for that title are
+removed from the profile (a profile write, with its authority), the answers and
+gift history stay, and the conflict is not raised again. Without `keep` nothing
+changes and the recorded dates come back to put to the owner.
 
 ### 4.13 Travel and away state feeds nudge timing
 A known future location for the owner is licence to modify timing such as when a
 nudge lands. A nudge due inside an away window moves EARLIER, to the day before
 departure, because nothing can be delivered to a house the owner is not in. Once
 they have already left there is nothing earlier to move to and the nudge stands.
+The lead window moves with it: it is measured back from the day before
+departure, so a birthday late in a long trip is still raised before the owner
+leaves.
 
 ### 4.14 Bulk entry is not needed in v1
 Skipped.
@@ -284,20 +314,20 @@ carries the date.
 |---|---|---|
 | `occasions.list` | `read:occasions` | Every occasion, its next occurrence, days away, window, recorded answer; unparsed lines with reasons; conflicts. |
 | `occasions.propose` | `write:occasions` | What would be written, plus the one-line confirmation. Writes nothing. |
-| `occasions.confirm` | `write:occasions` | Write the confirmed occasion. Refuses without a kind. |
+| `occasions.confirm` | `write:occasions` | Write the confirmed occasion. Refuses without a kind. `self: true` marks the owner's own date (`for me`). |
 | `occasions.remove` | `write:occasions` | One confirmation; removes the line and every record against it. |
-| `occasions.answer` | `write:occasions` | yes / no / later. A yes opens the interview. |
-| `occasions.acknowledge` | `write:occasions` | Record that the owner has one occurrence in hand, without ending the question: the open item stays open and stops being pushed. Distinct from `answer`, which resolves and removes the item. |
+| `occasions.answer` | `write:occasions` | yes / no / later / acknowledged. A yes opens the interview; acknowledged is the same as `occasions.acknowledge`. |
+| `occasions.acknowledge` | `write:occasions` | Record that the owner has one occurrence in hand, without ending the question: the open item stays open and stops being pushed. Distinct from `answer`, which resolves and removes the item. An occurrence already answered yes or no is left as it is and the reply says so (`changed: false`). |
 | `occasions.interview.get` | `read:occasions` | Resume at the unanswered question. |
 | `occasions.interview.answer` | `write:occasions` | Record one answer, return the next question. |
 | `occasions.interview.record` | `write:occasions` | Close with what the owner landed on; writes gift history. |
 | `occasions.gifts` | `read:occasions` | What the owner landed on in previous years. |
-| `occasions.pending` | `read:occasions` | Everything outstanding, delivered to nobody. Leaves out a nudge a push has already landed on the agent, while the agent is a push destination (§4.2). |
+| `occasions.pending` | `read:occasions` | Everything outstanding, delivered to nobody. Lists a date inside its window even before any sweep has run. Leaves out a nudge a push has already landed on the agent, while the agent is a push destination (§4.2). |
 | `occasions.sweep` | `write:occasions` | Run one pass now. |
-| `occasions.conflict.resolve` | `write:occasions` | Stop re-raising a conflict the owner has dealt with. |
+| `occasions.conflict.resolve` | `write:occasions` | Apply the owner's answer: `keep` names the right date and the other lines are removed (§4.12). Without `keep`, returns the recorded dates and changes nothing. |
 | `occasions.plans.list` | `read:occasions` | Plans, and whether one has the owner away today. |
 | `occasions.plans.propose` | `write:occasions` | Same two-step capture, for a plan. |
-| `occasions.plans.confirm` | `write:occasions` | Write the confirmed plan. |
+| `occasions.plans.confirm` | `write:occasions` | Write the confirmed plan, with every entry of `details` (a confirmation number, flights and times), which `occasions.plans.list` returns. |
 | `occasions.state` | `read:occasions` | What the machine-owned store holds; counts and reasons only. |
 
 `occasions.confirm`, `occasions.plans.confirm` and `occasions.remove` write to
@@ -332,7 +362,11 @@ came from originally.
 A loop that only runs when a verb asks it to is not proactive, and proactive is
 the whole feature, so the composition arms a repeating timer
 (`occasions/ticker.ts`), re-read from config every tick so
-`occasions.sweepIntervalMinutes` is live rather than restart-only.
+`occasions.sweepIntervalMinutes` is live rather than restart-only. The first
+pass is timed from the last stored sweep rather than from start: when the last
+one is older than the interval (or there is none) a pass runs shortly after the
+daemon starts, so a machine that is restarted or only on for a while still gets
+its reminders.
 
 The ticker is deliberately dumb, because the sweep is where the judgement is. A
 tick inside quiet hours raises nothing and reaps anyway, and a tick on a day an

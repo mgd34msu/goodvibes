@@ -18,6 +18,7 @@ export interface OccasionView {
 
 /** What `occasions.list` answers. */
 export interface OccasionListResult {
+  /** Present when decision models are off: who each date is about was taken from the line's `for me` marker only. */
   readonly provenance?: 'classic';
   readonly subjectAssessment?: 'not-evaluated';
   readonly today: IsoDate;
@@ -38,11 +39,12 @@ export interface PlanListResult {
 
 /** What one sweep did. */
 export interface SweepOutcome {
+  /** Present when decision models are off: who each date is about was taken from the line's `for me` marker only. */
   readonly provenance?: 'classic';
   readonly semanticAssessment?: 'not-evaluated';
   readonly ranAt: number;
   readonly today: IsoDate;
-  readonly hold: SweepHold | 'decision-models-disabled';
+  readonly hold: SweepHold;
   readonly nudge: OccasionNudge | null;
   readonly conflictMessages: readonly string[];
   readonly resumedInterviews: readonly string[];

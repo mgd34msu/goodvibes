@@ -183,11 +183,16 @@ function toolRequest(name: 'profile' | 'occasions', args: Record<string, unknown
   const identity = { authority, said: authority === 'autonomous' ? '' : text('said'), surface: 'agent' };
   const fieldId = text('fieldId') || text('field');
   if (name === 'occasions') {
+    // The same body the Agent's `occasions` tool sends for these actions, key for key.
+    const details = Array.isArray(args.details)
+      ? args.details.flatMap(detail => typeof detail === 'string' && detail.trim() ? [detail.trim()] : []) : [];
     if (action === 'confirm') return { method: 'occasions.confirm', input: { title: text('title'), date: text('date'), kind: text('kind'),
       ...(text('person') ? { person: text('person') } : {}), ...(text('recurrence') ? { recurrence: text('recurrence') } : {}),
-      ...(typeof args.leadDays === 'number' ? { leadDays: args.leadDays } : {}), ...identity } };
+      ...(typeof args.leadDays === 'number' ? { leadDays: args.leadDays } : {}), ...(args.self === true ? { self: true } : {}), ...identity } };
     if (action === 'plan_confirm') return { method: 'occasions.plans.confirm', input: { title: text('title'), from: text('from'), to: text('to'),
-      ...(args.away === undefined ? {} : { away: args.away === true }), ...(text('destination') ? { destination: text('destination') } : {}), ...identity } };
+      ...(args.away === undefined ? {} : { away: args.away === true }), ...(text('destination') ? { destination: text('destination') } : {}),
+      ...(details.length > 0 ? { details } : {}), ...identity } };
+    if (action === 'resolve_conflict' && text('keep')) return { method: 'occasions.conflict.resolve', input: { occasionId: text('occasionId'), keep: text('keep'), authority } };
     if (action === 'remove') return { method: 'occasions.remove', input: { occasionId: text('occasionId'), confirmed: args.confirmed === true, authority } };
     return undefined;
   }

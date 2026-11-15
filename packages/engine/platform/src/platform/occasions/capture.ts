@@ -74,24 +74,32 @@ export function projectOccasionProfileMutation(source: OccasionProfileSource, me
     const occasion = readOccasionDeclarations(source).occasions.find(entry => entry.id === request.occasionId);
     return occasion ? { method: 'profile.forget', input: { section: OCCASIONS_SECTION, text: occasion.text, authority } } : undefined;
   }
+  if (method === 'occasions.conflict.resolve') {
+    if (typeof request.occasionId !== 'string' || typeof request.keep !== 'string') return undefined;
+    const plan = planConflictResolution(source, request.occasionId, request.keep);
+    // One admitted effect removes one line, the ordinary two-date conflict.
+    const only = plan.remove.length === 1 ? plan.remove[0] : undefined;
+    return only ? { method: 'profile.forget', input: { section: OCCASIONS_SECTION, text: only.text, authority } } : undefined;
+  }
   const surface = request.surface;
   if (typeof surface !== 'string' || !isProfileSurface(surface) || typeof request.said !== 'string') return undefined;
   const identity: Pick<AppendProfileProseInput, 'surface' | 'said' | 'authority'> = { surface, said: authority === 'autonomous' ? '' : request.said, authority };
   if (method === 'occasions.confirm') {
-    const { title, date, kind, person, recurrence, leadDays } = request;
+    const { title, date, kind, person, recurrence, leadDays, self } = request;
     if (typeof title !== 'string' || typeof date !== 'string' || typeof kind !== 'string') return undefined;
     const proposal = proposeOccasion(source, { title, date, kind,
       ...(typeof person === 'string' ? { person } : {}), ...(typeof recurrence === 'string' ? { recurrence } : {}),
-      ...(typeof leadDays === 'number' ? { leadDays } : {}),
+      ...(typeof leadDays === 'number' ? { leadDays } : {}), ...(self === true ? { self: true } : {}),
     });
     return proposal.ok && !proposal.needsKind
       ? { method: 'profile.append', input: { section: OCCASIONS_SECTION, text: proposal.line, ...identity } } : undefined;
   }
   if (method === 'occasions.plans.confirm') {
-    const { title, from, to, away, destination } = request;
+    const { title, from, to, away, destination, details } = request;
     if (typeof title !== 'string' || typeof from !== 'string' || typeof to !== 'string') return undefined;
     const proposal = proposePlan({ title, from, to, ...(away === undefined ? {} : { away: away === true }),
       ...(typeof destination === 'string' ? { destination } : {}),
+      ...(Array.isArray(details) ? { details: details.filter((detail): detail is string => typeof detail === 'string') } : {}),
     });
     return proposal.ok ? { method: 'profile.append', input: { section: PLANS_SECTION, text: proposal.line, ...identity } } : undefined;
   }
@@ -424,6 +432,115 @@ export async function removeOccasion(
     disclosure: result.disclosure,
     droppedRecords: dropped,
   };
+}
+
+/** What resolving one date conflict would remove, and what the owner can choose from. */
+export interface ConflictResolutionPlan {
+  /** Every distinct date recorded for the occasion, as written, in document order. */
+  readonly dates: readonly string[];
+  /** The date to keep, normalised, or null when none (or none recorded) was given. */
+  readonly keep: string | null;
+  /** The declarations that carry another date. Empty when there is nothing to resolve. */
+  readonly remove: readonly Occasion[];
+}
+
+/** Work out which declarations a resolution keeping `keep` removes. Reads only; writes nothing. */
+export function planConflictResolution(
+  source: Pick<OccasionProfileSource, 'importantDates'>,
+  occasionId: string,
+  keep: string | undefined,
+): ConflictResolutionPlan {
+  const lines = readOccasionDeclarations(source).declarations.filter((entry) => entry.id === occasionId);
+  const dates = [...new Set(lines.map((entry) => renderOccasionDate(entry.date)))];
+  const parsed = keep === undefined ? null : parseOccasionDate(keep);
+  const wanted = parsed === null ? null : renderOccasionDate(parsed);
+  if (wanted === null || !dates.includes(wanted)) return { dates, keep: null, remove: [] };
+  return { dates, keep: wanted, remove: lines.filter((entry) => renderOccasionDate(entry.date) !== wanted) };
+}
+
+/** What `occasions.conflict.resolve` answers. */
+export interface ConflictResolution {
+  readonly occasionId: string;
+  /** True when the profile now holds one date for this occasion. */
+  readonly resolved: boolean;
+  /** Why it is not resolved, and what to do; null when it is. */
+  readonly reason: string | null;
+  /** Every date that was recorded before this call. */
+  readonly dates: readonly string[];
+  /** The dates whose lines were removed. */
+  readonly removed: readonly string[];
+  /** The profile's own account of the write, to say to the owner. */
+  readonly disclosure: string;
+}
+
+/**
+ * Resolve a date conflict with the date the owner says is right.
+ *
+ * The other declarations of that title are removed from the profile through the
+ * ordinary write gate, one line at a time by its exact text, so a line the owner
+ * edited meanwhile is not removed by mistake. Answers, gift history and open
+ * items are machine state keyed by the title and stay as they are; the conflict
+ * reminder is closed. With no date, or one that is not recorded, nothing is
+ * changed and the recorded dates come back so the owner can choose.
+ */
+export async function resolveOccasionConflict(
+  source: Pick<OccasionProfileSource, 'importantDates'>,
+  writer: OccasionProfileWriter,
+  closeReminder: () => Promise<boolean>,
+  input: { readonly occasionId: string; readonly keep?: string | undefined; readonly authority?: AuthoritySurface | 'autonomous' | undefined },
+  options: ProfileMutationOptions = {},
+): Promise<ConflictResolution> {
+  const assertCurrent = () => { options.signal?.throwIfAborted(); options.assertCurrent?.(); };
+  assertCurrent();
+  const plan = planConflictResolution(source, input.occasionId, input.keep);
+  const base = { occasionId: input.occasionId, dates: plan.dates, removed: [] as string[], disclosure: '' };
+  if (plan.dates.length === 0) {
+    return { ...base, resolved: false, reason: 'There is no occasion by that name, so there was no conflict to resolve.' };
+  }
+  if (plan.dates.length === 1) {
+    // The file already agrees with itself (the owner fixed it by hand), so
+    // the only thing left is the reminder.
+    await closeReminder();
+    assertCurrent();
+    return { ...base, resolved: true, reason: null };
+  }
+  if (plan.keep === null) {
+    return {
+      ...base,
+      resolved: false,
+      reason: `Say which date to keep: ${plan.dates.join(' or ')}. Nothing was changed.`,
+    };
+  }
+  if (input.authority === undefined) {
+    return { ...base, resolved: false, reason: 'Keeping one date removes the others from the profile, so the write needs an authority. Nothing was changed.' };
+  }
+  const authority = input.authority;
+  const removed: string[] = [];
+  const disclosures: string[] = [];
+  let first = true;
+  for (const line of plan.remove) {
+    assertCurrent();
+    // An admitted effect covers one removal; any further line is a write of
+    // its own under the caller's authority.
+    const result = await writer.forget({ section: OCCASIONS_SECTION, text: line.text, authority },
+      first ? options : { ...options, admittedMutation: undefined });
+    first = false;
+    if (!result.ok) {
+      return {
+        ...base,
+        removed,
+        disclosure: disclosures.join(' '),
+        resolved: false,
+        reason: `${result.reason ?? 'The profile refused the change.'}`
+          + (removed.length > 0 ? ` The line${removed.length === 1 ? '' : 's'} dated ${removed.join(', ')} ${removed.length === 1 ? 'was' : 'were'} removed before that.` : ' Nothing was changed.'),
+      };
+    }
+    removed.push(renderOccasionDate(line.date));
+    if (result.disclosure) disclosures.push(result.disclosure);
+  }
+  await closeReminder();
+  assertCurrent();
+  return { ...base, removed: [...new Set(removed)], disclosure: disclosures.join(' '), resolved: true, reason: null };
 }
 
 /**

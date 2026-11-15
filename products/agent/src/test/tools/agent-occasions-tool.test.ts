@@ -78,7 +78,7 @@ describe('occasions tool: shape', () => {
     // §4.4: offering the three is the point; defaulting one is the defect.
     expect(params.properties.kind?.enum).toEqual(['gift-giving', 'remember-only', 'neither']);
     expect(params.properties.kind).not.toHaveProperty('default');
-    expect(params.properties.answer?.enum).toEqual(['yes', 'no', 'later']);
+    expect(params.properties.answer?.enum).toEqual(['yes', 'no', 'later', 'acknowledged']);
     expect(params.properties.answer).not.toHaveProperty('default');
   });
 });

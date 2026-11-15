@@ -1,4 +1,3 @@
-import type { ProfilePersonReadingOptions } from '../owner-profile/person-reading.js';
 /**
  * reader.ts, the profile, read as occasions and plans.
  *
@@ -17,13 +16,13 @@ import type { ProfilePersonReadingOptions } from '../owner-profile/person-readin
  * open item that is raised now and raised again if it is ignored.
  */
 import type { ProfileLine } from '../owner-profile/types.js';
+import type { ProfilePersonReadingOptions } from '../owner-profile/person-reading.js';
 import { renderOccasionDate, type IsoDate } from './dates.js';
-import { parseOccasionLine, parsePlanLine } from './grammar.js';
-import { OccasionReadingWork } from './readings.js';
-import { resolveOccasionSubject } from './subject.js';
-import { isClassicOperation, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
+import { occasionIdFor, parseOccasionLine, parsePlanLine, splitSegments } from './grammar.js';
+import { declaredSubject } from './subject.js';
 import type {
   Occasion,
+  OccasionSubject,
   OccasionConflict,
   Plan,
   UnparsedOccasionLine,
@@ -63,11 +62,20 @@ export interface OccasionProfileSource {
 
 /** Everything the dates section holds, including what did not parse. */
 export interface OccasionReadResult {
-  readonly provenance?: 'classic';
-  readonly subjectAssessment?: 'not-evaluated';
   readonly occasions: readonly Occasion[];
   readonly unparsed: readonly UnparsedOccasionLine[];
   readonly conflicts: readonly OccasionConflict[];
+  /**
+   * Every parsed declaration, in document order, including later lines for an
+   * id already seen. What a conflict resolution removes from.
+   */
+  readonly declarations: readonly Occasion[];
+  /**
+   * The id of every line under the heading that has a title, parsed or not.
+   * State for these is kept: a line the parser cannot read today is still the
+   * owner's line, and a typo must not cost its answers.
+   */
+  readonly declaredIds: ReadonlySet<string>;
 }
 
 /** Everything the plans section holds. */
@@ -85,25 +93,28 @@ export interface PlanReadResult {
  * the same one it is a harmless duplicate that stays in the file and stays
  * visible.
  */
-export function readOccasionDeclarations(source: OccasionProfileSource): OccasionReadResult {
+export function readOccasionDeclarations(
+  source: Pick<OccasionProfileSource, 'importantDates'>,
+  subjectOf: (occasion: Occasion) => OccasionSubject = declaredSubject,
+): OccasionReadResult {
   const occasions: Occasion[] = [];
+  const declarations: Occasion[] = [];
   const unparsed: UnparsedOccasionLine[] = [];
+  const declaredIds = new Set<string>();
   const byId = new Map<string, Occasion[]>();
-  // This structural projection grants only explicit schema attribution.
-
 
   for (const line of source.importantDates()) {
     const result = parseOccasionLine(line.lineIndex, line.text);
     if (!result.ok) {
       unparsed.push(result.unparsed);
+      const title = splitSegments(line.text).title;
+      if (title.length > 0) declaredIds.add(occasionIdFor(title));
       continue;
     }
-    // Free-form attribution is settled only by the asynchronous reader below.
-    const parsed = result.occasion;
-    const occasion: Occasion = {
-      ...parsed,
-      subject: parsed.selfDeclared ? 'owner' : 'unattributed',
-    };
+    const parsed: Occasion = { ...result.occasion, subject: declaredSubject(result.occasion) };
+    const occasion: Occasion = { ...parsed, subject: subjectOf(parsed) };
+    declaredIds.add(occasion.id);
+    declarations.push(occasion);
     const seen = byId.get(occasion.id);
     if (seen === undefined) {
       byId.set(occasion.id, [occasion]);
@@ -126,28 +137,18 @@ export function readOccasionDeclarations(source: OccasionProfileSource): Occasio
     });
   }
 
-  return { occasions, unparsed, conflicts };
+  return { occasions, unparsed, conflicts, declarations, declaredIds };
 }
 
-/** Semantic attribution used by the live service; capture/removal only need structural declarations. */
-export async function readOccasions(source: OccasionProfileSource, supplied?: OccasionReadingWork): Promise<OccasionReadResult> {
-  return withConfiguredDecisionModelPolicy(async () => {
-    const work = supplied ?? new OccasionReadingWork();
-    const lease = source.captureRead?.();
-    if (lease) work.retain(lease.assertCurrent);
-    const original = { lines: source.importantDates(), names: source.ownerNames?.() ?? [] };
-    const captured = work.snapshot(original);
-    const sourceKey = JSON.stringify(captured);
-    work.retain(() => { if (JSON.stringify({ lines: source.importantDates(), names: source.ownerNames?.() ?? [] }) !== sourceKey) throw new Error('Occasion source changed.'); });
-    const result = readOccasionDeclarations({ ...source, importantDates: () => captured.lines });
-    const occasions: Occasion[] = [];
-    for (const occasion of result.occasions) {
-      // Full lines were screened above. Closed-tier dates never enter model context.
-      const subject = await resolveOccasionSubject({ title: occasion.title, person: occasion.person, selfDeclared: occasion.selfDeclared }, captured.names, work);
-      occasions.push({ ...occasion, subject });
-    }
-    work.assertCurrent(); return { ...result, occasions, ...(isClassicOperation() ? { provenance: 'classic' as const, subjectAssessment: 'not-evaluated' as const } : {}) };
-  });
+/**
+ * The same read, with the subject the service resolved for each line (stored
+ * readings, see subject.ts). Synchronous: nothing here asks anything.
+ */
+export function readOccasions(
+  source: Pick<OccasionProfileSource, 'importantDates'>,
+  subjectOf?: (occasion: Occasion) => OccasionSubject,
+): OccasionReadResult {
+  return readOccasionDeclarations(source, subjectOf);
 }
 
 /** Read every plan, in document order. */

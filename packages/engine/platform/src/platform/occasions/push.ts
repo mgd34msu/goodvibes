@@ -6,8 +6,7 @@
  * what actually reached the owner, as opposed to what was attempted.
  */
 import { redactSensitiveDataAsync } from '../utils/redaction.js';
-import type { IsoDate } from './dates.js';
-import type { OccasionNudge, OpenItem } from './types.js';
+import type { OccasionNudge } from './types.js';
 import type { DeliveryLifetime } from '../utils/delivery-lifetime.js';
 import type { OccasionMutationOptions } from './operation.js';
 
@@ -73,7 +72,14 @@ export async function pushNudge(
   const results: NudgeDelivery[] = [];
   try {
     for (const channel of destinations) {
-      assertCurrent();
+      try {
+        assertCurrent();
+      } catch (error) {
+        // What a destination already accepted is a fact about the past, and the
+        // caller records it whatever changed since. Nothing further is sent.
+        if (results.some((result) => result.delivered)) break;
+        throw error;
+      }
       try {
         const request = { channel, nudge };
         const deliveryId = (await (withNudgeDelivery
@@ -87,39 +93,18 @@ export async function pushNudge(
         results.push({ channel, delivered: false, deliveryId: null, failure: qualified.length > 240 ? `${qualified.slice(0, 240)}…` : qualified });
       }
     }
-    assertCurrent();
     return results;
   } catch (error) {
     const acceptedDeliveries = results.filter(result => result.delivered).length;
-    if (!withNudgeDelivery || acceptedDeliveries === 0) throw error;
+    if (acceptedDeliveries === 0) throw error;
+    // The caller records what landed; only a native-admitted sweep, whose
+    // request is reported on its own, gets the stopped-after-delivery receipt.
+    if (!withNudgeDelivery) return results;
     let stopped: AcceptedNudgeReceipt['stopped'] = 'delivery-processing-stopped';
     try { assertCurrent(); } catch { stopped = 'request-retired-after-delivery'; }
     const observation = new Error('Native nudge processing stopped after an accepted delivery');
     stoppedDeliveries.set(observation, { owner: withNudgeDelivery,
       receipt: Object.freeze({ complete: false, acceptedDeliveries, stopped }) });
     throw observation;
-  }
-}
-
-/**
- * Remember that the agent has these items in hand, for TODAY.
- *
- * Written AFTER the push rather than folded into the raise, so an item is never
- * marked as spoken by a delivery that had not happened yet.
- *
- * The stamp carries the day and the pull compares it against today, so it
- * suppresses a duplicate within one conversation and nothing beyond that. It
- * used to be read as permanent, which under a cadence that now pushes twice
- * would have hidden an occasion from "anything coming up?" for the entire
- * stretch between its two boundaries.
- */
-export async function stampSpokenToAgent(
-  put: (item: OpenItem) => Promise<unknown>,
-  raised: readonly OpenItem[],
-  today: IsoDate,
-): Promise<void> {
-  for (const item of raised) {
-    if (item.kind !== 'nudge') continue;
-    await put({ ...item, agentPushedOn: today });
   }
 }

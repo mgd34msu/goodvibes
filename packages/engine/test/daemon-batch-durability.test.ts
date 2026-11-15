@@ -1,19 +1,21 @@
 import { describe, expect, test } from 'bun:test';
 import { forgetFailureReadings, installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { ConfigManager } from '../platform/src/platform/config/manager.js';
 import {
+  BATCH_SUBMISSION_METADATA_KEY,
   BATCH_TERMINAL_RETENTION_COUNT,
   BATCH_TERMINAL_RETENTION_MS,
   DaemonBatchManager,
   MAX_BATCH_REQUEST_BYTES,
 } from '../platform/src/platform/batch/manager.js';
-import type { DaemonBatchJob, DaemonBatchStoreData } from '../platform/src/platform/batch/types.js';
+import type { DaemonBatchJob } from '../platform/src/platform/batch/types.js';
 import type {
   LLMProvider,
   ProviderBatchChatRequest,
+  ProviderBatchPollResult,
   ProviderBatchResult,
   ProviderBatchStatus,
 } from '../platform/src/platform/providers/interface.js';
@@ -105,8 +107,22 @@ function rig(provider: LLMProvider, settings: Record<string, number> = {}): Rig 
 
 const request = { messages: [{ role: 'user' as const, content: 'hi' }] };
 
-function onDisk(path: string): DaemonBatchStoreData {
-  return JSON.parse(readFileSync(path, 'utf-8')) as DaemonBatchStoreData;
+/** The job directory beside the store name. */
+function jobDir(storePath: string): string {
+  return storePath.slice(0, -'.json'.length);
+}
+
+/** The jobs a restart would read. */
+function onDisk(storePath: string): Record<string, DaemonBatchJob> {
+  const dir = jobDir(storePath);
+  const jobs: Record<string, DaemonBatchJob> = {};
+  if (!existsSync(dir)) return jobs;
+  for (const name of readdirSync(dir)) {
+    if (!name.endsWith('.json') || name.endsWith('.result.json')) continue;
+    const job = JSON.parse(readFileSync(join(dir, name), 'utf-8')) as DaemonBatchJob;
+    jobs[job.id] = job;
+  }
+  return jobs;
 }
 
 function finishedJob(id: string, completedAt: number): DaemonBatchJob {
@@ -133,7 +149,7 @@ describe('batch store loading', () => {
     ]);
     const listed = (await manager.listJobs()).map((job) => job.id).sort();
     expect(listed).toEqual([a.id, b.id].sort());
-    expect(Object.keys(onDisk(storePath).jobs).sort()).toEqual([a.id, b.id].sort());
+    expect(Object.keys(onDisk(storePath)).sort()).toEqual([a.id, b.id].sort());
   });
 });
 
@@ -147,7 +163,7 @@ describe('provider batch durability', () => {
     script.retrieve = async (id) => ({ providerBatchId: id, status: 'running', resultAvailable: false });
     script.create = async (_requests, index) => {
       if (index === 2) {
-        const stored = onDisk(storePath).jobs;
+        const stored = onDisk(storePath);
         seenOnDisk.push(stored[first.id], stored[second.id]);
       }
       return { providerBatchId: `pb-${index}`, status: 'submitted' };
@@ -230,7 +246,7 @@ describe('an unreadable failure does not stall the rest of the tick', () => {
       expect((await manager.getJob(paid.id))?.status).toBe('completed');
       const still = await manager.getJob(waiting.id);
       expect(still?.status).toBe('queued');
-      expect(still?.attempts).toBe(0);
+      expect(still?.attempts).toBe(1);
     } finally {
       installJudgmentPort(previous);
     }
@@ -268,25 +284,24 @@ describe('store growth', () => {
     const script = scriptedProvider();
     const { manager, storePath } = rig(script.provider);
     const nowMs = Date.now();
-    const jobs: Record<string, DaemonBatchJob> = {};
-    for (let i = 0; i < BATCH_TERMINAL_RETENTION_COUNT + 100; i += 1) {
-      jobs[`recent-${i}`] = finishedJob(`recent-${i}`, nowMs - i);
-    }
-    jobs['stale'] = finishedJob('stale', nowMs - BATCH_TERMINAL_RETENTION_MS - 1000);
-    writeFileSync(storePath, JSON.stringify({ version: 1, jobs }));
+    const dir = jobDir(storePath);
+    mkdirSync(dir, { recursive: true });
+    const write = (job: DaemonBatchJob) => writeFileSync(join(dir, `${job.id}.json`), JSON.stringify(job));
+    for (let i = 0; i < BATCH_TERMINAL_RETENTION_COUNT + 100; i += 1) write(finishedJob(`recent-${i}`, nowMs - i));
+    write(finishedJob('stale', nowMs - BATCH_TERMINAL_RETENTION_MS - 1000));
 
     await manager.tick();
-    const kept = Object.keys(onDisk(storePath).jobs);
+    const kept = Object.keys(onDisk(storePath));
     expect(kept).toHaveLength(BATCH_TERMINAL_RETENTION_COUNT);
     expect(kept).not.toContain('stale');
     expect(kept).toContain('recent-0');
 
-    const internals = manager as unknown as { store: { persist: (data: unknown) => Promise<void> } };
+    const internals = manager as unknown as { files: { save: (job: DaemonBatchJob) => void } };
     let writes = 0;
-    const original = internals.store.persist.bind(internals.store);
-    internals.store.persist = async (data) => {
+    const original = internals.files.save.bind(internals.files);
+    internals.files.save = (job) => {
       writes += 1;
-      await original(data);
+      original(job);
     };
     await manager.tick();
     expect(writes).toBe(0);
@@ -298,5 +313,78 @@ describe('store growth', () => {
     await expect(manager.createJob({
       request: { messages: [{ role: 'user', content: 'x'.repeat(MAX_BATCH_REQUEST_BYTES + 1) }] },
     })).rejects.toMatchObject({ code: 'BATCH_REQUEST_TOO_LARGE' });
+  });
+});
+
+describe('a daemon that stopped during a provider submission', () => {
+  function submittingJob(id: string, submissionId: string): DaemonBatchJob {
+    const at = Date.now() - 1000;
+    return { id, provider: 'openai', model: 'gpt-test', status: 'submitting', createdAt: at, updatedAt: at, submittedAt: at, submissionId, attempts: 0, request };
+  }
+
+  function leaveSubmitting(storePath: string, job: DaemonBatchJob): void {
+    mkdirSync(jobDir(storePath), { recursive: true });
+    writeFileSync(join(jobDir(storePath), `${job.id}.json`), JSON.stringify(job));
+  }
+
+  test('a batch the provider accepted is found by its submission id and not paid for again', async () => {
+    const script = scriptedProvider();
+    script.retrieve = async (id) => ({ providerBatchId: id, status: 'running', resultAvailable: false });
+    const lookups: string[] = [];
+    Object.assign(script.provider.batch!, {
+      findBatchByMetadata: async (key: string, value: string): Promise<ProviderBatchPollResult | null> => {
+        lookups.push(`${key}=${value}`);
+        return { providerBatchId: 'pb-accepted', status: 'submitted', resultAvailable: false };
+      },
+    });
+    const { manager, storePath } = rig(script.provider);
+    leaveSubmitting(storePath, submittingJob('batch-job-crashed', 'sub-1'));
+
+    await manager.tick();
+    expect(script.requests).toHaveLength(0);
+    expect(lookups).toEqual([`${BATCH_SUBMISSION_METADATA_KEY}=sub-1`]);
+    const job = await manager.getJob('batch-job-crashed');
+    expect(job?.providerBatchId).toBe('pb-accepted');
+    expect(onDisk(storePath)['batch-job-crashed']?.providerBatchId).toBe('pb-accepted');
+  });
+
+  test('a provider that cannot be asked gets no second submission; the job fails with what to check', async () => {
+    const script = scriptedProvider();
+    const { manager, storePath } = rig(script.provider);
+    leaveSubmitting(storePath, submittingJob('batch-job-crashed', 'sub-2'));
+
+    await manager.tick({ forceSubmit: true });
+    expect(script.requests).toHaveLength(0);
+    const job = await manager.getJob('batch-job-crashed');
+    expect(job?.status).toBe('failed');
+    expect(job?.error?.code).toBe('BATCH_SUBMISSION_UNCONFIRMED');
+  });
+
+  test('the submission id is on disk before the provider is called', async () => {
+    const script = scriptedProvider();
+    const { manager, storePath } = rig(script.provider);
+    const job = await manager.createJob({ request });
+    let seen: DaemonBatchJob | undefined;
+    script.create = async () => {
+      seen = onDisk(storePath)[job.id];
+      return { providerBatchId: 'pb-1', status: 'submitted' };
+    };
+    await manager.tick({ forceSubmit: true });
+    expect(seen?.status).toBe('submitting');
+    expect(typeof seen?.submissionId).toBe('string');
+  });
+});
+
+describe('a store row that cannot be read', () => {
+  test('is moved aside and the other jobs are still served', async () => {
+    const script = scriptedProvider();
+    const { manager, storePath } = rig(script.provider);
+    const good = finishedJob('batch-job-good', Date.now());
+    writeFileSync(storePath, JSON.stringify({ version: 1, jobs: { 'batch-job-good': good, 'batch-job-bad': { id: 'other' } } }));
+
+    expect((await manager.listJobs()).map((job) => job.id)).toEqual(['batch-job-good']);
+    const quarantined = JSON.parse(readFileSync(`${jobDir(storePath)}.invalid.json`, 'utf-8')) as { entries: { source: string }[] };
+    expect(quarantined.entries.map((entry) => entry.source)).toEqual([`${storePath}#batch-job-bad`]);
+    expect(existsSync(storePath)).toBe(false);
   });
 });

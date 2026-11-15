@@ -16,8 +16,6 @@ import { AutomationRunStore } from '../platform/src/platform/automation/store/ru
 import { AutomationRouteStore } from '../platform/src/platform/automation/store/routes.ts';
 import { AutomationSourceStore } from '../platform/src/platform/automation/store/sources.ts';
 import { TaskScheduler } from '../platform/src/platform/scheduler/scheduler.ts';
-import { DaemonBatchManager } from '../platform/src/platform/batch/manager.ts';
-import { ConfigManager } from '../platform/src/platform/config/manager.ts';
 import { ApprovalBroker } from '../platform/src/platform/control-plane/approval-broker.ts';
 import { loadSessionBrokerState } from '../platform/src/platform/control-plane/session-broker-state.ts';
 import { ChannelPolicyManager } from '../platform/src/platform/channels/policy-manager.ts';
@@ -26,8 +24,6 @@ import { rowToRecord } from '../platform/src/platform/state/memory-store-helpers
 import { loadWatcherSnapshotFromPath } from '../platform/src/platform/watchers/store.ts';
 import { createTeamTool } from '../platform/src/platform/tools/team/index.ts';
 import { createWorklistTool } from '../platform/src/platform/tools/worklist/index.ts';
-import type { LLMProvider } from '../platform/src/platform/providers/interface.ts';
-import type { ProviderRegistry } from '../platform/src/platform/providers/registry.ts';
 
 const disposables = trackDisposables();
 
@@ -324,88 +320,6 @@ describe('state persistence failures', () => {
     }), 'utf-8');
 
     await expect(new TaskScheduler({ storePath: file }).start()).rejects.toThrow('TaskScheduler store snapshot is invalid');
-  });
-
-  test('DaemonBatchManager rejects malformed snapshots instead of resetting jobs', async () => {
-    const dir = tempDir('batch-store');
-    mkdirSync(dir, { recursive: true });
-    const storePath = join(dir, 'batch.json');
-    writeFileSync(storePath, JSON.stringify({ version: 1, jobs: [] }), 'utf-8');
-    const configManager = new ConfigManager({ configDir: join(dir, 'config') });
-    configManager.set('batch.mode', 'explicit');
-    const provider: LLMProvider = {
-      name: 'test',
-      models: ['model'],
-      async chat() {
-        throw new Error('not used');
-      },
-    };
-    const providerRegistry: Pick<ProviderRegistry, 'getCurrentModel' | 'getForModel' | 'getRegistered' | 'listProviders'> = {
-      getCurrentModel: () => ({
-        id: 'model',
-        provider: 'test',
-        registryKey: 'test:model',
-        displayName: 'Test Model',
-        description: 'Test model fixture',
-        capabilities: { toolCalling: false, codeEditing: false, reasoning: false, multimodal: false },
-        contextWindow: 4096,
-        selectable: true,
-      }),
-      getForModel: () => provider,
-      getRegistered: () => provider,
-      listProviders: () => [provider],
-    };
-    const manager = new DaemonBatchManager({ configManager, providerRegistry, storePath });
-
-    await expect(manager.listJobs()).rejects.toThrow('Daemon batch store snapshot is invalid');
-  });
-
-  test('DaemonBatchManager rejects malformed persisted job records', async () => {
-    const dir = tempDir('batch-records');
-    mkdirSync(dir, { recursive: true });
-    const storePath = join(dir, 'batch.json');
-    writeFileSync(storePath, JSON.stringify({
-      version: 1,
-      jobs: {
-        'batch-job-1': {
-          id: 'batch-job-2',
-          provider: 'test',
-          model: 'model',
-          status: 'queued',
-          createdAt: Date.now(),
-          updatedAt: Date.now(),
-          request: { messages: [] },
-          attempts: 0,
-        },
-      },
-    }), 'utf-8');
-    const configManager = new ConfigManager({ configDir: join(dir, 'config') });
-    configManager.set('batch.mode', 'explicit');
-    const provider: LLMProvider = {
-      name: 'test',
-      models: ['model'],
-      async chat() {
-        throw new Error('not used');
-      },
-    };
-    const providerRegistry: Pick<ProviderRegistry, 'getCurrentModel' | 'getForModel' | 'getRegistered' | 'listProviders'> = {
-      getCurrentModel: () => ({
-        id: 'model',
-        provider: 'test',
-        registryKey: 'test:model',
-        displayName: 'Test Model',
-        description: 'Test model fixture',
-        capabilities: { toolCalling: false, codeEditing: false, reasoning: false, multimodal: false },
-        contextWindow: 4096,
-        selectable: true,
-      }),
-      getForModel: () => provider,
-      getRegistered: () => provider,
-      listProviders: () => [provider],
-    };
-    const manager = new DaemonBatchManager({ configManager, providerRegistry, storePath });
-
-    await expect(manager.listJobs()).rejects.toThrow('Daemon batch store snapshot is invalid');
   });
 
   test('control-plane, channel, and distributed stores reject malformed records', async () => {

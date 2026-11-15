@@ -6,6 +6,7 @@ export type {
   DaemonBatchJob,
   DaemonBatchJobStatus,
   DaemonBatchMode,
+  DaemonBatchProviderCancelResult,
   DaemonBatchQueueBackend,
   DaemonBatchRuntimeSnapshot,
   DaemonBatchTickResult,

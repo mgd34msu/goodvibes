@@ -255,7 +255,7 @@ describe('provider batch failures: whether another attempt could succeed', () =>
 });
 
 describe('provider batch failure with no judgment port', () => {
-  test('a failure only wording can settle leaves the job as it was, and the tick completes', async () => {
+  test('a failure only wording can settle is retried within the attempt limit, and the tick completes', async () => {
     forgetFailureReadings();
     const previous = installJudgmentPort(undefined);
     try {
@@ -263,7 +263,7 @@ describe('provider batch failure with no judgment port', () => {
       await expect(manager.tick({ forceSubmit: true })).resolves.toMatchObject({ failedJobs: 0, submittedJobs: 0 });
       const after = await manager.getJob(job.id);
       expect(after?.status).toBe('queued');
-      expect(after?.attempts).toBe(0);
+      expect(after?.attempts).toBe(1);
     } finally {
       installJudgmentPort(previous);
     }

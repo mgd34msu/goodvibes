@@ -8,6 +8,7 @@ export type DaemonBatchQueueBackend = 'local' | 'cloudflare';
 
 export type DaemonBatchJobStatus =
   | 'queued'
+  | 'submitting'
   | 'submitted'
   | 'running'
   | 'completed'
@@ -17,20 +18,23 @@ export type DaemonBatchJobStatus =
   | 'dead_lettered';
 
 /**
- * The legal moves of a batch job. Mutation sites in manager.ts:
+ * The legal moves of a batch job. Every status write in manager.ts goes
+ * through this table; a move it does not list is not made.
  *  - createJob: (new) -> queued
- *  - cancelJob: queued -> cancelled (a submitted job is refused, 409)
- *  - submitProviderBatch success: queued -> submitted | running | failed
- *  - submitProviderBatch retryable failure: queued -> queued (attempts bumped)
- *  - submitProviderBatch unretryable failure: queued -> dead_lettered
- *  - pollProviderBatches status sync: submitted | running -> running (or unchanged)
- *  - pollProviderBatches provider terminal: -> failed | cancelled | expired
- *  - pollProviderBatches unretryable failure: -> dead_lettered
- *  - applyProviderResults: -> completed | failed | cancelled | expired
+ *  - submission: queued -> submitting (saved before the paid provider call),
+ *    then submitting -> submitted | running | failed, or back to queued for a
+ *    retry, or dead_lettered
+ *  - start-up reconcile of a submitting job left by a stopped daemon: found at
+ *    the provider -> submitted | running | failed; not there -> queued; the
+ *    provider cannot be asked -> failed
+ *  - cancelJob: queued | submitting -> cancelled
+ *  - poll: submitted -> running; provider terminal -> completed | failed | cancelled | expired;
+ *    unretryable poll failure -> dead_lettered
  * Terminal states never move.
  */
 export const daemonBatchJobLifecycle = defineLifecycle<DaemonBatchJobStatus>('batch job', {
-  queued: ['queued', 'submitted', 'running', 'failed', 'cancelled', 'dead_lettered'],
+  queued: ['submitting', 'cancelled'],
+  submitting: ['queued', 'submitted', 'running', 'failed', 'cancelled', 'dead_lettered'],
   submitted: ['submitted', 'running', 'completed', 'failed', 'cancelled', 'expired', 'dead_lettered'],
   running: ['running', 'completed', 'failed', 'cancelled', 'expired', 'dead_lettered'],
   completed: [],
@@ -73,6 +77,8 @@ export interface DaemonBatchJob {
   readonly source?: CreateDaemonBatchJobInput['source'] | undefined;
   readonly metadata?: Record<string, string> | undefined;
   readonly attempts: number;
+  /** Sent to the provider as batch metadata, so a batch accepted just before the daemon stopped is found instead of paid for twice. */
+  readonly submissionId?: string | undefined;
   readonly providerBatchId?: string | undefined;
   readonly providerBatchStatus?: ProviderBatchStatus | undefined;
   readonly submittedAt?: number | undefined;
@@ -118,19 +124,29 @@ export interface DaemonBatchRuntimeSnapshot {
   readonly supportedProviders: readonly string[];
 }
 
-export interface DaemonBatchStoreData extends Record<string, unknown> {
-  version: 1;
-  jobs: Record<string, DaemonBatchJob>;
+/** What cancelling a whole provider batch did. */
+export interface DaemonBatchProviderCancelResult {
+  readonly providerBatchId: string;
+  /** The provider's status after the cancel. `running` means it is still winding down; finished requests are collected by the next pass. */
+  readonly providerStatus: ProviderBatchStatus;
+  /** Every job in that provider batch, as the cancel left it. */
+  readonly jobs: readonly DaemonBatchJob[];
 }
 
 export class DaemonBatchError extends Error {
   readonly status: number;
   readonly code: string;
+  /** The state the refusal leaves things in, for callers that read refusals (`readRefusal`). */
+  readonly state: string | undefined;
+  /** What the caller can do next. */
+  readonly next: readonly string[] | undefined;
 
-  constructor(message: string, code: string, status = 400) {
+  constructor(message: string, code: string, status = 400, refusal?: { readonly state: string; readonly next: readonly string[] }) {
     super(message);
     this.name = 'DaemonBatchError';
     this.code = code;
     this.status = status;
+    this.state = refusal?.state;
+    this.next = refusal?.next;
   }
 }

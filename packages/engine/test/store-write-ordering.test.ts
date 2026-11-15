@@ -1,7 +1,7 @@
 /**
  * store-write-ordering.test.ts
  *
- * One defect, four stores. The rest of the stores that share it are pinned in
+ * One defect, three stores. The rest of the stores that share it are pinned in
  * store-write-ordering-registries.test.ts and store-write-ordering-extras.test.ts.
  *
  * `PersistentStore.persist` replaces a file atomically, so no reader ever sees
@@ -16,17 +16,14 @@
  * store whose next write is parked on a gate the test releases, so the overlap
  * is the same on an idle machine and a loaded one, and asserts the REAL consequence of the defect rather than a
  * general statement about ordering: a revoked permission rule that comes back,
- * a cancelled batch job that reads back queued, a deleted CI watch that keeps
- * notifying. Each one fails if its store's write queue is removed.
+ * a cancelled input that reads back queued, a disabled surface that comes back.
+ * Each one fails if its store's write queue is removed.
  *
  * The assertions read the FILE, not the object under test. Every one of these
  * defects leaves the in-memory state perfectly correct; what it loses is the
  * bytes a restart reads.
  */
 import { describe, test, expect } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { waitFor } from './_helpers/test-timeout.js';
 import {
   makeControllableStore,
@@ -37,18 +34,9 @@ import {
 } from './_helpers/controllable-store.js';
 
 import { UserPermissionRuleStore, type StoredUserPermissionRule } from '../platform/src/platform/permissions/user-rule-store.js';
-import { DaemonBatchManager } from '../platform/src/platform/batch/manager.js';
-import { ConfigManager } from '../platform/src/platform/config/manager.js';
-import type { LLMProvider, ProviderBatchResult } from '../platform/src/platform/providers/interface.js';
-import type { ProviderRegistry } from '../platform/src/platform/providers/registry.js';
 import { SharedSessionBroker } from '../platform/src/platform/control-plane/session-broker.js';
 import type { RouteBindingManager } from '../platform/src/platform/channels/index.js';
 import { ChannelPolicyManager } from '../platform/src/platform/channels/policy-manager.js';
-
-/** A temp directory that the caller is responsible for removing. */
-function tempDir(prefix: string): string {
-  return mkdtempSync(join(tmpdir(), `gv-${prefix}-`));
-}
 
 // ---------------------------------------------------------------------------
 // 1. UserPermissionRuleStore, a revoked always-allow rule must stay revoked.
@@ -110,115 +98,7 @@ describe('UserPermissionRuleStore: a revoked rule does not come back', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 2. DaemonBatchManager, a cancelled job is never submitted to the provider.
-// ---------------------------------------------------------------------------
-
-function makeBatchProvider(): LLMProvider & { readonly submitted: string[] } {
-  const submitted: string[] = [];
-  return {
-    name: 'openai',
-    models: ['gpt-test'],
-    submitted,
-    isConfigured: () => true,
-    async chat() { throw new Error('not used'); },
-    batch: {
-      kind: 'provider-batch',
-      endpoints: ['/v1/chat/completions'],
-      async createChatBatch(input) {
-        submitted.push(...input.requests.map((request) => request.customId));
-        return { providerBatchId: 'provider-batch-1', status: 'submitted' };
-      },
-      async retrieveBatch(providerBatchId) {
-        return { providerBatchId, status: 'submitted', resultAvailable: false };
-      },
-      async getResults(): Promise<ProviderBatchResult[]> { return []; },
-    },
-  };
-}
-
-function makeBatchRegistry(provider: LLMProvider): Pick<ProviderRegistry, 'getCurrentModel' | 'getForModel' | 'getRegistered' | 'listProviders'> {
-  return {
-    getCurrentModel: () => ({
-      id: 'gpt-test',
-      provider: 'openai',
-      registryKey: 'openai:gpt-test',
-      displayName: 'GPT Test',
-      description: 'test model',
-      capabilities: { toolCalling: true, codeEditing: true, reasoning: true, multimodal: false },
-      contextWindow: 128_000,
-      selectable: true,
-      tier: 'standard',
-    }),
-    getForModel: () => provider,
-    getRegistered: () => provider,
-    listProviders: () => [provider],
-  };
-}
-
-interface BatchStoreShape extends Record<string, unknown> {
-  readonly version: 1;
-  readonly jobs: Record<string, { readonly status: string }>;
-}
-
-describe('DaemonBatchManager: a cancelled job does not read back queued', () => {
-  test("the operator's cancel survives a tick whose write was already in flight", async () => {
-    const { store, path, cleanup } = makeControllableStore<BatchStoreShape>('batch-order', 'batch-jobs.json');
-    const configDir = tempDir('batch-config');
-    try {
-      const configManager = new ConfigManager({ configDir });
-      configManager.set('batch.mode', 'explicit');
-      const provider = makeBatchProvider();
-      const manager = new DaemonBatchManager({
-        configManager,
-        providerRegistry: makeBatchRegistry(provider),
-        storePath: path,
-      });
-      replaceInternalStore(manager, 'store', store);
-
-      // A batch already at the provider: the pass polls it, which changes a
-      // row, so the pass writes at its end. A pass with nothing to change
-      // writes nothing and has no write to race.
-      await manager.createJob({
-        provider: 'openai',
-        model: 'gpt-test',
-        request: { messages: [{ role: 'user', content: 'already submitted' }] },
-        flush: true,
-      });
-      const job = await manager.createJob({
-        provider: 'openai',
-        model: 'gpt-test',
-        request: { messages: [{ role: 'user', content: 'summarise the day' }] },
-      });
-      expect(job.status).toBe('queued');
-      const writesBefore = store.started;
-
-      // A tick's write is the slow one. The tick begins with provider I/O and
-      // writes at the end of the pass, so its write is routinely in flight when
-      // an operator acts.
-      const release = store.holdNext();
-      const ticking = manager.tick();
-      await waitFor(() => store.started >= writesBefore + 1);
-
-      const cancelling = manager.cancelJob(job.id);
-      await settleCompetingWrite(store, writesBefore + 1);
-      release();
-      const cancelled = await cancelling;
-      expect(cancelled.status).toBe('cancelled');
-      await ticking;
-      await waitFor(() => store.finished >= writesBefore + 2);
-
-      // What the next daemon start reads. 'queued' here is a job the next tick
-      // submits to the provider, a paid request the operator called off.
-      expect(readOnDisk<BatchStoreShape>(path)?.jobs[job.id]?.status).toBe('cancelled');
-    } finally {
-      cleanup();
-      rmSync(configDir, { recursive: true, force: true });
-    }
-  });
-});
-
-// ---------------------------------------------------------------------------
-// 3. SharedSessionBroker, a cancelled input does not read back queued.
+// 2. SharedSessionBroker, a cancelled input does not read back queued.
 // ---------------------------------------------------------------------------
 
 interface SessionStoreShape extends Record<string, unknown> {
@@ -299,7 +179,7 @@ describe('SharedSessionBroker: a cancelled input does not read back queued', () 
 });
 
 // ---------------------------------------------------------------------------
-// 4. ChannelPolicyManager, a "disable this surface" ruling does not revert.
+// 3. ChannelPolicyManager, a "disable this surface" ruling does not revert.
 // ---------------------------------------------------------------------------
 
 interface ChannelPolicyShape extends Record<string, unknown> {

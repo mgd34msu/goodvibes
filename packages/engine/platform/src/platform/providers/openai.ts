@@ -96,7 +96,10 @@ export class OpenAIProvider implements LLMProvider {
   get models(): string[] {
     return this._models;
   }
-  readonly batch: ProviderBatchAdapter;
+  readonly batch: ProviderBatchAdapter & {
+    /** The newest batch created since `createdAfterMs` whose metadata holds `key: value`, or null when there is none. */
+    findBatchByMetadata(key: string, value: string, createdAfterMs: number): Promise<ProviderBatchPollResult | null>;
+  };
 
   /**
    * The `openai` client, resolved on first use rather than at construction.
@@ -132,6 +135,7 @@ export class OpenAIProvider implements LLMProvider {
       retrieveBatch: (providerBatchId) => this.retrieveBatch(providerBatchId),
       cancelBatch: (providerBatchId) => this.cancelBatch(providerBatchId),
       getResults: (providerBatchId) => this.getBatchResults(providerBatchId),
+      findBatchByMetadata: (key, value, createdAfterMs) => this.findBatchByMetadata(key, value, createdAfterMs),
     };
   }
 
@@ -448,6 +452,23 @@ export class OpenAIProvider implements LLMProvider {
     };
   }
 
+  private async findBatchByMetadata(key: string, value: string, createdAfterMs: number): Promise<ProviderBatchPollResult | null> {
+    // The list is newest first; a minute of slack covers clock skew between this host and the API.
+    const floorSeconds = Math.floor(createdAfterMs / 1000) - 60;
+    for await (const batch of (await this.client()).batches.list({ limit: 100 })) {
+      if (batch.metadata?.[key] === value) {
+        return {
+          providerBatchId: batch.id,
+          status: this.mapOpenAIBatchStatus(batch.status),
+          resultAvailable: typeof batch.output_file_id === 'string' || typeof batch.error_file_id === 'string',
+          raw: batch,
+        };
+      }
+      if (batch.created_at < floorSeconds) break;
+    }
+    return null;
+  }
+
   private async getBatchResults(providerBatchId: string): Promise<readonly ProviderBatchResult[]> {
     const batch = await (await this.client()).batches.retrieve(providerBatchId);
     const results: ProviderBatchResult[] = [];
@@ -475,9 +496,11 @@ export class OpenAIProvider implements LLMProvider {
   private mapOpenAIBatchStatus(status: string): ProviderBatchPollResult['status'] {
     if (status === 'completed') return 'completed';
     if (status === 'failed') return 'failed';
-    if (status === 'cancelled' || status === 'cancelling') return 'cancelled';
+    if (status === 'cancelled') return 'cancelled';
     if (status === 'expired') return 'expired';
-    if (status === 'in_progress' || status === 'finalizing') return 'running';
+    // Still running while cancelling: requests that finished before the cancel are
+    // written to the output file once it ends, so a poller must not stop here.
+    if (status === 'in_progress' || status === 'finalizing' || status === 'cancelling') return 'running';
     return 'submitted';
   }
 

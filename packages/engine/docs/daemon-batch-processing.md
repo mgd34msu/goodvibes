@@ -32,7 +32,7 @@ Live TUI, companion, and daemon chat behavior remains live unless a client uses 
 
 The `/api/batch/jobs` endpoint itself never executes a live response. It only queues provider-batch jobs.
 
-Finished jobs (completed, failed, cancelled, expired or dead-lettered) are kept for 7 days and at most 1000 are kept; older ones are removed from the store, after which `GET /api/batch/jobs/{id}` answers 404. When a provider reports a batch completed but returns no result for a job, that job is marked failed.
+Finished jobs (completed, failed, cancelled, expired or dead-lettered) are kept for 7 days and at most 1000 are kept; older ones are removed from the store, after which `GET /api/batch/jobs/{id}` answers 404. A job moves `queued` -> `submitting` -> `submitted` -> `running` -> a finished state. `submitting` is saved before the provider is called, together with a submission id sent to the provider as batch metadata: if the daemon stops during that call, the next pass asks the provider for the batch by that id and resumes it, or queues the job again when the provider has none, instead of paying for a second batch. A provider that cannot be asked (Anthropic) is not sent the job twice; the job fails with `BATCH_SUBMISSION_UNCONFIRMED` and says what to check. When a provider batch ends (completed, failed, cancelled or expired), every job it returned no result for takes that end state (failed for a completed batch) instead of being polled again.
 
 ## Provider support
 
@@ -55,7 +55,7 @@ All routes require the same daemon auth as other daemon APIs. Queuing, cancellin
 | `/api/batch/jobs` | `POST` | Queues a chat batch job. Returns `202` with the job record. |
 | `/api/batch/jobs` | `GET` | Lists recent jobs. Supports `?limit=100`. |
 | `/api/batch/jobs/{jobId}` | `GET` | Reads one job. |
-| `/api/batch/jobs/{jobId}/cancel` | `POST` | Cancels a queued job. A job cancelled while its batch is being submitted to the provider stays cancelled. Submitted jobs are provider-batch scoped and cannot be cancelled per job. |
+| `/api/batch/jobs/{jobId}/cancel` | `POST` | Cancels a queued job. A job cancelled while its batch is being submitted to the provider stays cancelled. A job already at the provider is refused with `409 BATCH_JOB_ALREADY_SUBMITTED`, which names its provider batch, because the provider runs that batch as a whole. |
 | `/api/batch/tick` | `POST` | Submits eligible queued jobs and polls submitted provider batches. Body may include `{ "force": true }`. |
 
 Example:
@@ -85,7 +85,7 @@ Example:
 }
 ```
 
-Jobs are persisted under the daemon config directory in `batch-jobs.json`.
+Jobs are persisted under the daemon config directory in `batch-jobs/`, one file per job (`<id>.json`) and one per result (`<id>.result.json`), so a change writes one small file. A `batch-jobs.json` from an earlier build is split into that directory on first start. A job file that cannot be read is moved into `batch-jobs.invalid.json` with the reason, the path is logged, and the other jobs are served.
 
 **`POST /api/batch/jobs` body fields**
 
@@ -103,7 +103,7 @@ Jobs are persisted under the daemon config directory in `batch-jobs.json`.
 | `source.kind` | `"daemon-api" \| "cloudflare-worker" \| "cloudflare-queue" \| "automation" \| "client"` (optional) | Origin of the job. |
 | `source.id` | `string` (optional) | Caller-supplied source identifier. |
 | `metadata` | `object` (optional) | String key/value metadata. |
-| `flush` | `boolean` (optional) | Submit eligible jobs immediately after queuing. |
+| `flush` | `boolean` (optional) | Submit this job immediately instead of waiting for `batch.maxDelayMs`; other queued jobs keep their own delay. |
 
 **Error responses**
 
@@ -115,10 +115,11 @@ Jobs are persisted under the daemon config directory in `batch-jobs.json`.
 | `400` | `INVALID_BATCH_REQUEST` | The job is missing required fields (for example `request.messages`). |
 | `413` | `QUEUE_PAYLOAD_TOO_LARGE` | The queued job payload exceeds the maximum allowed size. |
 | `413` | `BATCH_REQUEST_TOO_LARGE` | The batch request exceeds 4 MiB. Split it into smaller jobs. |
-| `409` | `BATCH_JOB_ALREADY_SUBMITTED` | The job has already been submitted and cannot be submitted again. |
+| `409` | `BATCH_JOB_ALREADY_SUBMITTED` | The job is already in a provider batch, which runs as a whole; the response names that batch. |
 | `409` | `BATCH_PROVIDER_UNSUPPORTED` | The target provider does not expose a provider Batch API adapter. |
 | `409` | `BATCH_PROVIDER_NOT_CONFIGURED` | The target provider lacks the API-key credentials required for Batch API use. |
-| `500` | `BATCH_STORE_INVALID` | The daemon batch store snapshot is invalid. |
+| `500` | `BATCH_STORE_UNAVAILABLE` | The `batch-jobs/` directory could not be read; the message names it. |
+| `500` | `BATCH_STORE_WRITE_FAILED` | A job could not be written; nothing was queued, or a cancel holds only until restart. The message names the directory. |
 | `500` | `BATCH_ERROR` | An unexpected batch failure not covered by a more specific `DaemonBatchError` code. |
 
 ## Cloudflare integration

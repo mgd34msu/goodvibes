@@ -181,14 +181,6 @@ describe('worktrees.setup.run and worktrees.discard only act on a linked worktre
     return catalog;
   }
 
-  test('discard refuses the main checkout without touching git', async () => {
-    const main = tempDir('wt-main-');
-    const calls = { setupRuns: [], discards: [], recorded: [] } as { setupRuns: string[]; discards: string[]; recorded: string[] };
-    const catalog = register([main, join(main, '.goodvibes', '.worktrees', 'agent-1')], calls, main);
-    await expect(catalog.invoke('worktrees.discard', { ...ctx, body: { path: main } })).rejects.toMatchObject({ status: 404, field: 'path' });
-    expect(calls.discards).toEqual([]);
-  });
-
   test('setup refuses a directory that is not a worktree and records nothing', async () => {
     const main = tempDir('wt-main-');
     const other = tempDir('wt-other-');

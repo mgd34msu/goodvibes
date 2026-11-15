@@ -26,10 +26,12 @@ export interface WorktreeSetupGatewayDeps {
 }
 
 /**
- * The one linked worktree `rawPath` names. Setup commands and discard act on
- * whatever directory they are given (discard even commits into it), so a path
+ * The one linked worktree `rawPath` names. Setup runs the configured commands
+ * and copies carry-over files (`.env` among them) from the source root into
+ * whatever directory it is given, and records the outcome there, so a path
  * that is the main checkout, another repository, or just a folder is refused
- * before anything runs.
+ * before anything runs. Discard needs no copy of this: the registry's
+ * `discard` refuses the same paths itself, in its receipt.
  */
 async function resolveLinkedWorktree(deps: WorktreeSetupGatewayDeps, rawPath: string): Promise<string> {
   const absolute = resolve(deps.sourceRoot, rawPath);
@@ -65,12 +67,14 @@ export function createWorktreeSetupRunHandler(deps: WorktreeSetupGatewayDeps): G
  * `worktrees.discard`, discard actually discards: the registry's
  * eviction-preserving removal (dirty state committed onto the KEPT branch,
  * directory removed, record dropped) with the honest receipt as the output.
+ * A path that is not a linked worktree of this project comes back as a
+ * refused receipt (`ok: false`, nothing committed or removed).
  */
 export function createWorktreeDiscardHandler(deps: WorktreeSetupGatewayDeps): GatewayMethodHandler {
   return async (invocation) => {
     const params = readInvocationParams(invocation);
     const path = requireStringValue(params.path, 'path');
-    return await deps.registry.discard(await resolveLinkedWorktree(deps, path));
+    return await deps.registry.discard(resolve(deps.sourceRoot, path));
   };
 }
 

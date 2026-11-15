@@ -266,7 +266,9 @@ describe('worktrees.discard: discard performs its meaning', () => {
         resolveConfig: () => ({ commands: [], carryOverGlobs: [] }),
       });
 
-      await expect(catalog.invoke('worktrees.discard', { ...ctx, body: { path: root } })).rejects.toThrow(/not a linked worktree/);
+      const refused = await catalog.invoke('worktrees.discard', { ...ctx, body: { path: root } }) as { ok: boolean; detail: string };
+      expect(refused.ok).toBe(false);
+      expect(refused.detail).toMatch(/not a linked worktree/);
       await expect(catalog.invoke('worktrees.discard', { ...ctx, body: {} })).rejects.toThrow(/path is required/);
       expect(runGit(root, ['rev-list', '--count', 'HEAD'])).toBe(before);
       expect(runGit(root, ['status', '--porcelain'])).toContain('?? dirty.txt');

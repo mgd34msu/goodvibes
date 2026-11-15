@@ -10,9 +10,9 @@ import type { Question } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import {
   forgetFailureReadings,
+  GoodVibesError,
   HttpStatusError,
   installJudgmentPort,
-  JudgmentPortMissingError,
 } from '@goodvibes-jev/engine/errors';
 import {
   classifyDeliveryError,
@@ -75,6 +75,8 @@ describe('structure decides without a reading', () => {
       [Object.assign(new Error('Payment Required'), { statusCode: 402 }), 'terminal', 'status'],
       [connectionRefused(), 'retryable', 'errno'],
       [new DOMException('The operation timed out.', 'TimeoutError'), 'retryable', 'error-type'],
+      [Object.assign(new Error('Unable to connect. Is the computer able to access the url?'), { code: 'ConnectionRefused' }), 'retryable', 'errno'],
+      [new DOMException('The operation was aborted.', 'AbortError'), 'terminal', 'cancelled'],
     ];
     for (const [error, failureClass, basis] of cases) {
       const decided = await readFailureTransience(error, 'test.structure');
@@ -83,9 +85,20 @@ describe('structure decides without a reading', () => {
     }
   });
 
-  test('a status only in the message text is not parsed: it needs a reading', async () => {
+  test('a status only in the message text is not parsed; with no reading possible it is retried', async () => {
     expect(structuredTransience(new Error('HTTP 400: bad request'))).toBeUndefined();
-    await expect(readFailureTransience(new Error('HTTP 400: bad request'), 'test.text')).rejects.toBeInstanceOf(JudgmentPortMissingError);
+    expect(await readFailureTransience(new Error('HTTP 400: bad request'), 'test.text')).toMatchObject({ failureClass: 'retryable', basis: 'reading' });
+  });
+
+  test('the documented recoverable field and the retry decision agree', () => {
+    const errors = [
+      new GoodVibesError('unavailable, stated final', { status: 503, recoverable: false }),
+      new GoodVibesError('no route to host', { category: 'network' }),
+      new GoodVibesError('slow down', { retryAfterMs: 1_000 }),
+      new GoodVibesError('gone', { status: 404 }),
+      new DeliveryError('upstream busy', 'retryable'),
+    ];
+    for (const error of errors) expect(error.recoverable).toBe(structuredTransience(error)?.failureClass === 'retryable');
   });
 
   test('a failure with no wording is retried without a request', async () => {
@@ -168,13 +181,13 @@ describe('DeliveryQueue', () => {
     queue.dispose();
   });
 
-  test('no reading means no decision: the enqueue rejects with both errors', async () => {
+  test('a failure no reading can classify stays queued for retry, not dropped', async () => {
     const queue = new DeliveryQueue({ maxRetries: 3 });
     const attempt = queue.enqueue('webhook', 'agent.done', 'hello', async () => {
       throw new Error('delivery went wrong somehow');
     });
-    await expect(attempt).rejects.toBeInstanceOf(AggregateError);
-    expect(queue.getMetrics()).toMatchObject({ retrying: 0, deadLettered: 0 });
+    expect(await attempt).toBe('retrying');
+    expect(queue.getMetrics()).toMatchObject({ retrying: 1, deadLettered: 0 });
     queue.dispose();
   });
 });
@@ -304,10 +317,10 @@ describe('automation delivery attempts', () => {
 describe('automation run follow-up', () => {
   const ids = { jobId: 'job-1', runId: 'run-1' };
 
-  test('a known transience needs no reading; a failure with no port yields none', async () => {
+  test('a known transience needs no reading; a failure no reading can classify is retryable', async () => {
     const known = { failureClass: 'retryable', basis: 'explicit', detail: 'lost to a restart' } as const;
     expect(await readAutomationRunTransience({ known }, 'test.run', ids)).toBe(known);
-    expect(await readAutomationRunTransience({ error: 'model refused the task' }, 'test.run', ids)).toBeUndefined();
+    expect(await readAutomationRunTransience({ error: 'model refused the task' }, 'test.run', ids)).toMatchObject({ failureClass: 'retryable', basis: 'reading' });
   });
 
   test('a failure text is read', async () => {

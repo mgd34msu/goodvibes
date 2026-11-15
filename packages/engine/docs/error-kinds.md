@@ -109,7 +109,7 @@ Every error thrown by the platform's public surface is an instance of `GoodVibes
 
 **Remediation:** Log `err.requestId` for debugging. Retry with backoff for 500/502/503/504, these are typically transient. Do not retry on 501.
 
-**Retryable:** Sometimes. Check `err.recoverable`. The platform sets it based on status code. HTTP 500/502/503/504 are retryable by default.
+**Retryable:** Sometimes. Check `err.recoverable`. Unless the error states it, the platform sets it from the same decision its own retries use (status, Retry-After, connection code, category). HTTP 500/502/503/504 are retryable by default.
 
 ---
 
@@ -348,7 +348,7 @@ The class exposes 20 structured fields; `toJSON()` serializes them with `undefin
 | `code` | `EngineErrorCode \| (string & {})` | Typed error code; canonical for platform errors, any string for caller-supplied codes. |
 | `category` | `ErrorCategory` | Fine-grained classification (e.g. `authentication`, `rate_limit`). |
 | `source` | `ErrorSource` | Where the error originated (`transport`, `contract`, `config`, etc.). |
-| `recoverable` | `boolean` | Whether a retry is expected to succeed. |
+| `recoverable` | `boolean` | Whether a retry is expected to succeed: the value the error was given, or else the engine's own retry decision for its fields. |
 | `status` | `number \| undefined` | HTTP status code if from a transport response. |
 | `url` | `string \| undefined` | Request URL for transport failures. |
 | `method` | `string \| undefined` | HTTP method for transport failures. |

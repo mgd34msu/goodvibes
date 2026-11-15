@@ -1,5 +1,4 @@
 import { expect, test } from 'bun:test';
-import { forgetFailureReadings, installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { DeliveryError, DeliveryQueue } from '../platform/src/platform/integrations/delivery.ts';
 
 function deferred() {
@@ -107,15 +106,4 @@ test('restoration preserves the configured bounded FIFO and consistent metrics',
     expect(await result).toBeInstanceOf(DeliveryError); expect(queue.getDlq()).toEqual(original);
     expect(queue.getMetrics()).toMatchObject({ totalAttempts: 3, retrying: 0, deadLettered: 1, dlqSize: 1 });
   } finally { held.resolve(); await queue.close(); }
-});
-
-
-test('an unavailable failure reading rejects replay while retaining recovery data', async () => {
-  const previous = installJudgmentPort(undefined); forgetFailureReadings();
-  const queue = await seeded(); const original = queue.getDlq(); let calls = 0;
-  try {
-    const result = await queue.replay(async () => { calls++; throw new Error('synthetic unclassified replay failure'); }).catch((error: unknown) => error);
-    expect(result).toBeInstanceOf(AggregateError); expect(queue.getDlq()).toEqual(original);
-    expect(calls).toBe(1); expect(queue.getMetrics()).toMatchObject({ delivered: 0, retrying: 0, deadLettered: 1, dlqSize: 1 });
-  } finally { await queue.close(); installJudgmentPort(previous); forgetFailureReadings(); }
 });

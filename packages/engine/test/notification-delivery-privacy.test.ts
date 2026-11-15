@@ -172,7 +172,7 @@ test('approval snapshots and direct builders capture each primitive once without
   } finally { await notifier.close(); fetchSpy.mockRestore(); }
 });
 
-test('an unavailable retry reading receives the original failure but exposes no original error or cause', async () => {
+test('an unavailable retry reading keeps the notification queued and exposes no original error', async () => {
   const original = new Error(PRIVATE);
   const states: unknown[] = [];
   forgetFailureReadings();
@@ -183,14 +183,12 @@ test('an unavailable retry reading receives the original failure but exposes no 
   const fetchSpy = interceptFetch(async () => { throw original; });
   const notifier = new Notifier({ slack: new SlackIntegration(URL_A), metadataOnly: () => true });
   try {
-    const failure = await notifier.notifyNotification(turn()).catch((error: unknown) => error);
-    expect(failure).toBeInstanceOf(AggregateError);
+    await notifier.notifyNotification(turn());
     expect(states).toHaveLength(1);
     expect(String(states[0])).toContain(PRIVATE);
-    expect(inspect(failure, { depth: 8 })).not.toContain(PRIVATE);
-    expect((failure as AggregateError).errors).not.toContain(original);
-    expect((failure as Error).cause).toBeUndefined();
-    expect(notifier.getQueueStatus()[0]?.metrics).toMatchObject({ retrying: 0, deadLettered: 0 });
+    const status = notifier.getQueueStatus();
+    expect(inspect(status, { depth: 8 })).not.toContain(PRIVATE);
+    expect(status[0]?.metrics).toMatchObject({ retrying: 1, deadLettered: 0 });
     expect(structuralDeliveryEvidence({ failureClass: 'terminal', basis: 'reading', detail: PRIVATE })).toEqual({ failureClass: 'terminal', basis: 'reading' });
     expect(structuralDeliveryEvidence({ failureClass: 'terminal', basis: PRIVATE as never, detail: PRIVATE })).toBeUndefined();
   } finally { await notifier.close(); fetchSpy.mockRestore(); installJudgmentPort(previous); forgetFailureReadings(); }

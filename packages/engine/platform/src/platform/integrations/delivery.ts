@@ -3,8 +3,7 @@ import { logger } from '../utils/logger.js';
 import { randomInt, randomUUID } from 'node:crypto';
 import {
   GoodVibesError,
-  readFailureTransience as readSharedFailureTransience,
-  structuredTransience as structuredFailureTransience,
+  readFailureTransience,
   type FailureClass,
   type FailureTransience,
   type TransienceBasis,
@@ -44,31 +43,9 @@ export type DeliveryFailureClass = FailureClass;
 
 export type { FailureTransience, TransienceBasis, TransienceOptions };
 
-/**
- * The transience a failure's structure fixes on its own: an explicit
- * DeliveryError class first, then the shared structured facts (see
- * `structuredTransience` in `@goodvibes-jev/engine/errors`).
- */
-export function structuredTransience(error: unknown): FailureTransience | undefined {
-  if (error instanceof DeliveryError) {
-    return { failureClass: error.failureClass, basis: 'explicit', detail: `DeliveryError marked ${error.failureClass}` };
-  }
-  return structuredFailureTransience(error);
-}
-
-/**
- * Decides whether a failure is worth another attempt: an explicit
- * DeliveryError class, then the shared decision in
- * `@goodvibes-jev/engine/errors` (structure, then one `engine.failure-reading`
- * reading of the wording). Used before every retry, cooldown or dead-letter
- * in the integration delivery queue, in automation and in the provider batch
- * queue. Throws when a reading is needed and none can be made; there is no
- * pattern-list fallback.
- */
-export async function readFailureTransience(error: unknown, site: string, options: TransienceOptions = {}): Promise<FailureTransience> {
-  if (error instanceof DeliveryError) return structuredTransience(error)!;
-  return readSharedFailureTransience(error, site, { describe: summarizeError, ...options });
-}
+// One retry decision for every site: a DeliveryError states its class through
+// `recoverable`, which the shared decision honours first.
+export { readFailureTransience, structuredTransience } from '@goodvibes-jev/engine/errors';
 
 /** Classifies a delivery error as retryable or terminal (see {@link readFailureTransience}). */
 export async function classifyDeliveryError(error: unknown, site = 'integrations.delivery.transience'): Promise<DeliveryFailureClass> {
@@ -87,7 +64,7 @@ export class DeliveryError extends GoodVibesError {
     public readonly failureClass: DeliveryFailureClass,
     public readonly statusCode?: number,
   ) {
-    super(message, { code: 'DELIVERY_ERROR', category: 'internal', source: 'runtime', recoverable: false });
+    super(message, { code: 'DELIVERY_ERROR', category: 'internal', source: 'runtime', recoverable: failureClass === 'retryable' });
     this.name = 'DeliveryError';
   }
 }
@@ -496,34 +473,8 @@ export class DeliveryQueue<TPayload = string> {
       this._assertOpen();
       const errorMsg = this._describeError(err);
       const status = this._structuralDiagnostics ? deliveryHttpStatus(err) : undefined;
-      let transience: FailureTransience;
-      try {
-        transience = await readFailureTransience(err, 'integrations.delivery.queue');
-      } catch (readError: unknown) {
-        this._assertOpen();
-        if (entry.attempts > 1) {
-          // A retry has no caller left to throw to: the first attempt already
-          // answered `retrying`. Dropping it here lost a delivery the caller was
-          // told was still on its way, so it is dead-lettered instead.
-          return this._moveToDlq(entry, errorMsg, {
-            failureClass: 'retryable',
-            basis: 'no-wording',
-            detail: 'whether to retry this failure could not be decided',
-          }, status);
-        }
-        this._pending.delete(entry.id);
-        if (this._structuralDiagnostics) {
-          // Keep the shape of an aggregate without retaining either private
-          // source error as a cause or inner error after the decision failed.
-          const failure = new Error(errorMsg);
-          if (status !== undefined) Object.defineProperty(failure, 'status', { value: status, enumerable: true });
-          throw new AggregateError([failure, new Error('Retry decision unavailable')], 'Delivery failed; retry decision unavailable');
-        }
-        throw new AggregateError(
-          [err, readError],
-          `DeliveryQueue: ${entry.channel} delivery failed and whether to retry it could not be read (${summarizeError(readError)})`,
-        );
-      }
+      // An unreadable failure comes back retryable; the attempt budget bounds it.
+      let transience: FailureTransience = await readFailureTransience(err, 'integrations.delivery.queue');
       this._assertOpen();
       if (this._structuralDiagnostics) {
         const evidence = structuralDeliveryEvidence(transience);

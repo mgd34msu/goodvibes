@@ -1,4 +1,4 @@
-import { TRANSIENT_STATUS_CODES } from './failure-transience.js';
+import { RECOVERABLE_STATED, structuredTransience, TRANSIENT_STATUS_CODES } from './failure-transience.js';
 import { categoryForStatus } from './failure-reading.js';
 import { readNextSteps, type Refusal } from './refusal.js';
 import type {
@@ -287,6 +287,12 @@ export class GoodVibesError extends Error {
   public readonly code: EngineErrorCode | (string & {});
   public readonly category: ErrorCategory;
   public readonly source: ErrorSource;
+  /**
+   * Whether another attempt can succeed. The value passed in when one was;
+   * otherwise derived from the error's own fields by the engine's retry
+   * decision (`structuredTransience`: Retry-After, status, connection code,
+   * timeout class, category), so this field and the engine's retries agree.
+   */
   public readonly recoverable: boolean;
   public readonly status?: number | undefined;
   public readonly url?: string | undefined;
@@ -334,7 +340,6 @@ export class GoodVibesError extends Error {
     this.category = category;
     this.kind = inferKind(this.category);
     this.source = options.source ?? 'unknown';
-    this.recoverable = options.recoverable ?? (options.status !== undefined && RETRYABLE_STATUS_CODES.includes(options.status));
     this.status = options.status;
     this.url = options.url;
     this.method = options.method;
@@ -350,6 +355,10 @@ export class GoodVibesError extends Error {
     this.providerType = options.providerType;
     this.retryAfterMs = options.retryAfterMs;
     this.cause = options.cause;
+    if (options.recoverable !== undefined) {
+      Object.defineProperty(this, RECOVERABLE_STATED, { value: true, enumerable: false, configurable: false });
+    }
+    this.recoverable = options.recoverable ?? structuredTransience(this)?.failureClass === 'retryable';
   }
 
   toJSON(): Record<string, unknown> {
@@ -535,8 +544,9 @@ export class ContractError extends GoodVibesError {
  * (`createHttpStatusError`) or check `err.category` directly rather than
  * assuming a specific category from constructor arguments alone.
  *
- * Use `recoverable` to decide whether to retry, and `retryAfterMs` for
- * the backoff hint on rate-limit responses.
+ * Use `recoverable` to decide whether to retry (it is the engine's own retry
+ * decision, or the daemon's stated value), and `retryAfterMs` for the backoff
+ * hint on rate-limit responses.
  *
  * @example
  * import { HttpStatusError } from '@goodvibes-jev/engine/errors';
@@ -745,6 +755,7 @@ export {
   categoryDependsOnWording,
   categoryForCode,
   categoryForStatus,
+  connectionForCode,
   connectionSummary,
   failureReading,
   failureState,
@@ -752,6 +763,7 @@ export {
   summaryDependsOnWording,
   forgetFailureReadings,
   readFailure,
+  structuralFailureConclusions,
   type ConnectionFailure,
   type FailureCategory,
   type FailureConclusions,

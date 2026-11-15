@@ -30,7 +30,7 @@ async function waitFor(predicate: () => boolean, label: string): Promise<void> {
 }
 
 describe('DeliveryQueue accounting', () => {
-  test('a retry whose failure cannot be classified is dead-lettered, not dropped', async () => {
+  test('a failure that cannot be classified is retried within the budget, then dead-lettered, not dropped', async () => {
     const queue = new DeliveryQueue({ initialDelayMs: 1, maxDelayMs: 2, maxRetries: 3 });
     const dead: DeadLetterEntry[] = [];
     queue.onDeadLetter((entry) => { dead.push(entry); });
@@ -42,7 +42,7 @@ describe('DeliveryQueue accounting', () => {
     });
     expect(outcome).toBe('retrying');
     await waitFor(() => dead.length === 1, 'the dead-letter record');
-    expect(calls).toBe(2);
+    expect(calls).toBe(4);
     expect(queue.getDlq()).toHaveLength(1);
     expect(queue.getMetrics()).toMatchObject({ retrying: 0, deadLettered: 1, dlqSize: 1 });
   });

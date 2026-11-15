@@ -1,6 +1,6 @@
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import {
   defineBattery,
+  drainOwned,
   oneOf,
   STAKES_BANDS,
   yesNo,
@@ -273,48 +273,53 @@ function remember(memo: Map<string, Promise<FailureConclusions>>, state: string,
  * Reads what an error's wording says, asking every failure question in one
  * request. `site` names the decision site for the decision log. Explicit owned
  * options keep their port/lifetime and bypass the cross-caller wording memo.
+ * A failure with no HTTP status whose code is in the connection-code table is
+ * settled by that table with no request: the code already answers every
+ * question. The caller's `beforeAttempt` runs once before each model attempt,
+ * the last point before a request leaves the process.
  */
 export async function readFailure(evidence: FailureEvidence, site: string, options?: FailureReadOptions): Promise<FailureConclusions> {
-  const current = () => {
-    options?.signal?.throwIfAborted();
-    const checked: unknown = options?.beforeAttempt?.();
-    if (checked !== undefined) { drainOwned(checked); throw new Error('Failure reading guard must be synchronous.'); }
-  };
-  current();
-  if (decisionModelPolicyState().operation === 'classic') return classicFailureConclusions(evidence);
+  options?.signal?.throwIfAborted();
+  if (decisionModelPolicyState().operation === 'classic' || (evidence.status === undefined && codeFact(evidence.code) !== undefined)) {
+    return structuralFailureConclusions(evidence);
+  }
   try { return await readDecisionFailure(evidence, site, options); }
   catch (error) {
-    current();
+    options?.signal?.throwIfAborted();
     if (!tryClassicDecisionFallback(error)) throw error;
-    return classicFailureConclusions(evidence);
+    return structuralFailureConclusions(evidence);
   }
 }
 
-function classicFailureConclusions(evidence: FailureEvidence): FailureConclusions {
+/** What the status and code tables alone say about a failure; no wording is read. */
+export function structuralFailureConclusions(evidence: FailureEvidence): FailureConclusions {
   const code = evidence.code?.trim().toUpperCase();
+  const fact = evidence.status === undefined ? codeFact(code) : undefined;
   const fixed = categoryForStatus(evidence.status) ?? categoryForCode(code);
   const category = fixed && Object.hasOwn(CATEGORY_OPTIONS, fixed) ? fixed as FailureCategory : 'unknown';
-  const connection: ConnectionFailure = evidence.status !== undefined ? 'none' : code === 'ECONNREFUSED' ? 'refused'
-    : code === 'ENOTFOUND' || code === 'EAI_AGAIN' ? 'dns_failed' : code === 'ETIMEDOUT' ? 'timed_out' : 'none';
   return { source: 'classic', category, billing: evidence.status === 402, rateLimited: evidence.status === 429,
     contextExceeded: code === 'CONTEXT_LENGTH_EXCEEDED' || code === 'MAX_TOKENS_EXCEEDED',
-    transientNetwork: evidence.status === undefined && code !== undefined && CODE_CATEGORIES.has(code),
-    providerUnusable: evidence.status === 401 || evidence.status === 403 || evidence.status === 404,
-    beforeResponse: evidence.status === undefined && (code === 'ECONNREFUSED' || code === 'ENOTFOUND' || code === 'EAI_AGAIN' || code === 'EHOSTUNREACH'), connection };
+    transientNetwork: fact !== undefined,
+    providerUnusable: evidence.status === 401 || evidence.status === 403 || evidence.status === 404 || fact?.connection === 'refused' || fact?.connection === 'dns_failed',
+    beforeResponse: fact?.beforeResponse === true, connection: fact?.connection ?? 'none' };
 }
 
 async function readDecisionFailure(evidence: FailureEvidence, site: string, options?: FailureReadOptions): Promise<FailureConclusions> {
   const source = options === undefined ? captureJudgmentPort(site) : undefined;
   const port = options?.port ?? source!.port, model = port.model;
-  const current = () => {
+  // Source, cancellation and model checks are integer and flag compares; the
+  // caller's own guard runs only in `beforeAttempt`, once per model attempt.
+  const unchanged = () => {
     source?.assertCurrent(); options?.signal?.throwIfAborted();
-    const checked: unknown = options?.beforeAttempt?.();
-    if (checked !== undefined) { drainOwned(checked); throw new Error('Failure reading guard must be synchronous.'); }
     if (port.model !== model) throw new Error('Failure judgment model changed.');
   };
-  current();
+  const beforeAttempt = () => {
+    unchanged();
+    const checked: unknown = options?.beforeAttempt?.();
+    if (checked !== undefined) { drainOwned(checked); throw new Error('Failure reading guard must be synchronous.'); }
+  };
+  unchanged();
   const state = failureState(evidence);
-  source?.assertCurrent();
   let memo = source && memos.get(source.identity);
   if (source && !memo) { memo = new Map(); memos.set(source.identity, memo); }
   const known = memo?.get(state);
@@ -325,17 +330,17 @@ async function readDecisionFailure(evidence: FailureEvidence, site: string, opti
       // was retired or cancelled, this one is not: a failed reading is dropped
       // from the memo, so this caller reads for itself. Any other failure, and
       // this caller's own retirement, still surface.
-      current();
+      unchanged();
       if (!(error instanceof JudgmentAuthorityRetiredError)) throw error;
     }
   }
   const reading = (async () => {
     const run = await failureReading.run(port, state, { site,
       ...((options?.signal ?? source?.signal) ? { signal: (options?.signal ?? source?.signal)! } : {}),
-      beforeAttempt: current,
+      beforeAttempt,
       ...(options?.onRetry === undefined ? {} : { onRetry: options.onRetry }),
     });
-    current();
+    unchanged();
     const r = run.readings;
     const category = r.category.outcome === 'act' ? r.category.choice : 'unknown';
     return {
@@ -373,19 +378,54 @@ export function categoryForStatus(status: number | undefined): DaemonErrorCatego
   return undefined;
 }
 
-/** Categories fixed by a structured errno code (an error's `code` field, or a message that is exactly the code). */
-const CODE_CATEGORIES: ReadonlyMap<string, DaemonErrorCategory> = new Map([
-  ['ECONNREFUSED', 'network'],
-  ['ENOTFOUND', 'network'],
-  ['EAI_AGAIN', 'network'],
-  ['EHOSTUNREACH', 'network'],
-  ['ECONNRESET', 'network'],
-  ['ETIMEDOUT', 'timeout'],
-  ['ECONNABORTED', 'timeout'],
+/** What a connection-failure code fixes: its category, the connection failure it names, and whether it came before any response. */
+interface CodeFact {
+  readonly category: DaemonErrorCategory;
+  readonly connection: ConnectionFailure;
+  readonly beforeResponse: boolean;
+}
+
+const fact = (category: DaemonErrorCategory, connection: ConnectionFailure, beforeResponse: boolean): CodeFact => ({ category, connection, beforeResponse });
+
+/**
+ * Connection-failure codes, keyed upper-case: Node errno names, Bun's fetch
+ * codes (Bun reports a refused or unreachable host as `ConnectionRefused` with
+ * no errno) and undici's. One table serves the transience decision, the
+ * structural conclusions and every caller of {@link categoryForCode}.
+ */
+const CODE_FACTS: ReadonlyMap<string, CodeFact> = new Map([
+  ['ECONNREFUSED', fact('network', 'refused', true)],
+  ['ENOTFOUND', fact('network', 'dns_failed', true)],
+  ['EAI_AGAIN', fact('network', 'dns_failed', true)],
+  ['EHOSTUNREACH', fact('network', 'none', true)],
+  ['ENETUNREACH', fact('network', 'none', true)],
+  ['ECONNRESET', fact('network', 'none', false)],
+  ['ETIMEDOUT', fact('timeout', 'timed_out', false)],
+  ['ECONNABORTED', fact('timeout', 'none', false)],
+  ['CONNECTIONREFUSED', fact('network', 'refused', true)],
+  ['FAILEDTOOPENSOCKET', fact('network', 'refused', true)],
+  ['CONNECTIONFAILED', fact('network', 'none', true)],
+  ['DNSRESOLUTIONFAILED', fact('network', 'dns_failed', true)],
+  ['CONNECTIONCLOSED', fact('network', 'none', false)],
+  ['CONNECTIONRESETBYPEER', fact('network', 'none', false)],
+  ['CONNECTIONTIMEDOUT', fact('timeout', 'timed_out', false)],
+  ['CONNECTIONTIMEOUT', fact('timeout', 'timed_out', false)],
+  ['UND_ERR_CONNECT_TIMEOUT', fact('timeout', 'timed_out', true)],
+  ['UND_ERR_SOCKET', fact('network', 'none', false)],
 ]);
 
+function codeFact(code: string | undefined): CodeFact | undefined {
+  return code === undefined ? undefined : CODE_FACTS.get(code.trim().toUpperCase());
+}
+
+/** The category a connection-failure code (an error's `code` field, or a message that is exactly the code) fixes. */
 export function categoryForCode(code: string | undefined): DaemonErrorCategory | undefined {
-  return code === undefined ? undefined : CODE_CATEGORIES.get(code.trim().toUpperCase());
+  return codeFact(code)?.category;
+}
+
+/** The connection failure a code names, for the display summary; undefined when the code names none. */
+export function connectionForCode(code: string | undefined): ConnectionFailure | undefined {
+  return codeFact(code)?.connection;
 }
 
 /** A status's own category, which a billing reading may replace. */

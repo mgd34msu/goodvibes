@@ -36,7 +36,7 @@ import { ErrorState } from '../feedback/ErrorState';
 import { SkeletonBlock } from '../feedback/SkeletonBlock';
 import { SettingsBlock } from './dialog/parts';
 import { whenLabel } from '../../lib/when-label';
-import { unpairRelay } from '../../lib/relay-connection';
+import { getActiveRoute, unpairRelay } from '../../lib/relay-connection';
 import { describeRelayPairingForConfirmation, getStoredRelayPairing } from '../../lib/relay-pairing';
 import '../../styles/components/pairing-tokens.css';
 
@@ -157,18 +157,23 @@ export function PairingTokensSettings() {
 
   async function handleUnpairRelay(): Promise<void> {
     if (!relayPairing) return;
-    const { relayHost, fingerprint } = describeRelayPairingForConfirmation(relayPairing);
-    const ok = await confirm.ask({
-      title: 'Unpair from the relay?',
-      target: relayHost,
-      description: `This browser stops reaching its daemon through the relay (key ${fingerprint}) and uses the direct address again. Scan a new pairing code to reconnect.`,
-      confirmLabel: 'Unpair',
-      tone: 'danger',
-    });
-    if (!ok) return;
+    // Asked only while this browser is reaching the daemon THROUGH the relay: then unpairing
+    // cuts it off, and the pairing code that restores it cannot be fetched from here. Over
+    // the direct address the relay is only a spare route, so it goes at once.
+    if (getActiveRoute() === 'relay') {
+      const { relayHost, fingerprint } = describeRelayPairingForConfirmation(relayPairing);
+      const ok = await confirm.ask({
+        title: 'Unpair from the relay?',
+        target: relayHost,
+        description: `This browser is connected through the relay (key ${fingerprint}). Unpairing switches it to the direct address, which works only on the daemon's own network; reconnecting through the relay needs a new pairing code from the daemon.`,
+        confirmLabel: 'Unpair',
+        tone: 'danger',
+      });
+      if (!ok) return;
+    }
     unpairRelay();
     setRelayPairing(getStoredRelayPairing());
-    toast({ title: 'Relay unpaired', description: 'This browser now connects directly.', tone: 'success' });
+    toast({ title: 'Relay unpaired', description: 'This browser now connects directly. Scan a new pairing code from the daemon to use the relay again.', tone: 'success' });
   }
 
   function startRename(token: PublicPairingToken): void {

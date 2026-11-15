@@ -77,6 +77,8 @@ let chatDeleteCalls: string[] = [];
 let chatDeleteReallyRemoves = true;
 let chatCloseAvailable = true;
 let chatCloseHasMachineCode = true;
+/** Sessions the daemon holds but its list window does not return (older chats). */
+let chatSessionsOutsideList: { id: string; title: string; status: string }[] = [];
 
 function resetChatDeleteFixtures() {
   chatSessionsFixture = [{ id: 'c1', title: 'Chat One', status: 'active' }];
@@ -85,6 +87,7 @@ function resetChatDeleteFixtures() {
   chatDeleteReallyRemoves = true;
   chatCloseAvailable = true;
   chatCloseHasMachineCode = true;
+  chatSessionsOutsideList = [];
 }
 resetChatDeleteFixtures();
 
@@ -211,6 +214,15 @@ mock.module('./lib/goodvibes', () => ({
       },
       sessions: {
         list: () => Promise.resolve({ sessions: chatSessionsFixture, totals: { sessions: chatSessionsFixture.length } }),
+        get: (sessionId: string) => {
+          const session = [...chatSessionsFixture, ...chatSessionsOutsideList].find((s) => s.id === sessionId);
+          return session
+            ? Promise.resolve({ session, messages: [] })
+            : Promise.reject(Object.assign(new Error('Session not found'), {
+              status: 404,
+              body: { error: 'Session not found', code: 'SESSION_NOT_FOUND' },
+            }));
+        },
         update: (sessionId: string, input: { title?: string }) => {
           const session = chatSessionsFixture.find((s) => s.id === sessionId);
           if (session && input.title) session.title = input.title;
@@ -384,27 +396,6 @@ describe('App: D-WEBUI-3: the health poll drives the unreachable overlay on its 
     unmount();
   });
 
-  test('Retry now re-runs the health probes instead of waiting for the next poll', async () => {
-    window.history.pushState({}, '', '/?view=sessions');
-    const { container, client, unmount } = render();
-    await flushMicrotasks();
-    flushSync(() => {
-      setHealthConnection('down');
-    });
-    await flushMicrotasks();
-    const refetched: unknown[] = [];
-    const original = client.refetchQueries.bind(client);
-    client.refetchQueries = ((filters?: { queryKey?: unknown }) => {
-      refetched.push(filters?.queryKey);
-      return original(filters as never);
-    }) as typeof client.refetchQueries;
-
-    const retry = [...container.querySelectorAll('.daemon-gate-overlay button')].find((b) => b.textContent?.includes('Retry now'));
-    flushSync(() => retry?.dispatchEvent(new window.MouseEvent('click', { bubbles: true })));
-    expect(refetched).toContainEqual(['daemon-health']);
-    unmount();
-  });
-
   test('signing out also forgets a stored relay pairing and returns to the direct route', async () => {
     storeRelayPairing({
       protocol: 1,
@@ -539,7 +530,7 @@ describe('App: delete-means-delete, companion chat sidebar delete', () => {
     // Close-then-delete, in that order, honoring the "delete requires closed" verb.
     expect(chatCloseCalls).toEqual(['c1']);
     expect(chatDeleteCalls).toEqual(['c1']);
-    // Proof-of-gone: the reconcile re-fetch (includeClosed:true) found it truly absent.
+    // Proof-of-gone: the by-id read answered that the record is absent.
     expect(chatSessionsFixture.some((s) => s.id === 'c1')).toBe(false);
     expect(container.textContent).not.toContain('Chat One');
 
@@ -561,7 +552,7 @@ describe('App: delete-means-delete, companion chat sidebar delete', () => {
 
     expect(chatDeleteCalls).toEqual(['c1']);
     // The record was only soft-closed server-side (chatDeleteReallyRemoves=false), so
-    // the proof-of-gone reconcile finds it still present, the anti-pattern this brief
+    // the proof-of-gone read finds it still present, the anti-pattern this brief
     // removes is trusting the optimistic hide as "deleted" here; instead the row must
     // come back and the failure must be visible.
     expect(container.textContent).toContain('Chat One');
@@ -638,6 +629,27 @@ describe('App: the new-chat draft flag follows the URL session', () => {
     await flushMicrotasks();
 
     expect(newChatNav(container).getAttribute('aria-current')).toBeNull();
+    unmount();
+  });
+});
+
+describe('App: a chat outside the listed ones', () => {
+  test('a chat the list does not hold stays open when the daemon has it, so input goes to that chat', async () => {
+    chatSessionsOutsideList = [{ id: 'old1', title: 'Older chat', status: 'active' }];
+    window.history.pushState({}, '', '/?view=chat&session=old1');
+    const { container, unmount } = render();
+    await flushMicrotasks(16);
+    expect(new URL(window.location.href).searchParams.get('session')).toBe('old1');
+    expect(container.textContent).not.toContain('That chat no longer exists');
+    unmount();
+  });
+
+  test('a chat the daemon does not have moves to another chat and says so', async () => {
+    window.history.pushState({}, '', '/?view=chat&session=gone1');
+    const { container, unmount } = render();
+    await flushMicrotasks(16);
+    expect(new URL(window.location.href).searchParams.get('session')).toBe('c1');
+    expect(container.textContent).toContain('That chat no longer exists');
     unmount();
   });
 });

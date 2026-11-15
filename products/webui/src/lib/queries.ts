@@ -1,5 +1,3 @@
-import { getCurrentAuth, invokeMethod, client as platformClient } from './goodvibes';
-
 export const queryKeys = {
   auth: ['auth'] as const,
   status: ['control', 'status'] as const,
@@ -195,45 +193,3 @@ export const queryKeys = {
   occasionsGifts: (occasionId: string) => ['occasions', 'gifts', occasionId] as const,
 };
 
-export async function loadBootSnapshot() {
-  const entries = await Promise.allSettled([
-    getCurrentAuth(),
-    platformClient.operator.control.status(),
-    platformClient.operator.control.snapshot(),
-    platformClient.operator.accounts.snapshot(),
-    platformClient.operator.providers.list(),
-    platformClient.operator.tasks.list(),
-    platformClient.operator.approvals.list(),
-    platformClient.operator.sessions.list(),
-    platformClient.knowledge.status(),
-    invokeMethod('knowledge.sources.list', { limit: 100 }),
-    invokeMethod('knowledge.nodes.list', { limit: 100 }),
-    invokeMethod('knowledge.issues.list', { limit: 100 }),
-    invokeMethod('knowledge.projections.list', { limit: 100 }),
-    invokeMethod('knowledge.refinement.tasks.list', { limit: 100 }),
-  ]);
-
-  const keys = [
-    'auth',
-    'status',
-    'control',
-    'accounts',
-    'providers',
-    'tasks',
-    'approvals',
-    'sessions',
-    'knowledgeStatus',
-    'knowledgeSources',
-    'knowledgeNodes',
-    'knowledgeIssues',
-    'knowledgeProjections',
-    'knowledgeRefinement',
-  ] as const;
-
-  return Object.fromEntries(entries.map((entry, index) => [
-    keys[index],
-    entry.status === 'fulfilled'
-      ? { ok: true, value: entry.value }
-      : { ok: false, error: entry.reason instanceof Error ? entry.reason.message : String(entry.reason) },
-  ]));
-}

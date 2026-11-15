@@ -24,8 +24,7 @@ correct, not a fault. To see which binding Vite resolved, ask the daemon first:
 goodvibes-daemon webui status --json
 ```
 
-Only when the daemon does not answer does Vite fall back to the older source,
-which you can inspect with `goodvibes web --json`.
+When the daemon does not answer, Vite binds `127.0.0.1:3423`.
 
 For one-off development, override the bind:
 

@@ -44,15 +44,42 @@ import { summarizeError } from '../utils/error-display.js';
  * configured, inert surface and a healthy-looking daemon.
  *
  * A host that already configured a log keeps it; this never relocates one.
+ *
+ * A destination the daemon named is the daemon's to end: `holder` (one value
+ * per daemon, its config manager) is recorded, and `releaseDaemonActivityLog`
+ * called from the daemon's stop disposes the logger once the last daemon that
+ * holds it has stopped. Without that, lines logged during teardown stayed
+ * buffered and the next flush rebuilt `<workdir>/.goodvibes/logs` after the host
+ * had stopped the daemon and deleted its working directory.
  */
-export function ensureDaemonActivityLog(workingDirectory: string): void {
+export function ensureDaemonActivityLog(workingDirectory: string, holder: object): void {
   const logDir = join(workingDirectory, '.goodvibes', 'logs');
-  if (!ensureActivityLoggerConfigured(logDir)) return;
+  if (!ensureActivityLoggerConfigured(logDir)) {
+    // Another daemon in this process already named the destination: share it.
+    if (daemonLogHolders.size > 0) daemonLogHolders.add(holder);
+    return;
+  }
+  daemonLogHolders.add(holder);
   logger.warn('DaemonServer: the host started the daemon without configuring the activity log', {
     detail: 'every platform log line before this point was discarded',
     action: 'call configureActivityLogger() in the host entrypoint; the daemon has now defaulted it',
     logDir,
   });
+}
+
+/** Daemons in this process that hold an activity log destination a daemon named. */
+const daemonLogHolders = new Set<object>();
+
+/**
+ * End the activity log this daemon named, once no other daemon in the process
+ * holds it: a final flush that never rebuilds a removed directory, then the
+ * logger accepts nothing more. A host-configured log is never touched. Called
+ * by the daemon's stop with the same `holder` it booted with; a second call is
+ * a no-op.
+ */
+export function releaseDaemonActivityLog(holder: object): void {
+  if (!daemonLogHolders.delete(holder)) return;
+  if (daemonLogHolders.size === 0) logger.dispose();
 }
 
 /**
@@ -196,7 +223,7 @@ export async function runDaemonBootGuarantees(
   configManager: ConfigManager,
   services: DaemonBootServices,
 ): Promise<void> {
-  ensureDaemonActivityLog(services.shellPaths.workingDirectory);
+  ensureDaemonActivityLog(services.shellPaths.workingDirectory, configManager);
   migrateDaemonOwnedConfigOnBoot(configManager, services.shellPaths.homeDirectory);
   await migrateDaemonNeededCredentialsOnBoot(services.secretsManager, services.shellPaths.homeDirectory);
   await repairGoogleConnectionOnBoot(configManager, services);

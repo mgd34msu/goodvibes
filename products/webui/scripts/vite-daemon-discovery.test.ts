@@ -12,15 +12,13 @@ const query = { args: ['status', '--json'], result };
 const catalog = JSON.stringify({ schema: 'goodvibes.daemon.cli-catalog', schemaVersion: 1,
   commands: [{ name: 'webui', subcommands: ['status'], machineQueries: [query] }] });
 const binding = JSON.stringify({ ...result, host: '127.0.0.2', port: 44323 });
-const fallback = JSON.stringify({ host: '127.0.0.3', port: 45323 });
 const quote = (text: string) => `'${text.replaceAll("'", "'\\''")}'`;
 
 function fixture(options: {
   help?: string;
   status?: string;
-  cli?: string;
   realDaemon?: boolean;
-  hang?: 'help' | 'status' | 'terminal';
+  hang?: 'help' | 'status';
   helpExitCode?: number;
   statusExitCode?: number;
 } = {}) {
@@ -40,16 +38,14 @@ fi
 printf 'unrecognized command would start daemon' > ${quote(unsafe)}
 exit 94`;
   writeFileSync(join(bin, 'goodvibes-daemon'), `#!/bin/sh\nprintf 'daemon %s\\n' "$*" >> ${quote(calls)}\n${daemonBody}\n`, { mode: 0o755 });
-  writeFileSync(join(bin, 'goodvibes'), `#!/bin/sh\nprintf 'terminal %s\\n' "$*" >> ${quote(calls)}\n${options.hang === 'terminal'
-    ? "trap '' TERM; while :; do :; done" : `printf '%s\\n' ${quote(options.cli ?? fallback)}`}\n`, { mode: 0o755 });
-  const settings = join(root, 'tui-settings.json');
-  writeFileSync(settings, JSON.stringify({ web: { host: '127.0.0.4', port: 46323 } }));
+  // The terminal program is never asked: a call to it would show up in calls().
+  writeFileSync(join(bin, 'goodvibes'), `#!/bin/sh\nprintf 'terminal %s\\n' "$*" >> ${quote(calls)}\n`, { mode: 0o755 });
   function run(command: 'serve' | 'build' = 'serve', isPreview = false, discovery = '1') {
     const runner = join(root, 'run-config.ts');
     writeFileSync(runner, `import config from ${JSON.stringify(configPath)};\nconst result = typeof config === 'function' ? await config({ command: ${JSON.stringify(command)}, mode: 'development', isPreview: ${String(isPreview)} }) : config;\nconsole.log(JSON.stringify(result.server));\n`);
     const child = spawnSync(process.execPath, [runner], { cwd: root, encoding: 'utf8', timeout: 10_000, killSignal: 'SIGKILL',
       env: { PATH: `${bin}${delimiter}${process.env.PATH ?? ''}`, HOME: home, GOODVIBES_HOME: home, GOODVIBES_DAEMON_HOME: daemon,
-        GOODVIBES_WORKING_DIR: root, GOODVIBES_TUI_SETTINGS_PATH: settings, GOODVIBES_WEBUI_BINDING_DISCOVERY: discovery,
+        GOODVIBES_WORKING_DIR: root, GOODVIBES_WEBUI_BINDING_DISCOVERY: discovery,
         // Keep the runtime's transpiler cache outside the settings-home proof.
         BUN_RUNTIME_TRANSPILER_CACHE_PATH: join(root, 'bun-transpiler-cache') } });
     expect(child.error).toBeUndefined(); expect(child.status, child.stderr).toBe(0);
@@ -59,8 +55,10 @@ exit 94`;
     calls: () => existsSync(calls) ? readFileSync(calls, 'utf8').trim().split('\n') : [] };
 }
 
+const defaults = { host: '127.0.0.1', port: 3423 };
+
 describe('the actual Vite config caller discovers safely', () => {
-  test('machine proof gates the status subprocess and overrides terminal fallback', () => {
+  test('machine proof gates the status subprocess and its binding is used', () => {
     const f = fixture(); const output = f.run();
     expect(output.server).toMatchObject({ host: '127.0.0.2', port: 44323 });
     expect(output.stderr).toBe('');
@@ -75,58 +73,26 @@ describe('the actual Vite config caller discovers safely', () => {
       commands: [{ name: 'webui', subcommands: ['status'], machineQueries: [] }] }),
   ])('legacy or unsupported output never invokes webui: %s', (help) => {
     const f = fixture({ help }); const output = f.run();
-    expect(output.server).toMatchObject({ host: '127.0.0.3', port: 45323 });
-    expect(output.stderr).toContain('falling back');
-    expect(f.calls()).toEqual(['daemon --help --json', 'terminal web --json']);
+    expect(output.server).toMatchObject(defaults);
+    expect(output.stderr).toContain('did not answer');
+    expect(f.calls()).toEqual(['daemon --help --json']);
     expect(existsSync(f.unsafe)).toBe(false);
   });
 
-  test('malformed status falls back, then absent terminal output reaches settings', () => {
-    const f = fixture({ status: '{}', cli: 'not JSON' });
-    expect(f.run().server).toMatchObject({ host: '127.0.0.4', port: 46323 });
-    expect(f.calls()).toEqual(['daemon --help --json', 'daemon webui status --json', 'terminal web --json']);
-  });
-
-  test.each(['null', '[]', '{"host":false,"port":3423}', '{"host":"localhost","port":0}', '{"port":"3423"}'])(
-    'malformed terminal JSON reaches settings safely: %s', (cli) => {
-      const f = fixture({ help: 'legacy help', cli });
-      expect(f.run().server).toMatchObject({ host: '127.0.0.4', port: 46323 });
-      expect(f.calls()).toEqual(['daemon --help --json', 'terminal web --json']);
-    },
-  );
-
   test.each([
-    { helpExitCode: 1 }, { help: `${catalog}${' '.repeat(70_000)}` },
-  ])('failed or oversized help never authorizes a status invocation', (options) => {
+    { status: '{}' }, { statusExitCode: 1 }, { status: `${binding}${' '.repeat(70_000)}` }, { hang: 'status' as const },
+  ])('a malformed, failed, oversized or stuck status leaves the defaults', (options) => {
     const f = fixture(options);
-    expect(f.run().server).toMatchObject({ host: '127.0.0.3', port: 45323 });
-    expect(f.calls()).toEqual(['daemon --help --json', 'terminal web --json']);
+    expect(f.run().server).toMatchObject(defaults);
+    expect(f.calls()).toEqual(['daemon --help --json', 'daemon webui status --json']);
   });
 
   test.each([
-    { statusExitCode: 1 }, { status: `${binding}${' '.repeat(70_000)}` },
-  ])('failed or oversized status retains the terminal fallback', (options) => {
+    { helpExitCode: 1 }, { help: `${catalog}${' '.repeat(70_000)}` }, { hang: 'help' as const },
+  ])('failed, oversized or stuck help never authorizes a status invocation', (options) => {
     const f = fixture(options);
-    expect(f.run().server).toMatchObject({ host: '127.0.0.3', port: 45323 });
-    expect(f.calls()).toEqual(['daemon --help --json', 'daemon webui status --json', 'terminal web --json']);
-  });
-
-  test('a stuck legacy help process is killed before safe fallback', () => {
-    const f = fixture({ hang: 'help' });
-    expect(f.run().server).toMatchObject({ host: '127.0.0.3', port: 45323 });
-    expect(f.calls()).toEqual(['daemon --help --json', 'terminal web --json']);
-  });
-
-  test('a stuck status process is killed before the terminal fallback', () => {
-    const f = fixture({ hang: 'status' });
-    expect(f.run().server).toMatchObject({ host: '127.0.0.3', port: 45323 });
-    expect(f.calls()).toEqual(['daemon --help --json', 'daemon webui status --json', 'terminal web --json']);
-  });
-
-  test('a stuck terminal fallback is killed before reading settings', () => {
-    const f = fixture({ help: 'legacy help', hang: 'terminal' });
-    expect(f.run().server).toMatchObject({ host: '127.0.0.4', port: 46323 });
-    expect(f.calls()).toEqual(['daemon --help --json', 'terminal web --json']);
+    expect(f.run().server).toMatchObject(defaults);
+    expect(f.calls()).toEqual(['daemon --help --json']);
   });
 
   test.each([

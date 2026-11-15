@@ -19,7 +19,7 @@
     "preview": "vite preview --host 127.0.0.1 --port 3423 --strictPort",
     "test": "bun ../../packages/engine/scripts/test.ts --cwd ../../products/webui --isolate",
     "test:changed": "bun ../../packages/engine/scripts/test.ts --cwd ../../products/webui --changed=origin/main --isolate",
-    "test:live": "bun run scripts/live-daemon-smoke-runner.ts",
+    "test:live": "bun run scripts/live-daemon-smoke.ts",
     "test:connected-browser": "bun run scripts/connected-browser-smoke.ts",
     "e2e": "playwright test",
     "e2e:phone": "playwright test --project=phone",

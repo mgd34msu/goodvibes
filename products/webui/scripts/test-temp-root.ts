@@ -1,8 +1,8 @@
 /**
- * Run roots for the live smoke scripts (live-daemon-smoke*.ts,
+ * Run roots for the live smoke scripts (live-daemon-smoke.ts,
  * connected-router-*.ts), which are not `bun test` runs: each gets
- * `<repo>/.test-tmp/run-<pid>` as TMPDIR, its parent removes it after the child
- * exits, and roots abandoned by a killed run are swept after an hour.
+ * `<repo>/.test-tmp/run-<pid>` as TMPDIR and removes it when it is done, and
+ * roots abandoned by a killed run are swept after an hour.
  * `bun test` itself gets its temp directory from packages/engine/scripts/test.ts.
  */
 import { mkdirSync, realpathSync } from 'node:fs';

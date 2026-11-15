@@ -34,11 +34,15 @@ import { bestId, bestTitle } from './object';
  * - `cached`: a local copy of a session the daemon already knows about (restored
  *   from storage, or a `created-here` session a later list confirmed). Kept so a
  *   reload paints the sidebar before the first list request answers.
+ * - `opened-by-id`: a session the daemon returned when read by id because its list
+ *   (the newest chats only) did not hold it, an older chat opened from Work, a
+ *   bookmark or a link. Rendered alongside the list like `created-here`.
  * - `removed`: hidden pending the outcome of a delete, or reported gone by the
  *   daemon. Holds no session object by construction.
  */
 export type CompanionSessionEntry =
   | { readonly id: string; readonly status: 'created-here'; readonly session: unknown }
+  | { readonly id: string; readonly status: 'opened-by-id'; readonly session: unknown }
   | { readonly id: string; readonly status: 'cached'; readonly session: unknown }
   | { readonly id: string; readonly status: 'removed' };
 
@@ -57,6 +61,8 @@ export interface CompanionSessionsState {
 export type CompanionSessionsAction =
   /** A session was created in this tab (the composer sent its first message). */
   | { readonly type: 'local-session-created'; readonly session: unknown }
+  /** The daemon answered a by-id read for a session its list did not hold. */
+  | { readonly type: 'session-opened-by-id'; readonly session: unknown }
   /** A session the operator renamed, or whose detail this tab just re-read. */
   | { readonly type: 'local-session-updated'; readonly sessionId: string; readonly session: unknown }
   /** The operator confirmed a delete; hide the row while the call is in flight. */
@@ -134,6 +140,16 @@ export function companionSessionsReducer(
       return withEntryFirst(state, { id, status: 'created-here', session }, id);
     }
 
+    case 'session-opened-by-id': {
+      const session = companionSessionFromDetail(action.session);
+      const id = bestId(session);
+      if (!id) return state;
+      const previous = findEntry(state, id);
+      // A tombstone outranks a late read, and a session started here keeps that status.
+      if (previous?.status === 'removed' || previous?.status === 'created-here') return state;
+      return withEntryFirst(state, { id, status: 'opened-by-id', session }, id);
+    }
+
     case 'local-session-updated': {
       const session = companionSessionFromDetail(action.session);
       const updatedId = bestId(session);
@@ -146,7 +162,8 @@ export function companionSessionsReducer(
       const nextSession: unknown = updatedId
         ? session
         : { id: action.sessionId, sessionId: action.sessionId, title: bestTitle(action.session, action.sessionId) };
-      const status = previous?.status === 'created-here' ? 'created-here' : 'cached';
+      const status = previous?.status === 'created-here' ? 'created-here'
+        : previous?.status === 'opened-by-id' ? 'opened-by-id' : 'cached';
       return withEntryFirst(state, { id, status, session: nextSession }, action.sessionId);
     }
 
@@ -164,7 +181,7 @@ export function companionSessionsReducer(
     case 'server-sessions-synced': {
       const known = new Set(action.sessionIds.filter(Boolean));
       const confirmed = (entry: CompanionSessionEntry): entry is CompanionSessionCopy =>
-        entry.status === 'created-here' && known.has(entry.id);
+        (entry.status === 'created-here' || entry.status === 'opened-by-id') && known.has(entry.id);
       // Returning the SAME state object when a list confirms nothing new lets React
       // bail out of the re-render this dispatch would otherwise cause on every fetch.
       if (!state.entries.some(confirmed)) return state;
@@ -208,8 +225,9 @@ export interface VisibleSessionsInput {
  *
  * Until a daemon list has answered, every local copy is shown (that is all this
  * browser has). Once one has, the daemon's records win outright and the only local
- * copies still contributed are `created-here` sessions the daemon has not returned
- * yet, so a stale cached copy can never resurrect a session the daemon dropped.
+ * copies still contributed are `created-here` and `opened-by-id` sessions the list
+ * has not returned, so a stale cached copy can never resurrect a session the daemon
+ * dropped.
  * Removed ids are filtered out last, so a tombstone hides a daemon record too.
  */
 export function selectVisibleSessions(
@@ -217,7 +235,7 @@ export function selectVisibleSessions(
   { serverSessions, serverListLoaded }: VisibleSessionsInput,
 ): unknown[] {
   const copies = state.entries.filter(hasLocalCopy);
-  const local = serverListLoaded ? copies.filter((entry) => entry.status === 'created-here') : copies;
+  const local = serverListLoaded ? copies.filter((entry) => entry.status !== 'cached') : copies;
   const removed = selectRemovedSessionIds(state);
   return mergeCompanionSessions(
     local.map((entry) => entry.session),

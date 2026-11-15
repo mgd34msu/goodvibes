@@ -8,6 +8,7 @@ import { PowerChip } from './components/status/PowerChip';
 import { WakeChip } from './components/voice/WakeChip';
 import { getCommands, registerCommand, unregisterCommand } from './lib/commands';
 import { useConfirm } from './components/ui/ConfirmDialog';
+import { Button } from './components/ui/Button';
 import { useUrlState } from './hooks/useUrlState';
 import type { ViewId } from './lib/router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -27,7 +28,7 @@ import { WakeBanner } from './components/voice/WakeBanner';
 import { useWakeHost } from './lib/voice/useWake';
 import { DaemonReceipts } from './components/status/DaemonReceipts';
 import { clearStoredAuthToken, getCurrentAuth, hasStoredTokenSync, client as platformClient } from './lib/goodvibes';
-import { loadBootSnapshot, queryKeys } from './lib/queries';
+import { queryKeys } from './lib/queries';
 import { ChatView } from './views/ChatView';
 import { WorkView } from './views/work/WorkView';
 import { LibraryView } from './views/library/LibraryView';
@@ -52,6 +53,7 @@ import {
   companionSessionsReducer,
   companionSessionsStateFromStored,
   selectNextSessionId,
+  selectRemovedSessionIds,
   selectVisibleSessions,
 } from './lib/companion-sessions-state';
 import { formatError, isDaemonUnreachableError, isMethodUnavailableError, isSessionNotFoundError } from './lib/errors';
@@ -84,10 +86,6 @@ export default function App() {
   // operator confirms (relayOffer below), and a malformed code surfaces as a banner on
   // the signed-out gate.
   const relayPairing = useRelayPairingHandoff();
-  const boot = useQuery({
-    queryKey: ['boot'],
-    queryFn: loadBootSnapshot,
-  });
   const auth = useQuery({
     queryKey: queryKeys.auth,
     queryFn: getCurrentAuth,
@@ -186,6 +184,15 @@ export default function App() {
     }),
     [chatSessions.isSuccess, chatSessionsState, fetchedChatSessions],
   );
+  // The chat named in the address, when it is not among the listed ones: the list holds the
+  // newest chats only, so an older one (opened from Work, a bookmark, a link from another
+  // device) is read by id before the address is given up on.
+  const activeChatListed = chatSessionItems.some((session) => bestId(session) === activeChatSessionId);
+  const activeChatRemoved = useMemo(
+    () => Boolean(activeChatSessionId) && selectRemovedSessionIds(chatSessionsState).has(activeChatSessionId),
+    [activeChatSessionId, chatSessionsState],
+  );
+  const [missingChatNotice, setMissingChatNotice] = useState(false);
 
   // DELETE-MEANS-DELETE. "Delete" now names a real hard-delete distinct from
   // "close": companion.chat.sessions.delete permanently removes the on-disk
@@ -193,8 +200,8 @@ export default function App() {
   // otherwise), so this always closes first, a no-op if the daemon has no separate
   // close route yet (isMethodUnavailableError) or the session is already closed
   // (SESSION_NOT_FOUND from a double-close race). The mutation never trusts the
-  // delete call's 200 at face value: it reconciles against a real re-fetch with
-  // includeClosed:true and only reports success once the record is genuinely absent,
+  // delete call's 200 at face value: it reads the session back by id and only reports
+  // success once the daemon answers that the record is genuinely absent,
   // the exact anti-pattern this replaces was trusting the client-side hide (the
   // removed entry in companion-sessions-state) as proof, which just hides a
   // soft-closed record whose file never left disk. A daemon that still only
@@ -212,15 +219,18 @@ export default function App() {
       } catch (error) {
         if (!isSessionNotFoundError(error)) throw error;
       }
-      const reconciled = await platformClient.chat.sessions.list({ includeClosed: true, limit: 100 });
-      const stillPresent = companionSessionsFromListResponse(reconciled)
-        .some((session) => bestId(session) === sessionId);
-      if (stillPresent) {
-        throw Object.assign(
-          new Error('Delete did not complete, the record still exists'),
-          { code: 'DELETE_INCOMPLETE' },
-        );
+      // Proof of gone is a read of this one session: 404 means the record left disk; an
+      // answer means it is still there (an older daemon only closes on delete).
+      try {
+        await platformClient.chat.sessions.get(sessionId);
+      } catch (error) {
+        if (isSessionNotFoundError(error)) return;
+        throw error;
       }
+      throw Object.assign(
+        new Error('Delete did not complete, the record still exists'),
+        { code: 'DELETE_INCOMPLETE' },
+      );
     },
     onMutate: async (sessionId) => {
       await queryClient.cancelQueries({ queryKey: ['companion-chat', 'sessions'] });
@@ -258,7 +268,7 @@ export default function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Both auto-select effects act only on the chat view: the list now loads in every
+  // The session-selecting effects act only on the chat view: the list loads in every
   // view (for "Recent"), and choosing a session elsewhere would rewrite that view's URL.
   useEffect(() => {
     if (!sessionRestored || view !== 'chat') return;
@@ -266,15 +276,6 @@ export default function App() {
       setSession(bestId(chatSessionItems[0]), { replace: true });
     }
   }, [sessionRestored, view, activeChatSessionId, chatSessionItems, draftChatRequested, setSession]);
-
-  useEffect(() => {
-    if (!sessionRestored || view !== 'chat') return;
-    if (!chatSessions.isSuccess || !activeChatSessionId) return;
-    if (chatSessionItems.some((s) => bestId(s) === activeChatSessionId)) return;
-    const nextSessionId = bestId(chatSessionItems[0]);
-    setSession(nextSessionId, { replace: true });
-    setDraftChatRequested(!nextSessionId);
-  }, [sessionRestored, view, activeChatSessionId, chatSessionItems, chatSessions.isSuccess, setSession]);
 
   // "New chat" is a request for an EMPTY session, so it cannot outlive a URL that names
   // one. Back/forward after "New chat" lands on a session without passing through any
@@ -304,14 +305,43 @@ export default function App() {
     queryClient.removeQueries({ queryKey: ['companion-chat', sessionId, 'messages'] });
     if (activeChatSessionId === sessionId) {
       const nextSessionId = chatSessions.isSuccess ? selectNextSessionId(chatSessionItems, sessionId) : '';
+      setMissingChatNotice(true);
       setSession(nextSessionId, { replace: true });
       setDraftChatRequested(!nextSessionId);
     }
     void queryClient.invalidateQueries({ queryKey: ['companion-chat', 'sessions'] });
   }, [activeChatSessionId, chatSessionItems, chatSessions.isSuccess, queryClient, setSession]);
 
+  const activeChatLookup = useQuery({
+    queryKey: ['companion-chat', activeChatSessionId, 'lookup'],
+    queryFn: () => platformClient.chat.sessions.get(activeChatSessionId),
+    enabled: sessionRestored && view === 'chat' && chatSessions.isSuccess && Boolean(activeChatSessionId)
+      && !activeChatListed && !activeChatRemoved,
+    retry: false,
+  });
+  useEffect(() => {
+    if (activeChatLookup.data) dispatchChatSessions({ type: 'session-opened-by-id', session: activeChatLookup.data });
+  }, [activeChatLookup.data]);
+
+  // Leave the address only when the daemon says the chat is gone (or this tab removed it).
+  // While the by-id read is in flight, or it failed for another reason, the address stays.
+  useEffect(() => {
+    if (!sessionRestored || view !== 'chat') return;
+    if (!chatSessions.isSuccess || !activeChatSessionId || activeChatListed) return;
+    if (isSessionNotFoundError(activeChatLookup.error)) {
+      handleMissingChatSession(activeChatSessionId);
+      return;
+    }
+    if (!activeChatRemoved) return;
+    const nextSessionId = selectNextSessionId(chatSessionItems, activeChatSessionId);
+    setSession(nextSessionId, { replace: true });
+    setDraftChatRequested(!nextSessionId);
+  }, [sessionRestored, view, activeChatSessionId, activeChatListed, activeChatRemoved, activeChatLookup.error,
+    chatSessionItems, chatSessions.isSuccess, handleMissingChatSession, setSession]);
+
   const handleNavigate = useCallback(
     (nextView: ViewId, options?: { newChat?: boolean; tab?: string }) => {
+      setMissingChatNotice(false);
       if (options?.newChat) {
         // One URL update for view and session together: setView then setSession would
         // build the second entry from the pre-navigation state and put the old view back.
@@ -341,16 +371,15 @@ export default function App() {
   );
 
   // Open a specific session in the chat view, one history entry (view + session
-  // together), used by the CI "open fix session" affordance.
-  // The chat list loads in every view (for Recent), so it can predate a session
-  // that was just started (a CI fix session): refresh it first, or the chat view
-  // would treat the new id as unknown and switch to another chat.
+  // together), used by the Work page and the CI "open fix session" affordance. A session
+  // the list does not hold yet (just started, or older than the listed ones) is read by id
+  // in the chat view, so this navigates at once; the list refreshes behind it for Recent.
   const handleOpenSession = useCallback(
     (sessionId: string) => {
-      void queryClient.refetchQueries({ queryKey: ['companion-chat', 'sessions'] }).finally(() => {
-        setDraftChatRequested(false);
-        setUrlState({ view: 'chat', session: sessionId });
-      });
+      setDraftChatRequested(false);
+      setMissingChatNotice(false);
+      setUrlState({ view: 'chat', session: sessionId });
+      void queryClient.invalidateQueries({ queryKey: ['companion-chat', 'sessions'] });
     },
     [queryClient, setUrlState],
   );
@@ -383,6 +412,7 @@ export default function App() {
   const handleNewChat = useCallback(() => handleNavigate('chat', { newChat: true }), [handleNavigate]);
   const handleOpenChat = useCallback((sessionId: string) => {
     setDraftChatRequested(false);
+    setMissingChatNotice(false);
     setUrlState({ view: 'chat', session: sessionId });
   }, [setUrlState]);
   const confirmDialog = useConfirm();
@@ -420,6 +450,13 @@ export default function App() {
       for (const id of ids) unregisterCommand(id);
     };
   }, [recentChats, handleOpenChat]);
+  // Refresh refetches every query the open views hold, the same complete recovery the
+  // relay-overflow resync runs. Busy follows this one pass, not the background polls.
+  const [refreshing, setRefreshing] = useState(false);
+  const handleRefresh = useCallback(() => {
+    setRefreshing(true);
+    void queryClient.invalidateQueries().finally(() => setRefreshing(false));
+  }, [queryClient]);
   const handleSearch = useCallback(() => {
     getCommands().find((command) => command.id === 'system.palette')?.run();
   }, []);
@@ -573,8 +610,8 @@ export default function App() {
       onSearch={handleSearch}
       onSignOut={handleSignOut}
       onOpenSettings={openSettings}
-      onRefresh={() => void boot.refetch()}
-      refreshing={boot.isFetching}
+      onRefresh={handleRefresh}
+      refreshing={refreshing}
       inert={daemonUnreachable}
       indicators={(
         <>
@@ -608,6 +645,15 @@ export default function App() {
               {realtimeError && sessionRealtime.error
                 ? 'Live updates paused: reconnecting. Views fall back to periodic refresh until the stream returns.'
                 : (realtimeError ?? sessionRealtime.error)}
+            </div>
+          )}
+          {missingChatNotice && (
+            <div className="banner warning" role="status">
+              <TriangleAlert size={16} aria-hidden="true" />
+              {' '}
+              That chat no longer exists.
+              {' '}
+              <Button size="sm" variant="ghost" onClick={() => setMissingChatNotice(false)}>Dismiss</Button>
             </div>
           )}
           {deleteChat.error && !isSessionNotFoundError(deleteChat.error) && (

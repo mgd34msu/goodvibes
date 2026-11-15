@@ -5,11 +5,10 @@ import react from '@vitejs/plugin-react';
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir, hostname } from 'node:os';
 import { isAbsolute, join, resolve } from 'node:path';
-import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { readWebBindingFromDaemon, type GoodVibesWebBinding } from './scripts/daemon-binding';
+import { readWebBindingFromDaemon } from './scripts/daemon-binding';
 
-// Directory this config file lives in (the repo root), resolved independent
+// Directory this config file lives in (products/webui), resolved independent
 // of process.cwd(), this config is the seam every `vite build` invocation
 // loads (bun run build, a wrapper script, CI, or a bare `vite build` in this
 // directory), so a guard planted here cannot be routed around the way a
@@ -50,18 +49,8 @@ interface GoodVibesListenerSettings {
   port?: number;
 }
 
-interface GoodVibesTuiSettings {
+interface GoodVibesDaemonSettings {
   controlPlane?: GoodVibesListenerSettings;
-  web?: GoodVibesListenerSettings;
-}
-
-function readSettingsFile(settingsPath: string): GoodVibesTuiSettings {
-  if (!existsSync(settingsPath)) return {};
-  try {
-    return JSON.parse(readFileSync(settingsPath, 'utf8')) as GoodVibesTuiSettings;
-  } catch {
-    return {};
-  }
 }
 
 /**
@@ -82,38 +71,14 @@ function goodVibesDaemonDirectory(): string {
   return isAbsolute(override) ? override : resolve(process.cwd(), override);
 }
 
-/** The deprecated terminal settings file: its `web.*` and `controlPlane.*` predate the daemon owning them. */
-function readTuiSettings(): GoodVibesTuiSettings {
-  return readSettingsFile(process.env.GOODVIBES_TUI_SETTINGS_PATH ?? join(goodVibesTreeDirectory(), 'tui', 'settings.json'));
-}
-
-/** The daemon owns `controlPlane.*`; its own settings file wins over the deprecated terminal one. */
-function readControlPlaneSettings(tuiSettings: GoodVibesTuiSettings): GoodVibesListenerSettings | undefined {
-  return readSettingsFile(join(goodVibesDaemonDirectory(), 'settings.json')).controlPlane ?? tuiSettings.controlPlane;
-}
-
-function readWebBindingFromCli(): GoodVibesWebBinding {
+/** The daemon's own settings file names its control-plane listener, the dev proxy's target. */
+function readControlPlaneSettings(): GoodVibesListenerSettings | undefined {
+  const settingsPath = join(goodVibesDaemonDirectory(), 'settings.json');
+  if (!existsSync(settingsPath)) return undefined;
   try {
-    const output = execFileSync('goodvibes', ['web', '--json'], {
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-      timeout: 2000,
-      maxBuffer: 64 * 1024,
-      killSignal: 'SIGKILL',
-    });
-    const binding: unknown = JSON.parse(output);
-    if (typeof binding !== 'object' || binding === null || Array.isArray(binding)) return {};
-    const value = binding as Record<string, unknown>;
-    if ((value.host !== undefined && (typeof value.host !== 'string' || !value.host.trim()))
-      || (value.port !== undefined && (typeof value.port !== 'number' || !Number.isInteger(value.port)
-        || value.port < 1 || value.port > 65535))) return {};
-    return {
-      ...(typeof value.host === 'string' ? { host: value.host } : {}),
-      ...(typeof value.port === 'number' ? { port: value.port } : {}),
-      ...(typeof value.url === 'string' ? { url: value.url } : {}),
-    };
+    return (JSON.parse(readFileSync(settingsPath, 'utf8')) as GoodVibesDaemonSettings).controlPlane;
   } catch {
-    return {};
+    return undefined;
   }
 }
 
@@ -156,40 +121,29 @@ function uniqueHosts(values: string[]): string[] {
 }
 
 export default defineConfig(({ command, isPreview }) => {
+// Where the dev server listens comes from the daemon (`goodvibes-daemon webui status
+// --json`); one environment variable per value overrides it. The proxy target is the
+// daemon's control-plane listener from its own settings file.
 const discoverBinding = command === 'serve' && !isPreview && process.env.GOODVIBES_WEBUI_BINDING_DISCOVERY !== '0';
 const daemonWebBinding = discoverBinding ? readWebBindingFromDaemon() : null;
 if (discoverBinding && !daemonWebBinding) {
   console.warn(
-    '[vite] Verified daemon WebUI binding discovery is unavailable, falling back to the ' +
-    'deprecated `goodvibes web --json` / TUI settings.json binding source. That path predates ' +
-    'the daemon becoming its own product and is removed once every supported daemon answers ' +
-    '`webui status --json`.',
+    '[vite] The daemon did not answer `goodvibes-daemon webui status --json`; the dev server binds ' +
+    '127.0.0.1:3423 unless GOODVIBES_WEB_HOST / GOODVIBES_WEB_PORT say otherwise.',
   );
 }
-const cliWebBinding = daemonWebBinding ?? (discoverBinding ? readWebBindingFromCli() : {});
-// The binding names only the web listener, so the control-plane port (the proxy
-// target) is read from settings whether or not a binding was found.
-const tuiSettings = discoverBinding ? readTuiSettings() : {};
-const webHost = cliWebBinding.host ?? listenerHost(tuiSettings.web, '127.0.0.1');
-const webPort = cliWebBinding.port ?? tuiSettings.web?.port ?? 3423;
-const controlPlaneSettings = discoverBinding ? readControlPlaneSettings(tuiSettings) : undefined;
+const controlPlaneSettings = discoverBinding ? readControlPlaneSettings() : undefined;
 const controlPlaneHost = listenerHost(controlPlaneSettings, '127.0.0.1');
 const controlPlanePort = controlPlaneSettings?.port ?? 3421;
 const daemonTarget = process.env.GOODVIBES_DAEMON_BASE_URL
-  ?? process.env.VITE_GOODVIBES_BACKEND_URL
   ?? `http://${localhostTarget(controlPlaneHost)}:${controlPlanePort}`;
-const devHost = process.env.GOODVIBES_WEB_HOST
-  ?? process.env.VITE_GOODVIBES_WEBUI_HOST
-  ?? webHost;
-const devPort = Number(process.env.GOODVIBES_WEB_PORT
-  ?? process.env.VITE_GOODVIBES_WEBUI_PORT
-  ?? webPort);
+const devHost = process.env.GOODVIBES_WEB_HOST ?? daemonWebBinding?.host ?? '127.0.0.1';
+const devPort = Number(process.env.GOODVIBES_WEB_PORT ?? daemonWebBinding?.port ?? 3423);
 const machineHostname = hostname();
 const devAllowedHosts = uniqueHosts([
   ...csv(process.env.GOODVIBES_WEB_ALLOWED_HOSTS),
-  ...csv(process.env.VITE_GOODVIBES_WEBUI_ALLOWED_HOSTS),
   hostnameFromUrl(process.env.GOODVIBES_WEB_PUBLIC_BASE_URL),
-  hostnameFromUrl(cliWebBinding.url),
+  hostnameFromUrl(daemonWebBinding?.url),
   machineHostname,
   `${machineHostname}.local`,
   'goodvibes.local',

@@ -67,13 +67,18 @@ let exitHookInstalled = false;
  * paths the platform does not own the call site of. `process.exit()` runs 'exit'
  * listeners before terminating, and only synchronous work in them completes,
  * which is the reason the flush path is synchronous at all.
+ *
+ * The exit flush never rebuilds a missing directory: by the time the process
+ * ends, a log directory that is gone was removed by its owner (a host that
+ * stopped its daemon and deleted the working tree), and recreating it would put
+ * back a tree that owner just cleaned up.
  */
 function flushAllLoggers(): void {
   for (const instance of liveLoggers) {
     // One logger with a broken destination must not stop the others from
     // landing. An exit hook that throws is also an exit hook that changes how
     // the process ends, which is never this module's business.
-    try { instance.flushSync(); } catch { /* nothing left to log it with */ }
+    try { instance.flushSync({ recreateDestination: false }); } catch { /* nothing left to log it with */ }
   }
 }
 
@@ -194,9 +199,10 @@ export class ActivityLogger {
   }
 
   /**
-   * Stop tracking this logger for the process-exit flush. For hosts and tests
-   * that create their own instances; the shared singleton lives for the life of
-   * the process.
+   * Final flush, then stop accepting entries and stop tracking this logger for
+   * the process-exit flush. For hosts and tests that create their own
+   * instances, and for a runtime that named the shared logger's destination
+   * itself and is now stopping (`releaseDaemonActivityLog`).
    */
   dispose(): void {
     // recreateDestination: false, the difference between a live logger and a
@@ -406,13 +412,15 @@ export function flushActivityLogSync(): void {
  * log at all, for every component in the process. That is not a defect the
  * component can detect from the inside, so the long-lived runtimes call this
  * at start with their own working directory as the fallback. A host that DID
- * configure a destination keeps it; this never relocates an existing log.
+ * configure a destination keeps it; this never relocates an existing log. A
+ * logger its owner disposed counts as unconfigured, so a runtime started again
+ * in the same process after the previous one ended its log gets a log again.
  */
 export function ensureActivityLoggerConfigured(
   logDir: string,
   options?: ActivityLoggerOptions,
 ): boolean {
-  if (logger.isConfigured) return false;
+  if (logger.isConfigured && !logger.isDisposed) return false;
   logger.configure(logDir, options);
   return true;
 }

@@ -1,10 +1,16 @@
+/** Where a host slash command writes text for the person who typed it. */
+export interface HostCommandOutput {
+  print(text: string): void;
+}
+
 export interface HostSlashCommand {
   readonly name: string;
   readonly aliases?: readonly string[] | undefined;
   readonly description: string;
   readonly usage?: string | undefined;
   readonly argsHint?: string | undefined;
-  readonly handler: (args: string[]) => void | Promise<void>;
+  /** `output` is the typing session's output; a host with no session (the daemon) passes none. */
+  readonly handler: (args: string[], output?: HostCommandOutput) => void | Promise<void>;
 }
 
 export interface CommandRegistryLike {

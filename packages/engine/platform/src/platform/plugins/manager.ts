@@ -102,6 +102,8 @@ export interface PluginReloadSummary {
   quarantined?: string[] | undefined;
   /** Plugins that were unloaded but whose cleanup callbacks threw; they were still reloaded. */
   cleanupFailed?: string[] | undefined;
+  /** Plugins that did not start, each with the reason it gave. */
+  loadFailed?: { readonly name: string; readonly reason: string }[] | undefined;
 }
 
 /** Result of a plugin lifecycle verb that persists operator state. */
@@ -452,7 +454,7 @@ export class PluginManager {
       if (failure) return { ok: false, error: `Plugin '${name}' was not enabled, the change could not be saved: ${failure}` };
 
       if (this.deps) {
-        const { loaded } = await this.acquireOrFail(discovered, this.deps);
+        const { loaded, failure } = await this.acquireOrFail(discovered, this.deps);
         if (loaded) {
           this.plugins.set(name, loaded);
           this.notifySubscribers();
@@ -464,7 +466,7 @@ export class PluginManager {
           delete this.state.enabled[name];
           delete this.state.enabledDirs[name];
           this.saveState();
-          return { ok: false, error: `Plugin '${name}' failed to load, check logs` };
+          return { ok: false, error: `Plugin '${name}' did not start and was left disabled: ${failure ?? 'see the log for the reason'}` };
         }
       }
 
@@ -522,6 +524,7 @@ export class PluginManager {
       let failed = 0;
       const cleanupFailed: string[] = [];
       const quarantined: string[] = [];
+      const loadFailed: { name: string; reason: string }[] = [];
 
       const drains = await Promise.all(loadedNames.map(async (name) => ({
         name,
@@ -566,12 +569,13 @@ export class PluginManager {
             }
             // Pass cacheBust so loadPlugin appends ?t=<timestamp> to the import URL,
             // forcing Bun to bypass its module cache and re-execute the file.
-            const { loaded } = await this.acquireOrFail(d, this.deps, cacheBust);
+            const { loaded, failure } = await this.acquireOrFail(d, this.deps, cacheBust);
             if (loaded) {
               this.plugins.set(d.manifest.name, loaded);
               reloaded++;
             } else {
               failed++;
+              loadFailed.push({ name: d.manifest.name, reason: failure ?? 'see the log for the reason' });
             }
           }
         }
@@ -586,6 +590,7 @@ export class PluginManager {
         notDrained: [...notDrained],
         ...(quarantined.length > 0 ? { quarantined } : {}),
         ...(cleanupFailed.length > 0 ? { cleanupFailed } : {}),
+        ...(loadFailed.length > 0 ? { loadFailed } : {}),
       };
     });
   }
@@ -677,13 +682,18 @@ export class PluginManager {
     return pending;
   }
 
-  private async acquire(discovered: Parameters<typeof loadPlugin>[0], deps: PluginLoaderDeps, cacheBust?: number): Promise<LoadedPlugin | null> {
-    if (this.closed) return null;
+  private async acquire(
+    discovered: Parameters<typeof loadPlugin>[0],
+    deps: PluginLoaderDeps,
+    cacheBust?: number,
+    onFailure?: (reason: string) => void,
+  ): Promise<LoadedPlugin | null> {
+    if (this.closed) { onFailure?.('the plugin manager is shutting down'); return null; }
     const tracker = deps.inFlight ?? this.inFlight;
     const names = this.ownedCalls.get(tracker) ?? new Set<string>();
     this.ownedCalls.set(tracker, names);
     names.add(discovered.manifest.name);
-    const loaded = await loadPlugin(discovered, deps, cacheBust, { throwOnCleanupError: true });
+    const loaded = await loadPlugin(discovered, deps, cacheBust, { throwOnCleanupError: true, onFailure });
     if (loaded) this.acquired.add(loaded);
     return loaded;
   }
@@ -697,13 +707,16 @@ export class PluginManager {
     discovered: DiscoveredPlugin,
     deps: PluginLoaderDeps,
     cacheBust?: number,
-  ): Promise<{ loaded: LoadedPlugin | null; cleanupError?: PluginCleanupError }> {
+  ): Promise<{ loaded: LoadedPlugin | null; cleanupError?: PluginCleanupError; failure?: string }> {
+    let failure: string | undefined;
+    const onFailure = (reason: string): void => { failure ??= reason; };
     try {
-      return { loaded: await this.acquire(discovered, deps, cacheBust) };
+      const loaded = await this.acquire(discovered, deps, cacheBust, onFailure);
+      return loaded ? { loaded } : { loaded, ...(failure !== undefined ? { failure } : {}) };
     } catch (error) {
       if (!(error instanceof PluginCleanupError)) throw error;
       this.cleanupErrors.add(error);
-      return { loaded: null, cleanupError: error };
+      return { loaded: null, cleanupError: error, ...(failure !== undefined ? { failure } : {}) };
     }
   }
 

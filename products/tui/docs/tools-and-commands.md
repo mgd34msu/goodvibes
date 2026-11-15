@@ -674,9 +674,9 @@ Place plugin folders in `~/.goodvibes/plugins/` (global) or `.goodvibes/plugins/
 
 Plugins receive a sandboxed API:
 
-- `registerCommand()`: add custom slash commands
+- `registerCommand()`: add custom slash commands; the handler receives the arguments and a context whose `print(text)` shows text in the session that typed the command, and an error it throws (or a refusal while the plugin reloads) is shown there too
 - `registerProvider()` / `registerProviderInstance()`: add OpenAI-compatible or fully custom LLM providers
-- `registerTool()`: add custom tools available to the LLM
+- `registerTool()`: add custom tools available to the LLM; registering a tool name the plugin already registered throws, so the plugin does not start and `/plugin enable` or `/plugin reload` says why
 - `registerGatewayMethod()`: add control-plane/API methods
 - `registerChannelPlugin()` / `registerDeliveryStrategy()`: extend omnichannel surfaces
 - `registerMemoryEmbeddingProvider()`: extend sqlite-vec-backed memory indexing
@@ -685,7 +685,7 @@ Plugins receive a sandboxed API:
 - `getConfig()`: read plugin-specific settings
 - `log()`: emit structured plugin logs
 
-Manage installed plugins via `/plugin enable|disable|reload|list`.
+Manage installed plugins via `/plugin enable|disable|reload|list`. `/plugin reload` names each plugin that did not start (with its reason), each one left on its current version because calls into it were still running, each one skipped because it is quarantined, and each one whose earlier copy reported an error while stopping.
 
 ### Trust, quarantine, and discovery
 

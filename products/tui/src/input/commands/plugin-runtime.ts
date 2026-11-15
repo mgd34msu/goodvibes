@@ -283,8 +283,21 @@ export function registerPluginRuntimeCommands(registry: CommandRegistry): void {
       }
       if (sub === 'reload') {
         ctx.print('Reloading plugins...');
-        const { reloaded, failed } = await pluginManager.reload();
-        ctx.print(`Done. ${reloaded} plugin(s) reloaded${failed > 0 ? `, ${failed} failed` : ''}.`);
+        const summary = await pluginManager.reload();
+        const lines = [`Done. ${summary.reloaded} plugin(s) reloaded${summary.failed > 0 ? `, ${summary.failed} failed` : ''}.`];
+        for (const { name, reason } of summary.loadFailed ?? []) {
+          lines.push(`  ${name}: did not start, ${reason}`);
+        }
+        for (const name of summary.notDrained) {
+          lines.push(`  ${name}: not reloaded, calls into it were still running; it keeps its current version. Run /plugin reload again once they finish.`);
+        }
+        for (const name of summary.quarantined ?? []) {
+          lines.push(`  ${name}: not loaded, it is quarantined. Run /plugin quarantine ${name} lift, then /plugin reload.`);
+        }
+        for (const name of summary.cleanupFailed ?? []) {
+          lines.push(`  ${name}: stopping its earlier copy reported an error; restart to clear anything that copy left behind.`);
+        }
+        ctx.print(lines.join('\n'));
         return;
       }
       if (sub === 'trust') {

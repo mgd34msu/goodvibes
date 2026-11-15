@@ -133,7 +133,7 @@ function scanPluginDirectory(rootDir: string): DiscoveredPlugin[] {
       // The name becomes part of tool names, command names and gateway ids, so
       // spaces and dots would produce invalid or colliding identifiers.
       if (!PLUGIN_NAME_PATTERN.test(manifest.name)) {
-        logger.warn(`[plugins] ${entry}: manifest.json 'name' must be lowercase letters, digits and hyphens, starting with a letter or digit (got '${manifest.name}')`);
+        logger.warn(`[plugins] ${entry}: manifest.json 'name' must be lowercase letters, digits and hyphens, starting with a letter or digit (got '${manifest.name}'), so the plugin is not offered; rename it, for example 'my-plugin'`);
         continue;
       }
       if (manifest.main !== undefined) {
@@ -213,6 +213,11 @@ export interface PluginCleanupOptions {
   readonly throwOnCleanupError?: boolean;
 }
 
+export interface PluginLoadOptions extends PluginCleanupOptions {
+  /** Told why the plugin did not load, in words a person can act on. */
+  readonly onFailure?: ((reason: string) => void) | undefined;
+}
+
 const registrationLifetimes = new WeakMap<LoadedPlugin, PluginInFlightTracker>();
 
 /**
@@ -226,9 +231,14 @@ export async function loadPlugin(
   discovered: DiscoveredPlugin,
   deps: PluginLoaderDeps,
   cacheBust?: number,
-  options: PluginCleanupOptions = {},
+  options: PluginLoadOptions = {},
 ): Promise<LoadedPlugin | null> {
   const { manifest, pluginDir } = discovered;
+  const fail = (reason: string, level: 'warn' | 'error' = 'warn'): null => {
+    logger[level](`[plugins] ${manifest.name}: ${reason}`);
+    options.onFailure?.(reason);
+    return null;
+  };
   const entryFile = manifest.main ?? 'index.js';
   const entryPath = join(pluginDir, entryFile);
 
@@ -236,13 +246,11 @@ export async function loadPlugin(
   const resolvedEntry = resolve(entryPath);
   const resolvedPluginDir = resolve(pluginDir);
   if (!resolvedEntry.startsWith(resolvedPluginDir + '/') && resolvedEntry !== resolvedPluginDir) {
-    logger.error(`[plugins] ${manifest.name}: path traversal detected, entry '${entryFile}' resolves outside plugin directory`);
-    return null;
+    return fail(`entry '${entryFile}' resolves outside the plugin directory`, 'error');
   }
 
   if (!existsSync(entryPath)) {
-    logger.warn(`[plugins] ${manifest.name}: entry file not found: ${entryPath}`);
-    return null;
+    return fail(`entry file not found: ${entryPath}`);
   }
 
   // Trust notice, plugins run as trusted code (like VS Code extensions)
@@ -265,21 +273,17 @@ export async function loadPlugin(
 
     // Validate module shape before casting
     if (!mod || typeof mod !== 'object') {
-      logger.warn(`[plugins] ${manifest.name}: entry file did not export a module object`);
-      return null;
+      return fail('entry file did not export a module object');
     }
     const modObj = mod as Record<string, unknown>;
     if (typeof modObj['init'] !== 'function') {
-      logger.warn(`[plugins] ${manifest.name}: entry file must export an init() function`);
-      return null;
+      return fail('entry file must export an init() function');
     }
     if (modObj['activate'] !== undefined && typeof modObj['activate'] !== 'function') {
-      logger.warn(`[plugins] ${manifest.name}: entry file 'activate' export must be a function`);
-      return null;
+      return fail("entry file 'activate' export must be a function");
     }
     if (modObj['deactivate'] !== undefined && typeof modObj['deactivate'] !== 'function') {
-      logger.warn(`[plugins] ${manifest.name}: entry file 'deactivate' export must be a function`);
-      return null;
+      return fail("entry file 'deactivate' export must be a function");
     }
     const entry = mod as PluginEntryPoint;
 
@@ -318,7 +322,7 @@ export async function loadPlugin(
     logger.info(`[plugins] ${manifest.name} v${manifest.version} activated`);
     return loaded;
   } catch (err) {
-    logger.error(`[plugins] ${manifest.name}: load failed, ${summarizeError(err)}`);
+    fail(`start failed: ${summarizeError(err)}`, 'error');
     // Stop retained APIs and drain admitted async registrations before cleanup.
     await registrations.close();
     const cleanupErrors: unknown[] = [];

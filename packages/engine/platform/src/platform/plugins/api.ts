@@ -1,4 +1,4 @@
-import type { CommandRegistryLike, HostSlashCommand } from '../runtime/host-ui.js';
+import type { CommandRegistryLike, HostCommandOutput, HostSlashCommand } from '../runtime/host-ui.js';
 import type { ModelDefinition, ProviderRegistry, RuntimeProviderRegistration, TokenLimits, ModelTier } from '../providers/registry.js';
 import type { LLMProvider } from '../providers/interface.js';
 import type { ToolRegistry } from '../tools/registry.js';
@@ -18,7 +18,7 @@ import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 import { reasoningEffortSpecFromLevels } from '../providers/reasoning-effort.js';
 import { GatewayVerbError } from '../control-plane/routes/gateway-verb-error.js';
-import { EngineErrorCodes } from '@goodvibes-jev/engine/errors';
+import { EngineErrorCodes, formatRefusal, refusal, type Refusal } from '@goodvibes-jev/engine/errors';
 import { createOwnedPluginCapabilities } from './owned-capabilities.js';
 import { PluginClosedError, PluginQuiescingError, type PluginInFlightTracker } from './in-flight.js';
 
@@ -90,10 +90,17 @@ export type PluginToolHandler = (
   args: Record<string, unknown>,
 ) => Promise<{ success: boolean; output?: string; error?: string }>;
 
+/** What a plugin's slash command can do in the session of the person who typed it. */
+export interface PluginCommandContext {
+  /** Show text in the session the command was typed in. */
+  print(text: string): void;
+}
+
 /**
  * PluginCommandHandler, Called when a user runs a plugin-registered slash command.
+ * A handler that throws has its error shown to the person who typed the command.
  */
-export type PluginCommandHandler = (args: string[]) => void | Promise<void>;
+export type PluginCommandHandler = (args: string[], context: PluginCommandContext) => void | Promise<void>;
 
 /**
  * PluginAPI, The constrained API surface exposed to plugins.
@@ -114,7 +121,10 @@ export interface PluginAPI {
   /** Register a fully custom runtime provider instance with optional model entries. */
   registerProviderInstance(registration: PluginProviderRegistration): void;
 
-  /** Register a custom tool available to the LLM. */
+  /**
+   * Register a custom tool available to the LLM. Throws when the plugin already
+   * registered a tool with this name, which fails the plugin's start.
+   */
   registerTool(
     name: string,
     schema: PluginToolSchema,
@@ -186,6 +196,35 @@ export interface PluginAPIContext {
   registrations?: PluginInFlightTracker | undefined;
 }
 
+/** The refusal shown when a plugin command was refused or threw. */
+function commandFailure(pluginName: string, cmdName: string, err: unknown): Refusal {
+  if (err instanceof PluginClosedError) {
+    return refusal({
+      code: 'PLUGIN_STOPPED',
+      state: `plugin '${pluginName}' is stopped`,
+      reason: `/${cmdName} was not run because the plugin '${pluginName}' is stopped`,
+      next: [`Enable the plugin '${pluginName}' again, then run /${cmdName}`],
+      retryable: false,
+    });
+  }
+  if (err instanceof PluginQuiescingError) {
+    return refusal({
+      code: 'PLUGIN_RELOADING',
+      state: `plugin '${pluginName}' is reloading`,
+      reason: `/${cmdName} was not run because the plugin '${pluginName}' is reloading`,
+      next: [`Run /${cmdName} again when the reload finishes`],
+      retryable: true,
+    });
+  }
+  return refusal({
+    code: 'PLUGIN_COMMAND_FAILED',
+    state: 'the command stopped with an error',
+    reason: `/${cmdName} failed: ${summarizeError(err)}`,
+    next: [`The error comes from the plugin '${pluginName}'; check its settings or report it to its author`],
+    retryable: false,
+  });
+}
+
 /**
  * createPluginAPI, Factory that creates a sandboxed PluginAPI for a single plugin.
  * All registrations are tracked in `ctx.cleanup` so they can be undone on deactivation.
@@ -216,15 +255,18 @@ export function createPluginAPI(ctx: PluginAPIContext): PluginAPI {
         const cmd: HostSlashCommand = {
           name: cmdName,
           description: `[${ctx.pluginName}] ${description}`,
-          handler: async (args: string[]) => {
+          handler: async (args: string[], output?: HostCommandOutput) => {
+            // A host without a session to print to (the daemon) gets the text in its log.
+            const print = (text: string): void => {
+              if (typeof output?.print === 'function') output.print(text);
+              else logger.info(`[plugin:${ctx.pluginName}] /${cmdName}: ${text}`);
+            };
             try {
-              await track(() => handler(args));
+              await track(() => handler(args, { print }));
             } catch (err) {
-              if (err instanceof PluginQuiescingError) {
-                logger.warn(`[plugin:${ctx.pluginName}] Command '${name}' refused: ${err.message}`);
-                return;
-              }
-              logger.error(`[plugin:${ctx.pluginName}] Command '${name}' threw: ${summarizeError(err)}`);
+              const failure = commandFailure(ctx.pluginName, cmdName, err);
+              logger.warn(`[plugin:${ctx.pluginName}] Command '${name}' ${failure.state}: ${failure.reason}`);
+              print(formatRefusal(failure));
             }
           },
         };
@@ -236,55 +278,50 @@ export function createPluginAPI(ctx: PluginAPIContext): PluginAPI {
     registerProvider(name, config) {
       try { return register(async () => {
         // Dynamically import to avoid circular dependency at module load time.
+        const { OpenAICompatProvider } = await import('../providers/openai-compat.js');
+        assertRegistrationOpen();
         try {
-          const { OpenAICompatProvider } = await import('../providers/openai-compat.js');
-          assertRegistrationOpen();
-          try {
-            const provider = new OpenAICompatProvider({
-              name,
-              baseURL: config.baseURL,
-              apiKey: config.apiKey ?? '',
-              defaultModel: config.models[0] ?? '',
-              models: config.models,
-              ...(config.embeddingModel ? { embeddingModel: config.embeddingModel } : {}),
-              ...(config.reasoningFormat ? { reasoningFormat: config.reasoningFormat } : {}),
-              ...(config.authEnvVars ? { authEnvVars: config.authEnvVars } : {}),
-              ...(config.serviceNames ? { serviceNames: config.serviceNames } : {}),
-              ...(config.subscriptionProviderId ? { subscriptionProviderId: config.subscriptionProviderId } : {}),
-            });
-            const registered = owned.provider(provider);
-            const unregister = ctx.providerRegistry.registerRuntimeProvider({
-              provider: registered,
-              models: config.models.map((modelId) => ({
-                id: modelId,
-                provider: name,
-                registryKey: `${name}:${modelId}`,
-                displayName: config.displayName ?? modelId,
-                description: `Plugin provider ${name}`,
-                contextWindow: config.contextWindow ?? 8192,
-                selectable: true,
-                capabilities: {
-                  toolCalling: config.capabilities?.toolCalling ?? true,
-                  codeEditing: config.capabilities?.codeEditing ?? true,
-                  reasoning: config.capabilities?.reasoning ?? false,
-                  multimodal: config.capabilities?.multimodal ?? false,
-                },
-                ...(config.reasoningEffort
-                  ? { reasoningEffort: reasoningEffortSpecFromLevels(config.reasoningEffort) }
-                  : {}),
-                ...(config.tier ? { tier: config.tier } : {}),
-                ...(config.tokenLimits ? { tokenLimits: config.tokenLimits } : {}),
-              })),
-              suppressCatalogModelRegistryKeys: config.suppressCatalogModelRegistryKeys,
-            });
-            ctx.cleanup.push(() => { if (ctx.providerRegistry.has(name) && ctx.providerRegistry.getRegistered(name) === registered) unregister(); });
-            logger.info(`[plugin:${ctx.pluginName}] Registered provider '${name}' with ${config.models.length} model(s)`);
-          } catch (err) {
-            logger.error(`[plugin:${ctx.pluginName}] registerProvider '${name}' failed: ${summarizeError(err)}`);
-            throw err;
-          }
+          const provider = new OpenAICompatProvider({
+            name,
+            baseURL: config.baseURL,
+            apiKey: config.apiKey ?? '',
+            defaultModel: config.models[0] ?? '',
+            models: config.models,
+            ...(config.embeddingModel ? { embeddingModel: config.embeddingModel } : {}),
+            ...(config.reasoningFormat ? { reasoningFormat: config.reasoningFormat } : {}),
+            ...(config.authEnvVars ? { authEnvVars: config.authEnvVars } : {}),
+            ...(config.serviceNames ? { serviceNames: config.serviceNames } : {}),
+            ...(config.subscriptionProviderId ? { subscriptionProviderId: config.subscriptionProviderId } : {}),
+          });
+          const registered = owned.provider(provider);
+          const unregister = ctx.providerRegistry.registerRuntimeProvider({
+            provider: registered,
+            models: config.models.map((modelId) => ({
+              id: modelId,
+              provider: name,
+              registryKey: `${name}:${modelId}`,
+              displayName: config.displayName ?? modelId,
+              description: `Plugin provider ${name}`,
+              contextWindow: config.contextWindow ?? 8192,
+              selectable: true,
+              capabilities: {
+                toolCalling: config.capabilities?.toolCalling ?? true,
+                codeEditing: config.capabilities?.codeEditing ?? true,
+                reasoning: config.capabilities?.reasoning ?? false,
+                multimodal: config.capabilities?.multimodal ?? false,
+              },
+              ...(config.reasoningEffort
+                ? { reasoningEffort: reasoningEffortSpecFromLevels(config.reasoningEffort) }
+                : {}),
+              ...(config.tier ? { tier: config.tier } : {}),
+              ...(config.tokenLimits ? { tokenLimits: config.tokenLimits } : {}),
+            })),
+            suppressCatalogModelRegistryKeys: config.suppressCatalogModelRegistryKeys,
+          });
+          ctx.cleanup.push(() => { if (ctx.providerRegistry.has(name) && ctx.providerRegistry.getRegistered(name) === registered) unregister(); });
+          logger.info(`[plugin:${ctx.pluginName}] Registered provider '${name}' with ${config.models.length} model(s)`);
         } catch (err) {
-          logger.error(`[plugin:${ctx.pluginName}] Could not import OpenAICompatProvider: ${summarizeError(err)}`);
+          logger.error(`[plugin:${ctx.pluginName}] registerProvider '${name}' failed: ${summarizeError(err)}`);
           throw err;
         }
       }); } catch (error) {
@@ -330,10 +367,6 @@ export function createPluginAPI(ctx: PluginAPIContext): PluginAPI {
     registerTool(name, schema, handler) {
       return register(() => {
         const toolName = `plugin_${ctx.pluginName}_${name}`;
-        if (ctx.toolRegistry.has(toolName)) {
-          logger.warn(`[plugin:${ctx.pluginName}] Tool '${toolName}' already registered, skipping`);
-          return;
-        }
         const definition: ToolDefinition = {
           name: toolName,
           description: (schema.description as string) ?? `Plugin tool: ${name}`,
@@ -350,6 +383,8 @@ export function createPluginAPI(ctx: PluginAPIContext): PluginAPI {
             }
           },
         };
+        // The registry refuses a name that is taken; the throw fails this
+        // plugin's start, so the person sees the reason instead of a missing tool.
         ctx.toolRegistry.register(tool);
         // Removed on deactivate so a reloaded instance registers its own handler.
         ctx.cleanup.push(() => {

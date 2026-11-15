@@ -24,6 +24,7 @@ function harness(overrides: Partial<ExitSequenceDeps<Snap>> = {}) {
     restoreTerminal: () => { events.push('restore'); },
     warn: (message) => { warnings.push(message); },
     warnPlain: (message) => { warnings.push(message); },
+    printToTerminal: (line) => { events.push(`terminal ${line}`); },
     exit: (code) => { events.push(`exit ${code}`); resolveExit(code); },
     ...overrides,
   };
@@ -108,13 +109,14 @@ describe('runExitSequence', () => {
     expect(await h.exited).toBe(1);
   });
 
-  test('a handover is skipped when shutdown did not finish, and the plain exit code is used', async () => {
+  test('an unfinished shutdown still hands over, keeps the recovery point and tells the terminal', async () => {
     const h = harness({ shutdown: async () => { throw new Error('owner hung'); } });
     let handedOver = false;
     runExitSequence(h.deps, () => { handedOver = true; return 7; });
-    expect(await h.exited).toBe(0);
-    expect(handedOver).toBe(false);
-    expect(h.warnings.some((w) => w.startsWith('Restart onto the updated program skipped'))).toBe(true);
+    expect(await h.exited).toBe(7);
+    expect(handedOver).toBe(true);
+    expect(h.events).not.toContain('recovery-removed');
+    expect(h.events.some((event) => event.startsWith('terminal '))).toBe(true);
   });
 
   test('a completed shutdown hands over with the handover code', async () => {

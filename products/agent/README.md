@@ -214,7 +214,7 @@ A few keys worth knowing up front:
 | --- | --- | --- |
 | `update.autoUpdateAtLaunch` | `true` | Check for and install a newer release at launch (standalone binaries only) |
 | `update.launchCheckTimeoutMs` | `2500` | How long that launch check may take before it is skipped; clamped to 250–30000 |
-| `update.auto` | follows `update.autoUpdateAtLaunch` | Keep checking WHILE the agent runs, and install at an idle moment (standalone binaries only); an explicit value always wins over the inherited one |
+| `update.auto` | follows `update.autoUpdateAtLaunch` | Keep checking WHILE the agent runs, and install at an idle moment: no turn, sub-agent, background process or open approval, and nothing typed or open on screen. The new version replaces the running process and reopens the same session (standalone binaries only); an explicit value always wins over the inherited one |
 | `update.intervalMinutes` | `60` | Minutes between those periodic checks; clamped to 5–1440 |
 | `update.firstCheckSeconds` | `30` | Seconds after start before the first periodic check; clamped to 0–3600 |
 | `checkpoints.preferGitRoot` | `true` | Snapshot the enclosing git repository's root rather than the raw working directory |

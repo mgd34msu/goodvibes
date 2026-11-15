@@ -1,16 +1,22 @@
 import type { CommandContext } from '../command-registry.ts';
-import type {
-  ProviderAccountRecord,
-  ProviderAccountSnapshot,
-  ProviderAuthRoute,
-  ProviderRouteRecord,
-} from '../../runtime/provider-account-snapshot.ts';
-import { buildProviderAccountSnapshot } from '../../runtime/provider-account-snapshot.ts';
+import {
+  buildProviderAccountSnapshot,
+  type ProviderAccountRecord,
+  type ProviderAccountSnapshot,
+  type ProviderAuthRoute,
+  type ProviderRecommendedAction,
+  type ProviderRouteRecord,
+} from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 import { requireProvider, requireServiceRegistry, requireSubscriptionManager } from './runtime-services.ts';
 import { formatProviderAuthRouteId } from '../../provider-auth-route-display.ts';
 
 function formatRouteList(routes: readonly ProviderAuthRoute[]): string {
   return routes.map((route) => formatProviderAuthRouteId(route)).join(', ');
+}
+
+/** A repair step as the owner types it: the sentence, then the command when one exists. */
+function formatAction(action: ProviderRecommendedAction): string {
+  return action.command ? `${action.description} (/${[action.command.name, ...action.command.args].join(' ')})` : action.description;
 }
 
 function formatRouteRecord(route: ProviderRouteRecord): string {
@@ -19,13 +25,11 @@ function formatRouteRecord(route: ProviderRouteRecord): string {
 
 async function loadProviderAccountSnapshot(context: CommandContext): Promise<ProviderAccountSnapshot> {
   return await buildProviderAccountSnapshot({
-    providerModels: requireProvider(context).providerRegistry,
-    services: requireServiceRegistry(context),
-    subscriptions: requireSubscriptionManager(context),
-    environment: {
-      hasEnvironmentVariable: (name: string) => Boolean(process.env[name]),
-    },
-    secrets: context.platform.secretsManager,
+    providerRegistry: requireProvider(context).providerRegistry,
+    serviceRegistry: requireServiceRegistry(context),
+    subscriptionManager: requireSubscriptionManager(context),
+    // Without a store only the environment is read.
+    secretsManager: context.platform.secretsManager ?? { get: async () => null },
   });
 }
 
@@ -60,7 +64,7 @@ export const { registerProviderAccountsRuntimeCommands } = createProviderAccount
     ...(record.fallbackRisk ? [`  routing risk ${record.fallbackRisk}`] : []),
     ...record.issues.map((issue) => `  issue ${issue}`),
     ...(record.recommendedActions.length > 0
-      ? ['  next', ...record.recommendedActions.map((action) => `    ${action}`)]
+      ? ['  next', ...record.recommendedActions.map((action) => `    ${formatAction(action)}`)]
       : ['  No active repair actions suggested.']),
   ],
   show: (record) => [
@@ -82,7 +86,7 @@ export const { registerProviderAccountsRuntimeCommands } = createProviderAccount
     ...record.usageWindows.map((entry) => `  window ${entry.label}, ${entry.detail}`),
     ...record.issues.map((issue) => `  issue ${issue}`),
     ...record.notes.map((note) => `  note ${note}`),
-    ...record.recommendedActions.map((action) => `  next ${action}`),
+    ...record.recommendedActions.map((action) => `  next ${formatAction(action)}`),
   ],
   review: (snapshot) => [
     'Provider Account Review',

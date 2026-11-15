@@ -37,6 +37,8 @@ export interface ExitSequenceDeps<Snapshot> {
   readonly restoreTerminal: () => void;
   readonly warn: (message: string, error: unknown) => void;
   readonly warnPlain: (message: string) => void;
+  /** A line the person must see after the terminal is restored (a descriptor write, not the log). */
+  readonly printToTerminal: (line: string) => void;
   readonly exit: (code: number) => void;
 }
 
@@ -118,9 +120,14 @@ export function runExitSequence<Snapshot>(
   // handover wait for runtime ownership release and the bounded audio drain.
   void exitCompletion.then((failures) => {
     for (const error of failures) deps.warn('Owned cleanup failed during exitApp', error);
-    // A handover replaces this process while it may still hold its session and
-    // services; after an unfinished shutdown, exit and let the next launch recover.
-    if (handOver && shutdownIncomplete) deps.warnPlain('Restart onto the updated program skipped: shutdown did not finish. Start it again to continue from the saved recovery point.');
-    deps.exit(handOver && !shutdownIncomplete ? handOver() : exitCode);
+    // The new program is already installed: an unfinished shutdown still hands
+    // over, because an agent that stops here stays down until someone starts it.
+    // The recovery point was kept, so the new process restores what the save missed.
+    if (handOver && shutdownIncomplete) {
+      deps.warnPlain('Shutdown did not finish before the restart onto the updated program; the recovery point was kept.');
+      try { deps.printToTerminal('goodvibes-agent: shutdown did not finish in time; starting the updated program anyway. It restores this session from its recovery point.'); }
+      catch (error) { deps.warn('The restart notice could not be written to the terminal', error); }
+    }
+    deps.exit(handOver ? handOver() : exitCode);
   });
 }

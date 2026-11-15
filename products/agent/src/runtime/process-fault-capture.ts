@@ -46,6 +46,7 @@ import {
   appendCrashRecord,
   buildCrashRecord,
   CRASH_LOG_FILENAME,
+  crashRecordLine,
 } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { createUnhandledRejectionHandler } from './unhandled-rejection-guard.ts';
 import { writeFatalLine } from '../utils/fatal-boot-write.ts';
@@ -80,9 +81,9 @@ export interface ProcessFaultCapture {
   dispose(): void;
   /**
    * Record a fault without registering anything. Exposed so a test can drive
-   * the exact write path the handlers use.
+   * the exact write path the handlers use. True when the crash log holds it.
    */
-  capture(kind: 'uncaughtException' | 'unhandledRejection', thrown: unknown): void;
+  capture(kind: 'uncaughtException' | 'unhandledRejection', thrown: unknown): boolean;
 }
 
 export function createProcessFaultHandlers(deps: ProcessFaultCaptureDeps): ProcessFaultCapture {
@@ -94,7 +95,7 @@ export function createProcessFaultHandlers(deps: ProcessFaultCaptureDeps): Proce
   const writeStderr = deps.writeStderr ?? writeFatalLine;
   const crashLogPath = deps.shellPaths.resolveUserPath(GOODVIBES_AGENT_SURFACE_ROOT, CRASH_LOG_FILENAME);
 
-  const capture = (kind: 'uncaughtException' | 'unhandledRejection', thrown: unknown): void => {
+  const capture = (kind: 'uncaughtException' | 'unhandledRejection', thrown: unknown): boolean => {
     let sessionId: string | null = null;
     try {
       sessionId = deps.activeSessionId();
@@ -106,8 +107,9 @@ export function createProcessFaultHandlers(deps: ProcessFaultCaptureDeps): Proce
       surface: GOODVIBES_AGENT_SURFACE_ROOT,
       sessionId,
     });
+    let written = false;
     try {
-      appendCrashRecord(crashLogPath, record);
+      written = appendCrashRecord(crashLogPath, record);
     } catch {
       // appendCrashRecord is already best-effort; belt and braces so a failure
       // here can never prevent the activity-log line and the stderr write.
@@ -119,7 +121,7 @@ export function createProcessFaultHandlers(deps: ProcessFaultCaptureDeps): Proce
         pid: record.pid,
         sessionId: record.sessionId ?? '(none)',
         timestamp: record.timestamp,
-        crashLog: crashLogPath,
+        crashLog: written ? crashLogPath : `${crashLogPath} (not written)`,
         ...(record.stack ? { stack: record.stack } : {}),
       });
       // The logger batches on a timer this process will not live to see.
@@ -127,10 +129,11 @@ export function createProcessFaultHandlers(deps: ProcessFaultCaptureDeps): Proce
     } catch {
       // Nothing left to do about a logger that cannot write.
     }
+    return written;
   };
 
   const onUncaughtException = (error: unknown): void => {
-    capture('uncaughtException', error);
+    const written = capture('uncaughtException', error);
     try {
       deps.restoreTerminal?.();
     } catch {
@@ -141,9 +144,9 @@ export function createProcessFaultHandlers(deps: ProcessFaultCaptureDeps): Proce
       // A descriptor write cannot be intercepted by the full-screen output
       // guard, which replaces process.stderr.write while the TUI is up.
       writeStderr(`goodvibes-agent crashed: ${message}`);
-      writeStderr(`crash record written to ${crashLogPath}`);
+      writeStderr(crashRecordLine(crashLogPath, written));
     } catch {
-      // The record already landed; the console line is the expendable part.
+      // The activity log already has it; the console line is the expendable part.
     }
     exit(1);
   };

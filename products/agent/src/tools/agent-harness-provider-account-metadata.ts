@@ -4,8 +4,7 @@ import { captureCatalogReadRequest, selectHarnessCatalog } from './agent-harness
 import { withModelReadingSource } from './agent-harness-model-reading-source.ts';
 import { captureServiceReadSource, captureSubscriptionReadSource, listBuiltinSubscriptionProviders } from '@goodvibes-jev/engine/platform/platform/config';
 import type { CommandContext } from '../input/command-registry.ts';
-import type { ProviderAccountRecord, ProviderAccountSnapshot } from '../runtime/provider-account-snapshot.ts';
-import { buildProviderAccountSnapshot } from '../runtime/provider-account-snapshot.ts';
+import { buildProviderAccountSnapshot, type ProviderAccountRecord, type ProviderAccountSnapshot } from '@/runtime/index.ts';
 import { clampReadLimit } from './agent-harness-read-helpers.ts';
 const nativeDateRoot = globalThis;
 const nativeOwnDescriptor = Object.getOwnPropertyDescriptor;
@@ -43,12 +42,14 @@ function readLimit(value: unknown, fallback: number): number {
   return clampReadLimit(value, fallback, 500);
 }
 
+const noStoredKeys = { get: async (_key: string): Promise<string | null> => null };
+
 async function loadSnapshot(context: ProviderCatalogContext, request?: ReturnType<typeof captureCatalogReadRequest<AgentHarnessProviderAccountArgs>>): Promise<ProviderAccountSnapshot> {
   if (!request) {
     const services = context.platform.serviceRegistry, subscriptions = context.platform.subscriptionManager;
     if (!services || !subscriptions) throw new ToolInputProjectionError('unavailable');
-    return buildProviderAccountSnapshot({ providerModels: context.provider.providerRegistry, services, subscriptions,
-      environment: { hasEnvironmentVariable: name => Boolean(process.env[name]) }, secrets: context.platform.secretsManager });
+    return buildProviderAccountSnapshot({ providerRegistry: context.provider.providerRegistry, serviceRegistry: services,
+      subscriptionManager: subscriptions, secretsManager: context.platform.secretsManager ?? noStoredKeys });
   }
   const assertContext = captureCatalogMethods(context, ['platform', 'provider']);
   const platform = context.platform, provider = context.provider;
@@ -153,22 +154,32 @@ async function loadSnapshot(context: ProviderCatalogContext, request?: ReturnTyp
   request.retain(assertSources, 'read-catalog.provider.records');
   const current = () => { request.assertCurrent(); assertSources(); };
   const snapshot = await buildProviderAccountSnapshot({
-    providerModels: { listModels() { current(); const value = listModels.call(models); current(); return value; } },
-    services: {
+    providerRegistry: {
+      listModels() { current(); const value = listModels.call(models); current(); return value; },
+      getCurrentModel() { current(); return models.getCurrentModel(); },
+      getRegistered(name) { current(); return models.getRegistered(name); },
+      describeRuntime(providerId) { current(); return models.describeRuntime(providerId); },
+    },
+    serviceRegistry: {
       getAll() { current(); const value = getAll.call(services); current(); return value; },
       async inspect(name) { current(); const value = await inspect.call(services, name);
         const saved = captureCatalogSnapshot(value); inspectionGuards.push(() => saved.assertCurrent(value)); current(); return value; },
       unreadableReason() { current(); return services.unreadableReason(); },
     },
-    subscriptions: {
+    subscriptionManager: {
       list() { current(); const value = list.call(subscriptions); current(); return value; },
       listPending() { current(); const value = listPending.call(subscriptions); current(); return value; },
       get(id) { current(); const value = get.call(subscriptions, id); current(); return value; },
       getPending(id) { current(); const value = getPending.call(subscriptions, id); current(); return value; },
     },
-    environment: { hasEnvironmentVariable(name) { current(); const present = environmentPresence.get(name);
-      if (present === undefined) throw new ToolInputProjectionError('held'); current(); return present; } },
-    secrets: { async get(key) { current(); return storedPresence.get(key) ? '' : null; } },
+    // Only presence leaves this reader: a stored key reads as an empty string, never its value.
+    secretsManager: { async get(key) {
+      current();
+      const known = storedPresence.get(key);
+      if (known !== undefined) return known ? '' : null;
+      if (!secretStore) return null;
+      try { return (await secretStore.get(key)) !== null ? '' : null; } catch { return null; }
+    } },
   });
   const saved = captureCatalogSnapshot(snapshot);
   current();

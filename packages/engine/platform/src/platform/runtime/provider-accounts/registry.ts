@@ -108,6 +108,11 @@ function determineActiveRoute(routes: readonly ProviderAuthRoute[], subscription
   return 'unconfigured';
 }
 
+function defaultProviderEnvKeys(providerId: string): readonly string[] {
+  const normalized = providerId.toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+  return normalized ? [`${normalized}_API_KEY`, `${normalized}_KEY`] : [];
+}
+
 function determineSubscriptionFreshness(expiresAt?: number): ProviderAuthFreshness {
   if (typeof expiresAt !== 'number' || !Number.isFinite(expiresAt)) return 'healthy';
   if (expiresAt <= Date.now()) return 'expired';
@@ -130,7 +135,11 @@ export async function buildProviderAccountSnapshot(
   } catch {
     currentModel = undefined;
   }
-  const apiKeys = await resolveApiKeys(deps.secretsManager);
+  // A store that cannot be read says nothing about a key; the environment answer stands.
+  const secrets: Pick<SecretsManager, 'get'> = {
+    get: async (key) => { try { return await deps.secretsManager.get(key); } catch { return null; } },
+  };
+  const apiKeys = await resolveApiKeys(secrets);
   const subscriptions = deps.subscriptionManager;
   const builtinSubscriptionProviders = new Set(listBuiltinSubscriptionProviders().map((entry) => entry.provider));
   const serviceRegistry = deps.serviceRegistry;
@@ -173,15 +182,31 @@ export async function buildProviderAccountSnapshot(
         runtimeMetadata = undefined;
       }
       const subscriptionFreshness = subscription ? determineSubscriptionFreshness(subscription.expiresAt) : 'unconfigured';
+      // A provider outside the built-in key table (a custom or service-backed
+      // one) has its key under the service's token name, the names its runtime
+      // declares, or the conventional <ID>_API_KEY; environment first, then the store.
+      let hasApiKey = providerId in apiKeys;
+      if (!hasApiKey) {
+        const serviceConfig = services.find((entry) => (entry.providerId ?? entry.name) === providerId);
+        const candidates = new Set<string>([
+          ...(serviceConfig?.tokenKey ? [serviceConfig.tokenKey] : []),
+          ...(runtimeMetadata?.auth?.envVars ?? []),
+          ...defaultProviderEnvKeys(providerId),
+        ]);
+        hasApiKey = (await Promise.all([...candidates].map(async (key) => {
+          if (process.env[key]) return true;
+          return (await secrets.get(key)) !== null;
+        }))).some(Boolean);
+      }
       const routes = classifyRoutes({
         providerId,
-        hasApiKey: providerId in apiKeys,
+        hasApiKey,
         hasSubscription: subscription != null,
         hasServiceOAuth: Boolean(serviceOauth?.configured),
       });
       const usableRoutes = classifyRoutes({
         providerId,
-        hasApiKey: providerId in apiKeys,
+        hasApiKey,
         hasSubscription: subscription != null && subscriptionFreshness !== 'expired',
         hasServiceOAuth: Boolean(serviceOauth?.usable),
       });
@@ -195,7 +220,7 @@ export async function buildProviderAccountSnapshot(
       let activeRouteReason = 'No usable auth route is configured for this provider.';
       let authFreshness: ProviderAuthFreshness = 'unconfigured';
 
-      if (providerId in apiKeys) {
+      if (hasApiKey) {
         routeRecords.push({
           route: 'api-key',
           usable: true,

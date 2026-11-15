@@ -31,8 +31,6 @@ import type { FeatureSetting } from '@goodvibes-jev/engine/platform/platform/run
 import { CONFIG_SCHEMA } from '@goodvibes-jev/engine/platform/platform/config';
 import type { ConfigKey, ConfigManager, ConfigSetting } from '../config/index.ts';
 
-export type LegacyFeatureConfigKey = 'featureFlags' | `featureFlags.${string}`;
-
 export type FeatureEnablementRequest = 'enabled' | 'disabled';
 
 /** One domain-key write that fulfills an explicit feature request. */
@@ -51,14 +49,6 @@ const FEATURE_SETTINGS_BY_ID: ReadonlyMap<string, FeatureSetting> = new Map(
 const CONFIG_SCHEMA_BY_KEY: ReadonlyMap<string, ConfigSetting> = new Map(
   CONFIG_SCHEMA.map((setting) => [setting.key, setting]),
 );
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-}
-
-export function isLegacyFeatureConfigKey(key: string): key is LegacyFeatureConfigKey {
-  return key === 'featureFlags' || key.startsWith('featureFlags.');
-}
 
 export function isFeatureEnablementRequest(value: unknown): value is FeatureEnablementRequest {
   return value === 'enabled' || value === 'disabled';
@@ -128,52 +118,4 @@ export function isFeatureEnabledInConfig(
   const binding = getFeatureSettingsBinding(featureId);
   if (!binding) return false;
   return deriveFeatureState(binding, config.get(binding.key)) === 'enabled';
-}
-
-/**
- * Expand a legacy `featureFlags` / `featureFlags.<id>` set-config value into
- * the domain-key writes that fulfill it. Validates shape with the historical
- * error wording; unknown ids and constant bindings throw with real guidance.
- */
-export function expandLegacyFeatureConfigValue(
-  key: LegacyFeatureConfigKey,
-  value: unknown,
-): readonly FeatureEnablementWrite[] {
-  if (key === 'featureFlags') {
-    if (!isRecord(value)) throw new Error('featureFlags expects an object value.');
-    const writes: FeatureEnablementWrite[] = [];
-    for (const [featureId, state] of Object.entries(value)) {
-      if (featureId.trim().length === 0) throw new Error('featureFlags cannot contain an empty feature id.');
-      if (!isFeatureEnablementRequest(state)) {
-        throw new Error(`featureFlags.${featureId} expects enabled or disabled.`);
-      }
-      writes.push(resolveFeatureEnablementWrite(featureId, state));
-    }
-    return writes;
-  }
-
-  const featureId = key.slice('featureFlags.'.length);
-  if (featureId.trim().length === 0) throw new Error('featureFlags requires a feature id.');
-  if (!isFeatureEnablementRequest(value)) {
-    throw new Error(`Config key ${key} expects enabled or disabled.`);
-  }
-  return [resolveFeatureEnablementWrite(featureId, value)];
-}
-
-/**
- * The feature ids a legacy set-config operation addresses (for verification:
- * each id's DERIVED state must match the requested one after apply).
- */
-export function legacyFeatureConfigTargets(
-  key: LegacyFeatureConfigKey,
-  value: unknown,
-): ReadonlyArray<{ readonly featureId: string; readonly desired: FeatureEnablementRequest }> {
-  if (key === 'featureFlags') {
-    if (!isRecord(value)) return [];
-    return Object.entries(value)
-      .filter((entry): entry is [string, FeatureEnablementRequest] => isFeatureEnablementRequest(entry[1]))
-      .map(([featureId, desired]) => ({ featureId, desired }));
-  }
-  const featureId = key.slice('featureFlags.'.length);
-  return isFeatureEnablementRequest(value) ? [{ featureId, desired: value }] : [];
 }

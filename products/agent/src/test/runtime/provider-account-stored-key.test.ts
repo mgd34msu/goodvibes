@@ -6,13 +6,14 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import { ServiceRegistry } from '@goodvibes-jev/engine/platform/platform/config';
-import { buildProviderAccountSnapshot } from '../../runtime/provider-account-snapshot.ts';
+import { buildProviderAccountSnapshot } from '@/runtime/index.ts';
 import { SecretsManager } from '../../config/secrets.ts';
 import { createTestManagers } from '../helpers/test-managers.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
 describe('provider account snapshot: stored keys', () => {
   const originalHome = process.env.HOME;
+  const originalOpenAiKey = process.env.OPENAI_API_KEY;
   const originalCwd = process.cwd();
   let root = '';
   let managers = createTestManagers();
@@ -30,6 +31,7 @@ describe('provider account snapshot: stored keys', () => {
     });
     root = makeProjectTempDir('gv-provider-stored-key');
     process.env.HOME = root;
+    delete process.env.OPENAI_API_KEY;
     process.chdir(root);
   });
 
@@ -37,18 +39,18 @@ describe('provider account snapshot: stored keys', () => {
     process.chdir(originalCwd);
     if (originalHome === undefined) delete process.env.HOME;
     else process.env.HOME = originalHome;
+    if (originalOpenAiKey !== undefined) process.env.OPENAI_API_KEY = originalOpenAiKey;
   });
 
-  function deps(secrets?: { get(key: string): Promise<string | null> }) {
+  function deps(secrets: { get(key: string): Promise<string | null> }) {
     return {
-      providerModels: managers.providerRegistry,
-      services: new ServiceRegistry(join(root, '.goodvibes', 'tui', 'services.json'), {
+      providerRegistry: managers.providerRegistry,
+      serviceRegistry: new ServiceRegistry(join(root, '.goodvibes', 'tui', 'services.json'), {
         secretsManager: new SecretsManager({ projectRoot: root, globalHome: root }),
         subscriptionManager: managers.subscriptionManager,
       }),
-      subscriptions: managers.subscriptionManager,
-      environment: { hasEnvironmentVariable: (_name: string) => false },
-      ...(secrets ? { secrets } : {}),
+      subscriptionManager: managers.subscriptionManager,
+      secretsManager: secrets,
     };
   }
 

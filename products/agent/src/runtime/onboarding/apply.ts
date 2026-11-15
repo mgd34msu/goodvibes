@@ -8,7 +8,6 @@ import {
 import { createOnboardingConfigValidator } from '@goodvibes-jev/engine/terminal-shell/onboarding-config-validation';
 const { validateConfigValue } = createOnboardingConfigValidator<Extract<OnboardingApplyOperation, { kind: 'set-config' }>>({
   separator: ' ',
-  validateExtension: validateLegacyFeatureConfigValue,
 });
 import { createOnboardingApplyPrimitives } from '@goodvibes-jev/engine/terminal-shell/onboarding-apply-primitives';
 import { existsSync, rmSync } from 'node:fs';
@@ -25,7 +24,6 @@ import { AgentNoteRegistry } from '../../agent/note-registry.ts';
 import { AgentPersonaRegistry, assertNoSecretLikeText } from '../../agent/persona-registry.ts';
 import { AgentRoutineRegistry } from '../../agent/routine-registry.ts';
 import { AgentSkillRegistry } from '../../agent/skill-registry.ts';
-import { expandLegacyFeatureConfigValue, isLegacyFeatureConfigKey } from '../feature-enablement.ts';
 import { getOnboardingRuntimeStatePath, readOnboardingRuntimeState, writeOnboardingAcknowledgementState } from './state.ts';
 import { verifyOnboardingRequest } from './verify.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../../config/surface.ts';
@@ -45,23 +43,6 @@ import {
   writeJsonObject,
   type RollbackAction,
 } from './apply-file-helpers.ts';
-
-function validateLegacyFeatureConfigValue(operation: Extract<OnboardingApplyOperation, { kind: 'set-config' }>): boolean {
-  if (!isLegacyFeatureConfigKey(operation.key)) return false;
-  // Throws with real guidance on malformed shapes, unknown feature ids, and
-  // always-available (constant-binding) features. The legacy featureFlags
-  // namespace dissolved onto domain settings keys; the expansion below is
-  // exactly what apply will write.
-  expandLegacyFeatureConfigValue(operation.key, operation.value);
-  return true;
-}
-
-function validateAuthOperation(
-  _deps: OnboardingApplyDependencies,
-  _operation: Extract<OnboardingApplyOperation, { kind: 'ensure-auth-user' }>,
-): void {
-  throw new Error('Runtime auth user/session administration is external to GoodVibes Agent onboarding.');
-}
 
 function validateCreateAgentProfileOperation(
   deps: OnboardingApplyDependencies,
@@ -166,8 +147,6 @@ const { applyConfigOperation, buildConfigRollbackAction, validateConfigOperation
   reload: (deps) => deps.config.load(),
   get: (deps, key) => deps.config.get(key as never),
   set: (deps, key, value) => deps.config.setDynamic(key as never, value),
-  translate: (operation) =>
-    isLegacyFeatureConfigKey(operation.key) ? expandLegacyFeatureConfigValue(operation.key, operation.value) : undefined,
 });
 
 async function buildRollbackAction(deps: OnboardingApplyDependencies, operation: OnboardingApplyOperation): Promise<RollbackAction> {
@@ -175,11 +154,6 @@ async function buildRollbackAction(deps: OnboardingApplyDependencies, operation:
 
   if (operation.kind === 'set-secret') {
     return buildSecretRollbackAction(deps, operation);
-  }
-
-  if (operation.kind === 'ensure-auth-user') {
-    validateAuthOperation(deps, operation);
-    return () => {};
   }
 
   if (operation.kind === 'acknowledge') {
@@ -364,11 +338,6 @@ function prevalidateApplyRequest(deps: OnboardingApplyDependencies, request: Onb
         return;
       }
 
-      if (operation.kind === 'ensure-auth-user') {
-        validateAuthOperation(deps, operation);
-        return;
-      }
-
       if (operation.kind === 'acknowledge') {
         validateAcknowledgementOperation(deps, operation);
         return;
@@ -424,7 +393,9 @@ function getVerificationFailureKind(itemId: string): OnboardingApplyOperation['k
   if (itemId.startsWith('local-persona:')) return 'create-local-persona';
   if (itemId.startsWith('local-skill:')) return 'create-local-skill';
   if (itemId.startsWith('local-routine:')) return 'create-local-routine';
-  return onboardingVerificationFailureKind(itemId);
+  const kind = onboardingVerificationFailureKind(itemId);
+  // The Agent applies no account operation, so no item is an account item.
+  return kind === 'ensure-auth-user' ? 'set-config' : kind;
 }
 
 export const { applyOnboardingRequest } = createOnboardingApplyPipeline<
@@ -443,10 +414,6 @@ export const { applyOnboardingRequest } = createOnboardingApplyPipeline<
   apply(deps, request, operation) {
     if (operation.kind === 'set-config') return applyConfigOperation(deps, operation);
     if (operation.kind === 'set-secret') return applySecretOperation(deps, operation);
-    if (operation.kind === 'ensure-auth-user') {
-      validateAuthOperation(deps, operation);
-      return null;
-    }
     if (operation.kind === 'acknowledge') return applyAcknowledgementOperation(deps, request, operation);
     if (operation.kind === 'create-agent-profile') return applyCreateAgentProfileOperation(deps, operation);
     if (operation.kind === 'select-agent-profile') return applySelectAgentProfileOperation(deps, operation);

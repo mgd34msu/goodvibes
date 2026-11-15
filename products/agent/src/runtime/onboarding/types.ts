@@ -69,7 +69,6 @@ export type {
 } from '@goodvibes-jev/engine/terminal-shell/onboarding-state-types';
 import type { ConfigManager, ConfigKey } from '../../config/index.ts';
 import type { SecretsManager } from '../../config/secrets.ts';
-import type { LegacyFeatureConfigKey } from '../feature-enablement.ts';
 import type { UserAuthManager } from '@goodvibes-jev/engine/platform/platform/security';
 import type { ShellPathService } from '@/runtime/index.ts';
 import type { LocalAuthInspectionQuery, ServiceInspectionQuery, SubscriptionAccessQuery } from '@/runtime/index.ts';
@@ -131,8 +130,9 @@ export interface OnboardingStep1CapabilityFlags {
 
 export type OnboardingStepDerivationState = TerminalOnboardingStepDerivationState<OnboardingStep1CapabilityId>;
 
+/** What the Agent's setup can apply; account administration belongs to the host, not this pipeline. */
 export type OnboardingApplyOperation =
-  | TerminalOnboardingApplyOperation<ConfigKey | LegacyFeatureConfigKey, 'project' | 'user'>
+  | Exclude<TerminalOnboardingApplyOperation<ConfigKey, 'project' | 'user'>, { readonly kind: 'ensure-auth-user' }>
   | {
       readonly kind: 'create-agent-profile';
       readonly name: string;

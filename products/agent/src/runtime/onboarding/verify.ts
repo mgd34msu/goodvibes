@@ -6,48 +6,8 @@ import { AgentPersonaRegistry } from '../../agent/persona-registry.ts';
 import { AgentRoutineRegistry } from '../../agent/routine-registry.ts';
 import { readAgentRuntimeProfileSelection, resolveAgentRuntimeProfileHome } from '../../agent/runtime-profile.ts';
 import { AgentSkillRegistry } from '../../agent/skill-registry.ts';
-import { isFeatureEnabledInConfig, isLegacyFeatureConfigKey, legacyFeatureConfigTargets } from '../feature-enablement.ts';
 import { readOnboardingRuntimeState } from './state.ts';
 import type { OnboardingApplyOperation, OnboardingVerificationDependencies, OnboardingVerificationItem } from './types.ts';
-
-function verifyLegacyConfig(
-  deps: OnboardingVerificationDependencies,
-  operation: Extract<OnboardingApplyOperation, { kind: 'set-config' }>,
-): OnboardingVerificationItem | undefined {
-  if (isLegacyFeatureConfigKey(operation.key)) {
-    // Legacy featureFlags keys dissolved onto domain settings keys: verify the
-    // DERIVED enablement of every addressed feature, not a category readback.
-    const targets = legacyFeatureConfigTargets(operation.key, operation.value);
-    const mismatched = targets.filter(
-      (target) => (isFeatureEnabledInConfig(deps.config, target.featureId) ? 'enabled' : 'disabled') !== target.desired,
-    );
-    const ok = targets.length > 0 && mismatched.length === 0;
-    return {
-      id: `config:${operation.key}`,
-      status: ok ? 'pass' : 'fail',
-      message: ok
-        ? `${operation.key} matches the requested onboarding value (derived from the domain settings keys).`
-        : `${operation.key} does not match the requested onboarding value${
-            mismatched.length > 0 ? ` (mismatched: ${mismatched.map((target) => target.featureId).join(', ')})` : ''
-          }.`,
-      target: operation.key,
-    };
-  }
-  return undefined;
-}
-
-function verifyAuthOperation(
-  _deps: OnboardingVerificationDependencies,
-  operation: Extract<OnboardingApplyOperation, { kind: 'ensure-auth-user' }>,
-): OnboardingVerificationItem {
-  const username = operation.username.trim();
-  return {
-    id: `auth:${username}`,
-    status: 'fail',
-    message: 'Runtime auth user/session administration is external to GoodVibes Agent onboarding.',
-    target: username,
-  };
-}
 
 function verifyCreateAgentProfileOperation(
   deps: OnboardingVerificationDependencies,
@@ -154,7 +114,6 @@ async function verifyExtraOperation(
   deps: OnboardingVerificationDependencies,
   operation: AgentVerificationOperation,
 ): Promise<OnboardingVerificationItem> {
-  if (operation.kind === 'ensure-auth-user') return verifyAuthOperation(deps, operation);
   if (operation.kind === 'create-agent-profile') return verifyCreateAgentProfileOperation(deps, operation);
   if (operation.kind === 'select-agent-profile') return verifySelectAgentProfileOperation(deps, operation);
   if (operation.kind === 'create-local-note') return verifyCreateLocalNoteOperation(deps, operation);
@@ -176,6 +135,5 @@ export const verifyOnboardingRequest = createOnboardingVerifier<
     operation.kind === 'set-config' || operation.kind === 'set-secret' || operation.kind === 'acknowledge'
       ? operation
       : { kind: 'extension', operation },
-  verifyConfig: verifyLegacyConfig,
   verifyExtra: verifyExtraOperation,
 });

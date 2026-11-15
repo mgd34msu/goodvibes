@@ -1,33 +1,23 @@
 /**
- * occasions-boot.ts, both halves of the agent's occasion-nudge wiring, in one
- * call.
+ * occasions-boot.ts, the agent's occasion-nudge wiring in one call.
  *
- * Split out of bootstrap.ts at this repo's 800-line file cap, and the cut is a
- * good one independently: the two halves belong together and are only correct
- * together. The owner's ruling is Telegram AND the agent (docs/occasions.md
- * §4.2), which for this product means it is BOTH a push destination and the
- * surface that pulls, and a reader who found one without the other would
- * reasonably conclude the other was missing.
+ * ## How a reminder reaches this conversation
  *
- * ## The two halves, and why neither replaces the other
+ * By the pull: the surface asks `occasions.pending` what is outstanding and
+ * raises it. It runs at the end of every turn, and while the shell sits idle it
+ * runs again once per occasions sweep interval (`occasions.sweepIntervalMinutes`,
+ * read live), so a reminder the daemon raised while the owner was away from the
+ * keyboard shows up without him typing first. Cost: one small read per sweep
+ * interval while idle and enabled; nothing while a turn runs.
  *
- * **Push**, the daemon addresses a message to `agent` and the router calls this
- * product's sender, which lands it in the conversation. This is what reaches him
- * during the hours he is not sitting at the terminal.
+ * The daemon's sweep cannot land a message here itself: it runs in another
+ * process, and a delivery it addresses to `agent` reaches no sender there. The
+ * pull is what carries the reminder; the item stays open on the daemon until it
+ * is answered, so the pull also covers a reminder raised while this process was
+ * not running.
  *
- * **Pull**, at a turn boundary the surface asks `occasions.pending` what is
- * outstanding and raises it. This is what covers everything the push could not:
- * `agent` configured with no sender registered, a send that failed, a nudge
- * raised while the process was not running.
- *
- * They cannot say the same thing twice, and the guard is neither half's: it is
- * the daemon's, over the ONE open item both read. A push that LANDS on the agent
- * stamps the item, and while the agent is a configured push destination the pull
- * leaves stamped items out. The condition is the push that LANDED rather than the
- * one that was configured, which is exactly why the pull is not redundant, and
- * why nothing in this file coordinates the two or keeps a local record of what
- * was pushed. A second ledger here would be a second answer to "has he already
- * been told", and the two would disagree the first time one missed a write.
+ * The in-process sender stays registered on this process's own router, for the
+ * agent's own `agent` channel sends.
  */
 
 import type { ConfigManager } from '../config/index.ts';
@@ -43,6 +33,9 @@ import {
   type OccasionsNudgeSurface,
 } from './occasions-nudge-surface.ts';
 
+/** Minutes between idle pulls when the setting says nothing (the sweep's default). */
+const DEFAULT_IDLE_PULL_MINUTES = 60;
+
 export interface OccasionsBootDeps {
   /** Owns the `agent` delivery destination the push half registers on. */
   readonly router: AgentDeliveryHost;
@@ -53,23 +46,27 @@ export interface OccasionsBootDeps {
   /** The live transcript both halves land in. */
   readonly conversation: ConversationManager;
   readonly requestRender: () => void;
-  /** Where the push registration's undo is filed, for shutdown. */
+  /** Where the push registration's undo and the idle timer's stop are filed, for shutdown. */
   readonly disposals: { push(undo: () => void): void };
+  /**
+   * True while no turn is running, so a pulled line cannot land inside a
+   * streaming reply. Without it there is no idle pull, only the turn-end one.
+   */
+  readonly isIdle?: (() => boolean) | undefined;
+  /** Injectable timer for tests. */
+  readonly setTimer?: ((fn: () => void, ms: number) => ReturnType<typeof setTimeout>) | undefined;
 }
 
 /**
- * Wire the push destination and build the pull surface.
+ * Register the in-process sender, build the pull surface and start its idle pull.
  *
- * Returns the pull surface because its caller owns WHEN it runs, bootstrap fires
- * it on the turn's completion, which is a decision about the transcript rather
- * than about occasions (see occasions-nudge-surface.ts on why the end of a turn
- * and not the start).
+ * Returns the pull surface because bootstrap also fires it on the turn's
+ * completion, which is a decision about the transcript rather than about
+ * occasions (see occasions-nudge-surface.ts on why the end of a turn and not
+ * the start).
  */
 export function installOccasionsNudging(deps: OccasionsBootDeps): OccasionsNudgeSurface {
-  // The push half. Unconditional and NOT gated on `occasions.enabled`: this is a
-  // general destination for anything the daemon addresses to `agent`, and the
-  // occasions feature is one caller of it. Whether an occasion may be raised at
-  // all is the daemon's decision, made before it ever reaches a sender.
+  // This process's own `agent` destination, for sends made in this process.
   installAgentConversationSender({
     router: deps.router,
     disposals: deps.disposals,
@@ -79,8 +76,7 @@ export function installOccasionsNudging(deps: OccasionsBootDeps): OccasionsNudge
     requestRender: deps.requestRender,
   });
 
-  // The pull half.
-  return createOccasionsNudgeSurface({
+  const surface = createOccasionsNudgeSurface({
     invoke: createOccasionsGatewayInvoke({
       gatewayMethods: deps.gatewayMethods,
       configManager: deps.configManager,
@@ -93,4 +89,28 @@ export function installOccasionsNudging(deps: OccasionsBootDeps): OccasionsNudge
     // and arrives only as the contents of `occasions.pending`.
     isEnabled: () => deps.configManager.get('occasions.enabled'),
   });
+
+  // The idle pull: re-armed after each pass so a changed interval takes effect
+  // at the next one. Skipped (not queued) while a turn runs; the turn's own
+  // completion pulls.
+  const setTimer = deps.setTimer ?? ((fn: () => void, ms: number) => setTimeout(fn, ms));
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let stopped = false;
+  const intervalMs = (): number => {
+    const minutes = Number(deps.configManager.get('occasions.sweepIntervalMinutes'));
+    return (Number.isFinite(minutes) && minutes > 0 ? minutes : DEFAULT_IDLE_PULL_MINUTES) * 60_000;
+  };
+  const isIdle = deps.isIdle;
+  if (isIdle === undefined) return surface;
+  const arm = (): void => {
+    if (stopped) return;
+    timer = setTimer(() => {
+      if (isIdle()) void surface.raiseNow().finally(arm);
+      else arm();
+    }, intervalMs());
+    (timer as { unref?: () => void }).unref?.();
+  };
+  arm();
+  deps.disposals.push(() => { stopped = true; if (timer !== undefined) clearTimeout(timer); });
+  return surface;
 }

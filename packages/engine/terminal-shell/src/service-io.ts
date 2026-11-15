@@ -1,5 +1,5 @@
 import net from 'node:net';
-import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 export async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | 'timeout'> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
@@ -23,16 +23,38 @@ export interface RestartOntoUpdatedBinaryOptions {
   /** Injectable so tests observe the restart instead of spawning a process. */
   readonly spawn?: ((execPath: string, argv: readonly string[], env: NodeJS.ProcessEnv) => number | null) | undefined;
 }
+type ProcessExecve = (file: string, args: readonly string[], env: NodeJS.ProcessEnv) => never;
+
+/**
+ * Hands this process over to the (just-swapped) binary at execPath with `argv`
+ * and the receipt marker in its environment, never on the command line.
+ *
+ * Where the runtime can replace the process image (`process.execve`, every
+ * platform but Windows) it does: one process, the same pid and terminal, so a
+ * supervisor's signal reaches the program that runs and nothing waits behind
+ * it. Without that, the new program starts on this terminal and the returned
+ * 0 lets the caller exit; nothing blocks on the child. A start that fails
+ * returns 1 and says why on stderr.
+ */
 export function restartOntoUpdatedBinary(options: RestartOntoUpdatedBinaryOptions, receiptEnvironmentKey: string): number {
-  const spawn =
-    options.spawn ??
-    ((execPath: string, argv: readonly string[], env: NodeJS.ProcessEnv) =>
-      spawnSync(execPath, [...argv], { stdio: 'inherit', env }).status);
-  const status = spawn(options.execPath, options.argv, {
-    ...options.env,
-    [receiptEnvironmentKey]: options.fromVersion,
-  });
-  return status ?? 1;
+  const env = { ...options.env, [receiptEnvironmentKey]: options.fromVersion };
+  if (options.spawn) return options.spawn(options.execPath, options.argv, env) ?? 1;
+  const failed = (error: unknown): number => {
+    process.stderr.write(`could not start the updated program at ${options.execPath}: ${error instanceof Error ? error.message : String(error)}\n`);
+    return 1;
+  };
+  const execve = process.platform === 'win32' ? undefined : (process as { execve?: ProcessExecve }).execve;
+  if (typeof execve === 'function') {
+    try { execve.call(process, options.execPath, [options.execPath, ...options.argv], env); } catch (error) { return failed(error); }
+  }
+  try {
+    const child = spawn(options.execPath, [...options.argv], { stdio: 'inherit', env });
+    child.once('error', failed);
+    child.unref();
+    return 0;
+  } catch (error) {
+    return failed(error);
+  }
 }
 /** Await the replacement's real close, retaining cancellation ownership while
  * the original image waits without starting another graph. */

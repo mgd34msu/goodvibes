@@ -21,7 +21,7 @@ function fixture() {
 
 test('fresh CI2 policy is hash-free while actual saved CI1 expectations retain their verifier', () => {
   let configuration = 'opaque-configuration-original', scope = 'opaque-scope-original';
-  const original = { captureDurableConfigurationIncarnation: () => configuration, getDurableConfigurationIncarnation: () => configuration, onDidChangeIncarnation: (_listener: () => void) => () => {} };
+  const original = { captureDurableConfigurationIncarnation: () => configuration, getDurableConfigurationIncarnation: () => configuration };
   const selected = { current: () => ({ revision: scope, scopes: ['read:work-ledger'] }) }, policy = createDaemonContinuationPolicy(original, selected);
   const expectedLegacy = createHash('sha256').update(JSON.stringify([configuration, scope])).digest('hex');
   const hash = spyOn(crypto, 'createHash'), count = () => hash.mock.calls.filter(([algorithm]) => algorithm === 'sha256').length;
@@ -88,22 +88,4 @@ test('workspace revision changes revoke saved bindings and a new issuance binds 
   expect(f.policy.scopes()).toEqual(['read:work-ledger']);
   const successor = f.policy.capture(); expect(successor).not.toBe(issued); expect(f.policy.current()).toBe(successor);
   expect(createDaemonContinuationPolicy(f.restart(), f.owner).current()).toBe(successor);
-});
-
-test('original live policy invalidation remains subscribed to the actual configuration owner', () => {
-  const f = fixture(); f.policy.capture(); let invalidations = 0;
-  const release = f.policy.onDidInvalidate(() => { invalidations++; });
-  try { f.configuration.setRuntimeOverride('behavior.autoApprove', true); expect(invalidations).toBeGreaterThan(0); }
-  finally { release(); }
-});
-
-test('replacing an original owner reader cannot retarget an issued policy check', () => {
-  const f = fixture(); f.policy.capture();
-  const original = f.owner.current;
-  f.owner.current = () => ({ revision: 'replacement', scopes: ['*'] });
-  expect(() => f.policy.current()).toThrow('owner changed');
-  expect(() => f.policy.capture()).toThrow('owner changed');
-  expect(() => f.policy.scopes()).toThrow('owner changed');
-  f.owner.current = original;
-  expect(() => f.policy.current()).toThrow('owner changed');
 });

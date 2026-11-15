@@ -13,7 +13,9 @@ import { IS_WORKSPACE_DISTRIBUTION } from './workspace-update-policy.ts';
  *
  * The idle gate is the whole safety story. A swap-and-restart is only allowed
  * at a moment when nothing is in flight:
- *   - no active turn (the session broker's real pending-input count),
+ *   - the person is not mid-gesture (the shell's own fact: composer text, an
+ *     open modal, editor or line prompt, a running `!` command, pairing),
+ *   - no active turn (hosted or local), sub-agent or background process,
  *   - no in-flight channel delivery (a message that left the conversation but
  *     has not reached the person yet),
  *   - no pending user confirmation (an approval waiting on a human answer).
@@ -23,7 +25,8 @@ import { IS_WORKSPACE_DISTRIBUTION } from './workspace-update-policy.ts';
  *
  * The restart hands over through the caller's ORDERLY exit path, so terminal
  * restore, session persistence, and shutdown hooks all run before the new
- * binary is spawned with the original argv and environment.
+ * binary replaces this process with the original argv, the environment and
+ * `--resume <session>` for the conversation that was on screen.
  *
  * Cadence, network, install step, and restart are all injectable; the decision
  * logic is provable without a network, a real swap, or real time passing.
@@ -45,7 +48,7 @@ export const DEFAULT_PERIODIC_INTERVAL_MINUTES = 60;
 /** Seconds after start before the first periodic check when settings say nothing. */
 export const DEFAULT_PERIODIC_FIRST_CHECK_SECONDS = 30;
 
-/** The three activity signals the idle gate reads, injected so tests drive them. */
+/** The activity signals the idle gate reads, injected so tests drive them. */
 export interface AgentUpdateIdleProbes {
   /** Sessions with pending input, an agent mid-turn. */
   readonly countBusySessions: () => number;
@@ -53,13 +56,24 @@ export interface AgentUpdateIdleProbes {
   readonly listApprovals: () => readonly { readonly status: string }[];
   /** Channel deliveries that have left the conversation but not reached the person. */
   readonly channelDeliveriesInFlight?: (() => number) | undefined;
+  /**
+   * The shell's own fact: the person is in the middle of something (text in
+   * the composer, a modal, editor or line prompt open, a `!` command running,
+   * pairing under way). Read once per due check.
+   */
+  readonly userIsMidGesture?: (() => boolean) | undefined;
+  /** Work this process runs outside a hosted turn: the local turn, sub-agents, background processes. */
+  readonly workRunningHere?: (() => boolean) | undefined;
 }
 
 /**
- * Idle for update purposes: no active turn, no in-flight channel delivery, no
- * pending user confirmation. Any one of them makes the agent busy.
+ * Idle for update purposes: no active turn or local work, no in-flight
+ * channel delivery, no pending user confirmation, and the person not in the
+ * middle of a gesture. Any one of them makes the agent busy.
  */
 export function agentIsIdleForUpdate(probes: AgentUpdateIdleProbes): boolean {
+  if (probes.userIsMidGesture?.() === true) return false;
+  if (probes.workRunningHere?.() === true) return false;
   if (probes.countBusySessions() > 0) return false;
   const inFlight = (probes.channelDeliveriesInFlight ?? channelDeliveriesInFlight)();
   if (inFlight > 0) return false;
@@ -251,6 +265,26 @@ export class AgentPeriodicUpdater {
   }
 }
 
+/**
+ * The launch arguments with the session that was on screen named for resume,
+ * replacing any session choice the original launch made.
+ */
+export function resumeArgv(argv: readonly string[], sessionId: string | undefined): readonly string[] {
+  if (!sessionId) return argv;
+  const kept: string[] = [];
+  for (let index = 0; index < argv.length; index++) {
+    const token = argv[index]!;
+    if (token === '--resume' || token === '-r') {
+      const next = argv[index + 1];
+      if (next !== undefined && !next.startsWith('-')) index++;
+      continue;
+    }
+    if (token.startsWith('--resume=')) continue;
+    kept.push(token);
+  }
+  return [...kept, '--resume', sessionId];
+}
+
 export interface StartPeriodicSelfUpdateParams {
   readonly configManager: Pick<ConfigManager, 'getRaw'> & Partial<Pick<ConfigManager, 'get' | 'getConfigPath' | 'getProjectConfigPath'>>;
   readonly services: {
@@ -272,6 +306,12 @@ export interface StartPeriodicSelfUpdateParams {
     readonly approvalsView: { snapshot(): { readonly approvals: readonly { readonly status: string }[] } };
   };
   readonly notify: (line: string) => void;
+  /** The shell's mid-gesture fact; see {@link AgentUpdateIdleProbes.userIsMidGesture}. */
+  readonly userIsMidGesture?: (() => boolean) | undefined;
+  /** Local turn, sub-agents or background processes still running in this process. */
+  readonly workRunningHere?: (() => boolean) | undefined;
+  /** The session on screen, reopened by the restarted program. */
+  readonly sessionId?: (() => string | undefined) | undefined;
   /**
    * The caller's orderly exit. `handOver` runs after teardown (terminal
    * restored, session persisted, hooks run) and its return value becomes the
@@ -324,15 +364,17 @@ export function startPeriodicSelfUpdate(params: StartPeriodicSelfUpdateParams): 
     isIdle: () => agentIsIdleForUpdate({
       countBusySessions: () => params.services.hostedSessions.countBusySessions(),
       listApprovals: () => params.services.approvalsView.snapshot().approvals,
+      userIsMidGesture: params.userIsMidGesture,
+      workRunningHere: params.workRunningHere,
     }),
     notify: params.notify,
     // The restart is the caller's orderly exit with a hand-over step: teardown
-    // first, then the swapped binary runs with this process's own argv and
-    // environment and this process exits with the new instance's code.
+    // first, then the swapped binary replaces this process with its own argv,
+    // environment and the session that was on screen.
     haltNow: () => params.exit(),
     restartNow: (fromVersion) => params.exit(() => restartOntoUpdatedBinary({
       execPath,
-      argv: params.argv ?? process.argv.slice(2),
+      argv: resumeArgv(params.argv ?? process.argv.slice(2), params.sessionId?.()),
       env: params.env ?? process.env,
       fromVersion,
     })),

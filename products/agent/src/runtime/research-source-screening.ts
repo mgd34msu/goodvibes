@@ -1,146 +1,61 @@
 import { randomUUID } from 'node:crypto';
 import { decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
 import { createClassicProtectedSourceOwner } from '@goodvibes-jev/engine/platform/platform/security';
-import { types as nodeTypes } from 'node:util';
 import { isSecretRefInput, normalizeSecretRef, type ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { createProtectedSourceOwner, type ProtectedSourceOwner, type ProtectedSource, type ProtectedResearchReference,
-  type SourceScreeningReceipt, type ResearchReferenceScreeningReceipt, type ResearchReferenceOperation } from '@goodvibes-jev/engine/platform/platform/security';
+  type SourceScreeningReceipt, type ResearchReferenceScreeningReceipt } from '@goodvibes-jev/engine/platform/platform/security';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { SecretsManager } from '../config/secrets.ts';
 import { AGENT_HOSTED_RESEARCH_SCREENING_KEY } from '../config/host-settings.ts';
 
 type ConfigOwner = Pick<ConfigManager, 'getHostBooleanSetting' | 'getIngestionQuarantine' | 'getConfigurationIncarnation'
-  | 'captureDurableConfigurationIncarnation' | 'getDurableConfigurationIncarnation' | 'onDidChangeIncarnation' | 'onDidInvalidate'>;
-type CredentialOwner = Pick<SecretsManager, 'resolveLocalCredentialSnapshot' | 'captureLocalCredentialReadset'
-  | 'getCredentialMutationState' | 'onDidInvalidateCredentials'>;
+  | 'onDidChangeIncarnation' | 'onDidInvalidate'>;
+type CredentialOwner = Pick<SecretsManager, 'resolveLocalCredentialSnapshot' | 'getCredentialMutationState' | 'onDidInvalidateCredentials'>;
 interface Acquisition { readonly owner: ProtectedSourceOwner; assertCurrent(): void; close(): Promise<void>; }
-const unavailable = (): never => { throw new ToolInputProjectionError('unconfigured'); };
-const apply = Reflect.apply;
+
+/** The general sentence, for a refusal raised before any cause is known. */
+export const RESEARCH_SCREENING_UNCONFIGURED_DETAIL = `Research report screening needs ${AGENT_HOSTED_RESEARCH_SCREENING_KEY} turned on and the two screening provider keys (ABACUSAI_API_KEY, TYPESAFE_API_KEY), or the Classic decision policy.`;
+/** One fixed sentence per cause; none names a value. */
+const CONSENT_OFF = 'Turn on "Allow hosted report screening" in the Agent workspace (setting tools.hostedResearchScreening).';
+const CONSENT_QUARANTINED = 'The settings file holding tools.hostedResearchScreening could not be read; fix or re-save it, then re-issue the call.';
+const SETTINGS_CHANGED = 'Settings or credentials changed during the call; re-issue it.';
+const SCREENING_CLOSED = 'Report screening is shutting down with this session.';
+const missingKey = (key: string): string => `Set ${key} (environment or the GoodVibes secret store) to screen research reports.`;
+const unconfigured = (detail: string): never => { throw new ToolInputProjectionError('unconfigured', detail); };
+const changed = (): never => { throw new ToolInputProjectionError('stale', SETTINGS_CHANGED); };
+// Widened so the guard does not narrow the environment string on either branch.
 const isCredentialReference: (value: unknown) => boolean = isSecretRefInput;
-function callHost<Args extends unknown[], Result>(method: (...args: Args) => Result, receiver: object, args: Args): Result {
-  return apply(method, receiver, args);
-}
-const getPrototypeOf = Object.getPrototypeOf;
-const getOwnPropertyDescriptor = Object.getOwnPropertyDescriptor;
-const ownKeys = Reflect.ownKeys;
-const signalAborted = getOwnPropertyDescriptor(AbortSignal.prototype, 'aborted')?.get;
-const throwIfAborted = AbortSignal.prototype.throwIfAborted;
-const promiseThen = Promise.prototype.then;
 
-/** Original caller restrictions are retained without invoking input accessors. */
-function retainReferenceOperation(operation: ResearchReferenceOperation | undefined): {
-  readonly operation: ResearchReferenceOperation | undefined; assertCurrent(): void; aborted(): boolean;
-} {
-  if (operation === undefined) return { operation, assertCurrent() {}, aborted: () => false };
-  if (!operation || typeof operation !== 'object' || nodeTypes.isProxy(operation)) return unavailable();
-  const prototype = getPrototypeOf(operation);
-  if (prototype !== Object.prototype && prototype !== null) return unavailable();
-  for (const key of ownKeys(operation)) {
-    if (key !== 'signal' && key !== 'assertCurrent') return unavailable();
-    const field = getOwnPropertyDescriptor(operation, key);
-    if (!field || !('value' in field)) return unavailable();
-  }
-  const callerSignal = getOwnPropertyDescriptor(operation, 'signal') ? operation.signal : undefined;
-  if (callerSignal !== undefined) {
-    if (!callerSignal || typeof callerSignal !== 'object' || nodeTypes.isProxy(callerSignal) || !signalAborted) return unavailable();
-    try { apply(signalAborted, callerSignal, []); } catch { return unavailable(); }
-  }
-  const check = getOwnPropertyDescriptor(operation, 'assertCurrent') ? operation.assertCurrent : undefined;
-  if (check !== undefined && (typeof check !== 'function' || nodeTypes.isProxy(check))) return unavailable();
-  const retained = Object.freeze({ signal: callerSignal, assertCurrent: check });
-  return { operation: retained,
-    aborted: () => callerSignal !== undefined && signalAborted !== undefined && apply(signalAborted, callerSignal, []) === true,
-    assertCurrent() {
-      if (callerSignal) apply(throwIfAborted, callerSignal, []);
-      const result: unknown = check === undefined ? undefined : apply(check, retained, []);
-      if (result !== undefined) {
-        if (nodeTypes.isPromise(result)) apply(promiseThen, result, [undefined, () => {}]);
-        return unavailable();
-      }
-      if (callerSignal) apply(throwIfAborted, callerSignal, []);
-    },
-  };
-}
-interface HostLayout {
-  readonly owner: object;
-  readonly prototype: object | null;
-  readonly fields: readonly { readonly key: PropertyKey; readonly descriptor: PropertyDescriptor | undefined }[];
-  readonly keys?: readonly PropertyKey[];
-}
-
-/** Descriptor checks never evaluate a replacement getter or proxy. Native
- * method dependencies on the same prototype chain cannot be shadowed either. */
-function retainHostMethods(subject: object, required: readonly string[]): () => void {
-  if (nodeTypes.isProxy(subject)) return unavailable();
-  const layouts: HostLayout[] = [];
-  const methodKeys = new Set<PropertyKey>(required);
-  let prototype: object | null = getPrototypeOf(subject);
-  const seen = new Set<object>([subject]);
-  while (prototype !== null) {
-    if (nodeTypes.isProxy(prototype) || seen.has(prototype)) return unavailable();
-    seen.add(prototype);
-    const owner = prototype;
-    const keys = ownKeys(owner);
-    for (const key of keys) methodKeys.add(key);
-    prototype = getPrototypeOf(owner);
-    layouts.push({ owner, prototype, keys, fields: keys.map(key => ({ key, descriptor: getOwnPropertyDescriptor(owner, key) })) });
-  }
-  const originalPrototype = getPrototypeOf(subject);
-  layouts.unshift({ owner: subject, prototype: originalPrototype,
-    fields: [...methodKeys].map(key => ({ key, descriptor: getOwnPropertyDescriptor(subject, key) })) });
-  for (const key of required) {
-    let owner: object | null = subject;
-    let descriptor: PropertyDescriptor | undefined;
-    while (owner !== null && !descriptor) {
-      descriptor = getOwnPropertyDescriptor(owner, key);
-      owner = getPrototypeOf(owner);
-    }
-    if (!descriptor || !('value' in descriptor) || typeof descriptor.value !== 'function'
-      || nodeTypes.isProxy(descriptor.value)) return unavailable();
-  }
-  return () => {
-    for (const layout of layouts) {
-      if (getPrototypeOf(layout.owner) !== layout.prototype) return unavailable();
-      if (layout.keys) {
-        const keys = ownKeys(layout.owner);
-        if (keys.length !== layout.keys.length) return unavailable();
-        for (let index = 0; index < keys.length; index++) if (keys[index] !== layout.keys[index]) return unavailable();
-      }
-      for (const { key, descriptor } of layout.fields) {
-        const current = getOwnPropertyDescriptor(layout.owner, key);
-        if ((descriptor === undefined) !== (current === undefined)
-          || !Object.is(descriptor?.value, current?.value) || descriptor?.get !== current?.get || descriptor?.set !== current?.set
-          || descriptor?.writable !== current?.writable || descriptor?.enumerable !== current?.enumerable
-          || descriptor?.configurable !== current?.configurable) return unavailable();
-      }
-    }
-  };
-}
-
-/** Values and native aliases remain private and never become authority identifiers. */
+/**
+ * A credential read once at capture. The value never becomes an identifier.
+ * Later changes are seen through the secrets owner's invalidation and its
+ * mutation generation, and an environment value by one string compare.
+ */
 function captureCredential(key: string, secrets: CredentialOwner): { readonly value: string; assertCurrent(): void } {
   const environment = process.env[key];
   let localKey = key;
   if (environment !== undefined) {
     if (!isCredentialReference(environment)) {
-      if (!environment || environment.trim() !== environment || /[\r\n\0]/.test(environment)) return unavailable();
-      return { value: environment, assertCurrent() { if (process.env[key] !== environment) unavailable(); } };
+      if (!environment || environment.trim() !== environment || /[\r\n\0]/.test(environment)) return unconfigured(missingKey(key));
+      return { value: environment, assertCurrent() { if (process.env[key] !== environment) changed(); } };
     }
     const reference = normalizeSecretRef(environment);
-    if (!reference || reference.source !== 'goodvibes') return unavailable();
+    if (!reference || reference.source !== 'goodvibes') return unconfigured(missingKey(key));
     localKey = reference.id;
   }
   const snapshot = secrets.resolveLocalCredentialSnapshot(localKey);
-  if (snapshot.state !== 'resolved' || !snapshot.value || snapshot.value.trim() !== snapshot.value || /[\r\n\0]/.test(snapshot.value)) return unavailable();
-  return { value: snapshot.value, assertCurrent() {
-    if (process.env[key] !== environment) unavailable();
-    const current = secrets.resolveLocalCredentialSnapshot(localKey);
-    if (current.state !== 'resolved' || current.revision !== snapshot.revision || current.value !== snapshot.value) unavailable();
-  } };
+  if (snapshot.state !== 'resolved' || !snapshot.value || snapshot.value.trim() !== snapshot.value || /[\r\n\0]/.test(snapshot.value)) {
+    return unconfigured(missingKey(key));
+  }
+  return { value: snapshot.value, assertCurrent() { if (process.env[key] !== environment) changed(); } };
 }
 
-/** Native research consent only. Inbox consent and provider routing confer no grant. */
-function acquire(config: ConfigOwner, secrets: CredentialOwner, hostSignal: AbortSignal, assertHost: () => void): Acquisition {
+/**
+ * One acquisition under the settings and credentials it was granted under.
+ * The owners' own subscriptions abort `signal` on any settings or credential
+ * change; what is left per check is integer compares and the abort signal.
+ */
+function acquire(config: ConfigOwner, secrets: CredentialOwner, hostSignal: AbortSignal, isClosing: () => boolean): Acquisition {
   const lifetime = new AbortController();
   const signal = AbortSignal.any([hostSignal, lifetime.signal]);
   const subscriptions: Array<() => void> = [];
@@ -149,6 +64,7 @@ function acquire(config: ConfigOwner, secrets: CredentialOwner, hostSignal: Abor
   let owner: ProtectedSourceOwner | undefined;
   const close = (): Promise<void> => {
     if (closing) return closing;
+    // Claimed before the abort, so a listener that re-enters close shares this one.
     const finish = Promise.withResolvers<void>();
     closing = finish.promise;
     closed = true; lifetime.abort();
@@ -166,54 +82,47 @@ function acquire(config: ConfigOwner, secrets: CredentialOwner, hostSignal: Abor
   };
   const retire = (): void => { lifetime.abort(); };
   try {
-    assertHost();
+    if (isClosing()) unconfigured(SCREENING_CLOSED);
     subscriptions.push(config.onDidChangeIncarnation(retire));
     subscriptions.push(config.onDidInvalidate(retire));
     subscriptions.push(secrets.onDidInvalidateCredentials(retire));
     const incarnation = config.getConfigurationIncarnation();
-    if (decisionModelPolicyState().operation === 'classic') {
-      const assertCurrent = () => {
-        assertHost(); signal.throwIfAborted();
-        if (closed || config.getConfigurationIncarnation() !== incarnation) return unavailable();
-      };
-      owner = createClassicProtectedSourceOwner(Object.freeze({ ownerId: `classic-agent-source-${randomUUID()}`,
-        revision: randomUUID(), signal, assertCurrent }));
-      assertCurrent();
-      return Object.freeze({ owner, assertCurrent, close });
-    }
-    const assertCredentials = secrets.captureLocalCredentialReadset();
-    const consent = config.getHostBooleanSetting(AGENT_HOSTED_RESEARCH_SCREENING_KEY);
-    let durableIncarnation: string | undefined;
-    const assertNative = (): void => {
-      assertHost(); signal.throwIfAborted();
-      const quarantine = config.getIngestionQuarantine();
-      if (closed || config.getConfigurationIncarnation() !== incarnation || secrets.getCredentialMutationState().pending
-        || (durableIncarnation !== undefined && config.getDurableConfigurationIncarnation() !== durableIncarnation)
-        || consent.get() !== true || consent.getResolved().value !== true
-        || quarantine.some(entry => entry.key === '(whole file)' || entry.key === 'tools' || entry.key === AGENT_HOSTED_RESEARCH_SCREENING_KEY)) unavailable();
-      assertCredentials(); assertHost(); signal.throwIfAborted();
+    const live = (): void => {
+      signal.throwIfAborted();
+      if (closed || isClosing()) unconfigured(SCREENING_CLOSED);
+      if (config.getConfigurationIncarnation() !== incarnation) changed();
     };
-    assertNative();
-    durableIncarnation = config.captureDurableConfigurationIncarnation();
-    assertNative();
+    if (decisionModelPolicyState().operation === 'classic') {
+      owner = createClassicProtectedSourceOwner(Object.freeze({ ownerId: `classic-agent-source-${randomUUID()}`,
+        revision: randomUUID(), signal, assertCurrent: live }));
+      return Object.freeze({ owner, assertCurrent: live, close });
+    }
+    const consent = config.getHostBooleanSetting(AGENT_HOSTED_RESEARCH_SCREENING_KEY);
+    if (config.getIngestionQuarantine().some(entry => entry.key === '(whole file)' || entry.key === 'tools'
+      || entry.key === AGENT_HOSTED_RESEARCH_SCREENING_KEY)) unconfigured(CONSENT_QUARANTINED);
+    if (consent.get() !== true || consent.getResolved().value !== true) unconfigured(CONSENT_OFF);
+    const credentialState = secrets.getCredentialMutationState();
+    if (credentialState.pending) changed();
     const abacus = captureCredential('ABACUSAI_API_KEY', secrets);
     const typesafe = captureCredential('TYPESAFE_API_KEY', secrets);
     const assertCurrent = (): void => {
-      assertNative(); abacus.assertCurrent(); typesafe.assertCurrent(); assertNative();
+      live();
+      const credentials = secrets.getCredentialMutationState();
+      if (credentials.pending || credentials.generation !== credentialState.generation) changed();
+      abacus.assertCurrent(); typesafe.assertCurrent();
     };
-    assertCurrent();
     owner = createProtectedSourceOwner(Object.freeze({ kind: 'hosted',
       authority: Object.freeze({ kind: 'hosted', ownerId: `agent-research-${randomUUID()}`, revision: randomUUID(),
         retention: 'provider-managed-zero-retention-unverified', signal, assertCurrent }),
       credentials: Object.freeze({ abacusApiKey: abacus.value, typesafeApiKey: typesafe.value }),
     }));
-    assertCurrent();
     return Object.freeze({ owner, assertCurrent, close });
-  } catch {
-    // Acquisition has admitted no provider operation. Synchronous subscriptions
-    // still close if consent, metadata or credentials could not be captured.
+  } catch (error) {
+    // No provider operation was admitted; the subscriptions taken so far close.
     void close().catch(() => {});
-    return unavailable();
+    if (error instanceof ToolInputProjectionError) throw error;
+    if (signal.aborted) throw new ToolInputProjectionError('cancelled');
+    return unconfigured(RESEARCH_SCREENING_UNCONFIGURED_DETAIL);
   }
 }
 
@@ -223,19 +132,6 @@ function acquire(config: ConfigOwner, secrets: CredentialOwner, hostSignal: Abor
  * acquisition. No source, receipt or operation can supply consent.
  */
 export function createAgentResearchSourceOwner(config: ConfigOwner, secrets: CredentialOwner, signal: AbortSignal): ProtectedSourceOwner {
-  const assertConfigMethods = retainHostMethods(config, ['getHostBooleanSetting', 'getIngestionQuarantine', 'getConfigurationIncarnation',
-    'captureDurableConfigurationIncarnation', 'getDurableConfigurationIncarnation', 'onDidChangeIncarnation', 'onDidInvalidate']);
-  const assertCredentialMethods = retainHostMethods(secrets, ['resolveLocalCredentialSnapshot', 'captureLocalCredentialReadset',
-    'getCredentialMutationState', 'onDidInvalidateCredentials']);
-  const configMethods = {
-    getHostBooleanSetting: config.getHostBooleanSetting, getIngestionQuarantine: config.getIngestionQuarantine,
-    getConfigurationIncarnation: config.getConfigurationIncarnation, captureDurableConfigurationIncarnation: config.captureDurableConfigurationIncarnation,
-    getDurableConfigurationIncarnation: config.getDurableConfigurationIncarnation, onDidChangeIncarnation: config.onDidChangeIncarnation,
-    onDidInvalidate: config.onDidInvalidate,
-  };
-  const credentialMethods = { resolveLocalCredentialSnapshot: secrets.resolveLocalCredentialSnapshot,
-    captureLocalCredentialReadset: secrets.captureLocalCredentialReadset, getCredentialMutationState: secrets.getCredentialMutationState,
-    onDidInvalidateCredentials: secrets.onDidInvalidateCredentials };
   const handles = new WeakMap<ProtectedSource | ProtectedResearchReference, Acquisition>();
   const receipts = new WeakMap<SourceScreeningReceipt | ResearchReferenceScreeningReceipt, Acquisition>();
   const acquisitions = new Set<Acquisition>();
@@ -243,36 +139,6 @@ export function createAgentResearchSourceOwner(config: ConfigOwner, secrets: Cre
   const failures: unknown[] = [];
   let active: Acquisition | undefined;
   let closing: Promise<void> | undefined;
-  const assertHost = (): void => {
-    signal.throwIfAborted();
-    if (closing) return unavailable();
-    assertConfigMethods(); assertCredentialMethods(); signal.throwIfAborted();
-  };
-  const observe = <T>(read: () => T): T => {
-    assertHost();
-    try { return read(); } finally { assertHost(); }
-  };
-  const observeSubscription = (subscribe: () => () => void): (() => void) => {
-    assertHost();
-    const unsubscribe = subscribe();
-    try { assertHost(); return unsubscribe; }
-    catch (error) { unsubscribe(); throw error; }
-  };
-  const nativeConfig: ConfigOwner = {
-    getHostBooleanSetting: key => observe(() => callHost(configMethods.getHostBooleanSetting, config, [key])),
-    getIngestionQuarantine: () => observe(() => callHost(configMethods.getIngestionQuarantine, config, [])),
-    getConfigurationIncarnation: () => observe(() => callHost(configMethods.getConfigurationIncarnation, config, [])),
-    captureDurableConfigurationIncarnation: () => observe(() => callHost(configMethods.captureDurableConfigurationIncarnation, config, [])),
-    getDurableConfigurationIncarnation: () => observe(() => callHost(configMethods.getDurableConfigurationIncarnation, config, [])),
-    onDidChangeIncarnation: listener => observeSubscription(() => callHost(configMethods.onDidChangeIncarnation, config, [listener])),
-    onDidInvalidate: listener => observeSubscription(() => callHost(configMethods.onDidInvalidate, config, [listener])),
-  };
-  const nativeCredentials: CredentialOwner = {
-    resolveLocalCredentialSnapshot: key => observe(() => callHost(credentialMethods.resolveLocalCredentialSnapshot, secrets, [key])),
-    captureLocalCredentialReadset: () => observe(() => callHost(credentialMethods.captureLocalCredentialReadset, secrets, [])),
-    getCredentialMutationState: () => observe(() => callHost(credentialMethods.getCredentialMutationState, secrets, [])),
-    onDidInvalidateCredentials: listener => observeSubscription(() => callHost(credentialMethods.onDidInvalidateCredentials, secrets, [listener])),
-  };
   const drain = (acquisition: Acquisition): void => {
     if (!acquisitions.delete(acquisition)) return;
     let pending: Promise<void>;
@@ -281,14 +147,17 @@ export function createAgentResearchSourceOwner(config: ConfigOwner, secrets: Cre
     void pending.then(() => drains.delete(pending), error => { drains.delete(pending); failures.push(error); });
   };
   const current = (): Acquisition => {
-    assertHost();
+    signal.throwIfAborted();
+    if (closing) return unconfigured(SCREENING_CLOSED);
     if (active) {
       try { active.assertCurrent(); return active; }
       catch { drain(active); active = undefined; }
     }
-    active = acquire(nativeConfig, nativeCredentials, signal, assertHost); acquisitions.add(active);
+    active = acquire(config, secrets, signal, () => closing !== undefined); acquisitions.add(active);
     return active;
   };
+  const staleOrCancelled = (aborted = false): { status: 'held'; reason: 'cancelled' | 'stale' } =>
+    ({ status: 'held', reason: signal.aborted || closing || aborted ? 'cancelled' : 'stale' });
   return Object.freeze({
     capture(parts) {
       const acquisition = current(), handle = acquisition.owner.capture(parts);
@@ -303,10 +172,8 @@ export function createAgentResearchSourceOwner(config: ConfigOwner, secrets: Cre
       if (!acquisition) return { status: 'held', reason: 'stale' };
       const result = await acquisition.owner.screen(handle);
       if (result.status === 'settled') {
-        // Canonical screening owns its asynchronous transport drain. Retain
-        // this exact acquisition through that await before publishing a receipt.
-        try { acquisition.assertCurrent(); }
-        catch { return { status: 'held', reason: signal.aborted || closing ? 'cancelled' : 'stale' }; }
+        // The one compare after the screening await, before a receipt exists.
+        try { acquisition.assertCurrent(); } catch { return staleOrCancelled(); }
         receipts.set(result.receipt, acquisition);
       }
       return result;
@@ -314,26 +181,22 @@ export function createAgentResearchSourceOwner(config: ConfigOwner, secrets: Cre
     async screenResearchReference(handle, operation) {
       const acquisition = handles.get(handle);
       if (!acquisition) return { status: 'held', reason: 'stale' };
-      let caller: ReturnType<typeof retainReferenceOperation>;
-      try { caller = retainReferenceOperation(operation); }
-      catch { return { status: 'held', reason: 'malformed' }; }
-      const result = await acquisition.owner.screenResearchReference(handle, caller.operation);
+      const result = await acquisition.owner.screenResearchReference(handle, operation);
       if (result.status === 'settled') {
-        // The original caller and acquisition remain live through native drain.
-        try { acquisition.assertCurrent(); caller.assertCurrent(); acquisition.assertCurrent(); }
-        catch { return { status: 'held', reason: signal.aborted || closing || caller.aborted() ? 'cancelled' : 'stale' }; }
+        try { acquisition.assertCurrent(); operation?.signal?.throwIfAborted(); operation?.assertCurrent?.(); }
+        catch { return staleOrCancelled(operation?.signal?.aborted === true); }
         receipts.set(result.receipt, acquisition);
       }
       return result;
     },
     project(receipt) {
       const acquisition = receipts.get(receipt);
-      if (!acquisition) return unavailable();
+      if (!acquisition) return changed();
       return acquisition.owner.project(receipt);
     },
     projectResearchReference(receipt) {
       const acquisition = receipts.get(receipt);
-      if (!acquisition) return unavailable();
+      if (!acquisition) return changed();
       return acquisition.owner.projectResearchReference(receipt);
     },
     async release(handle) {

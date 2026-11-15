@@ -3,34 +3,19 @@
 import { createHash } from 'node:crypto';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 
-type ConfigurationOwner = Pick<ConfigManager, 'captureDurableConfigurationIncarnation' | 'getDurableConfigurationIncarnation' | 'onDidChangeIncarnation'>;
+type ConfigurationOwner = Pick<ConfigManager, 'captureDurableConfigurationIncarnation' | 'getDurableConfigurationIncarnation'>;
 interface ScopeOwner { current(version?: 1 | 2): { readonly revision: string; readonly scopes: readonly string[] } }
 interface PolicySnapshot { readonly configuration: string; readonly scope: string }
 const CHANGED = 'native-continuation-policy-changed';
 
 export function createDaemonContinuationPolicy(configuration: ConfigurationOwner, scope: ScopeOwner) {
-  // Bind the original readers before a later callback can replace them. A new
-  // owner is a new policy, not an alternate reader for a previously issued act.
-  const capture = configuration.captureDurableConfigurationIncarnation.bind(configuration);
-  const current = configuration.getDurableConfigurationIncarnation.bind(configuration);
-  const readScope = scope.current.bind(scope);
-  const subscribe = configuration.onDidChangeIncarnation.bind(configuration);
-  const methods = { capture: configuration.captureDurableConfigurationIncarnation, current: configuration.getDurableConfigurationIncarnation,
-    scope: scope.current, subscribe: configuration.onDidChangeIncarnation };
   let snapshot: PolicySnapshot | undefined;
   let savedSnapshot: PolicySnapshot | undefined, savedBinding: string | undefined;
-  let retired = false;
-  const assertReaders = () => {
-    if (retired || configuration.captureDurableConfigurationIncarnation !== methods.capture || configuration.getDurableConfigurationIncarnation !== methods.current
-      || scope.current !== methods.scope || configuration.onDidChangeIncarnation !== methods.subscribe) {
-      retired = true;
-      throw new Error('Native continuation policy owner changed');
-    }
-  };
+  // The configuration owner's durable revision survives a restart, so a grant
+  // saved before one is compared against the same counter after it.
   const read = (establish: boolean, version: 1 | 2 = 2) => {
-    assertReaders();
-    const configurationRevision = establish ? capture() : current(version), selected = readScope(version);
-    assertReaders();
+    const configurationRevision = establish ? configuration.captureDurableConfigurationIncarnation() : configuration.getDurableConfigurationIncarnation();
+    const selected = scope.current(version);
     if (typeof configurationRevision !== 'string' || !configurationRevision || typeof selected.revision !== 'string' || !selected.revision) {
       throw new Error('Native continuation policy revision is unavailable');
     }
@@ -48,7 +33,7 @@ export function createDaemonContinuationPolicy(configuration: ConfigurationOwner
   };
   return Object.freeze({
     capture(version: 1 | 2 = 2): string {
-      if (version === 1) { assertReaders(); throw new Error('Historical native continuation policy requires fresh issuance'); }
+      if (version === 1) throw new Error('Historical native continuation policy requires fresh issuance');
       const selected = read(true); if (!same(selected)) establish(selected); return binding(version);
     },
     current(version: 1 | 2 = 2): string {
@@ -63,7 +48,6 @@ export function createDaemonContinuationPolicy(configuration: ConfigurationOwner
       if (!snapshot) establish(selected);
       return same(selected) ? binding(version) : CHANGED;
     },
-    scopes(): readonly string[] { assertReaders(); const selected = readScope(); assertReaders(); return selected.scopes; },
-    onDidInvalidate(listener: () => void): () => void { assertReaders(); return subscribe(listener); },
+    scopes(): readonly string[] { return scope.current().scopes; },
   });
 }

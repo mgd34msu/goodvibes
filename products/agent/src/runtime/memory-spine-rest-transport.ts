@@ -47,14 +47,19 @@ export interface MemorySpineRestTransportOptions {
   readonly longTimeoutMs?: number;
 }
 
-/** Wraps global fetch with a per-call AbortController timeout. */
-function createTimeoutFetch(timeoutMs: number): typeof fetch {
+/**
+ * Wraps global fetch with the verb's deadline. The abort reason is a
+ * `TimeoutError` naming the verb and the bound, so the caller reports a
+ * deadline, not a cancellation.
+ */
+function deadlineFetch(verb: string, timeoutMs: number): typeof fetch {
   return (async (input: RequestInfo | URL, init?: RequestInit) => {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const deadline = new AbortController();
+    const timer = setTimeout(() => deadline.abort(new DOMException(
+      `memory ${verb} did not answer within ${timeoutMs} ms`, 'TimeoutError')), timeoutMs);
     try {
       const parent = init?.signal ?? (input instanceof Request ? input.signal : undefined);
-      const signal = parent ? AbortSignal.any([parent, controller.signal]) : controller.signal;
+      const signal = parent ? AbortSignal.any([parent, deadline.signal]) : deadline.signal;
       return await awaitMemoryOperation(() => fetch(input, { ...init, signal }), { signal });
     } finally {
       clearTimeout(timer);
@@ -78,15 +83,13 @@ function requireToken(connection: SessionRegistrationConnection): void {
  */
 export function createMemorySpineRestTransport(options: MemorySpineRestTransportOptions): MemoryTransport {
   const timeoutMs = options.timeoutMs ?? DEFAULT_MEMORY_WIRE_TIMEOUT_MS;
-  const shortFetch = createTimeoutFetch(timeoutMs);
-  const longFetch = createTimeoutFetch(options.longTimeoutMs ?? DEFAULT_LONG_MEMORY_WIRE_TIMEOUT_MS);
-  const optionsResolver = options.resolveConnection;
+  const longTimeoutMs = options.longTimeoutMs ?? DEFAULT_LONG_MEMORY_WIRE_TIMEOUT_MS;
+  const resolveConnection = options.resolveConnection;
   const captureOperationScope = () => {
-    const connection = optionsResolver();
+    const connection = resolveConnection();
     const baseUrl = connection.baseUrl, token = connection.token, tokenPath = connection.tokenPath;
     return () => {
-      if (options.resolveConnection !== optionsResolver) throw new Error('Memory spine connection resolver changed');
-      const current = optionsResolver();
+      const current = resolveConnection();
       if (current.baseUrl !== baseUrl || current.token !== token || current.tokenPath !== tokenPath) {
         throw new Error('Memory spine connection changed');
       }
@@ -103,13 +106,11 @@ export function createMemorySpineRestTransport(options: MemorySpineRestTransport
     } });
     return awaitMemoryOperation(() => {
       assertMemoryOperationCurrent(operation);
-      if (options.resolveConnection !== optionsResolver) throw new Error('Memory spine connection resolver changed');
-      const connection = optionsResolver();
+      const connection = resolveConnection();
       requireToken(connection);
-      assertMemoryOperationCurrent(operation);
       const transport = createPlatformMemorySpineRestTransport({
         baseUrl: connection.baseUrl, authToken: connection.token,
-        fetchImpl: LONG_RUNNING_VERBS.has(verb) ? longFetch : shortFetch,
+        fetchImpl: deadlineFetch(verb, LONG_RUNNING_VERBS.has(verb) ? longTimeoutMs : timeoutMs),
       });
       const result = invoke(transport, operation);
       if (!result) throw memoryVerbUnavailableError(verb);

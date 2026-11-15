@@ -1,5 +1,5 @@
 import { statSync } from 'node:fs';
-import { buildProviderAccountSnapshot } from '../runtime/provider-account-snapshot.ts';
+import { buildProviderAccountSnapshot } from '@/runtime/index.ts';
 import { requireLocalUserAuthManager, requirePlatform, requireProvider, requireSecretsManager, requireServiceRegistry, requireShellPaths, requireSubscriptionManager } from '../input/commands/runtime-services.ts';
 import { collectOnboardingSnapshot } from '../runtime/onboarding/index.ts';
 import type { CommandContext } from '../input/command-registry.ts';
@@ -138,13 +138,10 @@ export async function collectSnapshot(context: CommandContext, ownership: { read
     } : {}),
     providerAccounts: {
       loadSnapshot: () => buildProviderAccountSnapshot({
-        providerModels: requireProvider(context).providerRegistry,
-        services: requireServiceRegistry(context),
-        subscriptions: requireSubscriptionManager(context),
-        environment: {
-          hasEnvironmentVariable: (name: string) => Boolean(process.env[name]),
-        },
-        secrets: requireSecretsManager(context),
+        providerRegistry: requireProvider(context).providerRegistry,
+        serviceRegistry: requireServiceRegistry(context),
+        subscriptionManager: requireSubscriptionManager(context),
+        secretsManager: requireSecretsManager(context),
       }),
     },
   }, ownership);

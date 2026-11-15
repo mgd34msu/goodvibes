@@ -12,7 +12,7 @@ import { estimateConversationTokens } from '@goodvibes-jev/engine/platform/platf
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { buildSetupReviewSnapshot } from './local-setup-review.ts';
 import { describeApprovalsUnavailable } from '../../runtime/client/approvals-view.ts';
-import { buildProviderAccountSnapshot } from '../../runtime/provider-account-snapshot.ts';
+import { buildProviderAccountSnapshot } from '@/runtime/index.ts';
 import { getSettingsControlPlaneSnapshot } from '@/runtime/index.ts';
 import '@/runtime/index.ts';
 import {
@@ -27,13 +27,11 @@ import {
 
 async function loadProviderAccountSnapshot(ctx: CommandContext) {
   return await buildProviderAccountSnapshot({
-    providerModels: requireProvider(ctx).providerRegistry,
-    services: requireServiceRegistry(ctx),
-    subscriptions: requireSubscriptionManager(ctx),
-    environment: {
-      hasEnvironmentVariable: (name: string) => Boolean(process.env[name]),
-    },
-    secrets: ctx.platform.secretsManager,
+    providerRegistry: requireProvider(ctx).providerRegistry,
+    serviceRegistry: requireServiceRegistry(ctx),
+    subscriptionManager: requireSubscriptionManager(ctx),
+    // Without a store only the environment is read.
+    secretsManager: ctx.platform.secretsManager ?? { get: async () => null },
   });
 }
 

@@ -14,7 +14,7 @@
 
 
 export const SHELL_USAGE_HINT =
-  '[Shell] Usage: !<command>, runs a shell command; its output is shown and added as context for your next message.';
+  '[Shell] Usage: !<command>, runs a shell command; its output is shown and added as context for your next message. Esc stops a command that is still running.';
 
 export interface ShellRunResult {
   /** Formatted output for the conversation/activity feed. */
@@ -24,12 +24,13 @@ export interface ShellRunResult {
 }
 
 export interface ShellRunOptions {
-  /** Stop the command after this long. Defaults to SHELL_TIMEOUT_MS. */
+  /**
+   * Stop the command after this long. Unset, it runs until it finishes: it runs beside the
+   * composer, and Esc (turn cancel) or closing the app stops it.
+   */
   readonly timeoutMs?: number;
 }
 
-/** A `!` command that has not finished by now is stopped; it cannot be cancelled from the composer. */
-export const SHELL_TIMEOUT_MS = 120_000;
 /** Output kept per command, for the feed and for the model's context. */
 export const SHELL_OUTPUT_LIMIT_CHARS = 20_000;
 /** Buffered blocks kept for the next message; the oldest are dropped past this. */
@@ -71,7 +72,7 @@ export class ShellPassthrough {
 
   /** Run `command` in `cwd`, returning display + model-context renderings. */
   async run(command: string, cwd: string, options: ShellRunOptions = {}): Promise<ShellRunResult> {
-    const timeoutMs = options.timeoutMs ?? SHELL_TIMEOUT_MS;
+    const timeoutMs = options.timeoutMs;
     // Its own process group, so stopping it reaches every part of a pipeline or `a; b` list and not only bash.
     const proc = Bun.spawn(['bash', '-c', command], { cwd, stdout: 'pipe', stderr: 'pipe', detached: process.platform !== 'win32' });
     const outcome: { stoppedBy: 'timeout' | 'cancelled' | null } = { stoppedBy: null };
@@ -88,7 +89,7 @@ export class ShellPassthrough {
     };
     const handle = { stop: () => stop('cancelled') };
     this.running.add(handle);
-    const timer = setTimeout(() => stop('timeout'), timeoutMs);
+    const timer = timeoutMs === undefined ? undefined : setTimeout(() => stop('timeout'), timeoutMs);
     const out = new CappedText(SHELL_OUTPUT_LIMIT_CHARS);
     const err = new CappedText(SHELL_OUTPUT_LIMIT_CHARS);
     const readers: Array<ReadableStreamDefaultReader<Uint8Array>> = [];
@@ -117,7 +118,7 @@ export class ShellPassthrough {
       const dropped = out.dropped + err.dropped;
       const notes: string[] = [];
       if (dropped > 0) notes.push(`output cut: ${dropped} more character${dropped === 1 ? '' : 's'} not kept`);
-      if (outcome.stoppedBy === 'timeout') notes.push(`stopped after ${timeoutMs >= 1000 ? `${Math.round(timeoutMs / 1000)}s` : `${timeoutMs} ms`} without finishing`);
+      if (outcome.stoppedBy === 'timeout' && timeoutMs !== undefined) notes.push(`stopped after ${timeoutMs >= 1000 ? `${Math.round(timeoutMs / 1000)}s` : `${timeoutMs} ms`} without finishing`);
       if (outcome.stoppedBy === 'cancelled') notes.push('stopped before it finished');
       const body = combined.length > 0 ? combined : '(no output)';
       const status = `exit ${exitCode}${notes.length > 0 ? `; ${notes.join('; ')}` : ''}`;

@@ -1003,4 +1003,25 @@ describe('SettingsModal', () => {
     expect(modal.commitEdit()).toBe(true);
     expect(updatedMode as string | null).toBe('allow-all');
   });
+
+  test('an arrow key that moves a server into allow-all asks for the same typed confirmation', () => {
+    const updates: string[] = [];
+    let trustMode = 'ask-on-risk';
+    mcpRegistry = {
+      listServerSecurity: () => [{
+        name: 'docs-server', connected: true, role: 'docs', trustMode, allowedPaths: [], allowedHosts: [], schemaFreshness: 'fresh',
+      }],
+      setServerTrustMode: (_name: string, mode: string) => { updates.push(mode); trustMode = mode; },
+    } as unknown as McpRegistry;
+
+    modal.open(cm, ffm, subscriptionManager, serviceRegistry, mcpRegistry);
+    while (modal.currentCategory !== 'mcp') modal.nextCategory();
+    modal.adjustSelected('right');
+    expect(updates).toEqual([]);
+    expect(modal.mcpAllowAllConfirmationTarget).toBe('docs-server');
+    expect(modal.editingMode).toBe(true);
+    modal.cancelEdit();
+    modal.adjustSelected('left');
+    expect(updates).toEqual(['constrained']);
+  });
 });

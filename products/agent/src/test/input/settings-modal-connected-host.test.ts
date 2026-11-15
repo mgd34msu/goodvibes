@@ -175,19 +175,25 @@ describe('SettingsModal with a connected host', () => {
     expect(modal.flagEntries.find((e) => e.feature.id === ownedId)!.state).toBe(expected);
   });
 
-  test('a second change to the same key waits for the first one to finish', async () => {
+  test('a change made while the same key is saving is sent after it, so the host ends on the newest value', async () => {
     const host = installHost();
-    select('payments.cvvHandling');
-    modal.activateSelected();
-    modal.activateSelected();
-    expect(host.sets).toHaveLength(1);
-    expect(modal.lastSettingEffectMessage).toContain('still being saved on the connected host');
+    selectFirst((entry) => entry.setting.type === 'number' && isDaemonOwnedConfigKey(entry.setting.key)
+      && [41, 42, 43].every((n) => entry.setting.validate?.(n) ?? true));
+    const key = modal.getSelected()!.setting.key;
+    for (const typed of ['41', '42', '43']) {
+      modal.activateSelected();
+      modal.editBuffer = typed;
+      expect(modal.commitEdit()).toBe(true);
+    }
+    // One write per key at a time; the middle value was replaced before it was sent.
+    expect(host.sets).toEqual([{ key, value: 41 }]);
     host.release();
     await settle();
-    // Once the first has landed the key accepts a change again, computed from the new value.
-    modal.activateSelected();
-    expect(host.sets).toHaveLength(2);
-    expect(host.sets[1]!.value).not.toBe('prompt');
+    expect(host.sets).toEqual([{ key, value: 41 }, { key, value: 43 }]);
+    host.release();
+    await settle();
+    expect(host.held.get(key)).toBe(43);
+    expect(modal.getSelected()!.currentValue).toBe(43);
   });
 
   test('an answer that arrives after the modal was closed does not touch it', async () => {

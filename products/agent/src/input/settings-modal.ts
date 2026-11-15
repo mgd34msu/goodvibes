@@ -65,6 +65,8 @@ export {
 } from './settings-modal-types.ts';
 export { isAgentHiddenSettingKey } from './settings-modal-agent-policy.ts';
 
+const MCP_TRUST_MODES: readonly McpEntry['trustMode'][] = ['constrained', 'ask-on-risk', 'allow-all', 'blocked'];
+
 // ---------------------------------------------------------------------------
 // SettingsModal
 // ---------------------------------------------------------------------------
@@ -111,8 +113,11 @@ export class SettingsModal extends TerminalSettingsModalState<
   /** Accepted secret edits finish here; commitEdit remains a synchronous keystroke API. */
 
   private secretWriteSession = 0;
-  /** Daemon-owned keys with a write still in flight; a second change to one waits for the first. */
-  private readonly routedWriteKeys = new Set<string>();
+  /**
+   * Daemon-owned keys with a write in flight. One write per key at a time keeps the host's order;
+   * the newest value asked for meanwhile is kept here and sent when the first settles.
+   */
+  private readonly routedWrites = new Map<string, { next?: { readonly value: unknown } }>();
   /** Values the connected host confirmed this session; the local store never holds them, so every rebuild of the rows re-applies them. */
   private readonly hostHeldValues = new Map<string, unknown>();
   /** Host-owned keys whose value the connected host has not given this opening, with why; shown instead of this machine's copy. */
@@ -154,7 +159,7 @@ export class SettingsModal extends TerminalSettingsModalState<
     options?: SettingsModalOpenOptions,
   ): void {
     this.secretWriteSession++;
-    this.routedWriteKeys.clear();
+    this.routedWrites.clear();
     this.hostHeldValues.clear();
     this.hostUnreadable.clear();
     this.unsubscribeHostSetting?.();
@@ -235,7 +240,7 @@ export class SettingsModal extends TerminalSettingsModalState<
   close(): void {
     this.active = false;
     this.secretWriteSession++;
-    this.routedWriteKeys.clear();
+    this.routedWrites.clear();
     this.hostHeldValues.clear();
     this.hostUnreadable.clear();
     this.unsubscribeHostSetting?.();
@@ -476,11 +481,8 @@ export class SettingsModal extends TerminalSettingsModalState<
     if (this.currentCategory === 'mcp') {
       const entry = this.getSelectedMcp();
       if (!entry || !this.mcpRegistry) return;
-      const modes: McpEntry['trustMode'][] = ['constrained', 'ask-on-risk', 'allow-all', 'blocked'];
-      const nextMode = cycleSettingChoice(modes, entry.trustMode, direction);
-      if (nextMode !== undefined) this.mcpRegistry.setServerTrustMode(entry.name, nextMode);
-      this._loadMcpEntries();
-      this.mcpAllowAllConfirmationTarget = null;
+      const nextMode = cycleSettingChoice(MCP_TRUST_MODES, entry.trustMode, direction);
+      if (nextMode !== undefined) this._requestTrustMode(entry, nextMode);
       return;
     }
 
@@ -528,7 +530,7 @@ export class SettingsModal extends TerminalSettingsModalState<
       this._loadFlagEntries();
       if (!accepted) return;
       // A routed write reports and updates the row when the host answers.
-      if (this.routedWriteKeys.has(write.key)) return;
+      if (this.routedWrites.has(write.key)) return;
       this.lastSettingEffectMessage ??= feature.restartRequired
         ? `${write.key} = ${String(write.value)} saved; takes effect on the next launch.`
         : `${write.key} = ${String(write.value)}`;
@@ -554,30 +556,14 @@ export class SettingsModal extends TerminalSettingsModalState<
         if (this.editBuffer.trim() !== expected) {
           return this._rejectEdit(`Not changed: type ${expected} exactly to allow all, or press Esc to cancel.`);
         }
-        this.mcpRegistry.setServerTrustMode(entry.name, 'allow-all');
-        this._loadMcpEntries();
-        this.editingMode = false;
-        this.editBuffer = '';
-        this.mcpAllowAllConfirmationTarget = null;
-        return true;
+        return this._applyTrustMode(entry, 'allow-all');
       }
 
       const nextMode = this.editBuffer.trim() as McpEntry['trustMode'];
-      const validModes: McpEntry['trustMode'][] = ['constrained', 'ask-on-risk', 'allow-all', 'blocked'];
-      if (!validModes.includes(nextMode)) {
-        return this._rejectEdit(`Not changed: "${this.editBuffer.trim()}" is not a trust mode. Use ${validModes.join(', ')}.`);
+      if (!MCP_TRUST_MODES.includes(nextMode)) {
+        return this._rejectEdit(`Not changed: "${this.editBuffer.trim()}" is not a trust mode. Use ${MCP_TRUST_MODES.join(', ')}.`);
       }
-      if (nextMode === 'allow-all' && entry.trustMode !== 'allow-all') {
-        this.mcpAllowAllConfirmationTarget = entry.name;
-        this.editBuffer = '';
-        return false;
-      }
-      this.mcpRegistry.setServerTrustMode(entry.name, nextMode);
-      this._loadMcpEntries();
-      this.editingMode = false;
-      this.editBuffer = '';
-      this.mcpAllowAllConfirmationTarget = null;
-      return true;
+      return this._requestTrustMode(entry, nextMode);
     }
 
     if (!this._canEditSettings()) return false;
@@ -610,6 +596,35 @@ export class SettingsModal extends TerminalSettingsModalState<
     }
     this.editingMode = false;
     this.editBuffer = '';
+    return true;
+  }
+
+  /**
+   * The one way this screen changes a server's trust mode, from the arrow keys or a typed mode.
+   * A move INTO allow-all opens the typed confirmation; every other move applies at once.
+   */
+  private _requestTrustMode(entry: McpEntry, mode: McpEntry['trustMode']): boolean {
+    if (mode === 'allow-all' && entry.trustMode !== 'allow-all') {
+      this.editingMode = true;
+      this.editBuffer = '';
+      this.mcpAllowAllConfirmationTarget = entry.name;
+      return false;
+    }
+    return this._applyTrustMode(entry, mode);
+  }
+
+  private _applyTrustMode(entry: McpEntry, mode: McpEntry['trustMode']): boolean {
+    if (!this.mcpRegistry) return false;
+    this.editingMode = false;
+    this.editBuffer = '';
+    this.mcpAllowAllConfirmationTarget = null;
+    try {
+      this.mcpRegistry.setServerTrustMode(entry.name, mode);
+      this.lastSettingEffectMessage = `${entry.name} trust mode is ${mode} for this session only; edit the server in /mcp to keep it after a restart.`;
+    } catch (error) {
+      this.lastSettingEffectMessage = `Trust mode not changed: ${summarizeError(error)}`;
+    }
+    this._loadMcpEntries();
     return true;
   }
 
@@ -1003,25 +1018,31 @@ export class SettingsModal extends TerminalSettingsModalState<
     // daemon-owned key never has two writers. The modal cannot await from a
     // keystroke handler, so the outcome lands on `lastSettingEffectMessage` a
     // moment later, including the refusal, which is the message that matters.
-    if (this.routedWriteKeys.has(key)) {
-      this.lastSettingEffectMessage = `A change to ${key} is still being saved on the connected host. Try again when it finishes.`;
-      return false;
+    const inFlight = this.routedWrites.get(key);
+    if (inFlight) {
+      inFlight.next = { value };
+      this.lastSettingEffectMessage = 'Saving on the connected host…';
+      return true;
     }
     const opened = this.secretWriteSession;
+    const write: { next?: { readonly value: unknown } } = {};
     const routed = routeSettingWriteToConnectedHost(key, value, (update) => {
       // The modal may have been closed or reopened while the host answered.
       if (!this.active || opened !== this.secretWriteSession) return;
-      if (update.settled) this.routedWriteKeys.delete(key);
       this.lastSettingEffectMessage = update.message;
       if (update.applied) {
         this._applyRoutedValue(key, update.applied.value);
         // Same warning as a local write, set after the host's report so the report does not replace it.
         if (key === 'payments.cvvHandling' && update.applied.value === 'prompt') this.lastSettingEffectMessage = CVV_PROMPT_TRADEOFF_WARNING;
       }
+      if (update.settled) {
+        this.routedWrites.delete(key);
+        if (write.next && !isDeepStrictEqual(write.next.value, value)) this._setValue(key, write.next.value);
+      }
       this.requestHostSettingRender?.();
     });
     if (routed) {
-      this.routedWriteKeys.add(key);
+      this.routedWrites.set(key, write);
       return true;
     }
     try {

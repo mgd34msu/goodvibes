@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 /**
  * Fleet types, the normalized process-tree contract for the live process
  * registry. One queryable + subscribable aggregation surface that

@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 /**
  * TransportEvent, discriminated union covering ACP/daemon transport lifecycle events.
  *

@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 /**
  * runtime/config, the bridge from in-process config changes to the runtime
  * event bus `config` domain, so a client whose settings live in the daemon gets

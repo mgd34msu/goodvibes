@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 import type { TriggerDefinition } from '../../../tools/workflow/index.js';
 import type { ProcessNode } from '../types.js';
 

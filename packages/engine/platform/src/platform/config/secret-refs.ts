@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 import { readFileSync } from 'node:fs';
 import { resolve as resolvePath } from 'node:path';
 import { summarizeError } from '../utils/error-display.js';

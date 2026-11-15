@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 /**
  * goodvibes-home.ts, where this process's GoodVibes tree lives, resolved in
  * ONE place for every entry point, on every surface.

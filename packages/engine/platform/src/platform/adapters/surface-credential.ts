@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 /**
  * surface-credential.ts, the credential an inbound adapter checks a caller against.
  *

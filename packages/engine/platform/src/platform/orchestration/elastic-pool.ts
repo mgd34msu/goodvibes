@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 /**
  * elastic-pool.ts, the elastic-fleet muscles of the shared workstream engine
  * : a ready task with no available agent SPAWNS one (the phase-runner's

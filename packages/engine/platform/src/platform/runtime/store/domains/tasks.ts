@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 /**
  * Tasks domain state, unified task lifecycle tracking across all
  * subsystem kinds: exec, agent, acp, scheduler, daemon, mcp, plugin, integration.

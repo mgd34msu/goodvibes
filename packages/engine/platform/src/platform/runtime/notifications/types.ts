@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 /**
  * Notification system types, core interfaces for the conversation noise
  * routing model. Operational noise is routed to dedicated

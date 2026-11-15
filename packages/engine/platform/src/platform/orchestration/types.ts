@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 /**
  * Orchestration engine, the model (see CHANGELOG 0.38.0).
  *

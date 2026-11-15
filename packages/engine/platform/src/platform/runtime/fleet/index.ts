@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 // ── Fleet, live process registry ───────────────────────────────────────────
 // Curated named-export barrel (no `export *`), mirroring the observability
 // barrel convention: the public fleet surface is an explicit allowlist.

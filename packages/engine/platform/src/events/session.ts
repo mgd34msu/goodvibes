@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 /**
  * SessionEvent, discriminated union covering all session lifecycle events.
  *

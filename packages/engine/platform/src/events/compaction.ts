@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 /**
  * CompactionEvent, discriminated union covering all context compaction events.
  *

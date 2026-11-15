@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 /**
  * Config emit-bridge, turns in-process `ConfigManager.subscribe` callbacks
  * into poll-free key-level events on the runtime event bus `config` domain.

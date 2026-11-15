@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 /**
  * Embedded WASM files for tree-sitter, compiled into the binary via Bun's
  * `with { type: 'file' }` import assertion. In `bun build --compile`, Bun

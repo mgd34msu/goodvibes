@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 /**
  * Phase-runner (see CHANGELOG 0.38.0), runs one WorkItem through one Phase:
  * spawn the agent, await its outcome, run gates and the claim check, commit,

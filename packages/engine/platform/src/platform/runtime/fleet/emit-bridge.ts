@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 /**
  * Fleet emit-bridge, turns the ProcessRegistry's in-process coalesced snapshot
  * tick into poll-free lifecycle events on the runtime event bus `fleet` domain.

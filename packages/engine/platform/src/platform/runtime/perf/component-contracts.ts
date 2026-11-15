@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 /**
  * Component resource contracts, per-component CPU/IO/update budget definitions.
  *

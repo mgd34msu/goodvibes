@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 import type { AutomationJob } from '../../../automation/jobs.js';
 import type { ProcessNode } from '../types.js';
 

@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 /**
  * AgentEvent, discriminated union covering all subagent/agent lifecycle events.
  *

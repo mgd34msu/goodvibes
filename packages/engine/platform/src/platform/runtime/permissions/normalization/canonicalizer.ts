@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 /**
  * Canonicalizer, resolves raw command tokens to their canonical command names.
  *

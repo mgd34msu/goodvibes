@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 import { join } from 'node:path';
 
 export interface AutomationStorePathConfig {

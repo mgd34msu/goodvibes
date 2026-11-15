@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 /**
  * TaskEvent, discriminated union covering all task lifecycle events.
  *

@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 /**
  * Model domain state, tracks the active LLM provider and model,
  * fallback chain, token limits, and reasoning configuration.

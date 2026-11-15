@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 import { appendFileSync, mkdirSync, existsSync, statSync, renameSync } from 'fs';
 import { dirname, join } from 'path';
 import { FieldKindReader } from './field-kind-reading.js';

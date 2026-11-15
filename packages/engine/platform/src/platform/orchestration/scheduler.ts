@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 /**
  * Scheduler (see CHANGELOG 0.38.0), pure capacity-matching helpers, no side
  * effects. Each tick, for every phase in ordinal order, free capacity slots

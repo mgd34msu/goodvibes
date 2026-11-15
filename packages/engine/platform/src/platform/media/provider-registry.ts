@@ -1,6 +1,5 @@
 import { types as nodeTypes } from 'node:util';
 import { assertSecurityReadSource, captureSecurityReadBindings, captureSecurityReadData, retainSecurityReadData } from '../security/read-source.js';
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
 import type { DeliveryLifetime } from '../utils/delivery-lifetime.js';
 import { RefusalError, refusal } from '@goodvibes-jev/engine/errors';
 

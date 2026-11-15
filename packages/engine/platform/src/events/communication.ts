@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 /**
  * CommunicationEvent, typed runtime events for structured agent communication.
  */

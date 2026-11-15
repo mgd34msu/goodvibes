@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 /**
  * Intelligence domain state, tracks AI-assisted developer intelligence
  * features: diagnostics, completions, hover info, and symbol references.

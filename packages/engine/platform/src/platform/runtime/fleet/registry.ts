@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 /**
  * Live process registry, one queryable + subscribable aggregation
  * surface over the already-composed runtime managers. ZERO new store state:

@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 /**
  * AutomationEvent, discriminated union covering automation job and run lifecycle events.
  */

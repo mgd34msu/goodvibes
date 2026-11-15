@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 import type { CodeIndexBuildProgress, CodeIndexStats } from '../../../state/code-index-store.js';
 import type { ProcessNode, ProcessState } from '../types.js';
 

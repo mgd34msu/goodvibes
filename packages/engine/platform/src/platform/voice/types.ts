@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 export type VoiceProviderCapability = 'tts' | 'tts-stream' | 'stt' | 'realtime' | 'voice-list';
 export type VoiceProviderState = 'healthy' | 'degraded' | 'disabled' | 'unconfigured';
 export type VoiceAudioFormat = 'wav' | 'mp3' | 'ogg' | 'webm' | 'pcm16' | 'flac';

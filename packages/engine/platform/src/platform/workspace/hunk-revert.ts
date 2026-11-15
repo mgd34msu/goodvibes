@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 /**
  * hunk-revert.ts, per-hunk reverse-apply on the live working tree.
  *

@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 /**
  * OpsEvent, discriminated union covering all operator control plane events.
  *

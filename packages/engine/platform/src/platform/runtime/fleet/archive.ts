@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 /**
  * Fleet archive, moves FINISHED process subtrees out of the live fleet view
  * into a session-scoped archive, without touching the source managers.

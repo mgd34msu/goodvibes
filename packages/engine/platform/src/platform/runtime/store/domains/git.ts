@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 /**
  * Git domain state, tracks the current repository status, staged/unstaged
  * changes, active branch, and recent commits.

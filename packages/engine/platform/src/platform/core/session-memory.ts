@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 /**
  * SessionMemoryStore manages pinned in-memory notes for the current session.
  *

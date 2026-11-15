@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 export const EXECUTION_RISK_CLASSES = ['safe', 'elevated', 'dangerous'] as const;
 export const EXECUTION_NETWORK_POLICIES = ['inherit', 'allow', 'deny', 'scoped'] as const;
 export const EXECUTION_FILESYSTEM_POLICIES = ['inherit', 'workspace-write', 'read-only', 'isolated'] as const;

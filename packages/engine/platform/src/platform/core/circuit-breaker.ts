@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 /**
  * Shared circuit breaker for consecutive all-error turn detection.
  *

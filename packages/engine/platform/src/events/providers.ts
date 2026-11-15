@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 /**
  * ProviderEvent, discriminated union for provider registry and fallback events.
  */

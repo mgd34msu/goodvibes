@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 /**
  * Daemon domain state, tracks the goodvibes daemon process lifecycle
  * and IPC transport health.

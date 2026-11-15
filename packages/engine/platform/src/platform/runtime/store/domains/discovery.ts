@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 /**
  * Discovery domain state, tracks the project index, file watcher state,
  * and language server availability for the active project.

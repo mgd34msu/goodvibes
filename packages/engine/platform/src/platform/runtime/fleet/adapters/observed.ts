@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 /**
  * Observed foreign coding-agent -> ProcessNode. An externally-launched Claude
  * Code / Codex / opencode session goodvibes did NOT spawn or host appears as a

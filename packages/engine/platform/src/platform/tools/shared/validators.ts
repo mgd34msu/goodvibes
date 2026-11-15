@@ -1,5 +1,4 @@
 import { hasCapturedToolInvocation } from './captured-input-tools.js';
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
 
 /**
  * Shared validator infrastructure for write and edit tools.

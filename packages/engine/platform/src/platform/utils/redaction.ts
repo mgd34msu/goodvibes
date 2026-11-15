@@ -1,4 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
 import { FieldKindReader } from './field-kind-reading.js';
 import { isClassicOperation } from '../runtime/decision-policy.js';
 import type { FieldKind } from './batteries/field-kind.js';

@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 /**
  * Shared glob-to-regex conversion utility.
  * Handles **, *, and ? wildcards correctly for file path matching.

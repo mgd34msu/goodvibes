@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 /**
  * ControlPlaneEvent, discriminated union covering gateway/control-plane client lifecycle events.
  */

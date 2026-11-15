@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 import { summarizeError } from './error-display.js';
 import { envFlag } from './env-flag.js';
 import { logger } from './logger.js';

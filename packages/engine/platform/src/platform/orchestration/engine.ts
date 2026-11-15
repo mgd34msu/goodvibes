@@ -1,5 +1,4 @@
 import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
 
 /**
  * OrchestrationEngine (see CHANGELOG 0.38.0), owns Workstream state and

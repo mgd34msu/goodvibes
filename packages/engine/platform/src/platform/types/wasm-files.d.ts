@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 /**
  * Type declarations for WASM file imports using Bun's compile-time embedding.
  *

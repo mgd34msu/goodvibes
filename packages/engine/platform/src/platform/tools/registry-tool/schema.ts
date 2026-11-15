@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 /**
  * JSON Schema and TypeScript types for the `registry` tool.
  */

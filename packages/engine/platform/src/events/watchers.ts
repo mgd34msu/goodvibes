@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 /**
  * WatcherEvent, discriminated union covering managed watcher and listener lifecycle events.
  */

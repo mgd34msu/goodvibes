@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 /**
  * ForensicsEvent, discriminated union for failure forensics events.
  *

@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { lstat, readdir, realpath, stat } from 'node:fs/promises';
 import type { Dirent } from 'node:fs';

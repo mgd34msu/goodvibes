@@ -1,5 +1,4 @@
 import { DirectoryWalk } from '../utils/walk-dir.js';
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
 /**
  * CodeIndexStore, an incremental, tree-sitter-chunked, embedding-backed index
  * of a repo's source tree (see CHANGELOG 0.38.0).

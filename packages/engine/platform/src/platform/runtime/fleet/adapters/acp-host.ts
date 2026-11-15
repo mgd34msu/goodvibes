@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 /**
  * Hosted third-party ACP agent -> ProcessNode. A hosted Claude Code / Codex /
  * opencode session appears as a first-class fleet row: steerable (a steer is

@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 /**
  * KnowledgeEvent, structured knowledge ingest, extraction, packet, projection, and job lifecycle events.
  */

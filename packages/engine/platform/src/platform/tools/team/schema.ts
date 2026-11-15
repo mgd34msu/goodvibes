@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 export const TEAM_TOOL_SCHEMA = {
   type: 'object',
   properties: {

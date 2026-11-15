@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 import { join } from 'node:path';
 import { requireSurfaceRoot, resolveSurfaceDirectory } from './surface-root.js';
 import type { NativeDataWriteOwner } from './native-reader-compatibility.js';

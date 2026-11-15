@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 export interface LspCapabilities {
   documentSymbols: boolean;
   definition: boolean;

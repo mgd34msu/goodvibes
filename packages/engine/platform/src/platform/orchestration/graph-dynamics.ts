@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 /**
  * graph-dynamics.ts, the runtime-dynamic dependency-graph muscles added to
  * the shared workstream engine (used by the workstream scheduler):

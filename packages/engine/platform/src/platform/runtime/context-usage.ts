@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 /**
  * The single derivation of context-window usage from a token count and a
  * window size, so the in-process read model (ui-read-models-core.ts) and the

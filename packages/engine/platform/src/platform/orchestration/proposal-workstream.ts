@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 /**
  * Plan proposal to contract (docs/design/contract-runner.md 10.4).
  * `draftFromProposal()` maps a PlanProposal (platform/core/plan-proposal.ts,

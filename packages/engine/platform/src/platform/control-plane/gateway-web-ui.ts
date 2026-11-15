@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 function escapeHtmlAttribute(value: string): string {
   return value.replace(/[&<>"']/g, (char) => {
     switch (char) {

@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 /**
  * Shared automation type vocabulary used across jobs, runs, routes, delivery,
  * watchers, and control-plane domains.

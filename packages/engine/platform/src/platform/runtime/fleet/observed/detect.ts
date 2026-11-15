@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 /**
  * observed/detect.ts, read-only detection of externally-launched coding-agent
  * sessions this daemon did NOT spawn or host (someone's own Claude Code / Codex

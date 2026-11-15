@@ -1,5 +1,4 @@
 import { isCompiledBunModuleUrl } from '../utils/bun-module.js';
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
 
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';

@@ -1,6 +1,4 @@
 /**
- * platform-owned platform module. This implementation is maintained in goodvibes-platform.
- *
  * `sql.js` ships no types of its own, so this is the one place its shape is
  * written. It is an ambient declaration, which means tsc treats it as an input
  * and never emits it, `scripts/prepare-engine-package.ts` copies it into dist

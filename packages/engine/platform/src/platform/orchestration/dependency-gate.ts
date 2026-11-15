@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 /**
  * dependency-gate.ts, the per-tick dependency pre-pass,
  * extracted from engine.ts so the engine stays under its line cap. Pure but for

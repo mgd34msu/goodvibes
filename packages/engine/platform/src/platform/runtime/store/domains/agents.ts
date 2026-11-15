@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 /**
  * Agents domain state, tracks all spawned agent sessions including
  * subagents, contract owners and unit agents, and orchestrator agents.

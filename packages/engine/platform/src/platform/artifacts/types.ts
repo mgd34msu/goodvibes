@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 export type ArtifactKind = 'file' | 'image' | 'audio' | 'video' | 'document' | 'archive' | 'data';
 export const ARTIFACT_ACQUISITION_MODES = ['inline-data', 'local-path', 'remote-fetch', 'unknown'] as const;
 export const ARTIFACT_FETCH_MODES = ['not-applicable', 'public-only', 'allow-private-hosts', 'unknown'] as const;

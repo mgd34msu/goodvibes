@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 /**
  * Budget enforcement (see CHANGELOG 0.38.0). Enforcement point is BEFORE the
  * scheduler claims an item into a new phase (i.e. before a new agent spawn)

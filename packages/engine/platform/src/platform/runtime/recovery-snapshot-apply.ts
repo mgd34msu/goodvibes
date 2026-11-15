@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 /**
  * recovery-snapshot-apply.ts, restoring a crash-recovery snapshot the user
  * explicitly asked for.

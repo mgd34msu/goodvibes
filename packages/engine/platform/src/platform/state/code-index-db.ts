@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 /**
  * Code-index SQL layer, schema plus every direct table operation for
  * CodeIndexStore's bun:sqlite database (see CHANGELOG 0.38.0; extracted from

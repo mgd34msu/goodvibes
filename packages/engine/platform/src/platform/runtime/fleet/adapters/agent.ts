@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 import type { AgentRecord } from '../../../tools/agent/manager.js';
 import type {
   ProcessActivity,

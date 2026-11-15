@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 export type OccurrenceSpec = 'first' | 'last' | 'all' | number;
 
 /**

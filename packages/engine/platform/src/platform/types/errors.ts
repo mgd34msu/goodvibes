@@ -13,8 +13,6 @@ import {
 } from '@goodvibes-jev/engine/errors';
 import { readRetryWaitMs } from './batteries/retry-wait.js';
 
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 export { RETRYABLE_STATUS_CODES };
 
 export interface ProviderErrorOptions extends AppErrorOptions {

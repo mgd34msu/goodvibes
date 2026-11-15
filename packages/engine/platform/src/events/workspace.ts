@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 /**
  * WorkspaceEvent, discriminated union covering workspace swap lifecycle events.
  *

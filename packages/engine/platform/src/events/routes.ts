@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 /**
  * RouteEvent, discriminated union covering external route binding lifecycle events.
  */

@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 /**
  * Shared notebook utility, checks whether a file path targets a Jupyter notebook.
  * Case-insensitive to handle `.IPYNB`, `.Ipynb`, etc.

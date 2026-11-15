@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 /**
  * WorktreeIsolationManager, the engine-side driver for `worktree` isolation
  * mode (see WorkstreamIsolation, types.ts, and IsolatedWorktree, worktree.ts).

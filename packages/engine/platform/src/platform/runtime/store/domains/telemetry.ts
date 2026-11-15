@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 /**
  * Telemetry domain state, tracks runtime observability data including
  * correlation IDs, session metrics, and structured event counts.

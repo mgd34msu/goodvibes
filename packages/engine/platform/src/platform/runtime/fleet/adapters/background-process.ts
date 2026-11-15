@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 import type { BackgroundProcess } from '../../../tools/shared/process-manager.js';
 import type { ProcessNode, ProcessState } from '../types.js';
 

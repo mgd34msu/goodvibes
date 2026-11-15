@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 /** Encodings `content` may be written in. `content` is text, so hex and base64 (which re-read it as encoded bytes) are not among them: send bytes as `content_base64`. */
 export const WRITE_TEXT_ENCODINGS = ['utf-8', 'utf8', 'ascii', 'latin1', 'binary'] as const;
 

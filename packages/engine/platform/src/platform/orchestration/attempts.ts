@@ -1,5 +1,4 @@
 import { drainOwned, opaqueUuid } from '@goodvibes-jev/judgment/decisions';
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
 
 /**
  * attempts.ts, best-of-N sibling attempts for the orchestration engine.

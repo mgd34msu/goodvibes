@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 /**
  * Per-work-item cancellation registry (see CHANGELOG 0.38.0), closing a
  * previously deferred cooperative-cancellation gap.

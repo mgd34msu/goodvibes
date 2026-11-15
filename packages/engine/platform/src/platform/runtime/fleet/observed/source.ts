@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 /**
  * observed/source.ts, the ObservedAgentSource: the fleet's read-only view of
  * externally-launched coding-agent sessions on this host, plus the one genuine

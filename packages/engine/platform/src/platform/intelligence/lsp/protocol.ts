@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 /** JSON-RPC 2.0 message types */
 export interface JsonRpcRequest {
   jsonrpc: '2.0';

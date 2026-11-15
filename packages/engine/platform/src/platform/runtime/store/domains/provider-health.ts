@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 /**
  * Provider health domain state, tracks connectivity, error rates,
  * and latency for all configured LLM providers.

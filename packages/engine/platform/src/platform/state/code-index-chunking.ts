@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 /**
  * Code-index chunking, pure content → chunk transformation for CodeIndexStore
  * (see CHANGELOG 0.38.0; extracted from code-index-store.ts to keep that file

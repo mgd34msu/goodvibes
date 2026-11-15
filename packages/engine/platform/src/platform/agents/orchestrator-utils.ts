@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 import type { ChatResponse } from '../providers/interface.js';
 import { isContextOverflowSignal } from '../providers/stop-reason-maps.js';
 import type { ProviderMessage } from '../providers/interface.js';

@@ -1,7 +1,5 @@
 import type { JevDecision } from '@goodvibes-jev/judgment/decisions';
 
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 /**
  * ToolEvent, discriminated union covering all tool execution lifecycle events.
  *

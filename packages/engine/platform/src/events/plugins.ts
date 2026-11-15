@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 /**
  * PluginEvent, discriminated union covering all plugin lifecycle events.
  *

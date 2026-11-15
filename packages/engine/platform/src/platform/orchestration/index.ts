@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 // ── Orchestration engine (see CHANGELOG 0.38.0) ─────────────────────────────
 // Curated named-export barrel (no `export *`), mirroring runtime/fleet/
 // index.ts's allowlist convention. TUI import path:

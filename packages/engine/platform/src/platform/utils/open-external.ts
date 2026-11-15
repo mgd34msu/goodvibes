@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 import { spawn } from 'node:child_process';
 import { summarizeError } from './error-display.js';
 import { logger } from './logger.js';

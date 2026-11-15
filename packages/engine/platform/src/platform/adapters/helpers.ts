@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import type { AutomationRouteBinding } from '../automation/routes.js';
 import type { SurfaceAdapterContext } from './types.js';

@@ -3,7 +3,6 @@ import { executePolicyCheck } from '../../gate/execute-policy-check.js';
 import { mkdtemp, open, rm, type FileHandle } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
 
 import { summarizeError } from '../../utils/error-display.js';
 import { logger } from '../../utils/logger.js';

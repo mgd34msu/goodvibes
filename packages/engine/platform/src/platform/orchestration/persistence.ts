@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 /**
  * Persistence (see CHANGELOG 0.38.0): serializes a workstream into a
  * schema-versioned snapshot, rejects a snapshot written by a newer schema, and

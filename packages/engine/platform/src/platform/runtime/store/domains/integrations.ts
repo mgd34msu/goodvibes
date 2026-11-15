@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 /**
  * Integrations domain state, tracks external service integrations
  * such as email, CMS, file storage, analytics, and custom webhooks.

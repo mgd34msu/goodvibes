@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 /**
  * Plugins domain state, tracks all plugins through their lifecycle,
  * configuration, and health status.

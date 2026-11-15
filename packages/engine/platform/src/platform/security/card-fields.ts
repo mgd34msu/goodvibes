@@ -21,8 +21,12 @@ import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decision
  * (checkbox, email, search, date, ...) is settled in code. Every other form
  * control is read by Jev (`engine.security.card-field`) from its name, id,
  * placeholder and labels in whatever language the page uses, all the controls
- * of one snapshot in one request, and a page remembers each reading; that
- * reading replaced a list of multilingual name and label regexes.
+ * of one snapshot in one request. A reading depends only on the control's
+ * descriptor, so each decision source remembers it for the life of the
+ * process: a control already read on any page, tab or step of a form is
+ * settled by a lookup. That reading replaced a list of multilingual name and
+ * label regexes. A `select` stays a reading: an expiry month or year is often
+ * one.
  *
  * ── Erring toward yes ─────────────────────────────────────────────────────
  *
@@ -103,26 +107,39 @@ const DIGIT_ENTRY_INPUT_TYPES: ReadonlySet<string> = new Set(['', 'text', 'tel',
  */
 export type CardFieldDecision = 'reported' | 'card-field' | 'no-decision-model';
 
-/** Readings remembered for one page: descriptor key to "is a card field". */
+/** Readings remembered for one decision source: descriptor key to "is a card field". */
 export type CardFieldMemory = Map<string, boolean>;
 
-/** Most readings one page remembers; the oldest is dropped first. */
+/** Most readings one decision source remembers; the least recently used is dropped first. */
 const MEMORY_LIMIT = 1_024;
+
+const sourceMemories = new WeakMap<object, CardFieldMemory>();
+
+/**
+ * The readings remembered for one decision source, keyed by its opaque cache
+ * identity (a changed model, endpoint or credential is a new identity, so its
+ * readings start empty). The memory lives as long as the identity does.
+ */
+export function cardFieldMemoryFor(source: object): CardFieldMemory {
+  let memory = sourceMemories.get(source);
+  if (!memory) { memory = new Map(); sourceMemories.set(source, memory); }
+  return memory;
+}
 
 interface CardFieldReading {
   /** Explicit absence retains the caller's original missing reader. */
   readonly port: JudgmentPort | undefined;
   readonly signal?: AbortSignal | undefined;
   readonly assertCurrent: () => void;
-  /** Readings already made on this page; an unchanged control is asked about once per page. */
+  /** Readings this decision source already made; a control is asked about once per descriptor. */
   readonly memory?: CardFieldMemory | undefined;
 }
 
 /**
  * Decide, for every control of one snapshot, whether its value may be
  * reported. Code settles what it can (elements that carry no value, declared
- * `cc-*` tokens, input types that cannot hold card material, and controls this
- * page already had read); the rest are asked about in ONE request, one yes/no
+ * `cc-*` tokens, input types that cannot hold card material, and descriptors
+ * already read by this decision source); the rest are asked about in ONE request, one yes/no
  * per control. Erring toward yes: a control is a payment field unless the
  * reading is a confident no.
  */
@@ -156,7 +173,11 @@ export async function classifyCardFields(controls: readonly FormControlDescripto
       placeholder: text(control.placeholder), ariaLabel: text(control.ariaLabel), label: text(control.label) };
     const key = JSON.stringify([view.tag, view.type, view.name, view.id, view.placeholder, view.ariaLabel, view.label]);
     const remembered = memory?.get(key);
-    if (remembered !== undefined) { if (remembered) decisions[index] = 'card-field'; return; }
+    if (remembered !== undefined) {
+      memory!.delete(key); memory!.set(key, remembered);
+      if (remembered) decisions[index] = 'card-field';
+      return;
+    }
     const entry = pending.get(key);
     if (entry) { entry.indexes.push(index); return; }
     pending.set(key, { view, digitEntry: tag === 'textarea' || (tag === 'input' && DIGIT_ENTRY_INPUT_TYPES.has(type)), indexes: [index] });
@@ -186,6 +207,7 @@ export async function classifyCardFields(controls: readonly FormControlDescripto
       const ordinary = resultReading.verdict === 'no' && resultReading.outcome === 'act';
       if (!ordinary) { suppressed += 1; for (const index of entry.indexes) decisions[index] = 'card-field'; }
       if (memory) {
+        memory.delete(key);
         if (memory.size >= MEMORY_LIMIT) memory.delete(memory.keys().next().value!);
         memory.set(key, !ordinary);
       }

@@ -1267,18 +1267,22 @@ for (const original of ['installed', 'missing'] as const)
     const later = fakePort(() => noulAnswer(0.01));
     try {
       await pending.started; installJudgmentPort(later.port); pending.release();
-      expect(await result).toBeInstanceOf(Error); expect(later.requests).toHaveLength(0);
+      // An installed reader that was replaced retires the snapshot; with none
+      // installed at the start, the snapshot finishes without the later one.
+      if (original === 'installed') expect(await result).toBeInstanceOf(Error);
+      else expect(await result).not.toBeInstanceOf(Error);
+      expect(later.requests).toHaveLength(0);
     } finally { await pending.drain(); await result; }
   });
 
-test('snapshot card-field classification retains page cancellation and stops admitting further fields', async () => {
+test('snapshot card-field classification is one request that retains page cancellation', async () => {
   const pending = pendingNativeAction(), prior = installed, signals: AbortSignal[] = [];
   let firstBatch!: () => void;
   const started = new Promise<void>(resolve => { firstBatch = resolve; });
   installJudgmentPort({ ...prior, async ask(request) {
     if (request.context?.battery !== 'engine.security.card-field') return prior.ask(request);
     if (!request.signal) throw new Error('Snapshot classification lost page cancellation');
-    signals.push(request.signal); if (signals.length === 8) firstBatch();
+    signals.push(request.signal); firstBatch();
     await pending.wait(undefined); return prior.ask(request);
   } });
   const rows = Array.from({ length: 10 }, (_, index) => ({ ...fixtureRow(EMAIL_STEP_ELEMENTS, 0),
@@ -1290,10 +1294,25 @@ test('snapshot card-field classification retains page cancellation and stops adm
   try {
     await started;
     await engine.closeTab({ sessionId }, { pageId });
-    expect(signals).toHaveLength(8); expect(signals.every(signal => signal.aborted)).toBe(true);
+    expect(signals).toHaveLength(1); expect(signals[0]?.aborted).toBe(true);
     pending.release(); expect(await result).toBeInstanceOf(Error);
-    expect(signals).toHaveLength(8);
+    expect(signals).toHaveLength(1);
   } finally { await pending.drain(); await result; }
+});
+
+test('a repeat snapshot asks nothing about a control the decision source already read', async () => {
+  const prior = installed;
+  let asked = 0;
+  installJudgmentPort({ ...prior, async ask(request) {
+    if (request.context?.battery === 'engine.security.card-field') asked += 1;
+    return prior.ask(request);
+  } });
+  const rows = [{ ...fixtureRow(EMAIL_STEP_ELEMENTS, 0), selector: '#ordinary-field', name: 'Ordinary field', control: attributes('text') }];
+  const engine = await buildEngine(ORDINARY_URL, rows);
+  await engine.snapshot({});
+  expect(asked).toBe(1);
+  await engine.snapshot({});
+  expect(asked).toBe(1);
 });
 
 test('releasing a session forgets its snapshots and disarms its card material', async () => {

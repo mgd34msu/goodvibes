@@ -188,6 +188,13 @@ export interface BrowserSessionManagerDeps {
   readonly homeDirectory?: string;
   /** Where the node-hosted browser host lives, for a build that stages it itself. */
   readonly host?: BrowserHostOptions;
+  /**
+   * Whether the driver can complete the debugger WebSocket handshake in this
+   * process. The Playwright driver cannot under Bun (its node:http client never
+   * raises the upgrade event for a 101), so there every attach goes straight to
+   * the Node host. Defaults to true under Node and for an injected driver.
+   */
+  readonly inProcessAttach?: boolean;
 }
 
 /**
@@ -244,9 +251,11 @@ export class BrowserSessionManager {
   private readonly loadDriver: () => DriverApi | null;
   private readonly probeEndpoint: (candidates: readonly string[], signal?: AbortSignal) => Promise<ReachableCdpEndpoint | null>;
   private readonly hostOptions: BrowserHostOptions;
+  private readonly inProcessAttach: boolean;
 
   constructor(deps: BrowserSessionManagerDeps) {
     this.profileRoot = deps.profileRoot;
+    this.inProcessAttach = deps.inProcessAttach ?? (deps.loadDriver !== undefined || typeof process.versions.bun !== 'string');
     this.homeDirectory = deps.homeDirectory ?? deps.profileRoot;
     this.hostOptions = deps.host ?? {};
     this.io = deps.io ?? createBrowserProvisionIo({
@@ -492,7 +501,7 @@ export class BrowserSessionManager {
     );
     let browser: Browser | null = null;
     let lastMessage = '';
-    try {
+    if (this.inProcessAttach) try {
       current();
       // The endpoint is already known to answer, so a long connect timeout only
       // delays an honest answer.
@@ -508,12 +517,14 @@ export class BrowserSessionManager {
       throw error;
     }
     if (!browser) {
-      // This runtime cannot complete a CDP WebSocket handshake, so the
-      // connection is made by a Node process instead and driven over a pipe.
+      // This runtime cannot complete a CDP WebSocket handshake (known under
+      // Bun, or the attempt just failed), so the connection is made by a Node
+      // process instead and driven over a pipe.
       // The result is the same session, with the same operations.
       const hosted = await this.attachThroughHost(webSocket, requestedEndpoint, original, owner).catch((error: unknown) => {
         if (original) throw error;
-        lastMessage = `${lastMessage} | host: ${error instanceof Error ? error.message : String(error)}`;
+        const hostMessage = `host: ${error instanceof Error ? error.message : String(error)}`;
+        lastMessage = lastMessage ? `${lastMessage} | ${hostMessage}` : hostMessage;
         return null;
       });
       if (hosted) {

@@ -187,6 +187,20 @@ describe('exact browser attachment identity', () => {
     } finally { complete(); await manager.shutdown(); }
   });
 
+  test('a runtime that cannot complete the handshake in process goes straight to the host: no in-process attempt', async () => {
+    let inProcess = 0;
+    const manager = tracked(new BrowserSessionManager({ profileRoot: PROFILE_ROOT, surfaceRoot: 'test-surface', io: readyProvisionIo(),
+      inProcessAttach: false, host: { scriptPath: join(PROFILE_ROOT, 'no-host-script.mjs') },
+      loadDriver: () => ({ chromium: { launchPersistentContext: async () => fakeContext('unexpected-launch', []).context,
+        connectOverCDP: async () => { inProcess += 1; throw new Error('unexpected in-process attach'); } } }),
+      probeEndpoint: async () => ({ endpoint: 'http://127.0.0.1:1', webSocketDebuggerUrl: 'ws://127.0.0.1:1/devtools/browser/x' }),
+    }));
+    try {
+      await expect(manager.attach({ cdpEndpoint: '1' })).rejects.toThrow('host:');
+      expect(inProcess).toBe(0);
+    } finally { await manager.shutdown(); }
+  });
+
   test('a connected browser without a context retires only the new client transport', async () => {
     const calls: string[] = [];
     const manager = attachManager(async () => ({ contexts: () => [],

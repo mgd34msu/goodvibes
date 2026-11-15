@@ -4,26 +4,9 @@ import { captureOwnedJson, snapshotJudgmentInput } from '../gate/judgment-input.
 import { containsIssuerCredential } from '../utils/redaction.js';
 
 import { BrowserControlIdentityWork } from './browser-control-identity.js';
-import type { CardFieldMemory } from '../security/card-fields.js';
 import { hasAdmittedBrowserWork } from './browser-action-admission.js';
 import type { BrowserElementRef, BrowserSnapshot, CardFieldGuard } from './browser-types.js';
 import { captureBrowserControlSnapshot, BrowserControlSnapshotError, type BrowserControlSnapshot } from './browser-control-snapshot-data.js';
-
-/**
- * Card-field readings remembered per page, dropped when the page's address
- * changes: an unchanged control is asked about once per page, not once per
- * snapshot. The answer depends only on the control's descriptor strings.
- */
-const cardFieldMemory = new WeakMap<Page, { readonly address: string; readonly memory: CardFieldMemory }>();
-function pageCardFieldMemory(page: Page): CardFieldMemory {
-  let address: string;
-  try { address = page.url().split('#')[0]!; } catch { address = ''; }
-  const held = cardFieldMemory.get(page);
-  if (held && held.address === address) return held.memory;
-  const memory: CardFieldMemory = new Map();
-  cardFieldMemory.set(page, { address, memory });
-  return memory;
-}
 
 /** What an element says in place of a value withheld because no decision model could read the control. */
 export const VALUE_WITHHELD_NO_DECISION_MODEL = '[value withheld: no decision model]';
@@ -837,8 +820,8 @@ export async function takeSnapshot(
     options.guard === undefined ? text : options.guard.redact(sessionId, pageId, text);
 
   // One card-field reading for the whole snapshot: links, buttons and inputs
-  // that cannot hold card material are settled in code, controls this page
-  // already had read are remembered, and the rest go in one request.
+  // that cannot hold card material are settled in code, descriptors the
+  // decision source already read are remembered, and the rest go in one request.
   const cardFields = await work.cardFields(raw.map((element) => {
     const control = element.control ?? undefined;
     return {
@@ -851,7 +834,7 @@ export async function takeSnapshot(
       ariaLabel: control?.ariaLabel ?? '',
       label: control?.label ?? '',
     };
-  }), pageCardFieldMemory(page));
+  }));
 
   const elements: BrowserElementRef[] = raw.map((element, index) => {
     // A payment field's value is never reported. Not masked, not truncated,

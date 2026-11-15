@@ -7,7 +7,7 @@ import { snapshotJudgmentInput } from '../gate/judgment-input.js';
 import { executePolicyCheck } from '../gate/execute-policy-check.js';
 import { currentExecutionMode } from '../gate/execution-context.js';
 import { activateClassicFallback, decisionOrClassic, isClassicOperation } from '../runtime/decision-policy.js';
-import { classifyCardFields, type CardFieldDecision, type CardFieldMemory, type FormControlDescriptor } from '../security/card-fields.js';
+import { cardFieldMemoryFor, classifyCardFields, type CardFieldDecision, type FormControlDescriptor } from '../security/card-fields.js';
 
 export const browserControlIdentity = defineBattery({
   name: 'browser.control.same-identity', version: 1, accuracyFloor: 0.95,
@@ -78,8 +78,10 @@ export class BrowserControlIdentityWork {
     return original && this.pageSignal ? AbortSignal.any([original, this.pageSignal]) : original ?? this.pageSignal;
   }
 
-  /** Snapshot value retention for every control of one snapshot, in one reading, with the page's remembered readings. */
-  cardFields(controls: readonly FormControlDescriptor[], memory?: CardFieldMemory): Promise<CardFieldDecision[]> {
+  /** Snapshot value retention for every control of one snapshot, in one reading, with the readings
+   * this action's decision source already made (a repeat snapshot asks nothing). */
+  cardFields(controls: readonly FormControlDescriptor[]): Promise<CardFieldDecision[]> {
+    const memory = this.owner === undefined ? undefined : cardFieldMemoryFor(this.owner.identity);
     return classifyCardFields(controls, { port: this.owner?.port, signal: this.currentSignal(), assertCurrent: this.assertCurrent, memory });
   }
   /** Every page read ends when the call or its page is cancelled; the driver

@@ -1,7 +1,7 @@
 import { defineBattery, estimateTokens, JudgmentError, LIMITS, STAKES_BANDS, toJson, yesNo, type EntryType } from '@goodvibes-jev/judgment';
 import { captureJudgmentPort, decisionModelPolicyState, JudgmentPortMissingError, type JudgmentPortCapture } from '@goodvibes-jev/engine/errors';
 import { captureJudgmentFailure } from '../../gate/failure-input.js';
-import { assertPermissionActive, awaitPermission } from '../../permissions/cancellation.js';
+import { executePolicyCheck } from '../../gate/execute-policy-check.js';
 import { isClassicOperation, requireDecisionFeature } from '../../runtime/decision-policy.js';
 
 export interface VoiceProofLifetime {
@@ -18,7 +18,7 @@ export function ownVoiceProofLifetime<T extends VoiceProofLifetime>(input: T): T
   let owner: JudgmentPortCapture | undefined;
   let attempted = false;
   const check = () => {
-    assertPermissionActive(original.signal);
+    original.signal?.throwIfAborted();
     original.assertCurrent?.();
     owner?.signal.throwIfAborted();
     if (!isClassicOperation()) owner?.assertCurrent();
@@ -36,7 +36,7 @@ export function ownVoiceProofLifetime<T extends VoiceProofLifetime>(input: T): T
   return Object.freeze({ ...original, assertCurrent: check });
 }
 export function assertVoiceProofCurrent(lifetime: VoiceProofLifetime): void {
-  assertPermissionActive(lifetime.signal);
+  lifetime.signal?.throwIfAborted();
   lifetime.assertCurrent?.();
 }
 
@@ -74,7 +74,7 @@ export async function readVoiceRoundTrip(phrase: string, transcript: string, lif
     if (phrase.trim().length === 0 || transcript.trim().length === 0) return 'no';
     if (estimateTokens(state) > LIMITS.maxStateWithQuestionTokens - 1500 || !owner) return 'unavailable';
     const signal = AbortSignal.any([owner.signal, ...(lifetime.signal ? [lifetime.signal] : [])]);
-    const run = await awaitPermission(() => voiceRoundTripReading.run(owner.port, toJson(state) as EntryType, {
+    const run = await executePolicyCheck(() => voiceRoundTripReading.run(owner.port, toJson(state) as EntryType, {
       signal, beforeAttempt: () => assertVoiceProofCurrent(lifetime),
     }), signal);
     assertVoiceProofCurrent(lifetime);

@@ -3,7 +3,7 @@ import { defineBattery, estimateTokens, LIMITS, oneOf, STAKES_BANDS, toJson, typ
 import { captureJudgmentPort, decisionModelPolicyState, tryClassicDecisionFallback, type JudgmentPortCapture } from '@goodvibes-jev/engine/errors';
 import { captureJudgmentFailure } from '../../gate/failure-input.js';
 import { JudgmentInputError } from '../../gate/judgment-input.js';
-import { assertPermissionActive, awaitPermission } from '../../permissions/cancellation.js';
+import { executePolicyCheck } from '../../gate/execute-policy-check.js';
 
 const OPTIONS = {
   'model-load-incompatible': 'The engine cannot load this model because its format, version or runtime is incompatible. This is an actual fatal model-load failure.',
@@ -137,7 +137,7 @@ export function ownLocalEngineFailureLifetime(config: { readonly engine: string;
 }
 
 export function assertLocalEngineFailureCurrent(lifetime: LocalEngineFailureLifetime): void {
-  assertPermissionActive(lifetime.signal);
+  lifetime.signal.throwIfAborted();
   lifetime.assertCurrent();
   if (decisionModelPolicyState().operation !== 'classic') lifetime.owner?.assertCurrent();
 }
@@ -147,7 +147,7 @@ export function assertLocalEngineFailureCurrent(lifetime: LocalEngineFailureLife
 export async function readLocalEngineFailure(error: unknown, engine: string, operation: 'TTS' | 'STT',
   lifetime: LocalEngineFailureLifetime): Promise<LocalEngineFailureKind | undefined> {
   lifetime.assertCurrent();
-  if (decisionModelPolicyState().operation === 'classic') { assertPermissionActive(lifetime.signal); return undefined; }
+  if (decisionModelPolicyState().operation === 'classic') { lifetime.signal.throwIfAborted(); return undefined; }
   let readingStarted = false;
   try {
     // Admit the FULL immutable failure before projection, size caps or use of
@@ -162,7 +162,7 @@ export async function readLocalEngineFailure(error: unknown, engine: string, ope
     const owner = lifetime.owner;
     readingStarted = true;
     assertLocalEngineFailureCurrent(lifetime);
-    const run = await awaitPermission(() => localEngineFailureReading.run(owner.port, toJson(state) as EntryType, {
+    const run = await executePolicyCheck(() => localEngineFailureReading.run(owner.port, toJson(state) as EntryType, {
       signal: owner.signal, beforeAttempt: () => assertLocalEngineFailureCurrent(lifetime),
     }), owner.signal);
     assertLocalEngineFailureCurrent(lifetime);

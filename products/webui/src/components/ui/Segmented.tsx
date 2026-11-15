@@ -20,7 +20,7 @@ export interface SegmentedProps<V extends string = string> {
  * Segmented control: a radiogroup of pills on a --surface-2 track. Roving
  * tabindex; Left/Right (and Up/Down) move and select, Home/End jump.
  */
-export function Segmented<V extends string = string>({ value, onChange, options, label, className }: SegmentedProps<V>) {
+export function Segmented<V extends string = string>({ value, onChange, options, label, className, size = 'md' }: SegmentedProps<V>) {
   const refs = useRef<(HTMLButtonElement | null)[]>([]);
   const index = Math.max(0, options.findIndex((o) => o.value === value));
 
@@ -38,7 +38,7 @@ export function Segmented<V extends string = string>({ value, onChange, options,
   };
 
   return (
-    <div role="radiogroup" aria-label={label} className={['gv-segmented', className ?? ''].filter(Boolean).join(' ')}>
+    <div role="radiogroup" aria-label={label} className={['gv-segmented', size === 'sm' ? 'gv-segmented--sm' : '', className ?? ''].filter(Boolean).join(' ')}>
       {options.map((option, i) => (
         <button
           key={option.value}

@@ -1,7 +1,7 @@
 import type { ButtonHTMLAttributes, ReactNode } from 'react';
 import '../../styles/components/ui.css';
 
-export interface ToggleProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'onChange' | 'role'> {
+export interface ToggleProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'onChange' | 'onClick' | 'role' | 'type' | 'aria-checked'> {
   checked: boolean;
   onChange: (checked: boolean) => void;
   /** Visible label beside the switch; without it pass aria-label. */
@@ -12,12 +12,12 @@ export interface ToggleProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement
 export function Toggle({ checked, onChange, children, className, ...rest }: ToggleProps) {
   return (
     <button
+      {...rest}
       type="button"
       role="switch"
       aria-checked={checked}
       className={['gv-toggle', className ?? ''].filter(Boolean).join(' ')}
       onClick={() => onChange(!checked)}
-      {...rest}
     >
       <span className="gv-toggle__track" aria-hidden="true"><span className="gv-toggle__thumb" /></span>
       {children}

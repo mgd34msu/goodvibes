@@ -44,7 +44,8 @@ export function Field({ label, help, error, className, children }: FieldProps) {
   const autoId = useId();
   const control = isValidElement(children) ? children : null;
   const controlId = control?.props.id ?? `${autoId}-control`;
-  const helpId = help ? `${autoId}-help` : undefined;
+  // Help is replaced by the error, so only the element actually rendered is referenced.
+  const helpId = help && !error ? `${autoId}-help` : undefined;
   const errorId = error ? `${autoId}-error` : undefined;
   const describedBy = [control?.props['aria-describedby'], helpId, errorId].filter(Boolean).join(' ') || undefined;
 

@@ -1,5 +1,9 @@
 import { declaredProviderCatalogId } from '@goodvibes-jev/engine/contracts';
 import { credentialKey } from '../../config/batteries/credential-key.js';
+import { configKeyFacts } from '../../config/config-key-facts.js';
+import { isDeclaredCredentialProvider } from './catalogs.js';
+import { readFenceTagLanguage } from './code-fence-language.js';
+import { readReplySubjectMarker } from './reply-subject-marker.js';
 import type { BatteryRun, Outcome, Reading, YesNoReading } from '@goodvibes-jev/judgment/decisions';
 import { BrowserJudgmentError, type BrowserJudgmentInputMap } from '@goodvibes-jev/engine/daemon-api';
 import { requireSynchronousAssertion } from '../guards.js';
@@ -30,6 +34,8 @@ function recordProjection(runs: readonly { recordAction(action: string): void }[
   for (const run of runs) run.recordAction(action);
 }
 const unsettled = (readings: Readonly<Record<string, Reading>>): boolean => Object.values(readings).some((reading) => reading.outcome !== 'act');
+// A fact the program declares is never sent for a reading; the caller answers it from the same declaration.
+const declaredConfigKey = (key: string): boolean => { const facts = configKeyFacts(key); return facts.inSchema || facts.secret || facts.cardMaterial; };
 const hasHttpStatus = (source: ResolvedDaemonRefusal): source is ResolvedDaemonRefusal & { readonly status: number } => source.status !== undefined && Number.isInteger(source.status) && source.status >= 100 && source.status <= 599;
 
 export function createWebuiCodeLanguageAdapter(resolve: BrowserJudgmentBattery<'webui.code.language', { readonly code: string; readonly tag: string }, BatteryRun<typeof codeLanguageBattery.items>>['resolve']): BrowserJudgmentBattery<'webui.code.language', { readonly code: string; readonly tag: string }, BatteryRun<typeof codeLanguageBattery.items>> {
@@ -37,6 +43,7 @@ export function createWebuiCodeLanguageAdapter(resolve: BrowserJudgmentBattery<'
     id: 'webui.code.language', version: 2, maxCalls: 1, questions: WEBUI_BATTERY_QUESTIONS['webui.code.language']!, resolve,
     async run(port, input, { signal }) {
       checkAbort(signal); const state = preflight(() => snapshotWebuiCode(input));
+      if (readFenceTagLanguage(state.tag) !== undefined) return inputHeld();
       const run = await codeLanguageBattery.run(port, state, { signal, site: 'webui.code.language' });
       checkAbort(signal); return run;
     },
@@ -55,6 +62,7 @@ export function createWebuiConfigKeyAdapter(resolve: BrowserJudgmentBattery<'web
     id: 'webui.config.credential-key', version: 1, maxCalls: 64, questions: Object.fromEntries(Object.entries(credentialKey.items).map(([name, item]) => [name, item.question])), resolve,
     async run(port, input, { signal }) {
       checkAbort(signal); const source = preflight(() => snapshotWebuiConfigKeys(input));
+      if (source.keys.some(({ key }) => declaredConfigKey(key))) return inputHeld();
       const runs: BatteryRun<typeof credentialKey.items>[] = [];
       // One browser request, bounded server fan-out. The service owns shared budgets and retries.
       let next = 0; let failure: unknown;
@@ -82,6 +90,7 @@ export function createWebuiCardMaterialKeyAdapter(resolve: BrowserJudgmentBatter
     id: 'webui.settings.card-material-key', version: 1, maxCalls: 64, questions: Object.fromEntries(Object.entries(cardMaterialKeyBattery.items).map(([name, item]) => [name, item.question])), resolve,
     async run(port, input, { signal }) {
       checkAbort(signal); const source = preflight(() => snapshotWebuiConfigKeys(input));
+      if (source.keys.some(({ key }) => declaredConfigKey(key))) return inputHeld();
       const runs: BatteryRun<typeof cardMaterialKeyBattery.items>[] = [];
       // One browser request, bounded server fan-out. The service owns shared budgets and retries.
       let next = 0; let failure: unknown;
@@ -109,6 +118,7 @@ export function createWebuiCredentialProviderAdapter(resolve: BrowserJudgmentBat
     id: 'webui.credentials.provider-key', version: 1, maxCalls: 64, questions: WEBUI_BATTERY_QUESTIONS['webui.credentials.provider-key']!, resolve,
     async run(port, input, { signal }) {
       checkAbort(signal); const source = preflight(() => snapshotWebuiCredentialNames(input));
+      if (isDeclaredCredentialProvider(source.providerId)) return inputHeld();
       const runs: BatteryRun<typeof credentialProviderBattery.items>[] = [];
       // One browser request, bounded server fan-out. The service owns shared budgets and retries.
       let next = 0; let failure: unknown;
@@ -158,7 +168,7 @@ export function createWebuiCatalogProviderAdapter(resolve: BrowserJudgmentBatter
   };
 }
 
-/** Only an authenticated canonical read can issue the referenced subject. */
+/** Only an authenticated canonical read can issue the referenced subject. Asked only for a prefix the reply-marker rule does not know. */
 export const webuiMailReplySubjectAdapter: BrowserJudgmentBattery<typeof MAIL, { readonly subject: string }, BatteryRun<typeof mailReplySubjectBattery.items>> = {
   id: MAIL, version: 1, maxCalls: 1, questions: WEBUI_BATTERY_QUESTIONS[MAIL]!,
   async resolve(input, context) {
@@ -168,6 +178,7 @@ export const webuiMailReplySubjectAdapter: BrowserJudgmentBattery<typeof MAIL, {
   async run(port, raw, { signal }) {
     checkAbort(signal);
     const source = preflight(() => snapshotWebuiMailSubject(raw));
+    if (readReplySubjectMarker(source.subject) !== 'unrecognised-prefix') return inputHeld();
     const run = await mailReplySubjectBattery.run(port, source, { signal, site: MAIL });
     checkAbort(signal);
     return run;

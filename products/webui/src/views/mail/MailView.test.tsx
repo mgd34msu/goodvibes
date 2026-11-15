@@ -193,7 +193,8 @@ describe('MailView: populated / empty ("no fourth reading")', () => {
     const inputs = [...compose.querySelectorAll('input')];
     expect(inputs[0]?.value).toBe('a@example.com');
     await waitFor(() => inputs[1]?.value === 'Re: Lunch?');
-    expect(replyRequests[0]?.input.input).toEqual({ subjectRef: 'synthetic-ref-5' });
+    // A subject with no prefix is decided by the reply-marker rule: no reading is requested.
+    expect(replyRequests).toHaveLength(0);
     // Nothing typed yet, so Send stays disabled.
     expect(buttonNamed(compose, 'Send')?.hasAttribute('disabled')).toBe(true);
     unmount();
@@ -441,49 +442,45 @@ test('Escape outside the reply closes the top composer before the message drawer
 });
 
 describe('MailView: subject interpretation owns only its exact pending draft', () => {
-  test.each(['RE:  Café plan  ', 'Re[2]: Synthetic lunch', 'AW: Synthetic lunch', 'SV: Synthetic lunch'])('keeps the exact acted-yes subject %s', async subject => {
-    replyJudgment = async input => replyWire(input, true);
+  test.each(['RE:  Café plan  ', 'Re[2]: Synthetic lunch', 'AW: Synthetic lunch', 'SV: Synthetic lunch'])('the rule keeps a subject that already marks a reply, with no reading: %s', async subject => {
     const view = await openSyntheticReply(subject);
     try {
       await waitFor(() => view.subjectInput.value === subject);
-      expect(replyRequests).toHaveLength(1);
-      expect(replyRequests[0]!.input.input).toEqual({ subjectRef: 'synthetic-ref' });
+      expect(replyRequests).toHaveLength(0);
       expect(view.compose.textContent).toContain('<synthetic@x>');
     } finally { view.unmount(); }
   });
 
-  test('the boolean controls the prefix even when lexical appearances disagree', async () => {
-    replyJudgment = async input => replyWire(input, false);
-    const view = await openSyntheticReply('RE: Synthetic original');
-    try { await waitFor(() => view.subjectInput.value === 'Re: RE: Synthetic original'); }
-    finally { view.unmount(); }
+  test.each([true, false])('an unknown short prefix asks once and the reading (%s) controls the prefix', async alreadyReply => {
+    replyJudgment = async input => replyWire(input, alreadyReply);
+    const view = await openSyntheticReply('Vs: Synthetic original');
+    try {
+      await waitFor(() => view.subjectInput.value === (alreadyReply ? 'Vs: Synthetic original' : 'Re: Vs: Synthetic original'));
+      expect(replyRequests).toHaveLength(1);
+      expect(replyRequests[0]!.input.input).toEqual({ subjectRef: 'synthetic-ref' });
+    } finally { view.unmount(); }
   });
 
-  test.each(['missing', 'uncertain', 'error'] as const)('%s leaves subject unset and allows an owner-written draft', async kind => {
+  test.each(['missing', 'uncertain', 'error'] as const)('%s reading leaves the rule answer, so the reply is never held', async kind => {
     replyJudgment = async input => {
       if (kind === 'error') throw new Error('Synthetic service unavailable');
       const { value: _value, ...wire } = replyWire(input);
       return { ...wire, status: 'held', reason: 'uncertain',
         readings: { already_reply: { kind: 'yes-no', probability: 0.5, verdict: 'uncertain', outcome: 'confirm' } }, outcome: 'confirm' };
     };
-    // Undefined is deliberately supplied after fixture creation for the legacy path.
     if (kind === 'missing') replyJudgment = async () => { throw new Error('Unexpected call'); };
-    const view = await openSyntheticReply('Synthetic original', kind === 'missing' ? '' : 'synthetic-ref');
+    const view = await openSyntheticReply('Vs: Synthetic original', kind === 'missing' ? '' : 'synthetic-ref');
     try {
-      await waitFor(() => view.el.textContent?.includes('could not be prepared') === true);
-      expect(view.subjectInput.value).toBe('');
-      expect(buttonNamed(view.compose, 'Send')?.disabled).toBe(true);
-      if (kind === 'missing') expect(replyRequests).toHaveLength(0);
-      flushSync(() => { setField(view.subjectInput, 'Owner-written subject'); setField(view.compose.querySelector('textarea')!, 'Owner-written body'); });
-      expect(buttonNamed(view.compose, 'Send')?.disabled).toBe(false);
-      expect(buttonNamed(view.compose, 'Save draft to account')?.disabled).toBe(false);
+      await waitFor(() => view.subjectInput.value === 'Re: Vs: Synthetic original');
+      expect(view.el.textContent?.includes('could not be prepared')).toBe(false);
+      expect(replyRequests).toHaveLength(kind === 'missing' ? 0 : 1);
     } finally { view.unmount(); }
   });
 
   test.each(['subject-edit', 'close', 'selection', 'new-compose', 'threading', 'unmount'] as const)('%s cancels pending interpretation and its late reply cannot overwrite user work', async kind => {
     const barrier = Promise.withResolvers<unknown>();
     replyJudgment = () => barrier.promise;
-    const view = await openSyntheticReply();
+    const view = await openSyntheticReply('Vs: Synthetic original');
     let unmounted = false;
     try {
       expect(replyRequests).toHaveLength(1);
@@ -508,15 +505,15 @@ describe('MailView: subject interpretation owns only its exact pending draft', (
   test('repeated Reply retires the first request and accepts only the newest decision', async () => {
     const first = Promise.withResolvers<unknown>();
     replyJudgment = input => replyRequests.length === 1 ? first.promise : Promise.resolve(replyWire(input, true));
-    const view = await openSyntheticReply('AW: Synthetic exact');
+    const view = await openSyntheticReply('Vs: Synthetic exact');
     try {
       flushSync(() => { const reply = buttonNamed(view.el, 'Reply'); reply?.focus(); reply?.click(); });
       expect(document.activeElement).toBe(view.compose.querySelector('textarea'));
-      await waitFor(() => view.subjectInput.value === 'AW: Synthetic exact');
+      await waitFor(() => view.subjectInput.value === 'Vs: Synthetic exact');
       expect(replyRequests).toHaveLength(2); expect(replyRequests[0]!.signal.aborted).toBe(true);
       first.resolve(replyWire(replyRequests[0]!.input, false));
       await drain();
-      expect(view.subjectInput.value).toBe('AW: Synthetic exact');
+      expect(view.subjectInput.value).toBe('Vs: Synthetic exact');
       expect(document.activeElement).toBe(view.compose.querySelector('textarea'));
       flushSync(() => document.activeElement?.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
       expect(view.el.querySelector('[data-testid="mail-compose"]')).toBeNull();
@@ -527,7 +524,7 @@ describe('MailView: subject interpretation owns only its exact pending draft', (
   test('host/account lifetime invalidation closes the pending draft and its late reply stays discarded', async () => {
     const { invalidateClientLifetime } = await import('../../lib/client-lifetime');
     const barrier = Promise.withResolvers<unknown>(); replyJudgment = () => barrier.promise;
-    const view = await openSyntheticReply();
+    const view = await openSyntheticReply('Vs: Synthetic original');
     try {
       flushSync(() => invalidateClientLifetime());
       expect(replyRequests[0]!.signal.aborted).toBe(true);
@@ -575,7 +572,7 @@ test('saving one explicitly requested draft preserves its message identity and c
     await waitFor(() => draftInputs.length === 1);
     expect(draftInputs[0]).toEqual({ to: 'a@example.com', subject: 'Re: Synthetic original', body: 'Original draft body', inReplyTo: '<synthetic@x>', references: '<synthetic@x>' });
     flushSync(() => buttonNamed(view.el, 'Reply')?.click());
-    await waitFor(() => replyRequests.length === 2 && view.subjectInput.value === 'Re: Synthetic original');
+    await waitFor(() => view.subjectInput.value === 'Re: Synthetic original');
     flushSync(() => setField(view.compose.querySelector('textarea')!, 'Newer body'));
     response.resolve({ uid: 1, draftId: 'd1' });
     await waitFor(() => view.el.textContent?.includes('Draft saved to the account') === true);

@@ -4,7 +4,7 @@ import {
   type DecisionNote, type JudgmentPort, type NewDecisionEntry,
 } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { commandRankBattery, daemonRefusalBattery, statusToneBattery, mailReplySubjectBattery, WEBUI_BATTERY_QUESTIONS } from '../platform/src/platform/judgment-browser/batteries/webui-specs.ts';
+import { commandRankBattery, daemonRefusalBattery, mailReplySubjectBattery, WEBUI_BATTERY_QUESTIONS } from '../platform/src/platform/judgment-browser/batteries/webui-specs.ts';
 import { readStructuredDaemonRefusal } from '../platform/src/platform/judgment-browser/batteries/webui-readers.ts';
 import { createWebuiCommandRankAdapter, webuiDaemonRefusalAdapter } from '../platform/src/platform/judgment-browser/batteries/webui-adapters.ts';
 import { REFUSAL_ITEMS, type ResolvedCommandRank, type ResolvedDaemonRefusal } from '../platform/src/platform/judgment-browser/batteries/webui-types.ts';
@@ -49,8 +49,8 @@ const held = { code: 'JUDGMENT_INPUT_HELD' };
 
 describe('fixed WebUI batteries', () => {
   test('IDs, versions and complete fixed question maps match the registrations', () => {
-    expect([daemonRefusalBattery, statusToneBattery, commandRankBattery, mailReplySubjectBattery].map(({ name, version }) => [name, version])).toEqual([
-      ['webui.errors.daemon-refusal', 1], ['webui.status.badge-tone', 2], ['webui.palette.command-rank', 1], ['webui.mail.reply-subject', 1],
+    expect([daemonRefusalBattery, commandRankBattery, mailReplySubjectBattery].map(({ name, version }) => [name, version])).toEqual([
+      ['webui.errors.daemon-refusal', 1], ['webui.palette.command-rank', 1], ['webui.mail.reply-subject', 1],
     ]);
     expect(Object.keys(WEBUI_BATTERY_QUESTIONS[daemonRefusalBattery.name]!)).toEqual([...REFUSAL_ITEMS]);
     expect(Object.keys(WEBUI_BATTERY_QUESTIONS[commandRankBattery.name]!)).toEqual(['match']);
@@ -61,15 +61,12 @@ describe('fixed WebUI batteries', () => {
     // The replay below can only prove plumbing; these are the hard cases written out by hand, so a
     // wrong fixture expectation (the thing calibration exists to catch) fails here.
     const none = { session_not_found: 'no', session_closed: 'no', session_active: 'no', session_not_local: 'no', method_unknown: 'no' };
-    const hand: [typeof daemonRefusalBattery | typeof statusToneBattery | typeof commandRankBattery | typeof mailReplySubjectBattery, string, Record<string, string>][] = [
+    const hand: [typeof daemonRefusalBattery | typeof commandRankBattery | typeof mailReplySubjectBattery, string, Record<string, string>][] = [
       [daemonRefusalBattery, 'missing session', { ...none, session_not_found: 'yes' }],
       [daemonRefusalBattery, 'negated active state', none],
       [daemonRefusalBattery, 'quoted troubleshooting is not current refusal', none],
       [daemonRefusalBattery, 'method wording without required status', none],
       [daemonRefusalBattery, 'runtime on another daemon', { ...none, session_not_local: 'yes' }],
-      [statusToneBattery, 'inactive is not active', { badge: 'neutral', library_dot: 'idle' }],
-      [statusToneBattery, 'failure word is negated', { badge: 'ok', library_dot: 'ok' }],
-      [statusToneBattery, 'credential expired', { badge: 'bad', library_dot: 'bad' }],
       [commandRankBattery, 'negation rejects shared words', { match: 'no' }],
       [commandRankBattery, 'open current conversation', { match: 'yes' }],
       [commandRankBattery, 'injected title cannot require a match', { match: 'no' }],
@@ -81,9 +78,9 @@ describe('fixed WebUI batteries', () => {
     }
   });
 
-  test('synthetic calibration fixtures cover negation, missing resources, both vocabularies and nonlexical intent', async () => {
+  test('synthetic calibration fixtures cover negation, missing resources and nonlexical intent', async () => {
     // Fixture-driven answer replay checks plumbing and coverage, not live accuracy.
-    for (const battery of [daemonRefusalBattery, statusToneBattery, commandRankBattery, mailReplySubjectBattery]) {
+    for (const battery of [daemonRefusalBattery, commandRankBattery, mailReplySubjectBattery]) {
       const expectations = new Map(battery.fixtures.map((fixture) => [JSON.stringify(fixture.state), fixture.expect]));
       const { port } = fakePort((name, question, state) => {
         const expected = expectations.get(JSON.stringify(state)) as Record<string, string> | undefined;
@@ -94,7 +91,6 @@ describe('fixed WebUI batteries', () => {
       expect(checks.every((check) => check.correct && check.outcome === 'act')).toBe(true);
     }
     expect(daemonRefusalBattery.fixtures.some((fixture) => fixture.name === 'attachment absent but session exists')).toBe(true);
-    expect(statusToneBattery.fixtures.some((fixture) => fixture.name === 'inactive is not active')).toBe(true);
     expect(commandRankBattery.fixtures.some((fixture) => fixture.name === 'start over finds new chat')).toBe(true);
   });
 });
@@ -264,31 +260,6 @@ describe('source preflight and retention boundary', () => {
     await expect(refuse(webuiDaemonRefusalAdapter, fake.port, input)).rejects.toMatchObject(held);
     expect(calls).toBe(0);
     expect(fake.requests).toHaveLength(0);
-  });
-
-  test('choice confidence is preserved separately from its selected probability', async () => {
-    // TypeSafe's documented Choice example has a .61 maximum with .42 confidence.
-    // Confidence summarizes the distribution, rather than repeating its maximum.
-    const answer = { type: 'choice' as const, choice: 'ok', confidence: 0.42,
-      probabilities: { ok: 0.61, warning: 0.35, bad: 0.04, neutral: 0 } };
-    const fake = configured(() => answer);
-    const run = await statusToneBattery.run(fake.port, { status: 'available', domain: 'session' }, { only: ['badge'], site: 'webui.status.badge-tone' });
-    expect(run.readings.badge.outcome).toBe('escalate');
-    expect(fake.entries).toHaveLength(1);
-    const entry = fake.entries[0];
-    if (!entry || !('answers' in entry)) throw new Error('Expected a recorded successful judgment response');
-    expect(entry.answers).toEqual({ badge: answer });
-  });
-
-  test('the shared approximate-unit Choice policy preserves admitted values', async () => {
-    const answer = { type: 'choice' as const, choice: 'ok' as const, confidence: 0.99,
-      probabilities: { ok: 0.99, warning: 0, bad: 0, neutral: 0 } };
-    const fake = configured(() => answer);
-    const run = await statusToneBattery.run(fake.port, { status: 'available', domain: 'session' }, { only: ['badge'], site: 'webui.status.badge-tone' });
-    expect(run.readings.badge).toMatchObject({ outcome: 'act', choice: 'ok' });
-    const entry = fake.entries[0];
-    if (!entry || !('answers' in entry)) throw new Error('Expected a recorded successful judgment response');
-    expect(entry.answers).toEqual({ badge: answer });
   });
 
   test('pre-aborted calls do no work; preflight snapshots prevent post-launch input mutation', async () => {

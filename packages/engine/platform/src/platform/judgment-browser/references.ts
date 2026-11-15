@@ -9,8 +9,7 @@ export interface BrowserJudgmentReferenceSource {
   readonly mayRead: (principal: AuthenticatedPrincipal) => boolean;
 }
 const held = (): never => { throw new BrowserJudgmentError('JUDGMENT_REFERENCE_HELD'); };
-/** A principal never holds more than this many live references: a failing loop or a hostile client fills its own slots, not the shared ones. */
-const PER_PRINCIPAL_LIMIT = 8;
+/** Bounds the snapshots held in memory. At the bound the largest holder loses its oldest reference, so one principal never crowds out another. */
 const TOTAL_LIMIT = 64;
 type OwnedReference = BrowserJudgmentReferenceSource & { readonly identity: symbol; readonly lifetime: AbortController };
 
@@ -30,11 +29,11 @@ export class BrowserJudgmentReferences {
     try {
       const { principalId, battery, revision, expiresAt, assertCurrent, mayRead } = entry;
       if (this.#closed || !principalId || !revision || !Number.isFinite(now) || !Number.isFinite(expiresAt)
-        || expiresAt <= now || expiresAt > now + 300_000 || this.#full(principalId)
+        || expiresAt <= now || expiresAt > now + 300_000
         || typeof mayRead !== 'function' || typeof assertCurrent !== 'function') return held();
       captured = { principalId, battery, revision, expiresAt, assertCurrent, mayRead };
       requireSynchronousAssertion(() => assertCurrent.call(entry), 'JUDGMENT_REFERENCE_HELD');
-      if (this.#closed || this.#full(principalId)) return held();
+      if (this.#closed) return held();
       // Read the supplied snapshot exactly once, only after admission and the
       // source assertion, within the same value-free failure boundary.
       snapshot = snapshotJudgmentInput(entry.snapshot);
@@ -45,8 +44,8 @@ export class BrowserJudgmentReferences {
     const admittedAt = this.now();
     // Supplied callbacks and input accessors may have closed or filled the
     // store. No ownership is acquired until after those callbacks finish.
-    if (this.#closed || this.#entries.has(id) || !Number.isFinite(admittedAt) || expiresAt <= admittedAt
-      || !this.#makeRoom(principalId)) return held();
+    if (this.#closed || this.#entries.has(id) || !Number.isFinite(admittedAt) || expiresAt <= admittedAt) return held();
+    this.#makeRoom(principalId);
     const identity = Symbol();
     this.#entries.set(id, { principalId, battery, revision, expiresAt, snapshot, identity, lifetime: new AbortController(),
       assertCurrent: assertCurrent.bind(entry), mayRead: mayRead.bind(entry),
@@ -64,21 +63,15 @@ export class BrowserJudgmentReferences {
     return id;
   }
 
-  /** True when no slot can be freed for this principal: the store is full of other principals' references. */
-  #full(principalId: string): boolean {
-    if (this.#entries.size < TOTAL_LIMIT) return false;
-    for (const entry of this.#entries.values()) if (entry.principalId === principalId) return false;
-    return true;
-  }
-
-  /** Frees the principal's oldest references so that, with the new one, it holds at most its limit. */
-  #makeRoom(principalId: string): boolean {
-    const own = [...this.#entries].filter(([, entry]) => entry.principalId === principalId);
-    let drop = Math.max(0, own.length - (PER_PRINCIPAL_LIMIT - 1));
-    // A full store still yields one slot when this principal holds one.
-    if (this.#entries.size - drop >= TOTAL_LIMIT && own.length > drop) drop += 1;
-    for (const [id] of own.slice(0, drop)) this.revoke(id);
-    return this.#entries.size < TOTAL_LIMIT;
+  /** Drops the oldest reference of the principal holding the most (the issuer on a tie) until one slot is free. */
+  #makeRoom(principalId: string): void {
+    while (this.#entries.size >= TOTAL_LIMIT) {
+      const counts = new Map<string, number>();
+      for (const entry of this.#entries.values()) counts.set(entry.principalId, (counts.get(entry.principalId) ?? 0) + 1);
+      let largest = principalId;
+      for (const [holder, count] of counts) if (count > (counts.get(largest) ?? 0)) largest = holder;
+      for (const [id, entry] of this.#entries) if (entry.principalId === largest) { this.revoke(id); break; }
+    }
   }
 
   resolve<S>(id: string, currentPrincipal: () => AuthenticatedPrincipal, battery: BrowserJudgmentBatteryId, parse: (value: unknown) => S): BrowserJudgmentResolvedInput<S> {

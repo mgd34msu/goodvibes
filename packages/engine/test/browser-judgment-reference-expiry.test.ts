@@ -66,18 +66,7 @@ describe('owned browser reference retention', () => {
     } finally { refs.close(); clock.restore(); }
   });
 
-  test('an issue assertion cannot overfill capacity through reentry', () => {
-    const clock = timers(); const refs = new BrowserJudgmentReferences(() => 100);
-    try {
-      // Eight other principals fill the shared capacity from inside the outer assertion.
-      expect(() => refs.issue({ ...source(), principalId: 'outer', assertCurrent() {
-        for (let i = 0; i < 64; i++) refs.issue({ ...source(), principalId: `other-${i % 8}` });
-      } })).toThrow(BrowserJudgmentError);
-      expect(clock.scheduled).toHaveLength(64);
-    } finally { refs.close(); clock.restore(); }
-  });
-
-  test('reentry by one principal never leaves it more than its own quota', () => {
+  test('reentrant issues never hold more than the store bound', () => {
     const clock = timers(); const refs = new BrowserJudgmentReferences(() => 100);
     try {
       const ids: string[] = []; let reenter = true;
@@ -87,7 +76,7 @@ describe('owned browser reference retention', () => {
         for (let i = 0; i < 64; i++) ids.push(refs.issue(source()));
       } }));
       const live = ids.filter((id) => { try { resolve(refs, id); return true; } catch { return false; } });
-      expect(live.length).toBeLessThanOrEqual(8);
+      expect(live.length).toBe(64);
       expect(live).toContain(ids.at(-1)!);
     } finally { refs.close(); clock.restore(); }
   });

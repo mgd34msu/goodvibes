@@ -64,16 +64,18 @@ function deferred() {
 }
 
 /** Same owned config/home layout as daemon-fixture, with no server or external adapters. */
-function configuration(): RuntimeServicesOptions {
+function configuration(settings?: Record<string, unknown>): RuntimeServicesOptions {
   const root = makeOwnedTempDir('daemon-browser-judgment');
   const workingDir = join(root, 'workspace'); const homeDirectory = join(root, 'home');
   const cache = join(homeDirectory, '.goodvibes', GOODVIBES_DAEMON_SURFACE_ROOT);
-  mkdirSync(workingDir, { recursive: true }); mkdirSync(cache, { recursive: true });
+  const configDir = join(homeDirectory, '.goodvibes', 'daemon');
+  mkdirSync(workingDir, { recursive: true }); mkdirSync(cache, { recursive: true }); mkdirSync(configDir, { recursive: true });
   writeFileSync(join(cache, 'benchmarks.json'), JSON.stringify({
     version: 1, fetchedAt: Date.now(), ttlMs: 86_400_000, entries: [],
   }));
+  if (settings) writeFileSync(join(configDir, 'settings.json'), JSON.stringify(settings));
   const configManager = new ConfigManager({
-    configDir: join(homeDirectory, '.goodvibes', 'daemon'), workingDir, homeDir: homeDirectory,
+    configDir, workingDir, homeDir: homeDirectory,
     surfaceRoot: GOODVIBES_DAEMON_SURFACE_ROOT,
   });
   configManager.set('judgment.model', 'jev-1.13.0');
@@ -305,11 +307,11 @@ test('default configured browser policy admits only the issued mail-subject purp
     disposal: { add(_label, dispose) { cleanup.push(dispose); } },
   });
   try {
-    const subjectRef = service.issueMailSubjectReference({ principal, snapshot: { revision: 'synthetic-canonical-read', subject: 'AW: Synthetic note', signal: source.signal, assertCurrent: () => source.signal.throwIfAborted() } });
+    const subjectRef = service.issueMailSubjectReference({ principal, snapshot: { revision: 'synthetic-canonical-read', subject: 'Vs: Synthetic note', signal: source.signal, assertCurrent: () => source.signal.throwIfAborted() } });
     expect(subjectRef).toBeString();
     const request = { protocolVersion: 1, batteryVersion: 1, requestId: crypto.randomUUID(), battery: 'webui.mail.reply-subject', input: { subjectRef } };
     expect(await service.execute(request, principal, new AbortController().signal, () => principal)).toMatchObject({ status: 'settled', value: { alreadyReply: true } });
-    expect(calls).toEqual([{ subject: 'AW: Synthetic note' }]);
+    expect(calls).toEqual([{ subject: 'Vs: Synthetic note' }]);
     expect(log.query()).toHaveLength(1);
     source.abort();
     await expect(service.execute({ ...request, requestId: crypto.randomUUID() }, principal, new AbortController().signal, () => principal)).rejects.toMatchObject({ code: 'JUDGMENT_REFERENCE_HELD' });
@@ -321,7 +323,8 @@ test.each(['webui.config.credential-key', 'webui.settings.card-material-key'] as
   using log = new SqliteDecisionLog(':memory:');
   const entered = Promise.withResolvers<void>(); const release = Promise.withResolvers<void>();
   const calls: unknown[] = []; const cleanup: (() => void | Promise<void>)[] = [];
-  const config = configuration().configManager;
+  // A key no declaration covers (an extension's setting); declared keys are answered without a reading.
+  const config = configuration({ syntheticExtension: { label: 'synthetic' } }).configManager;
   const inner: JudgmentPort = { model: 'jev-1.13.0', async ask(input) {
     calls.push(input.state); entered.resolve(); await release.promise;
     return { requestedModel: 'jev-1.13.0', model: 'jev-1.13.0', requestId: undefined, usage: { inputTokens: 1, outputTokens: 1 }, latencyMs: 1,
@@ -331,15 +334,17 @@ test.each(['webui.config.credential-key', 'webui.settings.card-material-key'] as
     methods: new GatewayMethodCatalog(), config, secrets: { onDidChange: () => () => {} },
     disposal: { add(_label, dispose) { cleanup.push(dispose); } },
   });
-  const request = () => ({ protocolVersion: 1, batteryVersion: 1, requestId: crypto.randomUUID(), battery, input: { keys: ['display.stream'] } });
+  const request = (key = 'syntheticExtension.label') => ({ protocolVersion: 1, batteryVersion: 1, requestId: crypto.randomUUID(), battery, input: { keys: [key] } });
   try {
+    await expect(service.execute(request('display.stream'), principal, new AbortController().signal, () => principal)).rejects.toMatchObject({ code: 'JUDGMENT_INPUT_HELD' });
+    expect(calls).toEqual([]);
     const pending = service.execute(request(), principal, new AbortController().signal, () => principal);
     const observed = pending.then(() => 'unexpected-settled', () => 'held');
     await entered.promise;
     config.set('display.stream', !config.get('display.stream'));
     release.resolve(); expect(await observed).toBe('held'); expect(log.query()).toEqual([]);
     expect(await service.execute(request(), principal, new AbortController().signal, () => principal)).toMatchObject({ status: 'settled', value: { matches: [false] } });
-    expect(calls).toEqual([{ key: 'display.stream', description: 'Stream LLM tokens as they arrive' }, { key: 'display.stream', description: 'Stream LLM tokens as they arrive' }]);
+    expect(calls).toEqual([{ key: 'syntheticExtension.label', description: '' }, { key: 'syntheticExtension.label', description: '' }]);
     expect(log.query()).toHaveLength(1);
   } finally { release.resolve(); for (const dispose of cleanup.reverse()) await dispose(); }
 });

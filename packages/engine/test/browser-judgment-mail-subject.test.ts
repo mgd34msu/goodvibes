@@ -13,9 +13,11 @@ import { withWebuiAnswerBoundary } from '../platform/src/platform/judgment-brows
 
 const owner: AuthenticatedPrincipal = { principalId: 'synthetic-mail-owner', principalKind: 'user', admin: false, scopes: ['read:email', 'write:judgment'] };
 const ORIGIN = 'https://daemon.fixture.invalid';
+// The rule decides known markers; only a short unknown prefix is read.
+const ASKED = 'Vs: Synthetic lunch';
 const request = (subjectRef: string): BrowserJudgmentRequest<'webui.mail.reply-subject'> => ({ protocolVersion: 1, batteryVersion: 1, requestId: crypto.randomUUID(), battery: 'webui.mail.reply-subject', input: { subjectRef } });
 function fixture(options: { plans?: ReadPlan[]; probability?: number; transport?: JudgmentPort; beforeAnswer?: () => Promise<void> } = {}) {
-  const mail = mailFixture(options.plans ? { plans: options.plans } : {});
+  const mail = mailFixture({ plans: (options.plans ?? [{}]).map((plan) => ({ subject: ASKED, ...plan })) });
   const gateway = instrumentEmailGateway(createServiceBackedGateway(mail.service), {});
   const log = new SqliteDecisionLog(':memory:');
   const calls: unknown[] = [];
@@ -43,7 +45,7 @@ function fixture(options: { plans?: ReadPlan[]; probability?: number; transport?
 }
 
 test('canonical IMAP read issues an authenticated opaque reference and only a recorded boolean reaches the browser', async () => {
-  const f = fixture({ plans: [{ subject: 'RE: Synthetic lunch' }] });
+  const f = fixture();
   try {
     const message = await f.read();
     expect(message.replySubjectRef).toBeString();
@@ -51,12 +53,21 @@ test('canonical IMAP read issues an authenticated opaque reference and only a re
     const result = await f.wire(request(message.replySubjectRef!));
     expect(result.status, result.body).toBe(200);
     expect(JSON.parse(result.body)).toMatchObject({ status: 'settled', value: { alreadyReply: true }, outcome: 'act', evidence: [{ decisionId: expect.any(String) }] });
-    expect(f.calls).toEqual([{ subject: 'RE: Synthetic lunch' }]);
+    expect(f.calls).toEqual([{ subject: ASKED }]);
     expect(f.mail.connections()).toBe(1);
     const records = f.log.query(); expect(records).toHaveLength(1);
     expect(JSON.stringify(records)).not.toContain('Synthetic lunch');
     expect(JSON.stringify(records)).not.toContain('owner@example.invalid');
     expect(JSON.stringify(records)).not.toContain('Synthetic body');
+  } finally { await f.close(); }
+});
+
+test.each(['RE: Synthetic lunch', 'Fwd: AW: Synthetic lunch', 'Synthetic lunch', 'Invoice: May'])('a subject the reply-marker rule decides sends no reading: %s', async subject => {
+  const f = fixture({ plans: [{ subject }] });
+  try {
+    const message = await f.read();
+    expect((await f.wire(request(message.replySubjectRef!))).status).not.toBe(200);
+    expect(f.calls).toEqual([]); expect(f.log.query()).toEqual([]);
   } finally { await f.close(); }
 });
 
@@ -165,7 +176,7 @@ test.each([4, 130])('configured failover survives %s targets and source invalida
 
 test('capture genuine synthetic mail-read references and browser judgment wires for UI replay', async () => {
   const captures: unknown[] = [];
-  for (const [subject, probability] of [['Nightly build finished', 0.01], ['RE: Synthetic lunch', 0.99], ['Re[2]: Synthetic lunch', 0.99], ['AW: Synthetic lunch', 0.99], ['SV: Synthetic lunch', 0.99], ['Synthetic uncertain', 0.5]] as const) {
+  for (const [subject, probability] of [['Ok: Nightly build finished', 0.01], ['Vs: Synthetic lunch', 0.99], ['Vá: Synthetic lunch', 0.99], ['Xyz: Synthetic uncertain', 0.5]] as const) {
     const f = fixture({ plans: [{ subject }], probability });
     try {
       const message = await f.read(1002); const requestBody = request(message.replySubjectRef!);

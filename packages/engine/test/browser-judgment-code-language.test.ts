@@ -41,6 +41,13 @@ test('actual canonical message source provides only complete screened code and t
     expect(f.log.query()).toHaveLength(1); expect(JSON.stringify(f.log.query())).not.toContain('const count:');
   } finally { await f.close(); }
 });
+test.each(['ts', 'Python', 'yml', 'text'])('a block tagged %s is decided by its tag: no reading is sent', async tag => {
+  const tagged = `Before\n\`\`\`${tag}\nconst count: number = 2;\n\`\`\`\nAfter`;
+  const f = fixture({ content: tagged }); try {
+    await expect(f.run(request(tagged))).rejects.toMatchObject({ code: 'JUDGMENT_INPUT_HELD' });
+    expect(f.calls).toEqual([]); expect(f.log.query()).toEqual([]);
+  } finally { await f.close(); }
+});
 test.each(['permission', 'revision', 'unknown-message', 'out-of-bounds', 'protected-outside-block'] as const)('%s makes no provider call or text retention', async kind => {
   const f = fixture({ authorized: kind !== 'permission', content: kind === 'protected-outside-block' ? content + '\nAuthorization: Bearer synthetic-protected-material' : content });
   try {

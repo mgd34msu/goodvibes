@@ -35,9 +35,14 @@ test.each(['request', 'invented-text', 'boolean', 'missing-reading', 'unsettled'
   if (kind === 'evidence') raw = { ...wire, evidence: [] };
   expect(readMailReplySubjectResponse(input, raw)).toBeUndefined();
 });
-test('sends only the issued reference and exposes a client-lifetime-bound boolean', async () => {
-  const result = await readMailReplySubject('synthetic-subject-reference', new AbortController().signal);
-  expect(result).toMatchObject({ status: 'ready', alreadyReply: false });
+test.each([['RE: Lunch?', true], ['Fwd: AW: Lunch?', true], ['Lunch?', false], ['Invoice: May', false]] as const)('the rule decides %s with no request', async (subject, alreadyReply) => {
+  expect(await readMailReplySubject('synthetic-subject-reference', new AbortController().signal, subject)).toMatchObject({ status: 'ready', provenance: 'rule', alreadyReply });
+  expect(calls).toHaveLength(0);
+});
+test('an unknown short prefix sends only the issued reference and exposes a client-lifetime-bound boolean', async () => {
+  transport = async input => response(input, 'yes');
+  const result = await readMailReplySubject('synthetic-subject-reference', new AbortController().signal, 'Vs: Lunch?');
+  expect(result).toMatchObject({ status: 'ready', alreadyReply: true });
   expect(calls).toHaveLength(1);
   expect(calls[0]!.input.input).toEqual({ subjectRef: 'synthetic-subject-reference' });
   if (result.status !== 'ready') throw new Error('Missing ready fixture');
@@ -50,17 +55,19 @@ test.each(['cancel', 'client-change'] as const)('%s aborts the transport and rej
   const started = Promise.withResolvers<void>();
   transport = () => { started.resolve(); return barrier.promise; };
   const abort = new AbortController();
-  const pending = readMailReplySubject('synthetic-subject-reference', abort.signal);
+  const pending = readMailReplySubject('synthetic-subject-reference', abort.signal, 'Vs: Lunch?');
   await started.promise;
   if (kind === 'cancel') abort.abort(); else invalidateClientLifetime();
   expect(calls[0]!.signal.aborted).toBe(true);
-  barrier.resolve(response(calls[0]!.input));
+  barrier.resolve(response(calls[0]!.input, 'yes'));
   expect(await pending).toEqual({ status: 'unavailable' });
 });
-test('missing provenance and transport failure never substitute a lexical decision or retry policy', async () => {
-  expect(await readMailReplySubject(undefined, new AbortController().signal)).toEqual({ status: 'held' });
+test('an unsure or failed reading leaves the rule answer, so the draft is never held', async () => {
+  expect(await readMailReplySubject('synthetic-subject-reference', new AbortController().signal)).toEqual({ status: 'held' });
   expect(calls).toHaveLength(0);
+  transport = async input => response(input, 'uncertain');
+  expect(await readMailReplySubject('synthetic-subject-reference', new AbortController().signal, 'Vs: Lunch?')).toMatchObject({ status: 'ready', provenance: 'rule', alreadyReply: false });
   transport = async () => { throw new Error('synthetic outage'); };
-  expect(await readMailReplySubject('synthetic-subject-reference', new AbortController().signal)).toEqual({ status: 'unavailable' });
-  expect(calls).toHaveLength(1);
+  expect(await readMailReplySubject('synthetic-subject-reference', new AbortController().signal, 'Vs: Lunch?')).toMatchObject({ status: 'ready', provenance: 'rule', alreadyReply: false });
+  expect(calls).toHaveLength(2);
 });

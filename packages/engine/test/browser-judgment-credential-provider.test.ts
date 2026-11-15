@@ -11,7 +11,9 @@ const RAW_VALUE = 'synthetic-credential-value-never-for-judgment';
 const PROVIDER_DETAIL = 'synthetic-private-provider-response-detail';
 const NAMES = ['OPENAI_API_KEY', 'AZURE_OPENAI_API_KEY', 'GOOGLE_GEMINI_API_KEY'];
 type Request = BrowserJudgmentRequest<'webui.credentials.provider-key'>;
-const request = (keys: readonly string[] = ['OPENAI_API_KEY'], providerId = 'openai'): Request => ({
+// Built-in providers answer from their declared names; only an undeclared provider is read.
+const CUSTOM = 'synthetic-custom-provider';
+const request = (keys: readonly string[] = ['OPENAI_API_KEY'], providerId = CUSTOM): Request => ({
   protocolVersion: 1, requestId: crypto.randomUUID(), battery: 'webui.credentials.provider-key', batteryVersion: 1,
   input: { providerId, keys },
 });
@@ -96,7 +98,7 @@ test('real HTTP runtime verifies canonical names and returns recorded booleans w
       status: 'settled', outcome: 'act', value: { matches: [false, true] },
       readings: { key_0: { kind: 'yes-no', probability: 0.01, verdict: 'no' }, key_1: { kind: 'yes-no', probability: 0.99, verdict: 'yes' } },
       evidence: [{ decisionId: expect.any(String) }, { decisionId: expect.any(String) }] });
-    expect(f.calls).toEqual(input.input.keys.map(key => ({ providerId: 'openai', key })));
+    expect(f.calls).toEqual(input.input.keys.map(key => ({ providerId: CUSTOM, key })));
     expect(f.listCalls()).toBe(1); expect(f.valueReads()).toBe(0);
     expect(f.permissions.length).toBeGreaterThan(0);
     expect(f.permissions.every(input => (input as { sources: string[] }).sources.join(',') === 'credential-names')).toBe(true);
@@ -110,6 +112,15 @@ test('real HTTP runtime verifies canonical names and returns recorded booleans w
       expect(response.body).not.toContain(text); expect(retained).not.toContain(text);
     }
     expect(JSON.stringify(f.calls)).not.toContain(RAW_VALUE);
+  } finally { await f.close(); }
+});
+
+test('a built-in provider is answered from its declared names: no reading is sent', async () => {
+  const f = fixture();
+  try {
+    const response = await f.wire(request(['OPENAI_API_KEY', 'AZURE_OPENAI_API_KEY'], 'openai'));
+    expect(response.status).not.toBe(200);
+    expect(f.calls).toEqual([]); expect(f.log.query()).toEqual([]);
   } finally { await f.close(); }
 });
 
@@ -128,7 +139,7 @@ test('multi-key fan-out is bounded to four and preserves request order when answ
     expect(f.calls).toHaveLength(5); expect(f.maxActive()).toBe(4);
     gates.forEach(gate => gate.resolve());
     expect(await pending).toMatchObject({ status: 'settled', value: { matches: [true, false, true, false, true, false, true] } });
-    expect(f.calls).toEqual(keys.map(key => ({ providerId: 'openai', key })));
+    expect(f.calls).toEqual(keys.map(key => ({ providerId: CUSTOM, key })));
     expect(f.log.query()).toHaveLength(7); expect(f.valueReads()).toBe(0);
   } finally { gates.forEach(gate => gate.resolve()); await pending.catch(() => {}); await f.close(); }
 });
@@ -164,7 +175,7 @@ test.each(['missing-name', 'missing-source', 'missing-method', 'non-admin-method
 test.each(['duplicate-name', 'empty-list', 'too-many-names', 'oversize-name', 'oversize-provider', 'empty-provider', 'raw-values', 'key-object'] as const)
   ('%s is rejected by the wire shape before canonical lookup, provider calls or retention', async kind => {
     const f = fixture();
-    const input: { providerId: unknown; keys: unknown; values?: unknown } = { providerId: 'openai', keys: ['OPENAI_API_KEY'] };
+    const input: { providerId: unknown; keys: unknown; values?: unknown } = { providerId: CUSTOM, keys: ['OPENAI_API_KEY'] };
     if (kind === 'duplicate-name') input.keys = ['OPENAI_API_KEY', 'OPENAI_API_KEY'];
     if (kind === 'empty-list') input.keys = [];
     if (kind === 'too-many-names') input.keys = Array.from({ length: 65 }, (_, index) => `SYNTHETIC_KEY_${index}`);
@@ -185,7 +196,7 @@ test.each(['provider', 'first-name', 'last-name'] as const)('protected material 
   const keys = kind === 'first-name' ? [protectedText, ...NAMES] : kind === 'last-name' ? [...NAMES, protectedText] : NAMES;
   const f = fixture({ names: keys });
   try {
-    await expect(f.run(request(keys, kind === 'provider' ? protectedText : 'openai'))).rejects.toMatchObject({ code: 'JUDGMENT_INPUT_HELD' });
+    await expect(f.run(request(keys, kind === 'provider' ? protectedText : CUSTOM))).rejects.toMatchObject({ code: 'JUDGMENT_INPUT_HELD' });
     expect(f.listCalls()).toBe(0); expect(f.calls).toEqual([]); expect(f.log.query()).toEqual([]); expect(f.valueReads()).toBe(0);
   } finally { await f.close(); }
 });
@@ -217,7 +228,7 @@ test('caller mutation during inventory lookup cannot replace the captured provid
   try {
     await entered.promise; keys[0] = 'AZURE_OPENAI_API_KEY'; Object.assign(input.input, { providerId: 'replacement-provider' });
     finish.resolve(); expect(await pending).toMatchObject({ status: 'settled', value: { matches: [true] } });
-    expect(f.calls).toEqual([{ providerId: 'openai', key: 'OPENAI_API_KEY' }]);
+    expect(f.calls).toEqual([{ providerId: CUSTOM, key: 'OPENAI_API_KEY' }]);
   } finally { finish.resolve(); await pending.catch(() => {}); await f.close(); }
 });
 

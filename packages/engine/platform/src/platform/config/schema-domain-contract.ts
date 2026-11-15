@@ -1,5 +1,5 @@
 /**
- * Contract runner configuration (docs/design/contract-runner.md section 9.1).
+ * Contract runner configuration.
  *
  * The `contract.*` settings replace the retired review loop's settings; the
  * settings migration in migrations.ts moves an existing file's values across
@@ -25,7 +25,7 @@ export const contractConfigDefaults: { contract: ContractSettings } = {
       { name: 'lint', command: 'npx eslint . --max-warnings 0', enabled: false },
       { name: 'build', command: 'npm run build', enabled: false },
     ],
-    gateTimeoutMs: 0,
+    gateTimeoutMs: 900_000,
     acceptanceStakes: 'high',
     midRunChecks: true,
     evidenceNudgeLimit: 0,
@@ -68,8 +68,8 @@ export const contractConfigSettings: ConfigSettingDefinition[] = [
   {
     key: 'contract.gateTimeoutMs',
     type: 'number',
-    default: 0,
-    description: 'Optional timeout in ms for each quality gate command; 0 runs until completion or cancellation',
+    default: 900_000,
+    description: 'Timeout in ms for each quality gate command (default 15 minutes); a gate past it is stopped and reported unverified; 0 runs until completion or cancellation',
     ...intRange(0, 2_147_483_647),
   },
   {

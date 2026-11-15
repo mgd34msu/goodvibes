@@ -4,7 +4,8 @@
  * Surfaces and partner apps that do not embed the runner dispatch, poll,
  * cancel and fetch contract work through an adapter with these four methods.
  * Two implementations exist: the in-process hosted adapter
- * (platform/src/platform/hosted-sessions/contract-work-adapter.ts) and the operator
+ * (platform/src/platform/hosted-sessions/contract-work-adapter.ts, which the
+ * daemon serves as `contracts.dispatch`) and the operator
  * adapter over the `contracts.*` methods (operator-client
  * contract-work-adapter.ts). The types and the mapping from a contract to a
  * snapshot or result live here, in the wire contracts package both reach, so
@@ -57,27 +58,6 @@ export interface ContractExternalWorkAdapter {
   status(externalTaskId: string): Promise<ContractExternalWorkSnapshot>;
   cancel(externalTaskId: string, reason?: string | undefined): Promise<void>;
   result(externalTaskId: string): Promise<ContractExternalWorkResult>;
-}
-
-/** Hands each call to the adapter it was built over. */
-export class ContractExternalWorkBridge {
-  constructor(private readonly adapter: ContractExternalWorkAdapter) {}
-
-  dispatch(request: ContractExternalWorkRequest): Promise<ContractExternalWorkHandle> {
-    return this.adapter.dispatch(request);
-  }
-
-  status(externalTaskId: string): Promise<ContractExternalWorkSnapshot> {
-    return this.adapter.status(externalTaskId);
-  }
-
-  cancel(externalTaskId: string, reason?: string | undefined): Promise<void> {
-    return this.adapter.cancel(externalTaskId, reason);
-  }
-
-  result(externalTaskId: string): Promise<ContractExternalWorkResult> {
-    return this.adapter.result(externalTaskId);
-  }
 }
 
 /** Every runner status and the seam status it reports as. */

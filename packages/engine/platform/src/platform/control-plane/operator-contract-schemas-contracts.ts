@@ -390,6 +390,12 @@ export const CONTRACTS_START_OUTPUT_SCHEMA = objectSchema({
   replayed: BOOLEAN_SCHEMA,
 }, ['contract', 'ownerAgentId']);
 
+export const CONTRACTS_DISPATCH_INPUT_SCHEMA = objectSchema({
+  ask: STRING_SCHEMA,
+  workspaceRoot: STRING_SCHEMA,
+  idempotencyKey: STRING_SCHEMA,
+}, ['ask']);
+
 export const CONTRACTS_CANCEL_INPUT_SCHEMA = objectSchema({ contractId: STRING_SCHEMA, reason: STRING_SCHEMA }, ['contractId']);
 export const CONTRACTS_CANCEL_OUTPUT_SCHEMA = objectSchema({ cancelled: BOOLEAN_SCHEMA }, ['cancelled']);
 

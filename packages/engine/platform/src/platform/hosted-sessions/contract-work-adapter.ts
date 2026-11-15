@@ -24,7 +24,7 @@ import {
   contractWorkSnapshot,
   type ContractExternalWorkAdapter,
 } from '../contract/external.js';
-import type { ContractOperatorService } from '../contract/operator-service.js';
+import { ContractOperatorError, type ContractOperatorService } from '../contract/operator-service.js';
 import { realpathSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { logger } from '../utils/logger.js';
@@ -32,8 +32,12 @@ import { summarizeError } from '../utils/error-display.js';
 import type { HostedSessionManager } from './manager.js';
 
 export interface HostedContractWorkAdapterDeps {
-  /** The contracts operator surface: it starts a hosted session's contract on the session's floor. */
-  readonly runner: Pick<ContractOperatorService, 'start' | 'get' | 'cancel'>;
+  /**
+   * The contracts operator surface: it starts a hosted session's contract on
+   * the session's floor. When it can take a dispatcher, the adapter attaches
+   * itself, so `contracts.dispatch` reaches it, and detaches on close.
+   */
+  readonly runner: Pick<ContractOperatorService, 'start' | 'get' | 'cancel'> & Partial<Pick<ContractOperatorService, 'attachDispatcher'>>;
   /** `kill` lets the adapter end a session it created once its contract is over or never started. */
   readonly hostedSessions: Pick<HostedSessionManager, 'create' | 'hosts'> & Partial<Pick<HostedSessionManager, 'kill'>>;
   /** Where a session created for a dispatch works when the request names no workspace. Absolute. */
@@ -112,7 +116,7 @@ export function createHostedContractWorkAdapter(deps: HostedContractWorkAdapterD
 
   const contractOf = (externalTaskId: string) => {
     const contract = deps.runner.get(externalTaskId);
-    if (contract === null) throw new Error(`No contract ${externalTaskId} on this daemon.`);
+    if (contract === null) throw new ContractOperatorError(`No contract ${externalTaskId} on this daemon.`, 'CONTRACT_NOT_FOUND', 404);
     return contract;
   };
 
@@ -144,19 +148,19 @@ export function createHostedContractWorkAdapter(deps: HostedContractWorkAdapterD
     let sessionId = metadataString(request.metadata, 'sessionId');
     let created = false;
     if (sessionId !== undefined && !deps.hostedSessions.hosts(sessionId)) {
-      throw new Error(`This daemon hosts no live session ${sessionId}.`);
+      throw new ContractOperatorError(`This daemon hosts no live session ${sessionId}.`, 'SESSION_NOT_LIVE', 409, 'sessionId');
     }
     if (sessionId !== undefined && deps.ownsSession?.(sessionId, request) !== true) {
-      throw new Error(`This requester may not run work on hosted session ${sessionId}. Omit metadata.sessionId to run on a new session.`);
+      throw new ContractOperatorError(`This requester may not run work on hosted session ${sessionId}. Omit metadata.sessionId to run on a new session.`, 'SESSION_NOT_OWNED', 403, 'sessionId');
     }
     if (sessionId === undefined) {
       const requested = metadataString(request.metadata, 'workspaceRoot');
       const workspaceRoot = requested ?? deps.workspaceRoot;
-      if (workspaceRoot === undefined) throw new Error('A dispatch without a hosted session needs metadata.workspaceRoot: no default workspace is set.');
+      if (workspaceRoot === undefined) throw new ContractOperatorError('A dispatch without a hosted session needs metadata.workspaceRoot: no default workspace is set.', 'INVALID_ARGUMENT', 400, 'workspaceRoot');
       if (requested !== undefined) {
         const roots = [...(deps.allowedWorkspaceRoots ?? []), ...(deps.workspaceRoot === undefined ? [] : [deps.workspaceRoot])];
         if (!isAbsolute(requested) || !roots.some((root) => insideRoot(root, requested))) {
-          throw new Error(`metadata.workspaceRoot ${requested} is outside the workspaces this daemon allows for dispatched work.`);
+          throw new ContractOperatorError(`metadata.workspaceRoot ${requested} is outside the workspaces this daemon allows for dispatched work.`, 'INVALID_ARGUMENT', 400, 'workspaceRoot');
         }
       }
       sessionId = (await deps.hostedSessions.create({ workspaceRoot })).id;
@@ -182,7 +186,7 @@ export function createHostedContractWorkAdapter(deps: HostedContractWorkAdapterD
     });
   };
 
-  return {
+  const adapter: HostedContractWorkAdapter = {
     async dispatch(request) {
       const key = metadataString(request.metadata, 'idempotencyKey');
       if (key === undefined) return dispatchOnce(request);
@@ -202,6 +206,7 @@ export function createHostedContractWorkAdapter(deps: HostedContractWorkAdapterD
     },
     close() {
       unsubscribe?.();
+      detachDispatcher?.();
     },
     async status(externalTaskId) {
       const contract = contractOf(externalTaskId);
@@ -222,4 +227,6 @@ export function createHostedContractWorkAdapter(deps: HostedContractWorkAdapterD
       return result;
     },
   };
+  const detachDispatcher = deps.runner.attachDispatcher?.(adapter);
+  return adapter;
 }

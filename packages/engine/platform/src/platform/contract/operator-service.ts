@@ -16,6 +16,7 @@
 import { realpathSync } from 'node:fs';
 import { isAbsolute, relative, resolve } from 'node:path';
 import { OwnerReplyRefusedError, type OwnerReplyOutcome } from './escalation.js';
+import type { ContractExternalWorkAdapter } from './external.js';
 import type { ContractRunner } from './runner.js';
 import { isTerminalContractStatus, type ContractOrigin, type ContractView, type NativeContractSource, type StartContractInput } from './types.js';
 
@@ -78,6 +79,25 @@ export interface OperatorStartedContract {
   readonly replayed?: boolean | undefined;
 }
 
+/** Contract work started in a hosted session of its own (`contracts.dispatch`). */
+export interface OperatorDispatchInput {
+  /** The person's words, verbatim. */
+  readonly ask: string;
+  /** The caller; it scopes the retry key. */
+  readonly principalId?: string | undefined;
+  /** Absolute; inside the daemon's working directory. Omitted: the daemon's working directory. */
+  readonly workspaceRoot?: string | undefined;
+  /** The caller's retry key: the same caller and key return the first dispatch's contract while it runs. */
+  readonly idempotencyKey?: string | undefined;
+}
+
+/**
+ * What starts dispatched work: the hosted contract work adapter
+ * (hosted-sessions/contract-work-adapter.ts), which creates the session, starts
+ * the contract in it and ends the session when the contract settles.
+ */
+export type OperatorWorkDispatcher = Pick<ContractExternalWorkAdapter, 'dispatch'>;
+
 export interface ContractOperatorService {
   list(filter?: { readonly sessionId?: string | undefined; readonly includeTerminal?: boolean | undefined }): ContractView[];
   get(contractId: string): ContractView | null;
@@ -98,6 +118,19 @@ export interface ContractOperatorService {
    * native work execution owns that.
    */
   attachNative(runner: Pick<ContractRunner, 'get' | 'list' | 'reply'> | null): void;
+  /**
+   * Starts `ask` as a contract in a new hosted session: its questions are that
+   * session's replies, and the session ends when the contract settles. Read
+   * and stop it with `get` and `cancel` like any other contract. Refused with
+   * NOT_HOSTING while no dispatcher is attached.
+   */
+  dispatch(input: OperatorDispatchInput): Promise<OperatorStartedContract>;
+  /**
+   * Joins the dispatcher in (the hosted adapter attaches itself when the daemon
+   * composes it). Returns the detach, which only removes this dispatcher, so a
+   * replaced adapter's close cannot take out its successor.
+   */
+  attachDispatcher(dispatcher: OperatorWorkDispatcher): () => void;
 }
 
 export type ContractOperatorErrorCode =
@@ -113,6 +146,8 @@ export type ContractOperatorErrorCode =
   | 'SESSION_NOT_OWNED'
   /** The escalation is answered, or another reply to it is being read. */
   | 'ESCALATION_NOT_OPEN'
+  /** This daemon hosts no sessions, so work cannot be dispatched into a new one. */
+  | 'NOT_HOSTING'
   | 'INVALID_ARGUMENT';
 
 /** A refusal with the wire code and status the operator routes report it under. */
@@ -187,6 +222,7 @@ export function createContractOperatorService(deps: ContractOperatorServiceDeps)
   /** Present while this daemon hosts sessions. */
   let hostedRunners: HostedContractRunners | null = null;
   let nativeRunner: Pick<ContractRunner, 'get' | 'list' | 'reply'> | null = null;
+  let dispatcher: OperatorWorkDispatcher | null = null;
   const runners = (): readonly Pick<ContractRunner, 'get' | 'list' | 'reply'>[] => [deps.runner, ...(nativeRunner === null ? [] : [nativeRunner]), ...(hostedRunners?.runners() ?? [])];
 
   /** The runner holding a contract, with its view; first found wins. */
@@ -323,6 +359,36 @@ export function createContractOperatorService(deps: ContractOperatorServiceDeps)
     },
     attachNative(runner) {
       nativeRunner = runner;
+    },
+    async dispatch(input) {
+      if (input.ask.trim().length === 0) throw new ContractOperatorError('ask is required', 'INVALID_ARGUMENT', 400, 'ask');
+      if (dispatcher === null) {
+        throw new ContractOperatorError('This daemon hosts no sessions, so it cannot dispatch work into a new one. Use contracts.start, which runs the work on the daemon\'s own runner.', 'NOT_HOSTING', 409);
+      }
+      if (input.workspaceRoot !== undefined && (!isAbsolute(input.workspaceRoot) || !isWithin(deps.workingDirectory, input.workspaceRoot))) {
+        throw new ContractOperatorError(
+          `workspaceRoot must be an absolute path inside this daemon's workspace ${deps.workingDirectory}; '${input.workspaceRoot}' is not.`,
+          'INVALID_ARGUMENT',
+          400,
+          'workspaceRoot',
+        );
+      }
+      const handle = await dispatcher.dispatch({
+        task: input.ask,
+        metadata: {
+          ...(input.workspaceRoot === undefined ? {} : { workspaceRoot: input.workspaceRoot }),
+          // Keys are per caller: another caller's key never returns this caller's work.
+          ...(input.idempotencyKey === undefined ? {} : { idempotencyKey: `${input.principalId ?? ''}\u0000${input.idempotencyKey}` }),
+        },
+      });
+      const contract = holder(handle.externalTaskId).contract;
+      return { contract: projectContractOperatorView(contract), ownerAgentId: contract.ownerAgentId };
+    },
+    attachDispatcher(next) {
+      dispatcher = next;
+      return () => {
+        if (dispatcher === next) dispatcher = null;
+      };
     },
   };
 }

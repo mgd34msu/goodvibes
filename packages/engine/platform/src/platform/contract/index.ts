@@ -346,7 +346,6 @@ export { createRoutePlannerContractSelector, type ContractSelectorOptions } from
 export type { ContractPlannedRoute, ContractRoutePlanner } from './route.js';
 export {
   CONTRACT_WORK_STATUS,
-  ContractExternalWorkBridge,
   contractWorkHandle,
   contractWorkProgress,
   contractWorkResult,

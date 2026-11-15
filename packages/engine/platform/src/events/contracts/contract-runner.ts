@@ -82,7 +82,8 @@ const ROUTE_SUMMARY: readonly FieldSpec[] = [str('model'), str('provider'), optS
 
 /** The required and optional fields of every contract event, beside `type`. */
 export const CONTRACT_EVENT_FIELD_SPECS: { readonly [T in ContractEventType]: readonly FieldSpec[] } = {
-  CONTRACT_CREATED: [optStr('occurrenceId'), str('contractId'), str('sessionId'), oneOf('origin', CONTRACT_ORIGINS), str('ask'), str('ownerAgentId')],
+  CONTRACT_CREATED: [optStr('occurrenceId'), str('contractId'), str('sessionId'), oneOf('origin', CONTRACT_ORIGINS), str('ask'), str('ownerAgentId'),
+    { key: 'gateProblems', kind: 'string[]', optional: true }],
   CONTRACT_STATUS_CHANGED: [optStr('occurrenceId'), str('contractId'), oneOf('from', CONTRACT_STATUSES), oneOf('to', CONTRACT_STATUSES)],
   CONTRACT_SHAPED: [
     optStr('occurrenceId'),

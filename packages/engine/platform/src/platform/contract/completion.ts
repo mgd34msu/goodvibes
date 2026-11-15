@@ -645,9 +645,15 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
             const pending = new Set<Promise<AnswerClaimReview[]>>();
             let settled: AnswerClaimReview | undefined;
             const decisive = (review: AnswerClaimReview): boolean => review.reading.probability > 0.5 && review.reading.outcome === 'act';
+            const scopes = answerClaimScopes(evidence.output, 0, evidence.output.length, undefined, outputOwnerForCurrentAnswer());
+            let started = 0;
             try {
-              claimReviews = (await mapLimit(answerClaimScopes(evidence.output, 0, evidence.output.length, undefined, outputOwnerForCurrentAnswer()), 4, async scope => {
+              claimReviews = (await mapLimit(scopes, 4, async scope => {
                 if (settled !== undefined) return [];
+                started += 1;
+                // The owner's status line names the passage being read, so a long answer's check is not a silent wait.
+                const owner = context.getStatus(contract.ownerAgentId);
+                if (owner !== null && owner.status === 'running') setAgentProgress(owner, `Contract ${contract.id}: checking answer passage ${started} of ${scopes.length}`, 'operator');
                 const job = inspect(scope); pending.add(job);
                 try {
                   const reviewed = await job;
@@ -661,6 +667,8 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
               claimAbort.abort(error);
               while (pending.size) await Promise.allSettled([...pending]);
               throw error;
+            } finally {
+              context.ownerProgress(run);
             }
             if (settled === undefined && !completeAnswerClaimCoverage(evidence.output, claimReviews, outputOwnerForCurrentAnswer())) throw new Error('Scoped answer checks do not cover the complete answer');
             const worst = claimReviews.reduce((previous, current) => current.reading.probability > previous.reading.probability ? current : previous);

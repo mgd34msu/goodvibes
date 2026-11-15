@@ -1,10 +1,10 @@
 /**
- * method-catalog-contracts.ts, the `contracts.*` operator methods
- * (docs/design/contract-runner.md 10.2): list, read, start, cancel and reply
- * to contracts, over every contract runner this daemon holds (its own and
- * each hosted-session workspace floor's). Handlers are in routes/contracts.ts;
- * each method also has a REST path, served through the daemon-api REST route
- * table (gateway-rest-routes.ts) by the same handler.
+ * method-catalog-contracts.ts, the `contracts.*` operator methods: list,
+ * read, start, dispatch, cancel and reply to contracts, over every contract
+ * runner this daemon holds (its own and each hosted-session workspace
+ * floor's). Handlers are in routes/contracts.ts; each method except dispatch
+ * also has a REST path, served through the daemon-api REST route table
+ * (gateway-rest-routes.ts) by the same handler; dispatch is reached by invoke.
  *
  * Scopes follow the fleet methods: reading is `read:fleet`, acting is
  * `write:fleet`.
@@ -15,6 +15,7 @@ import { methodDescriptor } from './method-catalog-shared.js';
 import {
   CONTRACTS_CANCEL_INPUT_SCHEMA,
   CONTRACTS_CANCEL_OUTPUT_SCHEMA,
+  CONTRACTS_DISPATCH_INPUT_SCHEMA,
   CONTRACTS_GET_INPUT_SCHEMA,
   CONTRACTS_GET_OUTPUT_SCHEMA,
   CONTRACTS_LIST_INPUT_SCHEMA,
@@ -70,6 +71,20 @@ export const builtinGatewayContractMethodDescriptors: readonly GatewayMethodDesc
       { code: 'IDEMPOTENCY_KEY_REUSED', status: 409, meaning: 'This Idempotency-Key was already used for a different request; use a new key.' },
     ],
     inputSchema: CONTRACTS_START_INPUT_SCHEMA,
+    outputSchema: CONTRACTS_START_OUTPUT_SCHEMA,
+  }),
+  methodDescriptor({
+    id: 'contracts.dispatch',
+    title: 'Dispatch Contract Work',
+    description: 'Start a contract for `ask` (the person\'s words verbatim) in a hosted session created for it, in `workspaceRoot` (absolute, inside the daemon\'s workspace) or the daemon\'s working directory. The contract\'s questions arrive as that session\'s replies, and the session ends when the contract passes, fails or is cancelled. Returns at once with the contract and its owner agent id; read it with `contracts.get`, stop it with `contracts.cancel`, answer it with `contracts.reply`. `idempotencyKey` returns the first dispatch\'s contract to a retry by the same caller while that contract runs. 400 with INVALID_ARGUMENT when `ask` is empty or `workspaceRoot` is relative or outside the daemon\'s workspace; 409 with NOT_HOSTING when this daemon hosts no sessions (use `contracts.start`).',
+    category: 'contracts',
+    scopes: ['write:fleet'],
+    effect: 'outward',
+    errorCodes: [
+      INVALID_ARGUMENT,
+      { code: 'NOT_HOSTING', status: 409, meaning: 'This daemon hosts no sessions, so work cannot be dispatched into a new one; use contracts.start.' },
+    ],
+    inputSchema: CONTRACTS_DISPATCH_INPUT_SCHEMA,
     outputSchema: CONTRACTS_START_OUTPUT_SCHEMA,
   }),
   methodDescriptor({

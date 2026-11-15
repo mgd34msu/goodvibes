@@ -34,7 +34,6 @@ export type {
 export { DISTRIBUTED_WORK_TYPES } from './types.js';
 export {
   CONTRACT_WORK_STATUS,
-  ContractExternalWorkBridge,
   contractWorkHandle,
   contractWorkProgress,
   contractWorkResult,

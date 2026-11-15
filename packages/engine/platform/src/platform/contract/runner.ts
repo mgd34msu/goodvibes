@@ -54,7 +54,7 @@ import type { AgentManager, AgentRecord } from '../tools/agent/index.js';
 import { startContractOwner, bindContractActionSignal } from '../tools/agent/contract-binding.js';
 import { delegationForbidden } from './batteries/request-shape.js';
 import { createUnitCheckLoop, queueSessionNudge, type ContractSessionHooks } from './agent-hooks.js';
-import { readContractConfig, type ContractConfigReader } from './config.js';
+import { contractGateProblems, readContractConfig, type ContractConfigReader } from './config.js';
 import { emitContractEvent } from './events.js';
 import { OwnerReplyRefusedError, type FailurePauseInput, type OwnerReplyOutcome } from './escalation.js';
 import { createGroupRunner, takeBaseline, type ContractEngineInput } from './group-runner.js';
@@ -1172,8 +1172,13 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
     // No executor or creation event is admitted until actual claim cleanup
     // succeeds. Future creators now see the durable initial checkpoint.
     extra.creation.release();
-    run.decide('created', id, `origin ${input.origin}; ${isolation} isolation${extra.draftPlan === undefined ? '' : `; ${extra.draftPlan.units.length} drafted units`}`);
-    run.emit({ type: 'CONTRACT_CREATED', contractId: id, sessionId: input.sessionId, origin: input.origin, ask: input.ask, ownerAgentId: owner.id });
+    // A gate that cannot run is said once here, to the owner, before any check
+    // reports it as a failure to a worker.
+    const gateProblems = contractGateProblems(deps.configManager);
+    run.decide('created', id, `origin ${input.origin}; ${isolation} isolation${extra.draftPlan === undefined ? '' : `; ${extra.draftPlan.units.length} drafted units`}`
+      + (gateProblems.length === 0 ? '' : `; gate settings: ${gateProblems.join(' ')}`));
+    run.emit({ type: 'CONTRACT_CREATED', contractId: id, sessionId: input.sessionId, origin: input.origin, ask: input.ask, ownerAgentId: owner.id,
+      ...(gateProblems.length === 0 ? {} : { gateProblems }) });
     if (owner.status === 'cancelled') cancelRun(run, 'the owner was cancelled during spawn');
     if (run.terminal || deferAdmission) {
       // Re-entrant creation/spawn listeners can stop the owner before admission.

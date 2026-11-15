@@ -566,7 +566,8 @@ export function normalizeChannelRenderEventFromRuntime(
       // phrase, and it has to come from AFTER the remember call above.
       return [renderEvent('status', 'progress', envelope, {
         audience: 'owner',
-        text: `Started work on: ${trimText(payload.ask, 180)}${workstreamPlaceSuffix(payload.contractId)}`,
+        text: `Started work on: ${trimText(payload.ask, 180)}${workstreamPlaceSuffix(payload.contractId)}`
+          + (payload.gateProblems === undefined || payload.gateProblems.length === 0 ? '' : `\nGate settings to fix: ${payload.gateProblems.join(' ')}`),
       })];
     case 'CONTRACT_STATUS_CHANGED':
       return [renderEvent('status', 'progress', envelope, {

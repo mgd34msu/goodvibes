@@ -275,7 +275,9 @@ export interface ContractUnitRouteSummary {
 }
 
 export type ContractEvent = (
-  | { type: 'CONTRACT_CREATED'; contractId: string; sessionId: string; origin: ContractOrigin; ask: string; ownerAgentId: string }
+  | { type: 'CONTRACT_CREATED'; contractId: string; sessionId: string; origin: ContractOrigin; ask: string; ownerAgentId: string;
+      /** What is wrong with the `contract.gates` setting, one sentence each with the fix; absent when every gate can run. */
+      gateProblems?: readonly string[] }
   | { type: 'CONTRACT_STATUS_CHANGED'; contractId: string; from: ContractStatus; to: ContractStatus }
   | {
       type: 'CONTRACT_SHAPED';

@@ -28,7 +28,8 @@ function listOrNone(items: readonly string[]): string {
 function describeEvent(event: ContractEvent): string {
   switch (event.type) {
     case 'CONTRACT_CREATED':
-      return `created (origin ${event.origin}, session ${event.sessionId}): ${oneLine(event.ask)}`;
+      return `created (origin ${event.origin}, session ${event.sessionId}): ${oneLine(event.ask)}`
+        + (event.gateProblems === undefined || event.gateProblems.length === 0 ? '' : `\n  gate settings to fix: ${event.gateProblems.join(' ')}`);
     case 'CONTRACT_STATUS_CHANGED':
       return `status ${event.from} -> ${event.to}`;
     case 'CONTRACT_SHAPED':

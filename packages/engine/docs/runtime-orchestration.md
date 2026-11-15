@@ -199,13 +199,19 @@ as well.
 | `agent-tool` | The `agent` tool's `spawn` or `batch-spawn` without `outsideContract`; the tasks become proposed units and the result carries `contractStarted: true` and the contract id |
 | `proposal` | A launched plan proposal or workstream draft, through `runner.startFromPlan`; the drafted units are kept and the planner writes their criteria |
 | `cli` | The command line, `goodvibes-contract run` (`runContractCli` in `contract/cli.ts`); it follows the contract, asks the owner's questions at a terminal, and hosts the session a session-mode contract's turns run in |
-| `hosted` | `contracts.start` naming a live hosted session, and the hosted external work adapter (`createHostedContractWorkAdapter`, composed by a daemon that hosts sessions and reached in process as `HostedSessionManager.contractWork()`); the contract runs on the session's workspace floor. A dispatch that names no session gets a new one in the daemon's working directory (or a `metadata.workspaceRoot` inside it); that session ends, and the dispatch's `metadata.idempotencyKey` is forgotten, when the contract passes, fails or is cancelled. A turn in a hosted session is read by the same turn intake and starts with origin `turn` |
+| `hosted` | `contracts.start` naming a live hosted session, and `contracts.dispatch`, served by the hosted external work adapter (`createHostedContractWorkAdapter`, composed by a daemon that hosts sessions and reached in process as `HostedSessionManager.contractWork()`); the contract runs on the session's workspace floor. A dispatch that names no session gets a new one in the daemon's working directory (or a `metadata.workspaceRoot` inside it); that session ends, and the dispatch's `metadata.idempotencyKey` is forgotten, when the contract passes, fails or is cancelled. A turn in a hosted session is read by the same turn intake and starts with origin `turn` |
 | `external` | `contracts.start` without a hosted session (under the `operator` session unless one is named), the operator external work adapter (`createOperatorContractWorkAdapter`), and an embedded session's spawn-mode submit |
 
 The daemon's operator methods `contracts.list`, `contracts.get`,
 `contracts.start`, `contracts.cancel` and `contracts.reply` (REST
-`/api/contracts...`) act through one service across the daemon's runner and
-each hosted floor's runner. A hosted session lists the contracts it started
+`/api/contracts...`) and `contracts.dispatch` (invoke) act through one
+service across the daemon's runner and each hosted floor's runner.
+`contracts.dispatch` starts the work in a hosted session made for it, so its
+questions arrive as that session's replies, and ends the session when the
+contract settles; a daemon that hosts no sessions refuses it with
+`NOT_HOSTING` (409), and `contracts.start` runs the work on its own runner
+instead. A dispatch's `idempotencyKey` is scoped to the caller and kept until
+the contract settles. A hosted session lists the contracts it started
 on its record (`contractIds`), says each contract's question for its owner
 and its outcome in its conversation, and sends its next turn to an open
 question. The external work seam (`ContractExternalWorkAdapter`: `dispatch`,
@@ -377,8 +383,8 @@ The runner reads `contract.*` (`config/schema-domain-contract.ts`,
 | --- | --- | --- |
 | `contract.autoCommit` | `true` | Commit the deliverable when it passes |
 | `contract.commitScope` | `scoped` | `off`, `scoped` (the contract's changes only) or `all` |
-| `contract.gates` | typecheck, lint and build, all off | Quality gate commands run at each completion check; each runs only once you enable it (`enabled: true`) |
-| `contract.gateTimeoutMs` | `0` (no limit) | Timeout per gate; `0` lets a gate run until it finishes or is cancelled |
+| `contract.gates` | typecheck, lint and build, all off | Quality gate commands run at each completion check; each runs only once you enable it (`enabled: true`). Any gate, `test` included, passes or fails on its command's exit code; under `bun test` its assertion counts are recorded too. A list with a gate that cannot run (missing name or command, a wrong option, a name used twice, an enabled gate with an empty command) is refused when saved, and a contract reports it when it starts |
+| `contract.gateTimeoutMs` | `900000` (15 minutes) | Timeout per gate; a gate past it is stopped and reported unverified; `0` waits until it finishes or is cancelled |
 | `contract.acceptanceStakes` | `high` | Which declared pass band the judges use: `high` or `critical` |
 | `contract.midRunChecks` | `true` | Check a unit after turns that write, edit or run commands, once a criterion already reads met (before that nothing can regress) |
 | `contract.evidenceNudgeLimit` | `0` (no limit) | Unsettled checks before the owner is asked; with `0` the owner is not asked on this count, and `contract.stallLimit` still applies |

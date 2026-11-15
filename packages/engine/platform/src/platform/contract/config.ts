@@ -9,6 +9,7 @@
  * never end.
  */
 import type { ConfigManager } from '../config/manager.js';
+import { contractGateListProblems, qualityGateEntryProblem } from '../config/contract-gate-list.js';
 import { logger } from '../utils/logger.js';
 import type { QualityGate } from './gates.js';
 
@@ -109,19 +110,16 @@ const ISOLATION_SETTINGS: readonly string[] = ['auto', 'worktree', 'shared'];
 
 const warnedGates = new Set<string>();
 
-/** A reader must not throw: a gate with a wrong-shaped option is left out, and the warning names it once. */
+/** A reader must not throw: a gate that cannot run is left out, and the warning names it once. */
 function isQualityGate(value: unknown): value is QualityGate {
-  if (value === null || typeof value !== 'object') return false;
-  const gate = value as Record<string, unknown>;
-  if (typeof gate['name'] !== 'string' || typeof gate['command'] !== 'string' || typeof gate['enabled'] !== 'boolean') return false;
-  const badOption = gate['required'] !== undefined && typeof gate['required'] !== 'boolean' ? 'required (a boolean)'
-    : gate['verification'] !== undefined && gate['verification'] !== 'command' && gate['verification'] !== 'assertions' ? 'verification ("command" or "assertions")'
-      : undefined;
-  if (badOption === undefined) return true;
-  const key = `${gate['name']}:${badOption}`;
+  const problem = qualityGateEntryProblem(value);
+  if (problem === undefined) return true;
+  const name = value !== null && typeof value === 'object' ? (value as Record<string, unknown>)['name'] : undefined;
+  if (typeof name !== 'string') return false;
+  const key = `${name}:${problem}`;
   if (!warnedGates.has(key)) {
     warnedGates.add(key);
-    logger.warn(`contract.gates: the gate "${gate['name']}" is ignored because its ${badOption} option has the wrong value; fix it in the contract.gates setting to run this gate`);
+    logger.warn(`contract.gates: the gate "${name}" is ignored because ${problem}; fix it in the contract.gates setting to run this gate`);
   }
   return false;
 }
@@ -189,27 +187,12 @@ export function getContractGates(configManager: ContractConfigReader): readonly 
 
 /**
  * What is wrong with the `contract.gates` setting, one sentence each with the
- * fix: entries the reader leaves out and enabled gates that cannot run. Empty
- * when every gate can run. For the owner, at save time and when a contract
- * starts; reading it costs one pass over the setting.
+ * fix (config/contract-gate-list.ts holds the rule). Empty when every gate can
+ * run. Read when a contract starts; the settings schema applies the same rule
+ * when the list is saved. One pass over the setting.
  */
 export function contractGateProblems(configManager: ContractConfigReader): string[] {
-  const raw = (configManager.getCategory('contract') as Readonly<Record<string, unknown>> | undefined)?.['gates'];
-  if (raw === undefined) return [];
-  if (!Array.isArray(raw)) return ['contract.gates is not a list of gates, so no gate runs; set it to a list of { name, command, enabled }.'];
-  const problems: string[] = [], names = new Set<string>();
-  raw.forEach((value, index) => {
-    const label = value !== null && typeof value === 'object' && typeof (value as Record<string, unknown>)['name'] === 'string'
-      ? `the gate "${(value as Record<string, unknown>)['name'] as string}"` : `gate ${index + 1}`;
-    if (!isQualityGate(value)) {
-      problems.push(`${label} is ignored: it needs a name and a command (text) and enabled (true or false), required must be true or false, and verification "command" or "assertions".`);
-      return;
-    }
-    if (names.has(value.name)) problems.push(`${label} is listed twice; both run, under one name in the results. Give each gate its own name.`);
-    names.add(value.name);
-    if (value.enabled && value.command.trim().length === 0) problems.push(`${label} is enabled with an empty command, so it fails every check; give it a command or disable it.`);
-  });
-  return problems;
+  return contractGateListProblems((configManager.getCategory('contract') as Readonly<Record<string, unknown>> | undefined)?.['gates']);
 }
 
 /** The gates a check runs. */

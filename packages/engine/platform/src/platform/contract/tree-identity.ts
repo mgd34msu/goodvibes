@@ -19,8 +19,13 @@ import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:f
 import { tmpdir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
 
-function git(cwd: string, args: readonly string[], env?: NodeJS.ProcessEnv): string | null {
-  const result = spawnSync('git', ['-C', cwd, ...args], { encoding: 'utf-8', ...(env === undefined ? {} : { env }) });
+/** The process environment without the caller's GIT_* routing, so GIT_DIR or GIT_WORK_TREE cannot point the identity at another repository. */
+function baseEnv(): NodeJS.ProcessEnv {
+  return Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_')));
+}
+
+function git(cwd: string, args: readonly string[], env: NodeJS.ProcessEnv = baseEnv()): string | null {
+  const result = spawnSync('git', ['-C', cwd, ...args], { encoding: 'utf-8', env });
   return result.status === 0 ? (result.stdout ?? '').trim() : null;
 }
 
@@ -36,7 +41,7 @@ export function workingTreeIdentity(root: string): string | null {
   try {
     if (existsSync(index)) copyFileSync(index, scratch);
     mkdirSync(join(scratchDir, 'objects'));
-    const env = { ...process.env, GIT_INDEX_FILE: scratch, GIT_OBJECT_DIRECTORY: join(scratchDir, 'objects'), GIT_ALTERNATE_OBJECT_DIRECTORIES: objects };
+    const env = { ...baseEnv(), GIT_INDEX_FILE: scratch, GIT_OBJECT_DIRECTORY: join(scratchDir, 'objects'), GIT_ALTERNATE_OBJECT_DIRECTORIES: objects };
     if (git(root, ['add', '-A', '--', '.', ':(exclude).goodvibes'], env) === null) return null;
     const tree = git(root, ['write-tree'], env);
     return tree !== null && /^[0-9a-f]{40,64}$/.test(tree) ? tree : null;

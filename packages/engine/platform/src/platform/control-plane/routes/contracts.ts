@@ -1,6 +1,5 @@
 /**
- * routes/contracts.ts, the handlers behind `contracts.*`
- * (docs/design/contract-runner.md 10.2).
+ * routes/contracts.ts, the handlers behind `contracts.*`.
  *
  * Thin on purpose: reading the arguments and mapping refusals. What a
  * contract is, and which runner holds it, lives in
@@ -117,6 +116,29 @@ export function createContractsStartHandler(service: ContractOperatorService): G
   };
 }
 
+export function createContractsDispatchHandler(service: ContractOperatorService): GatewayMethodHandler {
+  return async (invocation) => {
+    const params = readInvocationParams(invocation);
+    requireString(params, 'ask');
+    const ask = params['ask'] as string;
+    const workspaceRoot = optionalString(params, 'workspaceRoot');
+    const idempotencyKey = optionalString(params, 'idempotencyKey');
+    if (idempotencyKey !== undefined && idempotencyKey.length > MAX_IDEMPOTENCY_KEY_LENGTH) {
+      throw new GatewayVerbError(`idempotencyKey must be at most ${MAX_IDEMPOTENCY_KEY_LENGTH} characters`, 'INVALID_ARGUMENT', 400, 'idempotencyKey');
+    }
+    try {
+      return await service.dispatch({
+        ask,
+        ...(invocation.context.principalId ? { principalId: invocation.context.principalId } : {}),
+        ...(workspaceRoot === undefined ? {} : { workspaceRoot }),
+        ...(idempotencyKey === undefined ? {} : { idempotencyKey }),
+      });
+    } catch (error) {
+      return toGatewayVerbError(error);
+    }
+  };
+}
+
 export function createContractsCancelHandler(service: ContractOperatorService): GatewayMethodHandler {
   return (invocation) => {
     const params = readInvocationParams(invocation);
@@ -149,6 +171,7 @@ export const CONTRACT_METHOD_IDS: readonly string[] = [
   'contracts.list',
   'contracts.get',
   'contracts.start',
+  'contracts.dispatch',
   'contracts.cancel',
   'contracts.reply',
 ];
@@ -168,6 +191,7 @@ export function registerContractGatewayMethods(catalog: GatewayMethodCatalog, se
   attach('contracts.list', createContractsListHandler(service));
   attach('contracts.get', createContractsGetHandler(service));
   attach('contracts.start', createContractsStartHandler(service));
+  attach('contracts.dispatch', createContractsDispatchHandler(service));
   attach('contracts.cancel', createContractsCancelHandler(service));
   attach('contracts.reply', createContractsReplyHandler(service));
 }

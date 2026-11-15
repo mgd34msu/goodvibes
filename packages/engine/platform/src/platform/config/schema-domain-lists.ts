@@ -6,12 +6,14 @@
  * them without a hand-kept list per layer.
  *
  * Defaults are the domain defaults the settings tree already holds, so the two
- * tables cannot disagree. Validators check the shape; a consumer that skips one
- * bad entry (a contract gate with a wrong option) keeps doing so. The two
- * sandbox lists are checked strictly: a malformed list there widens what a
- * command may reach, so it is refused whole.
+ * tables cannot disagree. Validators check the shape. `contract.gates` is
+ * checked by the same rule the contract runner reports at contract start, so a
+ * gate that cannot run is refused when it is saved, with the rule as the hint.
+ * The two sandbox lists are checked strictly: a malformed list there widens
+ * what a command may reach, so it is refused whole.
  */
 import { isAbsolute } from 'node:path';
+import { CONTRACT_GATE_LIST_HINT, contractGateListProblems } from './contract-gate-list.js';
 import type { ConfigSetting } from './schema-types.js';
 import type { ListConfigKey } from './schema-types-lists.js';
 import { clusterConfigDefaults } from './schema-domain-cluster.js';
@@ -27,10 +29,6 @@ export interface ListConfigSetting extends Omit<ConfigSetting, 'key' | 'type'> {
 
 function stringList(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((entry) => typeof entry === 'string');
-}
-
-function objectList(value: unknown): boolean {
-  return Array.isArray(value) && value.every((entry) => entry !== null && typeof entry === 'object' && !Array.isArray(entry));
 }
 
 export const listConfigSettings: readonly ListConfigSetting[] = [
@@ -54,9 +52,9 @@ export const listConfigSettings: readonly ListConfigSetting[] = [
     key: 'contract.gates',
     type: 'object',
     default: structuredClone(contractConfigDefaults.contract.gates),
-    description: 'Quality gates a contract runs before it reports work done: each is { name, command, enabled } with optional required and verification. A gate with a wrong option is skipped with a warning naming it',
-    validate: objectList,
-    validationHint: 'list of { name, command, enabled } objects',
+    description: 'Quality gates a contract runs before it reports work done: each is { name, command, enabled } with optional required and verification. Any gate passes or fails on its command\'s exit code. A list with a gate that cannot run is refused when saved',
+    validate: (value) => contractGateListProblems(value).length === 0,
+    validationHint: CONTRACT_GATE_LIST_HINT,
   },
   {
     key: 'sandbox.egressAllowlist',

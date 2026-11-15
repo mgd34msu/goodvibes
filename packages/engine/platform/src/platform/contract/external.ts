@@ -5,14 +5,13 @@
  * in-process hosted adapter (hosted-sessions/contract-work-adapter.ts) and
  * the operator adapter (operator-client contract-work-adapter.ts) implement it.
  *
- * The types, the bridge and the mapping from a contract to a snapshot or a
+ * The types and the mapping from a contract to a snapshot or a
  * result are declared in the wire contracts package, which the operator platform
  * can reach and this package cannot be reached from; they are re-exported
  * here so the runner's barrel carries the whole seam.
  */
 export {
   CONTRACT_WORK_STATUS,
-  ContractExternalWorkBridge,
   contractWorkHandle,
   contractWorkProgress,
   contractWorkResult,

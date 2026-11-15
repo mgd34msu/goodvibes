@@ -1,46 +1,37 @@
 /**
- * daemon-repair.ts, the one-touch repair for a machine whose daemon is off in
- * both places at once.
+ * daemon-repair.ts, the Agent's one owner of "what state is the daemon on this
+ * machine in, and how is it brought up".
  *
- * ── The state this exists for ──────────────────────────────────────────────
+ * Three paths ask that question and all of them answer it here:
  *
- * A laptop sat unusable for weeks. Two things were true on it at the same time:
- * its daemon service was stopped, and its Agent settings carried
- * `daemon.enabled: false`. Neither alone is a fault, a stopped service is
- * started by the boot-time autostart in bootstrap-external-services.ts, and a
- * deliberate `false` is a choice the platform honors. Together they are a dead
- * end, because the flag short-circuits discovery before the autostart is ever
- * consulted: `startHostServices` returns `mode: 'disabled'` without probing,
- * and `autostartInstalledDaemon` classifies that as `daemon-disabled` and
- * declines to act. The Agent booted, found no host, and had no path to one.
- * A person had to be handed shell commands to type.
+ * - the boot-time autostart (bootstrap-external-services.ts), which starts an
+ *   installed-but-stopped service through the platform service manager;
+ * - the repair offer at first render (shell/daemon-repair-prompt.ts), for a
+ *   machine whose `daemon.enabled` is false while no daemon runs, where the
+ *   flag stops discovery before the autostart is ever consulted;
+ * - a headless run, which cannot prompt and prints the commands that repair it.
  *
- * ── What this does instead ─────────────────────────────────────────────────
+ * The service query is the platform's `DaemonServiceControl`, the same one the
+ * autostart uses. The repair is "set the setting, install the service if there
+ * is none, then run the autostart": installing goes through the daemon's own
+ * CLI (`goodvibes-daemon install-service`), because the unit must carry the
+ * daemon's command line, which this process does not own; everything after
+ * that is the autostart's job.
  *
- * States the situation in ONE line and offers to fix it. On the user's single
- * confirmation the platform does every step itself: writes the setting, has the
- * daemon's own CLI install or start its service, waits for the daemon to answer
- * on its configured address, and leaves a receipt in the activity log naming
- * each thing it did. One action from the user; the mechanics are the platform's
- * problem.
- *
- * ── The boundaries ─────────────────────────────────────────────────────────
- *
- * - The offer is only ever made when BOTH halves are true. A `false` flag on a
- *   machine whose daemon is up and answering is a working configuration and is
- *   left alone.
- * - Declining changes nothing at all, not the setting, not the service, and
- *   is remembered for the rest of the session, so the answer is asked for once
- *   and never again turn after turn.
- * - Every step of a repair reports what it actually did, including a partial
- *   one. A repair that sets the flag and then cannot start the service says
- *   exactly that; it never claims a daemon that is not answering.
- * - Nothing here reads or writes the terminal. It returns text, and the two
- *   surfaces (the interactive prompt and headless run's stderr) render it.
+ * Boundaries: the offer is made only when the flag is false AND the service is
+ * stopped or absent (a false flag beside a running daemon is a deliberate
+ * local-only configuration). Declining changes nothing and is remembered for
+ * the session. Every step reports what it did, a partial repair included.
+ * Nothing here reads or writes the terminal.
  */
 import net from 'node:net';
 import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-import { resolveDaemonEnabled } from '@goodvibes-jev/engine/platform/platform/config';
+import { ConfigManager, resolveDaemonEnabled } from '@goodvibes-jev/engine/platform/platform/config';
+import {
+  autostartInstalledDaemon,
+  createDaemonServiceControl,
+  type DaemonServiceControl,
+} from '@goodvibes-jev/engine/platform/platform/runtime/client';
 import {
   connectedHostPort,
   dialHostForConfiguredHost,
@@ -48,143 +39,125 @@ import {
 import {
   createDaemonCliRunner,
   installDaemonService,
-  readDaemonServiceReport,
-  startDaemonService,
   type DaemonCliRunner,
-  type DaemonServiceReport,
 } from './daemon-cli-service.ts';
 
 /** The setting this repair turns back on, named once so every string agrees. */
 export const DAEMON_ENABLED_KEY = 'daemon.enabled';
 
+/** The daemon CLI commands a person or an agent runs to repair a machine by hand. */
+export const DAEMON_INSTALL_COMMAND = 'goodvibes-daemon install-service';
+export const DAEMON_START_COMMAND = 'goodvibes-daemon start-service';
+
 /**
  * The config surface this module needs: read the adopt flag, write it back, and
- * resolve the address the daemon is expected to answer on. Narrow on purpose,
- * so a test supplies an object literal rather than a whole ConfigManager.
+ * resolve the address the daemon is expected to answer on.
  */
 export interface DaemonRepairConfig {
   get(key: 'daemon.enabled' | 'controlPlane.host' | 'controlPlane.port'): boolean | string | number | undefined;
   set(key: 'daemon.enabled', value: boolean): void;
 }
 
-/**
- * A decline, remembered for the life of this process.
- *
- * Deliberately NOT persisted to disk, unlike the workspace-registration
- * decline it otherwise resembles. That one answers "should this directory ever
- * get checkpoints", which is a standing preference. This one answers "fix this
- * machine now", asked about a state that is still broken, a durable "no" would
- * turn one dismissal into permanent silence about a laptop that still cannot
- * reach its daemon. The next session asks again; this one does not.
- */
-export interface DaemonRepairSessionMemory {
-  readonly declined: () => boolean;
-  readonly decline: () => void;
+/** What the daemon's service entry on this machine is doing, from the platform service manager. */
+export interface DaemonServiceState {
+  readonly kind: 'running' | 'installed-not-running' | 'not-installed' | 'unknown';
+  /** The unit the state describes, when one is installed. */
+  readonly serviceName: string | null;
 }
 
-export function createDaemonRepairSessionMemory(): DaemonRepairSessionMemory {
-  let declined = false;
+/** The one service query: the same snapshot the boot-time autostart acts on. */
+export function readDaemonServiceState(control: DaemonServiceControl): DaemonServiceState {
+  const entries = control.snapshot();
+  const installed = entries.filter((entry) => entry.installed);
+  if (installed.length === 0) {
+    // 'unknown' platform on every entry means the service manager did not
+    // answer, which is not the same as "nothing is installed".
+    const answered = entries.some((entry) => entry.platform !== 'unknown');
+    return { kind: answered ? 'not-installed' : 'unknown', serviceName: null };
+  }
+  const running = installed.find((entry) => entry.running);
+  if (running) return { kind: 'running', serviceName: running.serviceName };
+  const target = installed.find((entry) => entry.startSupported) ?? installed[0]!;
+  return { kind: 'installed-not-running', serviceName: target.serviceName };
+}
+
+/** The result of bringing the daemon up through the autostart. */
+export interface DaemonBringUpResult {
+  /** True only when the daemon answered afterwards (adopted, when a host controller ran it). */
+  readonly answered: boolean;
+  /** One line saying what happened, in the words the person reads. */
+  readonly detail: string;
+}
+
+/**
+ * The daemon on this machine: its service state and how to bring it up. The
+ * Agent's connected-host controller implements it (bootstrap-external-services.ts),
+ * so a repair re-probes and adopts the daemon in this same session.
+ */
+export interface DaemonHost {
+  serviceState(): DaemonServiceState;
+  bringUp(): Promise<DaemonBringUpResult>;
+}
+
+/**
+ * A host over the platform service manager alone, for a caller with no
+ * connected-host controller to hand: same query, same autostart, and a TCP
+ * connect to the configured address as the proof the daemon answers.
+ */
+export function createStandaloneDaemonHost(options: {
+  readonly config: DaemonRepairConfig;
+  readonly control: DaemonServiceControl;
+  readonly isReachable?: () => Promise<boolean>;
+  readonly waitTimeoutMs?: number;
+  readonly pollIntervalMs?: number;
+  readonly sleep?: (ms: number) => Promise<void>;
+}): DaemonHost {
+  const isReachable = options.isReachable ?? tcpReachability(options.config);
   return {
-    declined: () => declined,
-    decline: () => { declined = true; },
+    serviceState: () => readDaemonServiceState(options.control),
+    bringUp: async () => {
+      const outcome = await autostartInstalledDaemon({
+        // The caller established that nothing answers; the autostart acts only then.
+        daemonMode: 'unavailable',
+        control: options.control,
+        isReachable,
+        waitTimeoutMs: options.waitTimeoutMs,
+        pollIntervalMs: options.pollIntervalMs,
+        sleep: options.sleep,
+      });
+      switch (outcome.action) {
+        case 'started':
+          return { answered: true, detail: `started the daemon service "${outcome.serviceName}" and it answers on its configured address` };
+        case 'came-online':
+          return { answered: true, detail: `the daemon service "${outcome.serviceName}" was already starting and now answers` };
+        case 'start-failed':
+          return { answered: false, detail: `${outcome.reason}; start it with: ${DAEMON_START_COMMAND}` };
+        case 'not-installed':
+          return { answered: false, detail: `no daemon service is installed on this machine; install it with: ${DAEMON_INSTALL_COMMAND}` };
+        case 'none':
+          return { answered: false, detail: `nothing was started (${outcome.reason})` };
+      }
+    },
   };
 }
 
-/** The wedged state, once both halves have been confirmed. */
-export interface DaemonRepairOffer {
-  /** Whether a unit exists already, decides install-service vs start-service. */
-  readonly serviceInstalled: boolean;
-  /** The unit name the daemon CLI reported, when it named one. */
-  readonly serviceName: string | null;
-  /** One plain line stating what is wrong. */
-  readonly diagnosis: string;
-  /** The offer itself, in the wording each surface presents verbatim. */
-  readonly offer: string;
-}
-
-export interface DaemonRepairDiagnosisOptions {
-  readonly config: DaemonRepairConfig;
-  readonly session: DaemonRepairSessionMemory;
-  /** Injectable so a test never spawns the real daemon CLI. */
-  readonly runDaemonCli?: DaemonCliRunner;
-}
-
 /**
- * Decide whether this machine is in the wedged state, and say so.
- *
- * Returns null, silently, having spawned nothing, in every ordinary case.
- * The daemon CLI is only consulted when the flag is already off, so a machine
- * with `daemon.enabled: true` (which is every healthy machine, since true is
- * the default) pays nothing for this check at boot.
+ * The standalone host for a config that is a real ConfigManager (the service
+ * manager reads its `service.*` settings and directories); null otherwise.
  */
-export function diagnoseDaemonRepair(options: DaemonRepairDiagnosisOptions): DaemonRepairOffer | null {
-  if (options.session.declined()) return null;
-  // The flag is the cheap half and the one that short-circuits discovery, so it
-  // is asked first. `resolveDaemonEnabled` is the same reader the discovery
-  // path uses, so this can never disagree with the thing it is diagnosing.
-  if (resolveDaemonEnabled(options.config)) return null;
-
-  const run = options.runDaemonCli ?? createDaemonCliRunner();
-  let report: DaemonServiceReport;
-  try {
-    report = readDaemonServiceReport(run);
-  } catch (error) {
-    // A diagnosis that cannot complete is not an offer. Boot is never the place
-    // to raise from a check that exists to be helpful.
-    logger.debug('[daemon-repair] reading the daemon service entry failed', { error: summarizeError(error) });
-    return null;
-  }
-
-  // Only the two states that mean "there is no daemon running here" are
-  // offered on. 'running' is a working machine whose flag merely declines to
-  // adopt a daemon of its own, a real configuration, left exactly alone.
-  // 'unknown' means the question was not answered (no daemon CLI on this
-  // machine, or a service manager that refused), and guessing on top of an
-  // unanswered question is how a helpful offer becomes a wrong one.
-  if (report.state !== 'installed-not-running' && report.state !== 'not-installed') return null;
-
-  const serviceInstalled = report.state === 'installed-not-running';
-  const named = report.serviceName ? ` "${report.serviceName}"` : '';
-  const diagnosis = serviceInstalled
-    ? `This machine cannot reach a GoodVibes daemon: its service${named} is installed but stopped, and this Agent's ${DAEMON_ENABLED_KEY} setting is false, which stops it from even looking.`
-    : `This machine cannot reach a GoodVibes daemon: no daemon service is installed here, and this Agent's ${DAEMON_ENABLED_KEY} setting is false, which stops it from even looking.`;
-  const offer = serviceInstalled
-    ? `Repair it? Press "y" and the Agent will set ${DAEMON_ENABLED_KEY} to true, start the daemon service, and confirm it answers. Any other key leaves everything untouched.`
-    : `Repair it? Press "y" and the Agent will set ${DAEMON_ENABLED_KEY} to true, install and start the daemon service, and confirm it answers. Any other key leaves everything untouched.`;
-
-  return { serviceInstalled, serviceName: report.serviceName, diagnosis, offer };
+function defaultDaemonHost(config: DaemonRepairConfig): DaemonHost | null {
+  if (!(config instanceof ConfigManager)) return null;
+  const homeDirectory = config.getHomeDirectory();
+  const workingDirectory = config.getWorkingDirectory();
+  if (!homeDirectory || !workingDirectory) return null;
+  return createStandaloneDaemonHost({
+    config,
+    control: createDaemonServiceControl({ configManager: config, workingDirectory, homeDirectory }),
+  });
 }
-
-/** What a repair actually did, step by step, in the order it did it. */
-export interface DaemonRepairResult {
-  /** True only when the daemon answered on its configured address afterwards. */
-  readonly repaired: boolean;
-  /** One line per step performed, the receipt, in the order things happened. */
-  readonly steps: readonly string[];
-  /** The single line a surface shows the user. */
-  readonly summary: string;
-}
-
-export interface DaemonRepairRunOptions {
-  readonly config: DaemonRepairConfig;
-  readonly offer: DaemonRepairOffer;
-  /** Injectable so a test never spawns the real daemon CLI. */
-  readonly runDaemonCli?: DaemonCliRunner;
-  /** Injectable so a test never opens a socket. Defaults to a TCP connect. */
-  readonly verifyReachable?: () => Promise<boolean>;
-  readonly waitTimeoutMs?: number;
-  readonly pollIntervalMs?: number;
-  /** Injectable so a test drives the wait loop without real time. */
-  readonly sleep?: (ms: number) => Promise<void>;
-  /** Injectable receipt sink; defaults to the activity log. */
-  readonly recordReceipt?: (text: string) => void;
-}
-
-const DEFAULT_WAIT_TIMEOUT_MS = 15_000;
-const DEFAULT_POLL_INTERVAL_MS = 500;
 
 /** A read-only TCP connect to the address the daemon is configured to bind. */
-function defaultVerifyReachable(config: DaemonRepairConfig): () => Promise<boolean> {
+function tcpReachability(config: DaemonRepairConfig): () => Promise<boolean> {
   const host = dialHostForConfiguredHost(config.get('controlPlane.host'));
   const port = connectedHostPort(config.get('controlPlane.port'));
   return () => new Promise<boolean>((resolve) => {
@@ -202,99 +175,161 @@ function defaultVerifyReachable(config: DaemonRepairConfig): () => Promise<boole
 }
 
 /**
- * Perform the repair the user just confirmed, and report every step.
+ * A decline, remembered for the life of this process. Not persisted: it
+ * answers "fix this machine now" about a state that is still broken, and a
+ * durable "no" would turn one dismissal into permanent silence.
+ */
+export interface DaemonRepairSessionMemory {
+  readonly declined: () => boolean;
+  readonly decline: () => void;
+}
+
+export function createDaemonRepairSessionMemory(): DaemonRepairSessionMemory {
+  let declined = false;
+  return {
+    declined: () => declined,
+    decline: () => { declined = true; },
+  };
+}
+
+/** The wedged state, once both halves have been confirmed. */
+export interface DaemonRepairOffer {
+  /** Whether a unit exists already: decides whether the repair installs one first. */
+  readonly serviceInstalled: boolean;
+  /** The unit name the service manager reported, when one is installed. */
+  readonly serviceName: string | null;
+  /** One plain line stating what is wrong. */
+  readonly diagnosis: string;
+  /** The offer itself, in the wording the interactive surface presents verbatim. */
+  readonly offer: string;
+}
+
+export interface DaemonRepairDiagnosisOptions {
+  readonly config: DaemonRepairConfig;
+  readonly session: DaemonRepairSessionMemory;
+  /** The daemon on this machine; defaults to the platform service manager over `config`. */
+  readonly host?: DaemonHost | undefined;
+}
+
+/**
+ * Decide whether this machine is in the wedged state, and say so.
  *
- * Never throws: a surface calls this from a keypress handler and from a
- * headless boot path, and neither is a place where an exception is a useful
- * answer. Everything that goes wrong comes back as a step that says so.
+ * Returns null in every ordinary case. The service manager is consulted only
+ * when the flag is already off, so a healthy machine pays one setting read.
+ */
+export function diagnoseDaemonRepair(options: DaemonRepairDiagnosisOptions): DaemonRepairOffer | null {
+  if (options.session.declined()) return null;
+  // `resolveDaemonEnabled` is the reader discovery uses, so this cannot
+  // disagree with the thing it is diagnosing.
+  if (resolveDaemonEnabled(options.config)) return null;
+  const host = options.host ?? defaultDaemonHost(options.config);
+  if (!host) return null;
+
+  let state: DaemonServiceState;
+  try {
+    state = host.serviceState();
+  } catch (error) {
+    logger.debug('[daemon-repair] reading the daemon service entry failed', { error: summarizeError(error) });
+    return null;
+  }
+  // 'running' is a deliberate local-only configuration; 'unknown' is an
+  // unanswered question, and an offer built on a guess is a wrong offer.
+  if (state.kind !== 'installed-not-running' && state.kind !== 'not-installed') return null;
+
+  const serviceInstalled = state.kind === 'installed-not-running';
+  const named = state.serviceName ? ` "${state.serviceName}"` : '';
+  const diagnosis = serviceInstalled
+    ? `This machine cannot reach a GoodVibes daemon: its service${named} is installed but stopped, and this Agent's ${DAEMON_ENABLED_KEY} setting is false, which stops it from even looking.`
+    : `This machine cannot reach a GoodVibes daemon: no daemon service is installed here, and this Agent's ${DAEMON_ENABLED_KEY} setting is false, which stops it from even looking.`;
+  const offer = serviceInstalled
+    ? `Repair it? Press "y" and the Agent will set ${DAEMON_ENABLED_KEY} to true, start the daemon service, and connect to it. Any other key leaves everything untouched.`
+    : `Repair it? Press "y" and the Agent will set ${DAEMON_ENABLED_KEY} to true, install and start the daemon service, and connect to it. Any other key leaves everything untouched.`;
+
+  return { serviceInstalled, serviceName: state.serviceName, diagnosis, offer };
+}
+
+/** What a repair actually did, step by step, in the order it did it. */
+export interface DaemonRepairResult {
+  /** True only when the daemon answered afterwards. */
+  readonly repaired: boolean;
+  /** One line per step performed, in the order things happened. */
+  readonly steps: readonly string[];
+  /** The single line a surface shows the user. */
+  readonly summary: string;
+}
+
+export interface DaemonRepairRunOptions {
+  readonly config: DaemonRepairConfig;
+  readonly offer: DaemonRepairOffer;
+  /** The daemon on this machine; defaults to the platform service manager over `config`. */
+  readonly host?: DaemonHost | undefined;
+  /** Runs the daemon's own CLI for the install step; injectable so a test never spawns it. */
+  readonly runDaemonCli?: DaemonCliRunner | undefined;
+  /** Receipt sink; defaults to the activity log. */
+  readonly recordReceipt?: (text: string) => void;
+}
+
+/**
+ * Perform the repair the user confirmed: set the setting, install the service
+ * when there is none, then run the autostart. Never throws; everything that
+ * goes wrong comes back as a step that says so.
  */
 export async function runDaemonRepair(options: DaemonRepairRunOptions): Promise<DaemonRepairResult> {
   const { config, offer } = options;
   const steps: string[] = [];
-  const run = options.runDaemonCli ?? createDaemonCliRunner();
-  const recordReceipt = options.recordReceipt
-    ?? ((text: string) => { logger.info(text); });
+  const recordReceipt = options.recordReceipt ?? ((text: string) => { logger.info(text); });
+  const finish = (repaired: boolean, summary: string): DaemonRepairResult => {
+    recordReceipt(`${summary} Steps: ${steps.join('; ')}`);
+    return { repaired, steps, summary };
+  };
 
-  // Step 1, the setting. Done first and on its own, because it is the half
-  // that silenced discovery, and because it is the half that survives even if
-  // the service work below fails: the next boot's ordinary autostart path can
-  // then finish the job without anyone being asked anything.
+  // The setting first and on its own: it is the half that silenced discovery,
+  // and it survives a failed service step, so the next launch's ordinary
+  // autostart can finish the job without asking anything.
   try {
     config.set(DAEMON_ENABLED_KEY, true);
     steps.push(`set ${DAEMON_ENABLED_KEY} to true (it was false, which stopped this Agent from looking for a daemon at all)`);
   } catch (error) {
     const reason = summarizeError(error);
     steps.push(`could not set ${DAEMON_ENABLED_KEY} to true: ${reason}`);
-    const summary = `[Daemon] Repair could not start: the ${DAEMON_ENABLED_KEY} setting could not be written (${reason}). Nothing was changed.`;
-    recordReceipt(`${summary} Steps: ${steps.join('; ')}`);
-    return { repaired: false, steps, summary };
+    return finish(false, `[Daemon] Repair could not start: the ${DAEMON_ENABLED_KEY} setting could not be written (${reason}). Nothing was changed.`);
   }
 
-  // Step 2, the service. `install-service` installs AND starts, so an absent
-  // unit takes one command, not two.
-  const action = offer.serviceInstalled ? startDaemonService(run) : installDaemonService(run);
-  const verb = offer.serviceInstalled ? 'started the daemon service' : 'installed and started the daemon service';
-  if (action.ok) {
-    steps.push(`${verb} through goodvibes-daemon (${action.detail})`);
-  } else {
-    steps.push(`could not ${offer.serviceInstalled ? 'start' : 'install'} the daemon service: ${action.detail}`);
-  }
-
-  // Step 3, proof. The service manager accepting a command is not the daemon
-  // answering, and only the second one means the machine is repaired.
-  const verifyReachable = options.verifyReachable ?? defaultVerifyReachable(config);
-  const reachable = action.ok ? await waitForDaemon(verifyReachable, options) : false;
-  if (action.ok) {
-    steps.push(reachable
-      ? 'confirmed the daemon answers on its configured address'
-      : 'the daemon did not answer on its configured address within the wait');
-  }
-
-  const summary = reachable
-    ? `[Daemon] Repaired: ${DAEMON_ENABLED_KEY} is true, the daemon service is running, and it answers. ${steps.length} steps recorded in the activity log.`
-    : action.ok
-      ? `[Daemon] Partly repaired: ${DAEMON_ENABLED_KEY} is now true and the service command was accepted, but the daemon is not answering yet. Its own logs will say why; the Agent will try to start it again at the next launch.`
-      : `[Daemon] Not repaired: ${DAEMON_ENABLED_KEY} is now true, but the daemon service could not be ${offer.serviceInstalled ? 'started' : 'installed'}, ${action.detail}.`;
-
-  recordReceipt(`${summary} Steps: ${steps.join('; ')}`);
-  return { repaired: reachable, steps, summary };
-}
-
-/** Poll for an answering daemon, attempt-counted so an injected sleep terminates. */
-async function waitForDaemon(
-  isReachable: () => Promise<boolean>,
-  options: DaemonRepairRunOptions,
-): Promise<boolean> {
-  const waitTimeoutMs = options.waitTimeoutMs ?? DEFAULT_WAIT_TIMEOUT_MS;
-  const pollIntervalMs = Math.max(1, options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS);
-  const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => {
-    const timer = setTimeout(resolve, ms);
-    timer.unref?.();
-  }));
-  const attempts = Math.max(1, Math.ceil(waitTimeoutMs / pollIntervalMs));
-  for (let attempt = 0; attempt < attempts; attempt += 1) {
-    if (attempt > 0) await sleep(pollIntervalMs);
-    try {
-      if (await isReachable()) return true;
-    } catch (error) {
-      logger.debug('[daemon-repair] re-probing the daemon failed', { error: summarizeError(error) });
+  if (!offer.serviceInstalled) {
+    const installed = installDaemonService(options.runDaemonCli ?? createDaemonCliRunner());
+    if (!installed.ok) {
+      steps.push(`could not install the daemon service: ${installed.detail}`);
+      return finish(false, `[Daemon] Not repaired: ${DAEMON_ENABLED_KEY} is now true, but the daemon service could not be installed (${installed.detail}). Install it with: ${DAEMON_INSTALL_COMMAND}`);
     }
+    steps.push(`installed the daemon service through goodvibes-daemon (${installed.detail})`);
   }
-  return false;
+
+  const host = options.host ?? defaultDaemonHost(config);
+  if (!host) {
+    steps.push('could not reach the service manager from this process');
+    return finish(false, `[Daemon] Partly repaired: ${DAEMON_ENABLED_KEY} is now true. Start the daemon with: ${DAEMON_START_COMMAND}`);
+  }
+  let brought: DaemonBringUpResult;
+  try {
+    brought = await host.bringUp();
+  } catch (error) {
+    brought = { answered: false, detail: summarizeError(error) };
+  }
+  steps.push(brought.detail);
+  return brought.answered
+    ? finish(true, `[Daemon] Repaired: ${DAEMON_ENABLED_KEY} is true and the daemon answers. ${steps.length} steps recorded in the activity log.`)
+    : finish(false, `[Daemon] Partly repaired: ${DAEMON_ENABLED_KEY} is now true, but the daemon is not answering yet: ${brought.detail}. The Agent tries again at the next launch.`);
 }
 
 /**
- * The two lines headless `run` writes to stderr.
- *
- * Run mode never prompts, stdout is a machine-readable contract and stdin is
- * not a person, but staying silent about a wedged machine is how the incident
- * this repairs lasted weeks. It states the diagnosis and quotes the offer the
- * interactive surface would have made, so the reader knows the fix exists and
- * what taking it involves, then the run proceeds exactly as before.
+ * The lines a headless run writes to stderr for a wedged machine. Run mode
+ * never prompts, so it names the commands that repair the machine, which a
+ * person or an agent can run as they are.
  */
 export function describeDaemonRepairForHeadless(offer: DaemonRepairOffer): readonly string[] {
+  const serviceStep = offer.serviceInstalled ? DAEMON_START_COMMAND : DAEMON_INSTALL_COMMAND;
   return [
     `[Daemon] ${offer.diagnosis}`,
-    `[Daemon] ${offer.offer.replace('Press "y" and the Agent will', 'Start goodvibes-agent interactively and press "y" at the offer, and it will')}`,
+    `[Daemon] To repair: run \`${serviceStep}\`, then set ${DAEMON_ENABLED_KEY} to true in the Agent's settings (or pass \`-c ${DAEMON_ENABLED_KEY}=true\` for one run).`,
   ];
 }

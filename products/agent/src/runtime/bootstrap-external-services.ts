@@ -7,21 +7,16 @@ import {
 /**
  * Connected-host (daemon + HTTP listener) discovery for GoodVibes Agent.
  *
- * Split out of bootstrap.ts (which is near the 800-line architecture cap) to
- * keep this concern, and the Agent's daemon-lifecycle boundary, in one
- * small, readable place.
- *
  * Discovery routes through the platform's host services, which only adopt:
  * a reachable, version-compatible daemon is adopted and anything else (absent,
  * blocked, or on an incompatible wire version) is reported honestly. The
  * Agent never spawns or embeds a daemon of its own and never restarts a
- * running one. One bounded exception at boot: when discovery finds nothing
- * on the configured port but the host's service entry IS installed on this
- * machine, the Agent issues a single start through the platform service
- * manager, waits a bounded time for the daemon to answer, re-probes, and
- * reports what it did (the platform's autostartInstalledDaemon decides and acts;
- * the wording below is the Agent's). A machine with the host installed but
- * stopped must not hand the user homework.
+ * running one. One bounded exception: when discovery finds nothing on the
+ * configured port but the daemon's service entry IS installed on this
+ * machine, the Agent starts it once through the platform service manager,
+ * waits a bounded time, re-probes and reports what it did. The controller's
+ * `daemon` member is that same path, offered to the repair in
+ * runtime/daemon-repair.ts, so a repair ends with the daemon adopted here.
  */
 import { startExternalServices } from '@/runtime/index.ts';
 import {
@@ -39,6 +34,7 @@ import type {
 } from '@/runtime/index.ts';
 import type { HookDispatcher } from '@goodvibes-jev/engine/platform/platform/hooks';
 import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { DAEMON_INSTALL_COMMAND, DAEMON_START_COMMAND, readDaemonServiceState, type DaemonHost, type DaemonBringUpResult } from './daemon-repair.ts';
 import type { SystemMessageRouter } from '../core/system-message-router.ts';
 import type { RuntimeServices } from './services.ts';
 import type { UiRuntimeServices } from './ui-services.ts';
@@ -76,6 +72,8 @@ export interface AgentExternalServicesController {
    * they see the post-discovery daemon state instead of racing it.
    */
   whenDiscovered(): Promise<void>;
+  /** The daemon's service state and its bring-up (re-probe, autostart, adopt), for the repair. */
+  readonly daemon: DaemonHost;
   stop(): Promise<void>;
 }
 
@@ -181,56 +179,93 @@ export function wireAgentExternalServices(options: {
     return handle;
   };
 
-  // Boot-time start of an installed-but-stopped host: when discovery found
-  // nothing on the configured port, check the platform service manager for an
-  // installed host entry, start it once, wait a bounded time, and re-probe.
-  // Every skip/failure path is honest; errors here never break discovery.
-  const maybeStartInstalledConnectedHost = async (): Promise<void> => {
+  // One service query and one starter, shared by the boot-time start and the
+  // repair's bring-up. Built on first use: a machine whose daemon answers at
+  // boot never needs it.
+  let serviceControl: DaemonServiceControl | null = null;
+  const daemonServiceControl = (): DaemonServiceControl => {
+    serviceControl ??= options.connectedHostAutostart?.control ?? createDaemonServiceControl({
+      configManager: services.configManager,
+      workingDirectory: services.workingDirectory,
+      homeDirectory: services.homeDirectory,
+    });
+    return serviceControl;
+  };
+
+  // Start of an installed-but-stopped host: when discovery found nothing on
+  // the configured port, start the installed service entry once, wait a
+  // bounded time, and re-probe. Every skip/failure path is reported.
+  const startInstalledConnectedHost = async (): Promise<DaemonBringUpResult & { readonly level: 'low' | 'high' | null }> => {
     const seams = options.connectedHostAutostart ?? {};
-    try {
-      const probeReachability = seams.probeReachability ?? (() => services.sessionSpineClient.probeReachability());
-      const outcome = await autostartInstalledDaemon({
-        daemonMode: externalServices.daemonStatus.mode,
-        control:
-          seams.control ??
-          createDaemonServiceControl({
-            configManager: services.configManager,
-            workingDirectory: services.workingDirectory,
-            homeDirectory: services.homeDirectory,
-          }),
-        isReachable: async () => (await probeReachability()) === 'online',
-        waitTimeoutMs: seams.waitTimeoutMs,
-        pollIntervalMs: seams.pollIntervalMs,
-        sleep: seams.sleep,
-      });
-      switch (outcome.action) {
-        case 'started':
-        case 'came-online': {
-          const settled = await replaceExternalServices();
-          const adopted = settled.daemonStatus.mode === 'external';
-          const suffix = adopted
-            ? ''
-            : `, but adopting it still failed: ${settled.daemonStatus.reason ?? settled.daemonStatus.mode}`;
-          systemMessageRouter.low(
-            outcome.action === 'started'
-              ? `[Startup] Connected host was installed but stopped; started it (service "${outcome.serviceName}")${suffix}.`
-              : `[Startup] Connected host service "${outcome.serviceName}" was already starting; connected once it answered${suffix}.`,
-          );
-          break;
-        }
-        case 'start-failed': {
-          systemMessageRouter.high(
-            `[Startup] Connected host is installed but not answering, and starting it did not succeed: ${outcome.reason}. Start it manually with: goodvibes service start`,
-          );
-          break;
-        }
-        case 'not-installed':
-        case 'none':
-          break;
+    const probeReachability = seams.probeReachability ?? (() => services.sessionSpineClient.probeReachability());
+    const outcome = await autostartInstalledDaemon({
+      daemonMode: externalServices.daemonStatus.mode,
+      control: daemonServiceControl(),
+      isReachable: async () => (await probeReachability()) === 'online',
+      waitTimeoutMs: seams.waitTimeoutMs,
+      pollIntervalMs: seams.pollIntervalMs,
+      sleep: seams.sleep,
+    });
+    switch (outcome.action) {
+      case 'started':
+      case 'came-online': {
+        const settled = await replaceExternalServices();
+        const adopted = settled.daemonStatus.mode === 'external';
+        const suffix = adopted
+          ? ''
+          : `, but adopting it still failed: ${settled.daemonStatus.reason ?? settled.daemonStatus.mode}`;
+        return {
+          answered: adopted,
+          level: 'low',
+          detail: outcome.action === 'started'
+            ? `Connected host was installed but stopped; started it (service "${outcome.serviceName}")${suffix}`
+            : `Connected host service "${outcome.serviceName}" was already starting; connected once it answered${suffix}`,
+        };
       }
+      case 'start-failed':
+        return {
+          answered: false,
+          level: 'high',
+          detail: `Connected host is installed but not answering, and starting it did not succeed: ${outcome.reason}. Start it with: ${DAEMON_START_COMMAND}`,
+        };
+      case 'not-installed':
+        return { answered: false, level: null, detail: `No daemon service is installed on this machine; install it with: ${DAEMON_INSTALL_COMMAND}` };
+      case 'none':
+        return {
+          answered: outcome.reason === 'daemon-active',
+          level: null,
+          detail: outcome.reason === 'daemon-active' ? 'Connected to the running daemon' : `Nothing was started (${outcome.reason})`,
+        };
+    }
+  };
+
+  const maybeStartInstalledConnectedHost = async (): Promise<void> => {
+    try {
+      const result = await startInstalledConnectedHost();
+      if (result.level === 'low') systemMessageRouter.low(`[Startup] ${result.detail}.`);
+      if (result.level === 'high') systemMessageRouter.high(`[Startup] ${result.detail}`);
     } catch (error) {
       logger.debug('Boot-time connected-host start check failed', { error: summarizeError(error) });
     }
+  };
+
+  const daemon: DaemonHost = {
+    serviceState: () => readDaemonServiceState(daemonServiceControl()),
+    // Re-probe under the current settings (the repair has just turned
+    // discovery back on), then the same start the boot path runs.
+    bringUp: async () => {
+      if (externalServicesPromise) {
+        try {
+          await externalServicesPromise;
+        } catch {
+          // A failed earlier discovery does not prevent this one.
+        }
+      }
+      await replaceExternalServices();
+      const result = await startInstalledConnectedHost();
+      requestRender();
+      return { answered: result.answered, detail: result.detail };
+    },
   };
 
   const platformExternalServices = uiServices.platform as typeof uiServices.platform & {
@@ -279,6 +314,7 @@ export function wireAgentExternalServices(options: {
   return {
     getStatus: () => externalServices,
     whenDiscovered: () => discoveryComplete,
+    daemon,
     stop: async () => {
       await externalServices.stop();
     },

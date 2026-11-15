@@ -213,7 +213,7 @@ describe('wireAgentExternalServices (boot wiring)', () => {
     expect(fixture.discoveryCalls()).toBe(1);
     expect(fixture.router.highs).toHaveLength(1);
     expect(fixture.router.highs[0]).toContain('unit goodvibes-daemon.service failed to start');
-    expect(fixture.router.highs[0]).toContain('goodvibes service start');
+    expect(fixture.router.highs[0]).toContain('goodvibes-daemon start-service');
     expect(fixture.controller.getStatus().daemonStatus.mode).toBe('unavailable');
   });
 

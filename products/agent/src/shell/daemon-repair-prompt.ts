@@ -18,6 +18,7 @@ import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/
 import {
   DAEMON_ENABLED_KEY,
   runDaemonRepair,
+  type DaemonHost,
   type DaemonRepairConfig,
   type DaemonRepairOffer,
   type DaemonRepairResult,
@@ -43,7 +44,13 @@ export interface DaemonRepairPromptOptions {
   readonly session: DaemonRepairSessionMemory;
   readonly systemMessageRouter: { high(message: string): void };
   readonly render: () => void;
-  /** Injectable so a test never spawns the real daemon CLI. */
+  /**
+   * The daemon on this machine. Pass the connected-host controller's `daemon`
+   * so an accepted repair adopts the daemon in this session; without it the
+   * repair uses the platform service manager over `config`.
+   */
+  readonly host?: DaemonHost | undefined;
+  /** Runs the daemon's own CLI for the install step; injectable so a test never spawns it. */
   readonly runDaemonCli?: DaemonCliRunner | undefined;
   /**
    * Injectable repair, so a test drives accept/decline without touching a
@@ -59,7 +66,8 @@ export function createDaemonRepairPrompt(options: DaemonRepairPromptOptions): Da
   const repair = options.repair ?? ((pending: DaemonRepairOffer) => runDaemonRepair({
     config,
     offer: pending,
-    ...(options.runDaemonCli ? { runDaemonCli: options.runDaemonCli } : {}),
+    host: options.host,
+    runDaemonCli: options.runDaemonCli,
   }));
 
   return {
@@ -77,15 +85,14 @@ export function createDaemonRepairPrompt(options: DaemonRepairPromptOptions): Da
       }
 
       systemMessageRouter.high(offer.serviceInstalled
-        ? '[Daemon] Starting the daemon service and waiting for it to answer...'
-        : '[Daemon] Installing and starting the daemon service, then waiting for it to answer...');
+        ? '[Daemon] Starting the daemon service and connecting to it...'
+        : '[Daemon] Installing and starting the daemon service, then connecting to it...');
       render();
 
-      // Fire-and-forget: this runs inside a keypress handler, and the repair
-      // installs or starts a service and then waits for the daemon to answer,
-      // far too long to hold the terminal for. Each outcome lands on the router
-      // when it happens, and runDaemonRepair never throws, so the catch below
-      // exists only so a defect here can never become an unhandled rejection.
+      // Not awaited: this runs inside a keypress handler, and the repair waits
+      // for the daemon to answer. Each outcome lands on the router when it
+      // happens; runDaemonRepair never throws, so the catch below only keeps a
+      // defect from becoming an unhandled rejection.
       void repair(offer)
         .then((result) => {
           systemMessageRouter.high(result.summary);

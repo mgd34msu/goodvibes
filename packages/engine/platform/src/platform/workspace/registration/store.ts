@@ -128,6 +128,41 @@ function validate(snapshot: PersistedRegistry | null): PersistedRegistry {
   };
 }
 
+/** One synchronous read of the register file, judged by the store's own rules. */
+export type WorkspaceRegisterRead =
+  | { readonly state: 'absent' }
+  | {
+    readonly state: 'ok';
+    readonly version: 1 | 2;
+    /** v1 rows keep every field they were written with, except an unattested `nativeScope`. */
+    readonly workspaces: readonly RegisteredWorkspaceRecord[];
+    readonly declines: readonly DeclinedWorkspaceRecord[];
+  }
+  | { readonly state: 'unreadable'; readonly reason: string };
+
+/**
+ * Read the register at `path` synchronously, accepting exactly what the store
+ * accepts. For callers that cannot await the store (start-up composition, the
+ * per-event checkpoint gate); they take no lock, so they may see the previous
+ * complete file but never a torn one (writes are one atomic rename).
+ */
+export function readWorkspaceRegisterSync(path: string): WorkspaceRegisterRead {
+  let bytes: string;
+  try {
+    bytes = readFileSync(path, 'utf-8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { state: 'absent' };
+    return { state: 'unreadable', reason: error instanceof Error ? error.message : String(error) };
+  }
+  try {
+    // `validate` is the runtime check of this shape; anything else throws there.
+    const state = validate(JSON.parse(bytes) as PersistedRegistry | null);
+    return { state: 'ok', version: state.version, workspaces: state.workspaces, declines: state.declines };
+  } catch (error) {
+    return { state: 'unreadable', reason: error instanceof Error ? error.message : String(error) };
+  }
+}
+
 /** Short digest of the registrations and declines at or below `root`, ignoring everything elsewhere in the registry. */
 function subtreeDigest(root: string, registrations: readonly RegisteredWorkspaceRecord[], declinedRoots: readonly string[]): string {
   const within = (candidate: string): boolean => candidate === root || candidate.startsWith(root.endsWith(sep) ? root : `${root}${sep}`);

@@ -40,3 +40,6 @@ export async function runHeadlessCommand(
     process.removeListener('SIGTERM', interrupt);
   }
 }
+
+// The turn a headless command runs, shared by both terminal products.
+export * from './headless-turn.js';

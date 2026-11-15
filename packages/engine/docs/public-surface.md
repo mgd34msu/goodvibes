@@ -320,7 +320,7 @@ The following table lists the notable platform subpaths. The `exports` map in `p
 | `platform/relay` | Daemon-side relay surface: the reachability controller and the WebAuthn step-up policy hook. Node-only; the daemon never mints its own certificates | beta |
 | `platform/rewind` | Unified message-anchored rewind service (`UnifiedRewindService`) over the existing workspace-checkpoint / conversation / file-undo stores, plus its ports and plan/receipt IO types, so a consumer can construct it and thread the workspace + conversation ports | beta |
 | `platform/runtime` | Curated runtime surface exposing bootstrap, observability, operations, security, shell, state, transport, and UI as namespaces | beta |
-| `platform/runtime/bootstrap` | Background provider and MCP discovery task scheduling used during runtime startup | beta |
+| `platform/runtime/bootstrap` | Background provider and MCP discovery task scheduling used during runtime startup, and `composeRuntimeServices`, the one runtime graph a product builds from its choices (roots, memory store location, workspace trust, how asks are raised, host seams, `extras`) | beta |
 | `platform/runtime/client` | The client-side seams: what a surface does at each point its own process stops and the daemon's begins | beta |
 | `platform/runtime/client-services` | The composition shape for a surface that runs its own interactive loop and reaches a daemon for everything else, distinct from the daemon-grade `RuntimeServices` graph | beta |
 | `platform/runtime/config` | Bridges in-process config changes to the runtime event bus's `config` domain so a daemon-backed client gets live change notices instead of polling | beta |

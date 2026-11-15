@@ -75,6 +75,19 @@ export type {
 // parameter takes, consumers name this alias instead of re-anchoring through
 // the positional `Parameters<typeof startHostServices>[3]`.
 export type { RuntimeServices } from './services.js';
+// The one composition every product builds its graph through: each product's
+// differences (roots, memory store, workspace trust, how asks are raised, the
+// host's own seams) are the inputs, and what only one product has is `extras`.
+export { composeRuntimeServices, embeddedProductComposition } from './services.js';
+export type {
+  ProductComposition,
+  ProductSurface,
+  SurfaceRoots,
+  MemoryStoreChoice,
+  WorkspaceTrustChoice,
+  PermissionHostSeam,
+  HostSeams,
+} from './services.js';
 // The OTHER composition shape: what a surface product's interactive loop needs
 // in-process, without the daemon-grade furniture `RuntimeServices` requires.
 // Purely additive, `RuntimeServices` is unchanged and still satisfies the

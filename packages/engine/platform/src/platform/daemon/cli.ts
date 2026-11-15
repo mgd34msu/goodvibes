@@ -6,7 +6,8 @@ import { ConfigManager } from '../config/manager.js';
 import { resolveDaemonEnabled } from '../config/index.js';
 import { RuntimeEventBus, configureRuntimeEventBusDefaults, runtimeEventBusOptionsFrom } from '../runtime/events/index.js';
 import { createRuntimeStore } from '../runtime/store/index.js';
-import { createRuntimeServices } from '../runtime/services.js';
+import { composeRuntimeServices } from '../runtime/services.js';
+import { foldMemoryStores } from '../state/canonical-memory.js';
 import { createHostPowerSeam } from '../power/runtime-wiring.js';
 import { DaemonServer } from './server.js';
 import { createHostShutdown, settleDaemonStart } from './cli-shutdown.js';
@@ -95,28 +96,37 @@ async function main(): Promise<void> {
   ensureDaemonHome(daemonHomeDir);
   const runtimeStore = createRuntimeStore();
   await prepareConfiguredProjectContext(config, workingDir, REGULAR_KNOWLEDGE_DB_FILE, { activate: true });
-  const runtimeServices = createRuntimeServices({
-    configManager: config,
-    runtimeBus,
-    runtimeStore,
-    surfaceRoot: 'goodvibes',
-    getConversationTitle: () => 'goodvibes daemon',
-    workingDir,
-    homeDirectory,
-    // The same override, threaded into the credential store so it MOVES the
-    // daemon-scoped secret tier too. runtime/secrets-composition.ts records
-    // what happened while no composition root passed it: a throwaway daemon
-    // given `--daemon-home /tmp/...` kept reading the owner's real secret
-    // store, long-polled their real bot token, and stopped their inbound messages.
-    daemonHome: daemonHomeDir,
-    // The real standalone daemon observes externally-launched coding-agent
-    // sessions on the host read-only (fleet visibility + steer; never counted,
-    // never stopped). Off in the generic factory for test determinism.
-    observeExternalAgents: true,
-    // The real standalone daemon owns the host sleep edge (work inhibition,
-    // keep-awake, sleep-edge checkpoint/catch-up). Off in the generic factory
-    // so tests never spawn systemd-inhibit / dbus-monitor host processes.
-    powerSeam: createHostPowerSeam(),
+  // The shipped daemon's choices: one trust owner in front of every ask this
+  // daemon raises (an undecided workspace asks once, as an approval any attached
+  // surface can answer), and the one home-scoped memory store every product opens.
+  const runtimeServices = composeRuntimeServices({
+    surface: 'daemon',
+    roots: {
+      surfaceRoot: 'goodvibes',
+      workingDir,
+      homeDirectory,
+      // The same override, threaded into the credential store so it MOVES the
+      // daemon-scoped secret tier too. runtime/secrets-composition.ts records
+      // what happened while no composition root passed it: a throwaway daemon
+      // given `--daemon-home /tmp/...` kept reading the owner's real secret
+      // store, long-polled their real bot token, and stopped their inbound messages.
+      daemonHome: daemonHomeDir,
+    },
+    memoryStore: 'home',
+    workspaceTrust: 'surface',
+    permissionHost: {},
+    hostSeams: {
+      configManager: config,
+      runtimeBus,
+      runtimeStore,
+      getConversationTitle: () => 'goodvibes daemon',
+      // Observes externally-launched coding-agent sessions on the host read-only
+      // (fleet visibility + steer; never counted, never stopped).
+      observeExternalAgents: true,
+      // Owns the host sleep edge (work inhibition, keep-awake, sleep-edge
+      // checkpoint/catch-up).
+      powerSeam: createHostPowerSeam(),
+    },
   });
 
   const userAuth = runtimeServices.localUserAuthManager;
@@ -162,6 +172,15 @@ async function main(): Promise<void> {
   });
   process.on('SIGINT', () => void shutdown());
   process.on('SIGTERM', () => void shutdown());
+
+  // Memory this daemon kept in its per-project file before it opened the home
+  // store. Id-keyed and idempotent: an absent file is one existence check, and a
+  // re-run imports nothing new. The old file is never deleted.
+  const legacyMemory = join(workingDir, '.goodvibes', 'goodvibes', 'memory.sqlite');
+  await foldMemoryStores(runtimeServices.memoryStore, [{ label: `${workingDir} (per-project store)`, dbPath: legacyMemory }],
+    { embeddingRegistry: runtimeServices.memoryEmbeddingRegistry })
+    .then(report => { if (report.totalImported > 0 || report.failedSources.length > 0) logger.info('memory fold', { imported: report.totalImported, failed: report.failedSources.length }); })
+    .catch(error => logger.warn('memory fold failed; the home store serves on', { error: summarizeError(error) }));
 
   const [startOutcome] = await Promise.all([
     daemon.start(),

@@ -94,7 +94,12 @@ import {
   createBrokeredPermissionManager,
   createPolicyRuntimeState,
   createUserPermissionRuleStore,
+  type ApprovalRaiser,
 } from './permissions/permission-composition.js';
+import type { PermissionManager } from '../permissions/manager.js';
+import { resolveCanonicalMemoryDbPath } from '../state/canonical-memory.js';
+import { WorkspaceTrustManager, type WorkspaceTrustLevel } from './workspace-trust.js';
+import { createWorkspaceTrustDecisionAsk, trustGatedApprovalRaiser } from './workspace-trust-approval.js';
 import {
   FeatureAnnouncementStore,
   featureAnnouncementsPath,
@@ -161,7 +166,67 @@ import {
   type MemoryGovernor,
 } from './memory/index.js';
 
-export interface RuntimeServicesOptions {
+/** Which product a composition is for. Names the graph; the choices below carry the differences. */
+export type ProductSurface = 'tui' | 'agent' | 'daemon' | 'embedded';
+
+/** Where a composition's state lives. */
+export interface SurfaceRoots {
+  /** The `.goodvibes/<surface root>/` segment every surface-scoped store is built under. */
+  readonly surfaceRoot: string;
+  readonly workingDir: string;
+  readonly homeDirectory: string;
+  /**
+   * The daemon's state root when the host was told one (`--daemon-home`,
+   * `GOODVIBES_DAEMON_HOME`, a test harness's temp tree). Threaded into
+   * `SecretsManager` so the override actually MOVES the daemon-scoped
+   * credential store; see runtime/secrets-composition.ts for what went wrong
+   * while it did not. Absent = the machine default.
+   */
+  readonly daemonHome?: string | undefined;
+  /** Override the broker store path (default: home-scoped durable store). */
+  readonly sessionStorePath?: string | undefined;
+}
+
+/**
+ * Where the memory store lives.
+ * - `home`: the one cross-surface store under the user's home, what every shipped product opens.
+ * - `project`: a per-project file under `<workingDir>/.goodvibes/<surface root>/`; it follows a workspace swap.
+ * - `{ path }`: an explicit file.
+ */
+export type MemoryStoreChoice = 'home' | 'project' | { readonly path: string };
+
+/** The slice of a workspace trust owner an autonomous protocol request reads. */
+type WorkspaceTrustConstraint = Pick<WorkspaceTrustManager, 'prepareAutonomousConstraint'>;
+
+/**
+ * Whether this product gates asks on a per-workspace trust decision.
+ * - `none`: no separate workspace policy; external and autonomous execution decline.
+ * - `surface`: one trust owner at `<workingDir>/.goodvibes/<surface root>/trust.json`, in front of every ask the
+ *   graph raises. An undecided workspace asks once through `requestTrustDecision`, by default an ordinary
+ *   approval record on this graph's broker that any attached surface can answer. `resolveFor` names the trust
+ *   owner for another directory an autonomous protocol process runs in.
+ */
+export type WorkspaceTrustChoice =
+  | 'none'
+  | 'surface'
+  | {
+    readonly kind: 'surface';
+    readonly requestTrustDecision?: (() => Promise<WorkspaceTrustLevel>) | undefined;
+    readonly resolveFor?: ((manager: WorkspaceTrustManager) => (cwd: string) => WorkspaceTrustConstraint | null | undefined) | undefined;
+  };
+
+/** How this product raises an approval ask. */
+export interface PermissionHostSeam {
+  /**
+   * The raiser every permission ask in the graph goes through, built over the graph's own broker. Absent: the
+   * broker itself. A client passes one that posts the ask to the daemon while prompting on its own screen. The
+   * workspace trust gate, when chosen, wraps whatever this returns.
+   */
+  readonly raiseApproval?: ((broker: ApprovalBroker) => ApprovalRaiser) | undefined;
+}
+
+/** What the host process hands the graph: its bus, store, settings and the host-only seams. */
+export interface HostSeams {
   /** Trusted installed-data publisher; otherwise use the configured host writer. */
   readonly nativeDataWriter?: import('./native-reader-compatibility.js').NativeDataWriteOwner | undefined;
   /** Explicit absolute ordinary-Bun runtime for contained captured evaluation. */
@@ -169,11 +234,8 @@ export interface RuntimeServicesOptions {
   readonly runtimeBus: RuntimeEventBus;
   readonly runtimeStore: RuntimeStore;
   readonly configManager: ConfigManager;
-  readonly surfaceRoot: string;
   readonly featureFlags?: FeatureFlagManager | undefined;
   readonly getConversationTitle?: (() => string | undefined) | undefined;
-  readonly workingDir: string;
-  readonly homeDirectory: string;
   readonly panelManager?: PanelManagerLike | undefined;
   readonly keybindingsManager?: KeybindingsManagerLike | undefined;
   /**
@@ -184,22 +246,30 @@ export interface RuntimeServicesOptions {
   readonly autoStartCodeIndex?: boolean | undefined;
   /**
    * Opt-in: fold host coding-agent sessions the daemon did not spawn into the
-   * fleet as read-only observed rows. Off by default (test determinism); the standalone daemon (cli.ts) turns it on.
+   * fleet as read-only observed rows. Off by default; a long-running daemon turns it on.
    */
   readonly observeExternalAgents?: boolean | undefined;
-  /** Override the broker store path (default: home-scoped durable store). */
-  readonly sessionStorePath?: string | undefined;
-  /** Opt-in host power seam for sleep ownership; absent ⇒ non-spawning unavailable seam (test determinism), the standalone daemon (cli.ts) passes createHostPowerSeam(). */
+  /** Host power seam for sleep ownership; absent: a non-spawning unavailable seam. A long-running host passes createHostPowerSeam(). */
   readonly powerSeam?: PowerPlatformSeam | undefined;
-  /**
-   * The daemon's state root when the host was told one (`--daemon-home`,
-   * `GOODVIBES_DAEMON_HOME`, a test harness's temp tree). Threaded into
-   * `SecretsManager` so the override actually MOVES the daemon-scoped
-   * credential store; see runtime/secrets-composition.ts for what went wrong
-   * while it did not. Absent = the machine default.
-   */
-  readonly daemonHome?: string | undefined;
 }
+
+/**
+ * One product's composition: the differences between the products, stated as inputs to the one graph.
+ * `extras` adds what only this product has, built over the finished base graph; it may replace members but
+ * owns the teardown of anything it starts (wrap `close`/`dispose` of the base it was given).
+ */
+export interface ProductComposition {
+  readonly surface: ProductSurface;
+  readonly roots: SurfaceRoots;
+  readonly memoryStore: MemoryStoreChoice;
+  readonly workspaceTrust: WorkspaceTrustChoice;
+  readonly permissionHost: PermissionHostSeam;
+  readonly hostSeams: HostSeams;
+  extras?(base: RuntimeServices): Partial<RuntimeServices>;
+}
+
+/** The embedded graph's options: roots and host seams in one flat object (see createRuntimeServices). */
+export interface RuntimeServicesOptions extends SurfaceRoots, HostSeams {}
 
 export interface RuntimeServices {
   /** Trusted installed-data publisher; absent for non-native embedders. */
@@ -215,6 +285,10 @@ export interface RuntimeServices {
    * that produced the unscoped pre-split control-plane store.
    */
   readonly surfaceRoot: string;
+  /** The workspace trust owner every ask in this graph passes; absent when the product composed without one. */
+  readonly workspaceTrustManager?: WorkspaceTrustManager | undefined;
+  /** The permission manager background and hosted runs ask through, behind the trust gate when there is one. */
+  readonly permissionManager?: PermissionManager | undefined;
   /** platform-owned memory governance: samples RSS/heap, sheds caches, pauses jobs, trips on leaks. */
   readonly memoryGovernor: MemoryGovernor;
   /** Registry of every retained cache the governor can observe and shrink. */
@@ -370,29 +444,58 @@ export {
 } from './provider-optimizer-wiring.js';
 
 /**
- * Compose the platform's own embedded runtime graph. No product ships this root:
- * the terminal, agent and daemon products each build their own graph, with
- * workspace trust and a home-scoped memory store. This one has no workspace-trust
- * gate (external and autonomous execution decline here), keeps memory in a
- * per-project file, and is what the engine's standalone `daemon/cli.ts` and the
- * engine tests compose. A trust, approval or memory behaviour proven only through
- * this graph is not proven for a shipped product; assert it from the product's
- * own composition.
+ * The embedded product's choices: no workspace-trust gate (external and
+ * autonomous execution decline), memory in a per-project file, asks raised on
+ * the graph's own broker. A test that asserts trust, approval or memory
+ * behaviour composes the shipped product's choices instead (`'surface'` trust,
+ * `'home'` memory) through composeRuntimeServices.
  */
+export function embeddedProductComposition(options: RuntimeServicesOptions): ProductComposition {
+  return { surface: 'embedded', roots: options, hostSeams: options, memoryStore: 'project', workspaceTrust: 'none', permissionHost: {} };
+}
+
+/** The embedded graph: composeRuntimeServices over embeddedProductComposition. */
 export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeServices {
-  assertConfiguredProjectContextReady(options.configManager, options.workingDir, REGULAR_KNOWLEDGE_DB_FILE);
+  return composeRuntimeServices(embeddedProductComposition(options));
+}
+
+/**
+ * Compose one runtime graph. Every product's differences arrive as the explicit
+ * choices on `product`; nothing here branches on which product asked.
+ */
+export function composeRuntimeServices(product: ProductComposition): RuntimeServices {
+  assertConfiguredProjectContextReady(product.hostSeams.configManager, product.roots.workingDir, REGULAR_KNOWLEDGE_DB_FILE);
   const disposalScope = createAsyncDisposalScope('RuntimeServices');
   // A constructor that throws part-way would otherwise leave every timer, watch and
   // store handle already started with no owner to stop it.
+  let base: RuntimeServices;
   try {
-    return composeRuntimeServices(options, disposalScope);
+    base = buildRuntimeGraph(product, disposalScope);
   } catch (error) {
     disposalScope.dispose();
     throw error;
   }
+  if (!product.extras) return base;
+  try {
+    return { ...base, ...product.extras(base) };
+  } catch (error) {
+    base.dispose();
+    throw error;
+  }
 }
 
-function composeRuntimeServices(options: RuntimeServicesOptions, disposalScope: AsyncDisposalScope): RuntimeServices {
+function resolveMemoryDbPath(choice: MemoryStoreChoice, roots: { readonly workingDir: string; readonly homeDirectory: string }, surfaceRoot: string): string {
+  if (choice === 'home') return resolveCanonicalMemoryDbPath(roots.homeDirectory);
+  if (choice === 'project') return projectMemoryDbPath(roots.workingDir, surfaceRoot);
+  return choice.path;
+}
+
+function projectMemoryDbPath(workingDir: string, surfaceRoot: string): string {
+  return join(workingDir, '.goodvibes', surfaceRoot, 'memory.sqlite');
+}
+
+function buildRuntimeGraph(product: ProductComposition, disposalScope: AsyncDisposalScope): RuntimeServices {
+  const options: RuntimeServicesOptions = { ...product.roots, ...product.hostSeams };
   const workingDirectory = options.workingDir;
   const homeDirectory = options.homeDirectory;
   const surfaceRoot = requireSurfaceRoot(options.surfaceRoot, 'RuntimeServicesOptions surfaceRoot');
@@ -559,7 +662,7 @@ function composeRuntimeServices(options: RuntimeServicesOptions, disposalScope: 
   });
   const artifactStore = new ArtifactStore({ configManager });
   const memoryEmbeddingRegistry = new MemoryEmbeddingProviderRegistry({ configManager });
-  const memoryDbPath = join(workingDirectory, '.goodvibes', surfaceRoot, 'memory.sqlite');
+  const memoryDbPath = resolveMemoryDbPath(product.memoryStore, options, surfaceRoot);
   const memoryStore = new MemoryStore(memoryDbPath, {
     embeddingRegistry: memoryEmbeddingRegistry,
   });
@@ -897,9 +1000,25 @@ function composeRuntimeServices(options: RuntimeServicesOptions, disposalScope: 
   // every PermissionManager here; permissions.rules.* lists/deletes. Background init is fail-safe.
   // Same store + same manager wiring the pure-client composition uses (permissions/permission-composition.ts).
   const userPermissionRuleStore = createUserPermissionRuleStore(configManager);
+  // The product's raiser, behind the workspace trust gate when the product has one. Every ask below
+  // (tool permissions and the three approval-derived handlers) goes through this one function, so a
+  // restricted workspace refuses them all the same way.
+  const raiseApproval: ApprovalRaiser = product.permissionHost.raiseApproval?.(approvalBroker)
+    ?? ((input) => approvalBroker.requestApproval(input));
+  const trustChoice = product.workspaceTrust === 'none' ? null
+    : product.workspaceTrust === 'surface' ? { kind: 'surface' as const } : product.workspaceTrust;
+  const workspaceTrustManager = trustChoice ? new WorkspaceTrustManager({ shellPaths, surfaceRoot }) : undefined;
+  const requestApproval: ApprovalRaiser = trustChoice && workspaceTrustManager
+    ? trustGatedApprovalRaiser(
+      workspaceTrustManager,
+      raiseApproval,
+      trustChoice.requestTrustDecision ?? createWorkspaceTrustDecisionAsk({ broker: approvalBroker, workingDirectory }),
+    )
+    : raiseApproval;
+  const workspaceTrustFor = trustChoice?.resolveFor && workspaceTrustManager ? trustChoice.resolveFor(workspaceTrustManager) : undefined;
   const backgroundPermissionManager = createBrokeredPermissionManager({
-    workspaceTrust: null,
-    requestApproval: (input) => approvalBroker.requestApproval(input),
+    workspaceTrust: workspaceTrustManager ?? null,
+    requestApproval,
     configManager,
     policyRuntimeState,
     hookDispatcher,
@@ -909,7 +1028,8 @@ function composeRuntimeServices(options: RuntimeServicesOptions, disposalScope: 
   const externalPermissionLifetime = new AbortController();
   disposalScope.registry.add('external protocol permission lifetime', () => externalPermissionLifetime.abort());
   const externalPermissionHost = { port: judgment.port, permissionManager: backgroundPermissionManager,
-    config: configManager, signal: externalPermissionLifetime.signal, workspaceTrust: null, workspaceRoot: workingDirectory };
+    config: configManager, signal: externalPermissionLifetime.signal, workspaceTrust: workspaceTrustManager ?? null, workspaceRoot: workingDirectory,
+    ...(workspaceTrustFor ? { workspaceTrustFor } : {}) };
   // The interactive session binds its Orchestrator-backed source onto this holder
   // after construction; passing it through here registers the context_accounting
   // tool on the shared roster (every consumer inherits it, like repo_map).
@@ -926,7 +1046,7 @@ function composeRuntimeServices(options: RuntimeServicesOptions, disposalScope: 
     onSandboxedRun,
   } = createApprovalDerivedHandlers({
     autonomousHost: externalPermissionHost,
-    requestApproval: (input) => approvalBroker.requestApproval(input),
+    requestApproval,
     configManager,
     featureFlags,
     announcementStore,
@@ -1167,6 +1287,8 @@ function composeRuntimeServices(options: RuntimeServicesOptions, disposalScope: 
     nativeMutationHost: externalPermissionHost,
     homeDirectory,
     surfaceRoot,
+    ...(workspaceTrustManager ? { workspaceTrustManager } : {}),
+    permissionManager: backgroundPermissionManager,
     memoryGovernor,
     cacheRegistry,
     pauseController,
@@ -1273,7 +1395,6 @@ function composeRuntimeServices(options: RuntimeServicesOptions, disposalScope: 
     close: (): Promise<void> => { stopRequests.request(); return disposalScope.close(); },
     async rerootStores(newWorkingDir: string): Promise<{ readonly requiresRestart: readonly string[] }> {
       const previousDir = storesRootedAt;
-      const memoryPath = (dir: string): string => join(dir, '.goodvibes', surfaceRoot, 'memory.sqlite');
       const codeIndexPath = (dir: string): string => join(dir, '.goodvibes', surfaceRoot, 'code-index.sqlite');
       const indexStats = codeIndexStore.stats();
       const codeIndexWasBuilt = codeIndexStore.isBuilding() || indexStats.lastBuild !== null || indexStats.indexedChunks > 0;
@@ -1281,8 +1402,11 @@ function composeRuntimeServices(options: RuntimeServicesOptions, disposalScope: 
       // reports failure leaves nothing reading or writing the other tree.
       const moved: Array<{ readonly name: string; readonly restore: () => Promise<unknown> }> = [];
       try {
-        await memoryStore.reroot(memoryPath(newWorkingDir));
-        moved.push({ name: 'memory store', restore: () => memoryStore.reroot(memoryPath(previousDir)) });
+        // Only a per-project memory store follows the workspace; a home or explicit one stays where it is.
+        if (product.memoryStore === 'project') {
+          await memoryStore.reroot(projectMemoryDbPath(newWorkingDir, surfaceRoot));
+          moved.push({ name: 'memory store', restore: () => memoryStore.reroot(projectMemoryDbPath(previousDir, surfaceRoot)) });
+        }
         // Re-root the code index alongside memory. Otherwise it keeps
         // pointing at the old tree after a workspace swap.
         await codeIndexStore.reroot(newWorkingDir, codeIndexPath(newWorkingDir));

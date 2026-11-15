@@ -62,9 +62,16 @@ constructing native work services. The synchronous `new DaemonServer(config)`
 entry point requires an already prepared project context or an existing
 `runtimeServices` graph. Direct runtime embedders call
 `await prepareConfiguredProjectContext(configManager, workingDirectory,
-'knowledge-wiki.sqlite', { activate: true })` before `createRuntimeServices`.
+'knowledge-wiki.sqlite', { activate: true })` before `composeRuntimeServices`
+(or `createRuntimeServices`, its embedded choices).
 The preparation API's default mode only inspects existing project metadata;
 activation explicitly registers the project for an active runtime.
+
+`composeRuntimeServices(product)` builds the graph from the host's choices: where
+memory lives (`'home'`, the one store every shipped product opens; `'project'`; or
+an explicit path), whether a workspace trust owner stands in front of every ask
+(`'surface'` or `'none'`), how an ask is raised (`permissionHost.raiseApproval`,
+by default the graph's own broker), and `extras` for what only that host adds.
 
 The platform does not replace your server framework. You still own:
 - **request routing**: matching incoming requests to the handlers this package builds.

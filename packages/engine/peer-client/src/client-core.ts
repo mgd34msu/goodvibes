@@ -10,7 +10,6 @@ import type { HttpTransport } from '@goodvibes-jev/engine/transport-http';
 import {
   firstJsonSchemaFailureAsync,
   invokeContractRoute,
-  retainJsonSchemaSource,
   mergeClientInput,
   requireContractRoute,
   type ContractInvokeOptions,
@@ -108,6 +107,27 @@ function requireEndpoint(
   return requireContractRoute(contract.endpoints, endpointId, 'peer endpoint');
 }
 
+const frozenContracts = new WeakSet<object>();
+
+/**
+ * Deep-freeze a contract manifest once, so the endpoint schemas a response is
+ * validated against cannot change for the life of the client. A manifest
+ * already frozen by an earlier client is recognised in O(1); no request pays
+ * for this.
+ */
+function freezeContract(contract: PeerContractManifest): void {
+  if (frozenContracts.has(contract)) return;
+  const pending: object[] = [contract];
+  const seen = new Set<object>();
+  for (let node = pending.pop(); node !== undefined; node = pending.pop()) {
+    if (seen.has(node)) continue;
+    seen.add(node);
+    for (const child of Object.values(node)) if (child !== null && typeof child === 'object') pending.push(child);
+    Object.freeze(node);
+  }
+  frozenContracts.add(contract);
+}
+
 /**
  * Construct a low-level peer remote client from a transport and contract manifest.
  *
@@ -124,6 +144,7 @@ export function createPeerRemoteClient(
   contract: PeerContractManifest,
   clientOptions: PeerRemoteClientOptions = {},
 ): PeerRemoteClient {
+  freezeContract(contract);
   function invokeTyped<TEndpointId extends PeerTypedEndpointId>(
     endpointId: TEndpointId,
     ...args: KnownEndpointArgs<TEndpointId>
@@ -152,27 +173,16 @@ export function createPeerRemoteClient(
     options: PeerRemoteClientInvokeOptions,
   ): Promise<T> {
     const endpoint = requireEndpoint(contract, endpointId);
-    const validateResponse = clientOptions.validateResponses !== false;
+    if (clientOptions.validateResponses === false) return invokeContractRoute<T>(transport, endpoint, input, options);
     const getRegexReading = clientOptions.getRegexReading, configuredReading = clientOptions.regexReading;
-    const outputSchema = endpoint.outputSchema;
-    // The schema graph is captured once per call, and only when it will be used.
-    const retainedSchema = validateResponse ? retainJsonSchemaSource(outputSchema) : undefined;
-    const assertValidationCurrent = () => {
-      options.signal?.throwIfAborted();
-      if (requireEndpoint(contract, endpointId) !== endpoint || clientOptions.getRegexReading !== getRegexReading || clientOptions.regexReading !== configuredReading || endpoint.id !== endpointId || endpoint.outputSchema !== outputSchema)
-        throw new ContractError('Response schema owner changed during the request.');
-      retainedSchema?.assertCurrent();
-    };
+    const signal = options.signal;
     return invokeContractRoute<T>(transport, endpoint, input, options).then(async (body) => {
-      if (validateResponse) {
-        assertValidationCurrent();
-        const reading = getRegexReading && outputSchema
-          ? getRegexReading({ kind: 'peer', methodId: endpointId, outputSchema: structuredClone(retainedSchema?.snapshot) as Record<string, unknown>, signal: options.signal, assertCurrent: assertValidationCurrent })
-          : configuredReading;
-        assertValidationCurrent();
-        await validateJsonSchemaResponse(endpoint, body, { signal: options.signal, reading, assertCurrent: assertValidationCurrent });
-        assertValidationCurrent();
-      }
+      signal?.throwIfAborted();
+      const outputSchema = endpoint.outputSchema;
+      const reading = getRegexReading && outputSchema
+        ? getRegexReading({ kind: 'peer', methodId: endpointId, outputSchema, signal, assertCurrent: () => signal?.throwIfAborted() })
+        : configuredReading;
+      await validateJsonSchemaResponse(endpoint, body, { signal, reading });
       return body;
     });
   }
@@ -219,7 +229,7 @@ function isMutatingRoute(method: unknown): boolean {
   return typeof method === 'string' && !['GET', 'HEAD'].includes(method.toUpperCase());
 }
 
-async function validateJsonSchemaResponse(endpoint: PeerEndpointContract, body: unknown, options: { readonly signal?: AbortSignal | undefined; readonly reading?: RegexReadingCapability | undefined; readonly assertCurrent: () => void }): Promise<void> {
+async function validateJsonSchemaResponse(endpoint: PeerEndpointContract, body: unknown, options: { readonly signal?: AbortSignal | undefined; readonly reading?: RegexReadingCapability | undefined }): Promise<void> {
   const schema = endpoint.outputSchema;
   if (!schema || typeof schema !== 'object') return;
   const failure = await firstJsonSchemaFailureAsync(schema as Record<string, unknown>, body, options);

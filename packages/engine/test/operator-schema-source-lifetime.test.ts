@@ -129,18 +129,6 @@ describe('native recursive response schema source lifetime', () => {
     expect(readings.requests).toHaveLength(0);
   });
 
-  test.each(['schema descendant', 'equal alias replacement', 'value descendant', 'restriction callback'])('pending pattern execution retains %s', async kind => {
-    const { schema, scalar, properties } = recursiveSchema();
-    const value = { first: 'native', second: 'native' };
-    const options = { assertCurrent: () => {} };
-    const pending = firstJsonSchemaFailureAsync(schema, value, options);
-    if (kind === 'schema descendant') scalar.pattern = '^changed$';
-    if (kind === 'equal alias replacement') properties.second = { ...scalar };
-    if (kind === 'value descendant') value.second = 'changed';
-    if (kind === 'restriction callback') options.assertCurrent = () => { throw new Error('Replacement callback must not run.'); };
-    await expect(pending).rejects.toThrow();
-  });
-
   test('a native recursive schema still refuses an invalid nested response', async () => {
     const native = buildOperatorContract(new GatewayMethodCatalog());
     const method = native.operator.methods.find(item => item.id === 'sessions.create');

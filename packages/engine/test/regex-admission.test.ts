@@ -124,14 +124,6 @@ test('changing Jev configuration does not retire local regex execution', async (
 });
 
 
-test('schema source mutations during worker startup cannot authorize changed values', async () => {
-  const schema = { type: 'string', pattern: '^a$' };
-  const pending = firstJsonSchemaFailureAsync(schema, 'a');
-  schema.pattern = '^b$';
-  await expect(pending).rejects.toThrow();
-});
-
-
 test('permission matcher mutation during worker startup cannot become an allow', async () => {
   const rule = { type: 'arg-shape' as const, id: 'allow', origin: 'user' as const, effect: 'allow' as const, toolPattern: 'read', argMatchers: { path: '/public/' } };
   const pending = evaluateArgShapeRuleAsync(rule, 'read', { path: 'public' });

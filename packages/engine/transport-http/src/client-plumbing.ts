@@ -1,6 +1,5 @@
 import type { OmitNamed, RequiredNamedKeys } from '@goodvibes-jev/engine/contracts';
 import { ContractError, admitRegex, compileLegacyRegex, type RegexAdmissionOptions } from '@goodvibes-jev/engine/errors';
-import { retainJsonSchemaSource } from './retained-schema-source.js';
 
 const MAX_SCHEMA_PATTERN_CHARS = 512;
 const MAX_SCHEMA_PATTERN_INPUT_CHARS = Number.MAX_SAFE_INTEGER;
@@ -137,29 +136,27 @@ export function firstJsonSchemaFailure(
   return next.value;
 }
 
-/** One owned schema/value snapshot; no result or admission escapes this call. */
+/**
+ * Validate a value against a JSON Schema, running non-fixed `pattern` tests in
+ * the isolated regex executor. The schema is the caller's settled value (a
+ * contract manifest is frozen once where it is loaded) and the value belongs to
+ * the call, so neither is copied or re-scanned. Between awaited pattern tests
+ * only the call's signal and the caller's own `assertCurrent` are consulted.
+ */
 export async function firstJsonSchemaFailureAsync(
   schema: Record<string, unknown>, value: unknown,
   options: Omit<RegexAdmissionOptions, 'operation'> = {},
 ): Promise<JsonSchemaValidationFailure | undefined> {
-  const retained = retainJsonSchemaSource<readonly [Record<string, unknown>, unknown]>([schema, value]);
-  const [capturedSchema, capturedValue] = retained.snapshot;
-  const signal = options.signal, assertOwnerCurrent = options.assertCurrent, reading = options.reading;
-  const current = () => {
-    signal?.throwIfAborted(); assertOwnerCurrent?.();
-    if (options.signal !== signal || options.assertCurrent !== assertOwnerCurrent || options.reading !== reading) {
-      throw new ContractError('Contract schema validation owner changed while reading.');
-    }
-    retained.assertCurrent();
-  };
-  current();
-  const walk = walkJsonSchema(capturedSchema, capturedValue);
+  const signal = options.signal, assertOwnerCurrent = options.assertCurrent;
+  signal?.throwIfAborted();
+  const current = () => { signal?.throwIfAborted(); assertOwnerCurrent?.(); };
+  const walk = walkJsonSchema(schema, value);
   let next = walk.next();
+  if (next.done) return next.value;
   // Reuse only within this exact invocation, not by source across requests.
   const handles = new Map<string, Awaited<ReturnType<typeof admitRegex>>>();
   try {
     while (!next.done) {
-      current();
       const { source, value: input } = next.value;
       if (input.length > MAX_SCHEMA_PATTERN_INPUT_CHARS) throw new ContractError(`Contract schema pattern input exceeds ${MAX_SCHEMA_PATTERN_INPUT_CHARS} characters.`);
       let handle = handles.get(source);
@@ -171,8 +168,6 @@ export async function firstJsonSchemaFailureAsync(
       current();
       next = walk.next(matches);
     }
-    current();
-    for (const handle of handles.values()) handle.assertCurrent();
     return next.value;
   } finally {
     for (const handle of handles.values()) await handle[Symbol.asyncDispose]();

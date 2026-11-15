@@ -132,8 +132,27 @@ function answerProblem(question: Question, answer: RawAnswer): string | undefine
   return headlineProblem(question, answer) ?? (invalid === undefined ? distributionProblem(question, answer) : `no valid ${invalid.what}`);
 }
 
+// Answers the native transport checked, projected and froze, each map keyed to
+// the questions it was checked against. Nothing outside this package can add
+// to them, so a reader or the decision log that meets one trusts it instead of
+// running the same checks again.
+const checkedAnswerMaps = new WeakMap<object, Questions>();
+const checkedAnswers = new WeakSet<object>();
+
+/** Transport only: `answers` passed `checkAnswers(questions, …)`, came from `projectAnswers` and is frozen. */
+export function markCheckedAnswers(questions: Questions, answers: object): void {
+  checkedAnswerMaps.set(answers, questions);
+  for (const answer of Object.values(answers)) if (answer !== null && typeof answer === 'object') checkedAnswers.add(answer);
+}
+
+/** True when `answers` is the transport's checked projection for exactly these questions. */
+export function answersCheckedFor(questions: Questions, answers: unknown): boolean {
+  return answers !== null && typeof answers === 'object' && checkedAnswerMaps.get(answers) === questions;
+}
+
 /** Standalone readers must reject malformed injected answers too. */
 export function captureNoulAnswer(answer: RawAnswer): number {
+  if (checkedAnswers.has(answer) && answer.type === 'noul') return answer.noul!;
   try {
     const { type, noul } = answer;
     if (type !== 'noul' || !isNumberWithin(noul, 0, 1)) throw new Error('invalid noul');
@@ -144,6 +163,10 @@ export function captureNoulAnswer(answer: RawAnswer): number {
 }
 
 export function captureScoreAnswer(answer: RawAnswer): { readonly score: number; readonly confidence: number; readonly probabilities: readonly number[] } {
+  if (checkedAnswers.has(answer) && answer.type === 'score') {
+    const probabilities = answer.probabilities!;
+    return { score: answer.score!, confidence: answer.confidence!, probabilities: Object.keys(probabilities).map((_, level) => probabilities[String(level)]!) };
+  }
   try {
     const { type, score, confidence, probabilities: raw } = answer;
     if (type !== 'score' || typeof score !== 'number' || typeof confidence !== 'number'
@@ -162,6 +185,7 @@ export function captureScoreAnswer(answer: RawAnswer): { readonly score: number;
 
 /** Snapshot and validate standalone readChoice inputs through the same wire rules. */
 export function captureChoiceAnswer(answer: RawAnswer): { readonly choice: string; readonly confidence: number; readonly probabilities: Readonly<Record<string, number>> } {
+  if (checkedAnswers.has(answer) && answer.type === 'choice') return { choice: answer.choice!, confidence: answer.confidence!, probabilities: answer.probabilities! };
   try {
     const { type, choice, confidence, probabilities: raw } = answer;
     if (type !== 'choice' || typeof choice !== 'string' || typeof confidence !== 'number'

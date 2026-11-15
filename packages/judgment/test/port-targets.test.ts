@@ -1,5 +1,5 @@
-import { describe, expect, test } from 'bun:test';
-import { createSystemOnePort, endpointKind, JudgmentContextLimitError, noul, type JudgmentConfig } from '../src/index.ts';
+import { describe, expect, spyOn, test } from 'bun:test';
+import { createSystemOnePort, endpointKind, JudgmentContextLimitError, noul, SqliteDecisionLog, withDecisionLog, type JudgmentConfig } from '../src/index.ts';
 
 const json = (status: number, body: unknown, headers: Record<string, string> = {}) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', ...headers } });
@@ -36,6 +36,40 @@ describe('judgment targets', () => {
     expect(second).toMatchObject({ kind: 'unavailable', message: expect.stringMatching(/retry in about \d+ s/) });
     expect((second as { retryAfterMs: number }).retryAfterMs).toBeGreaterThan(0);
     expect(calls).toBe(1);
+  });
+
+  test('a key refused by every target is rejected with its status, however many targets there are', async () => {
+    const port = createSystemOnePort(config(async () => json(401, {}),
+      { fallbacks: [{ endpoint: hosted('https://backup.test'), model: 'jev-latest' }] }));
+    await expect(port.ask(request)).rejects.toMatchObject({ kind: 'rejected', status: 401 });
+  });
+
+  test('a refusal followed by an outage on the backup is unavailable', async () => {
+    let calls = 0;
+    const port = createSystemOnePort(config(async () => ++calls === 1 ? json(401, {}) : json(503, {}),
+      { fallbacks: [{ endpoint: hosted('https://backup.test'), model: 'jev-latest' }] }));
+    await expect(port.ask(request)).rejects.toMatchObject({ kind: 'unavailable', status: 503 });
+  });
+
+  test('an outage that asks for a wait is reported as an outage with the wait, not a rate limit', async () => {
+    const port = createSystemOnePort(config(async () => json(503, {}, { 'retry-after': '60' })));
+    const error = await port.ask(request).catch((caught: unknown) => caught);
+    expect(error).toMatchObject({ kind: 'unavailable', reason: 'endpoint-status', status: 503, message: expect.stringMatching(/HTTP 503.*retry in about \d+ s/) });
+    expect((error as Error).message).not.toContain('rate limited');
+  });
+
+  test('one recorded ask serializes the whole state twice: the capture and the wire body', async () => {
+    const state = 'x'.repeat(200_000);
+    const port = createSystemOnePort(config(async () =>
+      json(200, { model: 'jev-latest', answers: { urgent: { type: 'noul', noul: 0.9 } }, usage: { input_tokens: 1, output_tokens: 1 } })));
+    using log = new SqliteDecisionLog(':memory:');
+    const recorded = withDecisionLog(port, log);
+    const stringify = spyOn(JSON, 'stringify');
+    try {
+      await recorded.ask({ ...request, state });
+      const whole = stringify.mock.results.filter(result => typeof result.value === 'string' && result.value.length >= state.length);
+      expect(whole).toHaveLength(2);
+    } finally { stringify.mockRestore(); }
   });
 
   test('an unauthenticated endpoint is never sent a key', async () => {

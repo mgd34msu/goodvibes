@@ -1,18 +1,18 @@
 import { assertSynchronousJudgmentGuard } from './attempt-guard.ts';
 import { APIError, APITimeoutError, type Questions } from '@typesafe-ai/sdk';
-import { checkAnswers, projectAnswers } from './answers.ts';
-import { toJudgmentError } from './client.ts';
+import { checkAnswers, markCheckedAnswers, projectAnswers } from './answers.ts';
+import { PreparedBody, toJudgmentError } from './client.ts';
 import { acceptsBackendModel, askBackend, judgmentAdapter, validateBackendInput } from './backends.ts';
 import { validateJudgmentConfig, type JudgmentConfig } from './config.ts';
 import { DEADLINE_COOLDOWN_MS, DEADLINE_MISSES_BEFORE_COOLDOWN } from './deadline.ts';
 import { JudgmentContextLimitError, JudgmentError, type JudgmentFailureReason } from './errors.ts';
-import { requiresLongContext, validateContextBudget, validateQuestions } from './limits.ts';
+import { checkInputBytes, requiresLongContextFor, serializeInput, validateQuestions, wireBody, wireBodyBytes } from './limits.ts';
 import { withRequestId } from './request-id.ts';
 import { delay, interruptible, retryable, retryDelay, retryPolicy } from './retry.ts';
 import { recordNativeModelObservation } from './model-observation.ts';
 import { opaqueUuid } from './opaque-uuid.ts';
 import { captureJudgmentInput } from './input-snapshot.ts';
-import { DECISION_MODELS_UNAVAILABLE_NOTICE, missedDeadlineNotice, rateLimitedNotice, slowTargetsNotice } from './availability-notice.ts';
+import { cooldownNotice, DECISION_MODELS_UNAVAILABLE_NOTICE, missedDeadlineNotice, slowTargetsNotice } from './availability-notice.ts';
 import type { JudgmentAttempt, JudgmentEndpointHealth, JudgmentPort, JudgmentRequest, JudgmentResult } from './types.ts';
 
 /** The reason AbortSignal.timeout gives; the owner's deadline passed. */
@@ -51,8 +51,10 @@ export function createSystemOnePort(config: JudgmentConfig): JudgmentPort {
   const policy = retryPolicy(config.retry);
   const timeoutMs = config.timeoutMs || 30_000;
   const cooldowns = targets.map(() => 0);
-  // Why each target is cooling: a provider's Retry-After, or missed deadlines.
-  const cooledForDeadline = targets.map(() => false);
+  // Why each target is cooling: missed deadlines, or a provider's Retry-After
+  // with the status it came with (429 is a rate limit; anything else an outage).
+  const cooledFor = targets.map((): 'deadline' | 'retry-after' => 'retry-after');
+  const cooledStatus = targets.map((): number | undefined => undefined);
   const deadlineMisses = targets.map(() => 0);
   const defaultModel = config.model;
   const ownerSignal = config.signal;
@@ -121,14 +123,16 @@ export function createSystemOnePort(config: JudgmentConfig): JudgmentPort {
         catch { throw new JudgmentError('invalid-request', 'judgment input must be JSON-serializable', { reason: 'not-serializable' }); }
         const { state, questions } = input;
         validateQuestions(questions);
-        validateContextBudget(state, questions);
+        // The state is serialized once here; size checks and every wire body reuse it.
+        const serialized = serializeInput(state, questions);
+        checkInputBytes(serialized);
         let lastFailure: JudgmentError | undefined;
         // What the last failed attempt ran into, for the terminal message.
         let lastReason: JudgmentFailureReason | undefined;
         let malformedFailure: JudgmentError | undefined;
-        // True while every failed attempt was the request's own size or shape;
-        // another target cannot repair that, so it is not an availability problem.
-        let onlyRequestRefusals = true;
+        // Targets whose latest attempt failed in a way waiting can heal (5xx,
+        // 429, timeout, connection). With none, the chain was refused, not down.
+        const transientTargets = new Set<number>();
         let skippedForCooldown = false;
         const eligible = targets.map((target, endpointIndex) => ({ target, endpointIndex }));
         for (let eligibleIndex = 0; eligibleIndex < eligible.length; eligibleIndex++) {
@@ -137,7 +141,7 @@ export function createSystemOnePort(config: JudgmentConfig): JudgmentPort {
           const { target, endpointIndex } = entry;
           if (cooldowns[endpointIndex]! > Date.now()) { skippedForCooldown = true; continue; }
           const targetModel = endpointIndex === 0 ? requestedModel : target.model;
-          let headers = judgmentAdapter(target.endpoint) === 'system-one' && requiresLongContext(state, questions)
+          let headers = judgmentAdapter(target.endpoint) === 'system-one' && requiresLongContextFor(serialized)
             ? { 'TypeSafe-Danger-Zone-Long-Context': 'true' } : undefined;
           let contextUpgrade = false;
           let retried = false;
@@ -176,13 +180,13 @@ export function createSystemOnePort(config: JudgmentConfig): JudgmentPort {
             const attemptTimer = timeoutMs > 0 ? setTimeout(() => { attemptTimedOut = true; attemptController.abort(new APITimeoutError(timeoutMs)); }, timeoutMs) : undefined;
             let failure: unknown;
             try {
-              const body = { state, questions, model: targetModel };
-              validateBackendInput(target.endpoint, targetModel, body);
+              validateBackendInput(target.endpoint, targetModel, { questions }, wireBodyBytes(serialized, targetModel));
+              const body = new PreparedBody(wireBody(serialized, targetModel));
               if (target.endpoint.authentication !== 'none' && !target.endpoint.apiKey.trim()) {
                 throw new JudgmentError('unavailable', 'this judgment target has no resolved credential', { reason: 'no-credential' });
               }
               const { result } = await interruptible(withRequestId(
-                () => askBackend({ ...target, timeoutMs, retry: {}, fetch: (input, init) => { dispatched = true; return fetch ? fetch(input, init) : globalThis.fetch(input, init); } }, body, attemptController.signal, headers),
+                () => askBackend<Q>({ ...target, timeoutMs, retry: {}, fetch: (input, init) => { dispatched = true; return fetch ? fetch(input, init) : globalThis.fetch(input, init); } }, body, attemptController.signal, headers),
                 (id) => { requestId = safeId(id); },
               ), attemptController.signal);
               checkCancellation();
@@ -203,11 +207,14 @@ export function createSystemOnePort(config: JudgmentConfig): JudgmentPort {
               remember(attempt);
               deadlineMisses[endpointIndex] = 0;
               health[endpointIndex] = { ...health[endpointIndex]!, attempts: health[endpointIndex]!.attempts + 1, consecutiveFailures: 0, lastOutcome: 'answered' };
-              return recordNativeModelObservation({
+              const answered = recordNativeModelObservation({
                 answers: projectAnswers(questions, result.answers), requestedModel, model: result.model,
                 usage: { inputTokens: result.usage.input_tokens, outputTokens: result.usage.output_tokens },
                 latencyMs: performance.now() - started, requestId, lineage: lineage(),
               }, { requestedModel, model: result.model, targetModel, endpointIndex });
+              // Checked once, here; the decision log and the readers trust this mark.
+              markCheckedAnswers(questions, answered.answers);
+              return answered;
             } catch (error) {
               failure = controller.signal.aborted ? controller.signal.reason : attemptController.signal.aborted ? attemptController.signal.reason : error;
               const last = toJudgmentError(failure);
@@ -216,7 +223,8 @@ export function createSystemOnePort(config: JudgmentConfig): JudgmentPort {
               lastReason = last.reason ?? (last.kind !== 'unavailable' ? undefined : attemptTimedOut ? 'endpoint-timeout'
                 : last.status !== undefined ? 'endpoint-status' : 'unreachable');
               if (last.kind === 'invalid-response') malformedFailure = last;
-              if (!(last instanceof JudgmentContextLimitError) && last.kind !== 'invalid-request') onlyRequestRefusals = false;
+              if (last.kind === 'unavailable' && lastReason !== 'no-credential') transientTargets.add(endpointIndex);
+              else transientTargets.delete(endpointIndex);
               requestId = last.kind === 'internal' ? undefined : safeId(last.requestId) ?? requestId;
               remember({
                 attempt: attemptCount, endpointIndex, endpointKind: target.endpoint.kind, requestedModel: targetModel, dispatched,
@@ -231,7 +239,7 @@ export function createSystemOnePort(config: JudgmentConfig): JudgmentPort {
                 if (deadlineMisses[endpointIndex]! >= DEADLINE_MISSES_BEFORE_COOLDOWN) {
                   deadlineMisses[endpointIndex] = 0;
                   cooldowns[endpointIndex] = Date.now() + DEADLINE_COOLDOWN_MS;
-                  cooledForDeadline[endpointIndex] = true;
+                  cooledFor[endpointIndex] = 'deadline';
                 }
               }
               // Exact server tokenization can exceed the character estimate.
@@ -256,7 +264,8 @@ export function createSystemOnePort(config: JudgmentConfig): JudgmentPort {
               }
               if (retryWaitMs === undefined && failure instanceof APIError && (failure.headers.has('retry-after') || failure.headers.has('retry-after-ms'))) {
                 cooldowns[endpointIndex] = Date.now() + retryDelay(failure, 0, policy);
-                cooledForDeadline[endpointIndex] = false;
+                cooledFor[endpointIndex] = 'retry-after';
+                cooledStatus[endpointIndex] = failure.status;
               }
             } finally {
               clearTimeout(attemptTimer);
@@ -304,12 +313,12 @@ export function createSystemOnePort(config: JudgmentConfig): JudgmentPort {
         // Exhausting backups cannot turn a malformed answer into an availability
         // downgrade. Preferred may enter Classic only for actual unavailability.
         if (malformedFailure) throw malformedFailure;
-        // Preserve a precise terminal protocol/configuration diagnostic when
-        // there is only one target, or when every target refused the request
-        // itself (context limit, local capability limit); context-limit
-        // callers can still partition complete evidence. Availability failures
-        // use the halt notice.
-        if (lastFailure && lastFailure.kind !== 'unavailable' && (targets.length === 1 || onlyRequestRefusals && !skippedForCooldown)) {
+        // A chain no target answered is unavailable only when some target
+        // failed in a way waiting can heal. When every target refused (a
+        // revoked key, a context limit, a capability limit), the refusal is
+        // the answer, whatever the number of targets: a fallback endpoint must
+        // not turn "fix your key" into "the service is down".
+        if (lastFailure && lastFailure.kind !== 'unavailable' && transientTargets.size === 0 && !skippedForCooldown) {
           if (lastFailure.kind === 'rejected' && (lastFailure.status === 401 || lastFailure.status === 403)) {
             throw new JudgmentError('rejected', `${lastFailure.message}. ${DECISION_MODELS_UNAVAILABLE_NOTICE}`, {
               status: lastFailure.status,
@@ -318,22 +327,25 @@ export function createSystemOnePort(config: JudgmentConfig): JudgmentPort {
           }
           throw lastFailure;
         }
-        // When every target is cooling down after a rate limit, the useful
-        // advice is the wait, not a credentials check.
+        // When every target is cooling down, the useful advice is the wait,
+        // named for what caused it: missed deadlines, a rate limit (429), or
+        // an outage that sent Retry-After with another status.
         const now = Date.now();
         const waits = cooldowns.map(until => until - now);
         const allCooling = waits.every(wait => wait > 0);
-        if (allCooling && cooledForDeadline.some(Boolean)) {
+        if (allCooling && cooledFor.includes('deadline')) {
           throw new JudgmentError('unavailable', slowTargetsNotice(Math.ceil(Math.min(...waits))), { reason: 'targets-slow',
             ...(last?.status === undefined ? {} : { status: last.status }),
             ...(last?.requestId === undefined ? {} : { requestId: last.requestId }),
           });
         }
-        const retryAfterMs = allCooling ? Math.ceil(Math.min(...waits)) : undefined;
-        if (retryAfterMs !== undefined) {
-          throw new JudgmentError('unavailable', rateLimitedNotice(retryAfterMs), {
-            retryAfterMs, reason: 'rate-limited',
-            ...(last?.status === undefined ? {} : { status: last.status }),
+        if (allCooling) {
+          const retryAfterMs = Math.ceil(Math.min(...waits));
+          const rateLimited = cooledStatus.every(status => status === 429);
+          const status = rateLimited ? 429 : cooledStatus.find(code => code !== 429);
+          throw new JudgmentError('unavailable', cooldownNotice(retryAfterMs, status), {
+            retryAfterMs, reason: rateLimited ? 'rate-limited' : 'endpoint-status',
+            ...(status === undefined ? {} : { status }),
             ...(last?.requestId === undefined ? {} : { requestId: last.requestId }),
           });
         }

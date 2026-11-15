@@ -3,12 +3,12 @@ import { drainOwned } from '../drain-owned.ts';
 import { assertSynchronousJudgmentGuard } from '../port/attempt-guard.ts';
 import { opaqueUuid } from '../port/opaque-uuid.ts';
 import { captureJudgmentInput } from '../port/input-snapshot.ts';
-import { DECISION_MODELS_UNAVAILABLE_NOTICE, rateLimitedNotice } from '../port/availability-notice.ts';
+import { cooldownNotice, DECISION_MODELS_UNAVAILABLE_NOTICE, rateLimitedNotice } from '../port/availability-notice.ts';
 import { types as nodeTypes } from 'node:util';
-import { checkAnswers, projectAnswers } from '../port/answers.ts';
+import { answersCheckedFor, checkAnswers, projectAnswers } from '../port/answers.ts';
 import { isJudgmentFailureReason, JUDGMENT_FAILURE_REASONS, JudgmentContextLimitError, JudgmentError, type JudgmentErrorKind } from '../port/errors.ts';
 import {
-  toJson, type JudgmentAttempt, type JudgmentLineage, type JudgmentPort, type JudgmentRequest,
+  toJson, type JsonValue, type JudgmentAttempt, type JudgmentLineage, type JudgmentPort, type JudgmentRequest,
   type JudgmentResult, type Questions,
 } from '../port/types.ts';
 import { hashState, isoTime, type DecisionLog, type DecisionNote, type NewDecisionEntry } from './types.ts';
@@ -154,7 +154,8 @@ function asFailure(error: unknown, overrideKind?: JudgmentErrorKind): JudgmentEr
   // a billing refusal must not look like Jev rejected the task itself.
   const sentence = reason === undefined ? FAILURE_MESSAGES[kind] : JUDGMENT_FAILURE_REASONS[reason];
   const http = status === undefined ? '' : `HTTP ${status}${status === 402 ? ': Payment Required' : ''}`;
-  const diagnostic = retryAfterMs !== undefined ? rateLimitedNotice(retryAfterMs)
+  // A wait is called a rate limit only when a rate limit caused it.
+  const diagnostic = retryAfterMs !== undefined ? (reason === 'rate-limited' ? rateLimitedNotice(retryAfterMs) : cooldownNotice(retryAfterMs, status))
     : reason === 'endpoint-status' && status !== undefined ? `The decision endpoint answered ${http}; retry in a moment.`
     : status === undefined ? sentence
     : sentence.endsWith('.') ? `${sentence.slice(0, -1)} (${http}).` : `${sentence} (${http})`;
@@ -230,10 +231,14 @@ function projectResult<Q extends Questions>(questions: Q, expectedModel: string,
     const model = identifier(rawModel, true);
     if (requestedModel !== expectedModel || model === undefined
       || !nonnegative(inputTokens) || !nonnegative(outputTokens) || !nonnegative(latencyMs)) throw invalidResponse();
-    checkAnswers(questions, answers);
-    const normalizedAnswers = projectAnswers(questions, answers);
-    // Check the projected values too: a borrowed object can have changing getters.
-    checkAnswers(questions, normalizedAnswers);
+    // The native transport already checked, projected and froze these
+    // answers for these very questions. A borrowed or injected port's answers
+    // are checked here, and the projection again: a borrowed object can have
+    // changing getters.
+    const trusted = answersCheckedFor(questions, answers);
+    if (!trusted) checkAnswers(questions, answers);
+    const normalizedAnswers = trusted ? answers : projectAnswers(questions, answers);
+    if (!trusted) checkAnswers(questions, normalizedAnswers);
     return {
       answers: normalizedAnswers, requestedModel, model,
       usage: { inputTokens, outputTokens },
@@ -290,12 +295,13 @@ export function withDecisionLog(inner: JudgmentPort, log: DecisionLog, options: 
       if (inputBinding !== undefined && inputBinding !== 'state') drainOwned(inputBinding);
       assertLogCurrent(logAssertion);
       // Admit one immutable payload before settings/key acquisition can await.
-      // Keep a separate question snapshot so a borrowed port cannot alter validation.
+      // The captured input is deeply frozen, so the port it is lent to cannot
+      // alter the questions answers are validated against.
       const { signal, input, questions, at, context } = (() => {
         try {
           const signal = request.signal;
           const input = captureJudgmentInput(request, { immutable: true });
-          return { signal, input, questions: toJson(input.questions), at: isoTime(now()), context: Object.freeze({ ...request.context }) };
+          return { signal, input, questions: input.questions, at: isoTime(now()), context: Object.freeze({ ...request.context }) };
         } finally {
           // Borrowed accessors can revoke retention even when they throw. The
           // detached state has no borrowed getters left when it is hashed.
@@ -305,7 +311,8 @@ export function withDecisionLog(inner: JudgmentPort, log: DecisionLog, options: 
       const call = {
         at,
         context,
-        questions,
+        // Plain JSON already: the capture above is a JSON round trip.
+        questions: questions as unknown as JsonValue,
       };
       let originalResult: JudgmentResult<Q> | undefined;
       let result: JudgmentResult<Q>;

@@ -40,6 +40,11 @@ function classifyJudgmentError(error: unknown): JudgmentError {
   return new JudgmentError('internal', 'The decision client failed internally. The operation has stopped.');
 }
 
+/** A request body already serialized by the caller, sent as is. */
+export class PreparedBody {
+  constructor(readonly text: string) {}
+}
+
 /** One wire request, owned by the caller's cancellation/deadline signal. */
 export async function requestWithoutDeadline(
   config: JudgmentConfig, method: 'GET' | 'POST', path: string, signal: AbortSignal,
@@ -53,7 +58,7 @@ export async function requestWithoutDeadline(
   const init = {
     method, redirect: 'error' as const, signal,
     headers: { ...extraHeaders, ...(config.endpoint.authentication !== 'none' && config.endpoint.apiKey ? { Authorization: `Bearer ${config.endpoint.apiKey}` } : {}), Accept: 'application/json', 'Content-Type': 'application/json' },
-    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    ...(body === undefined ? {} : { body: body instanceof PreparedBody ? body.text : JSON.stringify(body) }),
   };
   let response: Response;
   let text: string;
@@ -73,7 +78,7 @@ export async function requestWithoutDeadline(
 }
 
 export async function systemOneWithoutDeadline<Q extends Questions>(
-  config: JudgmentConfig, request: SystemOneRequest<Q>, signal: AbortSignal,
+  config: JudgmentConfig, request: SystemOneRequest<Q> | PreparedBody, signal: AbortSignal,
   extraHeaders?: Readonly<Record<string, string>>,
 ): Promise<SystemOneResult<Q>> {
   return await requestWithoutDeadline(config, 'POST', '/v1/systemone', signal, request, extraHeaders) as SystemOneResult<Q>;

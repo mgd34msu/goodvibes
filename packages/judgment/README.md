@@ -169,14 +169,28 @@ The last target ready to take a call gets one further attempt after a transient
 failure (a timeout, a lost connection, HTTP 408, 429 or 5xx) when the wait,
 `Retry-After` included, fits within `backoffMaxMs` and the remaining deadline;
 `onRetry` reports that wait. Otherwise each chain runs once. An exhausted chain
-fails as `unavailable` with a message naming what happened to the last attempt
-(the endpoint answered HTTP 503, did not answer in time, could not be reached,
-has no API key); a decision asked through `judge` then takes its fallback.
-A single target's terminal protocol/context error retains its precise kind so
-callers can partition complete evidence when supported.
+fails as `unavailable` only when some target failed in a way waiting can heal
+(a timeout, a lost connection, HTTP 408, 429 or 5xx), with a message naming what
+happened to the last attempt (the endpoint answered HTTP 503, did not answer in
+time, could not be reached, has no API key); a decision asked through `judge`
+then takes its fallback. When every target refused the request (a rejected key,
+a context or capability limit), the last refusal is thrown with its kind and
+status however many targets are configured, so a revoked key reads as `rejected`
+with HTTP 401 and context-limit callers can still partition complete evidence.
 
 `Retry-After` cools the failed target for at most five minutes without delaying
-independent backups. Health snapshots expose the remaining cooldown.
+independent backups. Health snapshots expose the remaining cooldown. When every
+target is cooling, the call fails at once with `retryAfterMs` and a message named
+for the cause: `rate-limited` only when every cooldown came from HTTP 429,
+`endpoint-status` (with the status) when an outage sent `Retry-After`, and
+`targets-slow` when a target missed its deadline repeatedly.
+
+The transport serializes the state once per call: the size checks, the
+long-context choice and each target's wire body reuse that text. It validates
+the answers once, projects them to the documented fields and freezes them; the
+decision log and the readers (`readYesNo`, `readChoice`, `readScore`) trust
+those answers without checking them again. Answers from a borrowed or injected
+port are still checked by the decision log and by the readers.
 Progress reports a zero delay before the next target and the real wait before a retry. Credential-free lineage
 records each attempt's model, endpoint index/kind, outcome and safe request ID;
 the logical result retains the original requested model and actual returned model.

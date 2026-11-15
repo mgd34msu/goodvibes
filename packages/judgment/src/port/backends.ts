@@ -1,6 +1,6 @@
 import type { Questions, SystemOneRequest, SystemOneResult } from '@typesafe-ai/sdk';
 import type { JudgmentConfig, JudgmentEndpoint } from './config.ts';
-import { requestWithoutDeadline, systemOneWithoutDeadline } from './client.ts';
+import { requestWithoutDeadline, systemOneWithoutDeadline, type PreparedBody } from './client.ts';
 import { JudgmentError } from './errors.ts';
 import { matchesJudgmentModel } from './endpoint-validation.ts';
 
@@ -14,11 +14,11 @@ export function judgmentAdapter(endpoint: JudgmentEndpoint): JudgmentAdapterKind
     ? 'cloudflare-workers-ai' : 'system-one';
 }
 
-/** Capabilities are deployment facts. They never authorize dropping evidence. */
-export function validateBackendInput(endpoint: JudgmentEndpoint, model: string, request: SystemOneRequest<Questions>): void {
+/** Capabilities are deployment facts. They never authorize dropping evidence.
+ * `bytes` is the UTF-8 size of the request body this target would be sent. */
+export function validateBackendInput(endpoint: JudgmentEndpoint, model: string, request: Pick<SystemOneRequest<Questions>, 'questions'>, bytes: number): void {
   const adapter = judgmentAdapter(endpoint);
   const questions = Object.keys(request.questions);
-  const bytes = new TextEncoder().encode(JSON.stringify(request)).byteLength;
   if (endpoint.maxInputBytes !== undefined && bytes > endpoint.maxInputBytes
     || endpoint.maxQuestions !== undefined && questions.length > endpoint.maxQuestions) {
     throw new JudgmentError('invalid-request', 'the complete judgment input exceeds this target deployment capability', { reason: 'target-capability' });
@@ -48,7 +48,7 @@ const record = (value: unknown): value is Record<string, unknown> => value !== n
 
 /** Translate only declared wire fields; never fabricate probabilities or confidence. */
 export async function askBackend<Q extends Questions>(
-  config: JudgmentConfig, request: SystemOneRequest<Q>, signal: AbortSignal,
+  config: JudgmentConfig, request: SystemOneRequest<Q> | PreparedBody, signal: AbortSignal,
   headers?: Readonly<Record<string, string>>,
 ): Promise<SystemOneResult<Q>> {
   const adapter = judgmentAdapter(config.endpoint);

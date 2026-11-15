@@ -162,7 +162,7 @@ try {
   await unavailable.ask({ state: requestState, questions: requestQuestions });
   effects++;
 } catch (error) {
-  if (!(error instanceof judgmentRoot.JudgmentError) || error.kind !== 'unavailable' || !error.message.includes('The decision models are rate limited; retry in about')) throw error;
+  if (!(error instanceof judgmentRoot.JudgmentError) || error.kind !== 'unavailable' || error.reason !== 'endpoint-status' || !error.message.includes('The decision models are unavailable (HTTP 503) and asked to be retried later; retry in about')) throw error;
 }
 if (outageAttempts !== profiles.length || effects !== 0) throw new Error('packaged outage did not halt after exhausting configured decision models');
 let refusalAttempts = 0;

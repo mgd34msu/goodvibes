@@ -39,7 +39,7 @@ test('fresh source identity is minted once and resolved by its persisted tuple a
   const f = await fixture();
   const first = await f.service.upsertState({ projectId: 'alpha', state });
   const sourceId = first.source?.id;
-  expect(sourceId).toMatch(/^project-planning-state-[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}$/);
+  expect(sourceId).toMatch(/^project-planning-state-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
   expect(f.store.getPlanningSourceSnapshot(identity).source?.id).toBe(sourceId);
   expect((await f.service.getState({ projectId: 'alpha' })).source?.id).toBe(sourceId);
   expect((await f.service.upsertState({ projectId: 'alpha', state: { ...state, goal: 'A revised goal' } })).source?.id).toBe(sourceId);

@@ -84,7 +84,7 @@ test('new non-Latin decision title receives one persisted opaque identity and re
     const service = new ProjectPlanningService(store, { defaultProjectId: 'explicit-project' });
     const first = await service.recordDecision({ decision: { title: '決定事項', decision: 'First' } });
     const second = await service.recordDecision({ decision: { title: '決定事項', decision: 'Second' } });
-    expect(first.decision.id).toMatch(/^decision-[a-p-]+$/); expect(second.decision.id).toBe(first.decision.id);
+    expect(first.decision.id).toMatch(/^decision-[0-9a-f-]+$/); expect(second.decision.id).toBe(first.decision.id);
   } finally { await store.close(); }
 });
 test('ambiguous saved titles require actual IDs and preserve both old records', async () => {

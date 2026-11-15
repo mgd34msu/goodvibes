@@ -540,7 +540,7 @@ export class ProjectPlanningService {
     observation();
     const previous = matching[0] ?? (savedById ? readDecision(savedById) ?? undefined : undefined), now = Date.now();
     const decision: ProjectPlanningDecision = {
-      id: input.decision.id ?? previous?.id ?? `decision-${randomUUID().replace(/[0-9a-f]/g, nibble => String.fromCharCode(97 + Number.parseInt(nibble, 16)))}`,
+      id: input.decision.id ?? previous?.id ?? `decision-${randomUUID()}`,
       title,
       ...(input.decision.context ? { context: input.decision.context } : {}),
       decision: input.decision.decision.trim(),
@@ -1107,7 +1107,7 @@ export class ProjectPlanningService {
   ): KnowledgeSourceUpsertInput {
     const spaceId = space.knowledgeSpaceId;
     return {
-      id: sourceId ?? `project-planning-${kind}-${randomUUID().replace(/[0-9a-f]/g, nibble => String.fromCharCode(97 + Number.parseInt(nibble, 16)))}`,
+      id: sourceId ?? `project-planning-${kind}-${randomUUID()}`,
       connectorId: PROJECT_PLANNING_CONNECTOR_ID,
       sourceType: 'dataset',
       title: titleForArtifact(kind, value),

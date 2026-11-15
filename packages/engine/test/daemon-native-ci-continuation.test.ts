@@ -236,7 +236,8 @@ async function scenario(options: ScenarioOptions, body: (s: Scenario) => Promise
     expect(originalResult.status, JSON.stringify({ error: originalResult.error, events, requests: f.requests.map(request => ({ systemPrompt: request.systemPrompt?.slice(0,100), messages: request.messages })), pushes })).toBe('passed');
     expect(pushes, JSON.stringify({ events, requests: f.requests.map(request => request.messages), warnings })).toBe(1);
     await waitFor(async () => (await ci.listWatches()).length > 0, 'original CI watch registration');
-    const watches = await ci.listWatches();
+    // The native owner pins the watch as it was registered; `expiresAt` and `repair` are the CI service's scheduling state.
+    const watches = (await ci.listWatches()).map(({ expiresAt: _expiresAt, repair: _repair, ...identity }) => identity);
     expect(originalResult.nativeSource).toMatchObject({ goal: f.goal, criteria: f.criteria }); expect(watches, JSON.stringify(warnings)).toHaveLength(1);
     expect(watches[0]!.continuationId).toBeDefined();
     const continuationStorage = (await f.knowledgeStore.openNativeWorkExecutionStorage('project')).continuations!;
@@ -258,7 +259,7 @@ async function scenario(options: ScenarioOptions, body: (s: Scenario) => Promise
 }
 
 // Closes the original activation (unless the successor must keep running) and reopens everything from disk, as a daemon restart would.
-async function restartDaemon(s: Scenario, options: { closeFirst: boolean; policyUnchanged?: boolean }): Promise<CiWatchService> {
+async function restartDaemon(s: Scenario, options: { closeFirst: boolean; policyUnchanged?: boolean; now?: () => number }): Promise<CiWatchService> {
   const { f } = s;
   await waitFor(() => s.execution.status(s.original.admission.key, f.authority).settlement?.state === 'published', 'original native settlement').catch(error => { throw new Error(JSON.stringify({ error: String(error), state: s.execution.status(s.original.admission.key, f.authority), warnings: s.warnings })); });
   if (options.closeFirst) { f.continuationScopeOwner.close(); await f.activation.close(); }
@@ -276,7 +277,7 @@ async function restartDaemon(s: Scenario, options: { closeFirst: boolean; policy
     nativeScopes: new WorkspaceRegistrationStore({ path: join(f.root, 'registrations.json'), homeDir: f.root, daemonStateDir: join(f.root, '.goodvibes') }) });
   s.execution = await s.restarted.acquire();
   const execution = s.execution;
-  return new CiWatchService({ source: s.source, store: new CiWatchStore(join(f.root, 'ci-watches.json')),
+  return new CiWatchService({ source: s.source, store: new CiWatchStore(join(f.root, 'ci-watches.json')), now: options.now,
     recoverOwner: watch => execution.recoverCiWatchOwner(watch),
     revokeOwner: watch => execution.revokeCiWatch(watch),
     autonomousRepair: request => startAdmittedCiRepair({ workspaceTrust: null, port: f.options.judgmentPort,
@@ -371,7 +372,8 @@ async function successorKey(s: Scenario) {
   if (successor.kind !== 'execution') throw new Error('Missing successor execution');
   const key = successor.execution.request.key;
   await waitFor(() => s.execution.status(key, s.f.authority).settlement?.state === 'published', 'successor settlement before cancellation');
-  expect(await s.ci.listWatches()).toHaveLength(1); // Successor has issued no new watch/grant.
+  // The original watch retired when its repair started, and the successor has issued no new watch/grant.
+  expect(await s.ci.listWatches()).toHaveLength(0);
   return key;
 }
 
@@ -390,14 +392,15 @@ test(name('restart'), () => scenario({}, async s => {
 test(name('concurrent'), () => scenario({}, async s => {
   const [repaired] = await Promise.all([s.ci.checkWatch(s.watches[0]!.id), s.ci.checkWatch(s.watches[0]!.id)]);
   const current = await expectNativeSuccessor(s, repaired!);
-  const replay = await s.ci.checkWatch(s.watches[0]!.id);
-  expect(replay.fixSessionId).toBe(repaired!.fixSessionId);
+  // The started repair retired the watch, so no later check can start a second one.
+  expect(repaired!.retired).toBe(true);
+  await expect(s.ci.checkWatch(s.watches[0]!.id)).rejects.toThrow('No CI watch');
   const snapshot = await s.f.ledger.service.readSnapshot(s.f.actor); expect(snapshot.works[0]!.attempt!.id).toBe(current.attempt!.id);
 }), TIMEOUT);
 
 test(name('chain'), () => scenario({ chain: true }, async s => {
   const current = await expectNativeSuccessor(s, await s.ci.checkWatch(s.watches[0]!.id));
-  await waitFor(async () => (await s.ci.listWatches()).length >= 2, 'chained CI watch registration');
+  await waitFor(async () => (await s.ci.listWatches()).some(watch => watch.continuationId !== s.watches[0]!.continuationId), 'chained CI watch registration');
   const nextWatch = (await s.ci.listWatches()).find(watch => watch.continuationId !== s.watches[0]!.continuationId);
   expect(nextWatch, JSON.stringify(s.warnings)).toBeDefined();
   const next = await s.ci.checkWatch(nextWatch!.id);
@@ -415,17 +418,18 @@ test(name('partial-claim-restart'), () => scenario({}, async s => {
     expect(partial.fixSessionError).toBe('Synthetic response loss after private consumption');
     expect(f.requests.filter(isWorkerRequest)).toHaveLength(2);
   } finally { consumptionFault.mockRestore(); }
-  const polling = await restartDaemon(s, { closeFirst: true, policyUnchanged: true });
+  // A repair that failed to start waits out its backoff, saved with the watch, before it is tried again.
+  const polling = await restartDaemon(s, { closeFirst: true, policyUnchanged: true, now: () => Date.now() + 5 * 60_000 });
   await expectNativeSuccessor(s, await polling.checkWatch(s.watches[0]!.id));
 }), TIMEOUT);
 
 test(name('launched-restart'), () => scenario({ blockSuccessor: true }, async s => {
   expect((await s.ci.checkWatch(s.watches[0]!.id)).fixSessionTriggered).toBe(true);
   await waitFor(() => s.gate.repairBlocked, 'actual successor member effect');
+  // The started repair retired the watch on disk, so the restarted daemon has nothing that could launch a second one.
   const polling = await restartDaemon(s, { closeFirst: false, policyUnchanged: true });
-  const repaired = await polling.checkWatch(s.watches[0]!.id);
-  expect(repaired.fixSessionTriggered).toBe(false);
-  expect(repaired.fixSessionError).toContain('requires native reconciliation');
+  expect(await polling.listWatches()).toHaveLength(0);
+  await expect(polling.checkWatch(s.watches[0]!.id)).rejects.toThrow('No CI watch');
   expect(s.f.requests.filter(isWorkerRequest)).toHaveLength(3);
 }), TIMEOUT);
 

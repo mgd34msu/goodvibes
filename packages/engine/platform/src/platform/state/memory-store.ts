@@ -11,15 +11,13 @@
 import { captureMemoryOperation, assertMemoryOperationCurrent, awaitMemoryOperation, type MemoryOperationOptions } from './memory-operation.js';
 import { randomUUID } from 'node:crypto';
 import { statSync } from 'node:fs';
-import { isDeepStrictEqual } from 'node:util';
 import { rankReviewQueue, rankSemanticSearch, rerankRetrieved } from './memory-search-ranking.js';
 import { SQLiteStore } from './sqlite-store.js';
 import {
   SqliteVecMemoryIndex,
   type MemoryVectorStats,
   resolveMemoryVectorDbPath,
-  memoryVectorInput,
-  type MemoryVectorSourceRevision,
+  type MemoryVectorEntry,
 } from './memory-vector-store.js';
 import {
   HASHED_MEMORY_EMBEDDING_PROVIDER,
@@ -321,6 +319,8 @@ export class MemoryStore {
   private vectorIndex: SqliteVecMemoryIndex | null;
   private ready = false;
   private rebuildVectorIndexPromise: Promise<MemoryVectorStats> | null = null;
+  /** A pass asked for while one ran: null when none, else whether it re-embeds every row. */
+  private rebuildVectorIndexAgain: boolean | null = null;
   private readonly embeddingRegistry: MemoryEmbeddingProviderRegistry;
   private mutationRevision = 0;
   private backendEpoch = 0;
@@ -341,7 +341,7 @@ export class MemoryStore {
           options.vectorDbPath ?? resolveMemoryVectorDbPath(dbPath),
           undefined,
           this.embeddingRegistry,
-          record => this.captureVectorSourceRevision(record),
+          id => this.rowRevision(id),
         );
   }
 
@@ -353,7 +353,7 @@ export class MemoryStore {
     this.diskIdentity = this.currentDiskIdentity(this.sqlite);
     this.ready = true;
     await this.vectorIndex?.init();
-    this.rebuildVectorIndex();
+    this.syncVectorIndexInBackground();
     logger.info('MemoryStore: initialized', { ready: true });
   }
 
@@ -438,7 +438,7 @@ export class MemoryStore {
     // fail, never the caller's lifecycle or another write landing meanwhile, or
     // the caller would retry a row that already exists into a duplicate. The
     // index follows the committed row whatever happened to the caller.
-    this.indexCommitted(() => this.vectorIndex?.upsert(record, this.committedOperation()));
+    this.indexRow(record);
     try {
       await this.persistNow();
     } catch (error) {
@@ -575,9 +575,11 @@ export class MemoryStore {
    * The vector index's candidates for the filter's query, in similarity order,
    * with the filter's post-SQL conditions applied. Retrieval only: nothing here
    * judges relevance. Empty when there is no query or the index returns
-   * nothing. `score` is the similarity on a 0 to 100 scale.
+   * nothing (a failed query embed is on `vectorStats().error`). The query is
+   * embedded through the asynchronous embed, so every embedding provider
+   * answers. `score` is the similarity on a 0 to 100 scale.
    */
-  semanticCandidates(filter: MemorySearchFilter = {}, options?: MemoryOperationOptions): MemorySemanticSearchResult[] {
+  async semanticCandidates(filter: MemorySearchFilter = {}, options?: MemoryOperationOptions): Promise<MemorySemanticSearchResult[]> {
     const operation = this.captureOperation(options, 'read');
     assertMemoryOperationCurrent(operation);
     if (!this.ready) return [];
@@ -589,7 +591,7 @@ export class MemoryStore {
       limit: Math.max(requestedLimit * 8, 50),
     };
     const results: MemorySemanticSearchResult[] = [];
-    for (const candidate of this.vectorIndex?.search(query, vectorFilter, operation) ?? []) {
+    for (const candidate of await this.vectorIndex?.search(query, vectorFilter, operation) ?? []) {
       const record = this.get(candidate.id, operation);
       if (!record) continue;
       if (!recordMatchesPostSqlFilter(record, filter)) continue;
@@ -704,7 +706,7 @@ export class MemoryStore {
         importedRecords++;
         // Index the row as stored (normalised), not the bundle's raw values.
         const stored = this.get(record.id, operation);
-        if (stored) this.vectorIndex?.upsert(stored, operation);
+        if (stored) this.indexRow(stored);
       }
 
       for (const link of bundle.links) {
@@ -864,7 +866,7 @@ export class MemoryStore {
 
     const updated: MemoryRecord = { ...existing, cls: newClass, scope: newScope, summary: newSummary, detail: newDetail, tags: newTags, validFrom: newValidFrom, validUntil: newValidUntil, updatedAt: now,
       ...(resetReview ? { reviewState: 'fresh', confidence: FRESH_MEMORY_CONFIDENCE, reviewedAt: undefined, reviewedBy: undefined, staleReason: undefined } : {}) };
-    this.indexCommitted(() => this.vectorIndex?.upsert(updated, this.committedOperation()));
+    this.indexRow(updated);
     this.persist();
     logger.info('MemoryStore: record updated', { id });
     return updated;
@@ -910,7 +912,7 @@ export class MemoryStore {
     );
 
     const reviewed = { ...existing, reviewState, confidence, reviewedAt, reviewedBy, staleReason, updatedAt: now };
-    this.indexCommitted(() => this.vectorIndex?.upsert(reviewed, this.committedOperation()));
+    this.indexRow(reviewed);
     this.persist();
     logger.info('MemoryStore: record reviewed', { id, reviewState, confidence });
     return reviewed;
@@ -929,7 +931,7 @@ export class MemoryStore {
     // stores with FK enforcement disabled for a connection.
     this.runMutation('DELETE FROM memory_links WHERE from_id = ? OR to_id = ?', [id, id], operation);
     this.runMutation('DELETE FROM memory_records WHERE id = ?', [id], operation);
-    this.indexCommitted(() => this.vectorIndex?.delete(id, this.committedOperation()));
+    this.indexCommitted(() => this.vectorIndex?.delete(id));
     this.persist();
     logger.info('MemoryStore: record deleted', { id });
     return true;
@@ -1048,41 +1050,59 @@ export class MemoryStore {
     return standing;
   }
 
+  /** Bring the vector index in step with the rows now (a provider that only embeds over the network continues in the background). */
   rebuildVectorIndex(): MemoryVectorStats {
     if (!this.ready) return this.vectorStats();
-    const rows = this.sqlite.exec(
-      `SELECT id, scope, cls, summary, detail, tags, provenance, review_state, confidence, reviewed_at, reviewed_by, stale_reason, created_at, updated_at, valid_from, valid_until
-         FROM memory_records
-         ORDER BY updated_at DESC, created_at DESC`,
-    );
-    const records = rows.length ? (rows[0]?.values ?? []).map((value) => rowToRecord(rows[0]?.columns ?? [], value)) : [];
-    this.vectorIndex?.sync(records);
+    this.vectorIndex?.sync(this.vectorEntries());
     return this.vectorStats();
   }
 
-  async rebuildVectorIndexAsync(): Promise<MemoryVectorStats> {
+  /**
+   * Embed the rows through the asynchronous embed: every row when `force` is
+   * set (the default, an explicit rebuild), else only rows the index does not
+   * hold at their revision. Calls made while a pass runs share it and start
+   * one more pass after it, so rows loaded meanwhile are covered.
+   */
+  async rebuildVectorIndexAsync(options: { readonly force?: boolean } = {}): Promise<MemoryVectorStats> {
     if (!this.ready) return this.vectorStats();
-    if (!this.rebuildVectorIndexPromise) {
-      this.rebuildVectorIndexPromise = (async () => {
-        try {
-          const rows = this.sqlite.exec(
-            `SELECT id, scope, cls, summary, detail, tags, provenance, review_state, confidence, reviewed_at, reviewed_by, stale_reason, created_at, updated_at, valid_from, valid_until
-               FROM memory_records
-               ORDER BY updated_at DESC, created_at DESC`,
-          );
-          const records = rows.length ? (rows[0]?.values ?? []).map((value) => rowToRecord(rows[0]?.columns ?? [], value)) : [];
-          if (this.vectorIndex?.syncAsync) {
-            await this.vectorIndex.syncAsync(records, { force: true });
-          } else {
-            this.vectorIndex?.sync(records);
-          }
-          return this.vectorStats();
-        } finally {
-          this.rebuildVectorIndexPromise = null;
-        }
-      })();
+    const force = options.force ?? true;
+    if (this.rebuildVectorIndexPromise) {
+      this.rebuildVectorIndexAgain = (this.rebuildVectorIndexAgain ?? false) || force;
+      return this.rebuildVectorIndexPromise;
     }
-    return this.rebuildVectorIndexPromise;
+    const pass = (async () => {
+      try {
+        await this.vectorIndex?.syncAsync(this.vectorEntries(), { force });
+        return this.vectorStats();
+      } finally {
+        this.rebuildVectorIndexPromise = null;
+        const again = this.rebuildVectorIndexAgain;
+        this.rebuildVectorIndexAgain = null;
+        if (again !== null && this.ready) this.syncVectorIndexInBackground(again);
+      }
+    })();
+    this.rebuildVectorIndexPromise = pass;
+    return pass;
+  }
+
+  /** Start-up and reload: index the rows the index does not hold yet, off the caller's path. */
+  private syncVectorIndexInBackground(force = false): void {
+    if (!this.vectorIndex) return;
+    void this.rebuildVectorIndexAsync({ force }).catch((error: unknown) => {
+      logger.warn('MemoryStore: the vector index could not be brought up to date', { error: summarizeError(error) });
+    });
+  }
+
+  /** Every row with the revision its trigger stamped, in one query. */
+  private vectorEntries(): MemoryVectorEntry[] {
+    const result = this.sqlite.exec(
+      `SELECT id, scope, cls, summary, detail, tags, provenance, review_state, confidence, reviewed_at, reviewed_by, stale_reason, created_at, updated_at, valid_from, valid_until, gv_revision
+         FROM memory_records
+         ORDER BY updated_at DESC, created_at DESC`,
+    )[0];
+    if (!result) return [];
+    const revisionAt = result.columns.indexOf('gv_revision');
+    return result.values.map((values) => ({ record: rowToRecord(result.columns, values), revision: String(values[revisionAt] ?? '') }));
   }
 
   vectorStats(options?: MemoryOperationOptions): MemoryVectorStats {
@@ -1150,7 +1170,7 @@ export class MemoryStore {
       this.sqlite = next;
       this.diskIdentity = this.currentDiskIdentity(next);
       sqlite.close();
-      this.rebuildVectorIndex();
+      this.syncVectorIndexInBackground();
       logger.info('MemoryStore: reloaded the memory file after another process saved it', { path });
     })().finally(() => { this.reloading = null; });
     this.reloading = reload;
@@ -1181,13 +1201,14 @@ export class MemoryStore {
     this.vectorIndex?.close();
     this.ready = false;
     this.rebuildVectorIndexPromise = null;
+    this.rebuildVectorIndexAgain = null;
     this.diskIdentity = undefined;
     this.sqlite = this.openBackend(newDbPath);
     this.vectorIndex = new SqliteVecMemoryIndex(
       resolveMemoryVectorDbPath(newDbPath),
       undefined,
       this.embeddingRegistry,
-      record => this.captureVectorSourceRevision(record),
+      id => this.rowRevision(id),
     );
     await this.init();
   }
@@ -1263,28 +1284,19 @@ export class MemoryStore {
     throw new MemoryStoreChangedOnDiskError(path, 'reloading');
   }
 
-  private captureVectorSourceRevision(record: MemoryRecord): MemoryVectorSourceRevision {
-    const sqlite = this.sqlite, epoch = this.backendEpoch;
-    // Read this connection: a mutation can have committed locally before the
-    // autosave publishes its image to disk. A disk read would bind the old row.
-    const selected = sqlite.exec('SELECT * FROM memory_records WHERE id = ? LIMIT 1', [record.id])[0];
-    const values = selected?.values[0];
-    if (!selected || !values || !isDeepStrictEqual(memoryVectorInput(record), memoryVectorInput(rowToRecord(selected.columns, values)))) {
-      throw new Error('Memory vector record source changed');
-    }
-    const revision = values[selected.columns.indexOf('gv_revision')];
-    if (typeof revision !== 'string' || !/^[0-9a-f]{32}$/.test(revision)) {
-      throw new Error('Memory vector record revision unavailable');
-    }
-    return {
-      revision,
-      assertCurrent: () => {
-        if (!this.ready || this.sqlite !== sqlite || this.backendEpoch !== epoch
-          || sqlite.exec('SELECT gv_revision FROM memory_records WHERE id = ? LIMIT 1', [record.id])[0]?.values[0]?.[0] !== revision) {
-          throw new Error('Memory vector record source changed');
-        }
-      },
-    };
+  /** The row's revision as its trigger stamped it, read on this connection: a committed write may not be saved to disk yet. */
+  private rowRevision(id: string): string | undefined {
+    const value = this.sqlite.exec('SELECT gv_revision FROM memory_records WHERE id = ? LIMIT 1', [id])[0]?.values[0]?.[0];
+    return typeof value === 'string' ? value : undefined;
+  }
+
+  /**
+   * Keep the index in step with a committed row: the write hands the index
+   * the row and the revision it just produced (one read), and nothing is
+   * checked after. A refusal here is logged; the row stays stored.
+   */
+  private indexRow(record: MemoryRecord): void {
+    this.indexCommitted(() => this.vectorIndex?.upsert(record, { revision: this.rowRevision(record.id) }));
   }
 
   /**
@@ -1304,15 +1316,6 @@ export class MemoryStore {
     onPublished?.();
   }
 
-  /**
-   * The operation for work that follows a committed row (its vector entry):
-   * bound to the store's backend only, never to the caller's lifecycle, so a
-   * caller that is gone cannot leave a committed row unindexed or make it look
-   * failed.
-   */
-  private committedOperation(): MemoryOperationOptions {
-    return this.captureOperation(undefined, 'read');
-  }
 
   /**
    * Keep the index in step with a committed row. A refusal here (a later write
@@ -1377,7 +1380,7 @@ export class MemoryStore {
     try {
       this.sqlite.run('DELETE FROM memory_records WHERE id = ?', [id]);
       this.mutationRevision++;
-      this.vectorIndex?.delete(id, this.committedOperation());
+      this.vectorIndex?.delete(id);
     } catch (error) {
       logger.warn('MemoryStore: could not withdraw an add whose save failed', { id, error: summarizeError(error) });
     }

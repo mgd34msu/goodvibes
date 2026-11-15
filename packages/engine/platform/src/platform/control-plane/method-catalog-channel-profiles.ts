@@ -7,9 +7,12 @@
  * channel can bind the model/provider and permission-mode defaults applied to
  * the sessions it originates.
  *
- * Distinct from the pre-existing channels.routing.* table (which maps a channel
- * to a named profile id; the surface that owns the profile resolves it, and the daemon only logs an id it does not hold): these bind CONCRETE origination
- * defaults, including the permission mode ProfileData deliberately excludes.
+ * Which applies when both name a channel: these bindings are the only values
+ * the daemon applies to a session it originates from a channel message. The
+ * channels.routing.* table maps a channel to a named profile id that the
+ * surface owning the profile resolves; the daemon carries that id on the
+ * inbound item and applies none of it. The descriptions below say so, so a
+ * caller asking "what model does this channel get" reads one answer.
  */
 import type { GatewayMethodDescriptor } from './method-catalog-shared.js';
 import {
@@ -71,7 +74,7 @@ export const builtinGatewayChannelProfilesMethodDescriptors: readonly GatewayMet
   methodDescriptor({
     id: 'channels.profiles.list',
     title: 'List Channel Profile Bindings',
-    description: 'Return every per-channel profile binding (the model/permission defaults applied to sessions each channel originates).',
+    description: 'Return every per-channel profile binding: the model, provider and permission-mode defaults the daemon applies to the sessions each channel originates. These are the values that apply; a channels.routing assignment for the same channel names a profile that only the surface owning it resolves.',
     category: 'channels',
     scopes: ['read:channels'],
     http: { method: 'GET', path: '/api/channels/profiles' },
@@ -91,7 +94,7 @@ export const builtinGatewayChannelProfilesMethodDescriptors: readonly GatewayMet
   methodDescriptor({
     id: 'channels.profiles.set',
     title: 'Bind Channel Profile',
-    description: 'Bind (upsert) the model/provider and permission-mode defaults for a channel. Keyed on (surfaceKind, channelId?): a channelId-scoped binding wins over the surface-wide default; setting the same key again replaces it.',
+    description: 'Bind (upsert) the model/provider and permission-mode defaults for a channel. Keyed on (surfaceKind, channelId?): field by field, a channelId-scoped binding wins over the surface-wide default; setting the same key again replaces it. A session the daemon originates from the channel uses these values whatever a channels.routing assignment names.',
     category: 'channels',
     scopes: ['write:channels'],
     access: 'admin',

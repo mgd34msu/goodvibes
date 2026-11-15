@@ -174,6 +174,26 @@ export function toClientDescriptor(record: ControlPlaneClientRecord): ControlPla
   };
 }
 
+/**
+ * The domain names a stream request asked for, split into the ones this daemon
+ * publishes and the ones it does not. A stream opened with an unrecognised name
+ * is told which, in its `ready` frame, instead of silently missing those events.
+ */
+export function readRequestedDomains(requested: readonly string[]): {
+  readonly domains: RuntimeEventDomain[];
+  readonly unrecognised: string[];
+} {
+  const domains: RuntimeEventDomain[] = [];
+  const unrecognised: string[] = [];
+  for (const raw of requested) {
+    const name = raw.trim();
+    if (!name) continue;
+    if (isRuntimeEventDomain(name)) { if (!domains.includes(name)) domains.push(name); }
+    else if (!unrecognised.includes(name)) unrecognised.push(name);
+  }
+  return { domains, unrecognised };
+}
+
 export function normalizeRuntimeDomains(domains: readonly RuntimeEventDomain[] | undefined): RuntimeEventDomain[] {
   const values = domains?.length ? domains : DEFAULT_DOMAINS;
   return [...new Set(values.filter((domain): domain is RuntimeEventDomain => isRuntimeEventDomain(domain)))];
@@ -246,7 +266,7 @@ export function pruneDisconnectedClientRecords(
  * opt into narrowing (deliver-all, matching live), a `Set` when it did. Do NOT
  * derive this from `options.domains` here: by the time options reaches this
  * function it has already been normalized (empty/undefined domains fall back to
- * DEFAULT_DOMAINS, which excludes e.g. 'permissions'), so re-deriving from it
+ * DEFAULT_DOMAINS, which excludes e.g. 'gate'), so re-deriving from it
  * would always look "explicit" and silently narrow every default consumer's
  * replay, the bug this parameter exists to prevent.
  */

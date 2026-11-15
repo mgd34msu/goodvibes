@@ -40,6 +40,7 @@ import { captureAutonomousSource, type AutonomousToolSource } from '../permissio
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 import { VERSION } from '../version.js';
+import { ACP_HOST_ERROR_STAGES, HOSTED_ACP_STATES } from './hosted-agent-states.js';
 
 // ── Discovery ────────────────────────────────────────────────────────────────
 
@@ -126,19 +127,21 @@ export function discoverAcpAgents(io: DiscoveryIo = defaultDiscoveryIo): Discove
 
 // ── Hosted sessions ──────────────────────────────────────────────────────────
 
+export { ACP_HOST_ERROR_STAGES, HOSTED_ACP_STATES };
+
 /**
  * Lifecycle state of a hosted third-party agent session. There is no waiting
  * state: permission asks are decided by the autonomous admission, not by a
  * person, so no hosted row waits on a human.
  */
-export type HostedAcpState = 'starting' | 'idle' | 'prompting' | 'failed' | 'stopped';
+export type HostedAcpState = typeof HOSTED_ACP_STATES[number];
 
 /** The structured, user-renderable handshake/spawn failure, never a bare string. */
 export interface AcpHostError {
   /** The binary that was launched. */
   readonly binary: string;
-  /** Which stage failed: spawning the process, the ACP initialize, or session creation. */
-  readonly stage: 'spawn' | 'initialize' | 'session' | 'prompt';
+  /** Which stage failed: spawning the process, the ACP initialize, session creation, or a prompt. */
+  readonly stage: typeof ACP_HOST_ERROR_STAGES[number];
   readonly message: string;
 }
 

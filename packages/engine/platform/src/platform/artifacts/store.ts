@@ -24,6 +24,8 @@ import type {
   ArtifactStreamCreateInput,
 } from './types.js';
 import {
+  ARTIFACT_ACQUISITION_MODES,
+  ARTIFACT_FETCH_MODES,
   guessMimeType,
   inferArtifactKind,
   sanitizeArtifactFilename,
@@ -128,16 +130,20 @@ function filenameFromUrl(input: string): string | undefined {
 
 function normalizeExistingRecord(record: ArtifactRecord): ArtifactRecord {
   const sourceUri = typeof record.sourceUri === 'string' ? record.sourceUri : undefined;
-  const acquisitionMode = typeof record.acquisitionMode === 'string'
-    ? record.acquisitionMode
-    : typeof sourceUri === 'string' && /^https?:\/\//i.test(sourceUri)
+  // A saved record keeps a mode only when it is one this build knows, so every
+  // descriptor served matches the published enum; anything else reads as unknown.
+  const savedAcquisition: unknown = record.acquisitionMode;
+  const savedFetch: unknown = record.fetchMode;
+  const acquisitionMode: ArtifactAcquisitionMode = (ARTIFACT_ACQUISITION_MODES as readonly unknown[]).includes(savedAcquisition)
+    ? savedAcquisition as ArtifactAcquisitionMode
+    : savedAcquisition === undefined && typeof sourceUri === 'string' && /^https?:\/\//i.test(sourceUri)
       ? 'remote-fetch'
       : 'unknown';
-  const fetchMode = typeof record.fetchMode === 'string'
-    ? record.fetchMode
-    : acquisitionMode === 'remote-fetch'
-        ? 'unknown'
-        : 'not-applicable';
+  const fetchMode: ArtifactFetchMode = (ARTIFACT_FETCH_MODES as readonly unknown[]).includes(savedFetch)
+    ? savedFetch as ArtifactFetchMode
+    : savedFetch === undefined && acquisitionMode !== 'remote-fetch'
+        ? 'not-applicable'
+        : 'unknown';
   return {
     ...record,
     metadata: record.metadata ?? {},

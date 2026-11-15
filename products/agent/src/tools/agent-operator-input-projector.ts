@@ -1,4 +1,5 @@
 import { getOperatorContract } from '@goodvibes-jev/engine/platform/contracts';
+import { GatewayMethodCatalog } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import { captureStrictJudgmentJson } from '@goodvibes-jev/engine/platform/platform/gate';
 import { assertProjectionExecution, ToolInputProjectionError, type ToolInputProjector } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
@@ -11,30 +12,16 @@ import { captureOperatorConnection } from '../agent/operator-connection-owner.ts
 import { captureOperatorAutomationTarget, type OperatorAutomationTarget } from '../agent/operator-automation-target.ts';
 import { captureOperatorRequestPolicy } from '../agent/operator-request-policy.ts';
 
-// These exact contract methods dispatch messages, remote commands or metered work.
-const OUTWARD_METHOD_IDS = new Set([
-  'email.send', 'channels.actions.invoke', 'channels.tools.invoke', 'channels.accounts.action.default',
-  'channels.accounts.action.named', 'remote.peers.invoke', 'web_search.query', 'judgment.battery.run',
-  'voice.realtime.session', 'voice.stt', 'voice.tts', 'voice.tts.stream', 'sessions.messages.create',
-  'sessions.inputs.deliver', 'sessions.followUp', 'sessions.steer', 'companion.chat.messages.create',
-  'companion.chat.messages.edit', 'companion.chat.messages.retry', 'companion.chat.messages.steer',
-  'contracts.start', 'contracts.reply', 'workLedger.turn.start', 'workLedger.turn.startAgent',
-  'workLedger.execution.start', 'workLedger.execution.resume', 'automation.jobs.run',
-  'automation.schedules.run', 'automation.runs.retry', 'checkin.run',
-  'media.analyze', 'media.transform', 'media.generate', 'memory.vector.rebuild',
-  'tasks.create', 'tasks.retry',
-  'automation.heartbeat.run', 'ci.watches.run', 'watchers.run', 'knowledge.job.run', 'knowledge.refinement.run',
-  'homeassistant.homeGraph.refinement.run', 'channels.test.send', 'fleet.observed.steer',
-  'multimodal.analyze', 'homeassistant.conversation.submit', 'homeassistant.conversation.stream', 'batch.run',
-  // Read-scoped POSTs that still run metered model work or may carry a mutation.
-  'knowledge.ask', 'homeassistant.homeGraph.askHomeGraph',
-  // Read-scoped, but the body is a GraphQL document that may be a mutation.
-  'knowledge.graphql.execute',
-]);
-
 export { assertSafeOperatorPathValue } from '../agent/operator-contract-routes.ts';
 
-export function operatorMethodIsOutward(methodId: string): boolean { return OUTWARD_METHOD_IDS.has(methodId); }
+// The method descriptors state whether a method sends something outward; built once, on first use.
+let builtinMethods: GatewayMethodCatalog | undefined;
+
+/** True when the method dispatches messages, remote commands or metered work (its descriptor's `effect`). */
+export function operatorMethodIsOutward(methodId: string): boolean {
+  builtinMethods ??= new GatewayMethodCatalog();
+  return builtinMethods.get(methodId)?.effect === 'outward';
+}
 
 type CapturedConnection = ReturnType<typeof captureOperatorConnection>;
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -16,7 +16,7 @@
  *
  * Two backends can answer, and this is where one is chosen: a CalDAV server
  * when `surfaces.calendar.caldavUrl`/`caldavUser` are set, a connected Google
- * account otherwise. The five verbs behave identically either way, that is the
+ * account otherwise. The verbs behave identically either way, that is the
  * point of the `CalendarGatewayService` slice, so the choice is invisible
  * above this line.
  */
@@ -69,6 +69,11 @@ function configString(deps: CalendarCompositionDeps, key: string): string {
     return '';
   }
   return typeof value === 'string' ? value.trim() : '';
+}
+
+/** The backend chosen for this call does not have the operation; the verb answers 501 with what to do. */
+function unsupported(action: string): GatewayVerbError {
+  return new GatewayVerbError(`The configured calendar backend cannot ${action}.`, 'CALENDAR_NOT_SUPPORTED', 501);
 }
 
 export function createDaemonCalendarGatewayService(
@@ -150,7 +155,22 @@ export function createDaemonCalendarGatewayService(
     listEvents: async (input) => select().listEvents(input),
     getEvent: async (eventId, calendarId) => select().getEvent(eventId, calendarId),
     createEvent: async (input) => select().createEvent(input),
+    updateEvent: async (eventId, changes, calendarId) => {
+      const backend = select();
+      if (!backend.updateEvent) throw unsupported('update events');
+      return backend.updateEvent(eventId, changes, calendarId);
+    },
+    deleteEvent: async (eventId, calendarId) => {
+      const backend = select();
+      if (!backend.deleteEvent) throw unsupported('delete events');
+      return backend.deleteEvent(eventId, calendarId);
+    },
+    listCalendars: async () => {
+      const backend = select();
+      if (!backend.listCalendars) throw unsupported('list its calendars; set surfaces.calendar.defaultCalendarId to the calendar to use');
+      return backend.listCalendars();
+    },
     exportIcs: async (input) => select().exportIcs(input),
-    importIcs: async (icsContent, calendarId) => select().importIcs(icsContent, calendarId),
+    importIcs: async (icsContent, calendarId, options) => select().importIcs(icsContent, calendarId, options),
   };
 }

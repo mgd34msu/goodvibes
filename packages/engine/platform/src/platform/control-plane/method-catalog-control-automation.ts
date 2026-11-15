@@ -55,8 +55,8 @@ import { METADATA_SCHEMA } from './operator-contract-schemas-shared.js';
  * required for an interval schedule. The union below is discriminated on
  * `kind`, with the cron branch appearing twice because the handler also
  * accepts the expression nested as `schedule.expression`, that path works
- * today and stays valid. The `every` and `at` branches also require `kind`:
- * the handler would otherwise read `{ every }` as a cron schedule.
+ * today and stays valid. `kind` may be left out: the field that carries the
+ * schedule (`cron`/`schedule`, `every`, `at`) already says which kind it is.
  */
 function automationScheduleInputSchema(
   properties: Record<string, Record<string, unknown>>,
@@ -69,13 +69,12 @@ function automationScheduleInputSchema(
     every: STRING_SCHEMA,
     at: STRING_SCHEMA,
   };
-  // The handler reads a missing `kind` as `'cron'`, so only the cron branches
-  // may leave it out; an interval or one-shot schedule must say which it is.
+  // A branch names the field that carries the schedule; `kind`, when given, must agree with it.
   const branch = (kinds: readonly string[], scheduleField: string): Record<string, unknown> =>
     requirementBranch({
       kind: stringEnumSchema([...kinds]),
       [scheduleField]: branchProperty[scheduleField] as Record<string, unknown>,
-    }, kinds.includes('cron') ? [scheduleField] : ['kind', scheduleField]);
+    }, [scheduleField]);
   return branchedSchema(
     bodyEnvelopeSchema({
       ...properties,

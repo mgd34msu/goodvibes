@@ -8,6 +8,7 @@ import {
   arraySchema,
   objectSchema,
 } from './method-catalog-shared.js';
+import { ARTIFACT_ACQUISITION_MODES, ARTIFACT_FETCH_MODES } from '../artifacts/types.js';
 
 export {
   BOOLEAN_SCHEMA,
@@ -49,6 +50,10 @@ export const TOOL_ARGUMENTS_SCHEMA = recordSchema(JSON_VALUE_SCHEMA);
 export const HTTP_HEADER_MAP_SCHEMA = recordSchema(STRING_SCHEMA);
 export const METADATA_SCHEMA = JSON_RECORD_SCHEMA;
 
+/** How an artifact's bytes were obtained and how a remote one was fetched: the artifact store's own unions. */
+export const ARTIFACT_ACQUISITION_MODE_SCHEMA = enumSchema(ARTIFACT_ACQUISITION_MODES);
+export const ARTIFACT_FETCH_MODE_SCHEMA = enumSchema(ARTIFACT_FETCH_MODES);
+
 export const ARTIFACT_DESCRIPTOR_SCHEMA = objectSchema({
   id: STRING_SCHEMA,
   kind: STRING_SCHEMA,
@@ -59,8 +64,8 @@ export const ARTIFACT_DESCRIPTOR_SCHEMA = objectSchema({
   createdAt: NUMBER_SCHEMA,
   expiresAt: NUMBER_SCHEMA,
   sourceUri: STRING_SCHEMA,
-  acquisitionMode: STRING_SCHEMA,
-  fetchMode: STRING_SCHEMA,
+  acquisitionMode: ARTIFACT_ACQUISITION_MODE_SCHEMA,
+  fetchMode: ARTIFACT_FETCH_MODE_SCHEMA,
   metadata: METADATA_SCHEMA,
 }, ['id', 'kind', 'mimeType', 'sizeBytes', 'createdAt', 'metadata'], { additionalProperties: true });
 

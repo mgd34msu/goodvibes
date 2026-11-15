@@ -57,6 +57,10 @@ export const ENUM_VALUE_DESCRIPTIONS: Record<string, Record<string, string>> = {
     explicit: 'Use batch only when callers explicitly request batch execution.',
     'eligible-by-default': 'Accepted and reported to clients, but not yet enforced: it behaves like explicit, and daemon chat stays live.',
   },
+  'batch.fallback': {
+    live: 'A batch job for a provider that cannot batch runs at once on the live path, at live prices, and comes back already finished.',
+    fail: 'A batch job for a provider that cannot batch is refused, and nothing is sent.',
+  },
   'controlPlane.hostMode': {
     local: 'Bind only to this computer.',
     network: 'Bind for LAN access using the default network host.',

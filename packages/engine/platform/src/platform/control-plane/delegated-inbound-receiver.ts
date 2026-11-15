@@ -12,7 +12,11 @@ export interface DelegatedReviewRecord {
   readonly configurationId: string; readonly ownerRevision: string; readonly owner?: DelegatedReviewOwner; readonly workspaceRevision: string;
   readonly approvalId: string; readonly choices: DelegatedInboundChoices;
   readonly acceptedAt: number; readonly sourceExpiresAt: number; readonly recordExpiresAt: number;
-  readonly state: 'accepted-for-review' | 'cancelled'; readonly execution: 'not-started';
+  /** `reviewed` once the owner has read the original; a review leaves the queue when cancelled or expired. */
+  readonly state: 'accepted-for-review' | 'reviewed' | 'cancelled'; readonly execution: 'not-started';
+}
+function isOpenReview(record: DelegatedReviewRecord): boolean {
+  return record.state === 'accepted-for-review' || record.state === 'reviewed';
 }
 /** Rows waiting for review that one queue holds. A cancelled row is dropped at once, so cancelling makes room. */
 const MAX_REVIEW_ROWS = 500;
@@ -70,7 +74,7 @@ export class DelegatedInboundReviewReceiver {
     if (droppedRows > 0) logger.warn('Delegated review queue rows failed validation and were dropped', { droppedRows, kept: loaded.length });
     // Old original proof is never reconstructed; persisted rows are metadata
     // only. A cancelled row grants nothing, so one left by an earlier build is dropped.
-    for (const record of loaded) if (record.recordExpiresAt > Date.now() && record.state === 'accepted-for-review') { this.records.set(record.ref.requestId, record); this.durable.add(record.ref.requestId); }
+    for (const record of loaded) if (record.recordExpiresAt > Date.now() && isOpenReview(record)) { this.records.set(record.ref.requestId, record); this.durable.add(record.ref.requestId); }
     for (const record of this.records.values()) this.armExpiry(record);
     // Rewrite only when loading dropped something; a clean file is already what memory holds.
     if (saved && this.records.size !== saved.records.length) await this.persist();
@@ -137,7 +141,7 @@ export class DelegatedInboundReviewReceiver {
         }
         return { ref: source.ref, disposition: 'transferred' };
       },
-      inspect: async ref => { const record = await this.get(ref); return record?.state === 'accepted-for-review' ? { ref: record.ref, disposition: 'transferred' } : null; },
+      inspect: async ref => { const record = await this.get(ref); return record && isOpenReview(record) ? { ref: record.ref, disposition: 'transferred' } : null; },
       cancel: async ref => { await this.cancel(ref); },
     };
   }
@@ -148,8 +152,21 @@ export class DelegatedInboundReviewReceiver {
   async list(): Promise<readonly DelegatedReviewRecord[]> { await this.start(); await this.expire(); return [...this.records.values()].filter(record => this.durable.has(record.ref.requestId)); }
   async read(ref: NativeInboundSourceRef): Promise<NativeInboundResolvedSource['original'] | null> {
     const record = await this.get(ref); const entry = this.originals.get(ref.requestId);
-    if (!record || !entry || record.state !== 'accepted-for-review' || record.sourceExpiresAt <= Date.now()) { this.release(ref); return null; }
+    if (!record || !entry || !isOpenReview(record) || record.sourceExpiresAt <= Date.now()) { this.release(ref); return null; }
     try { entry.assertCurrent(); return entry.source.original; } catch { this.release(ref); return null; }
+  }
+  /**
+   * The owner read this review's original: its row says `reviewed` from now on,
+   * so a later list shows which messages still wait to be read. One write the
+   * first time; nothing after that.
+   */
+  async markReviewed(ref: NativeInboundSourceRef): Promise<DelegatedReviewRecord | null> {
+    const record = await this.get(ref);
+    if (!record || record.state !== 'accepted-for-review') return record;
+    const reviewed: DelegatedReviewRecord = Object.freeze({ ...record, state: 'reviewed' });
+    this.records.set(ref.requestId, reviewed);
+    await this.persist();
+    return reviewed;
   }
   /** A cancelled review grants nothing, so its row leaves the queue at once and frees its place. */
   async cancel(ref: NativeInboundSourceRef): Promise<void> {

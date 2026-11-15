@@ -16,10 +16,12 @@ import {
 import {
   ARTIFACT_ACQUISITION_MODE_SCHEMA,
   ARTIFACT_FETCH_MODE_SCHEMA,
+  MULTIMODAL_ANALYSIS_RESULT_SCHEMA,
 } from './media-contract-schemas.js';
 export {
   ARTIFACT_ACQUISITION_MODE_SCHEMA,
   ARTIFACT_FETCH_MODE_SCHEMA,
+  MULTIMODAL_ANALYSIS_RESULT_SCHEMA,
   MEDIA_ANALYZE_REQUEST_SCHEMA,
   MEDIA_GENERATION_REQUEST_SCHEMA,
   MEDIA_TRANSFORM_REQUEST_SCHEMA,
@@ -181,7 +183,8 @@ const MEDIA_PROVIDER_DESCRIPTOR_SCHEMA = objectSchema({
   capabilities: STRING_LIST_SCHEMA,
 }, ['id', 'label', 'capabilities']);
 
-const MEDIA_ARTIFACT_SCHEMA = objectSchema({
+/** An artifact a media provider returned (the request-side shape is `MEDIA_ARTIFACT_SCHEMA`). */
+const MEDIA_RESULT_ARTIFACT_SCHEMA = objectSchema({
   id: STRING_SCHEMA,
   artifactId: STRING_SCHEMA,
   mimeType: STRING_SCHEMA,
@@ -205,13 +208,13 @@ export const MEDIA_ANALYSIS_RESULT_SCHEMA = objectSchema({
 
 export const MEDIA_TRANSFORM_RESULT_SCHEMA = objectSchema({
   providerId: STRING_SCHEMA,
-  artifact: MEDIA_ARTIFACT_SCHEMA,
+  artifact: MEDIA_RESULT_ARTIFACT_SCHEMA,
   metadata: METADATA_SCHEMA,
 }, ['providerId', 'artifact', 'metadata']);
 
 export const MEDIA_GENERATION_RESULT_SCHEMA = objectSchema({
   providerId: STRING_SCHEMA,
-  artifacts: arraySchema(MEDIA_ARTIFACT_SCHEMA),
+  artifacts: arraySchema(MEDIA_RESULT_ARTIFACT_SCHEMA),
   metadata: METADATA_SCHEMA,
 }, ['providerId', 'artifacts', 'metadata']);
 
@@ -224,35 +227,12 @@ const MULTIMODAL_PROVIDER_DESCRIPTOR_SCHEMA = objectSchema({
   metadata: METADATA_SCHEMA,
 }, ['id', 'label', 'transport', 'capabilities', 'configured', 'metadata']);
 
-const MULTIMODAL_SEGMENT_SCHEMA = objectSchema({
-  kind: STRING_SCHEMA,
-  title: STRING_SCHEMA,
-  text: STRING_SCHEMA,
-  startMs: NUMBER_SCHEMA,
-  endMs: NUMBER_SCHEMA,
-  confidence: NUMBER_SCHEMA,
-  metadata: METADATA_SCHEMA,
-}, ['kind', 'metadata']);
-
 export const MULTIMODAL_STATUS_SCHEMA = objectSchema({
   enabled: BOOLEAN_SCHEMA,
   providerCount: NUMBER_SCHEMA,
   providers: arraySchema(MULTIMODAL_PROVIDER_DESCRIPTOR_SCHEMA),
   note: STRING_SCHEMA,
 }, ['enabled', 'providerCount', 'providers', 'note']);
-
-export const MULTIMODAL_ANALYSIS_RESULT_SCHEMA = objectSchema({
-  id: STRING_SCHEMA,
-  kind: STRING_SCHEMA,
-  artifact: ARTIFACT_DESCRIPTOR_SCHEMA,
-  providerIds: STRING_LIST_SCHEMA,
-  summary: STRING_SCHEMA,
-  text: STRING_SCHEMA,
-  labels: STRING_LIST_SCHEMA,
-  entities: STRING_LIST_SCHEMA,
-  segments: arraySchema(MULTIMODAL_SEGMENT_SCHEMA),
-  metadata: METADATA_SCHEMA,
-}, ['id', 'kind', 'artifact', 'providerIds', 'labels', 'entities', 'segments', 'metadata']);
 
 export const MULTIMODAL_PACKET_SCHEMA = objectSchema({
   detail: STRING_SCHEMA,

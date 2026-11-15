@@ -7,6 +7,14 @@ export type GatewayMethodTransport = 'http' | 'ws' | 'internal';
 export type GatewayMethodSource = 'builtin' | 'plugin';
 export type GatewayMethodAccess = 'public' | 'authenticated' | 'admin' | 'remote-peer';
 export type GatewayEventTransport = 'sse' | 'ws' | 'internal';
+/**
+ * What calling a method does beyond this daemon: `read` changes nothing,
+ * `write` changes state the owner holds here, `outward` sends something to a
+ * third party or a provider (a message, an invitation, a remote command,
+ * metered model work). A caller that must not let read content cause a send
+ * asks for a send admission on every `outward` method.
+ */
+export type GatewayMethodEffect = 'read' | 'write' | 'outward';
 
 export interface GatewayHttpBinding {
   readonly method: 'GET' | 'POST' | 'PATCH' | 'DELETE';
@@ -28,6 +36,8 @@ export interface GatewayMethodDescriptor {
   readonly outputSchema?: Record<string, unknown> | undefined;
   readonly pluginId?: string | undefined;
   readonly dangerous?: boolean | undefined;
+  /** Set by `methodDescriptor` for every builtin method; see `GatewayMethodEffect`. */
+  readonly effect?: GatewayMethodEffect | undefined;
   /** The header or body field that makes a retry safe; the route that reads it is its owner. */
   readonly replay?: ContractReplayKey | undefined;
   /** Codes this method's route puts on an error body beyond the shared engine codes. */
@@ -178,6 +188,7 @@ export const METHOD_DESCRIPTOR_SCHEMA = objectSchema({
   outputSchema: JSON_OBJECT_SCHEMA,
   pluginId: STRING_SCHEMA,
   dangerous: BOOLEAN_SCHEMA,
+  effect: stringEnumSchema(['read', 'write', 'outward']),
   invokable: BOOLEAN_SCHEMA,
   replay: objectSchema({ in: STRING_SCHEMA, name: STRING_SCHEMA, behavior: STRING_SCHEMA }, ['in', 'name', 'behavior']),
   errorCodes: arraySchema(objectSchema({ code: STRING_SCHEMA, status: NUMBER_SCHEMA, meaning: STRING_SCHEMA }, ['code', 'status', 'meaning'])),
@@ -319,12 +330,57 @@ export function exhaustiveStringEnumSchema<Member extends string>() {
   };
 }
 
+/**
+ * Methods whose catalog file does not yet state `effect: 'outward'` itself but
+ * that dispatch messages, remote commands or metered model work. A descriptor
+ * that sets `effect` wins; a new outward method sets it on its descriptor.
+ */
+const OUTWARD_METHOD_IDS: ReadonlySet<string> = new Set([
+  'email.send', 'channels.actions.invoke', 'channels.tools.invoke', 'channels.accounts.action.default',
+  'channels.accounts.action.named', 'remote.peers.invoke', 'web_search.query', 'judgment.battery.run',
+  'voice.realtime.session', 'voice.stt', 'voice.tts', 'voice.tts.stream', 'sessions.messages.create',
+  'sessions.inputs.deliver', 'sessions.followUp', 'sessions.steer', 'companion.chat.messages.create',
+  'companion.chat.messages.edit', 'companion.chat.messages.retry', 'companion.chat.messages.steer',
+  'contracts.start', 'contracts.reply', 'workLedger.turn.start', 'workLedger.turn.startAgent',
+  'workLedger.execution.start', 'workLedger.execution.resume', 'automation.jobs.run',
+  'automation.schedules.run', 'automation.runs.retry', 'checkin.run',
+  'media.analyze', 'media.transform', 'media.generate', 'memory.vector.rebuild',
+  'tasks.create', 'tasks.retry',
+  'automation.heartbeat.run', 'ci.watches.run', 'watchers.run', 'knowledge.job.run', 'knowledge.refinement.run',
+  'homeassistant.homeGraph.refinement.run', 'fleet.observed.steer',
+  'multimodal.analyze', 'homeassistant.conversation.submit', 'homeassistant.conversation.stream',
+  // Read-scoped POSTs that still run metered model work or may carry a mutation.
+  'knowledge.ask', 'homeassistant.homeGraph.askHomeGraph',
+  // Read-scoped, but the body is a GraphQL document that may be a mutation.
+  'knowledge.graphql.execute',
+]);
+
+function defaultMethodEffect(id: string, scopes: readonly string[]): GatewayMethodEffect {
+  if (OUTWARD_METHOD_IDS.has(id)) return 'outward';
+  return scopes.length > 0 && scopes.every((scope) => scope.startsWith('read:')) ? 'read' : 'write';
+}
+
+/** Scopes whose admin writes change who can sign in or what the daemon is allowed to do. */
+const ACCESS_AND_SETTINGS_WRITE_SCOPES: ReadonlySet<string> = new Set(['write:auth', 'write:config']);
+
+/**
+ * `dangerous` means: a client should confirm before calling, and a generated
+ * tool list marks it destructive. Every admin method that writes accounts,
+ * sign-in or settings (a `write:auth` or `write:config` scope) is dangerous
+ * unless its descriptor says `dangerous: false`; any other method sets the flag
+ * itself.
+ */
 export function methodDescriptor(input: Omit<GatewayMethodDescriptor, 'source' | 'transport' | 'access'> & Partial<Pick<GatewayMethodDescriptor, 'source' | 'transport' | 'access'>>): GatewayMethodDescriptor {
+  const access = input.access ?? 'authenticated';
+  const dangerous = input.dangerous
+    ?? (access === 'admin' && input.scopes.some((scope) => ACCESS_AND_SETTINGS_WRITE_SCOPES.has(scope)) ? true : undefined);
   return {
     source: input.source ?? 'builtin',
     transport: input.transport ?? ['http', 'ws'],
-    access: input.access ?? 'authenticated',
+    access,
     ...input,
+    ...(dangerous === undefined ? {} : { dangerous }),
+    effect: input.effect ?? defaultMethodEffect(input.id, input.scopes),
   };
 }
 

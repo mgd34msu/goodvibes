@@ -160,9 +160,7 @@ export function applySettingValue({
       });
     }
     if (removable && (!daemonOwned || daemonConfig?.reset !== undefined)) {
-      // reset() does not consult managed-policy locks; the dynamic setter's
-      // preflight does, so a locked key is refused here exactly as a write is.
-      configManager.validateDynamic(key, value);
+      // reset() refuses a key locked by managed policy, exactly as a write is refused.
       configManager.reset(key);
     } else {
       configManager.setDynamic(key, value);

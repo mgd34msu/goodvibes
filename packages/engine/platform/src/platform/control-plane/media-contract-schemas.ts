@@ -9,14 +9,16 @@ import {
   objectSchema,
 } from './method-catalog-shared.js';
 import {
+  ARTIFACT_ACQUISITION_MODE_SCHEMA,
+  ARTIFACT_DESCRIPTOR_SCHEMA,
+  ARTIFACT_FETCH_MODE_SCHEMA,
   JSON_RECORD_SCHEMA,
   METADATA_SCHEMA,
   STRING_LIST_SCHEMA,
   enumSchema,
 } from './operator-contract-schemas-shared.js';
 
-export const ARTIFACT_ACQUISITION_MODE_SCHEMA = enumSchema(['inline-data', 'local-path', 'remote-fetch', 'unknown']);
-export const ARTIFACT_FETCH_MODE_SCHEMA = enumSchema(['not-applicable', 'public-only', 'allow-private-hosts', 'unknown']);
+export { ARTIFACT_ACQUISITION_MODE_SCHEMA, ARTIFACT_FETCH_MODE_SCHEMA };
 
 export const VOICE_AUDIO_ARTIFACT_SCHEMA = objectSchema({
   mimeType: STRING_SCHEMA,
@@ -126,94 +128,66 @@ export const MULTIMODAL_WRITEBACK_OPTIONS_SCHEMA = objectSchema({
   metadata: METADATA_SCHEMA,
 });
 
-export const MULTIMODAL_ANALYZE_REQUEST_SCHEMA = bodyEnvelopeSchema({
-  artifactId: STRING_SCHEMA,
-  artifact: MULTIMODAL_ARTIFACT_INPUT_SCHEMA,
-  prompt: STRING_SCHEMA,
-  imageProviderId: STRING_SCHEMA,
-  audioProviderId: STRING_SCHEMA,
-  modelId: STRING_SCHEMA,
-  language: STRING_SCHEMA,
-  detail: enumSchema(['compact', 'standard', 'detailed']),
-  allowPrivateHosts: BOOLEAN_SCHEMA,
-  includePacket: BOOLEAN_SCHEMA,
-  writeback: MULTIMODAL_WRITEBACK_OPTIONS_SCHEMA,
-  sessionId: STRING_SCHEMA,
+/** Like `media.analyze`: the artifact to read is named by `artifact` or by a stored `artifactId`. */
+export const MULTIMODAL_ANALYZE_REQUEST_SCHEMA = branchedSchema(
+  bodyEnvelopeSchema({
+    artifactId: STRING_SCHEMA,
+    artifact: MULTIMODAL_ARTIFACT_INPUT_SCHEMA,
+    prompt: STRING_SCHEMA,
+    imageProviderId: STRING_SCHEMA,
+    audioProviderId: STRING_SCHEMA,
+    modelId: STRING_SCHEMA,
+    language: STRING_SCHEMA,
+    detail: enumSchema(['compact', 'standard', 'detailed']),
+    allowPrivateHosts: BOOLEAN_SCHEMA,
+    includePacket: BOOLEAN_SCHEMA,
+    writeback: MULTIMODAL_WRITEBACK_OPTIONS_SCHEMA,
+    sessionId: STRING_SCHEMA,
+    metadata: METADATA_SCHEMA,
+  }),
+  [
+    requirementBranch({ artifact: MULTIMODAL_ARTIFACT_INPUT_SCHEMA }, ['artifact']),
+    requirementBranch({ artifactId: STRING_SCHEMA }, ['artifactId']),
+  ],
+);
+
+/** One segment of an analysis, as `multimodal.analyze` returns it. */
+const MULTIMODAL_SEGMENT_SCHEMA = objectSchema({
+  kind: STRING_SCHEMA,
+  title: STRING_SCHEMA,
+  text: STRING_SCHEMA,
+  startMs: NUMBER_SCHEMA,
+  endMs: NUMBER_SCHEMA,
+  confidence: NUMBER_SCHEMA,
   metadata: METADATA_SCHEMA,
-});
+}, ['kind', 'metadata']);
+
+/**
+ * The analysis `multimodal.analyze` returns and `multimodal.packet` and
+ * `multimodal.writeback` take back. One schema for all three, so whatever the
+ * first step returns the second step accepts.
+ */
+export const MULTIMODAL_ANALYSIS_RESULT_SCHEMA = objectSchema({
+  id: STRING_SCHEMA,
+  kind: STRING_SCHEMA,
+  artifact: ARTIFACT_DESCRIPTOR_SCHEMA,
+  providerIds: STRING_LIST_SCHEMA,
+  summary: STRING_SCHEMA,
+  text: STRING_SCHEMA,
+  labels: STRING_LIST_SCHEMA,
+  entities: STRING_LIST_SCHEMA,
+  segments: arraySchema(MULTIMODAL_SEGMENT_SCHEMA),
+  metadata: METADATA_SCHEMA,
+}, ['id', 'kind', 'artifact', 'providerIds', 'labels', 'entities', 'segments', 'metadata']);
 
 export const MULTIMODAL_PACKET_REQUEST_SCHEMA = bodyEnvelopeSchema({
-  analysis: objectSchema({
-    id: STRING_SCHEMA,
-    kind: STRING_SCHEMA,
-    artifact: objectSchema({
-      id: STRING_SCHEMA,
-      kind: STRING_SCHEMA,
-      mimeType: STRING_SCHEMA,
-      filename: STRING_SCHEMA,
-      sizeBytes: NUMBER_SCHEMA,
-      sha256: STRING_SCHEMA,
-      createdAt: NUMBER_SCHEMA,
-      expiresAt: NUMBER_SCHEMA,
-      sourceUri: STRING_SCHEMA,
-      acquisitionMode: STRING_SCHEMA,
-      fetchMode: STRING_SCHEMA,
-      metadata: METADATA_SCHEMA,
-    }, ['id', 'kind', 'mimeType', 'sizeBytes', 'sha256', 'createdAt', 'metadata'], { additionalProperties: true }),
-    providerIds: STRING_LIST_SCHEMA,
-    summary: STRING_SCHEMA,
-    text: STRING_SCHEMA,
-    labels: STRING_LIST_SCHEMA,
-    entities: STRING_LIST_SCHEMA,
-    segments: arraySchema(objectSchema({
-      kind: STRING_SCHEMA,
-      title: STRING_SCHEMA,
-      text: STRING_SCHEMA,
-      startMs: NUMBER_SCHEMA,
-      endMs: NUMBER_SCHEMA,
-      confidence: NUMBER_SCHEMA,
-      metadata: METADATA_SCHEMA,
-    }, ['kind', 'metadata'])),
-    metadata: METADATA_SCHEMA,
-  }, ['id', 'kind', 'artifact', 'providerIds', 'labels', 'entities', 'segments', 'metadata']),
+  analysis: MULTIMODAL_ANALYSIS_RESULT_SCHEMA,
   detail: enumSchema(['compact', 'standard', 'detailed']),
   budgetLimit: NUMBER_SCHEMA,
 }, ['analysis']);
 
 export const MULTIMODAL_WRITEBACK_REQUEST_SCHEMA = bodyEnvelopeSchema({
-  analysis: objectSchema({
-    id: STRING_SCHEMA,
-    kind: STRING_SCHEMA,
-    artifact: objectSchema({
-      id: STRING_SCHEMA,
-      kind: STRING_SCHEMA,
-      mimeType: STRING_SCHEMA,
-      filename: STRING_SCHEMA,
-      sizeBytes: NUMBER_SCHEMA,
-      sha256: STRING_SCHEMA,
-      createdAt: NUMBER_SCHEMA,
-      expiresAt: NUMBER_SCHEMA,
-      sourceUri: STRING_SCHEMA,
-      acquisitionMode: STRING_SCHEMA,
-      fetchMode: STRING_SCHEMA,
-      metadata: METADATA_SCHEMA,
-    }, ['id', 'kind', 'mimeType', 'sizeBytes', 'sha256', 'createdAt', 'metadata'], { additionalProperties: true }),
-    providerIds: STRING_LIST_SCHEMA,
-    summary: STRING_SCHEMA,
-    text: STRING_SCHEMA,
-    labels: STRING_LIST_SCHEMA,
-    entities: STRING_LIST_SCHEMA,
-    segments: arraySchema(objectSchema({
-      kind: STRING_SCHEMA,
-      title: STRING_SCHEMA,
-      text: STRING_SCHEMA,
-      startMs: NUMBER_SCHEMA,
-      endMs: NUMBER_SCHEMA,
-      confidence: NUMBER_SCHEMA,
-      metadata: METADATA_SCHEMA,
-    }, ['kind', 'metadata'])),
-    metadata: METADATA_SCHEMA,
-  }, ['id', 'kind', 'artifact', 'providerIds', 'labels', 'entities', 'segments', 'metadata']),
+  analysis: MULTIMODAL_ANALYSIS_RESULT_SCHEMA,
   sessionId: STRING_SCHEMA,
   title: STRING_SCHEMA,
   tags: arraySchema(STRING_SCHEMA),

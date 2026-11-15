@@ -155,15 +155,14 @@ describe('every {param} in an advertised path is a required input', () => {
 });
 
 describe('automation schedules', () => {
-  test.each(['automation.jobs.create', 'automation.schedules.create'])(
-    '%s rejects an interval or one-shot schedule that omits kind, which the handler would read as cron',
-    (id) => {
-      expect(validateInvocationInput(descriptor(id), { prompt: 'x', every: '5m' })?.code).toBe('INVALID_INPUT');
-      expect(validateInvocationInput(descriptor(id), { prompt: 'x', at: '2030-01-01T00:00:00Z' })?.code).toBe('INVALID_INPUT');
-    },
-  );
+  test.each(['automation.jobs.create', 'automation.schedules.create'])('%s refuses a kind that disagrees with the schedule field', (id) => {
+    expect(validateInvocationInput(descriptor(id), { prompt: 'x', kind: 'cron', every: '5m' })?.code).toBe('INVALID_INPUT');
+    expect(validateInvocationInput(descriptor(id), { prompt: 'x' })?.code).toBe('INVALID_INPUT');
+  });
 
   test.each(['automation.jobs.create', 'automation.schedules.create'])('%s accepts each schedule form that works', (id) => {
+    expect(validateInvocationInput(descriptor(id), { prompt: 'x', every: '5m' })).toBeNull();
+    expect(validateInvocationInput(descriptor(id), { prompt: 'x', at: '2030-01-01T00:00:00Z' })).toBeNull();
     expect(validateInvocationInput(descriptor(id), { prompt: 'x', kind: 'every', every: '5m' })).toBeNull();
     expect(validateInvocationInput(descriptor(id), { prompt: 'x', kind: 'at', at: '2030-01-01T00:00:00Z' })).toBeNull();
     expect(validateInvocationInput(descriptor(id), { prompt: 'x', cron: '* * * * *' })).toBeNull();

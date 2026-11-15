@@ -488,7 +488,7 @@ export const builtinGatewayControlCoreMethodDescriptors: readonly GatewayMethodD
   methodDescriptor({
     id: 'sessions.permissionMode.get',
     title: 'Get Session Permission Mode',
-    description: 'Return the effective session execution mode: safe-owner, safe-jev, yolo, or the read-only plan posture. Only the daemon\'s live local runtime session is resolvable; any other session id is a 404 SESSION_NOT_LOCAL.',
+    description: 'Return the effective session execution mode: safe-owner, safe-jev, yolo, or the read-only plan posture. Answers for the local runtime session (addressable as `runtime`), every session the daemon hosts, and a channel session with its own mode; other session ids answer 404 SESSION_NOT_LOCAL.',
     category: 'sessions',
     scopes: ['read:sessions'],
     http: { method: 'GET', path: '/api/sessions/{sessionId}/permission-mode' },
@@ -501,7 +501,7 @@ export const builtinGatewayControlCoreMethodDescriptors: readonly GatewayMethodD
   methodDescriptor({
     id: 'sessions.permissionMode.set',
     title: 'Set Session Permission Mode',
-    description: 'Set safe-owner, safe-jev, or yolo execution, or enter the read-only plan posture. Admin only: yolo runs every action without safety denials, and for a session with no hosted or channel mode of its own this also rewrites the daemon-wide permissions.mode. Emits runtime.gate (PRESET_CHANGED) so every surface stays in sync. Only the daemon\'s live local runtime session is settable; any other session id is a 404 SESSION_NOT_LOCAL.',
+    description: 'Set safe-owner, safe-jev, or yolo execution, or enter the read-only plan posture. Admin only, because it can loosen security: yolo runs every action without safety denials, and for the local runtime session (no hosted or channel mode of its own) it rewrites the daemon-wide permissions.mode. A hosted session and a channel session with its own mode change only that session. Emits runtime.gate (PRESET_CHANGED) so every surface stays in sync. Other session ids answer 404 SESSION_NOT_LOCAL.',
     category: 'sessions',
     scopes: ['write:sessions'],
     access: 'admin',

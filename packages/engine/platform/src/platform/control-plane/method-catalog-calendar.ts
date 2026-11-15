@@ -1,5 +1,6 @@
 import type { GatewayMethodDescriptor } from './method-catalog-shared.js';
 import {
+  BOOLEAN_SCHEMA,
   STRING_SCHEMA,
   NUMBER_SCHEMA,
   arraySchema,
@@ -38,8 +39,8 @@ const CALENDAR_EVENT_DETAIL_SCHEMA = objectSchema({
  * These are SERVED. `registerCalendarGatewayMethods`
  * (control-plane/routes/calendar.ts) attaches an in-process handler to each id
  * over a `CalendarGatewayService`, the daemon composition supplies the
- * Google-backed implementation
- * (platform/google/gateway-calendar-service.ts), and
+ * configured backend (a CalDAV server, or a connected Google account;
+ * control-plane/routes/calendar-composition.ts), and
  * `GATEWAY_REST_ROUTES` maps each advertised http path to the same handler, so
  * the REST path and the methodId-invoke endpoint resolve identically.
  *
@@ -62,7 +63,7 @@ export const builtinGatewayCalendarMethodDescriptors: readonly GatewayMethodDesc
   methodDescriptor({
     id: 'calendar.events.list',
     title: 'List Calendar Events',
-    description: 'Return calendar event summaries from the configured CalDAV calendar within an optional time window. With no from or to, lists events starting from 24 hours ago onward.',
+    description: 'Return event summaries from the configured calendar (a CalDAV server, or the connected Google account) within an optional time window. With no from or to, lists from 24 hours ago to 30 days ahead; a recurring event is listed at each occurrence in the window.',
     category: 'calendar',
     scopes: ['read:calendar'],
     http: { method: 'GET', path: '/api/calendar/events' },
@@ -90,10 +91,12 @@ export const builtinGatewayCalendarMethodDescriptors: readonly GatewayMethodDesc
   methodDescriptor({
     id: 'calendar.events.create',
     title: 'Create Calendar Event',
-    description: 'Create an event on the configured CalDAV calendar. Requires explicit confirmation.',
+    description: 'Create an event on the configured calendar. Requires explicit confirmation (confirm: true); attendees are invited by the calendar. Change it with calendar.events.update and remove it with calendar.events.delete.',
     category: 'calendar',
     scopes: ['write:calendar'],
     access: 'admin',
+    dangerous: true,
+    effect: 'outward',
     http: { method: 'POST', path: '/api/calendar/events' },
     inputSchema: bodyEnvelopeSchema({
       title: STRING_SCHEMA,
@@ -103,7 +106,7 @@ export const builtinGatewayCalendarMethodDescriptors: readonly GatewayMethodDesc
       attendees: arraySchema(STRING_SCHEMA),
       location: STRING_SCHEMA,
       calendarId: STRING_SCHEMA,
-      confirm: { type: 'boolean' },
+      confirm: BOOLEAN_SCHEMA,
     }, ['title', 'start', 'end', 'confirm']),
     outputSchema: objectSchema({
       eventId: STRING_SCHEMA,
@@ -112,28 +115,96 @@ export const builtinGatewayCalendarMethodDescriptors: readonly GatewayMethodDesc
     }, ['eventId', 'uid', 'createdAt']),
   }),
   methodDescriptor({
-    id: 'calendar.ics.import',
-    title: 'Import iCalendar',
-    description: 'Import raw .ics content into the configured CalDAV calendar. Requires explicit confirmation.',
+    id: 'calendar.events.update',
+    title: 'Update Calendar Event',
+    description: 'Change an event on the configured calendar: only the fields sent change (attendees replaces the guest list). Requires explicit confirmation (confirm: true). An unknown eventId is a 404; a backend that cannot change events answers 501 CALENDAR_NOT_SUPPORTED.',
     category: 'calendar',
     scopes: ['write:calendar'],
     access: 'admin',
+    dangerous: true,
+    effect: 'outward',
+    http: { method: 'PATCH', path: '/api/calendar/events/{eventId}' },
+    inputSchema: bodyEnvelopeSchema({
+      eventId: STRING_SCHEMA,
+      title: STRING_SCHEMA,
+      start: STRING_SCHEMA,
+      end: STRING_SCHEMA,
+      description: STRING_SCHEMA,
+      attendees: arraySchema(STRING_SCHEMA),
+      location: STRING_SCHEMA,
+      calendarId: STRING_SCHEMA,
+      confirm: BOOLEAN_SCHEMA,
+    }, ['eventId', 'confirm']),
+    outputSchema: objectSchema({
+      eventId: STRING_SCHEMA,
+      updatedAt: STRING_SCHEMA,
+    }, ['eventId', 'updatedAt']),
+  }),
+  methodDescriptor({
+    id: 'calendar.events.delete',
+    title: 'Delete Calendar Event',
+    description: 'Remove an event from the configured calendar. Requires explicit confirmation (confirm: true). `deleted: false` means the calendar no longer held it; a backend that cannot delete events answers 501 CALENDAR_NOT_SUPPORTED.',
+    category: 'calendar',
+    scopes: ['write:calendar'],
+    access: 'admin',
+    dangerous: true,
+    effect: 'outward',
+    http: { method: 'DELETE', path: '/api/calendar/events/{eventId}' },
+    inputSchema: bodyEnvelopeSchema({
+      eventId: STRING_SCHEMA,
+      calendarId: STRING_SCHEMA,
+      confirm: BOOLEAN_SCHEMA,
+    }, ['eventId', 'confirm']),
+    outputSchema: objectSchema({
+      eventId: STRING_SCHEMA,
+      deleted: BOOLEAN_SCHEMA,
+    }, ['eventId', 'deleted']),
+  }),
+  methodDescriptor({
+    id: 'calendar.calendars.list',
+    title: 'List Calendars',
+    description: 'The calendars the configured account can reach, so a setup flow can offer them for surfaces.calendar.defaultCalendarId. A backend that cannot discover calendars answers 501 CALENDAR_NOT_SUPPORTED.',
+    category: 'calendar',
+    scopes: ['read:calendar'],
+    http: { method: 'GET', path: '/api/calendar/calendars' },
+    inputSchema: objectSchema({}),
+    outputSchema: listOutputSchema('calendars', objectSchema({
+      calendarId: STRING_SCHEMA,
+      displayName: STRING_SCHEMA,
+    }, ['calendarId', 'displayName'])),
+  }),
+  methodDescriptor({
+    id: 'calendar.ics.import',
+    title: 'Import iCalendar',
+    description: 'Import raw .ics content into the configured calendar. Requires explicit confirmation (confirm: true). A series and its overrides are stored together as written; an event already on the calendar is kept unless replace: true. Guests an imported event names are not invited; they are listed in attendeesLeftOff.',
+    category: 'calendar',
+    scopes: ['write:calendar'],
+    access: 'admin',
+    dangerous: true,
+    effect: 'outward',
     http: { method: 'POST', path: '/api/calendar/ics/import' },
     inputSchema: bodyEnvelopeSchema({
       icsContent: STRING_SCHEMA,
       calendarId: STRING_SCHEMA,
-      confirm: { type: 'boolean' },
+      replace: BOOLEAN_SCHEMA,
+      confirm: BOOLEAN_SCHEMA,
     }, ['icsContent', 'confirm']),
     outputSchema: objectSchema({
       imported: NUMBER_SCHEMA,
       eventIds: arraySchema(STRING_SCHEMA),
       errors: arraySchema(STRING_SCHEMA),
+      attendeesLeftOff: arraySchema(objectSchema({
+        eventId: STRING_SCHEMA,
+        title: STRING_SCHEMA,
+        attendees: arraySchema(STRING_SCHEMA),
+        next: STRING_SCHEMA,
+      }, ['eventId', 'title', 'attendees', 'next'])),
     }, ['imported', 'eventIds', 'errors']),
   }),
   methodDescriptor({
     id: 'calendar.ics.export',
     title: 'Export iCalendar',
-    description: 'Export events from the configured CalDAV calendar as raw .ics content within an optional time window.',
+    description: 'Export events from the configured calendar as raw .ics content within an optional time window.',
     category: 'calendar',
     scopes: ['read:calendar'],
     http: { method: 'GET', path: '/api/calendar/ics/export' },

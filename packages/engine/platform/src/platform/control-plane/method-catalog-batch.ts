@@ -83,7 +83,7 @@ export const builtinGatewayBatchMethodDescriptors: readonly GatewayMethodDescrip
   methodDescriptor({
     id: 'batch.runtime.get',
     title: 'Batch Runtime',
-    description: 'The batch queue\'s current mode (`off`, `explicit` or `eligible-by-default`), what happens when a provider cannot batch (`fallback`), which queue backend holds jobs, the Cloudflare settings it would use, its limits, and the providers that can batch. `GET /api/batch` and `GET /api/batch/config` return the same document.',
+    description: 'The batch queue\'s current mode (`off`, `explicit` or `eligible-by-default`; the last is accepted and behaves like `explicit`, nothing enqueues by default yet), what happens to a job whose provider cannot batch (`fallback`: `live` runs it at once on the live path and answers it finished, `fail` refuses it), which queue backend holds jobs, the Cloudflare settings it would use, its limits, and the providers that can batch. `GET /api/batch` and `GET /api/batch/config` return the same document.',
     category: 'batch',
     scopes: ['read:batch'],
     http: { method: 'GET', path: '/api/batch/runtime' },
@@ -113,11 +113,12 @@ export const builtinGatewayBatchMethodDescriptors: readonly GatewayMethodDescrip
   methodDescriptor({
     id: 'batch.jobs.create',
     title: 'Create Batch Job',
-    description: 'Queue one chat request to run later as part of a provider batch, answered 202 with the queued job. A message or tool the provider could never accept is refused here with INVALID_BATCH_REQUEST rather than accepted with a job id. `flush: true` submits it right away instead of waiting for the next pass, and the response then carries the job as that pass left it. Refused with BATCH_DISABLED (409) while the mode is `off`, LIVE_REQUEST_NOT_ACCEPTED (400) for `executionMode: "live"`, and BATCH_REQUEST_TOO_LARGE (413) above the request size limit. Spends provider budget, so it needs an admin.',
+    description: 'Queue one chat request to run later as part of a provider batch, answered 202 with the queued job. A message or tool the provider could never accept is refused here with INVALID_BATCH_REQUEST rather than accepted with a job id. `flush: true` submits it right away instead of waiting for the next pass, and the response then carries the job as that pass left it. When the provider cannot batch (no batch API, or not configured for it) and `batch.fallback` is `live`, the request runs at once on the live path and the job comes back finished: `completed` with its result, or `failed` with code LIVE_FALLBACK_FAILED, marked `metadata["goodvibes.execution"] = "live-fallback"`; with `fallback: fail` it is refused with BATCH_PROVIDER_UNSUPPORTED or BATCH_PROVIDER_NOT_CONFIGURED (409). Refused with BATCH_DISABLED (409) while the mode is `off`, LIVE_REQUEST_NOT_ACCEPTED (400) for `executionMode: "live"`, and BATCH_REQUEST_TOO_LARGE (413) above the request size limit. Spends provider budget, so it needs an admin.',
     category: 'batch',
     scopes: ['write:batch'],
     access: 'admin',
     dangerous: true,
+    effect: 'outward',
     http: { method: 'POST', path: '/api/batch/jobs' },
     inputSchema: bodyEnvelopeSchema({
       provider: STRING_SCHEMA,
@@ -159,6 +160,7 @@ export const builtinGatewayBatchMethodDescriptors: readonly GatewayMethodDescrip
     scopes: ['write:batch'],
     access: 'admin',
     dangerous: true,
+    effect: 'outward',
     http: { method: 'POST', path: '/api/batch/tick' },
     inputSchema: bodyEnvelopeSchema({ force: BOOLEAN_SCHEMA }, []),
     outputSchema: BATCH_RUN_RESULT_SCHEMA,

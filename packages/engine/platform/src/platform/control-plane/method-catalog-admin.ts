@@ -1,5 +1,5 @@
 import type { GatewayMethodDescriptor } from './method-catalog-shared.js';
-import { EMPTY_OBJECT_SCHEMA,STRING_SCHEMA,objectSchema,listOutputSchema,entityOutputSchema,bodyEnvelopeSchema,methodDescriptor } from './method-catalog-shared.js';
+import { EMPTY_OBJECT_SCHEMA, JSON_VALUE_SCHEMA, NUMBER_SCHEMA, STRING_SCHEMA, branchedSchema, objectSchema, listOutputSchema, entityOutputSchema, bodyEnvelopeSchema, methodDescriptor, requirementBranch, stringEnumSchema } from './method-catalog-shared.js';
 import {
   CONFIG_SET_OUTPUT_SCHEMA,
   CONFIG_SNAPSHOT_SCHEMA,
@@ -17,6 +17,38 @@ import {
   PANEL_OPEN_OUTPUT_SCHEMA,
   PANEL_SNAPSHOT_SCHEMA,
 } from './operator-contract-schemas.js';
+
+/**
+ * The two-step settings owner lanes `config.set` also serves: `capture`
+ * prepares a change and returns a reference, `apply` spends it. Each arm is the
+ * only field of its body; the arm's own fields depend on the action.
+ */
+function settingsLaneArmSchema(): Record<string, unknown> {
+  return objectSchema({
+    version: NUMBER_SCHEMA,
+    action: stringEnumSchema(['capture', 'apply']),
+    reference: STRING_SCHEMA,
+  }, ['version', 'action'], { additionalProperties: true });
+}
+
+/**
+ * `config.set` takes one of three bodies: `{ key, value }` writes a value;
+ * `{ settingsPrecondition }` and `{ settingsImportPrecondition }` run the
+ * capture-then-apply lanes the settings and import clients use.
+ */
+const CONFIG_SET_INPUT_SCHEMA = branchedSchema(
+  bodyEnvelopeSchema({
+    key: STRING_SCHEMA,
+    value: JSON_VALUE_SCHEMA,
+    settingsPrecondition: settingsLaneArmSchema(),
+    settingsImportPrecondition: settingsLaneArmSchema(),
+  }),
+  [
+    requirementBranch({ key: STRING_SCHEMA, value: JSON_VALUE_SCHEMA }, ['key', 'value']),
+    requirementBranch({ settingsPrecondition: settingsLaneArmSchema() }, ['settingsPrecondition']),
+    requirementBranch({ settingsImportPrecondition: settingsLaneArmSchema() }, ['settingsImportPrecondition']),
+  ],
+);
 
 export const builtinGatewayAdminMethodDescriptors: readonly GatewayMethodDescriptor[] = [
   methodDescriptor({
@@ -54,7 +86,6 @@ export const builtinGatewayAdminMethodDescriptors: readonly GatewayMethodDescrip
     http: { method: 'DELETE', path: '/api/local-auth/users/{username}' },
     inputSchema: objectSchema({ username: STRING_SCHEMA }, ['username']),
     outputSchema: LOCAL_AUTH_DELETE_OUTPUT_SCHEMA,
-    dangerous: true,
   }),
   methodDescriptor({
     id: 'local_auth.users.password.rotate',
@@ -64,7 +95,7 @@ export const builtinGatewayAdminMethodDescriptors: readonly GatewayMethodDescrip
     scopes: ['write:auth'],
     access: 'admin',
     http: { method: 'POST', path: '/api/local-auth/users/{username}/password' },
-    inputSchema: bodyEnvelopeSchema({ password: STRING_SCHEMA }, ['password']),
+    inputSchema: bodyEnvelopeSchema({ username: STRING_SCHEMA, password: STRING_SCHEMA }, ['username', 'password']),
     outputSchema: LOCAL_AUTH_ROTATE_PASSWORD_OUTPUT_SCHEMA,
   }),
   methodDescriptor({
@@ -77,7 +108,6 @@ export const builtinGatewayAdminMethodDescriptors: readonly GatewayMethodDescrip
     http: { method: 'DELETE', path: '/api/local-auth/sessions/{sessionId}' },
     inputSchema: objectSchema({ sessionId: STRING_SCHEMA }, ['sessionId']),
     outputSchema: LOCAL_AUTH_SESSION_REVOKE_OUTPUT_SCHEMA,
-    dangerous: true,
   }),
   methodDescriptor({
     id: 'local_auth.bootstrap.delete',
@@ -89,7 +119,6 @@ export const builtinGatewayAdminMethodDescriptors: readonly GatewayMethodDescrip
     http: { method: 'DELETE', path: '/api/local-auth/bootstrap-file' },
     inputSchema: EMPTY_OBJECT_SCHEMA,
     outputSchema: LOCAL_AUTH_BOOTSTRAP_DELETE_OUTPUT_SCHEMA,
-    dangerous: true,
   }),
   methodDescriptor({
     id: 'panels.list',
@@ -147,7 +176,6 @@ export const builtinGatewayAdminMethodDescriptors: readonly GatewayMethodDescrip
     transport: ['ws'],
     inputSchema: CREDENTIAL_SET_INPUT_SCHEMA,
     outputSchema: CREDENTIAL_SET_OUTPUT_SCHEMA,
-    dangerous: true,
   }),
   methodDescriptor({
     id: 'credentials.delete',
@@ -159,25 +187,22 @@ export const builtinGatewayAdminMethodDescriptors: readonly GatewayMethodDescrip
     transport: ['ws'],
     inputSchema: CREDENTIAL_DELETE_INPUT_SCHEMA,
     outputSchema: CREDENTIAL_DELETE_OUTPUT_SCHEMA,
-    dangerous: true,
   }),
   methodDescriptor({
     id: 'config.set',
     title: 'Set Config Value',
-    description: 'Set a config value through the daemon API.',
+    description: 'Write one config value on the daemon: `{ key, value }`, where value is any JSON the key accepts. The response reports the value the host now holds and which file and tier it is in; a value that did not take is refused with what the host holds instead. A key that holds a credential takes only a goodvibes://secrets/ reference (store the secret with credentials.set); runtime.workingDir swaps the workspace. The same route also serves the settings clients\' two-step lanes, `{ settingsPrecondition }` and `{ settingsImportPrecondition }` (capture, then apply the returned reference), which answer with that lane\'s own object.',
     category: 'config',
     scopes: ['write:config'],
     access: 'admin',
     http: { method: 'POST', path: '/config' },
-    inputSchema: bodyEnvelopeSchema({
-      key: STRING_SCHEMA,
-    }, ['key']),
+    inputSchema: CONFIG_SET_INPUT_SCHEMA,
     outputSchema: CONFIG_SET_OUTPUT_SCHEMA,
   }),
   methodDescriptor({
     id: 'config.reset',
     title: 'Reset Config Value',
-    description: 'Remove the explicit value of one config key through the daemon API so it reads as its default again, in every settings file that holds it. The response reports the value the host now holds and which file and tier it came from. Refuses a key that holds a credential (use credentials.delete) and a key the host does not know.',
+    description: 'Remove the explicit value of one config key through the daemon API so it reads as its default again, in every settings file that holds it. The response reports the value the host now holds and which file and tier it came from. Refuses a key that holds a credential (use credentials.delete), a key the host does not know, a key locked by managed policy, and runtime.workingDir (change the workspace with config.set).',
     category: 'config',
     scopes: ['write:config'],
     access: 'admin',

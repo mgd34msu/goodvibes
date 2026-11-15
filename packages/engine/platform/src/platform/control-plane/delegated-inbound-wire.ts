@@ -41,7 +41,8 @@ export const delegatedReviewRecordSchema = z.object({
   origin: z.object({ kind: z.literal('external-original'), accountId: id, accountRevision: id, routeId: id, routeRevision: id }).strict(),
   configurationId: id, ownerRevision: id, owner: delegatedReviewOwnerSchema.optional(), workspaceRevision: id, approvalId: id, choices: delegatedInboundChoicesSchema,
   acceptedAt: z.number(), sourceExpiresAt: z.number(), recordExpiresAt: z.number(),
-  state: z.enum(['accepted-for-review', 'cancelled']), execution: z.literal('not-started'),
+  // accepted-for-review -> reviewed (the owner read the original) -> gone (cancelled by the owner, or expired).
+  state: z.enum(['accepted-for-review', 'reviewed', 'cancelled']), execution: z.literal('not-started'),
 }).strict();
 /**
  * Why delegated intake held a message or refused a command. Each code has one
@@ -165,9 +166,3 @@ export type DelegatedTelegramAcceptance =
   | { readonly outcome: 'awaiting-owner'; readonly approvalId: string; readonly ref: DelegatedSourceRef; readonly sourceExpiresAt: number }
   | DelegatedHold;
 
-/** Every command's result in one schema, for a catalog that publishes one output schema for all of them. */
-export const delegatedTelegramResultSchema = z.union([
-  delegatedTelegramResultSchemas.configure, delegatedTelegramResultSchemas.decide, delegatedTelegramResultSchemas.status,
-  delegatedTelegramResultSchemas.list, delegatedTelegramResultSchemas.cancel, delegatedTelegramResultSchemas.revoke,
-  delegatedTelegramResultSchemas.release,
-]);

@@ -1,4 +1,3 @@
-import { prepareSystemMessagePresentation } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 /**
  * ActivityFeed, the single ambient record of what the assistant has been doing.
  *
@@ -13,6 +12,9 @@ import { prepareSystemMessagePresentation } from '@goodvibes-jev/engine/platform
  *   not an interactive widget. History beyond the visible window is available
  *   through the conversation (high priority) and logs.
  * - Subscribers are render invalidators only; they receive no payload.
+ * - The writer states the kind: an explicit `kind`, or the leading `[Tag]` the
+ *   writer gave the line. Nothing is read by a model, so an entry is complete
+ *   the moment it is pushed.
  */
 
 export type ActivityKind =
@@ -35,9 +37,32 @@ export interface ActivityEntry {
 
 const MAX_ENTRIES = 500;
 
-/** Map a bracket-tagged system message (e.g. "[Model] …") to an ActivityKind. */
-export async function classifyActivityKind(text: string): Promise<ActivityKind | undefined> {
-  return (await prepareSystemMessagePresentation(text)).activity;
+/**
+ * The activity kind of each leading `[Tag]` the products and the platform write,
+ * keyed by the tag in lower case. An untagged line or an unlisted tag is 'system'.
+ */
+const TAG_ACTIVITY_KINDS: Readonly<Record<string, ActivityKind>> = {
+  agents: 'agent', agent: 'agent', 'delegated task': 'agent', wrfc: 'agent', contract: 'agent', replay: 'agent',
+  schedule: 'schedule', schedules: 'schedule', wake: 'schedule', calendar: 'schedule', reminder: 'schedule',
+  'occasion reminder': 'schedule', automation: 'schedule', routine: 'schedule', routines: 'schedule',
+  delivery: 'delivery', channel: 'delivery', channels: 'delivery', telegram: 'delivery', slack: 'delivery',
+  discord: 'delivery', ntfy: 'delivery', email: 'delivery', push: 'delivery', webhook: 'delivery',
+  approval: 'security', permission: 'security', permissions: 'security', security: 'security',
+  trust: 'security', auth: 'security', pairing: 'security',
+  tool: 'tool', 'tool recovery': 'tool', exec: 'tool', shell: 'tool', mcp: 'tool', plugin: 'tool', hook: 'tool',
+  model: 'status', provider: 'status', providers: 'status', local: 'status', scan: 'status', session: 'status',
+  resume: 'status', recovery: 'status', compaction: 'status', daemon: 'status', 'connected host': 'status',
+  remote: 'status', bridge: 'status', startup: 'status', setup: 'status', install: 'status', update: 'status',
+  workspace: 'status', memory: 'status', health: 'status', status: 'status', terminal: 'status',
+  voice: 'status', stop: 'status', rewind: 'status', revert: 'status',
+};
+
+function activityKindOf(text: string): ActivityKind {
+  if (!text.startsWith('[')) return 'system';
+  const end = text.indexOf(']');
+  if (end <= 1) return 'system';
+  const tag = text.slice(1, end).toLowerCase();
+  return Object.hasOwn(TAG_ACTIVITY_KINDS, tag) ? TAG_ACTIVITY_KINDS[tag]! : 'system';
 }
 
 export class ActivityFeed {
@@ -47,17 +72,12 @@ export class ActivityFeed {
   push(text: string, priority: ActivityPriority = 'low', kind?: ActivityKind): void {
     const trimmed = text.replace(/\s+/g, ' ').trim();
     if (!trimmed) return;
-    const entry: ActivityEntry = {
+    this.entries.push({
       at: Date.now(),
-      kind: kind ?? 'system',
+      kind: kind ?? activityKindOf(trimmed),
       priority,
       text: trimmed,
-    };
-    this.entries.push(entry);
-    if (kind === undefined) void classifyActivityKind(text).then((resolved) => {
-      const index = this.entries.indexOf(entry);
-      if (resolved && index >= 0) { this.entries[index] = { ...entry, kind: resolved }; this.notify(); }
-    }).catch(() => { /* Keep the complete activity visible while categorization is unavailable. */ });
+    });
     if (this.entries.length > MAX_ENTRIES) {
       this.entries.splice(0, this.entries.length - MAX_ENTRIES);
     }

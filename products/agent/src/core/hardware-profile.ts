@@ -143,7 +143,8 @@ export function paramCountFromModel(model: { id: string; displayName?: string })
 }
 
 // ---------------------------------------------------------------------------
-// Process-level cache, the probe runs at most once per process.
+// Process-level cache: total RAM, CPU cores and GPUs are read once per process
+// (the GPU probe spawns at most one child); free RAM is read on each call.
 // ---------------------------------------------------------------------------
 let cachedProfile: HardwareProfile | null = null;
 // True while the cached entry was built from live probes (not injected by a test), so free RAM may be refreshed.
@@ -181,7 +182,7 @@ export function readHardwareProfileSync(readRam: () => Pick<HardwareProfile, 'to
 
 /**
  * Probe hardware and return a snapshot.
- * Safe to call many times, the OS probe runs exactly once per process.
+ * Safe to call many times; only free RAM is read again on each call.
  * Never throws; degraded fields are null.
  *
  * @deprecated Delegates to `readHardwareProfileSync()`. Prefer calling
@@ -216,15 +217,12 @@ export function startHardwareProbe(spawnProbe: typeof spawn = spawn): void {
     child.stdout?.on('data', (chunk: Buffer) => chunks.push(chunk));
     child.on('close', (code: number | null) => {
       try {
-        const { totalRamBytes, availableRamBytes } = probeRam();
-        const cpuCores = probeCpuCores();
         const gpus = code === 0 && chunks.length > 0
           ? parseNvidiaSmiOutput(Buffer.concat(chunks).toString('utf-8'))
           : [];
-        // Populate if cache is cold, or upgrade an existing sync-only entry
-        // (gpus: []) with the GPU data returned by the async probe.
-        cachedProfile = _mergeProbeIntoCache(cachedProfile, { totalRamBytes, availableRamBytes, gpus, cpuCores });
-        cacheIsLive = true;
+        // The sync reader owns RAM and CPU; the probe only adds the GPU list.
+        const current = readHardwareProfileSync();
+        cachedProfile = _mergeProbeIntoCache(current, { ...current, gpus });
       } catch {
         // GPU probe failure is non-fatal, leave cache unpopulated.
       }

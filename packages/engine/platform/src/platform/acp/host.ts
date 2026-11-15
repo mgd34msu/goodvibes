@@ -1,5 +1,4 @@
 import { prepareExternalExecution } from '../permissions/external-execution.js';
-import { captureAcpPermissionRequest, readProtocolRequest, type CapturedProtocolRequest } from '../permissions/protocol-request.js';
 import { AcpPermissionWire } from './permission-wire.js';
 /**
  * acp/host.ts, HOSTING third-party coding agents over the Agent Client
@@ -35,9 +34,8 @@ import { homedir } from 'node:os';
 import { loadAcpLibrary } from './optional-acp-library.js';
 import type { ClientSideConnection } from '@agentclientprotocol/sdk';
 import type { Agent, Client, NewSessionResponse, PromptResponse, RequestPermissionRequest, RequestPermissionResponse, SessionNotification } from './protocol.js';
-import { ACP_HANDSHAKE_TIMEOUT_MS, drainStderrTail, messageChunkText, permissionOutcomeFor, withTimeout, type AcpPermissionOptionLike } from './protocol.js';
-import type { PermissionRequestHandler } from '../permissions/prompt.js';
-import { admitExternalRequest, type ExternalPermissionHost } from '../permissions/external-request.js';
+import { ACP_HANDSHAKE_TIMEOUT_MS, drainStderrTail, messageChunkText, permissionOutcomeFor, readNdJsonMessages, stopAcpChild, wellFormedPermissionOptions, withTimeout } from './protocol.js';
+import { admitExternalRequest, externalAskDeadlineMs, type ExternalPermissionHost } from '../permissions/external-request.js';
 import { captureAutonomousSource, type AutonomousToolSource } from '../permissions/autonomous.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
@@ -160,7 +158,15 @@ export interface HostedAcpAgent {
   readonly progress?: string | undefined;
   /** Present when state === 'failed'. */
   readonly error?: AcpHostError | undefined;
+  /** The last permission ask or prompt that was refused without a decision on its merits, and why. */
+  readonly lastRefusal?: AcpHostRefusal | undefined;
   readonly promptCount: number;
+}
+
+/** A refusal the row shows: an ask that timed out, lost its owner or was malformed, or a prompt that could not start. */
+export interface AcpHostRefusal {
+  readonly at: number;
+  readonly reason: string;
 }
 
 interface HostedRecord {
@@ -168,7 +174,7 @@ interface HostedRecord {
     id: string; agentId: string; title: string; binaryPath: string; cwd: string;
     state: HostedAcpState; startedAt: number; completedAt?: number | undefined;
     sessionId?: string | undefined; progress?: string | undefined;
-    error?: AcpHostError | undefined; promptCount: number;
+    error?: AcpHostError | undefined; lastRefusal?: AcpHostRefusal | undefined; promptCount: number;
   };
   child: ReturnType<typeof Bun.spawn> | null;
   conn: ClientSideConnection | null;
@@ -177,10 +183,10 @@ interface HostedRecord {
   operation?: { readonly source: AutonomousToolSource; readonly lifetime: AbortController } | undefined;
   readonly permissionRequests: Map<string, AbortController>;
   permissionWire?: AcpPermissionWire | undefined;
+  /** The workspace trust revision captured at spawn: integer compares, no path resolution. */
   assertWorkspaceCurrent?: (() => void) | undefined;
   teardownPromise?: Promise<void> | undefined;
   teardownState?: 'pending' | 'done' | 'failed' | undefined;
-
 }
 
 /** Registers/heartbeats the daemon shared session a hosted agent maps onto. */
@@ -194,8 +200,6 @@ export type AcpSessionRegistrar = (input: {
 export interface AcpHostServiceDeps {
   /** Canonical recorded autonomous owner. No configured owner means fail closed. */
   readonly permissionHost?: ExternalPermissionHost | undefined;
-  /** @deprecated Human callbacks are not used by the autonomous ACP host. */
-  readonly requestPermission?: PermissionRequestHandler | undefined;
   /** Maps the hosted agent onto a daemon shared session (kind 'acp'). Optional, narrower embeds skip it. */
   readonly registerSession?: AcpSessionRegistrar | undefined;
   /** Injectable spawn seam for tests. Defaults to Bun.spawn. */
@@ -206,8 +210,6 @@ export interface AcpHostServiceDeps {
 }
 
 const PROGRESS_TAIL_CHARS = 400;
-const SHUTDOWN_GRACE_MS = 250;
-const FORCED_EXIT_TIMEOUT_MS = 5000;
 
 export class AcpHostService {
   private readonly records = new Map<string, HostedRecord>();
@@ -250,10 +252,7 @@ export class AcpHostService {
     let assertWorkspaceCurrent: (() => void) | undefined;
     try { assertWorkspaceCurrent = host ? await prepareExternalExecution(host, input.cwd, signal) : undefined; }
     catch (error) { unsubscribe(); throw error; }
-    const assertSpawnCurrent = () => {
-      signal.throwIfAborted(); assertWorkspaceCurrent?.();
-      if (this.deps.permissionHost !== host) throw new Error('ACP spawn owner changed');
-    };
+    const assertSpawnCurrent = () => { signal.throwIfAborted(); assertWorkspaceCurrent?.(); };
     const id = `acp-host-${randomUUID().slice(0, 10)}`;
     const sessionId = `acp-${id}`;
     const record: HostedRecord = {
@@ -283,9 +282,8 @@ export class AcpHostService {
       // Inside the try, so an install without the optional ACP package fails
       // this one session start with a message naming it, reported through the
       // same AcpHostError path as a spawn failure.
-      const { ClientSideConnection, ndJsonStream } = await loadAcpLibrary();
+      const { ClientSideConnection } = await loadAcpLibrary();
       record.lifetime.signal.throwIfAborted();
-      this.deps.permissionHost?.signal.throwIfAborted();
       assertSpawnCurrent();
       record.child = spawn([input.agent.binaryPath, ...input.agent.args], { cwd: input.cwd });
       const ownedChild = record.child;
@@ -301,26 +299,21 @@ export class AcpHostService {
         throw new Error('subprocess stdio not available (stdin/stdout must be piped)');
       }
       const bunStdin = record.child.stdin as import('bun').FileSink;
+      // An ask belongs to the prompt that was running when it arrived: a late
+      // ask must not borrow a newer prompt's goal. Config, trust and deadline
+      // are the admission's to check; this scope is only that binding.
       record.permissionWire = new AcpPermissionWire(() => {
-        const operation = record.operation, sessionId = record.acpSessionId;
-        const invalidation = new AbortController();
-        const unsubscribe = this.deps.permissionHost?.config.onDidInvalidate(() => invalidation.abort()) ?? (() => {});
+        const operation = record.operation;
         const assertCurrent = () => {
-          invalidation.signal.throwIfAborted(); record.lifetime.signal.throwIfAborted(); record.assertWorkspaceCurrent?.();
-          operation?.lifetime.signal.throwIfAborted(); this.deps.permissionHost?.signal.throwIfAborted();
-          if (!operation || !sessionId || record.operation !== operation || record.acpSessionId !== sessionId || record.child !== ownedChild)
-            throw new Error('ACP permission response owner changed');
+          record.lifetime.signal.throwIfAborted();
+          if (!operation || record.operation !== operation || record.child !== ownedChild) throw new Error('the prompt that raised this ask has ended');
+          operation.lifetime.signal.throwIfAborted();
         };
-        return { assertCurrent, close: unsubscribe };
+        return { assertCurrent, close: () => {} };
       });
-      const stdinStream = new WritableStream<Uint8Array>({
-        write(chunk) { bunStdin.write(chunk); },
-        close() { bunStdin.end(); },
-        abort() { bunStdin.end(); },
-      });
-      const stream = ndJsonStream(stdinStream, record.child.stdout as unknown as ReadableStream<Uint8Array>);
-      type WireMessage = typeof stream.readable extends ReadableStream<infer Message> ? Message : never;
-      const readable = stream.readable.pipeThrough(new TransformStream<WireMessage, WireMessage>({ transform(message, controller) {
+      const stdout = readNdJsonMessages(record.child.stdout as unknown as ReadableStream<Uint8Array>);
+      type WireMessage = typeof stdout extends ReadableStream<infer Message> ? Message : never;
+      const readable = stdout.pipeThrough(new TransformStream<WireMessage, WireMessage>({ transform(message, controller) {
         record.permissionWire!.observe(message); controller.enqueue(message);
       } }));
       // Own the final message sink rather than relying on the SDK's async
@@ -339,12 +332,10 @@ export class AcpHostService {
       }), timeoutMs, 'ACP initialize');
 
       record.lifetime.signal.throwIfAborted();
-      this.deps.permissionHost?.signal.throwIfAborted();
       assertSpawnCurrent();
       stage = 'session';
       const session = await withTimeout<NewSessionResponse>(record.conn.newSession({ cwd: input.cwd, mcpServers: [] }), timeoutMs, 'ACP session/new');
       record.lifetime.signal.throwIfAborted();
-      this.deps.permissionHost?.signal.throwIfAborted();
       assertSpawnCurrent();
       record.acpSessionId = session.sessionId;
 
@@ -355,7 +346,10 @@ export class AcpHostService {
       } catch (error) {
         logger.warn('AcpHostService: shared-session registration failed', { id, error: summarizeError(error) });
       }
-      if (input.prompt) void this.prompt(id, input.prompt);
+      if (input.prompt) {
+        const first = this.prompt(id, input.prompt);
+        if (!first.queued) this.noteRefusal(record, `The first prompt was not sent: ${first.reason}`);
+      }
       return { ...record.info };
     } catch (error) {
       if (record.info.state === 'stopped') { await this.teardown(record); return { ...record.info }; }
@@ -440,8 +434,12 @@ export class AcpHostService {
     const record = this.records.get(id);
     if (!record) return false;
     if (record.info.state !== 'stopped' && record.info.state !== 'failed') return false;
-    // A dismissed row must not orphan a still-running or failed-cleanup child.
-    if (record.child || record.teardownState === 'pending' || record.teardownState === 'failed') return false;
+    // A row whose child is still being stopped stays until that ends.
+    if (record.teardownState === 'pending') return false;
+    if (record.teardownState === 'failed' && record.child) {
+      // Everything that could be done was done; the row says which process is left, then goes.
+      logger.warn('AcpHostService: dismissed a hosted agent whose process could not be reaped', { id, pid: record.child.pid, binary: record.info.binaryPath });
+    } else if (record.child) return false;
     this.records.delete(id);
     return true;
   }
@@ -451,91 +449,74 @@ export class AcpHostService {
     let complete!: () => void;
     let fail!: (error: unknown) => void;
     const owned = new Promise<void>((resolve, reject) => { complete = resolve; fail = reject; });
-    // Publish ownership before abort/unsubscribe callbacks can reenter stop.
+    // Published before any authority is revoked, so a callback that reenters stop shares it.
     record.teardownPromise = owned;
     record.teardownState = 'pending';
     const child = record.child;
     record.conn = null;
     record.acpSessionId = null;
-    const cleanupErrors: unknown[] = [];
-    // Every authority is revoked synchronously, before any unrelated drain.
     record.lifetime.abort();
     record.operation?.lifetime.abort();
-    try { record.permissionWire?.close(); } catch (error) { cleanupErrors.push(error); }
-    const draining = Promise.resolve().then(async () => {
-      if (cancel) {
-        try { await withTimeout(cancel(), SHUTDOWN_GRACE_MS, 'ACP cancel'); }
-        catch (error) { logger.warn('AcpHostService: cancel failed; terminating child', { id: record.info.id, error: summarizeError(error) }); }
+    let wireError: unknown;
+    try { record.permissionWire?.close(); } catch (error) { wireError = error; }
+    void (async () => {
+      if (child) {
+        await stopAcpChild(child, { ...(cancel ? { cancel } : {}) });
+        if (record.child === child) record.child = null;
       }
-      if (!child) {
-        if (cleanupErrors.length) throw new AggregateError(cleanupErrors, 'Hosted ACP permission cleanup failed');
-        return;
-      }
-      try { child.kill('SIGTERM'); }
-      catch (error) { logger.warn('AcpHostService: graceful child termination failed', { id: record.info.id, error: summarizeError(error) }); }
-      try { await withTimeout(child.exited, SHUTDOWN_GRACE_MS, 'ACP graceful child exit'); }
-      catch (graceError) {
-        try { child.kill('SIGKILL'); }
-        catch (error) { logger.warn('AcpHostService: forced child termination failed', { id: record.info.id, error: summarizeError(error) }); }
-        try { await withTimeout(child.exited, FORCED_EXIT_TIMEOUT_MS, 'ACP forced child exit'); }
-        catch (error) { throw new AggregateError([...cleanupErrors, graceError, error], 'Hosted ACP child cleanup failed'); }
-      }
-      // Retain the child on cleanup failure so dismissal cannot erase ownership.
-      if (record.child === child) record.child = null;
-      if (cleanupErrors.length) throw new AggregateError(cleanupErrors, 'Hosted ACP permission cleanup failed');
+      if (wireError !== undefined) throw new AggregateError([wireError], 'Hosted ACP permission cleanup failed');
+    })().then(() => { record.teardownState = 'done'; complete(); }, (error: unknown) => {
+      record.teardownState = 'failed';
+      logger.warn('AcpHostService: child drainage failed', { id: record.info.id, pid: child?.pid, error: summarizeError(error) });
+      fail(error);
     });
-    void draining.then(() => { record.teardownState = 'done'; complete(); }, error => { record.teardownState = 'failed'; fail(error); });
-    // Prompt/exit callbacks initiate the same promise; stop and outer shutdown
-    // still await and report its original failure.
-    void owned.catch(error => logger.warn('AcpHostService: child drainage failed', { id: record.info.id, error: summarizeError(error) }));
+    // Prompt and exit callbacks start the same teardown without awaiting it; stop awaits and reports it.
+    void owned.catch(() => {});
     return owned;
+  }
+
+  /** Record why an ask or prompt was refused without a decision on its merits; logged once, shown on the row. */
+  private noteRefusal(record: HostedRecord, reason: string): void {
+    record.info.lastRefusal = { at: this.now(), reason };
+    logger.warn('AcpHostService: refused', { id: record.info.id, binary: record.info.binaryPath, reason });
   }
 
   private buildClient(record: HostedRecord): Client {
     return {
       requestPermission: async (params: RequestPermissionRequest): Promise<RequestPermissionResponse> => {
         const cancelled: RequestPermissionResponse = { outcome: { outcome: 'cancelled' } };
-        let wireBinding: ReturnType<AcpPermissionWire['binding']>;
-        if (record.permissionWire) {
-          // Descriptor reads preserve cancellation identity even when protected
-          // payloads fail the privacy snapshot. No remote getter is invoked.
-          try {
-            const call = Object.getOwnPropertyDescriptor(params, 'toolCall')?.value as unknown;
-            const id = call && typeof call === 'object' ? Object.getOwnPropertyDescriptor(call, 'toolCallId')?.value as unknown : undefined;
-            if (typeof id === 'string') wireBinding = record.permissionWire.binding(id);
-            wireBinding?.bindTerminal(cancelled);
-          } catch { return cancelled; }
-        }
+        const refuse = (reason: string): RequestPermissionResponse => { this.noteRefusal(record, reason); return cancelled; };
+        // The wire captured this exact request when it arrived; the binding is
+        // that capture, so the ask is read once. Descriptor reads take the id
+        // without invoking a remote getter.
+        let binding: ReturnType<AcpPermissionWire['binding']>;
+        try {
+          const call = Object.getOwnPropertyDescriptor(params, 'toolCall')?.value as unknown;
+          const id = call && typeof call === 'object' ? Object.getOwnPropertyDescriptor(call, 'toolCallId')?.value as unknown : undefined;
+          if (typeof id === 'string') binding = record.permissionWire?.binding(id);
+          binding?.bindTerminal(cancelled);
+        } catch { return refuse('the permission ask could not be read'); }
+        if (record.lifetime.signal.aborted) return cancelled;
         const host = this.deps.permissionHost;
         const operation = record.operation;
-        if (!host || !operation || record.lifetime.signal.aborted) return cancelled;
-        let owned: RequestPermissionRequest;
-        let protocolSubject: CapturedProtocolRequest;
-        try { protocolSubject = captureAcpPermissionRequest(params); owned = readProtocolRequest(protocolSubject).wire as RequestPermissionRequest; } catch { return cancelled; }
-        const sessionId = record.acpSessionId;
-        const connection = record.conn;
+        if (!host) return refuse('no permission owner is configured for hosted agents, so asks cannot be decided');
+        if (!operation || operation.lifetime.signal.aborted) return refuse('a permission ask arrived while no prompt was running');
+        const owned = binding?.request;
+        if (!binding || !owned || !binding.protocolSubject) return refuse('the permission ask was not a well-formed ACP request');
         const requestId = owned.toolCall?.toolCallId;
-        if (record.permissionWire) {
-          try {
-            if (!wireBinding?.request) return cancelled;
-            wireBinding.assertCurrent(); owned = wireBinding.request;
-            if (!wireBinding.protocolSubject) return cancelled; protocolSubject = wireBinding.protocolSubject;
-          } catch { return cancelled; }
-        }
-        if (!sessionId || !connection || owned.sessionId !== sessionId || typeof requestId !== 'string' || !requestId || !Array.isArray(owned.options)
-          || owned.options.some((option: AcpPermissionOptionLike) => !option || typeof option.optionId !== 'string' || !option.optionId
-            || !['allow_once', 'allow_always', 'reject_once', 'reject_always'].includes(option.kind))
-          || new Set(owned.options.map((option: AcpPermissionOptionLike) => option.optionId)).size !== owned.options.length) return cancelled;
+        if (owned.sessionId !== record.acpSessionId || typeof requestId !== 'string' || !requestId || !wellFormedPermissionOptions(owned.options))
+          return refuse('the permission ask named another session or offered malformed options');
         const previous = record.permissionRequests.get(requestId);
-        if (previous) { previous.abort(); return cancelled; }
+        if (previous) { previous.abort(); return refuse(`the agent reused tool call id ${requestId} while its first ask was pending`); }
         const requestLife = new AbortController();
         record.permissionRequests.set(requestId, requestLife);
-        const signal = AbortSignal.any([record.lifetime.signal, operation.lifetime.signal, requestLife.signal, AbortSignal.timeout(60_000), ...(wireBinding ? [wireBinding.signal] : [])]);
-        const assertCurrent = () => {
-          signal.throwIfAborted(); wireBinding?.assertCurrent(); record.assertWorkspaceCurrent?.();
-          if (this.records.get(record.info.id) !== record || record.conn !== connection || record.acpSessionId !== sessionId
-            || record.operation !== operation || record.permissionRequests.get(requestId) !== requestLife) throw new Error('ACP request is no longer current');
-        };
+        const deadlineMs = externalAskDeadlineMs(host);
+        const deadline = AbortSignal.timeout(deadlineMs);
+        // The one owner of "this ask is still wanted": the row, the prompt, this
+        // request, the wire binding and the deadline all abort this signal.
+        const signal = AbortSignal.any([record.lifetime.signal, operation.lifetime.signal, requestLife.signal, binding.signal, deadline]);
+        const wire = binding;
+        const assertCurrent = () => { signal.throwIfAborted(); wire.assertCurrent(); record.assertWorkspaceCurrent?.(); };
         let admission: Awaited<ReturnType<typeof admitExternalRequest>> | undefined;
         let deferred = false;
         const cleanup = () => {
@@ -543,23 +524,25 @@ export class AcpHostService {
           requestLife.abort();
         };
         try {
+          assertCurrent();
           admission = await admitExternalRequest(host, { connectionId: record.info.id, destination: record.info.binaryPath, signal, assertCurrent },
-            { sourceOf: () => operation.source, assertCurrent, signal }, {
-              tool: owned.toolCall.title ?? 'ACP action', protocolSubject,
+            { sourceOf: () => operation.source, assertCurrent: () => {} }, {
+              tool: owned.toolCall.title ?? 'ACP action', protocolSubject: wire.protocolSubject!,
               args: { ...(owned.toolCall.rawInput && typeof owned.toolCall.rawInput === 'object' && !Array.isArray(owned.toolCall.rawInput)
                 ? owned.toolCall.rawInput as Record<string, unknown> : {}),
                 destination: { binaryPath: record.info.binaryPath, cwd: record.info.cwd } },
             });
-          assertCurrent();
           const response = permissionOutcomeFor(owned.options, { approved: admission.result.approved, remember: false });
-          const claim = admission.result.approved && response.outcome.outcome === 'selected';
-          if (wireBinding) {
-            wireBinding.defer(response, admission, claim, cleanup); deferred = true;
-          } else if (claim) admission.claim();
-          assertCurrent();
+          // The wire checks once more, immediately before the response bytes are written.
+          wire.defer(response, admission, admission.result.approved && response.outcome.outcome === 'selected', cleanup);
+          deferred = true;
           return response;
-        } catch { return cancelled; }
-        finally {
+        } catch (error) {
+          if (record.lifetime.signal.aborted || operation.lifetime.signal.aborted) return cancelled;
+          return refuse(deadline.aborted
+            ? `the permission decision did not arrive within ${deadlineMs} ms (judgment.decisionDeadlineMs)`
+            : `the permission ask could not be decided: ${summarizeError(error)}`);
+        } finally {
           if (!deferred) { admission?.close(); cleanup(); }
         }
       },

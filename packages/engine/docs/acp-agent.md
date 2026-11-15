@@ -36,24 +36,27 @@ const { connection, dispose } = await serveAcpAgent({ homeDirectory: process.env
 
 ## What it maps
 
-The base is the platform embedding API (`@goodvibes-jev/engine/platform/embed`). Each
-ACP `session/new` boots an embedded GoodVibes session against the request's
-`cwd`, and the adapter is a protocol mapping over that surface:
+The base is the platform embedding API (`@goodvibes-jev/engine/platform/embed`).
+The ACP sessions of one working directory (with the same declared MCP servers)
+share one embedded GoodVibes daemon; each ACP session is one shared session in
+it. The adapter is a protocol mapping over that surface:
 
 | ACP                           | GoodVibes                                              |
 | ----------------------------- | ------------------------------------------------------ |
 | `initialize` / `authenticate` | capability report; no auth (process-local daemon)      |
-| `session/new` (cwd)           | `createEmbeddedSession({ workspace: cwd })`            |
-| `session/prompt` (text)       | `session.submit(text)`                                 |
-| `agent_message_chunk`         | runtime `STREAM_DELTA` turn events                     |
-| `tool_call` / `tool_call_update` | runtime `TOOL_EXECUTING` / `TOOL_SUCCEEDED` / `TOOL_FAILED` |
-| stop reason                   | terminal turn events (see mapping below)               |
+| `session/new` (cwd)           | the cwd's embedded daemon (booted on first use) and a new shared session in it |
+| `session/prompt` (text)       | `session.submit({ body, sessionId })`; the submission's `completion` follows the agent that took the input |
+| `agent_message_chunk`         | the agent's streamed text                              |
+| `tool_call` / `tool_call_update` | the agent's tool calls starting and settling        |
+| stop reason                   | how the agent's run ended (see mapping below)          |
 | `session/request_permission`  | the platform permission callback (allow once / always / reject) |
-| `session/cancel`              | aborts the session's active agent in-flight, then resolves the prompt `cancelled` |
+| `session/cancel`              | aborts the agents the session started, then resolves the prompt `cancelled` |
+| `session/close`               | cancels the session's work, closes its shared session, and stops the daemon when no other session uses it |
 
-Stop-reason mapping: `TURN_COMPLETED → end_turn`, `TURN_CANCEL → cancelled`,
-`context_overflow → max_tokens`, `tool_loop_circuit_breaker →
-max_turn_requests`, other turn errors → `refusal`.
+Stop-reason mapping: a completed run is `end_turn`, a cancelled one `cancelled`;
+a failed run, or an input no agent took (queued behind other work), is `refusal`
+with one message chunk saying why. A completed run that streamed no text sends
+its final output as the message.
 
 ## Honest capability surface
 
@@ -75,7 +78,8 @@ Anything the platform does not support is reported `false`, never stubbed:
 
 ## Event attribution
 
-Runtime envelopes are matched to an ACP session by runtime session id (the
-shared-session record id and, when present, the active agent id). When exactly
-one ACP session is active, the common editor case, all turn/tool events are
-forwarded to it.
+Each prompt follows only the agent its own input started (`EmbeddedSubmission.completion`),
+so events never cross between ACP sessions. A permission ask goes to the ACP
+session whose agent raised it; an ask from an agent no session started goes to
+the one session with a prompt running, or to the daemon's only session, and is
+refused when more than one session could have raised it.

@@ -6,10 +6,14 @@
  * lifecycle → streamed content + tool-call updates → permission requests
  * mapped onto the platform permission callback.
  *
- * The substrate is the platform Embedding API (`createEmbeddedSession`): each ACP
- * session boots an embedded GoodVibes session against the request's `cwd` and
- * bridges its runtime-event bus onto ACP `session/update` notifications. No new
- * engine, the adapter is a protocol mapping over the embed surface.
+ * The substrate is the platform Embedding API (`createEmbeddedSession`): the
+ * ACP sessions of one working directory share one embedded GoodVibes daemon,
+ * each holding its own shared session in it. A prompt is one submitted input;
+ * the submission's completion handle (the agent that took the input: its
+ * streamed text, tool calls and terminal event) becomes ACP `session/update`
+ * notifications and the prompt's stop reason. No new engine, the adapter is a
+ * protocol mapping over the embed surface. `session/close` ends a session and
+ * stops its daemon when no other session uses it.
  *
  * Honest capability surface (see `initialize`): anything the platform does not
  * support is reported `false`, never stubbed,
@@ -23,7 +27,7 @@
  * Turn cancellation is real: `session/cancel` aborts the session's active
  * agent(s) in-flight (`EmbeddedSession.cancelActive` → the agent's cancellation
  * signal, which the agent runner threads into the provider call), so an
- * already-executing provider call is stopped mid-flight and the turn emits its
+ * already-executing provider call is stopped mid-flight and the agent emits its
  * cancelled outcome. A still-queued input (not yet delivered to an agent) is
  * additionally cancelled via the broker's `cancelInput`, and the in-flight
  * prompt resolves with stop reason `cancelled`.
@@ -49,10 +53,15 @@ import type {
   StopReason,
 } from '@agentclientprotocol/sdk';
 import { randomUUID } from 'node:crypto';
-import { createEmbeddedSession, type EmbeddedSession } from '../embed/session.js';
+import { resolve } from 'node:path';
+import {
+  createEmbeddedSession,
+  type EmbeddedRunEvent,
+  type EmbeddedRunOutcome,
+  type EmbeddedSession,
+  type EmbeddedSubmission,
+} from '../embed/session.js';
 import type { PermissionPromptDecision, PermissionPromptRequest, PermissionRequestHandler } from '../permissions/prompt.js';
-import type { TurnEvent } from '../../events/turn.js';
-import type { ToolEvent } from '../../events/tools.js';
 import type { McpServerConfig } from '../mcp/config.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
@@ -126,18 +135,36 @@ export interface AcpAgentOptions {
   readonly sessionFactory?: EmbeddedSessionFactory | undefined;
 }
 
+/** `session/close` (ACP schema 0.21): the session to end, and an empty answer. */
+interface CloseSessionRequest { readonly sessionId: string }
+type CloseSessionResponse = Record<string, never>;
+
+/** One embedded daemon shared by the ACP sessions of one working directory. */
+interface AcpDaemon {
+  readonly key: string;
+  readonly cwd: string;
+  embedded: Promise<EmbeddedSession>;
+  /** ACP session ids using this daemon. */
+  readonly sessions: Set<string>;
+}
+
+interface ActivePrompt {
+  /** True while `submit` is still resolving: there is nothing to abort yet. */
+  submitting: boolean;
+  /** Set once the broker has accepted the input. */
+  inputId: string | undefined;
+  resolve: (stopReason: StopReason) => void;
+}
+
 interface AcpSessionState {
+  readonly daemon: AcpDaemon;
   readonly embedded: EmbeddedSession;
-  /** Runtime session ids whose envelopes belong to this ACP session. */
-  readonly knownIds: Set<string>;
+  /** The shared session inside the daemon that holds this editor thread. */
+  readonly sharedSessionId: string;
+  /** Agents this session's prompts started; cancel and permission routing use them. */
+  readonly agentIds: Set<string>;
   /** The prompt in flight, from the moment it is accepted until it resolves. At most one per session. */
-  activePrompt: {
-    /** True while `submit` is still resolving: there is nothing to abort yet. */
-    submitting: boolean;
-    /** Set once the broker has accepted the input. */
-    inputId: string | undefined;
-    resolve: (stopReason: StopReason) => void;
-  } | null;
+  activePrompt: ActivePrompt | null;
   /** `session/cancel` arrived for the current prompt. Reset when the next prompt starts. */
   cancelled: boolean;
 }
@@ -159,29 +186,30 @@ export function promptText(blocks: readonly ContentBlock[]): string {
   return parts.join('\n\n');
 }
 
-/** Map a terminal GoodVibes turn event onto an ACP stop reason. */
-export function mapStopReason(event: TurnEvent): StopReason | null {
-  switch (event.type) {
-    case 'TURN_COMPLETED':
-      return 'end_turn';
-    case 'TURN_CANCEL':
-      return 'cancelled';
-    case 'PREFLIGHT_FAIL':
-      return event.stopReason === 'context_overflow' ? 'max_tokens' : 'refusal';
-    case 'TURN_ERROR':
-      if (event.stopReason === 'context_overflow') return 'max_tokens';
-      if (event.stopReason === 'tool_loop_circuit_breaker') return 'max_turn_requests';
+/** Map how a run ended onto an ACP stop reason. */
+export function stopReasonFor(outcome: EmbeddedRunOutcome): StopReason {
+  switch (outcome.outcome) {
+    case 'completed': return 'end_turn';
+    case 'cancelled': return 'cancelled';
+    case 'failed':
+    case 'not-started':
       return 'refusal';
-    default:
-      return null;
   }
 }
 
-/** The line shown to the editor when a turn ends in a failure, or null for a turn that did not fail. */
-export function turnFailureText(event: TurnEvent): string | null {
-  if (event.type === 'TURN_ERROR') return `Turn failed (${event.stopReason}): ${event.error}`;
-  if (event.type === 'PREFLIGHT_FAIL') return `Turn could not start (${event.stopReason}): ${event.reason}`;
-  return null;
+/**
+ * The line shown to the editor about how a run ended, or null when the
+ * streamed text already said everything. A stop reason alone cannot say why a
+ * run failed or never started; a completed run that streamed nothing shows its
+ * final output.
+ */
+export function outcomeText(outcome: EmbeddedRunOutcome, streamedText: boolean): string | null {
+  switch (outcome.outcome) {
+    case 'completed': return !streamedText && outcome.output ? outcome.output : null;
+    case 'failed': return `The run failed: ${outcome.error}`;
+    case 'not-started': return `Nothing ran (${outcome.state}): ${outcome.reason}`;
+    case 'cancelled': return null;
+  }
 }
 
 /** Map an ACP permission outcome back onto the platform decision shape. */
@@ -201,11 +229,13 @@ export function mapPermissionOutcome(
 
 /**
  * The ACP `Agent` implementation backed by embedded GoodVibes sessions.
- * One instance serves one connection; each `session/new` boots one embedded
- * session against the request's `cwd`.
+ * One instance serves one connection. Sessions in the same working directory
+ * (with the same declared MCP servers) share one embedded daemon; each ACP
+ * session is one shared session inside it.
  */
 export class GoodVibesAcpAgent implements Agent {
   private readonly sessions = new Map<string, AcpSessionState>();
+  private readonly daemons = new Map<string, AcpDaemon>();
 
   constructor(
     private readonly conn: Pick<AgentSideConnection, 'sessionUpdate' | 'requestPermission'>,
@@ -220,6 +250,7 @@ export class GoodVibesAcpAgent implements Agent {
         loadSession: false,
         promptCapabilities: { image: false, audio: false, embeddedContext: false },
         mcpCapabilities: { http: false, sse: false },
+        sessionCapabilities: { close: {} },
       },
       authMethods: [],
     };
@@ -245,6 +276,32 @@ export class GoodVibesAcpAgent implements Agent {
         `This agent supports stdio MCP servers only (it advertises mcpCapabilities.http=false, sse=false).`,
       );
     }
+    const daemon = this.daemonFor(resolve(params.cwd), mcpServers);
+    daemon.sessions.add(acpSessionId);
+    try {
+      const embedded = await daemon.embedded;
+      const shared = await embedded.sessions.createSession({ project: daemon.cwd, title: `ACP session ${acpSessionId}` });
+      this.sessions.set(acpSessionId, {
+        daemon,
+        embedded,
+        sharedSessionId: shared.id,
+        agentIds: new Set(),
+        activePrompt: null,
+        cancelled: false,
+      });
+    } catch (error) {
+      daemon.sessions.delete(acpSessionId);
+      await this.releaseIfUnused(daemon);
+      throw error;
+    }
+    return { sessionId: acpSessionId };
+  }
+
+  /** One embedded daemon per working directory and declared MCP server set, booted on first use. */
+  private daemonFor(cwd: string, mcpServers: readonly McpServerConfig[]): AcpDaemon {
+    const key = JSON.stringify([cwd, mcpServers]);
+    const existing = this.daemons.get(key);
+    if (existing) return existing;
     const factory: EmbeddedSessionFactory =
       this.options.sessionFactory ??
       (async ({ workspace, requestPermission, mcpServers: servers }) =>
@@ -254,18 +311,26 @@ export class GoodVibesAcpAgent implements Agent {
           requestPermission,
           ...(servers && servers.length > 0 ? { mcpServers: servers } : {}),
         }));
-    const embedded = await factory({
-      workspace: params.cwd,
-      requestPermission: (request) => this.bridgePermission(acpSessionId, request),
+    const daemon: AcpDaemon = { key, cwd, sessions: new Set(), embedded: undefined as unknown as Promise<EmbeddedSession> };
+    daemon.embedded = factory({
+      workspace: cwd,
+      requestPermission: (request) => this.bridgePermission(daemon, request),
       ...(mcpServers.length > 0 ? { mcpServers } : {}),
     });
-    this.sessions.set(acpSessionId, {
-      embedded,
-      knownIds: new Set(),
-      activePrompt: null,
-      cancelled: false,
+    // A boot that failed is forgotten so the next session/new boots again.
+    daemon.embedded.catch(() => { if (this.daemons.get(key) === daemon) this.daemons.delete(key); });
+    this.daemons.set(key, daemon);
+    return daemon;
+  }
+
+  /** Stop a daemon no ACP session uses any more. */
+  private async releaseIfUnused(daemon: AcpDaemon): Promise<void> {
+    if (daemon.sessions.size > 0 || this.daemons.get(daemon.key) !== daemon) return;
+    this.daemons.delete(daemon.key);
+    const embedded = await daemon.embedded.catch(() => null);
+    await embedded?.stop().catch((error: unknown) => {
+      logger.warn('ACP embedded daemon did not stop cleanly', { cwd: daemon.cwd, error: summarizeError(error) });
     });
-    return { sessionId: acpSessionId };
   }
 
   async prompt(params: PromptRequest): Promise<PromptResponse> {
@@ -280,92 +345,54 @@ export class GoodVibesAcpAgent implements Agent {
 
     return new Promise<PromptResponse>((resolvePrompt, rejectPrompt) => {
       let finished = false;
-      let submitted = false;
-      // Events that arrive while `submit` is still resolving. A turn that ends
-      // fast (no provider key, preflight failure) can finish before submit
-      // returns the ids that tell this session's events apart, so they are
-      // held and replayed instead of missed.
-      const held: Array<() => void> = [];
-      const deliver = (handle: () => void): void => {
-        if (submitted) handle();
-        else held.push(handle);
-      };
-
+      let offEvents: () => void = () => {};
       const finish = (stopReason: StopReason): void => {
         if (finished) return;
         finished = true;
-        offTurn();
-        offTool();
+        offEvents();
         state.activePrompt = null;
         resolvePrompt({ stopReason });
       };
-
-      const matches = (envelopeSessionId: string | undefined): boolean => {
-        if (this.sessions.size === 1) return true; // single-session fast path
-        return envelopeSessionId !== undefined && state.knownIds.has(envelopeSessionId);
-      };
-
-      const offTurn = state.embedded.events.onDomain('turn', (envelope) => {
-        deliver(() => {
-          if (!matches(envelope.sessionId)) return;
-          const event = envelope.payload;
-          if (event.type === 'STREAM_DELTA' && event.content) {
-            this.notify({
-              sessionId: params.sessionId,
-              update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: event.content } },
-            });
-          }
-          const stop = mapStopReason(event);
-          if (!stop) return;
-          // The stop reason alone cannot say why a turn failed; the editor gets the text.
-          const failure = turnFailureText(event);
-          if (failure) {
-            this.notify({
-              sessionId: params.sessionId,
-              update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: failure } },
-            });
-          }
-          finish(state.cancelled ? 'cancelled' : stop);
-        });
-      });
-
-      const offTool = state.embedded.events.onDomain('tools', (envelope) => {
-        deliver(() => {
-          if (!matches(envelope.sessionId)) return;
-          this.forwardToolEvent(params.sessionId, envelope.payload);
-        });
-      });
-
-      state.activePrompt = { submitting: true, inputId: undefined, resolve: finish };
+      const active: ActivePrompt = { submitting: true, inputId: undefined, resolve: finish };
+      state.activePrompt = active;
 
       void (async () => {
-        let submission: Awaited<ReturnType<EmbeddedSession['submit']>>;
+        let submission: EmbeddedSubmission;
         try {
-          submission = await state.embedded.submit(promptText(params.prompt));
+          submission = await state.embedded.submit({ body: promptText(params.prompt), sessionId: state.sharedSessionId });
         } catch (error) {
           finished = true;
-          offTurn();
-          offTool();
           state.activePrompt = null;
           rejectPrompt(error);
           return;
         }
-        state.knownIds.add(submission.session.id);
-        if (submission.activeAgentId) state.knownIds.add(submission.activeAgentId);
-        if (state.activePrompt) {
-          state.activePrompt.submitting = false;
-          state.activePrompt.inputId = submission.input?.id;
-        }
+        const { completion } = submission;
+        if (completion.agentId) state.agentIds.add(completion.agentId);
+        active.submitting = false;
+        active.inputId = submission.input?.id;
         // A cancel that arrived while submit was resolving had nothing to abort
         // yet; apply it now that the agent and input ids are known.
         if (state.cancelled) {
-          await this.cancelWork(state, submission.input?.id);
-          held.length = 0;
+          await this.cancelWork(state, active.inputId);
           finish('cancelled');
           return;
         }
-        submitted = true;
-        for (const handle of held.splice(0)) handle();
+        let streamedText = false;
+        offEvents = completion.onEvent((event) => {
+          if (finished) return;
+          if (event.type === 'text') streamedText = true;
+          this.forwardRunEvent(params.sessionId, event);
+        });
+        const outcome = await completion.done;
+        if (finished) return;
+        const text = state.cancelled ? null : outcomeText(outcome, streamedText);
+        if (text) {
+          this.notify({
+            sessionId: params.sessionId,
+            update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text } },
+          });
+        }
+        finish(state.cancelled ? 'cancelled' : stopReasonFor(outcome));
       })();
     });
   }
@@ -375,32 +402,42 @@ export class GoodVibesAcpAgent implements Agent {
     if (!state) return;
     state.cancelled = true;
     const active = state.activePrompt;
-    // Still inside `submit`: no ids to abort yet. `prompt` applies the cancel
-    // as soon as the submission returns, and resolves it then.
     if (!active) {
-      state.embedded.cancelActive(state.knownIds);
+      state.embedded.cancelActive(state.agentIds);
       return;
     }
+    // Still inside `submit`: no ids to abort yet. `prompt` applies the cancel
+    // as soon as the submission returns, and resolves it then.
     if (active.submitting) return;
     await this.cancelWork(state, active.inputId);
     active.resolve('cancelled');
   }
 
+  /** `session/close`: end the session's work and release its daemon when no other session uses it. */
+  async closeSession(params: CloseSessionRequest): Promise<CloseSessionResponse> {
+    const state = this.sessions.get(params.sessionId);
+    if (!state) return {};
+    await this.cancel({ sessionId: params.sessionId });
+    this.sessions.delete(params.sessionId);
+    state.daemon.sessions.delete(params.sessionId);
+    await state.embedded.sessions.closeSession(state.sharedSessionId).catch((error: unknown) => {
+      logger.warn('ACP shared session could not be closed', { sessionId: params.sessionId, error: summarizeError(error) });
+    });
+    await this.releaseIfUnused(state.daemon);
+    return {};
+  }
+
   /**
-   * Real cancellation: abort the session's active agent(s) in-flight so the
-   * running turn stops mid-provider-call and emits its cancelled outcome,
-   * rather than running to completion. (knownIds carries the shared session id
-   * too; cancelActive ignores non-agent ids.) A still-queued input, which
-   * cancelActive cannot reach because it has not been delivered to an agent,
-   * is cancelled through the broker.
+   * Real cancellation: abort the agents this session started so the running
+   * turn stops mid-provider-call and emits its cancelled outcome, rather than
+   * running to completion. A still-queued input, which cancelActive cannot
+   * reach because it has not been delivered to an agent, is cancelled through
+   * the broker.
    */
   private async cancelWork(state: AcpSessionState, inputId: string | undefined): Promise<void> {
-    state.embedded.cancelActive(state.knownIds);
+    state.embedded.cancelActive(state.agentIds);
     if (inputId) {
-      const sharedId = [...state.knownIds][0];
-      if (sharedId) {
-        await state.embedded.sessions.cancelInput(sharedId, inputId).catch(() => null);
-      }
+      await state.embedded.sessions.cancelInput(state.sharedSessionId, inputId).catch(() => null);
     }
   }
 
@@ -415,16 +452,26 @@ export class GoodVibesAcpAgent implements Agent {
     }
   }
 
-  /** Tear down every embedded session (used by serveAcpAgent on stream end). */
+  /** Tear down every embedded daemon (used by serveAcpAgent on stream end). */
   async dispose(): Promise<void> {
-    await Promise.allSettled([...this.sessions.values()].map((s) => s.embedded.stop()));
+    const daemons = [...this.daemons.values()];
+    this.daemons.clear();
     this.sessions.clear();
+    await Promise.allSettled(daemons.map(async (daemon) => (await daemon.embedded).stop()));
   }
 
-  private async bridgePermission(
-    acpSessionId: string,
-    request: PermissionPromptRequest,
-  ): Promise<PermissionPromptDecision> {
+  /**
+   * Route a permission ask from a shared daemon to the ACP session it belongs
+   * to: the session whose agent asked, else the one session with a prompt
+   * running, else the daemon's only session. An ask no session can be named
+   * for is refused rather than shown in the wrong editor thread.
+   */
+  private async bridgePermission(daemon: AcpDaemon, request: PermissionPromptRequest): Promise<PermissionPromptDecision> {
+    const acpSessionId = this.sessionForAsk(daemon, request);
+    if (!acpSessionId) {
+      logger.warn('ACP permission ask refused: more than one editor session could have asked it', { tool: request.tool, cwd: daemon.cwd });
+      return { approved: false };
+    }
     const response = await this.conn.requestPermission({
       sessionId: acpSessionId,
       toolCall: {
@@ -438,31 +485,45 @@ export class GoodVibesAcpAgent implements Agent {
     return mapPermissionOutcome(response.outcome as Parameters<typeof mapPermissionOutcome>[0]);
   }
 
-  private forwardToolEvent(acpSessionId: string, event: ToolEvent): void {
-    if (event.type === 'TOOL_EXECUTING') {
-      this.notify({
-        sessionId: acpSessionId,
-        update: {
-          sessionUpdate: 'tool_call',
-          toolCallId: event.callId,
-          title: event.tool,
-          status: 'in_progress',
-        },
-      });
-      return;
+  private sessionForAsk(daemon: AcpDaemon, request: PermissionPromptRequest): string | undefined {
+    const candidates = [...daemon.sessions].filter((id) => this.sessions.has(id));
+    const agentId = request.attribution?.kind === 'background-agent' ? request.attribution.agentId : undefined;
+    if (agentId) {
+      const owner = candidates.find((id) => this.sessions.get(id)!.agentIds.has(agentId));
+      if (owner) return owner;
     }
-    if (event.type === 'TOOL_SUCCEEDED' || event.type === 'TOOL_FAILED') {
-      this.notify({
-        sessionId: acpSessionId,
-        update: {
-          sessionUpdate: 'tool_call_update',
-          toolCallId: event.callId,
-          status: event.type === 'TOOL_SUCCEEDED' ? 'completed' : 'failed',
-          ...(event.type === 'TOOL_FAILED'
-            ? { content: [{ type: 'content', content: { type: 'text', text: event.error } }] }
-            : {}),
-        },
-      });
+    const prompting = candidates.filter((id) => this.sessions.get(id)!.activePrompt !== null);
+    if (prompting.length === 1) return prompting[0];
+    return candidates.length === 1 ? candidates[0] : undefined;
+  }
+
+  private forwardRunEvent(acpSessionId: string, event: EmbeddedRunEvent): void {
+    switch (event.type) {
+      case 'text':
+        this.notify({
+          sessionId: acpSessionId,
+          update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: event.text } },
+        });
+        return;
+      case 'tool-started':
+        this.notify({
+          sessionId: acpSessionId,
+          update: { sessionUpdate: 'tool_call', toolCallId: event.callId, title: event.tool, status: 'in_progress' },
+        });
+        return;
+      case 'tool-settled':
+        this.notify({
+          sessionId: acpSessionId,
+          update: {
+            sessionUpdate: 'tool_call_update',
+            toolCallId: event.callId,
+            status: event.ok ? 'completed' : 'failed',
+            ...(event.ok || event.error === undefined
+              ? {}
+              : { content: [{ type: 'content', content: { type: 'text', text: event.error } }] }),
+          },
+        });
+        return;
     }
   }
 }

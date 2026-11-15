@@ -5,12 +5,12 @@ export type {
   SubagentStatus,
 } from './protocol.js';
 export { AcpConnection } from './connection.js';
-export { AcpManager, getDefaultAcpAgentCommand } from './manager.js';
-export {
+export { AcpManager, getDefaultAcpAgentCommand, parseAcpAgentCommandEnv, registerSelfAcpAgentCommand } from './manager.js';export {
   GoodVibesAcpAgent,
   serveAcpAgent,
   promptText,
-  mapStopReason,
+  stopReasonFor,
+  outcomeText,
   mapPermissionOutcome,
   type AcpAgentOptions,
   type AcpStdio,

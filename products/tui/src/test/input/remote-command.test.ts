@@ -5,6 +5,7 @@ import { CommandRegistry } from '../../input/command-registry.ts';
 import type { CommandContext } from '../../input/command-registry.ts';
 import { registerBuiltinCommands } from '../../input/commands.ts';
 import { AgentManager } from '@goodvibes-jev/engine/platform/platform/tools';
+import { registerSelfAcpAgentCommand } from '@goodvibes-jev/engine/platform/platform/acp';
 import { createShellPathService } from '@/runtime/index.ts';
 import { createRuntimeStore } from '../../runtime/store/index.ts';
 import type { PeerClient } from '@/runtime/index.ts';
@@ -341,6 +342,7 @@ describe('remote command', () => {
 
   test('renders remote setup guidance and exports reusable environment snippets', async () => {
     resetTestRuntimeServices();
+    registerSelfAcpAgentCommand(['/opt/good vibes/goodvibes', 'acp']);
     const registry = new CommandRegistry();
     registerBuiltinCommands(registry);
     const remote = registry.get('remote');
@@ -374,7 +376,7 @@ describe('remote command', () => {
     out.length = 0;
     await remote!.handler(['env', 'export', envPath], ctx);
     expect(out.join('\n')).toContain('Exported remote environment snippet');
-    expect(readFileSync(envPath, 'utf-8')).toContain('ACP_AGENT_CMD');
+    expect(readFileSync(envPath, 'utf-8')).toContain(`ACP_AGENT_CMD='["/opt/good vibes/goodvibes","acp"]'`);
 
     out.length = 0;
     const tunnelPath = join(dir, 'remote-tunnel.txt');

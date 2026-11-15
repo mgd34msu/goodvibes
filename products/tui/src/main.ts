@@ -24,5 +24,10 @@ if (readerDescription !== undefined) {
   });
   process.exit(code);
 } else {
+  // `/remote dispatch` and delegation start copies of this program as ACP
+  // agents; only this entry knows how it was launched, so it says how.
+  const { registerSelfAcpAgentCommand } = await import('@goodvibes-jev/engine/platform/platform/acp');
+  const compiled = import.meta.path.startsWith('/$bunfs/') || /^[A-Za-z]:[\\/]~BUN[\\/]/.test(import.meta.path);
+  registerSelfAcpAgentCommand(compiled ? [process.execPath, 'acp'] : [process.execPath, 'run', import.meta.path, 'acp']);
   await import('./interactive.ts');
 }

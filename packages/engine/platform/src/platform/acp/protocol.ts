@@ -6,6 +6,8 @@
  */
 
 import type { RequestPermissionResponse } from '@agentclientprotocol/sdk';
+import { logger } from '../utils/logger.js';
+import { summarizeError } from '../utils/error-display.js';
 
 // Re-export ACP SDK types
 export type {
@@ -60,6 +62,8 @@ export interface SubagentInfo {
   startedAt: number;
   /** Latest progress text from session updates. */
   progress?: string | undefined;
+  /** The last permission ask refused without a decision on its merits (timeout, no owner, malformed), and why. */
+  lastRefusal?: { readonly at: number; readonly reason: string } | undefined;
 }
 
 /** Final result after a subagent completes. */
@@ -85,6 +89,8 @@ export interface SubagentTask {
   model?: string | undefined;
   /** Optional provider override (e.g. "anthropic"). */
   provider?: string | undefined;
+  /** The session that dispatched the task; the subagent's events carry it. */
+  sessionId?: string | undefined;
 }
 
 /**
@@ -100,6 +106,21 @@ export interface SubagentTask {
 export interface AcpPermissionOptionLike {
   readonly optionId: string;
   readonly kind: 'allow_once' | 'allow_always' | 'reject_once' | 'reject_always';
+}
+
+const PERMISSION_OPTION_KINDS: ReadonlySet<string> = new Set(['allow_once', 'allow_always', 'reject_once', 'reject_always']);
+
+/** An option list an answer can be chosen from: each option has an id and a known kind, and no id repeats. */
+export function wellFormedPermissionOptions(options: unknown): options is readonly AcpPermissionOptionLike[] {
+  if (!Array.isArray(options)) return false;
+  const ids = new Set<string>();
+  for (const option of options as unknown[]) {
+    if (!option || typeof option !== 'object') return false;
+    const { optionId, kind } = option as { optionId?: unknown; kind?: unknown };
+    if (typeof optionId !== 'string' || !optionId || typeof kind !== 'string' || !PERMISSION_OPTION_KINDS.has(kind) || ids.has(optionId)) return false;
+    ids.add(optionId);
+  }
+  return true;
 }
 
 export function permissionOutcomeFor(
@@ -146,6 +167,76 @@ export function withTimeout<T>(promise: Promise<T>, ms: number, label: string): 
       (error) => { clearTimeout(timer); rejectPromise(error); },
     );
   });
+}
+
+/**
+ * The messages a child writes to stdout, one JSON value per line. The host owns
+ * the other direction (the permission wire is the only serialiser of what is
+ * sent to the child), so only the reading half of the SDK's ndjson stream is
+ * needed and it is done here.
+ */
+export function readNdJsonMessages(input: ReadableStream<Uint8Array>): ReadableStream<unknown> {
+  const decoder = new TextDecoder();
+  let pending = '';
+  const emitLine = (line: string, controller: TransformStreamDefaultController<unknown>): void => {
+    const trimmed = line.trim();
+    if (!trimmed) return;
+    try { controller.enqueue(JSON.parse(trimmed) as unknown); }
+    catch (error) { logger.warn('ACP child wrote a line that is not JSON; skipped', { line: trimmed.slice(0, 200), error: summarizeError(error) }); }
+  };
+  return input.pipeThrough(new TransformStream<Uint8Array, unknown>({
+    transform(chunk, controller) {
+      pending += decoder.decode(chunk, { stream: true });
+      const lines = pending.split('\n');
+      pending = lines.pop() ?? '';
+      for (const line of lines) emitLine(line, controller);
+    },
+    flush(controller) {
+      pending += decoder.decode();
+      emitLine(pending, controller);
+      pending = '';
+    },
+  }));
+}
+
+/** The part of a spawned ACP child that stopping it needs. */
+export interface AcpChildProcess {
+  readonly pid?: number | undefined;
+  readonly exited: Promise<unknown>;
+  kill(signal?: number | NodeJS.Signals): void;
+}
+
+/** How long a child gets to exit after SIGTERM before SIGKILL. */
+export const ACP_CHILD_GRACE_MS = 250;
+/** How long a child gets to exit after SIGKILL before it is reported as not reaped. */
+export const ACP_CHILD_FORCED_EXIT_MS = 5000;
+
+/**
+ * The one way an ACP child is stopped: ask the agent to cancel (bounded),
+ * SIGTERM, wait, SIGKILL, wait. Resolves once the process has exited; rejects,
+ * naming the pid, when it is still there after SIGKILL.
+ */
+export async function stopAcpChild(child: AcpChildProcess, options: {
+  readonly cancel?: (() => Promise<unknown>) | undefined;
+  readonly graceMs?: number | undefined;
+  readonly forcedExitMs?: number | undefined;
+} = {}): Promise<void> {
+  const graceMs = options.graceMs ?? ACP_CHILD_GRACE_MS;
+  if (options.cancel) {
+    try { await withTimeout(options.cancel(), graceMs, 'ACP cancel'); }
+    catch (error) { logger.warn('ACP child did not take the cancel; terminating it', { pid: child.pid, error: summarizeError(error) }); }
+  }
+  try { child.kill('SIGTERM'); }
+  catch (error) { logger.warn('ACP child could not be sent SIGTERM', { pid: child.pid, error: summarizeError(error) }); }
+  try { await withTimeout(child.exited, graceMs, 'ACP child exit'); return; }
+  catch { /* still running: escalate */ }
+  try { child.kill('SIGKILL'); }
+  catch (error) { logger.warn('ACP child could not be sent SIGKILL', { pid: child.pid, error: summarizeError(error) }); }
+  const forcedExitMs = options.forcedExitMs ?? ACP_CHILD_FORCED_EXIT_MS;
+  try { await withTimeout(child.exited, forcedExitMs, 'ACP child exit after SIGKILL'); }
+  catch (error) {
+    throw new Error(`ACP child process ${child.pid ?? '(unknown pid)'} did not report its exit after SIGKILL: ${summarizeError(error)}`, { cause: error });
+  }
 }
 
 /**

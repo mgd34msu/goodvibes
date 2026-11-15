@@ -1,126 +1,141 @@
 /**
  * acp-agent-adapter.test.ts
  *
- * Exercises the agent-side ACP adapter (GoodVibesAcpAgent): honest capability
- * reporting, session lifecycle over an injected embedded-session substrate,
- * prompt streaming (runtime turn/tool events forwarded as ACP session updates),
- * terminal stop-reason mapping, permission bridging, and cancellation.
- *
- * The substrate is a fake EmbeddedSession built around a REAL RuntimeEventBus,
- * so the event-forwarding path under test is the real subscription machinery;
- * only the daemon behind it is faked (no LLM turn runs in unit tests).
+ * The agent-side ACP adapter (GoodVibesAcpAgent) over an injected embedded
+ * session: honest capabilities, one daemon per working directory shared by its
+ * sessions, a prompt driven by the submission's completion handle (streamed
+ * text, tool calls, the run's outcome), cancellation, permission routing and
+ * session close. The handle itself is built from the agents' real events in
+ * embed-session.test.ts; here it is driven directly.
  */
 import { describe, expect, test } from 'bun:test';
 import {
   GoodVibesAcpAgent,
-  promptText,
-  mapStopReason,
   mapPermissionOutcome,
+  outcomeText,
+  promptText,
+  stopReasonFor,
   translateAcpMcpServers,
 } from '../platform/src/platform/acp/agent.ts';
-import type { EmbeddedSession } from '../platform/src/platform/embed/session.ts';
-import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.ts';
-import { createEventEnvelope } from '../platform/src/platform/runtime/event-envelope.ts';
-import type { SharedSessionSubmission } from '../platform/src/platform/control-plane/session-types.ts';
-import type { PermissionRequestHandler } from '../platform/src/platform/permissions/prompt.ts';
-import type { TurnEvent } from '../platform/src/events/turn.ts';
-import type { ToolEvent } from '../platform/src/events/tools.ts';
+import type {
+  EmbeddedCompletion,
+  EmbeddedRunEvent,
+  EmbeddedRunOutcome,
+  EmbeddedSession,
+  EmbeddedSessionInput,
+  EmbeddedSubmission,
+} from '../platform/src/platform/embed/session.ts';
+import type { PermissionPromptRequest, PermissionRequestHandler } from '../platform/src/platform/permissions/prompt.ts';
 import type { McpServerConfig } from '../platform/src/platform/mcp/config.ts';
 import { waitFor } from './_helpers/test-timeout.js';
 
 interface RecordedUpdate {
   sessionId: string;
-  update: Record<string, unknown>;
+  update: Record<string, unknown> & { content?: { text?: string } };
 }
 
-function makeConn(permissionOptionId = 'allow-once'): {
-  updates: RecordedUpdate[];
-  permissionRequests: Record<string, unknown>[];
-  conn: ConstructorParameters<typeof GoodVibesAcpAgent>[0];
-} {
+function makeConn(options: { permissionOptionId?: string; sessionUpdate?: (params: unknown) => Promise<void> } = {}) {
   const updates: RecordedUpdate[] = [];
   const permissionRequests: Record<string, unknown>[] = [];
   return {
     updates,
     permissionRequests,
     conn: {
-      sessionUpdate: async (params: unknown) => {
-        updates.push(params as RecordedUpdate);
-      },
+      sessionUpdate: options.sessionUpdate ?? (async (params: unknown) => { updates.push(params as RecordedUpdate); }),
       requestPermission: async (params: unknown) => {
         permissionRequests.push(params as Record<string, unknown>);
-        return { outcome: { outcome: 'selected', optionId: permissionOptionId } };
+        return { outcome: { outcome: 'selected', optionId: options.permissionOptionId ?? 'allow-once' } };
       },
     } as unknown as ConstructorParameters<typeof GoodVibesAcpAgent>[0],
   };
 }
 
-function makeFakeSubstrate(runtimeSessionId: string, activeAgentId?: string): {
-  bus: RuntimeEventBus;
-  submitted: string[];
-  cancelled: string[];
-  cancelledAgents: string[];
-  mcpServers: { value: readonly McpServerConfig[] | undefined };
-  stopped: { value: boolean };
-  permissionHandlers: PermissionRequestHandler[];
-  factory: (options: { workspace: string; requestPermission: PermissionRequestHandler; mcpServers?: readonly McpServerConfig[] | undefined }) => Promise<EmbeddedSession>;
-  emitTurn: (event: TurnEvent) => void;
-  emitTool: (event: ToolEvent) => void;
-} {
-  const bus = new RuntimeEventBus();
-  const submitted: string[] = [];
-  const cancelled: string[] = [];
-  const cancelledAgents: string[] = [];
-  const mcpServers: { value: readonly McpServerConfig[] | undefined } = { value: undefined };
-  const stopped = { value: false };
+/** A run the test drives: events before the first listener are replayed to it, like the real handle. */
+function fakeRun(agentId: string) {
+  const held: EmbeddedRunEvent[] = [];
+  const listeners = new Set<(event: EmbeddedRunEvent) => void>();
+  let attached = false;
+  let settle!: (outcome: EmbeddedRunOutcome) => void;
+  const done = new Promise<EmbeddedRunOutcome>((resolve) => { settle = resolve; });
+  const completion: EmbeddedCompletion = {
+    agentId,
+    onEvent(listener) {
+      listeners.add(listener);
+      if (!attached) { attached = true; for (const event of held.splice(0)) listener(event); }
+      return () => { listeners.delete(listener); };
+    },
+    done,
+  };
+  return {
+    completion,
+    emit(event: EmbeddedRunEvent) { if (!attached) held.push(event); else for (const listener of listeners) listener(event); },
+    end(outcome: EmbeddedRunOutcome) { settle(outcome); },
+  };
+}
+
+function makeSubstrate(options: { onSubmit?: (run: ReturnType<typeof fakeRun>) => Promise<void> } = {}) {
+  const boots: { workspace: string; mcpServers: readonly McpServerConfig[] | undefined }[] = [];
   const permissionHandlers: PermissionRequestHandler[] = [];
-  const emitTurn = (event: TurnEvent): void => {
-    bus.emit('turn', createEventEnvelope(event.type, event, { sessionId: runtimeSessionId, source: 'test' }));
-  };
-  const emitTool = (event: ToolEvent): void => {
-    bus.emit('tools', createEventEnvelope(event.type, event, { sessionId: runtimeSessionId, source: 'test' }));
-  };
-  const factory = async (options: {
-    workspace: string;
-    requestPermission: PermissionRequestHandler;
-    mcpServers?: readonly McpServerConfig[] | undefined;
-  }): Promise<EmbeddedSession> => {
-    permissionHandlers.push(options.requestPermission);
-    mcpServers.value = options.mcpServers;
+  const submitted: { body: string; sessionId: string | undefined }[] = [];
+  const runs: ReturnType<typeof fakeRun>[] = [];
+  const cancelledAgents: string[] = [];
+  const cancelledInputs: string[] = [];
+  const closedSessions: string[] = [];
+  let stops = 0;
+  let nextSession = 0;
+  let nextAgent = 0;
+  const factory = async (boot: { workspace: string; requestPermission: PermissionRequestHandler; mcpServers?: readonly McpServerConfig[] | undefined }): Promise<EmbeddedSession> => {
+    boots.push({ workspace: boot.workspace, mcpServers: boot.mcpServers });
+    permissionHandlers.push(boot.requestPermission);
     const fake: Partial<EmbeddedSession> = {
-      workspace: options.workspace,
+      workspace: boot.workspace,
       url: 'http://127.0.0.1:0',
-      events: bus,
-      submit: async (input) => {
-        submitted.push(typeof input === 'string' ? input : input.body);
+      submit: async (input: string | EmbeddedSessionInput): Promise<EmbeddedSubmission> => {
+        const structured = typeof input === 'string' ? { body: input } : input;
+        submitted.push({ body: structured.body, sessionId: structured.sessionId });
+        const run = fakeRun(`agent-${++nextAgent}`);
+        runs.push(run);
+        await options.onSubmit?.(run);
         return {
-          session: { id: runtimeSessionId },
-          input: { id: 'input-1' },
-          ...(activeAgentId ? { activeAgentId } : {}),
+          session: { id: structured.sessionId ?? 'unknown' },
+          input: { id: `input-${nextAgent}` },
+          activeAgentId: run.completion.agentId,
           mode: 'spawn',
-          created: true,
-        } as unknown as SharedSessionSubmission;
+          created: false,
+          completion: run.completion,
+        } as unknown as EmbeddedSubmission;
       },
       cancelActive: (agentIds) => {
         let count = 0;
-        for (const id of agentIds) {
-          if (id === activeAgentId) { cancelledAgents.push(id); count += 1; }
-        }
+        for (const id of agentIds) { cancelledAgents.push(id); count += 1; }
         return count;
       },
       sessions: {
-        cancelInput: async (sessionId: string, inputId: string) => {
-          cancelled.push(`${sessionId}:${inputId}`);
-          return null;
-        },
+        createSession: async () => ({ id: `shared-${++nextSession}` }),
+        closeSession: async (id: string) => { closedSessions.push(id); return null; },
+        cancelInput: async (sessionId: string, inputId: string) => { cancelledInputs.push(`${sessionId}:${inputId}`); return null; },
       } as unknown as EmbeddedSession['sessions'],
-      stop: async () => {
-        stopped.value = true;
-      },
+      stop: async () => { stops += 1; },
     };
     return fake as EmbeddedSession;
   };
-  return { bus, submitted, cancelled, cancelledAgents, mcpServers, stopped, permissionHandlers, factory, emitTurn, emitTool };
+  return {
+    factory, boots, permissionHandlers, submitted, runs, cancelledAgents, cancelledInputs, closedSessions,
+    stops: () => stops,
+  };
+}
+
+const prompt = (sessionId: string, text = 'go') => ({ sessionId, prompt: [{ type: 'text' as const, text }] });
+
+function permissionRequest(callId: string, agentId?: string): PermissionPromptRequest {
+  return {
+    callId,
+    tool: 'write_file',
+    args: { path: 'x.ts' },
+    category: 'write',
+    analysis: { classification: 'write', riskLevel: 'medium', summary: 'write a file', reasons: [] },
+    ...(agentId ? { attribution: { kind: 'background-agent', agentId } } : {}),
+  } as PermissionPromptRequest;
 }
 
 describe('pure mappings', () => {
@@ -134,109 +149,178 @@ describe('pure mappings', () => {
     ).toBe('fix the bug\n\nfile:///a.ts');
   });
 
-  test('mapStopReason covers terminal turn events honestly', () => {
-    expect(mapStopReason({ type: 'TURN_COMPLETED', turnId: 't', response: 'r', stopReason: 'completed' })).toBe('end_turn');
-    expect(mapStopReason({ type: 'TURN_CANCEL', turnId: 't', stopReason: 'cancelled' })).toBe('cancelled');
-    expect(mapStopReason({ type: 'TURN_ERROR', turnId: 't', error: 'x', stopReason: 'context_overflow' })).toBe('max_tokens');
-    expect(mapStopReason({ type: 'TURN_ERROR', turnId: 't', error: 'x', stopReason: 'tool_loop_circuit_breaker' })).toBe('max_turn_requests');
-    expect(mapStopReason({ type: 'TURN_ERROR', turnId: 't', error: 'x', stopReason: 'provider_error' })).toBe('refusal');
-    expect(mapStopReason({ type: 'STREAM_DELTA', turnId: 't', content: 'c', accumulated: 'c' })).toBeNull();
+  test('a run outcome maps to a stop reason and, when the stream did not say it, a line for the editor', () => {
+    expect(stopReasonFor({ outcome: 'completed', agentId: 'a', output: 'done' })).toBe('end_turn');
+    expect(stopReasonFor({ outcome: 'cancelled', reason: 'x' })).toBe('cancelled');
+    expect(stopReasonFor({ outcome: 'failed', agentId: 'a', error: 'boom' })).toBe('refusal');
+    expect(stopReasonFor({ outcome: 'not-started', state: 'queued', reason: 'busy' })).toBe('refusal');
+    expect(outcomeText({ outcome: 'failed', agentId: 'a', error: 'no provider key configured' }, true)).toContain('no provider key configured');
+    expect(outcomeText({ outcome: 'completed', agentId: 'a', output: 'final answer' }, false)).toBe('final answer');
+    expect(outcomeText({ outcome: 'completed', agentId: 'a', output: 'final answer' }, true)).toBeNull();
   });
 
   test('mapPermissionOutcome maps selections and cancellation', () => {
-    expect(mapPermissionOutcome({ outcome: 'cancelled' })).toEqual({ approved: false });
     expect(mapPermissionOutcome({ outcome: 'selected', optionId: 'allow-once' })).toEqual({ approved: true });
     expect(mapPermissionOutcome({ outcome: 'selected', optionId: 'allow-always' })).toEqual({ approved: true, remember: true });
     expect(mapPermissionOutcome({ outcome: 'selected', optionId: 'reject-once' })).toEqual({ approved: false });
+    expect(mapPermissionOutcome({ outcome: 'cancelled' })).toEqual({ approved: false });
   });
 });
 
 describe('initialize reports honest capabilities', () => {
-  test('unsupported protocol features are false, never stubbed', async () => {
-    const { conn } = makeConn();
-    const agent = new GoodVibesAcpAgent(conn);
+  test('unsupported protocol features are false, session close is offered', async () => {
+    const agent = new GoodVibesAcpAgent(makeConn().conn);
     const response = await agent.initialize({ protocolVersion: 1 });
-    expect(response.protocolVersion).toBe(1);
-    expect(response.agentCapabilities).toBeDefined();
-    const agentCapabilities = response.agentCapabilities!;
-    expect(agentCapabilities.loadSession).toBe(false);
-    expect(agentCapabilities.promptCapabilities).toEqual({
-      image: false,
-      audio: false,
-      embeddedContext: false,
-    });
-    expect(agentCapabilities.mcpCapabilities).toEqual({ http: false, sse: false });
+    const capabilities = response.agentCapabilities!;
+    expect(capabilities.loadSession).toBe(false);
+    expect(capabilities.promptCapabilities).toEqual({ image: false, audio: false, embeddedContext: false });
+    expect(capabilities.mcpCapabilities).toEqual({ http: false, sse: false });
+    expect(capabilities.sessionCapabilities).toEqual({ close: {} });
     expect(response.authMethods).toEqual([]);
-  });
-
-  test('authenticate is a no-op success (no auth needed for a local daemon)', async () => {
-    const { conn } = makeConn();
-    const agent = new GoodVibesAcpAgent(conn);
-    await expect(agent.authenticate({ methodId: 'anything' })).resolves.toBeUndefined();
   });
 });
 
-describe('session lifecycle + prompt streaming', () => {
-  test('newSession boots a substrate session against cwd; prompt streams and completes', async () => {
-    const substrate = makeFakeSubstrate('runtime-session-1');
+describe('a prompt follows the run its input started', () => {
+  test('text and tool calls stream, and the prompt ends when the run completes', async () => {
+    const sub = makeSubstrate();
     const { conn, updates } = makeConn();
-    const agent = new GoodVibesAcpAgent(conn, { sessionFactory: substrate.factory });
+    const agent = new GoodVibesAcpAgent(conn, { sessionFactory: sub.factory });
+    const { sessionId } = await agent.newSession({ cwd: '/work/project', mcpServers: [] });
+    const pending = agent.prompt(prompt(sessionId, 'do the thing'));
+    await waitFor(() => sub.runs.length > 0);
+    const run = sub.runs[0]!;
+    run.emit({ type: 'text', text: 'hello ' });
+    run.emit({ type: 'tool-started', callId: 'c1', tool: 'read_file' });
+    run.emit({ type: 'tool-settled', callId: 'c1', tool: 'read_file', ok: true });
+    run.end({ outcome: 'completed', agentId: 'agent-1', output: 'hello world' });
 
-    const created = await agent.newSession({ cwd: '/work/project', mcpServers: [] });
-    expect(created.sessionId.startsWith('gv-')).toBe(true);
-
-    const promptPromise = agent.prompt({
-      sessionId: created.sessionId,
-      prompt: [{ type: 'text', text: 'do the thing' }],
-    });
-    await waitFor(() => substrate.submitted.length > 0); // the prompt subscribes before it submits
-
-    substrate.emitTurn({ type: 'STREAM_DELTA', turnId: 't1', content: 'hello ', accumulated: 'hello ' });
-    substrate.emitTool({ type: 'TOOL_EXECUTING', callId: 'c1', turnId: 't1', tool: 'read_file', startedAt: Date.now() });
-    substrate.emitTool({ type: 'TOOL_SUCCEEDED', callId: 'c1', turnId: 't1', tool: 'read_file', durationMs: 5 });
-    substrate.emitTurn({ type: 'TURN_COMPLETED', turnId: 't1', response: 'hello world', stopReason: 'completed' });
-
-    const result = await promptPromise;
-    expect(result.stopReason).toBe('end_turn');
-    expect(substrate.submitted).toEqual(['do the thing']);
-
+    expect((await pending).stopReason).toBe('end_turn');
+    expect(sub.submitted).toEqual([{ body: 'do the thing', sessionId: 'shared-1' }]);
     const kinds = updates.map((u) => u.update.sessionUpdate);
-    expect(kinds).toContain('agent_message_chunk');
-    expect(kinds).toContain('tool_call');
-    expect(kinds).toContain('tool_call_update');
-    const chunk = updates.find((u) => u.update.sessionUpdate === 'agent_message_chunk')!;
-    expect((chunk.update.content as { text: string }).text).toBe('hello ');
-    const toolDone = updates.find((u) => u.update.sessionUpdate === 'tool_call_update')!;
-    expect(toolDone.update.status).toBe('completed');
-    expect(toolDone.update.toolCallId).toBe('c1');
+    expect(kinds).toEqual(['agent_message_chunk', 'tool_call', 'tool_call_update']);
+    expect(updates[0]!.update.content?.text).toBe('hello ');
+    expect(updates[2]!.update).toMatchObject({ toolCallId: 'c1', status: 'completed' });
   });
 
-  test('cancel resolves the in-flight prompt with cancelled and cancels the queued input', async () => {
-    const substrate = makeFakeSubstrate('runtime-session-2');
-    const { conn } = makeConn();
-    const agent = new GoodVibesAcpAgent(conn, { sessionFactory: substrate.factory });
-    const created = await agent.newSession({ cwd: '/work/p2', mcpServers: [] });
-    const promptPromise = agent.prompt({ sessionId: created.sessionId, prompt: [{ type: 'text', text: 'long task' }] });
-    await waitFor(() => substrate.submitted.length > 0);
-    await agent.cancel({ sessionId: created.sessionId });
-    const result = await promptPromise;
-    expect(result.stopReason).toBe('cancelled');
-    expect(substrate.cancelled).toEqual(['runtime-session-2:input-1']);
+  test('a run that fails before submit returns still ends the prompt, and the editor is told why', async () => {
+    const sub = makeSubstrate({ onSubmit: async (run) => { run.end({ outcome: 'failed', agentId: 'agent-1', error: 'no provider key configured' }); } });
+    const { conn, updates } = makeConn();
+    const agent = new GoodVibesAcpAgent(conn, { sessionFactory: sub.factory });
+    const { sessionId } = await agent.newSession({ cwd: '/w', mcpServers: [] });
+    expect((await agent.prompt(prompt(sessionId))).stopReason).toBe('refusal');
+    expect(updates.some((u) => (u.update.content?.text ?? '').includes('no provider key configured'))).toBe(true);
   });
 
-  test('cancel aborts the session active agent in-flight (real cancellation), not only the queued input', async () => {
-    const substrate = makeFakeSubstrate('runtime-session-2b', 'agent-42');
-    const { conn } = makeConn();
-    const agent = new GoodVibesAcpAgent(conn, { sessionFactory: substrate.factory });
-    const created = await agent.newSession({ cwd: '/work/p2b', mcpServers: [] });
-    const promptPromise = agent.prompt({ sessionId: created.sessionId, prompt: [{ type: 'text', text: 'long task' }] });
-    await waitFor(() => substrate.submitted.length > 0);
-    await agent.cancel({ sessionId: created.sessionId });
-    const result = await promptPromise;
-    expect(result.stopReason).toBe('cancelled');
-    // The active agent was cancelled in-flight (the real-cancellation seam),
-    // in addition to the queued-input cancel.
-    expect(substrate.cancelledAgents).toEqual(['agent-42']);
+  test('cancel ends the prompt as cancelled and aborts the agent and the queued input', async () => {
+    const sub = makeSubstrate();
+    const agent = new GoodVibesAcpAgent(makeConn().conn, { sessionFactory: sub.factory });
+    const { sessionId } = await agent.newSession({ cwd: '/w', mcpServers: [] });
+    const pending = agent.prompt(prompt(sessionId));
+    await waitFor(() => sub.runs.length > 0);
+    await new Promise((resolve) => setImmediate(resolve));
+    await agent.cancel({ sessionId });
+    expect((await pending).stopReason).toBe('cancelled');
+    expect(sub.cancelledAgents).toEqual(['agent-1']);
+    expect(sub.cancelledInputs).toEqual(['shared-1:input-1']);
+  });
+
+  test('a cancel during submit is applied once the submission names the agent', async () => {
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    const sub = makeSubstrate({ onSubmit: () => held });
+    const agent = new GoodVibesAcpAgent(makeConn().conn, { sessionFactory: sub.factory });
+    const { sessionId } = await agent.newSession({ cwd: '/w', mcpServers: [] });
+    const pending = agent.prompt(prompt(sessionId));
+    await waitFor(() => sub.runs.length > 0);
+    await agent.cancel({ sessionId });
+    expect(sub.cancelledAgents).toEqual([]);
+    release();
+    expect((await pending).stopReason).toBe('cancelled');
+    expect(sub.cancelledAgents).toEqual(['agent-1']);
+  });
+
+  test('a second prompt on a busy session is refused and the first still completes', async () => {
+    const sub = makeSubstrate();
+    const agent = new GoodVibesAcpAgent(makeConn().conn, { sessionFactory: sub.factory });
+    const { sessionId } = await agent.newSession({ cwd: '/w', mcpServers: [] });
+    const first = agent.prompt(prompt(sessionId));
+    await expect(agent.prompt(prompt(sessionId))).rejects.toThrow('already has a prompt running');
+    await waitFor(() => sub.runs.length > 0);
+    sub.runs[0]!.end({ outcome: 'completed', agentId: 'agent-1', output: '' });
+    expect((await first).stopReason).toBe('end_turn');
+  });
+
+  test('a client connection that rejects session updates does not produce an unhandled rejection', async () => {
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => { unhandled.push(reason); };
+    process.on('unhandledRejection', onUnhandled);
+    try {
+      const sub = makeSubstrate();
+      const { conn } = makeConn({ sessionUpdate: async () => { throw new Error('connection closed'); } });
+      const agent = new GoodVibesAcpAgent(conn, { sessionFactory: sub.factory });
+      const { sessionId } = await agent.newSession({ cwd: '/w', mcpServers: [] });
+      const pending = agent.prompt(prompt(sessionId));
+      await waitFor(() => sub.runs.length > 0);
+      sub.runs[0]!.emit({ type: 'text', text: 'hello' });
+      sub.runs[0]!.end({ outcome: 'completed', agentId: 'agent-1', output: 'hello' });
+      expect((await pending).stopReason).toBe('end_turn');
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+    }
+  });
+});
+
+describe('one daemon per working directory', () => {
+  test('sessions in one cwd share one daemon; the last session close stops it', async () => {
+    const sub = makeSubstrate();
+    const agent = new GoodVibesAcpAgent(makeConn().conn, { sessionFactory: sub.factory });
+    const a = await agent.newSession({ cwd: '/work/one', mcpServers: [] });
+    const b = await agent.newSession({ cwd: '/work/one', mcpServers: [] });
+    const c = await agent.newSession({ cwd: '/work/one', mcpServers: [] });
+    await agent.newSession({ cwd: '/work/two', mcpServers: [] });
+    expect(sub.boots.map((boot) => boot.workspace)).toEqual(['/work/one', '/work/two']);
+
+    await agent.closeSession({ sessionId: a.sessionId });
+    await agent.closeSession({ sessionId: b.sessionId });
+    expect(sub.stops()).toBe(0);
+    await agent.closeSession({ sessionId: c.sessionId });
+    expect(sub.stops()).toBe(1);
+    expect(sub.closedSessions).toEqual(['shared-1', 'shared-2', 'shared-3']);
+    await expect(agent.prompt(prompt(a.sessionId))).rejects.toThrow('Unknown ACP session');
+  });
+
+  test('a permission ask goes to the session whose agent asked', async () => {
+    const sub = makeSubstrate();
+    const { conn, permissionRequests } = makeConn({ permissionOptionId: 'allow-always' });
+    const agent = new GoodVibesAcpAgent(conn, { sessionFactory: sub.factory });
+    const first = await agent.newSession({ cwd: '/w', mcpServers: [] });
+    const second = await agent.newSession({ cwd: '/w', mcpServers: [] });
+    const pending = agent.prompt(prompt(second.sessionId));
+    await waitFor(() => sub.runs.length > 0);
+    await new Promise((resolve) => setImmediate(resolve));
+
+    const decision = await sub.permissionHandlers[0]!(permissionRequest('call-9', 'agent-1'));
+    expect(decision).toEqual({ approved: true, remember: true });
+    expect(permissionRequests[0]!.sessionId).toBe(second.sessionId);
+    expect((permissionRequests[0]!.options as { kind: string }[]).map((o) => o.kind)).toEqual(['allow_once', 'allow_always', 'reject_once']);
+
+    sub.runs[0]!.end({ outcome: 'completed', agentId: 'agent-1', output: '' });
+    await pending;
+    // With two idle sessions and an agent neither started, nobody can be named: refused, not misrouted.
+    expect(await sub.permissionHandlers[0]!(permissionRequest('call-10', 'agent-x'))).toEqual({ approved: false });
+    expect(permissionRequests).toHaveLength(1);
+    expect(first.sessionId).not.toBe(second.sessionId);
+  });
+
+  test('dispose stops every daemon', async () => {
+    const sub = makeSubstrate();
+    const agent = new GoodVibesAcpAgent(makeConn().conn, { sessionFactory: sub.factory });
+    await agent.newSession({ cwd: '/work/p4', mcpServers: [] });
+    await agent.newSession({ cwd: '/work/p5', mcpServers: [] });
+    await agent.dispose();
+    expect(sub.stops()).toBe(2);
   });
 });
 
@@ -253,56 +337,19 @@ describe('ACP MCP-server passthrough (session/new)', () => {
     expect(unsupported).toEqual(['remote (http)', 'events (sse)']);
   });
 
-  test('newSession threads declared stdio MCP servers into the embedded session', async () => {
-    const substrate = makeFakeSubstrate('runtime-session-mcp');
-    const { conn } = makeConn();
-    const agent = new GoodVibesAcpAgent(conn, { sessionFactory: substrate.factory });
-    await agent.newSession({
-      cwd: '/work/mcp',
-      mcpServers: [{ name: 'fs', command: '/usr/bin/mcp-fs', args: [], env: [] }],
-    } as never);
-    expect(substrate.mcpServers.value).toEqual([{ name: 'fs', command: '/usr/bin/mcp-fs' }]);
+  test('newSession threads declared stdio MCP servers into the embedded daemon', async () => {
+    const sub = makeSubstrate();
+    const agent = new GoodVibesAcpAgent(makeConn().conn, { sessionFactory: sub.factory });
+    await agent.newSession({ cwd: '/work/mcp', mcpServers: [{ name: 'fs', command: '/usr/bin/mcp-fs', args: [], env: [] }] } as never);
+    expect(sub.boots[0]!.mcpServers).toEqual([{ name: 'fs', command: '/usr/bin/mcp-fs' }]);
   });
 
-  test('newSession rejects an http/sse MCP server by name (honest unsupported-transport error)', async () => {
-    const substrate = makeFakeSubstrate('runtime-session-mcp2');
-    const { conn } = makeConn();
-    const agent = new GoodVibesAcpAgent(conn, { sessionFactory: substrate.factory });
+  test('newSession rejects an http/sse MCP server by name', async () => {
+    const sub = makeSubstrate();
+    const agent = new GoodVibesAcpAgent(makeConn().conn, { sessionFactory: sub.factory });
     await expect(agent.newSession({
       cwd: '/work/mcp2',
       mcpServers: [{ type: 'http', name: 'remote', url: 'https://x/mcp' }],
     } as never)).rejects.toThrow(/unsupported transport.*remote/);
-  });
-
-  test('permission asks bridge to ACP requestPermission and map the outcome back', async () => {
-    const substrate = makeFakeSubstrate('runtime-session-3');
-    const { conn, permissionRequests } = makeConn('allow-always');
-    const agent = new GoodVibesAcpAgent(conn, { sessionFactory: substrate.factory });
-    await agent.newSession({ cwd: '/work/p3', mcpServers: [] });
-
-    const handler = substrate.permissionHandlers[0]!;
-    const decision = await handler({
-      callId: 'call-9',
-      tool: 'write_file',
-      args: { path: 'x.ts' },
-      category: 'write',
-      analysis: { classification: 'write', riskLevel: 'medium', summary: 'write a file', reasons: [] },
-    });
-    expect(decision).toEqual({ approved: true, remember: true });
-    expect(permissionRequests.length).toBe(1);
-    const toolCall = permissionRequests[0]!.toolCall as Record<string, unknown>;
-    expect(toolCall.toolCallId).toBe('call-9');
-    expect(toolCall.title).toBe('write_file');
-    const options = permissionRequests[0]!.options as { kind: string }[];
-    expect(options.map((o) => o.kind)).toEqual(['allow_once', 'allow_always', 'reject_once']);
-  });
-
-  test('dispose stops every substrate session', async () => {
-    const substrate = makeFakeSubstrate('runtime-session-4');
-    const { conn } = makeConn();
-    const agent = new GoodVibesAcpAgent(conn, { sessionFactory: substrate.factory });
-    await agent.newSession({ cwd: '/work/p4', mcpServers: [] });
-    await agent.dispose();
-    expect(substrate.stopped.value).toBe(true);
   });
 });

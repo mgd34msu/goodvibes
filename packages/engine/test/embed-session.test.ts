@@ -131,6 +131,17 @@ describe('createEmbeddedSession', () => {
     }
   });
 
+  test('a spawn-mode submit returns a handle that settles from the owner agent\'s own terminal event', async () => {
+    const record = await session.sessions.createSession({ project: work, title: 'completion' });
+    const submission = await session.submit({ body: 'Summarise the README in one line.', sessionId: record.id });
+    expect(submission.completion.agentId).toBe(submission.activeAgentId);
+    // No provider is configured here, so the owner agent ends on its own; the
+    // handle settles from that event instead of waiting for a turn event.
+    const outcome = await submission.completion.done;
+    expect(['completed', 'failed', 'cancelled']).toContain(outcome.outcome);
+    if (outcome.outcome !== 'not-started') expect(outcome.agentId).toBe(submission.activeAgentId);
+  }, 20_000);
+
   test('stop is idempotent', async () => {
     await session.stop();
     await session.stop();

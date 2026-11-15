@@ -52,7 +52,16 @@ function acp() {
     operation: { source: { goal: 'Write the requested project file', criteria: [] }, lifetime: new AbortController() }, permissionRequests: new Map() };
   const access = service as unknown as { records: Map<string, unknown>; buildClient(record: unknown): { requestPermission(input: unknown): Promise<unknown> } };
   access.records.set('host', record);
-  return { service, record, client: access.buildClient(record) };
+  // As in a spawned row: the wire sees each request before the SDK dispatches it.
+  const wire = new AcpPermissionWire(() => ({ assertCurrent() { record.lifetime.signal.throwIfAborted(); }, close() {} }));
+  Object.assign(record, { permissionWire: wire });
+  const inner = access.buildClient(record);
+  let rpc = 0;
+  const client = { requestPermission(input: unknown) {
+    wire.observe({ jsonrpc: '2.0', id: ++rpc, method: 'session/request_permission', params: input });
+    return inner.requestPermission(input);
+  } };
+  return { service, record, client };
 }
 test('ACP actual host adapter selects original allow_once under current configuration, no human', async () => {
   const { client } = acp();

@@ -18,7 +18,7 @@ function run(mode: string, handshakeTimeoutMs?: number) {
     'script-run',
     { description: 'scripted task', context: '', tools: [], workingDirectory: import.meta.dir },
     [process.execPath, '--no-env-file', FIXTURE, mode],
-    undefined, bus, null, undefined, undefined, handshakeTimeoutMs,
+    { runtimeBus: bus, ...(handshakeTimeoutMs === undefined ? {} : { handshakeTimeoutMs }) },
   );
   return { connection, events, deltas };
 }

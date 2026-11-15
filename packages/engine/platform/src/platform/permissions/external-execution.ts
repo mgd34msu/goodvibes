@@ -1,4 +1,10 @@
-/** Explicit workspace constraints stay live until the actual protocol effect. */
+/**
+ * Workspace constraints for an external protocol owner (an MCP server, a hosted
+ * ACP agent). Paths are resolved once, when the owner is prepared: a spawned
+ * process keeps the directory it was started in whatever a path later points
+ * at, so re-resolving it per ask protects nothing. What can change, the trust
+ * decision, is the trust owner's revision, compared as an integer.
+ */
 import { realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { ExternalPermissionHost } from './external-request.js';
@@ -7,15 +13,10 @@ import type { ExternalPermissionHost } from './external-request.js';
 export async function prepareExternalWorkspaceRevision(host: ExternalPermissionHost, signal: AbortSignal): Promise<() => void> {
   const trust = host.workspaceTrust;
   const prepare = trust?.prepareAutonomousConstraint;
-  const root = host.workspaceRoot;
   if (trust === undefined || (trust !== null && typeof prepare !== 'function')) throw new Error('External operation has no workspace trust owner');
-  const physical = root ? realpathSync(resolve(root)) : undefined;
+  if (host.workspaceRoot) realpathSync(resolve(host.workspaceRoot));
   const assertTrust = await prepare?.call(trust, 'read', signal);
-  const assertCurrent = () => {
-    signal.throwIfAborted(); host.signal.throwIfAborted(); assertTrust?.();
-    if (host.workspaceTrust !== trust || trust?.prepareAutonomousConstraint !== prepare || host.workspaceRoot !== root
-      || (root && realpathSync(resolve(root)) !== physical)) throw new Error('External workspace ownership changed');
-  };
+  const assertCurrent = () => { signal.throwIfAborted(); host.signal.throwIfAborted(); assertTrust?.(); };
   assertCurrent(); return assertCurrent;
 }
 
@@ -28,7 +29,6 @@ export async function prepareExternalExecution(host: ExternalPermissionHost, cwd
   const target = resolver ? resolver(cwd) : origin;
   if (target === undefined) throw new Error('External process target has no workspace trust owner');
   const physical = realpathSync(resolve(cwd));
-  const originPhysical = root ? realpathSync(resolve(root)) : undefined;
   if (!resolver && origin !== null && (!root || realpathSync(resolve(root)) !== physical))
     throw new Error('External process target differs from its workspace trust owner');
   const originPrepare = origin?.prepareAutonomousConstraint;
@@ -38,13 +38,6 @@ export async function prepareExternalExecution(host: ExternalPermissionHost, cwd
   const originPreparation = originPrepare?.call(origin, 'execute', signal);
   const targetPreparation = target === origin ? originPreparation : targetPrepare?.call(target, 'execute', signal);
   const [originCurrent, targetCurrent] = await Promise.all([originPreparation, targetPreparation]);
-  const assertCurrent = () => {
-    signal.throwIfAborted(); host.signal.throwIfAborted(); originCurrent?.(); targetCurrent?.();
-    if (host.workspaceTrust !== origin || host.workspaceTrustFor !== resolver || host.workspaceRoot !== root
-      || origin?.prepareAutonomousConstraint !== originPrepare || target?.prepareAutonomousConstraint !== targetPrepare
-      || (resolver && resolver(cwd) !== target) || realpathSync(resolve(cwd)) !== physical
-      || (root && realpathSync(resolve(root)) !== originPhysical))
-      throw new Error('External process workspace ownership changed');
-  };
+  const assertCurrent = () => { signal.throwIfAborted(); host.signal.throwIfAborted(); originCurrent?.(); targetCurrent?.(); };
   assertCurrent(); return assertCurrent;
 }

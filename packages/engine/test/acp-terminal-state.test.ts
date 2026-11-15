@@ -43,7 +43,7 @@ describe('AcpConnection: one terminal outcome per run', () => {
     });
     const connection = new AcpConnection('terminal-once', {
       description: 'long task', context: '', tools: [], workingDirectory: import.meta.dir,
-    }, [process.execPath, 'run', FIXTURE, 'slow-turn'], async () => ({ approved: false, remember: false }), bus);
+    }, [process.execPath, 'run', FIXTURE, 'slow-turn'], { runtimeBus: bus });
     const running = connection.run();
     await waitFor(() => (connection as unknown as { sessionId: string | null }).sessionId !== null);
     await connection.cancel();

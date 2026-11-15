@@ -43,8 +43,8 @@ const request = () => ({ sessionId: 'session', toolCall: { toolCallId: 'operatio
 function acp(withHost = true) {
   const controller = new AbortController();
   const conn = new AcpConnection('subagent', { description: 'Generated delegated task', context: '', tools: [], workingDirectory: '/synthetic/project' },
-    ['/synthetic/agent'], async () => { humans++; return { approved: true }; }, null, null, withHost ? host : undefined,
-    { sourceOf: () => ({ goal: 'Original owner request to write the requested project file', criteria: [] }), assertCurrent() { controller.signal.throwIfAborted(); }, signal: controller.signal });
+    ['/synthetic/agent'], { ...(withHost ? { permissionHost: host } : {}),
+      operation: { sourceOf: () => ({ goal: 'Original owner request to write the requested project file', criteria: [] }), assertCurrent() { controller.signal.throwIfAborted(); }, signal: controller.signal } });
   const wire = new AcpPermissionWire(() => ({ assertCurrent() { controller.signal.throwIfAborted(); host.signal.throwIfAborted(); }, close() {} }));
   const access = conn as unknown as { sessionId: string; permissionWire: AcpPermissionWire; buildClientImpl(): { requestPermission(input: unknown): Promise<unknown> } };
   access.sessionId = 'session'; access.permissionWire = wire;
@@ -102,8 +102,7 @@ test('real subprocess platform stream reaches canonical permission and original 
   const connection = new AcpConnection('stdio-child', {
     description: 'Perform this delegated project operation', context: '', tools: ['write'], workingDirectory: dir,
   }, [process.execPath, '--no-env-file', fileURLToPath(new URL('./fixtures/acp/subagent-permission.ts', import.meta.url)), report],
-  async () => { humans++; return { approved: true }; }, null, null, host,
-  { sourceOf: () => ({ goal: 'Original host goal to write the project file', criteria: [] }), assertCurrent() {} });
+  { permissionHost: host, operation: { sourceOf: () => ({ goal: 'Original host goal to write the project file', criteria: [] }), assertCurrent() {} } });
   try {
     const result = await connection.run();
     expect(result.success).toBe(true);
@@ -118,8 +117,8 @@ import { withExternalOperationSource } from '../platform/src/platform/permission
 test('reachable AcpManager spawn inherits the admitted tool body original source and preserves it for child permissions', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'acp-manager-autonomous-'));
   const report = join(dir, 'wire.json');
-  const manager = new AcpManager({ permissionHost: host, requestPermission: async () => { humans++; return { approved: true }; } });
-  (manager as unknown as { agentCmd: string[] }).agentCmd = [process.execPath, '--no-env-file', fileURLToPath(new URL('./fixtures/acp/subagent-permission.ts', import.meta.url)), report];
+  const manager = new AcpManager({ permissionHost: host,
+    agentCommand: [process.execPath, '--no-env-file', fileURLToPath(new URL('./fixtures/acp/subagent-permission.ts', import.meta.url)), report] });
   let sourceReads = 0;
   const source = { goal: 'Exact original caller goal', criteria: ['Preserve existing content'] };
   try {
@@ -134,8 +133,8 @@ test('reachable AcpManager spawn inherits the admitted tool body original source
 test('AcpManager without original source fails permission closed instead of invoking the legacy human callback', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'acp-manager-no-source-'));
   const report = join(dir, 'wire.json');
-  const manager = new AcpManager({ permissionHost: host, requestPermission: async () => { humans++; return { approved: true }; } });
-  (manager as unknown as { agentCmd: string[] }).agentCmd = [process.execPath, '--no-env-file', fileURLToPath(new URL('./fixtures/acp/subagent-permission.ts', import.meta.url)), report];
+  const manager = new AcpManager({ permissionHost: host,
+    agentCommand: [process.execPath, '--no-env-file', fileURLToPath(new URL('./fixtures/acp/subagent-permission.ts', import.meta.url)), report] });
   try {
     await manager.spawn({ description: 'Generated delegation is not original authority', context: '', tools: ['write'], workingDirectory: dir });
     await manager.waitAll();

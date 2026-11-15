@@ -37,6 +37,10 @@ export {
   type EmbeddedSession,
   type EmbedSessionOptions,
   type EmbeddedSessionInput,
+  type EmbeddedSubmission,
+  type EmbeddedCompletion,
+  type EmbeddedRunEvent,
+  type EmbeddedRunOutcome,
 } from './platform/embed/session.js';
 
 // ── Session boot (the workspace-scoped daemon behind an embedded session) ─────

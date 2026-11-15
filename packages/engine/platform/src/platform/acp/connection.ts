@@ -25,12 +25,13 @@ import {
   drainStderrTail,
   messageChunkText,
   permissionOutcomeFor,
+  readNdJsonMessages,
+  stopAcpChild,
+  wellFormedPermissionOptions,
   withTimeout,
-  type AcpPermissionOptionLike,
 } from './protocol.js';
-import { admitExternalRequest, type ExternalPermissionHost, type ExternalOperationSource } from '../permissions/external-request.js';
+import { admitExternalRequest, externalAskDeadlineMs, type ExternalPermissionHost, type ExternalOperationSource } from '../permissions/external-request.js';
 import { AcpPermissionWire } from './permission-wire.js';
-import type { PermissionRequestHandler } from '../permissions/prompt.js';
 import { logger } from '../utils/logger.js';
 import { AcpError } from '../types/errors.js';
 import { VERSION } from '../version.js';
@@ -79,6 +80,18 @@ export function mapAcpUsage(usage: AcpPromptUsage | null | undefined): AgentUsag
   };
 }
 
+/** What a subagent connection is wired to besides its task and command. */
+export interface AcpConnectionOptions {
+  readonly runtimeBus?: RuntimeEventBus | null | undefined;
+  readonly hookDispatcher?: Pick<HookDispatcher, 'fire'> | null | undefined;
+  /** The owner of the child's permission asks; without one every ask is refused. */
+  readonly permissionHost?: ExternalPermissionHost | undefined;
+  /** The original goal the asks are judged against. */
+  readonly operation?: ExternalOperationSource | undefined;
+  /** Bound on the initialize and session/new handshake. */
+  readonly handshakeTimeoutMs?: number | undefined;
+}
+
 /**
  * AcpConnection manages the lifecycle of a single subagent child process.
  *
@@ -106,25 +119,26 @@ export class AcpConnection {
   private outputTruncated = false;
   private stderr: { tail(): string } | null = null;
   private transportClosed = false;
+  private stopping: Promise<void> | null = null;
   private readonly hookDispatcher: Pick<HookDispatcher, 'fire'> | null;
+  private readonly permissionHost: ExternalPermissionHost | undefined;
+  private readonly operation: ExternalOperationSource | undefined;
+  private readonly handshakeTimeoutMs: number;
 
   constructor(
     id: string,
     private task: SubagentTask,
     spawnCmd: string[],
-    /** Ignored: child permission asks are answered only through `permissionHost`; without one every ask is cancelled. */
-    _requestPermission: PermissionRequestHandler = async () => ({ approved: false, remember: false }),
-    runtimeBus: RuntimeEventBus | null = null,
-    hookDispatcher: Pick<HookDispatcher, 'fire'> | null = null,
-    private readonly permissionHost?: ExternalPermissionHost,
-    private readonly operation?: ExternalOperationSource,
-    private readonly handshakeTimeoutMs: number = ACP_HANDSHAKE_TIMEOUT_MS,
+    options: AcpConnectionOptions = {},
   ) {
     this.id = id;
     this.task = { ...task, tools: [...task.tools] };
     this.spawnCmd = [...spawnCmd];
-    this.runtimeBus = runtimeBus;
-    this.hookDispatcher = hookDispatcher;
+    this.runtimeBus = options.runtimeBus ?? null;
+    this.hookDispatcher = options.hookDispatcher ?? null;
+    this.permissionHost = options.permissionHost;
+    this.operation = options.operation;
+    this.handshakeTimeoutMs = options.handshakeTimeoutMs ?? ACP_HANDSHAKE_TIMEOUT_MS;
     this.info = {
       id,
       task: task.description,
@@ -153,7 +167,7 @@ export class AcpConnection {
       // 0. Resolve the ACP SDK. Inside the try, so an install without the
       //    optional package fails this subagent run with a message naming it
       //    rather than preventing the process from starting.
-      const { ClientSideConnection, ndJsonStream } = await loadAcpLibrary();
+      const { ClientSideConnection } = await loadAcpLibrary();
       this.lifetime.signal.throwIfAborted();
 
       // 1. Spawn child process with piped stdio
@@ -164,50 +178,29 @@ export class AcpConnection {
       });
       this.stderr = drainStderrTail(this.childProcess.stderr);
 
-      // 2. Build ndJsonStream from child stdio.
-      //
-      // In Bun, childProcess.stdin is a FileSink (not a Web WritableStream).
-      // ndJsonStream requires a Web WritableStream<Uint8Array> so it can call
-      // .getWriter() internally.  Wrap the FileSink in a WritableStream adapter.
+      // 2. Wire the child's stdio. The permission wire is the one serialiser of
+      // what is sent (it holds an approved answer until its bytes go out); the
+      // child's stdout is read as one JSON message per line.
       if (!this.childProcess.stdin) {
         throw new AcpError('ACP subprocess stdin not available, was it spawned with stdin: "pipe"?');
       }
       const bunStdin = this.childProcess.stdin as import('bun').FileSink;
-      const stdinStream = new WritableStream<Uint8Array>({
-        write(chunk) {
-          bunStdin.write(chunk);
-        },
-        close() {
-          bunStdin.end();
-        },
-        abort() {
-          bunStdin.end();
-        },
-      });
-
-      const stream = ndJsonStream(
-        stdinStream,
-        // Bun's piped stdout is ReadableStream-shaped at runtime, getReader() works
-        // correctly. The double-cast is safe here because Bun's ReadStream implements the
-        // same interface, unlike stdin (FileSink) which lacks getWriter().
-        this.childProcess.stdout as unknown as ReadableStream<Uint8Array>,
-      );
+      // Bun's piped stdout is ReadableStream-shaped at runtime.
+      const stdout = readNdJsonMessages(this.childProcess.stdout as unknown as ReadableStream<Uint8Array>);
 
       const ownedChild = this.childProcess;
+      // An ask belongs to the session and child that were live when it arrived;
+      // config, deadline and the original goal are the admission's to check.
       this.permissionWire = new AcpPermissionWire(() => {
         const sessionId = this.sessionId;
-        const invalidation = new AbortController();
-        const unsubscribe = this.permissionHost?.config.onDidInvalidate(() => invalidation.abort()) ?? (() => {});
         return { assertCurrent: () => {
-          this.lifetime.signal.throwIfAborted(); invalidation.signal.throwIfAborted();
-          this.permissionHost?.signal.throwIfAborted(); this.operation?.signal?.throwIfAborted();
-          this.operation?.assertCurrent();
-          if (!sessionId || this.sessionId !== sessionId || this.childProcess !== ownedChild) throw new Error('ACP permission owner changed');
-        }, close: unsubscribe };
+          this.lifetime.signal.throwIfAborted();
+          if (!sessionId || this.sessionId !== sessionId || this.childProcess !== ownedChild) throw new Error('the subagent session that raised this ask has ended');
+        }, close: () => {} };
       });
       const wire = this.permissionWire;
-      type WireMessage = typeof stream.readable extends ReadableStream<infer Message> ? Message : never;
-      const readable = stream.readable.pipeThrough(new TransformStream<WireMessage, WireMessage>({ transform(message, controller) {
+      type WireMessage = typeof stdout extends ReadableStream<infer Message> ? Message : never;
+      const readable = stdout.pipeThrough(new TransformStream<WireMessage, WireMessage>({ transform(message, controller) {
         wire.observe(message); controller.enqueue(message);
       } }));
       const writable = new WritableStream<WireMessage>({
@@ -318,7 +311,7 @@ export class AcpConnection {
       this.emitTransportTerminalFailure(error.message);
       return failureResult;
     } finally {
-      this.cleanup();
+      void this.cleanup();
     }
   }
 
@@ -346,7 +339,9 @@ export class AcpConnection {
       }
       this.emitTransportDisconnected('ACP session cancelled', false);
     }
-    this.cleanup();
+    // Cancelled means the child has exited: a subagent still writing files
+    // after its parent moved on is the thing this wait rules out.
+    await this.cleanup();
   }
 
   /** Record a terminal status unless one is already recorded. Returns whether this call set it. */
@@ -358,7 +353,7 @@ export class AcpConnection {
 
   private emitterContext(): import('../runtime/emitters/index.js').EmitterContext {
     return {
-      sessionId: 'acp-connection',
+      sessionId: this.task.sessionId ?? 'acp-connection',
       traceId: `acp-connection:${this.id}`,
       source: 'acp-connection',
     };
@@ -452,7 +447,7 @@ export class AcpConnection {
         phase: 'Lifecycle' as HookPhase,
         category: 'transport' as HookCategory,
         specific,
-        sessionId: 'acp-connection',
+        sessionId: this.task.sessionId ?? 'acp-connection',
         timestamp: Date.now(),
         payload,
       });
@@ -465,17 +460,29 @@ export class AcpConnection {
     }
   }
 
-  private cleanup(): void {
+  /** Revoke the run's authority and stop the child; every caller shares one stop. */
+  private cleanup(): Promise<void> {
     this.lifetime.abort();
     this.permissionWire?.close();
-    try {
-      this.childProcess?.kill();
-    } catch (err) {
-      logger.error('AcpConnection.cleanup: failed to kill child process', { id: this.id, err: summarizeError(err) });
+    if (!this.stopping) {
+      const child = this.childProcess;
+      this.stopping = child
+        ? stopAcpChild(child).catch((error: unknown) => {
+          logger.error('AcpConnection: the subagent process could not be stopped', { id: this.id, pid: child.pid, err: summarizeError(error) });
+        })
+        : Promise.resolve();
     }
     this.childProcess = null;
     this.conn = null;
     this.sessionId = null;
+    return this.stopping;
+  }
+
+  /** Why an ask was refused without a decision on its merits: logged once and kept on the run's info. */
+  private refuse(reason: string): RequestPermissionResponse {
+    this.info.lastRefusal = { at: Date.now(), reason };
+    logger.warn('AcpConnection: permission ask refused', { id: this.id, reason });
+    return { outcome: { outcome: 'cancelled' } };
   }
 
   private buildClientImpl(): Client {
@@ -486,39 +493,48 @@ export class AcpConnection {
         let binding: ReturnType<AcpPermissionWire['binding']>;
         let admission: Awaited<ReturnType<typeof admitExternalRequest>> | undefined;
         let deferred = false;
+        let deadline: AbortSignal | undefined;
+        let deadlineMs = 0;
         try {
-          if (isProxy(params)) return cancelled;
+          if (isProxy(params)) return this.refuse('the permission ask could not be read');
           const call = Object.getOwnPropertyDescriptor(params, 'toolCall')?.value as unknown;
-          if (isProxy(call)) return cancelled;
+          if (isProxy(call)) return this.refuse('the permission ask could not be read');
           const id = call && typeof call === 'object' ? Object.getOwnPropertyDescriptor(call, 'toolCallId')?.value as unknown : undefined;
-          if (typeof id !== 'string') return cancelled;
+          if (typeof id !== 'string') return this.refuse('the permission ask has no tool call id');
           binding = this.permissionWire?.binding(id);
           binding?.bindTerminal(cancelled);
+          if (this.lifetime.signal.aborted) return cancelled;
           const owned = binding?.request;
           const protocolSubject = binding?.protocolSubject;
           const host = this.permissionHost, operation = this.operation;
-          if (!binding || !owned || !protocolSubject || !host || !operation || !this.sessionId || owned.sessionId !== this.sessionId
-            || !owned.toolCall.toolCallId || !Array.isArray(owned.options)
-            || owned.options.some((option: AcpPermissionOptionLike) => !option || typeof option.optionId !== 'string' || !option.optionId
-              || !['allow_once', 'allow_always', 'reject_once', 'reject_always'].includes(option.kind))
-            || new Set(owned.options.map((option: AcpPermissionOptionLike) => option.optionId)).size !== owned.options.length) return cancelled;
-          const signal = AbortSignal.any([this.lifetime.signal, binding.signal, AbortSignal.timeout(60_000)]);
-          const assertCurrent = () => { signal.throwIfAborted(); binding!.assertCurrent(); operation.assertCurrent(); };
+          if (!host || !operation) return this.refuse('no permission owner is configured for subagents, so asks cannot be decided');
+          if (!binding || !owned || !protocolSubject) return this.refuse('the permission ask was not a well-formed ACP request');
+          if (!this.sessionId || owned.sessionId !== this.sessionId || !owned.toolCall.toolCallId || !wellFormedPermissionOptions(owned.options))
+            return this.refuse('the permission ask named another session or offered malformed options');
+          deadlineMs = externalAskDeadlineMs(host);
+          deadline = AbortSignal.timeout(deadlineMs);
+          const signal = AbortSignal.any([this.lifetime.signal, binding.signal, deadline]);
+          const wire = binding;
+          const assertCurrent = () => { signal.throwIfAborted(); wire.assertCurrent(); operation.assertCurrent(); };
           assertCurrent();
           // Capture the actual originating goal, never the child tool title or generated task prose.
           admission = await admitExternalRequest(host, { connectionId: this.id, destination: this.spawnCmd[0] ?? '', signal, assertCurrent },
-            { ...operation, sourceOf: () => { assertCurrent(); return operation.sourceOf(); } }, {
+            { ...operation, assertCurrent: () => {} }, {
               tool: owned.toolCall.title ?? 'ACP action', protocolSubject,
               args: { ...(owned.toolCall.rawInput && typeof owned.toolCall.rawInput === 'object' && !Array.isArray(owned.toolCall.rawInput)
                 ? owned.toolCall.rawInput as Record<string, unknown> : {}), destination: { command: this.spawnCmd, cwd: this.task.workingDirectory } },
             });
-          assertCurrent();
           const response = permissionOutcomeFor(owned.options, { approved: admission.result.approved, remember: false });
-          binding.defer(response, admission, admission.result.approved && response.outcome.outcome === 'selected', () => {});
+          // The wire checks once more, immediately before the response bytes are written.
+          wire.defer(response, admission, admission.result.approved && response.outcome.outcome === 'selected', () => {});
           deferred = true;
           return response;
-        } catch { return cancelled; }
-        finally { if (!deferred) admission?.close(); }
+        } catch (error) {
+          if (this.lifetime.signal.aborted) return cancelled;
+          return this.refuse(deadline?.aborted
+            ? `the permission decision did not arrive within ${deadlineMs} ms (judgment.decisionDeadlineMs)`
+            : `the permission ask could not be decided: ${summarizeError(error)}`);
+        } finally { if (!deferred) admission?.close(); }
       },
 
       /** Handle session update notifications from the subagent. */

@@ -8,28 +8,60 @@ import type { ExternalPermissionHost, ExternalOperationSource } from '../permiss
  * The manager tracks active subagents and provides cancel / waitAll.
  */
 
+import { existsSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { AcpConnection } from './connection.js';
 import type { SubagentInfo, SubagentResult, SubagentTask } from './protocol.js';
-import type { PermissionRequestHandler } from '../permissions/prompt.js';
 import type { RuntimeEventBus } from '../runtime/events/index.js';
 import { emitAgentSpawning } from '../runtime/emitters/index.js';
 import type { HookDispatcher } from '../hooks/index.js';
 
 /**
- * Command used to spawn subagent processes.
- * Defaults to the current Bun binary running the TUI in --acp (headless ACP) mode.
- * Override via ACP_AGENT_CMD env var (space-separated).
+ * How the running program starts itself as an ACP agent. Only the product's
+ * entry point knows its own verb and file, so it registers the command at
+ * start; the engine never guesses one.
  */
-function resolveAgentCommand(): string[] {
-  const envCmd = process.env.ACP_AGENT_CMD;
-  if (envCmd) return envCmd.split(' ');
-  // Default: re-launch self in ACP agent mode
-  return [process.execPath, 'run', process.argv[1] ?? 'src/main.ts', '--acp'];
+let selfAcpCommand: readonly string[] | undefined;
+
+/** Called by a product entry point that serves ACP (`goodvibes acp`). */
+export function registerSelfAcpAgentCommand(command: readonly string[]): void {
+  if (command.length === 0 || command.some((part) => typeof part !== 'string' || part.length === 0)) {
+    throw new Error('An ACP agent command needs a program and only non-empty arguments.');
+  }
+  selfAcpCommand = Object.freeze([...command]);
 }
 
+/**
+ * `ACP_AGENT_CMD` as a command: a JSON array of program and arguments; else a
+ * whole string that names an existing file (a path with spaces); else the
+ * string split on whitespace. Undefined when it is unset or empty.
+ */
+export function parseAcpAgentCommandEnv(value: string | undefined): string[] | undefined {
+  const raw = value?.trim();
+  if (!raw) return undefined;
+  if (raw.startsWith('[')) {
+    let parsed: unknown;
+    try { parsed = JSON.parse(raw); }
+    catch { throw new Error('ACP_AGENT_CMD starts with "[" but is not a JSON array of strings, for example ["/path/to/agent", "acp"].'); }
+    if (!Array.isArray(parsed) || parsed.length === 0 || parsed.some((part) => typeof part !== 'string' || part.length === 0)) {
+      throw new Error('ACP_AGENT_CMD must be a JSON array of non-empty strings, for example ["/path/to/agent", "acp"].');
+    }
+    return parsed as string[];
+  }
+  if (existsSync(raw)) return [raw];
+  return raw.split(/\s+/);
+}
+
+/**
+ * The command a subagent is spawned with: `ACP_AGENT_CMD` when set, else the
+ * command the product registered for itself. Throws, saying what to set, when
+ * neither exists.
+ */
 export function getDefaultAcpAgentCommand(): string[] {
-  return [...resolveAgentCommand()];
+  const fromEnv = parseAcpAgentCommandEnv(process.env.ACP_AGENT_CMD);
+  if (fromEnv) return fromEnv;
+  if (selfAcpCommand) return [...selfAcpCommand];
+  throw new Error('No ACP agent command is known for this program. Set ACP_AGENT_CMD to a JSON array such as ["/path/to/agent", "acp"].');
 }
 
 /**
@@ -45,25 +77,20 @@ export function getDefaultAcpAgentCommand(): string[] {
 export class AcpManager {
   private connections = new Map<string, AcpConnection>();
   private pending = new Map<string, Promise<SubagentResult>>();
-  private agentCmd: string[];
+  private readonly agentCmd: readonly string[] | undefined;
   private readonly permissionHost: ExternalPermissionHost | undefined;
-  private readonly requestPermission?: PermissionRequestHandler | undefined;
   private readonly runtimeBus: RuntimeEventBus | null;
   private readonly hookDispatcher: Pick<HookDispatcher, 'fire'> | null;
 
   constructor(options: {
     readonly permissionHost?: ExternalPermissionHost;
-    /**
-     * @deprecated Ignored. A subagent's permission asks are decided only through
-     * `permissionHost`; with none, every ask is cancelled.
-     */
-    readonly requestPermission?: PermissionRequestHandler | undefined;
+    /** The command a subagent is spawned with; defaults to {@link getDefaultAcpAgentCommand} at spawn. */
+    readonly agentCommand?: readonly string[] | undefined;
     readonly runtimeBus?: RuntimeEventBus | null | undefined;
     readonly hookDispatcher?: Pick<HookDispatcher, 'fire'> | null | undefined;
   } = {}) {
-    this.agentCmd = resolveAgentCommand();
+    this.agentCmd = options.agentCommand ? [...options.agentCommand] : undefined;
     this.permissionHost = options.permissionHost;
-    this.requestPermission = options.requestPermission;
     this.runtimeBus = options.runtimeBus ?? null;
     this.hookDispatcher = options.hookDispatcher ?? null;
   }
@@ -81,22 +108,20 @@ export class AcpManager {
       if (operation && !sourceIsCurrent?.(operation.sourceOf())) throw new Error('ACP originating source changed');
     };
     const ownedOperation = operation && source ? { ...operation, assertCurrent: assertOperationCurrent, sourceOf: () => { assertOperationCurrent(); return source; } } : undefined;
+    const command = this.agentCmd ? [...this.agentCmd] : getDefaultAcpAgentCommand();
     const id = randomUUID();
-    const conn = new AcpConnection(
-      id,
-      task,
-      this.agentCmd,
-      this.requestPermission,
-      this.runtimeBus,
-      this.hookDispatcher,
-      this.permissionHost,
-      ownedOperation,
-    );
+    const conn = new AcpConnection(id, task, command, {
+      runtimeBus: this.runtimeBus,
+      hookDispatcher: this.hookDispatcher,
+      permissionHost: this.permissionHost,
+      operation: ownedOperation,
+    });
     this.connections.set(id, conn);
 
     if (this.runtimeBus) {
+      // The dispatching session's id, the same one the connection's events carry.
       emitAgentSpawning(this.runtimeBus, {
-        sessionId: 'acp-manager',
+        sessionId: task.sessionId ?? 'acp-connection',
         traceId: `acp-manager:${id}`,
         source: 'acp-manager',
       }, {

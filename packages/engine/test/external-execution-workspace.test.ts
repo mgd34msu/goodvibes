@@ -1,7 +1,7 @@
 /**
  * Starting an external process keeps the workspace bounds that admitted it:
  * the process must run where its trust owner says, and the returned check
- * fails once that ownership, the target or the signal has changed.
+ * fails once the trust decision or the signal has changed.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
@@ -42,15 +42,6 @@ describe('prepareExternalExecution', () => {
     const owner = host({ workspaceTrust: trust(), workspaceRoot: root });
     await expect(prepareExternalExecution(owner, other, new AbortController().signal)).rejects.toThrow('differs from its workspace trust owner');
     await expect(prepareExternalExecution(owner, root, new AbortController().signal)).resolves.toBeInstanceOf(Function);
-  });
-
-  test('the returned check fails after the trust owner is replaced', async () => {
-    const { root } = workspace();
-    const state = host({ workspaceTrust: trust(), workspaceRoot: root });
-    const current = await prepareExternalExecution(state, root, new AbortController().signal);
-    expect(() => current()).not.toThrow();
-    (state as { workspaceTrust: unknown }).workspaceTrust = trust();
-    expect(() => current()).toThrow('workspace ownership changed');
   });
 
   test('the returned check fails once the call or host signal aborts', async () => {

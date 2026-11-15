@@ -93,13 +93,12 @@ describe('AcpHostService: full round-trip against the real protocol', () => {
     expect(host.prompt(hosted.id, 'nope').queued).toBe(false);
   }, 30_000);
 
-  test('without an autonomous owner permission requests cancel without a human fallback', async () => {
-    let humans = 0;
-    const host = new AcpHostService({ requestPermission: async () => { humans++; return { approved: true }; } });
+  test('without a permission owner an ask is refused and the row says why', async () => {
+    const host = new AcpHostService({});
     const hosted = await host.spawnAgent({ agent: fakeAgent('permission-reject-first'), cwd: import.meta.dir });
     host.prompt(hosted.id, 'do the thing');
     await waitUntil(() => (host.get(hosted.id)?.progress ?? '').includes('permission denied'));
-    expect(humans).toBe(0);
+    expect(host.get(hosted.id)?.lastRefusal?.reason).toContain('no permission owner');
     await host.stop(hosted.id);
   }, 30_000);
 

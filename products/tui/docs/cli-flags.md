@@ -229,7 +229,9 @@ Editor launch line (Zed `agent_servers` entry, or any ACP client that takes a co
 { "agent_servers": { "GoodVibes": { "command": "goodvibes", "args": ["acp"] } } }
 ```
 
-Unsupported capabilities are reported as such in `initialize`: `loadSession` is `false` (no session restore over ACP) and prompt input is text only.
+Unsupported capabilities are reported as such in `initialize`: `loadSession` is `false` (no session restore over ACP) and prompt input is text only. Editor threads in one working directory share one embedded daemon; `session/close` ends a thread and stops the daemon once no thread uses it.
+
+`/remote dispatch` and the `delegate` tool start this same command as their subagent. `ACP_AGENT_CMD` replaces it; give it as a JSON array of program and arguments (`["/path/to/agent","acp"]`) so a path with a space survives. `/remote env` prints that form.
 
 To expose the operator surface to an MCP client instead, use `goodvibes-daemon mcp serve` (see the [daemon command reference](../../daemon/docs/commands-reference.md#mcp)).
 

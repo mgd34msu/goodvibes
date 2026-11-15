@@ -3,7 +3,7 @@ import { expect, spyOn, test } from 'bun:test';
 import { join } from 'node:path';
 import { AcpHostService } from '../platform/src/platform/acp/host.ts';
 
-test('ACP failed child drainage remains owned and repeat stop reports the original failure', async () => {
+test('a child that cannot be reaped is reported by pid, repeat stop reports the same failure, and the row can be dismissed', async () => {
   let child: ReturnType<typeof Bun.spawn> | undefined;
   const host = new AcpHostService({ spawn(cmd, opts) {
     child = Bun.spawn(cmd, { ...opts, stdin: 'pipe', stdout: 'pipe', stderr: 'pipe' });
@@ -18,13 +18,13 @@ test('ACP failed child drainage remains owned and repeat stop reports the origin
   let exited = false; void ownedChild.exited.then(() => { exited = true; });
   try {
     const failure = await host.stop(hosted.id).then(() => undefined, (error: unknown) => error);
-    expect(failure).toBeInstanceOf(AggregateError);
-    expect(failure).toMatchObject({ message: 'Hosted ACP child cleanup failed' });
+    expect(String((failure as Error).message)).toContain(String(ownedChild.pid));
     expect(exited).toBe(false);
-    expect(host.dismiss(hosted.id)).toBe(false);
     expect(host.prompt(hosted.id, 'No post-shutdown work').queued).toBe(false);
     expect(await host.stop(hosted.id).then(() => undefined, (error: unknown) => error)).toBe(failure);
     expect(kill.mock.calls.map(([signal]) => signal)).toEqual(['SIGTERM', 'SIGKILL']);
+    // Everything that could be done was done: the row names the process left and can be dismissed.
+    expect(host.dismiss(hosted.id)).toBe(true);
   } finally {
     kill.mockRestore(); forceKill('SIGKILL'); await ownedChild.exited;
   }
@@ -76,13 +76,10 @@ test('ACP rejected exit observation remains an owned failure even when its real 
     const observationError = new Error('Synthetic ACP exit observation rejection');
     rejectExit(observationError);
     const failure = await stopping.then(() => undefined, (error: unknown) => error);
-    expect(failure).toBeInstanceOf(AggregateError);
-    if (!(failure instanceof AggregateError)) throw new Error('Expected owned child drainage failure');
-    expect(failure.errors).toEqual([observationError, observationError]);
+    expect((failure as Error).cause).toBe(observationError);
     expect(await host.stop(hosted.id).then(() => undefined, (error: unknown) => error)).toBe(failure);
     expect(kill.mock.calls.map(([signal]) => signal)).toEqual(['SIGTERM', 'SIGKILL']);
     await ownedChild.exited;
-    expect(host.dismiss(hosted.id)).toBe(false);
   } finally {
     kill.mockRestore(); forceKill('SIGKILL'); await ownedChild.exited;
   }

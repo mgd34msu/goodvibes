@@ -8,6 +8,17 @@ import { requireShellPaths } from './runtime-services.ts';
 
 type RemoteRegistryLike = Pick<RemoteCommandService, 'listContracts' | 'exportSessionBundle' | 'importSessionBundle'>;
 
+/** The command `/remote dispatch` spawns, or why there is none. */
+function acpAgentCommand(): { command: string[] } | { error: string } {
+  try { return { command: getDefaultAcpAgentCommand() }; }
+  catch (error) { return { error: error instanceof Error ? error.message : String(error) }; }
+}
+
+/** `ACP_AGENT_CMD` as a POSIX shell assignment: a JSON array, so a path with a space survives. */
+function acpAgentCommandExport(command: readonly string[]): string {
+  return `export ACP_AGENT_CMD='${JSON.stringify(command).replace(/'/g, "'\\''")}'`;
+}
+
 type ActiveConnectionLike = {
   agentId: string;
   transportState: string;
@@ -36,19 +47,20 @@ export async function handleRemoteSetupCommand(
 ): Promise<boolean> {
   const subcommand = args[0]?.toLowerCase() ?? 'show';
   if (subcommand === 'setup') {
-    const command = getDefaultAcpAgentCommand();
+    const resolved = acpAgentCommand();
+    const command = 'command' in resolved ? resolved.command : undefined;
     const danger = ctx.platform.configManager.getCategory('danger');
     const daemonEnabled = resolveDaemonEnabled(ctx.platform.configManager);
     const lines = [
       'Remote Setup Review',
-      `  acp agent command: ${command.join(' ')}`,
+      `  acp agent command: ${command ? JSON.stringify(command) : `none (${'error' in resolved ? resolved.error : ''})`}`,
       `  daemon enabled: ${daemonEnabled ? 'yes' : 'no'}`,
       `  http listener enabled: ${danger.httpListener ? 'yes' : 'no'}`,
       `  remote runner contracts: ${remoteRegistry.listContracts().length}`,
       `  active acp connections: ${activeConnections.length}`,
       '',
       '  guidance:',
-      '    - set ACP_AGENT_CMD to override the spawned remote agent command',
+      '    - set ACP_AGENT_CMD to a JSON array (program, then arguments) to override the spawned remote agent command',
       '    - use /remote env to export a reusable shell snippet',
       '    - the daemon runs by default (daemon.enabled); enable danger.httpListener only when you actually need that remote surface',
     ];
@@ -63,7 +75,7 @@ export async function handleRemoteSetupCommand(
       mkdirSync(dirname(targetPath), { recursive: true });
       writeFileSync(targetPath, `${JSON.stringify({
         exportedAt: Date.now(),
-        acpAgentCommand: command,
+        acpAgentCommand: command ?? null,
         daemonEnabled,
         httpListenerEnabled: Boolean(danger.httpListener),
         remoteRunnerContracts: remoteRegistry.listContracts().length,
@@ -76,9 +88,13 @@ export async function handleRemoteSetupCommand(
   }
 
   if (subcommand === 'env') {
-    const command = getDefaultAcpAgentCommand();
+    const resolved = acpAgentCommand();
+    if ('error' in resolved) {
+      ctx.print(`Remote Environment\n  ${resolved.error}`);
+      return true;
+    }
     const shellSnippet = [
-      `export ACP_AGENT_CMD='${command.join(' ')}'`,
+      acpAgentCommandExport(resolved.command),
       `export GOODVIBES_REMOTE_SESSION='${ctx.session.runtime.sessionId}'`,
     ].join('\n');
     if (args[1]?.toLowerCase() === 'export') {
@@ -126,19 +142,6 @@ export async function handleRemoteSetupCommand(
 
   if (subcommand === 'bootstrap') {
     const mode = args[1]?.toLowerCase() ?? 'export';
-    const payload = {
-      exportedAt: Date.now(),
-      sessionId: ctx.session.runtime.sessionId,
-      acpAgentCommand: getDefaultAcpAgentCommand(),
-      env: {
-        ACP_AGENT_CMD: getDefaultAcpAgentCommand().join(' '),
-        GOODVIBES_REMOTE_SESSION: ctx.session.runtime.sessionId,
-      },
-      links: [
-        'goodvibes://open/remote',
-        'goodvibes://open/cockpit?target=remote',
-      ],
-    };
     if (mode === 'inspect') {
       const pathArg = args[2];
       if (!pathArg) {
@@ -147,11 +150,11 @@ export async function handleRemoteSetupCommand(
       }
       const shellPaths = requireShellPaths(ctx);
       const targetPath = shellPaths.resolveWorkspacePath(pathArg);
-      const parsed = JSON.parse(readFileSync(targetPath, 'utf-8')) as typeof payload;
+      const parsed = JSON.parse(readFileSync(targetPath, 'utf-8')) as { sessionId: string; acpAgentCommand: string[]; links: string[] };
       ctx.print([
         'Remote Bootstrap Bundle Review',
         `  session: ${parsed.sessionId}`,
-        `  acp agent command: ${parsed.acpAgentCommand.join(' ')}`,
+        `  acp agent command: ${JSON.stringify(parsed.acpAgentCommand)}`,
         `  links: ${parsed.links.length}`,
       ].join('\n'));
       return true;
@@ -161,6 +164,24 @@ export async function handleRemoteSetupCommand(
       ctx.print('Usage: /remote bootstrap export <path> | /remote bootstrap inspect <path>');
       return true;
     }
+    const resolved = acpAgentCommand();
+    if ('error' in resolved) {
+      ctx.print(`Remote bootstrap bundle not exported: ${resolved.error}`);
+      return true;
+    }
+    const payload = {
+      exportedAt: Date.now(),
+      sessionId: ctx.session.runtime.sessionId,
+      acpAgentCommand: resolved.command,
+      env: {
+        ACP_AGENT_CMD: JSON.stringify(resolved.command),
+        GOODVIBES_REMOTE_SESSION: ctx.session.runtime.sessionId,
+      },
+      links: [
+        'goodvibes://open/remote',
+        'goodvibes://open/cockpit?target=remote',
+      ],
+    };
     const shellPaths = requireShellPaths(ctx);
     const targetPath = shellPaths.resolveWorkspacePath(pathArg);
     mkdirSync(dirname(targetPath), { recursive: true });

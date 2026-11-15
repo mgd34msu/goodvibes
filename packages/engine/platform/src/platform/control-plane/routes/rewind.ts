@@ -1,11 +1,12 @@
 /**
  * routes/rewind.ts
  *
- * Handlers for rewind.plan + rewind.apply over the UnifiedRewindService. Both
- * are registered together with their descriptors from
+ * Handlers for rewind.plan, rewind.apply and rewind.undo over the
+ * UnifiedRewindService. All are registered together with their descriptors from
  * register-gateway-verb-groups.ts. rewind.apply follows the checkpoints.restore
  * confirm idiom: an unconfirmed call returns a non-error refusal body, a bad
- * confirm token is an honest 400.
+ * confirm token is an honest 400. rewind.undo puts a conversation back to how
+ * it was before a rewind, from the undo snapshot id the receipt carries.
  */
 import type { GatewayMethodCatalog } from '../method-catalog.js';
 import type { GatewayMethodHandler } from '../method-catalog-shared.js';
@@ -80,11 +81,89 @@ export function createRewindApplyHandler(service: Pick<UnifiedRewindService, 'ap
   };
 }
 
-/** Attach the rewind.plan + rewind.apply handlers to their descriptors. Missing descriptor is a silent no-op. */
-export function registerRewindGatewayMethods(catalog: GatewayMethodCatalog, service: UnifiedRewindService): void {
+/** The reversal half of a conversation port: restore the pre-rewind copy, and say whether that is still safe. */
+export interface RewindConversationUndoPort {
+  restoreBefore(undoSnapshotId: string): boolean;
+  messagesSinceRewind(undoSnapshotId: string): number | null;
+}
+
+/** Where rewind.undo finds a session's conversation. */
+export interface RewindUndoDeps {
+  /** Sessions a surface is hosting: their messages and undo snapshots live in that surface's process. */
+  readonly hosts?: { listHosts(): readonly { readonly sessionId: string; readonly label: string }[] } | null | undefined;
+  /** The port of conversations this process holds itself; a port without the reversal half is ignored. */
+  readonly local?: object | null | undefined;
+}
+
+/** A rewind.undo answer: exactly one of `undone` true or a `refusal`. */
+export interface RewindUndoResult {
+  readonly undone: boolean;
+  readonly sessionId: string;
+  readonly undoSnapshotId: string;
+  readonly refusal: { readonly code: string; readonly state: string; readonly reason: string; readonly next: readonly string[] } | null;
+}
+
+function isUndoPort(port: object | null | undefined): port is RewindConversationUndoPort {
+  return !!port
+    && typeof (port as Partial<RewindConversationUndoPort>).restoreBefore === 'function'
+    && typeof (port as Partial<RewindConversationUndoPort>).messagesSinceRewind === 'function';
+}
+
+export function createRewindUndoHandler(
+  service: Pick<UnifiedRewindService, 'anchorsRestored'>,
+  deps: RewindUndoDeps,
+): GatewayMethodHandler {
+  const local = isUndoPort(deps.local) ? deps.local : null;
+  return async (invocation): Promise<RewindUndoResult> => {
+    const params = readInvocationParams(invocation);
+    const sessionId = requireString(params.sessionId, 'sessionId');
+    const undoSnapshotId = requireString(params.undoSnapshotId, 'undoSnapshotId');
+    const refused = (code: string, state: string, reason: string, next: readonly string[]): RewindUndoResult =>
+      ({ undone: false, sessionId, undoSnapshotId, refusal: { code, state, reason, next } });
+
+    const host = deps.hosts?.listHosts().find((entry) => entry.sessionId === sessionId);
+    if (host) {
+      return refused('CONVERSATION_HOSTED_ELSEWHERE', `the conversation is held by ${host.label}`,
+        `Only ${host.label} holds this conversation and its undo snapshot, and it does not take undo requests from the daemon; nothing was changed`,
+        [`Undo a rewind applied in ${host.label} with /undo rewind there`, 'Reverse the file half of the rewind with checkpoints.restore and the receipt\'s undo.files.restoreCheckpointId']);
+    }
+    if (!local) {
+      return refused('CONVERSATION_UNAVAILABLE', 'no conversation store is wired on this daemon',
+        'This daemon holds no conversations, so it has no undo snapshots; nothing was changed',
+        ['Reverse the file half of the rewind with checkpoints.restore and the receipt\'s undo.files.restoreCheckpointId']);
+    }
+    // The pre-rewind copy replaces the whole conversation, so it is only restored
+    // while nothing newer was added since the rewind.
+    const since = local.messagesSinceRewind(undoSnapshotId);
+    if (since === null) {
+      return refused('UNDO_POINT_GONE', 'the undo snapshot is gone',
+        'That rewind can no longer be undone: only the newest 32 rewinds keep their snapshot, and one is restored only while its session is open here; the conversation itself is unchanged',
+        ['Use rewind.plan and rewind.apply to move the conversation to the point you want']);
+    }
+    if (since !== 0) {
+      const what = since > 0 ? `${since} newer message${since === 1 ? '' : 's'}` : 'been edited';
+      return refused('CONVERSATION_CHANGED', `the conversation has ${what} since the rewind`,
+        'Restoring the pre-rewind copy would discard them, so nothing was changed',
+        ['Fork the session to keep the current conversation, then rewind or undo in the fork']);
+    }
+    if (!local.restoreBefore(undoSnapshotId)) {
+      return refused('UNDO_POINT_GONE', 'the undo snapshot is gone',
+        'That rewind can no longer be undone; the conversation itself is unchanged',
+        ['Use rewind.plan and rewind.apply to move the conversation to the point you want']);
+    }
+    service.anchorsRestored(undoSnapshotId);
+    return { undone: true, sessionId, undoSnapshotId, refusal: null };
+  };
+}
+
+/** Attach the rewind.plan, rewind.apply and rewind.undo handlers to their descriptors. Missing descriptor is a silent no-op. */
+export function registerRewindGatewayMethods(catalog: GatewayMethodCatalog, service: UnifiedRewindService, undo: RewindUndoDeps = {}): void {
   const planDescriptor = catalog.get('rewind.plan');
   if (planDescriptor) catalog.register(planDescriptor, createRewindPlanHandler(service), { replace: true });
 
   const applyDescriptor = catalog.get('rewind.apply');
   if (applyDescriptor) catalog.register(applyDescriptor, createRewindApplyHandler(service), { replace: true });
+
+  const undoDescriptor = catalog.get('rewind.undo');
+  if (undoDescriptor) catalog.register(undoDescriptor, createRewindUndoHandler(service, undo), { replace: true });
 }

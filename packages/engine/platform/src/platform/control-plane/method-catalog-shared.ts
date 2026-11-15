@@ -360,6 +360,21 @@ function defaultMethodEffect(id: string, scopes: readonly string[]): GatewayMeth
   return scopes.length > 0 && scopes.every((scope) => scope.startsWith('read:')) ? 'read' : 'write';
 }
 
+/**
+ * Read scopes over the owner's private records: mail, the owner profile,
+ * purchases and cards, the dates he keeps, memory, session transcripts and
+ * paired devices. They are not in the default grant of a credential without
+ * the admin role (method-catalog.ts `grantedGatewayScopes`); a paired device
+ * whose pairing stores its own scope list holds them when the list names them.
+ * `read:transcripts` and `read:pairing` are reserved for the transcript and
+ * paired-device reads, which today share `read:sessions` and
+ * `read:control-plane` with ordinary reads.
+ */
+export const OWNER_PRIVATE_READ_SCOPES: ReadonlySet<string> = new Set([
+  'read:email', 'read:profile', 'read:profile-document', 'read:payments', 'read:occasions', 'read:memory',
+  'read:transcripts', 'read:pairing',
+]);
+
 /** Scopes whose admin writes change who can sign in or what the daemon is allowed to do. */
 const ACCESS_AND_SETTINGS_WRITE_SCOPES: ReadonlySet<string> = new Set(['write:auth', 'write:config']);
 

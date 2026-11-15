@@ -771,7 +771,9 @@ export function registerGatewayVerbGroups(catalog: GatewayMethodCatalog, deps: G
       }
       : {}),
   });
-  registerRewindGatewayMethods(catalog, rewindService);
+  // rewind.undo: a surface-hosted conversation keeps its undo snapshot in that
+  // surface; one this daemon holds itself is restored through its own port.
+  registerRewindGatewayMethods(catalog, rewindService, { hosts: conversationHosts, local: deps.conversationRewindPort ?? null });
 
   if (deps.runtimeBus) {
     // LLM + metered-voice usage -> the attribution ledger (see attribution-ingest.ts).

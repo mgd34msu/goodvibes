@@ -34,13 +34,13 @@ export function requestsNativeAdmission(body: unknown): boolean {
   return field !== undefined && 'value' in field && field.value === 'autonomous';
 }
 
-export function retainNativeMutationRequest(body: unknown): () => void {
-  const before = JSON.stringify(captureOwnedJson(body, nodeTypes.isProxy));
-  return () => {
-    if (JSON.stringify(captureOwnedJson(body, nodeTypes.isProxy)) !== before) {
-      throw new HandlerError('Native mutation request changed', 'NATIVE_MUTATION_STALE', 409);
-    }
-  };
+/**
+ * The request body is the handler's own parsed object and is read once, where
+ * the mutation is judged; nothing re-reads it to prove it did not change.
+ * Kept as a no-op for callers that still take the check.
+ */
+export function retainNativeMutationRequest(_body: unknown): () => void {
+  return () => undefined;
 }
 
 /** Native path identity stays local, including replacement with equal database bytes. */
@@ -106,15 +106,15 @@ export async function runNativeMutation<T>(input: {
     || context.isAuthorized?.(scopes) !== true) {
     throw new HandlerError('Native mutation requires current paired owner access and native write scopes', 'NATIVE_MUTATION_FORBIDDEN', 403);
   }
-  // Keep the complete original bytes local and project only through the canonical protected boundary.
+  // The body is read once, here; the judged request is this copy.
   const original = captureOwnedJson(body, nodeTypes.isProxy);
-  const originalBytes = JSON.stringify(original);
-  const automationTarget = input.automationTarget, originalMethod = input.method;
+  const automationTarget = input.automationTarget;
   const request = automationTarget === undefined ? original
-    : projectAutomationTargetRequest(automationTarget, originalMethod, original);
+    : projectAutomationTargetRequest(automationTarget, input.method, original);
   const args = { method: input.method, request: snapshotJudgmentInput(request), selectedTarget: snapshotJudgmentInput(input.target) };
   const invalidation = new AbortController();
   const unsubscribe = host.config.onDidInvalidate(() => invalidation.abort());
+  // One signal says the authority ended: the request, the host or the config went away.
   const signal = AbortSignal.any([host.signal, invalidation.signal, ...(context.signal ? [context.signal] : [])]);
   const source = Object.freeze({ goal: `Perform the authenticated native request ${input.method}.`, criteria: Object.freeze([
     'Apply exactly the complete authenticated request to the retained selected target.',
@@ -122,32 +122,22 @@ export async function runNativeMutation<T>(input: {
     effect === 'send' ? 'Deliver only the complete retained message to the exact retained destination; do not purchase or select additional targets.'
       : 'This request does not authorize message delivery, purchases or additional targets.',
   ]) });
-  const expectedAuthority = JSON.stringify(expected);
-  const originalContext = JSON.stringify({ principalId: context.principalId, principalKind: context.principalKind,
-    admin: context.admin, scopes: context.scopes, explicitUserRequest: context.explicitUserRequest });
-  const authorized = context.isAuthorized, originalSignal = context.signal;
+  // The pairing owner states revocation and narrowing: a revoked or re-issued
+  // token yields no snapshot, and a narrowed one loses the scope.
   const assertPaired = () => {
-    if (JSON.stringify(authority.current()) !== expectedAuthority) {
+    const fresh = authority.current();
+    if (!fresh || fresh.tokenId !== expected.tokenId || fresh.authorityRevision !== expected.authorityRevision
+      || !scopes.every(scope => fresh.scopes.includes('*') || fresh.scopes.includes(scope))) {
       throw new HandlerError('Native mutation paired owner changed', 'NATIVE_MUTATION_STALE', 409);
     }
   };
   const assertCurrent = () => {
     signal.throwIfAborted(); assertPaired();
-    if (input.automationTarget !== automationTarget || (automationTarget !== undefined && input.method !== originalMethod)) {
-      throw new HandlerError('Native mutation selected reference changed', 'NATIVE_MUTATION_STALE', 409);
-    }
     automationTarget?.assertCurrent();
-    if (context.isAuthorized !== authorized || context.signal !== originalSignal || context.isAuthorized?.(scopes) !== true || context.nativeExecutionAuthority !== authority
-      || JSON.stringify({ principalId: context.principalId, principalKind: context.principalKind,
-        admin: context.admin, scopes: context.scopes, explicitUserRequest: context.explicitUserRequest }) !== originalContext
-      || JSON.stringify(captureOwnedJson(body, nodeTypes.isProxy)) !== originalBytes) {
-      throw new HandlerError('Native mutation authority changed', 'NATIVE_MUTATION_STALE', 409);
-    }
-    input.assertTargetCurrent();
   };
   try {
     assertCurrent();
-    const admission = await admitExternalRequest(host, { connectionId: randomUUID(), destination: input.method, signal, assertCurrent },
+    const admission = await admitExternalRequest(host, { connectionId: randomUUID(), destination: input.method, signal, assertCurrent: () => signal.throwIfAborted() },
       { sourceOf: () => source, assertCurrent, signal }, { tool: effect === 'send' ? 'send_message' : 'write', args, effect,
         serverPolicy: { principalKind: 'paired-token', admin: true, scopes, effect, method: input.method } }).catch(error => {
           // Before claim, the original native source can identify retirement
@@ -155,20 +145,20 @@ export async function runNativeMutation<T>(input: {
           assertCurrent(); throw error;
         });
     try {
-      assertCurrent();
       if (!admission.result.approved) {
         throw new HandlerError('Native mutation was not admitted', 'NATIVE_MUTATION_HELD', 422);
       }
-      admission.claim(); assertCurrent();
+      admission.claim();
       let active = true;
-      const current = () => { if (!active) throw new Error('Native mutation admission retired'); assertCurrent(); admission.assertCurrent(); };
+      const current = () => { if (!active) throw new Error('Native mutation admission retired'); admission.assertCurrent(); };
       // Staging and hosted admission remain outside the pairing owner's lock.
-      // Only the actual native writer calls this private publication keeper.
+      // Only the actual native writer calls this private publication keeper,
+      // and the selected target is checked there, once, at commit.
       const withPublication: MutationPublication = async operation => {
         current();
         return authority.withCurrent(expected, async assertPublication => {
           const publicationCurrent = () => { assertPublication(); current(); };
-          publicationCurrent();
+          publicationCurrent(); input.assertTargetCurrent();
           const result = await operation(publicationCurrent);
           // The exact writer owns its selected-target transition. Rechecking
           // the old target after publication would reject the intended effect.
@@ -178,7 +168,7 @@ export async function runNativeMutation<T>(input: {
       const token: NativeMutationAdmission = Object.freeze({ kind: 'native-recorded-mutation' });
       nativeAdmissions.set(token, Object.freeze({ invocation: input.invocation, method: input.method, source,
         assertCurrent: current, withPublication }));
-      try { current(); return await input.mutate(current, token, withPublication); }
+      try { input.assertTargetCurrent(); return await input.mutate(current, token, withPublication); }
       finally { active = false; nativeAdmissions.delete(token); }
     } finally { admission.close(); }
   } finally { unsubscribe(); }

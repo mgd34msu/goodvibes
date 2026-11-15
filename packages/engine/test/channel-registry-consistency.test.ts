@@ -1,5 +1,5 @@
 /**
- * The channel profile and channel sync registries keep memory and disk in
+ * The channel profile registry keeps memory and disk in
  * agreement, and the inbound intake binds a channel's permission mode even
  * when the first attempt to bind failed.
  */
@@ -8,8 +8,6 @@ import { describe, expect, test } from 'bun:test';
 import { ChannelProfileRegistry } from '../platform/src/platform/channel-profiles/registry.ts';
 import type { ChannelProfileStore } from '../platform/src/platform/channel-profiles/store.ts';
 import type { ChannelProfileBinding } from '../platform/src/platform/channel-profiles/types.ts';
-import { ChannelSyncRegistry } from '../platform/src/platform/channel-sync/registry.ts';
-import type { ChannelSyncStore, ChannelSyncTables } from '../platform/src/platform/channel-sync/store.ts';
 import { installInboundIntakeEnrichment, type InboundIntakeBroker } from '../platform/src/platform/channel-profiles/install-inbound-intake.ts';
 import type { PrincipalRegistry } from '../platform/src/platform/principals/index.ts';
 
@@ -38,27 +36,7 @@ class FakeProfileStore {
   }
 }
 
-class FakeSyncStore {
-  saved: ChannelSyncTables[] = [];
-  loads = 0;
-  failNextSave = false;
-  constructor(private readonly loadGate?: Promise<void>) {}
-  async load(): Promise<ChannelSyncTables> {
-    this.loads += 1;
-    await this.loadGate;
-    return { routes: [], drafts: [] };
-  }
-  async save(tables: ChannelSyncTables): Promise<void> {
-    if (this.failNextSave) {
-      this.failNextSave = false;
-      throw new Error('disk full');
-    }
-    this.saved.push({ routes: [...tables.routes], drafts: [...tables.drafts] });
-  }
-}
-
 const profileRegistry = (store: FakeProfileStore) => new ChannelProfileRegistry(store as unknown as ChannelProfileStore);
-const syncRegistry = (store: FakeSyncStore) => new ChannelSyncRegistry(store as unknown as ChannelSyncStore);
 
 describe('channel profile registry', () => {
   test('two first calls during a slow load both keep their binding', async () => {
@@ -100,44 +78,6 @@ describe('channel profile registry', () => {
     const registry = profileRegistry(store as unknown as FakeProfileStore);
     await expect(registry.list()).rejects.toThrow('unreadable');
     expect(await registry.list()).toEqual([]);
-  });
-});
-
-describe('channel sync registry', () => {
-  const draft = (id: string) => ({ id, status: 'draft', message: `message ${id}` });
-
-  test('two drafts saved during the first load are both on disk', async () => {
-    const loadGate = gate();
-    const store = new FakeSyncStore(loadGate.promise);
-    const registry = syncRegistry(store);
-    const first = registry.saveDraft(draft('one'));
-    const second = registry.saveDraft(draft('two'));
-    loadGate.open();
-    const results = await Promise.all([first, second]);
-    expect(results.map((result) => result.created)).toEqual([true, true]);
-    expect(store.loads).toBe(1);
-    expect(store.saved.at(-1)?.drafts.map((entry) => entry.id).sort()).toEqual(['one', 'two']);
-    expect((await registry.listDrafts()).total).toBe(2);
-  });
-
-  test('a draft whose save failed is not served afterwards', async () => {
-    const store = new FakeSyncStore();
-    const registry = syncRegistry(store);
-    store.failNextSave = true;
-    await expect(registry.saveDraft(draft('lost'))).rejects.toThrow('disk full');
-    expect((await registry.listDrafts()).drafts).toEqual([]);
-    await registry.saveDraft(draft('kept'));
-    expect((await registry.listDrafts()).drafts.map((entry) => entry.id)).toEqual(['kept']);
-    expect(store.saved.at(-1)?.drafts.map((entry) => entry.id)).toEqual(['kept']);
-  });
-
-  test('a routing rule whose save failed is not served afterwards', async () => {
-    const store = new FakeSyncStore();
-    const registry = syncRegistry(store);
-    await registry.assignRoute({ surfaceKind: 'slack', profileId: 'p1', channelId: 'c1' });
-    store.failNextSave = true;
-    await expect(registry.deleteRoute('slack:c1')).rejects.toThrow('disk full');
-    expect((await registry.listRoutes()).total).toBe(1);
   });
 });
 

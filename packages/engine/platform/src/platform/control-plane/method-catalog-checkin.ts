@@ -13,7 +13,6 @@ import {
   EMPTY_OBJECT_SCHEMA,
   NUMBER_SCHEMA,
   STRING_SCHEMA,
-  entityOutputSchema,
   listOutputSchema,
   methodDescriptor,
   objectSchema,
@@ -65,8 +64,16 @@ export const CHECKIN_RECEIPT_SCHEMA = objectSchema({
   error: STRING_SCHEMA,
 }, ['id', 'ranAt', 'trigger', 'outcome', 'briefingSummary']);
 
+const CHECKIN_SCHEDULE_SCHEMA = objectSchema({
+  state: { type: 'string', enum: ['scheduled', 'not-needed', 'failed'] },
+  reason: STRING_SCHEMA,
+}, ['state']);
+
 export const CHECKIN_CONFIG_GET_INPUT_SCHEMA = EMPTY_OBJECT_SCHEMA;
-export const CHECKIN_CONFIG_GET_OUTPUT_SCHEMA = entityOutputSchema('config', CHECKIN_CONFIG_SCHEMA);
+export const CHECKIN_CONFIG_GET_OUTPUT_SCHEMA = objectSchema({
+  config: CHECKIN_CONFIG_SCHEMA,
+  schedule: CHECKIN_SCHEDULE_SCHEMA,
+}, ['config', 'schedule'], { additionalProperties: false });
 
 export const CHECKIN_CONFIG_SET_INPUT_SCHEMA = objectSchema({
   enabled: BOOLEAN_SCHEMA,
@@ -74,10 +81,6 @@ export const CHECKIN_CONFIG_SET_INPUT_SCHEMA = objectSchema({
   deliveryChannel: STRING_SCHEMA,
   quietHours: STRING_SCHEMA,
 }, []);
-const CHECKIN_SCHEDULE_SCHEMA = objectSchema({
-  state: { type: 'string', enum: ['scheduled', 'not-needed', 'failed'] },
-  reason: STRING_SCHEMA,
-}, ['state']);
 export const CHECKIN_CONFIG_SET_OUTPUT_SCHEMA = objectSchema({
   config: CHECKIN_CONFIG_SCHEMA,
   schedule: CHECKIN_SCHEDULE_SCHEMA,
@@ -98,7 +101,7 @@ export const builtinGatewayCheckinMethodDescriptors: readonly GatewayMethodDescr
   methodDescriptor({
     id: 'checkin.config.get',
     title: 'Get Check-in Config',
-    description: 'Return the proactive check-in configuration: enabled, cadence (cron), delivery channel, and quiet hours.',
+    description: 'Return the proactive check-in configuration (enabled, cadence (cron), delivery channel, quiet hours) and `schedule`: whether the scheduler really holds the check-in job (scheduled), none is needed (not-needed: check-ins are off), or it could not be installed (failed, with the reason; for example the automation subsystem is off). Enabled with a failed schedule means no check-in will arrive.',
     category: 'checkin',
     scopes: ['read:checkin'],
     http: { method: 'GET', path: '/api/checkin/config' },

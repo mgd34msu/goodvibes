@@ -37,6 +37,7 @@ import {
   type RewindWorkspacePort,
 } from '@goodvibes-jev/engine/platform/platform/rewind';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { join } from 'node:path';
 import type { WorkspaceCheckpoint, WorkspaceCheckpointManager } from '@goodvibes-jev/engine/platform/platform/workspace';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { buildRewindReceiptBlock } from '../../core/rewind-receipt.ts';
@@ -92,7 +93,9 @@ function stateFor(ctx: CommandContext): RewindSessionState {
   if (!state) {
     const mgr = ctx.workspace.workspaceCheckpointManager;
     const conv = ctx.session.conversationManager;
-    const convPort = createConversationRewindPort(() => conv);
+    const surface = ctx.workspace.surface;
+    // On disk beside the session's history, so the pre-rewind copy outlives this process.
+    const convPort = createConversationRewindPort(() => conv, surface ? { undoDir: join(surface.sessionsDir, 'rewind-undo') } : {});
     const service = new UnifiedRewindService({
       workspace: mgr ? makeWorkspacePort(mgr) : null,
       conversation: convPort,

@@ -40,7 +40,7 @@ import { CheckoutRegistry, type CheckoutJournal } from './checkout-registry.js';
 import { CardMaterialRedactor } from './card-redaction.js';
 import { fillCard, FillCardRefusal, type CardFieldTarget } from './fill-card.js';
 import { runCheckout, type CheckoutFlowDeps, type CheckoutControls, type CheckoutOutcome, type PurchaseLedger, type PurchaseRequest } from './checkout-flow.js';
-import { extractCheckout, type RawCheckoutReading } from './checkout-extraction.js';
+import type { RawCheckoutReading } from './checkout-extraction.js';
 import { parseRequestedMaximum } from './money-parsing.js';
 import { isCardFieldName } from './card-material.js';
 import { ownerSuppliedText } from './types.js';
@@ -453,13 +453,6 @@ export class PaymentsGatewayServiceImpl {
       failedField: result.failedField,
       reason: result.reason,
     };
-  }
-
-  /** Validate a reading without buying anything, so a caller can check its parse. */
-  previewReading(reading: RawCheckoutReading): { ok: boolean; reason: string | null } {
-    const config = this.deps.config();
-    const extraction = extractCheckout(reading, config.budgetCurrency);
-    return extraction.ok ? { ok: true, reason: null } : { ok: false, reason: extraction.reason };
   }
 
   private refused(reason: string): PaymentBeginResult {

@@ -56,12 +56,11 @@ export function registerComposedCheckinGatewayMethods(catalog: GatewayMethodCata
     });
     deps.disposal?.add('check-in evaluation lifetime', () => checkinService.dispose());
     registerCheckinGatewayMethods(catalog, checkinService);
+    // A schedule that could not be installed (automation off, an unreadable
+    // automation store) is the service's `schedule` status, which
+    // checkin.config.get returns; turning automation on re-syncs it at once.
     void checkinService.attach().catch((error: unknown) => {
-      // Automation may be disabled at construction; the schedule syncs on the
-      // next checkin.config.set once it is enabled. Never fail construction,
-      // but say why the schedule is not running: a corrupt receipts file or a
-      // config error would otherwise leave check-ins silently off.
-      logger.warn('check-in: the schedule could not be attached; scheduled check-ins will not run until config is set again', {
+      logger.warn('check-in: the scheduler did not take the check-in evaluator; scheduled check-ins will not run until the daemon restarts', {
         error: summarizeError(error),
       });
     });

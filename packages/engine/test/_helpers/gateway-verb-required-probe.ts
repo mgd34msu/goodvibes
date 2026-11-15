@@ -54,7 +54,6 @@ import { registerCredentialWriteGatewayMethods } from '../../platform/src/platfo
 import { registerBrowserGatewayMethods } from '../../platform/src/platform/control-plane/routes/browser.js';
 import { registerCalendarGatewayMethods } from '../../platform/src/platform/control-plane/routes/calendar.js';
 import { registerChannelProfilesGatewayMethods } from '../../platform/src/platform/control-plane/routes/channel-profiles.js';
-import { registerChannelSyncGatewayMethods } from '../../platform/src/platform/control-plane/routes/channel-sync.js';
 import { registerChannelTestGatewayMethods } from '../../platform/src/platform/control-plane/routes/channel-test.js';
 import { registerRelayGatewayMethods } from '../../platform/src/platform/control-plane/routes/relay.js';
 import { registerTriggerSupervisorGatewayMethods } from '../../platform/src/platform/control-plane/routes/trigger-supervisor.js';
@@ -134,7 +133,6 @@ const ROUTE_REGISTRARS: ReadonlyArray<readonly [string, (catalog: GatewayMethodC
   ['browser', (catalog) => registerBrowserGatewayMethods(catalog, stubDeps())],
   ['calendar', (catalog) => registerCalendarGatewayMethods(catalog, stubDeps())],
   ['channel-profiles', (catalog) => registerChannelProfilesGatewayMethods(catalog, stubDeps())],
-  ['channel-sync', (catalog) => registerChannelSyncGatewayMethods(catalog, stubDeps())],
   ['channel-test', (catalog) => registerChannelTestGatewayMethods(catalog, stubDeps())],
   ['checkin', (catalog) => registerCheckinGatewayMethods(catalog, stubDeps())],
   ['ci', (catalog) => registerCiGatewayMethods(catalog, stubDeps())],
@@ -146,7 +144,7 @@ const ROUTE_REGISTRARS: ReadonlyArray<readonly [string, (catalog: GatewayMethodC
   ['owner-profile', (catalog) => registerOwnerProfileGatewayMethods(catalog, stubDeps())],
   ['payments', (catalog) => registerPaymentsGatewayMethods(catalog, stubDeps())],
   ['email-composition', (catalog) => registerDaemonEmailVerbs(catalog, stubDeps())],
-  ['flags-graduation', (catalog) => registerFlagsGraduationGatewayMethods(catalog, stubDeps())],
+  ['flags-graduation', (catalog) => registerFlagsGraduationGatewayMethods(catalog)],
   ['fleet-checkpoints-search', (catalog) => registerFleetCheckpointsSearchGatewayMethods(catalog, stubDeps())],
   ['memory', (catalog) => registerMemoryGatewayMethods(catalog, stubDeps())],
   ['memory-projections', (catalog) => registerMemoryProjectionsGatewayMethods(catalog, stubDeps())],
@@ -205,7 +203,6 @@ export const EXPECTED_ROUTE_REGISTRARS: readonly string[] = [
   'registerBrowserGatewayMethods',
   'registerCalendarGatewayMethods',
   'registerChannelProfilesGatewayMethods',
-  'registerChannelSyncGatewayMethods',
   'registerChannelTestGatewayMethods',
   'registerCheckinGatewayMethods',
   // Same four probed handlers; real runtime wiring is exercised by checkin-composed.test.ts.

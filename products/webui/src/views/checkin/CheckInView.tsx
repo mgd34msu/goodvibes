@@ -38,6 +38,20 @@ import '../../styles/components/checkin.css';
 type CheckinConfig = OperatorMethodOutput<'checkin.config.get'>['config'];
 type CheckinReceipt = OperatorMethodOutput<'checkin.receipts.list'>['receipts'][number];
 type CheckinRunResult = OperatorMethodOutput<'checkin.run'>;
+type CheckinSchedule = NonNullable<OperatorMethodOutput<'checkin.config.set'>['schedule']>;
+
+/** The scheduler outcome checkin.config.get carries beside the config. */
+function scheduleOf(answer: object): CheckinSchedule | undefined {
+  return 'schedule' in answer ? answer.schedule as CheckinSchedule | undefined : undefined;
+}
+
+/** Enabled is not the same as scheduled: the daemon says whether the scheduler really holds the job. */
+function statusOf(config: CheckinConfig, schedule: CheckinSchedule | undefined): { tone: StatusTone; label: string } {
+  if (!config.enabled) return { tone: 'idle', label: 'Disabled' };
+  if (schedule?.state === 'failed') return { tone: 'bad', label: `Enabled, but not scheduled: ${schedule.reason ?? 'the scheduler did not take the job'}` };
+  if (schedule?.state === 'scheduled') return { tone: 'ok', label: 'Enabled, scheduled' };
+  return { tone: 'ok', label: 'Enabled' };
+}
 
 /** Plain outcome labels, the receipts.list enum (skipped-disabled/skipped-quiet-hours)
  * and the checkin.run enum (a generic 'skipped') are distinct wire shapes; this handles
@@ -86,9 +100,13 @@ function ConfigEditForm({
 
   const save = useMutation({
     mutationFn: () => platformClient.operator.checkin.config.set({ enabled, cadence, deliveryChannel, quietHours }),
-    onSuccess: () => {
+    onSuccess: (result) => {
       onSaved();
-      toast({ title: 'Check-in configuration saved', tone: 'success' });
+      if (result.schedule?.state === 'failed') {
+        toast({ title: 'Saved, but check-ins are not scheduled', description: result.schedule.reason ?? 'The scheduler did not take the check-in job.', tone: 'danger' });
+      } else {
+        toast({ title: 'Check-in configuration saved', tone: 'success' });
+      }
     },
     onError: (error: unknown) => {
       toast({ title: 'Failed to save', description: formatError(error), tone: 'danger' });
@@ -200,6 +218,9 @@ export function CheckInSettings() {
   const runChannel = config.data?.config.deliveryChannel || 'the configured channel';
 
   const configUnavailable = config.isError && isMethodUnavailableError(config.error);
+  const configStatus = config.isSuccess
+    ? statusOf(config.data.config, scheduleOf(config.data))
+    : null;
   const receiptsUnavailable = receipts.isError && isMethodUnavailableError(receipts.error);
   const list = receipts.data?.receipts ?? [];
 
@@ -235,15 +256,15 @@ export function CheckInSettings() {
           {config.isError && !configUnavailable && (
             <ErrorState error={config.error} onRetry={() => void config.refetch()} title="Failed to load check-in config" />
           )}
-          {config.isSuccess && !editing && (
+          {config.isSuccess && !editing && configStatus && (
             <Facts
               items={[
                 {
                   label: 'Status',
                   value: (
                     <span className="checkin-status">
-                      <StatusDot tone={config.data.config.enabled ? 'ok' : 'idle'} />
-                      {config.data.config.enabled ? 'Enabled' : 'Disabled'}
+                      <StatusDot tone={configStatus.tone} />
+                      {configStatus.label}
                     </span>
                   ),
                 },

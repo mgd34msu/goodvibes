@@ -37,10 +37,13 @@
  *    the platform, and `read:profile.full` was its only dotted scope. That name
  *    read as "profile, but more" while granting its holder none of the plain
  *    `read:profile` verbs, a token minted with the apparent superset would
- *    have taken 403s on `get`, `person`, `provenance` and `status`. It is
- *    masked today only because `getGrantedGatewayScopes` unions every declared
- *    scope, so real tokens hold both; it would surface the moment a caller
- *    passed an explicit list.
+ *    have taken 403s on `get`, `person`, `provenance` and `status`.
+ *
+ *    Both are owner-private read scopes (method-catalog-shared.ts
+ *    `OWNER_PRIVATE_READ_SCOPES`): a user without the admin role is granted
+ *    neither, and a pairing that stores its own scope list holds exactly the
+ *    ones it names, so `read:profile` without `read:profile-document` is a
+ *    grant the daemon honours.
  */
 import type { GatewayMethodDescriptor } from './method-catalog-shared.js';
 import {

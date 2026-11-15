@@ -270,7 +270,13 @@ export class CheckinService {
   /** Wire this service as the automation manager's check-in evaluator, then sync the job. */
   async attach(): Promise<void> {
     // A run's signal, when the scheduler passes one, stops the run when its job is removed or the run is cancelled.
-    this.deps.automation?.attachCheckinEvaluator((job, signal?: AbortSignal) => this.evaluate('scheduled', job.id, signal));
+    try {
+      this.deps.automation?.attachCheckinEvaluator((job, signal?: AbortSignal) => this.evaluate('scheduled', job.id, signal));
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      this.schedule = { state: 'failed', reason: `The scheduler did not take the check-in evaluator: ${reason}. Restart the daemon to try again.` };
+      throw error;
+    }
     // A settings edit made outside setConfig must reach the scheduler too.
     this.attached = true;
     this.watchConfig();

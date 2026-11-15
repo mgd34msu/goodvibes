@@ -4,7 +4,7 @@ import type { AutomationScheduleDefinition } from '../../automation/schedules.js
 import { AutomationJobCommitIndeterminateError, AutomationJobMutationStaleError } from '../../automation/job-mutations.js';
 import type { GatewayMethodCatalog } from '../../control-plane/method-catalog.js';
 import { HandlerError, registerCatalogHandler } from '../../control-plane/host-handlers.js';
-import { requestsNativeAdmission, retainNativeMutationRequest, runNativeMutation, type NativeMutationHost } from '../../control-plane/native-mutation.js';
+import { requestsNativeAdmission, runNativeMutation, type NativeMutationHost } from '../../control-plane/native-mutation.js';
 import { isRecord } from '../../utils/record-coerce.js';
 import { normalizeAtSchedule, normalizeCronSchedule, normalizeEverySchedule } from '../../automation/schedules.js';
 import { parseCreateAutomationJobInput, parseUpdateAutomationJobInput } from './runtime-routes.js';
@@ -69,8 +69,7 @@ export function registerNativeAutomationGatewayMethods(catalog: GatewayMethodCat
     if (autonomous && typeof body.expectedMutationRevision !== 'string') throw new HandlerError('Autonomous updates require the selected job revision.', 'AUTOMATION_JOB_REVISION_REQUIRED', 409);
     const jobId = body.jobId;
     const { manager, host } = input;
-    const requestCurrent = retainNativeMutationRequest(body);
-    const current = () => { context.signal?.throwIfAborted(); requestCurrent(); };
+    const current = () => { context.signal?.throwIfAborted(); };
     try {
       current();
       const patch = parseJobInput(parseUpdateAutomationJobInput, body);
@@ -94,8 +93,7 @@ export function registerNativeAutomationGatewayMethods(catalog: GatewayMethodCat
     disposals.push(registerCatalogHandler<unknown, unknown>(catalog, method, async ({ body, context }) => {
       if (!isRecord(body) || typeof body.prompt !== 'string' || !body.prompt.trim()) throw new HandlerError('An automation prompt is required.', 'INVALID_ARGUMENT', 400);
       const { manager, host } = input;
-      const requestCurrent = retainNativeMutationRequest(body);
-      const current = () => { context.signal?.throwIfAborted(); requestCurrent(); };
+      const current = () => { context.signal?.throwIfAborted(); };
       current();
       const schedule = isRecord(body.schedule) && body.schedule.kind !== undefined ? body.schedule
         : body.kind === 'every' ? normalizeEverySchedule(typeof body.every === 'string' ? body.every : '')
@@ -121,8 +119,7 @@ export function registerNativeAutomationGatewayMethods(catalog: GatewayMethodCat
       if (revision !== undefined && (typeof revision !== 'string' || !revision.trim())) throw new HandlerError('expectedMutationRevision must be a nonempty string.', 'INVALID_ARGUMENT', 400);
       if (requestsNativeAdmission(body) && typeof revision !== 'string') throw new HandlerError('Autonomous mutations require the selected job revision.', 'AUTOMATION_JOB_REVISION_REQUIRED', 409);
       const { manager, host } = input;
-      const requestCurrent = retainNativeMutationRequest(body);
-      const current = () => { context.signal?.throwIfAborted(); requestCurrent(); };
+      const current = () => { context.signal?.throwIfAborted(); };
       try {
         current();
         const selected = typeof revision === 'string' ? manager.retainJobTarget(jobId, revision) : undefined;

@@ -7,6 +7,10 @@
  * REST binding), registered from the same composition root as the other verb
  * groups (routes/register-gateway-verb-groups.ts). Handlers:
  * routes/permission-rules.ts.
+ *
+ * They carry the approval scopes, the same ones that gate answering the ask
+ * that wrote a rule: a token allowed only to chat in a session can neither
+ * read the standing grants and denials nor remove one.
  */
 
 import { methodDescriptor } from './method-catalog-shared.js';
@@ -24,7 +28,7 @@ export const builtinGatewayPermissionRuleMethodDescriptors: readonly GatewayMeth
     title: 'List Durable Permission Rules',
     description: 'List the durable user-origin permission rules written by remembered approval decisions (exact command / command class / path scope / whole tool), newest first, the persistent grants and denials the permission manager consults before ever prompting. Project-scoped.',
     category: 'permissions',
-    scopes: ['read:sessions'],
+    scopes: ['read:approvals'],
     transport: ['ws'],
     inputSchema: PERMISSION_RULES_LIST_INPUT_SCHEMA,
     outputSchema: PERMISSION_RULES_LIST_OUTPUT_SCHEMA,
@@ -34,7 +38,7 @@ export const builtinGatewayPermissionRuleMethodDescriptors: readonly GatewayMeth
     title: 'Delete a Durable Permission Rule',
     description: 'Delete one durable user-origin permission rule by id. The matching asks prompt again afterwards, deleting a grant is how a remembered decision is revoked. deleted:false when no rule with that id exists (an honest miss, not an error).',
     category: 'permissions',
-    scopes: ['write:sessions'],
+    scopes: ['write:approvals'],
     transport: ['ws'],
     inputSchema: PERMISSION_RULES_DELETE_INPUT_SCHEMA,
     outputSchema: PERMISSION_RULES_DELETE_OUTPUT_SCHEMA,

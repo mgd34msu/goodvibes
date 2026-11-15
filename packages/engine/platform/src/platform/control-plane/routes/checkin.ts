@@ -14,7 +14,8 @@ import type { CheckinService } from '../../checkin/index.js';
 export type CheckinGatewayService = Pick<CheckinService, 'getConfig' | 'setConfig' | 'listReceipts' | 'evaluate' | 'scheduleStatus'>;
 
 function createConfigGetHandler(service: CheckinGatewayService): GatewayMethodHandler {
-  return () => ({ config: service.getConfig() });
+  // `schedule` is the service's last scheduler outcome: enabled is not the same as scheduled.
+  return () => ({ config: service.getConfig(), schedule: service.scheduleStatus() });
 }
 
 function createConfigSetHandler(service: CheckinGatewayService): GatewayMethodHandler {

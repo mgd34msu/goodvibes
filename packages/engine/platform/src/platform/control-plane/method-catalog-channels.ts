@@ -597,9 +597,9 @@ export const builtinGatewayChannelMethodDescriptors: readonly GatewayMethodDescr
    * method-dispatch path both said "cataloged, not callable" rather than
    * letting a caller find the 404 on their own.
    *
-   * Seven were served first: the routing table and the draft mirror got a store
-   * (platform/channel-sync), handlers (control-plane/routes/channel-sync.ts)
-   * and entries in the gateway REST table.
+   * Seven were served first: the daemon host serves the routing table
+   * (channels/host-routing) and the draft mirror (channels/host-drafts) over
+   * its own stores, with entries in the gateway REST table.
    *
    * `channels.inbox.list` was the eighth and the last, because it needed an
    * aggregator rather than a route. It has one now. The host that holds the

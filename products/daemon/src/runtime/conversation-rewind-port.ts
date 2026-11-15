@@ -42,6 +42,7 @@ import {
   createConversationRewindPort as createSharedConversationRewindPort,
   createConversationRewindScope,
   type ConversationRewindPort,
+  type ConversationRewindPortOptions,
   type RewindConversation,
 } from '@goodvibes-jev/engine/terminal-shell/conversation-rewind-port';
 
@@ -76,12 +77,13 @@ const NO_LIVE_CONVERSATION =
  */
 export function createConversationRewindPort(
   resolveConversation: (sessionId: string) => RewindableConversation | null,
+  options: ConversationRewindPortOptions = {},
 ): ConversationRewindPort {
   // The shared type pins the JSON shape to the terminal conversation class;
   // the daemon port is written against any structural conversation, and it only
   // ever hands a conversation's own JSON back to that conversation.
   const resolveShared = resolveConversation as unknown as (sessionId: string) => RewindConversation | null;
-  const shared = createSharedConversationRewindPort(resolveShared);
+  const shared = createSharedConversationRewindPort(resolveShared, options);
   return {
     ...shared,
     async preview(anchor: RewindAnchor): Promise<RewindConversationPreview> {
@@ -125,8 +127,9 @@ export function unregisterSessionConversation(sessionId: string): void {
  * The conversation rewind port the composed daemon threads into
  * registerGatewayVerbGroups, it resolves each anchor's live conversation from
  * the registry above, so the daemon's own rewind verbs serve conversation scope
- * live in this process.
+ * live in this process. With `undoDir` the undo snapshots are kept on disk, so
+ * rewind.undo still works after a daemon restart.
  */
-export function createSessionConversationRewindPort(): ConversationRewindPort {
-  return createConversationRewindPort((sessionId) => scope.findSessionConversation(sessionId));
+export function createSessionConversationRewindPort(options: ConversationRewindPortOptions = {}): ConversationRewindPort {
+  return createConversationRewindPort((sessionId) => scope.findSessionConversation(sessionId), options);
 }

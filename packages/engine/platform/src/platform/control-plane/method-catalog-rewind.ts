@@ -6,11 +6,13 @@
  * (truncate session state to the anchor), or both, reusing the platform's
  * existing history stores. rewind.plan is a read-only dry-run preview that
  * mints a single-use confirm token; rewind.apply is destructive and requires
- * that token (or confirm:true), following the checkpoints.restore confirm
- * idiom. ws-only invoke verbs (no REST binding). Handlers: routes/rewind.ts.
+ * that token, following the checkpoints.restore confirm idiom. rewind.undo
+ * restores the pre-rewind conversation from the receipt's undo snapshot id.
+ * ws-only invoke verbs (no REST binding). Handlers: routes/rewind.ts.
  */
 import { methodDescriptor } from './method-catalog-shared.js';
 import type { GatewayMethodDescriptor } from './method-catalog-shared.js';
+import { BOOLEAN_SCHEMA, STRING_LIST_SCHEMA, STRING_SCHEMA, nullableSchema, objectSchema } from './operator-contract-schemas-shared.js';
 import {
   REWIND_PLAN_INPUT_SCHEMA,
   REWIND_PLAN_OUTPUT_SCHEMA,
@@ -28,6 +30,24 @@ import {
   REWIND_CONVERSATION_REQUESTS_TAKE_OUTPUT_SCHEMA,
 } from './operator-contract-schemas-rewind.js';
 
+const REWIND_UNDO_INPUT_SCHEMA = objectSchema(
+  { sessionId: STRING_SCHEMA, undoSnapshotId: STRING_SCHEMA },
+  ['sessionId', 'undoSnapshotId'],
+);
+
+const REWIND_UNDO_OUTPUT_SCHEMA = objectSchema(
+  {
+    undone: BOOLEAN_SCHEMA,
+    sessionId: STRING_SCHEMA,
+    undoSnapshotId: STRING_SCHEMA,
+    refusal: nullableSchema(objectSchema(
+      { code: STRING_SCHEMA, state: STRING_SCHEMA, reason: STRING_SCHEMA, next: STRING_LIST_SCHEMA },
+      ['code', 'state', 'reason', 'next'],
+    )),
+  },
+  ['undone', 'sessionId', 'undoSnapshotId', 'refusal'],
+);
+
 export const builtinGatewayRewindMethodDescriptors: readonly GatewayMethodDescriptor[] = [
   methodDescriptor({
     id: 'rewind.plan',
@@ -44,13 +64,25 @@ export const builtinGatewayRewindMethodDescriptors: readonly GatewayMethodDescri
     id: 'rewind.apply',
     title: 'Apply a Unified Rewind',
     description:
-      'Apply a unified rewind to a session turn anchor, restoring files and/or conversation. DESTRUCTIVE: requires confirmation, either the confirmToken minted by rewind.plan (single-use, ~2 min) or confirm:true. Called without either, it returns a non-error refusal (refused:true) naming rewind.plan, never a silent no-op; a bad token is a 400. Every apply records an undo point (the workspace restore takes a pre-restore safety checkpoint; the conversation store captures its pre-rewind snapshot) so the rewind is itself reversible, and returns a receipt whose `undo` block carries how to reverse it. Emits a REWIND_APPLIED receipt event.',
+      'Apply a unified rewind to a session turn anchor, restoring files and/or conversation. DESTRUCTIVE: requires the confirmToken minted by rewind.plan (single-use, ~2 min), which is bound to the session, turn, scope and previewed checkpoint. Called without it, confirm:true included, it returns a non-error refusal (refused:true) naming rewind.plan, never a silent no-op; a bad token is a 400. Every apply records an undo point (the workspace restore takes a pre-restore safety checkpoint; the conversation store captures its pre-rewind snapshot) so the rewind is itself reversible, and returns a receipt whose `undo` block carries how to reverse it: checkpoints.restore with undo.files.restoreCheckpointId for the files, rewind.undo with undo.conversation.undoSnapshotId for the conversation. A conversation undo point lasts for the newest 32 rewinds of that conversation\'s process and only while the session is open there. Emits a REWIND_APPLIED receipt event.',
     category: 'rewind',
     scopes: ['write:checkpoints'],
     transport: ['ws'],
     dangerous: true,
     inputSchema: REWIND_APPLY_INPUT_SCHEMA,
     outputSchema: REWIND_APPLY_OUTPUT_SCHEMA,
+  }),
+  methodDescriptor({
+    id: 'rewind.undo',
+    title: 'Undo a Conversation Rewind',
+    description:
+      'Put a session\'s conversation back to how it was before a rewind, from the undo.conversation.undoSnapshotId of the rewind.apply receipt. The pre-rewind copy replaces the whole conversation, so the undo is refused while the conversation has newer messages than the rewind left it with. Answers undone:true, or undone:false with a refusal (code, state, reason, next) and nothing changed: the snapshot is gone (only the newest 32 rewinds keep one, and only while the session is open), the conversation changed since, or a surface holds the conversation (undo it there with /undo rewind). Files are reversed separately with checkpoints.restore.',
+    category: 'rewind',
+    scopes: ['write:checkpoints'],
+    transport: ['ws'],
+    dangerous: true,
+    inputSchema: REWIND_UNDO_INPUT_SCHEMA,
+    outputSchema: REWIND_UNDO_OUTPUT_SCHEMA,
   }),
   methodDescriptor({
     id: 'rewind.conversation.host.register',

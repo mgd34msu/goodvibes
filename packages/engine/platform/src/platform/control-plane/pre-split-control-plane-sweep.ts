@@ -59,17 +59,26 @@
  * Quarantine directories are bounded the way every other preserved-aside
  * artifact here is (worktree/registry.ts): an age TTL plus a count cap, newest
  * kept, ENOENT treated as success so two processes sweeping at once is safe.
+ * The reaper runs on every boot, also when there is nothing left to migrate,
+ * which is the ordinary case once the first sweep moved everything.
+ *
+ * A conflict (case 4) is reported once: the receipt names the command that
+ * sets the old copy aside, and the files already reported are remembered in
+ * `control-plane.pre-split-reported.json` beside the legacy directory, so a
+ * restart does not repeat the same notice. A copy that changes again is
+ * reported again.
  *
  * Nothing here throws. Anything that cannot be read, moved or removed is
  * recorded in the report, left alone, and the daemon boots.
  */
 
-import { existsSync, linkSync, mkdirSync, readdirSync, readFileSync, renameSync, rmdirSync, rmSync, statSync, unlinkSync } from 'node:fs';
+import { existsSync, linkSync, mkdirSync, readdirSync, readFileSync, renameSync, rmdirSync, rmSync, statSync, unlinkSync, type Stats } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 import { importLegacySessionStores } from './session-store-importer.js';
 import { foldLegacyWorkspaceRegister } from '../workspace/registration/fold-legacy-register.js';
+import { writeDocument } from '../utils/atomic-json-store.js';
 
 /** Directory-name prefix marking a quarantined pre-split control-plane store. */
 export const PRE_SPLIT_QUARANTINE_PREFIX = 'control-plane.pre-split-';
@@ -83,6 +92,23 @@ const QUARANTINE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 
 /** Count cap on quarantine directories. The age TTL alone is not a bound. Newest kept. */
 const MAX_QUARANTINE_DIRECTORIES = 5;
+
+/** Beside the legacy directory: the conflicts already reported, so a restart does not repeat them. */
+const REPORTED_CONFLICTS_FILE = 'control-plane.pre-split-reported.json';
+
+/** A conflict's identity: the name plus the legacy copy's size and change time, so an edited copy is new again. */
+function conflictIdentity(name: string, stats: Pick<Stats, 'size' | 'mtimeMs'>): string {
+  return `${name}:${stats.size}:${Math.trunc(stats.mtimeMs)}`;
+}
+
+function readReportedConflicts(path: string): ReadonlySet<string> {
+  try {
+    const parsed = JSON.parse(readFileSync(path, 'utf-8')) as { conflicts?: unknown };
+    return new Set(Array.isArray(parsed.conflicts) ? parsed.conflicts.filter((entry): entry is string => typeof entry === 'string') : []);
+  } catch {
+    return new Set();
+  }
+}
 
 /** The one store whose scoped home the broker decides, and which merges by id. */
 const SESSION_STORE_FILE = 'sessions.json';
@@ -131,6 +157,8 @@ export interface PreSplitControlPlaneSweepReport {
    * data. Named in the receipt.
    */
   readonly conflictedFiles: readonly string[];
+  /** The conflicted files not reported by an earlier boot; only these are in the receipt. */
+  readonly newlyConflictedFiles?: readonly string[] | undefined;
   /**
    * Files this pass could not place, and did not guess at. Only the session
    * store, and only for a composition whose broker was handed a store object
@@ -222,10 +250,18 @@ export async function sweepPreSplitControlPlaneStore(input: {
   // to the same place (a surface root of '', a test home) has one store, not
   // two, and there is nothing here to do.
   if (legacyDirectory === scopedDirectory) return emptyReport('absent', legacyDirectory, scopedDirectory);
-  if (!existsSync(legacyDirectory)) return emptyReport('absent', legacyDirectory, scopedDirectory);
+  // Before the early returns: once the first sweep moved everything, every
+  // later boot returns below, and the quarantine must still age out.
+  reapQuarantineDirectories(dirname(legacyDirectory), now);
+  const reportedPath = join(dirname(legacyDirectory), REPORTED_CONFLICTS_FILE);
+  if (!existsSync(legacyDirectory)) {
+    rmSync(reportedPath, { force: true });
+    return emptyReport('absent', legacyDirectory, scopedDirectory);
+  }
 
   const legacyFiles = listFiles(legacyDirectory);
   if (legacyFiles.length === 0) {
+    rmSync(reportedPath, { force: true });
     return emptyReport('clean', legacyDirectory, scopedDirectory, {
       legacyDirectoryRemoved: removeDirectoryIfEmpty(legacyDirectory),
     });
@@ -235,6 +271,7 @@ export async function sweepPreSplitControlPlaneStore(input: {
   const movedFiles: string[] = [];
   const adoptedFiles: string[] = [];
   const conflictedFiles: string[] = [];
+  const conflictIdentities: string[] = [];
   const skippedFiles: string[] = [];
   const sharedFiles: string[] = [];
   let foldedSessions = 0;
@@ -384,6 +421,7 @@ export async function sweepPreSplitControlPlaneStore(input: {
         retire(name);
       } else {
         conflictedFiles.push(name);
+        conflictIdentities.push(conflictIdentity(name, statSync(legacyPath)));
       }
     } catch (error) {
       failures.push(`${name} could not be compared with its scoped counterpart (${summarizeError(error)})`);
@@ -394,7 +432,16 @@ export async function sweepPreSplitControlPlaneStore(input: {
     ? removeDirectoryIfEmpty(legacyDirectory)
     : false;
 
-  reapQuarantineDirectories(dirname(legacyDirectory), now);
+  // Report each conflict once: remember what this boot saw, and name in the
+  // receipt only what an earlier boot did not.
+  const reported = readReportedConflicts(reportedPath);
+  const newlyConflictedFiles = conflictedFiles.filter((_, index) => !reported.has(conflictIdentities[index]!));
+  try {
+    if (conflictIdentities.length === 0) rmSync(reportedPath, { force: true });
+    else if (newlyConflictedFiles.length > 0 || conflictIdentities.length !== reported.size) writeDocument(reportedPath, { conflicts: conflictIdentities });
+  } catch (error) {
+    failures.push(`the list of reported conflicts could not be saved (${summarizeError(error)})`);
+  }
 
   const changed = movedFiles.length > 0 || adoptedFiles.length > 0 || foldedSessions > 0 || foldedWorkspaceRows > 0;
   const report: PreSplitControlPlaneSweepReport = {
@@ -408,6 +455,7 @@ export async function sweepPreSplitControlPlaneStore(input: {
     adoptedFiles,
     quarantineDirectory,
     conflictedFiles,
+    newlyConflictedFiles,
     skippedFiles,
     sharedFiles,
     foldedWorkspaceRows,
@@ -445,9 +493,13 @@ export function preSplitSweepReceipt(report: PreSplitControlPlaneSweepReport): s
       `${report.movedFiles.join(', ')} said the same as the copy already in use, so ${report.movedFiles.length === 1 ? 'it was' : 'they were'} retired to ${report.quarantineDirectory}`,
     );
   }
-  if (report.conflictedFiles.length > 0) {
+  const conflicts = report.newlyConflictedFiles ?? report.conflictedFiles;
+  if (conflicts.length > 0) {
+    const one = conflicts.length === 1;
+    const aside = join(dirname(report.legacyDirectory), `${PRE_SPLIT_QUARANTINE_PREFIX}kept`);
+    const moves = conflicts.map((name) => `mv ${JSON.stringify(join(report.legacyDirectory, name))} ${JSON.stringify(aside)}/`).join(' && ');
     parts.push(
-      `${report.conflictedFiles.join(', ')} exist${report.conflictedFiles.length === 1 ? 's' : ''} in both places with different content and ${report.conflictedFiles.length === 1 ? 'was' : 'were'} left alone, nothing here knows how to merge ${report.conflictedFiles.length === 1 ? 'that store' : 'those stores'}, the copy under ${report.scopedDirectory} is the one in use, and the old one is still at ${report.legacyDirectory} to be compared by hand`,
+      `${conflicts.join(', ')} exist${one ? 's' : ''} in both places with different content and ${one ? 'was' : 'were'} left alone: the copy under ${report.scopedDirectory} is the one in use, and nothing here can merge ${one ? 'that store' : 'those stores'}. Compare ${one ? 'it' : 'them'} with the old ${one ? 'copy' : 'copies'} in ${report.legacyDirectory}, then set the old ${one ? 'one' : 'ones'} aside (kept 30 days, then removed) with: mkdir -p ${JSON.stringify(aside)} && ${moves}`,
     );
   }
   if (report.skippedFiles.length > 0) {

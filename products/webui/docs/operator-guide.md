@@ -426,6 +426,12 @@ and the receipts list. Every save is confirmed, because the configuration can
 enable proactive contact. Each receipt states its outcome plainly, never
 collapsed to a bare status dot.
 
+The status row says whether the daemon's scheduler really holds the check-in
+job: Enabled, scheduled; or Enabled, but not scheduled, with the reason (for
+example, automation is turned off). A save that stored the settings but could
+not schedule the job says so instead of reporting success. Turning automation
+on schedules the job at once.
+
 A check-in looks at what needs you: approvals and questions waiting in the
 owner inbox, and automation runs that failed since the previous check-in. When
 none of those is waiting, the run records Ran quiet without asking a model.

@@ -74,3 +74,30 @@ export const memorySearchRerank = defineRerank({
     { name: 'nothing stored about it', query: 'kubernetes ingress annotations', candidates: [TEST_RUNNER, RELEASE, KEY_ROTATION], expect: { top: 'none' } },
   ],
 });
+
+/**
+ * `engine.state.knowledge-injection`: which project-memory records retrieval put
+ * forward help with the task an agent is about to do. Every candidate is read
+ * in ONE request (together), so a turn costs one decision-model request however
+ * many records retrieval found, and none when it found nothing. Low stakes: an
+ * injected record is framed as untrusted reference material for this task only.
+ */
+export const knowledgeInjectionRerank = defineRerank({
+  name: 'engine.state.knowledge-injection',
+  version: 1,
+  description: 'Picks the project-memory records that help with the task an agent is about to do, all candidates in one request.',
+  accuracyFloor: 0.9,
+  instructions: 'An agent is about to work on `query`. Would `candidate`, a record from the project\'s memory, help it do that work?',
+  criteria: {
+    true: 'The record states a fact, convention, constraint or past incident that bears on doing this task.',
+    false: 'The record only shares a word or a loose topic with the task, or is about something else.',
+  },
+  band: STAKES_BANDS.low.yesNo,
+  together: true,
+  fixtures: [
+    { name: 'write a test', query: 'add a unit test for the scheduler', candidates: [RELEASE, TEST_RUNNER, KEY_ROTATION], expect: { top: 'test-runner' } },
+    { name: 'daemon port change', query: 'make the daemon listen on port 4000', candidates: [TEST_FLAKE, PORT_SETTING, RELEASE], expect: { top: 'port-setting' } },
+    { name: 'cut a release', query: 'publish version 2.3.0', candidates: [KEY_ROTATION, PORT_CONFLICT, RELEASE], expect: { top: 'release' } },
+    { name: 'unrelated question', query: 'what time is it', candidates: [TEST_RUNNER, PORT_SETTING, KEY_ROTATION], expect: { top: 'none' } },
+  ],
+});

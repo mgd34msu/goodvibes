@@ -33,7 +33,7 @@ import { MultimodalService } from '@goodvibes-jev/engine/platform/platform/multi
 import { CONVERSATIONAL_CONTAINMENT } from '@goodvibes-jev/engine/platform/platform/hosted-sessions';
 import { OverflowHandler, ProcessManager, cancelAllAgentRuns, createConfiguredFetchDeps, createWorkflowServices } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { LocalhostFetchApproval } from '@goodvibes-jev/engine/platform/platform/runtime/permissions/localhost-fetch-approval';
-import { FileStateCache, FileUndoManager, MemoryEmbeddingProviderRegistry, MemoryRegistry, MemoryStore, ModeManager, ProjectIndex, resolveCanonicalMemoryDbPath } from '@goodvibes-jev/engine/platform/platform/state';
+import { FileStateCache, FileUndoManager, FileWatcher, MemoryEmbeddingProviderRegistry, MemoryRegistry, MemoryStore, ModeManager, ProjectIndex, resolveCanonicalMemoryDbPath } from '@goodvibes-jev/engine/platform/platform/state';
 import { createBrokeredPermissionManager } from '@goodvibes-jev/engine/platform/platform/runtime/client-services';
 import { wireMemoryPressureChannelNotice } from './notification-dispatch.js';
 import { operations } from '@goodvibes-jev/engine/platform/platform/runtime';
@@ -492,6 +492,10 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
     const fileCache = new FileStateCache();
     const projectIndex = new ProjectIndex(workingDirectory);
     disposalScope.ownUntilRegistered('default workspace project index', () => projectIndex.dispose());
+    // Project files changed outside the write and edit tools: the project index forgets deleted ones and Change:file:external hooks fire.
+    const fileWatcher = new FileWatcher(projectIndex, { projectRoot: workingDirectory }, hookDispatcher);
+    void fileWatcher.start();
+    disposalScope.registry.add('file watcher', () => fileWatcher.stop());
     const processManager = new ProcessManager();
     disposalScope.registry.add('background processes', () => processManager.close());
     // The source-tree index shares memory embeddings; auto-build is config-gated and off by default.
@@ -926,7 +930,7 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
       workspaceCheckpointManager,
       checkpointsCurrentlyAllowed: checkpointing.currentlyAllowed,
       integrationHelpers,
-      rerootStores: createStoreRerooter({ codeIndexStore, projectIndex, surfaceRoot: GOODVIBES_DAEMON_SURFACE_ROOT }),
+      rerootStores: createStoreRerooter({ codeIndexStore, projectIndex, fileWatcher, surfaceRoot: GOODVIBES_DAEMON_SURFACE_ROOT }),
       // Cancel hosted calls before their runtime dependencies close; the shared
       // poller registry places this ahead of runner, fleet and process teardown.
       cancelHostedAgentRuns: () => cancelAllAgentRuns(agentManager),

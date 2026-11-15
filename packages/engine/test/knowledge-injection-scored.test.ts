@@ -1,18 +1,19 @@
 /**
  * knowledge-injection.ts ranking: retrieval (confidence gate, review-state and
- * temporal exclusion, the vector index as shortlist builder) is code; the
- * order, the reason and the ingest mode come from the
- * `engine.state.knowledge-relevance` readings, one request per shortlisted
- * record. `selectKnowledgeForTask` is exactly the scored list, mapped to
- * injections and sliced to the limit.
+ * temporal exclusion, the vector index or shared words as shortlist builder)
+ * is code; the order comes from ONE `engine.state.knowledge-injection` request
+ * over the whole shortlist, and none when nothing was put forward.
+ * `selectKnowledgeForTask` is exactly the scored list, mapped to injections
+ * and sliced to the limit.
  */
-import { describe, expect, test } from 'bun:test';
+import { beforeEach, describe, expect, test } from 'bun:test';
 import { installJudgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
 import {
   buildKnowledgeInjectionPrompt,
   KNOWLEDGE_SCORE_SCALE,
   selectKnowledgeForTask,
   selectKnowledgeForTaskScored,
+  forgetKnowledgeInjectionReadings,
 } from '../platform/src/platform/state/knowledge-injection.js';
 import type { MemoryRecord, MemorySemanticSearchResult } from '../platform/src/platform/state/memory-store.js';
 import { useMemoryReadings } from './_helpers/memory-readings.ts';
@@ -48,12 +49,13 @@ const RELEVANCE: Record<string, number> = {
   'unrelated deployment note': 0.04,
 };
 
-describe('knowledge-injection.ts: ranking through the knowledge-relevance readings', () => {
+describe('knowledge-injection.ts: ranking through one knowledge-injection reading', () => {
   const readings = useMemoryReadings({
-    relevance: (_task, _scope, record) => ({ relevant: RELEVANCE[record.summary] ?? 0.05, taskMatch: 0.9 }),
+    relevance: (_task, _scope, record) => ({ relevant: RELEVANCE[record.summary] ?? 0.05 }),
   });
+  beforeEach(() => forgetKnowledgeInjectionReadings());
 
-  test('orders by the relevant reading, drops a clear no, and never reads gated records', async () => {
+  test('orders by the reading in one request, drops a clear no, and never reads gated records', async () => {
     const records = [
       makeRecord({ id: 'mem_c', summary: 'auth module rate limiting', confidence: 65 }),
       makeRecord({ id: 'mem_b', summary: 'unrelated deployment note' }),
@@ -63,18 +65,36 @@ describe('knowledge-injection.ts: ranking through the knowledge-relevance readin
       makeRecord({ id: 'mem_x', summary: 'expired auth note', validUntil: Date.now() - 1000 }),
     ];
     const scored = await selectKnowledgeForTaskScored(makeRegistry(records), 'fix the auth module', [], 2);
-
     expect(scored.map((entry) => entry.injection.id)).toEqual(['mem_a', 'mem_c']);
     expect(scored[0]!.score).toBeCloseTo(0.93 * KNOWLEDGE_SCORE_SCALE);
-    expect(scored[0]!.injection.reason).toBe('matched task');
     expect(scored[0]!.injection.ingestMode).toBe('keyword-ranked');
     expect(scored[0]!.injection.trustTier).toBe('reviewed');
-    // Only the three gate-passing records were read, and with no write scope the
-    // scope question is left out of each request.
-    expect(readings.requests).toHaveLength(3);
-    for (const request of readings.requests) {
-      expect(Object.keys(request.questions).sort()).toEqual(['relevant', 'task_match']);
-    }
+    expect(readings.requests).toHaveLength(1);
+    const candidates = (readings.requests[0]!.state as { candidates: { id: string }[] }).candidates.map((candidate) => candidate.id).sort();
+    expect(candidates).toEqual(['mem_a', 'mem_c']);
+  });
+
+  test('a task nothing is similar to asks nothing, however many records there are', async () => {
+    const records = Array.from({ length: 200 }, (_, index) => makeRecord({ id: `mem_${index}`, summary: `deployment note ${index}`, confidence: 90 }));
+    expect(await selectKnowledgeForTaskScored(makeRegistry(records), 'what time is it', [], 3)).toEqual([]);
+    expect(readings.requests).toHaveLength(0);
+  });
+
+  test('a related task is one request for the whole shortlist, and the same task asks nothing again', async () => {
+    readings.use({ relevance: () => ({ relevant: 0.9 }) });
+    const records = Array.from({ length: 30 }, (_, index) => makeRecord({ id: `mem_${index}`, summary: `deployment note ${index}` }));
+    const registry = makeRegistry(records);
+    await selectKnowledgeForTaskScored(registry, 'write the deployment note', [], 2);
+    expect(readings.requests).toHaveLength(1);
+    expect((readings.requests[0]!.state as { candidates: unknown[] }).candidates).toHaveLength(12);
+    await selectKnowledgeForTaskScored(registry, 'write the deployment note', [], 2);
+    expect(readings.requests).toHaveLength(1);
+  });
+
+  test('ids already injected are left out before anything is asked', async () => {
+    const records = [makeRecord({ id: 'mem_a', summary: 'auth module uses JWT tokens' })];
+    expect(await selectKnowledgeForTaskScored(makeRegistry(records), 'fix the auth module', [], 3, { excludeIds: new Set(['mem_a']) })).toEqual([]);
+    expect(readings.requests).toHaveLength(0);
   });
 
   test('selectKnowledgeForTask is the scored list mapped to injections and sliced to the limit', async () => {
@@ -82,9 +102,7 @@ describe('knowledge-injection.ts: ranking through the knowledge-relevance readin
       .map((summary, index) => makeRecord({ id: `mem_${index}`, summary }));
     const registry = makeRegistry(records);
     const scored = await selectKnowledgeForTaskScored(registry, 'fix the auth module', [], 2);
-    // An uncertain reading (0.5) stays for the caller's floor; only a clear no is dropped.
-    expect(scored.map((entry) => entry.injection.id)).toEqual(['mem_0', 'mem_1', 'mem_2', 'mem_3']);
-    expect(scored[3]!.injection.reason).toBe('matched task');
+    expect(scored.map((entry) => entry.injection.id).slice(0, 3)).toEqual(['mem_0', 'mem_1', 'mem_2']);
     const sliced = await selectKnowledgeForTask(registry, 'fix the auth module', [], 2);
     expect(sliced).toEqual(scored.slice(0, 2).map((entry) => entry.injection));
   });
@@ -97,47 +115,33 @@ describe('knowledge-injection.ts: ranking through the knowledge-relevance readin
     expect(buildKnowledgeInjectionPrompt([])).toBeNull();
   });
 
-  test('a scope match is reported as such, and the files the record names reach the reading', async () => {
-    readings.use({ relevance: () => ({ relevant: 0.9, taskMatch: 0.1, scopeMatch: 0.92 }) });
-    const record = makeRecord({ id: 'mem_scope', summary: 'login form keeps its CSRF token in a hidden field', provenance: [{ kind: 'file', ref: 'src/auth/login.ts' }] });
+  test('the write scope reaches the reading', async () => {
+    readings.use({ relevance: () => ({ relevant: 0.9 }) });
+    const record = makeRecord({ id: 'mem_scope', summary: 'login form keeps its CSRF token in a hidden field' });
     const scored = await selectKnowledgeForTaskScored(makeRegistry([record]), 'unrelated task text', ['src/auth/login.ts'], 3);
     expect(scored).toHaveLength(1);
-    expect(scored[0]!.injection.reason).toBe('matched write scope');
-    const state = readings.requests[0]!.state as { write_scope: string[]; record: { files: string[] } };
-    expect(state.write_scope).toEqual(['src/auth/login.ts']);
-    expect(state.record.files).toEqual(['src/auth/login.ts']);
+    const state = readings.requests[0]!.state as { query: { write_scope: string[] } };
+    expect(state.query.write_scope).toEqual(['src/auth/login.ts']);
   });
 
-  test('vector candidates go first on the shortlist and label the ingest mode', async () => {
-    readings.use({ relevance: (_task, _scope, record) => ({ relevant: 0.9, taskMatch: record.summary.startsWith('semantic and text') ? 0.9 : 0.1 }) });
-    const hybrid = makeRecord({ id: 'hybrid', summary: 'semantic and text match' });
-    const semanticOnly = makeRecord({ id: 'semantic', summary: 'semantic only' });
-    const registry = makeRegistry([hybrid, semanticOnly], [
-      { record: hybrid, distance: 0.2, similarity: 0.8, score: 80 },
-      { record: semanticOnly, distance: 0.3, similarity: 0.71, score: 71 },
+  test('vector candidates above the similarity floor are the shortlist and label the ingest mode', async () => {
+    readings.use({ relevance: () => ({ relevant: 0.9 }) });
+    const close = makeRecord({ id: 'close', summary: 'semantic and text match' });
+    const far = makeRecord({ id: 'far', summary: 'semantic only' });
+    const registry = makeRegistry([close, far], [
+      { record: close, distance: 0.4, similarity: 0.8, score: 80 },
+      { record: far, distance: 1.4, similarity: 0.3, score: 30 },
     ]);
     const scored = await selectKnowledgeForTaskScored(registry, 'task', [], 3);
-    const byId = new Map(scored.map((entry) => [entry.injection.id, entry.injection]));
-    expect(byId.get('hybrid')!.ingestMode).toBe('hybrid-ranked');
-    expect(byId.get('hybrid')!.reason).toBe('matched task, matched sqlite-vec semantic index (80%)');
-    expect(byId.get('semantic')!.ingestMode).toBe('semantic-ranked');
-    expect(byId.get('semantic')!.reason).toBe('matched sqlite-vec semantic index (71%)');
-  });
-
-  test('only the shortlist is read: max(limit*4, 12) records', async () => {
-    readings.use({ relevance: () => ({ relevant: 0.9 }) });
-    const records = Array.from({ length: 30 }, (_, index) => makeRecord({ id: `mem_${index}`, summary: `note ${index}`, confidence: 60 + index }));
-    const scored = await selectKnowledgeForTaskScored(makeRegistry(records), 'task', [], 2);
-    expect(readings.requests).toHaveLength(12);
-    // The top-up takes the most trusted records: highest confidence first.
-    expect(scored.map((entry) => entry.injection.id)).toContain('mem_29');
-    expect(scored.map((entry) => entry.injection.id)).not.toContain('mem_0');
+    expect(scored.map((entry) => entry.injection.id)).toEqual(['close']);
+    expect(scored[0]!.injection.ingestMode).toBe('semantic-ranked');
+    expect(scored[0]!.injection.reason).toContain('matched sqlite-vec semantic index (80%)');
   });
 
   test('a read with no judgment port installed throws', async () => {
     const previous = installJudgmentPort(undefined);
     try {
-      await expect(selectKnowledgeForTaskScored(makeRegistry([makeRecord({ id: 'a' })]), 'task')).rejects.toBeInstanceOf(JudgmentPortMissingError);
+      await expect(selectKnowledgeForTaskScored(makeRegistry([makeRecord({ id: 'a', summary: 'a task note' })]), 'task note')).rejects.toBeInstanceOf(JudgmentPortMissingError);
     } finally {
       installJudgmentPort(previous);
     }

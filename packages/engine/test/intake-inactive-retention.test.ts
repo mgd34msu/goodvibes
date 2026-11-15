@@ -114,11 +114,9 @@ test('stored custom retention takes precedence over the native historical defaul
   expect(result?.expired).toBe(0); expect(await row.count()).toBe(2);
 });
 
-test('empty unconfigured inboxes stay memory-only and an empty maintenance owner creates no storage', async () => {
+test('an empty maintenance owner creates no storage', async () => {
   const root = makeProjectTempDir('inactive-inbox-empty'); const owner = janitor(root); await owner.ready; await owner.close();
   expect(existsSync(join(root, '.goodvibes'))).toBe(false);
-  const store = new InboxCursorStore(root, undefined, { sweepIntervalMs: 0 }); await store.init(); await store.close();
-  expect(existsSync(store.dbPath)).toBe(false);
 });
 
 test('bounded maintenance stops admitting pages as soon as its owner closes', async () => {
@@ -136,7 +134,7 @@ test('bounded maintenance stops admitting pages as soon as its owner closes', as
 
 async function editImage(root: string, fileName: string, sql: string) {
   const database = new HandlerSqliteStore({ workingDirectory: root, fileName, schema: [] }); await database.init();
-  try { database.run(sql); await database.save(); } finally { database.close(); }
+  try { database.run(sql); } finally { database.close(); }
 }
 
 test('a historical native mirror is expired only under the explicit native policy owner', async () => {

@@ -63,13 +63,4 @@ describe('draft mirror sync rules', () => {
     expect(store.get(created.draft.id)!.status).toBe('sent');
   });
 
-  test('a persisted save that cannot be written leaves the mirror unchanged', async () => {
-    const kept = await store.upsert({ message: 'm', title: 'kept' });
-    // The database file's path becomes a non-empty directory, so publishing the next write fails.
-    rmSync(store.dbPath, { force: true });
-    mkdirSync(store.dbPath);
-    writeFileSync(join(store.dbPath, 'occupied'), '');
-    await expect(store.upsert({ id: kept.draft.id, message: 'm', title: 'lost' }, undefined, undefined, true)).rejects.toThrow();
-    expect(store.get(kept.draft.id)!.title).toBe('kept');
-  });
 });

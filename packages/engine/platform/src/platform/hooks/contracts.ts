@@ -339,7 +339,7 @@ const CONTRACTS: HookPointContract[] = [
   },
   {
     pattern: 'Change:file:*',
-    description: 'Observe external file state changes.',
+    description: 'Observe project files changed outside the write and edit tools (Change:file:external; payload filePath and change: changed or deleted).',
     authority: 'observe',
     executionMode: 'background',
     canDeny: false,

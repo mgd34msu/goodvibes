@@ -86,9 +86,9 @@ for (const name of ['write', 'edit'] as const) for (const copied of ['args', 'op
 test('notebook final publication checks current policy after read preparation', async () => {
   const original = JSON.stringify({ nbformat: 4, nbformat_minor: 5, cells: [{ cell_type: 'code', source: ['before'], metadata: {}, outputs: [], execution_count: null }], metadata: {} });
   writeFileSync(join(root, 'owned.ipynb'), original);
-  const cache = new FileStateCache(); const peek = cache.peek.bind(cache);
+  const cache = new FileStateCache(); const compare = cache.compare.bind(cache);
   let pending: Promise<void> | undefined;
-  const spy = spyOn(cache, 'peek').mockImplementation(path => { pending ??= trust.setLevel('restricted'); return peek(path); });
+  const spy = spyOn(cache, 'compare').mockImplementation((path, content) => { pending ??= trust.setLevel('restricted'); return compare(path, content); });
   try {
     const result = await run(createEditTool(cache, { cwd: root }), { notebook_operations: { path: 'owned.ipynb', operations: [{ op: 'replace', cell: 0, source: 'after' }] } });
     expect(result[0]!.success).toBe(false); expect(readFileSync(join(root, 'owned.ipynb'), 'utf8')).toBe(original);

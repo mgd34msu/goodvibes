@@ -463,6 +463,36 @@ export function buildGitignoreMatcher(
   };
 }
 
+/**
+ * Ignore rules applied where they live: the `.gitignore` of each directory
+ * between `root` and a path is read the first time a path below that directory
+ * is asked about, and kept for the life of the matcher. No pre-walk and no cap:
+ * asking about one file costs one read attempt per ancestor directory; asking
+ * about every file of a tree reads each directory's file once. A matcher sees
+ * the ignore files as they were when it first read them, so a long-lived caller
+ * makes a new one per build.
+ */
+export function createNestedIgnoreMatcher(root: string, diagnostics?: FindDiagnostics): (absPath: string) => boolean {
+  const byDirectory = new Map<string, ((rel: string) => boolean) | null>();
+  const matcherFor = (directory: string): ((rel: string) => boolean) | null => {
+    if (!byDirectory.has(directory)) byDirectory.set(directory, buildGitignoreMatcher(resolve(directory, '.gitignore'), diagnostics));
+    return byDirectory.get(directory) ?? null;
+  };
+  return (absPath: string): boolean => {
+    const rel = relative(root, absPath);
+    if (!rel || rel.startsWith('..')) return false;
+    const segments = rel.split(sep);
+    // A directory's rules see paths relative to it; an ignored ancestor ignores everything below it.
+    let directory = root;
+    for (let depth = 0; depth < segments.length; depth++) {
+      const matcher = matcherFor(directory);
+      if (matcher?.(segments.slice(depth).join('/'))) return true;
+      directory = resolve(directory, segments[depth]!);
+    }
+    return false;
+  };
+}
+
 /** Discovery may encounter old contract views below a live workspace. Their
  * denial must prune that subtree, not prevent searching the ordinary project.
  * Explicit roots and every opened path still require the original authority. */

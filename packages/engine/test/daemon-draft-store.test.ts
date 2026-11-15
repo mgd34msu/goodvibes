@@ -90,7 +90,7 @@ describe('DraftSyncStore', () => {
     old.run('ALTER TABLE drafts DROP COLUMN legacyWireReference');
     const ciphertext = old.get<{ bodyEnc: string }>('SELECT bodyEnc FROM drafts WHERE id = ?', [id]);
     expect(ciphertext).not.toBeNull();
-    await old.save(); await old.close();
+    old.close();
     const handle = historicalChannelDraftWireReference(id);
     store = makeStore(dir, cipher); await store.init();
     const canonical = store.get(id)!.wireReference;
@@ -109,7 +109,7 @@ describe('DraftSyncStore', () => {
     // retained, but no historical handle may arbitrarily choose either row.
     oldWriter.run('INSERT INTO drafts (id, version, createdAt, updatedAt, status, bodyEnc) VALUES (?,1,?,?,?,?)',
       [handle, '2026-10-01T00:00:00.000Z', '2026-10-01T00:00:00.000Z', 'draft', 'enc:ZGlmZmVyZW50']);
-    await oldWriter.save(); await oldWriter.close();
+    oldWriter.close();
     store = makeStore(dir, cipher); await store.init();
     expect(store.get(id)).toMatchObject({ wireReference: canonical, title: 'old reader edit' });
     // Both a direct ID and an actual old content-derived alias match: refuse.
@@ -153,7 +153,6 @@ describe('DraftSyncStore', () => {
       existing.run("ALTER TABLE drafts ADD COLUMN messageDigest TEXT NOT NULL DEFAULT 'previous-body-digest'");
       ciphertext = existing.get<{ bodyEnc: string; webhookEnc: string }>('SELECT bodyEnc, webhookEnc FROM drafts WHERE id = ?', [draft.id]);
       expect(ciphertext).not.toBeNull();
-      await existing.save();
     } finally { await existing.close(); }
     // Upgrade does not need the key just to remove display-only metadata.
     store = makeStore(dir, { async encrypt() { throw new Error('Unexpected encryption'); }, async decrypt() { throw new Error('Unexpected decryption'); } });

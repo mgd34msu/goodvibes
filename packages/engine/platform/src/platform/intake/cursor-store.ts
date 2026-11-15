@@ -1,7 +1,7 @@
 // ---------------------------------------------------------------------------
 // Persistent cursor + item store for the inbound feed.
 //
-// Backed by HandlerSqliteStore (sql.js WASM) at
+// Backed by HandlerSqliteStore (a SQLite file in WAL mode) at
 //   {wd}/.goodvibes/tui/operator/<file>.sqlite
 //
 // Tables:
@@ -33,18 +33,15 @@
 // Only an explicit UIDVALIDITY reset can replace an IMAP generation.
 //
 // Idempotence/concurrency: a sweep re-run immediately reclaims nothing (the
-// DELETEs are set-based over the current contents). Two processes opening the
-// same file each hold their own sql.js snapshot and `save()` writes the whole
-// file via temp+rename. HandlerSqliteStore orders saves within one process,
-// but separate processes still have last-writer-wins snapshots. This store is
-// single-owner; it does not claim cross-process mutation safety.
+// DELETEs are set-based over the current contents). Every write is a statement
+// or one transaction on the file, durable when it returns; two processes on the
+// same file share it under SQLite's own locking.
 // ---------------------------------------------------------------------------
 
 import { HandlerSqliteStore, type HandlerSqliteTransaction } from '../state/daemon-handler-sqlite-store.js';
 import type { ImapUidCheckpoint, ImapUidCheckpointAdvance, InboundChannelItem } from './provider-adapter.js';
 import { captureTriageReceiptScope } from './triage/evidence.js';
 import type { TriageLabel, TriageReceiptScope } from './triage/types.js';
-import { existsSync } from 'node:fs';
 import { retainActiveInboxStore } from './active-stores.js';
 import { captureImapAdvance, captureImapCheckpoint, captureImapItems, sameImapCheckpoint } from './imap-checkpoint.js';
 
@@ -209,8 +206,6 @@ export interface InboxTriageCandidate { readonly item: InboundChannelItem; reado
 
 export class InboxCursorStore {
   private readonly store: HandlerSqliteStore;
-  private revision = 0;
-  private persistedRevision = 0;
   private initialized = false;
   private sourceRevisionsReady = false;
   private initializing: Promise<void> | null = null;
@@ -268,6 +263,11 @@ export class InboxCursorStore {
     return this.store.dbPath;
   }
 
+  /** Set when the store file was unreadable at open and a fresh one started: what happened and where the old file is. */
+  recoveryNotice(): string | undefined {
+    return this.store.recoveryNotice();
+  }
+
   /**
    * Open the database, then immediately reap: recovery is exactly when stale
    * rows from previous runs must go. The periodic timer starts afterwards so
@@ -282,10 +282,9 @@ export class InboxCursorStore {
       if (this.closed) return;
       const sourcePolicy = this.store.get<{ version: number }>('SELECT version FROM inbox_source_revision_policy WHERE singleton = 1');
       if (sourcePolicy && sourcePolicy.version !== 1) throw new Error('Inbox source revisions are unsupported');
-      // This schema setup is private memory until a real mirror mutation is
-      // published. HandlerSqliteStore.beforeWrite declares the source-revision
-      // reader floor before every actual image write and final rename. Empty,
-      // unconfigured inboxes must not retire an installed reader at startup.
+      // HandlerSqliteStore.beforeWrite declares the source-revision reader
+      // floor before every mirror transaction commits; this schema setup is
+      // not a mirror mutation and does not declare it.
       const columns = this.store.all<{ name: string }>('PRAGMA table_info(items)');
       if (!columns.some(column => column.name === 'triage_revision')) {
         if (sourcePolicy) throw new Error('Inbox source revision schema is unsupported');
@@ -296,27 +295,21 @@ export class InboxCursorStore {
         // with semantic mutations. Reissue only derived revisions, never body data.
         this.store.run('UPDATE items SET triage_revision = NULL');
         this.store.run('INSERT INTO inbox_source_revision_policy (singleton, version) VALUES (1, 1)');
-        if (existsSync(this.store.dbPath)) this.revision += 1;
       }
       if (!columns.some(column => column.name === 'seq')) {
         // Rows written before the store assigned sequences take their insertion order.
         this.store.run('ALTER TABLE items ADD COLUMN seq INTEGER');
         this.store.run('UPDATE items SET seq = rowid');
-        if (existsSync(this.store.dbPath)) this.revision += 1;
       }
       this.store.run('CREATE INDEX IF NOT EXISTS idx_items_seq ON items(seq)');
       const unversioned = this.store.get<{ count: number }>('SELECT COUNT(*) AS count FROM items WHERE triage_revision IS NULL');
       if (unversioned && unversioned.count > 0) {
         this.store.run("UPDATE items SET triage_revision = 'ir-' || lower(hex(randomblob(16))) WHERE triage_revision IS NULL");
-        this.revision += 1;
       }
       const saved = this.store.get<{ version: number; itemTtlMs: number; itemCap: number }>('SELECT version, itemTtlMs, itemCap FROM inbox_retention_policy WHERE singleton = 1');
       if (saved && (saved.version !== 1 || !isInboxRetentionPolicy(saved))) throw new Error('Inbox retention policy is unsupported');
       if (!saved || saved.itemTtlMs !== this.itemTtlMs || saved.itemCap !== this.itemCap) {
         this.store.run('INSERT OR REPLACE INTO inbox_retention_policy (singleton, version, itemTtlMs, itemCap) VALUES (1, 1, ?, ?)', [this.itemTtlMs, this.itemCap]);
-        // Keep genuinely empty/unconfigured sources memory-only. Existing
-        // mirrors must retain their actual policy after their owner closes.
-        if (existsSync(this.store.dbPath)) this.revision += 1;
       }
       this.sourceRevisionsReady = true;
       await this.runSweep();
@@ -359,7 +352,6 @@ export class InboxCursorStore {
       try {
         const summary = this.sweepRetention();
         if (summary.expired + summary.capped === 0) return;
-        await this.flushSnapshot();
         this.onSweep?.(summary);
       } catch (error) {
         try { this.onSweepError?.(error instanceof Error ? error.message : String(error)); }
@@ -400,9 +392,7 @@ export class InboxCursorStore {
        )`,
       [this.itemCap],
     );
-    const removed = before - this.countItems();
-    if (removed > 0) this.revision += 1;
-    return removed;
+    return before - this.countItems();
   }
 
   /**
@@ -687,23 +677,7 @@ export class InboxCursorStore {
     }
     const before = this.countItems(providers);
     this.store.run(`DELETE FROM items WHERE ${clauses.join(' AND ')}`, params);
-    const removed = before - this.countItems(providers);
-    if (removed > 0) this.revision += 1;
-    return removed;
-  }
-
-  private flushSnapshot(): Promise<void> {
-    if (this.revision === this.persistedRevision) return Promise.resolve();
-    const revision = this.revision;
-    const pending = this.store.save().then(() => {
-      this.persistedRevision = Math.max(this.persistedRevision, revision);
-    });
-    this.flushing.add(pending);
-    void pending.then(
-      () => { this.flushing.delete(pending); },
-      () => { this.flushing.delete(pending); },
-    );
-    return pending;
+    return before - this.countItems(providers);
   }
 
   /** Stop admission/timers, await owned I/O, flush the last revision and close. */
@@ -717,7 +691,6 @@ export class InboxCursorStore {
         // A late init must finish before we close its handle. It is prevented
         // from starting a sweep/timer once closed, but its actual I/O is owned.
         await Promise.allSettled([this.initializing, ...this.sweeping, ...this.flushing]);
-        await this.flushSnapshot();
         if (timerError !== undefined) throw timerError;
       } finally { this.store.close(); this.releaseStorage(); }
     });

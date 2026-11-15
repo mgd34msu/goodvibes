@@ -1,293 +1,48 @@
-import { readFileSync } from 'fs';
-import { logger } from '../utils/logger.js';
-import { summarizeError } from '../utils/error-display.js';
-
-/**
- * A cache entry tracking file read history and content state.
- */
-export interface CacheEntry {
-  /** Stored content (only in with_content mode). */
-  content?: string | undefined;
-  lineCount: number;
-  byteSize: number;
-  firstReadAt: number;
-  lastReadAt: number;
-  readCount: number;
-  /** Estimated LLM tokens: Math.ceil(byteSize / 4). */
-  tokenEstimate: number;
-  /** Cumulative tokens saved by cache hits. */
-  tokensSaved: number;
-  /** OCC version counter, increments on every external modification. */
-  version: number;
-}
-
-export interface ConflictInfo {
-  yourVersion: number;
-  currentVersion: number;
-  diffSinceRead?: string | undefined;
-}
+import { createHash } from 'node:crypto';
 
 export type CacheStatus = 'miss' | 'unchanged' | 'modified';
 
-interface LRUNode {
-  filePath: string;
-  entry: CacheEntry;
-  /** Exact private baseline, including in metadata-only response mode. */
-  observedContent: string;
-  /** Approximate memory footprint in bytes (content + overhead). */
-  memBytes: number;
-  /** Access time for LRU eviction. */
-  accessAt: number;
+function digest(content: string): string {
+  return createHash('sha256').update(content, 'utf8').digest('hex');
 }
 
 /**
- * FileStateCache, File state tracking with Optimistic Concurrency Control.
+ * FileStateCache: "is this file still what this session last saw?"
  *
- * Tracks files that have been read by tools/agents, detects external modifications,
- * and provides conflict information for OCC workflows.
+ * One SHA-256 per path (64 bytes), recorded when a tool reads or writes the
+ * file. A read or edit compares the bytes it has just read itself with the
+ * recorded hash, so the comparison and the operation see the same instant and
+ * the file is read once per call. Nothing is evicted, so the protection does
+ * not lapse for files read long ago; memory grows by one hash per file read.
+ *
+ * - miss: this session has not seen the file
+ * - unchanged: the bytes are the ones last seen
+ * - modified: the file changed since this session last saw it
  */
 export class FileStateCache {
-  private readonly mode: 'metadata_only' | 'with_content';
-  private readonly maxMemoryBytes: number;
-  private cache: Map<string, LRUNode> = new Map();
-  private totalMemBytes = 0;
-  private totalReads = 0;
-  private cacheHits = 0;
+  private readonly hashes = new Map<string, string>();
 
-  constructor(options?: { mode?: 'metadata_only' | 'with_content'; maxMemoryMB?: number }) {
-    this.mode = options?.mode ?? 'metadata_only';
-    this.maxMemoryBytes = (options?.maxMemoryMB ?? 200) * 1024 * 1024;
+  /** Compare content the caller just read with what this session last saw. Records nothing. */
+  compare(filePath: string, content: string): CacheStatus {
+    const seen = this.hashes.get(filePath);
+    if (seen === undefined) return 'miss';
+    return seen === digest(content) ? 'unchanged' : 'modified';
   }
 
-  // ---------------------------------------------------------------------------
-  // Core API
-  // ---------------------------------------------------------------------------
-
-  /**
-   * Look up the current state of a file.
-   *
-   * - miss: file has never been cached
-   * - unchanged: exact content matches what we last saw
-   * - modified: exact content differs (external modification)
-   *
-   * In `with_content` mode, a unified diff is included when status is 'modified'.
-   */
-  lookup(filePath: string): { status: CacheStatus; entry?: CacheEntry | undefined; diff?: string | undefined } {
-    this.totalReads++;
-    const node = this.cache.get(filePath);
-    if (!node) {
-      return { status: 'miss' };
-    }
-
-    // Re-read file to detect external changes
-    let currentContent: string;
-    try {
-      currentContent = readFileSync(filePath, 'utf-8');
-    } catch (err) {
-      if (isMissingFileError(err)) {
-        return { status: 'miss' };
-      }
-      throw new Error(`FileStateCache failed to read cached file ${filePath}: ${summarizeError(err)}`);
-    }
-
-    node.accessAt = Date.now();
-
-    if (currentContent === node.observedContent) {
-      this.cacheHits++;
-      node.entry.lastReadAt = Date.now();
-      node.entry.readCount++;
-      node.entry.tokensSaved += node.entry.tokenEstimate;
-      return { status: 'unchanged', entry: { ...node.entry } };
-    }
-
-    // Modified externally, return modified status with optional diff
-    let diff: string | undefined;
-    if (this.mode === 'with_content' && node.entry.content !== undefined) {
-      diff = unifiedDiff(node.entry.content, currentContent, filePath);
-    }
-
-    // Advance the actual observation and keep the cache's memory accounting exact.
-    node.entry.version++;
-    node.observedContent = currentContent;
-    const oldMem = node.memBytes;
-    node.memBytes = estimateMemBytes(filePath, currentContent);
-    this.totalMemBytes += node.memBytes - oldMem;
-    node.entry.lineCount = currentContent.split('\n').length;
-    node.entry.byteSize = Buffer.byteLength(currentContent, 'utf-8');
-    node.entry.tokenEstimate = Math.ceil(node.entry.byteSize / 4);
-    if (this.mode === 'with_content') {
-      node.entry.content = currentContent;
-    }
-    node.entry.lastReadAt = Date.now();
-    node.entry.readCount++;
-    this.evictIfNeeded();
-
-    return { status: 'modified', entry: { ...node.entry }, diff };
+  /** Record the content a tool read or wrote as what this session has seen. */
+  update(filePath: string, content: string, _metadata?: { tool?: string; agent?: string }): void {
+    this.hashes.set(filePath, digest(content));
   }
 
-  /**
-   * Compare the file on disk with the last observation without recording a
-   * new one. A writer uses this: a refused write must keep refusing until the
-   * file is read again, so only a read (`lookup`/`update`) may advance it.
-   */
-  peek(filePath: string): { status: CacheStatus } {
-    const node = this.cache.get(filePath);
-    if (!node) return { status: 'miss' };
-    let currentContent: string;
-    try {
-      currentContent = readFileSync(filePath, 'utf-8');
-    } catch (err) {
-      if (isMissingFileError(err)) return { status: 'miss' };
-      throw new Error(`FileStateCache failed to read cached file ${filePath}: ${summarizeError(err)}`);
-    }
-    return { status: currentContent === node.observedContent ? 'unchanged' : 'modified' };
-  }
-
-  /**
-   * Record that a file was read or written by a tool/agent.
-   * Creates or updates the cache entry.
-   */
-  update(
-    filePath: string,
-    content: string,
-    metadata?: { tool?: string; agent?: string },
-  ): void {
-    const lineCount = content.split('\n').length;
-    const byteSize = Buffer.byteLength(content, 'utf-8');
-    const tokenEstimate = Math.ceil(byteSize / 4);
-    const now = Date.now();
-
-    const existing = this.cache.get(filePath);
-    if (existing) {
-      const oldMem = existing.memBytes;
-      existing.observedContent = content;
-      existing.entry.lineCount = lineCount;
-      existing.entry.byteSize = byteSize;
-      existing.entry.tokenEstimate = tokenEstimate;
-      existing.entry.lastReadAt = now;
-      existing.entry.readCount++;
-      existing.entry.version++;
-      if (this.mode === 'with_content') {
-        existing.entry.content = content;
-      }
-      existing.accessAt = now;
-      existing.memBytes = estimateMemBytes(filePath, content);
-      this.totalMemBytes += existing.memBytes - oldMem;
-    } else {
-      const entry: CacheEntry = {
-        lineCount,
-        byteSize,
-        firstReadAt: now,
-        lastReadAt: now,
-        readCount: 1,
-        tokenEstimate,
-        tokensSaved: 0,
-        version: 1,
-      };
-      if (this.mode === 'with_content') {
-        entry.content = content;
-      }
-      const memBytes = estimateMemBytes(filePath, content);
-      const node: LRUNode = { filePath, entry, observedContent: content, memBytes, accessAt: now };
-      this.cache.set(filePath, node);
-      this.totalMemBytes += memBytes;
-    }
-
-    if (metadata?.tool) {
-      logger.debug('FileStateCache: updated', { filePath, tool: metadata.tool, version: this.cache.get(filePath)?.entry.version });
-    }
-
-    this.evictIfNeeded();
-  }
-
-  /**
-   * Check for an OCC conflict: has the file been modified since `expectedVersion`?
-   * Returns null if no conflict, or ConflictInfo if the version has advanced.
-   */
-  checkConflict(filePath: string, expectedVersion: number): ConflictInfo | null {
-    const node = this.cache.get(filePath);
-    if (!node) return null;
-    if (node.entry.version === expectedVersion) return null;
-    return {
-      yourVersion: expectedVersion,
-      currentVersion: node.entry.version,
-      diffSinceRead: undefined, // diff on demand only
-    };
-  }
-
-  /**
-   * Remove a file from the cache.
-   */
+  /** Forget a file (it was changed by something that did not read it, such as an undo). */
   invalidate(filePath: string): void {
-    const node = this.cache.get(filePath);
-    if (node) {
-      this.totalMemBytes -= node.memBytes;
-      this.cache.delete(filePath);
-    }
+    this.hashes.delete(filePath);
   }
 
-  /**
-   * Return cache statistics.
-   */
-  getStats(): {
-    uniqueFiles: number;
-    totalReads: number;
-    hitRate: number;
-    tokensSaved: number;
-    memoryMB: number;
-  } {
-    let tokensSaved = 0;
-    for (const node of this.cache.values()) {
-      tokensSaved += node.entry.tokensSaved;
-    }
-    return {
-      uniqueFiles: this.cache.size,
-      totalReads: this.totalReads,
-      hitRate: this.totalReads > 0 ? this.cacheHits / this.totalReads : 0,
-      tokensSaved,
-      memoryMB: this.totalMemBytes / (1024 * 1024),
-    };
-  }
-
-  /**
-   * Clear all cached entries.
-   */
+  /** Forget every file. */
   clear(): void {
-    this.cache.clear();
-    this.totalMemBytes = 0;
+    this.hashes.clear();
   }
-
-  // ---------------------------------------------------------------------------
-  // Private helpers
-  // ---------------------------------------------------------------------------
-
-  private evictIfNeeded(): void {
-    if (this.totalMemBytes <= this.maxMemoryBytes) return;
-
-    // Sort by oldest access time, evict until under budget
-    const nodes = Array.from(this.cache.values()).sort((a, b) => a.accessAt - b.accessAt);
-    for (const node of nodes) {
-      if (this.totalMemBytes <= this.maxMemoryBytes) break;
-      this.totalMemBytes -= node.memBytes;
-      this.cache.delete(node.filePath);
-      logger.debug('FileStateCache: LRU evict', { filePath: node.filePath });
-    }
-  }
-}
-
-function isMissingFileError(err: unknown): boolean {
-  return typeof err === 'object' && err !== null && 'code' in err && err.code === 'ENOENT';
-}
-
-// ---------------------------------------------------------------------------
-// Module-level helpers
-// ---------------------------------------------------------------------------
-
-/**
- * Estimate in-memory footprint for a cache node.
- */
-function estimateMemBytes(filePath: string, content: string): number {
-  return filePath.length * 2 + content.length * 2 + 256; // 256 bytes overhead for entry fields
 }
 
 /**

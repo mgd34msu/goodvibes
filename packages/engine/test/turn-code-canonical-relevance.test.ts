@@ -1,6 +1,6 @@
 /** Offline proofs through the real passive injection caller and canonical rerank owner. */
 import { afterEach, expect, test } from 'bun:test';
-import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
+import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort, bindJudgmentPortAuthority, JudgmentAuthorityRetiredError, JudgmentPortMissingError } from '../errors/src/index.js';
 import { buildPerTurnKnowledgeInjection, type TurnCodeIndexSource } from '../platform/src/platform/agents/turn-knowledge-injection.js';
 import { rankCodeInjectionSnapshots } from '../platform/src/platform/state/code-injection-ranking.js';
@@ -37,7 +37,9 @@ test('semantic no drops a 0.99 vector neighbor, yes admits 0.01; registered owne
   expect(fake.requests).toHaveLength(2);
 });
 test('probability ×190 competes with memory in the existing shared budget', async () => {
-  use(fakePort((_name, _question, state) => noulAnswer(typeof state === 'object' && state !== null && 'candidate' in state ? 0.9 : 0.95)).port);
+  // Memory candidates are read together in one Choice; code hits one yes/no each.
+  use(fakePort((_name, question, state) => question.type === 'choice' ? choiceAnswer(question, 'memory', 0.95)
+    : noulAnswer(typeof state === 'object' && state !== null && 'candidate' in state ? 0.9 : 0.95)).port);
   const record: MemoryRecord = { id: 'memory', scope: 'project', cls: 'fact', summary: 'retry budget', detail: undefined, tags: [], provenance: [], confidence: 90, reviewState: 'reviewed', createdAt: 1, updatedAt: 1 };
   const memoryRegistry = { getAll: () => [record] };
   const full = await run(source([irrelevant]), { memoryRegistry });
@@ -67,7 +69,8 @@ test('port replacement during a reading invalidates authority', async () => {
 test('generation change during a reading invalidates consumption', async () => {
   let stale = false;
   use(fakePort(() => { stale = true; return noulAnswer(0.99); }).port);
-  await expect(run(source([irrelevant], { assertCurrent: async () => { if (stale) throw new Error('generation stale'); } }))).rejects.toThrow('generation stale');
+  const result = await run(source([irrelevant], { assertCurrent: async () => { if (stale) throw new Error('generation stale'); } }));
+  await expect(result.assertCodeCurrent!()).rejects.toThrow('generation stale');
 });
 test('canceling a pending uncooperative reading returns no injection', async () => {
   const stop = new AbortController(); const fake = fakePort(() => noulAnswer(0.99));
@@ -118,7 +121,11 @@ test('real live vector source requires current policy before code enters canonic
 test('real live source mutation during canonical reading cannot publish a chunk', async () => {
   const live = await createCanonicalLiveCodeSource();
   use(fakePort(() => { live.mutate(); return noulAnswer(0.99); }).port);
-  try { await expect(run(live.store, { codeAuthority: { readAccessFilter: live.readAccessFilter } })).rejects.toThrow('stale'); }
+  try {
+    const result = await run(live.store, { codeAuthority: { readAccessFilter: live.readAccessFilter } });
+    // Checked once at consumption: the changed file is refused before its chunk is used.
+    await expect(result.assertCodeCurrent!()).rejects.toThrow('stale');
+  }
   finally { live.dispose(); }
 });
 

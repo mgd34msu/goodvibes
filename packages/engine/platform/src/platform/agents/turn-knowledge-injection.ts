@@ -83,7 +83,7 @@ export type TurnCodeIndexSource = {
   stats(): Pick<
     CodeIndexStats,
     'available' | 'indexedChunks' | 'embeddingProviderMismatch' | 'semanticRetrievalAvailable' | 'error'
-  >;
+  > & { readonly lastSearchError?: string | undefined };
 };
 
 /** Source of one injected line: reviewable project memory vs the repo code index. */
@@ -178,7 +178,7 @@ export function memoryRecordIdsOf(record: Pick<TurnInjectionRecord, 'injectedIds
  */
 export type TurnKnowledgeRegistrySource = {
   getAll(): readonly MemoryRecord[];
-  semanticCandidates?(input: Parameters<MemoryRegistry['semanticCandidates']>[0]): readonly MemorySemanticSearchResult[];
+  semanticCandidates?(input: Parameters<MemoryRegistry['semanticCandidates']>[0]): readonly MemorySemanticSearchResult[] | Promise<readonly MemorySemanticSearchResult[]>;
   vectorStats?(): MemoryVectorStats;
 };
 
@@ -324,11 +324,15 @@ async function collectCodeInjectionCandidates(
   const hits = await codeIndex.search(query, { limit: codeLimit });
   const generation = codeIndex.generation?.();
   const considered = hits.filter(hit => !alreadyInjectedIdSet.has(generation === undefined ? codeHitId(hit) : `${codeHitId(hit)}:${generation}:${hit.chunk.fileRevision}`)).length;
-  if (!hits.length) return { candidates: [], considered, skipped: undefined };
+  if (!hits.length) {
+    // No hits because search could not run (the query embedding failed) is not "nothing matches".
+    const searchError = codeIndex.stats().lastSearchError;
+    return { candidates: [], considered, skipped: searchError };
+  }
   if (!codeIndex.rankForInjection) return { candidates: [], considered, skipped: 'code relevance unavailable' };
+  // The ranking authorized and read each hit once before its request; the
+  // caller checks once more at consumption through assertCodeCurrent.
   const reading = await codeIndex.rankForInjection(query, hits, authority);
-  await reading.assertCurrent();
-  await codeIndex.assertCurrent?.(generation);
   const candidates: MergedCandidate[] = [];
   for (const { hit, probability } of reading.ranked) {
     const id = generation === undefined ? codeHitId(hit) : `${codeHitId(hit)}:${generation}:${hit.chunk.fileRevision}`;
@@ -412,8 +416,8 @@ export async function buildPerTurnKnowledgeInjection(
     } };
   }
 
-  const scored = (await selectKnowledgeForTaskScored(memoryRegistry, query, writeScope, limit))
-    .filter((entry) => !alreadyInjectedIdSet.has(entry.injection.id));
+  // Already-injected records are left out before anything is asked about them.
+  const scored = await selectKnowledgeForTaskScored(memoryRegistry, query, writeScope, limit, { excludeIds: alreadyInjectedIdSet });
   const candidatesConsidered = scored.length;
   const memoryCleared: MergedCandidate[] = scored
     .filter((entry) => entry.score >= relevanceFloor)

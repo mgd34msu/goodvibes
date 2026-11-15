@@ -2,6 +2,8 @@ import { DEFAULT_MEMORY_EMBEDDING_DIMS } from './memory-embeddings.js';
 import { WELL_KNOWN_LOCAL_ENDPOINTS } from '../providers/well-known-endpoints.js';
 import { summarizeError } from '../utils/error-display.js';
 import type {
+  BatchMemoryEmbeddingProvider,
+  MemoryEmbeddingBatchRequest,
   MemoryEmbeddingProvider,
   MemoryEmbeddingProviderState,
   MemoryEmbeddingProviderStatus,
@@ -34,6 +36,10 @@ interface ProviderDefinition {
   resolveConfig(env: EnvMap, requestedDimensions: number): ProviderRuntimeConfig;
   buildRequest(config: ProviderRuntimeConfig, request: MemoryEmbeddingRequest): RequestInit & { readonly url: string };
   parseResponse(payload: unknown, request: MemoryEmbeddingRequest, config: ProviderRuntimeConfig): MemoryEmbeddingResult;
+  /** The list form of the endpoint: one request body for many texts. */
+  buildBatchRequest(config: ProviderRuntimeConfig, request: MemoryEmbeddingBatchRequest): RequestInit & { readonly url: string };
+  /** Vectors from a list response, in the order of the texts sent. */
+  parseBatchVectors(payload: unknown): readonly (readonly number[])[] | null;
 }
 
 interface CreateProviderContext {
@@ -45,6 +51,10 @@ type EmbeddingFetchLike = (input: string | URL | Request, init?: RequestInit) =>
 
 /** Longest one embedding request may take when the caller gave no signal of its own. */
 const EMBEDDING_REQUEST_TIMEOUT_MS = 30_000;
+/** Attempts per request when the provider answers 429 (rate limited); other failures are not retried. */
+const RATE_LIMIT_ATTEMPTS = 4;
+/** Longest single wait a Retry-After may ask for; a longer one fails the request with the provider's reason. */
+const RATE_LIMIT_MAX_WAIT_MS = 60_000;
 
 const DEFAULT_OPENAI_BASE_URL = 'https://api.openai.com/v1';
 const DEFAULT_OPENAI_MODEL = 'text-embedding-3-small';
@@ -67,9 +77,20 @@ export function createBuiltinMemoryEmbeddingProviders(context: CreateProviderCon
   ];
 }
 
-function createHttpEmbeddingProvider(definition: ProviderDefinition, context: CreateProviderContext): MemoryEmbeddingProvider {
+function createHttpEmbeddingProvider(definition: ProviderDefinition, context: CreateProviderContext): BatchMemoryEmbeddingProvider {
   const env = context.env ?? process.env;
   const fetchImpl: EmbeddingFetchLike = context.fetchImpl ?? globalThis.fetch.bind(globalThis);
+  const resolveConfigured = (dimensions: number): ProviderRuntimeConfig => {
+    const config = definition.resolveConfig(env, dimensions);
+    if (!config.configured) throw new Error(config.detail);
+    return config;
+  };
+  const resultMetadata = (config: ProviderRuntimeConfig, metadata: Record<string, unknown> | undefined): Record<string, unknown> => ({
+    ...config.metadata,
+    ...metadata,
+    providerId: definition.id,
+    providerLabel: definition.label,
+  });
   return {
     capturedInputAdmission: 'per-attempt',
     id: definition.id,
@@ -78,33 +99,37 @@ function createHttpEmbeddingProvider(definition: ProviderDefinition, context: Cr
     local: definition.local,
     async embed(request: MemoryEmbeddingRequest): Promise<MemoryEmbeddingResult> {
       request.signal?.throwIfAborted();
-      const preparationCheck = request.beforeAttempt?.();
-      if (preparationCheck !== undefined) await preparationCheck;
-      request.signal?.throwIfAborted();
-      const config = definition.resolveConfig(env, request.dimensions);
-      if (!config.configured) {
-        throw new Error(config.detail);
-      }
-      // Never follow a redirect (an Authorization or API-key header would go with it), and never wait forever on a server that does not answer.
-      const signal = request.signal ?? AbortSignal.timeout(EMBEDDING_REQUEST_TIMEOUT_MS);
-      const init = { ...definition.buildRequest(config, request), signal, redirect: 'error' as const };
-      const dispatchCheck = request.beforeAttempt?.();
-      if (dispatchCheck !== undefined) await dispatchCheck;
-      request.signal?.throwIfAborted();
-      const response = await fetchImpl(config.endpoint, init);
-      const payload = await readJsonResponse(response, config.endpoint, definition.id);
+      const config = resolveConfigured(request.dimensions);
+      const payload = await postEmbeddingRequest(fetchImpl, definition, definition.buildRequest(config, request), request);
       const result = definition.parseResponse(payload, request, config);
       return {
         vector: result.vector,
         dimensions: result.dimensions,
         modelId: result.modelId ?? config.model,
-        metadata: {
-          ...config.metadata,
-          ...result.metadata,
-          providerId: definition.id,
-          providerLabel: definition.label,
-        },
+        metadata: resultMetadata(config, result.metadata),
       };
+    },
+    async embedMany(request: MemoryEmbeddingBatchRequest): Promise<MemoryEmbeddingResult[]> {
+      request.signal?.throwIfAborted();
+      if (request.texts.length === 0) return [];
+      const config = resolveConfigured(request.dimensions);
+      const payload = await postEmbeddingRequest(fetchImpl, definition, definition.buildBatchRequest(config, request), request);
+      const vectors = definition.parseBatchVectors(payload);
+      if (!vectors || vectors.length !== request.texts.length) {
+        throw new Error(`${definition.label} response from ${config.endpoint} held ${vectors?.length ?? 0} vectors for ${request.texts.length} texts`);
+      }
+      const modelId = extractModelId(payload) ?? config.model;
+      return vectors.map((vector) => {
+        if (vector.length < request.dimensions) {
+          throw new Error(`Embeddings response from ${config.endpoint} has ${vector.length} dimensions, fewer than the ${request.dimensions} the memory index stores. Use an embedding model that returns at least ${request.dimensions}.`);
+        }
+        return {
+          vector,
+          dimensions: vector.length,
+          modelId,
+          metadata: resultMetadata(config, { requestedDimensions: request.dimensions, responseDimensions: vector.length, batchSize: request.texts.length }),
+        };
+      });
     },
     async status(): Promise<MemoryEmbeddingProviderStatus> {
       const config = definition.resolveConfig(env, DEFAULT_MEMORY_EMBEDDING_DIMS);
@@ -121,10 +146,85 @@ function createHttpEmbeddingProvider(definition: ProviderDefinition, context: Cr
           local: definition.local,
           hasSyncEmbed: false,
           hasAsyncEmbed: true,
+          hasBatchEmbed: true,
         },
       };
     },
   };
+}
+
+/**
+ * Send one embedding request and return its JSON. A 429 is the provider asking
+ * for time, not a failure: the request is sent again after its Retry-After (or
+ * 1, 2, 4 s without one), up to RATE_LIMIT_ATTEMPTS attempts, and the caller's
+ * signal ends the wait. `beforeAttempt` runs immediately before every attempt.
+ * Redirects are never followed (an Authorization or API-key header would go
+ * with them), and without a caller signal one attempt is bounded by
+ * EMBEDDING_REQUEST_TIMEOUT_MS.
+ */
+async function postEmbeddingRequest(
+  fetchImpl: EmbeddingFetchLike,
+  definition: ProviderDefinition,
+  built: RequestInit & { readonly url: string },
+  request: { readonly signal?: AbortSignal | undefined; readonly beforeAttempt?: (() => void | Promise<void>) | undefined },
+): Promise<unknown> {
+  const { url, ...init } = built;
+  for (let attempt = 1; ; attempt++) {
+    const check = request.beforeAttempt?.();
+    if (check !== undefined) await check;
+    request.signal?.throwIfAborted();
+    const signal = request.signal ?? AbortSignal.timeout(EMBEDDING_REQUEST_TIMEOUT_MS);
+    const response = await fetchImpl(url, { ...init, signal, redirect: 'error' });
+    if (response.status === 429 && attempt < RATE_LIMIT_ATTEMPTS) {
+      const waitMs = retryAfterMs(response.headers.get('retry-after')) ?? 1_000 * 2 ** (attempt - 1);
+      if (waitMs <= RATE_LIMIT_MAX_WAIT_MS) {
+        await response.body?.cancel().catch(() => {});
+        await waitFor(waitMs, request.signal);
+        continue;
+      }
+    }
+    return readJsonResponse(response, url, definition.id);
+  }
+}
+
+/** Retry-After as delay-seconds or an HTTP date; undefined when absent or unreadable. */
+function retryAfterMs(header: string | null): number | undefined {
+  if (!header) return undefined;
+  const seconds = Number(header.trim());
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.ceil(seconds * 1_000);
+  const at = Date.parse(header);
+  return Number.isFinite(at) ? Math.max(0, at - Date.now()) : undefined;
+}
+
+function waitFor(ms: number, signal: AbortSignal | undefined): Promise<void> {
+  signal?.throwIfAborted();
+  return new Promise((resolve, reject) => {
+    const onAbort = (): void => { clearTimeout(timer); reject(signal!.reason); };
+    const timer = setTimeout(() => { signal?.removeEventListener('abort', onAbort); resolve(); }, ms);
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
+/** `data: [{ index, embedding }]` (OpenAI shape), in `index` order. */
+function parseIndexedDataVectors(payload: unknown): number[][] | null {
+  if (!payload || typeof payload !== 'object') return null;
+  const data = (payload as Record<string, unknown>).data;
+  if (!Array.isArray(data)) return null;
+  const entries = data.map((entry, position) => {
+    const record = entry && typeof entry === 'object' ? entry as Record<string, unknown> : {};
+    return { index: typeof record.index === 'number' ? record.index : position, vector: findNumericArray(record.embedding) };
+  });
+  if (entries.some(entry => entry.vector === null)) return null;
+  return entries.sort((a, b) => a.index - b.index).map(entry => entry.vector!);
+}
+
+/** `embeddings: [[...], ...]` (Ollama) or `embeddings: [{ values }]` (Gemini batch). */
+function parseEmbeddingsListVectors(payload: unknown): number[][] | null {
+  if (!payload || typeof payload !== 'object') return null;
+  const list = (payload as Record<string, unknown>).embeddings;
+  if (!Array.isArray(list)) return null;
+  const vectors = list.map(entry => findNumericArray(entry) ?? (entry && typeof entry === 'object' ? findNumericArray((entry as Record<string, unknown>).values) : null));
+  return vectors.every((vector): vector is number[] => vector !== null) ? vectors : null;
 }
 
 function createOpenAIEmbeddingDefinition(): ProviderDefinition {
@@ -185,6 +285,19 @@ function createOpenAIEmbeddingDefinition(): ProviderDefinition {
         }),
       };
     },
+    buildBatchRequest(config, request) {
+      return {
+        url: config.endpoint,
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+          Authorization: `Bearer ${config.apiKey ?? ''}`,
+        },
+        body: JSON.stringify({ model: config.model, input: request.texts, dimensions: request.dimensions, encoding_format: 'float' }),
+      };
+    },
+    parseBatchVectors: parseIndexedDataVectors,
     parseResponse(payload, request, config) {
       const vector = extractEmbeddingVector(payload);
       if (!vector) {
@@ -280,6 +393,17 @@ function createOpenAICompatibleEmbeddingDefinition(): ProviderDefinition {
         }),
       };
     },
+    buildBatchRequest(config, request) {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json', Accept: 'application/json' };
+      if (config.apiKey) headers.Authorization = `Bearer ${config.apiKey}`;
+      return {
+        url: config.endpoint,
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ model: config.model, input: request.texts, encoding_format: 'float' }),
+      };
+    },
+    parseBatchVectors: parseIndexedDataVectors,
     parseResponse(payload, request, config) {
       const vector = extractEmbeddingVector(payload);
       if (!vector) {
@@ -370,6 +494,26 @@ function createGeminiEmbeddingDefinition(): ProviderDefinition {
         }),
       };
     },
+    buildBatchRequest(config, request) {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json', Accept: 'application/json' };
+      if (config.apiKey) headers['x-goog-api-key'] = config.apiKey;
+      const taskType = request.usage === 'query' ? 'RETRIEVAL_QUERY' : request.usage === 'record' ? 'RETRIEVAL_DOCUMENT' : undefined;
+      return {
+        // The list form of embedContent is batchEmbedContents on the same model.
+        url: config.endpoint.replace(/:embedContent$/, ':batchEmbedContents'),
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          requests: request.texts.map(text => ({
+            model: `models/${config.model}`,
+            content: { parts: [{ text }] },
+            taskType,
+            outputDimensionality: request.dimensions,
+          })),
+        }),
+      };
+    },
+    parseBatchVectors: parseEmbeddingsListVectors,
     parseResponse(payload, request, config) {
       const vector = extractEmbeddingVector(payload);
       if (!vector) {
@@ -451,6 +595,15 @@ function createMistralEmbeddingDefinition(): ProviderDefinition {
         }),
       };
     },
+    buildBatchRequest(config, request) {
+      return {
+        url: config.endpoint,
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json', Authorization: `Bearer ${config.apiKey ?? ''}` },
+        body: JSON.stringify({ model: config.model, input: request.texts, encoding_format: 'float' }),
+      };
+    },
+    parseBatchVectors: parseIndexedDataVectors,
     parseResponse(payload, request, config) {
       const vector = extractEmbeddingVector(payload);
       if (!vector) {
@@ -524,6 +677,15 @@ function createOllamaEmbeddingDefinition(): ProviderDefinition {
         }),
       };
     },
+    buildBatchRequest(config, request) {
+      return {
+        url: config.endpoint,
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ model: config.model, input: request.texts }),
+      };
+    },
+    parseBatchVectors: parseEmbeddingsListVectors,
     parseResponse(payload, request, config) {
       const vector = extractEmbeddingVector(payload);
       if (!vector) {

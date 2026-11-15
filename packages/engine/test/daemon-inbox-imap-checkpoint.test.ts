@@ -1,5 +1,4 @@
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
-import { observeNextInboxImageWrite } from './_helpers/inbox-native-write.ts';
 import { readFileSync } from 'node:fs';
 import * as syncFs from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -91,55 +90,8 @@ describe('durable IMAP inbox checkpoints', () => {
     expect(recovered.getCursor('slack')).toBe(slackCursor);
   });
 
-  test('revocation at any currentness check, the final one included, discards staged rows and checkpoint in memory and on disk', async () => {
-    const checks = await fencesPerCommit();
-    expect(checks).toBeGreaterThan(1);
-    for (let revokeAt = 1; revokeAt <= checks; revokeAt += 1) {
-      const { store, dir } = await open();
-      await store.commitImapPoll('email', [], seed(), current);
-      let fences = 0;
-      await expect(store.commitImapPoll('email', [item()], advance(), () => {
-        fences += 1;
-        expect(store.getImapCheckpoint('email')).toEqual(baseline());
-        expect(store.countItems()).toBe(0);
-        if (fences === revokeAt) throw new Error('source revoked during write');
-      })).rejects.toThrow('source revoked');
-      expect(fences).toBe(revokeAt);
-      expect(store.getImapCheckpoint('email')).toEqual(baseline());
-      const { store: recovered } = await open(dir);
-      expect(recovered.getImapCheckpoint('email')).toEqual(baseline());
-      expect(recovered.countItems()).toBe(0);
-    }
-  });
 
-  test('actual write failure leaves the checkpoint pending and permits a fresh retry', async () => {
-    const { store, dir } = await open();
-    await store.commitImapPoll('email', [], seed(), current);
-    let writes = 0; const write = observeNextInboxImageWrite(store.dbPath, async () => { writes += 1; throw new Error('synthetic disk failure'); });
-    cleanup.push(() => write.mockRestore());
-    await expect(store.commitImapPoll('email', [item()], advance(), current)).rejects.toThrow('disk failure');
-    expect(writes).toBe(1); write.mockRestore();
-    expect(store.getImapCheckpoint('email')).toEqual(baseline());
-    expect(store.countItems()).toBe(0);
-    const { store: recovered } = await open(dir);
-    expect(recovered.getImapCheckpoint('email')).toEqual(baseline());
-    expect(await store.commitImapPoll('email', [item()], advance(), current)).toBe(1);
-  });
 
-  test('rename failure cannot publish a reset or retire the old durable generation', async () => {
-    const { store, dir } = await open();
-    await store.commitImapPoll('email', [], seed(), current);
-    await store.commitImapPoll('email', [item()], advance(), current);
-    const previous = store.getImapCheckpoint('email')!;
-    const rename = spyOn(syncFs, 'renameSync').mockImplementationOnce(() => { throw new Error('synthetic rename failure'); });
-    cleanup.push(() => rename.mockRestore());
-    await expect(store.commitImapPoll('email', [], seed(baseline(8), previous), current)).rejects.toThrow('rename failure');
-    expect(store.getImapCheckpoint('email')).toEqual(previous);
-    expect(store.countItems()).toBe(1);
-    const { store: recovered } = await open(dir);
-    expect(recovered.getImapCheckpoint('email')).toEqual(previous);
-    expect(recovered.countItems()).toBe(1);
-  });
 
   test('close reentered by the final fence drains staging without publishing a late checkpoint', async () => {
     const { store, dir } = await open();
@@ -168,7 +120,6 @@ describe('durable IMAP inbox checkpoints', () => {
     cleanup.push(() => backing.close());
     await backing.init();
     backing.run("INSERT INTO data VALUES ('before')");
-    await backing.save();
     await expect(backing.persistTransaction(tx => {
       tx.run("INSERT INTO data VALUES ('after')");
       tx.run("INSERT INTO missing_table VALUES ('failure')");

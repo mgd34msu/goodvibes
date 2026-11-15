@@ -24,14 +24,16 @@ function makeTarget(over: {
 } = {}) {
   const calls: string[] = [];
   const modes: Array<{ automatic?: boolean } | undefined> = [];
+  const builds = { count: 0 };
   const target: CodeIndexReindexTarget = {
     reindexFile: async (abs, options) => {
       calls.push(abs); modes.push(options);
       return over.reindex ? over.reindex(abs) : { indexed: true, mode: 'symbols' as CodeChunkMode };
     },
+    scheduleBuild: () => { builds.count += 1; },
     stats: () => ({ available: over.available ?? true, indexedChunks: over.indexedChunks ?? 5 }),
   };
-  return { target, calls, modes };
+  return { target, calls, modes, builds };
 }
 
 const ROOT = '/repo';
@@ -169,37 +171,24 @@ describe('scheduler: no-op gates', () => {
     await s.flush();
     expect(calls).toEqual([]);
     expect(s.lastActivity()?.status).toBe('skipped');
-    expect(s.lastActivity()?.reason).toContain('queued');
     s.dispose();
   });
 
-  test('an edit made while reindexing is paused is indexed once it resumes', async () => {
+  test('edits missed while paused are never dropped: resuming starts the incremental build', async () => {
     let enabled = false;
-    const { target, calls } = makeTarget();
-    const s = new CodeIndexReindexScheduler({ target, workingDirectory: ROOT, debounceMs: 1, isEnabled: () => enabled });
-    s.onToolExecuted('write', { files: [{ path: 'a.ts', content: 'x' }] }, true);
-    await s.flush();
-    expect(s.deferredCount()).toBe(1);
-    s.retryDeferred();
-    expect(calls).toEqual([]);
-    enabled = true;
-    s.retryDeferred();
-    await s.flush();
-    expect(calls).toEqual(['/repo/a.ts']);
-    expect(s.deferredCount()).toBe(0);
-    s.dispose();
-  });
-
-  test('a deferred edit older than ten minutes is dropped rather than held forever', async () => {
     let clock = 0;
-    const { target, calls } = makeTarget();
-    const s = new CodeIndexReindexScheduler({ target, workingDirectory: ROOT, debounceMs: 1, isEnabled: () => false, now: () => clock });
-    s.onToolExecuted('write', { files: [{ path: 'a.ts', content: 'x' }] }, true);
+    const { target, calls, builds } = makeTarget();
+    const s = new CodeIndexReindexScheduler({ target, workingDirectory: ROOT, debounceMs: 1, isEnabled: () => enabled, now: () => clock });
+    for (const path of ['a.ts', 'b.ts', 'c.ts']) s.onToolExecuted('write', { files: [{ path, content: 'x' }] }, true);
     await s.flush();
+    expect(s.missedCount()).toBe(3);
     clock = 11 * 60 * 1000;
-    s.retryDeferred();
-    expect(s.deferredCount()).toBe(0);
+    expect(s.resume()).toBe(false);
+    enabled = true;
+    expect(s.resume()).toBe(true);
+    expect(builds.count).toBe(1);
     expect(calls).toEqual([]);
+    expect(s.missedCount()).toBe(0);
     s.dispose();
   });
 

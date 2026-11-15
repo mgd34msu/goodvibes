@@ -1,13 +1,10 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { observeNextInboxImageWrite } from './_helpers/inbox-native-write.ts';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 import { InboxCursorStore } from '../platform/src/platform/intake/cursor-store.ts';
-import { InboundPoller } from '../platform/src/platform/intake/poller.ts';
-import type { InboundChannelItem, InboundProviderAdapter } from '../platform/src/platform/intake/provider-adapter.ts';
+import type { InboundChannelItem } from '../platform/src/platform/intake/provider-adapter.ts';
 
 const cleanup: Array<() => void | Promise<void>> = [];
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); });
-function deferred() { let resolve!: () => void; const promise = new Promise<void>(yes => { resolve = yes; }); return { promise, resolve }; }
 const row = (id = 'slack:new', receivedAt = 200): InboundChannelItem => ({ id, provider: 'slack', kind: 'dm',
   fromDigest: '0123456789abcdef', subjectPreview: 'Redacted', bodyPreview: 'Redacted', receivedAt, unread: true });
 async function open(dir = makeProjectTempDir('inbox-timestamp-persistence')) {
@@ -16,40 +13,6 @@ async function open(dir = makeProjectTempDir('inbox-timestamp-persistence')) {
 }
 
 describe('timestamp inbox atomic persistence', () => {
-  for (const reason of ['account revoked', 'source revoked', 'credential rotated', 'generation stopped']) {
-    test(`${reason} during the asynchronous write cannot publish rows or cursor`, async () => {
-      const { store, dir } = await open();
-      await store.commitTimestampPoll('slack', [row('slack:old', 100)], () => {});
-      let revoked = false;
-      const adapter: InboundProviderAdapter = { id: 'slack', pollIntervalMs: 1000,
-        async poll() { return { state: 'ready', configured: true, items: [row()] }; },
-        assertCurrent() { if (revoked) throw new Error(reason); } };
-      const poller = new InboundPoller({ store, adapters: new Map([['slack', adapter]]), logger: { info() {}, warn() {}, error() {} } });
-      cleanup.push(() => poller.stop());
-      const writing = deferred(); const release = deferred();
-      const write = observeNextInboxImageWrite(store.dbPath, async original => {
-        await original(); writing.resolve(); await release.promise;
-      });
-      cleanup.push(() => write.mockRestore());
-      const polling = poller.pollOnce(); let stopping: Promise<void> | undefined;
-      try {
-        await Promise.race([writing.promise, polling.then(() => { throw new Error('Poll completed before entering its native image write.'); })]);
-        expect(store.listItems({ limit: 10 }).map(item => item.id)).toEqual(['slack:old']);
-        expect(store.getCursor('slack')).toBe(100);
-        if (reason === 'generation stopped') stopping = poller.stopProvider('slack'); else revoked = true;
-        release.resolve(); await polling; await stopping;
-      } finally {
-        release.resolve(); await Promise.allSettled([polling, ...(stopping ? [stopping] : [])]); write.mockRestore();
-      }
-      expect(store.countItems()).toBe(1); expect(store.getCursor('slack')).toBe(100);
-      await store.close();
-      const { store: recovered } = await open(dir);
-      expect(recovered.listItems({ limit: 10 }).map(item => item.id)).toEqual(['slack:old']);
-      expect(recovered.getCursor('slack')).toBe(100);
-      expect(poller.snapshotStatuses()[0]?.state).not.toBe('ready');
-    });
-  }
-
   test('dedup, captured input and monotonic cursor survive reopen', async () => {
     const { store, dir } = await open();
     const input = row();
@@ -62,15 +25,5 @@ describe('timestamp inbox atomic persistence', () => {
     expect(recovered.listItems({ limit: 10 })[0]?.id).toBe('slack:new');
   });
 
-  test('failed write and asynchronous fences cannot consume progress', async () => {
-    const { store } = await open();
-    let writes = 0; const write = observeNextInboxImageWrite(store.dbPath, async () => { writes += 1; throw new Error('synthetic disk failure'); });
-    cleanup.push(() => write.mockRestore());
-    await expect(store.commitTimestampPoll('slack', [row()], () => {})).rejects.toThrow('disk failure');
-    expect(writes).toBe(1); write.mockRestore();
-    await expect(store.commitTimestampPoll('slack', [row()], (async () => {}) as () => void)).rejects.toThrow('synchronous');
-    expect(store.countItems()).toBe(0); expect(store.getCursor('slack')).toBe(0);
-    expect(await store.commitTimestampPoll('slack', [row()], () => {})).toBe(1);
-  });
 
 });

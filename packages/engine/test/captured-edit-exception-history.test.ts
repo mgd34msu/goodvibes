@@ -62,15 +62,16 @@ async function fixture(onRead?: (path: string, root: string) => void | Promise<v
 }
 function bytes(root: string, index: number): Buffer { return readFileSync(join(root, edits[index]!.path)); }
 function roundTrip(f: Awaited<ReturnType<typeof fixture>>, expected: readonly string[]): void {
-  expect(f.undo.undoDepth()).toBe(2);
-  for (let index = 1; index >= 0; index--) {
-    expect(bytes(f.root, index)).toEqual(Buffer.from(expected[index]!));
-    expect(f.undo.peekUndo()).toMatchObject({ beforeContent: originals[index], afterContent: expected[index], tool: 'edit' });
-    expect(f.undo.undo()?.path).toBe(join(f.root, edits[index]!.path));
-    expect(bytes(f.root, index)).toEqual(Buffer.from(originals[index]!));
-  }
+  // Both files the call edited are one undo entry: undone and redone together.
+  const paths = [0, 1].map((index) => join(f.root, edits[index]!.path));
+  expect(f.undo.undoDepth()).toBe(1);
+  const recorded = new Map(f.undo.peekUndo()!.operations.map((op) => [op.path, [op.beforeContent, op.afterContent, op.tool]]));
+  for (let index = 0; index < 2; index++) expect(recorded.get(paths[index]!)).toEqual([originals[index]!, expected[index]!, 'edit']);
+  for (let index = 0; index < 2; index++) expect(bytes(f.root, index)).toEqual(Buffer.from(expected[index]!));
+  expect([...f.undo.undo()!.paths].sort()).toEqual([...paths].sort());
+  for (let index = 0; index < 2; index++) expect(bytes(f.root, index)).toEqual(Buffer.from(originals[index]!));
+  expect([...f.undo.redo()!.paths].sort()).toEqual([...paths].sort());
   for (let index = 0; index < 2; index++) {
-    expect(f.undo.redo()?.path).toBe(join(f.root, edits[index]!.path));
     expect(bytes(f.root, index)).toEqual(Buffer.from(expected[index]!));
     expect(bytes(f.owner, index)).toEqual(Buffer.from(originals[index]!));
   }
@@ -145,7 +146,7 @@ test('a same-byte replacement is a different revision and does not erase existin
 test('a partial publication failure records only the successfully written file', async () => {
   let reads = 0;
   const f = await fixture((path, root) => {
-    if (path === join(root, 'second.txt') && ++reads === 3) writeFileSync(path, 'newer second bytes\n');
+    if (path === join(root, 'second.txt') && ++reads === 2) writeFileSync(path, 'newer second bytes\n');
   });
   const result = await f.edit().execute({ edits, transaction: { mode: 'partial' } });
   expect(result.success).toBe(true); expect(result.output).toContain('Write failed');
@@ -223,7 +224,7 @@ test('captured finalization finishes inside its original lease before a queued p
   let successorRan = false;
   const successor = withCapturedPublication(f.authority, async () => {
     successorRan = true;
-    expect(f.undo.undoDepth()).toBe(2);
+    expect(f.undo.undoDepth()).toBe(1);
   });
   await Promise.resolve(); expect(successorRan).toBe(false);
   release();

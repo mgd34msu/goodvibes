@@ -120,6 +120,8 @@ export function createStoreRerooter(deps: {
   readonly codeIndexStore: Pick<CodeIndexStore, 'reroot' | 'stats' | 'isBuilding' | 'scheduleBuild'>;
   /** `baseDir` is the current root; the code index moves with it, so it is also where a failed swap returns both. */
   readonly projectIndex: { reroot(dir: string): Promise<unknown>; readonly baseDir: string };
+  /** Follows the project index to the new tree, when the product runs one. */
+  readonly fileWatcher?: { reroot(dir: string): Promise<void> } | undefined;
   /** The owning product's storage scope, so the rerooted index lands in its own directory. */
   readonly surfaceRoot: string;
 }): (newWorkingDir: string) => Promise<void> {
@@ -140,6 +142,7 @@ export function createStoreRerooter(deps: {
       if (wasBuilt) deps.codeIndexStore.scheduleBuild();
       throw error;
     }
+    await deps.fileWatcher?.reroot(newWorkingDir);
     if (wasBuilt) deps.codeIndexStore.scheduleBuild();
   };
 }

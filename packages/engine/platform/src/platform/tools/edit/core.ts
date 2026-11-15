@@ -63,6 +63,8 @@ interface EditExecutionContext {
   fileCache: FileStateCache;
   cwd: string;
   fileUndoManager?: FileUndoManager | undefined;
+  /** This call's undo token: every file it changes is one undo entry. */
+  undoCall?: number | undefined;
   configManager?: Pick<ConfigManager, 'get' | 'getWorkingDirectory'> | undefined;
   toolLLM?: Pick<ToolLLM, 'chat'> | undefined;
   changeTracker?: Pick<SessionChangeTracker, 'recordChange'> | undefined;
@@ -113,22 +115,21 @@ async function prepareTextEditInput(
 
   for (const resolvedPath of uniquePaths) {
     await assertCapturedToolReadAccess(resolvedPath);
-    const cacheResult = env.fileCache.peek(resolvedPath);
-    if (cacheResult.status === 'modified') {
-      const msg = occConflictMessage(resolvedPath);
+    let content: string;
+    try {
+      content = readFileSync(resolvedPath, 'utf-8');
+    } catch {
+      const msg = `File not found or unreadable: '${resolvedPath}'`;
       if (transactionMode === 'atomic') {
         return { error: msg };
       }
       fileReadErrors.set(resolvedPath, msg);
       continue;
     }
-
-    await assertCapturedToolReadAccess(resolvedPath);
-    let content: string;
-    try {
-      content = readFileSync(resolvedPath, 'utf-8');
-    } catch {
-      const msg = `File not found or unreadable: '${resolvedPath}'`;
+    // The stale-file check compares the bytes this edit will change, read once.
+    // A refused edit records nothing, so it keeps refusing until the file is read again.
+    if (env.fileCache.compare(resolvedPath, content) === 'modified') {
+      const msg = occConflictMessage(resolvedPath);
       if (transactionMode === 'atomic') {
         return { error: msg };
       }
@@ -403,7 +404,7 @@ function finalizeUncapturedBookkeeping(
     if (afterContent === undefined) continue;
     if (env.fileUndoManager) {
       try {
-        env.fileUndoManager.snapshot({ path, beforeContent: fileContents.get(path) ?? null, afterContent, tool: 'edit' });
+        env.fileUndoManager.snapshot({ path, beforeContent: fileContents.get(path) ?? null, afterContent, tool: 'edit', call: env.undoCall });
       } catch {
         // Undo snapshot failure should not fail the edit.
       }
@@ -755,7 +756,7 @@ async function executeTextEdits(
       for (const { path, content, revision } of admitted) {
         try {
           assertCapturedToolWriteRevision(path, revision);
-          env.fileUndoManager.snapshot({ path, beforeContent: fileContents.get(path) ?? null, afterContent: content, tool: 'edit' });
+          env.fileUndoManager.snapshot({ path, beforeContent: fileContents.get(path) ?? null, afterContent: content, tool: 'edit', call: env.undoCall });
         } catch {
           // Bookkeeping must not hide the edit result or bypass a held revision.
         }
@@ -826,6 +827,7 @@ export function createEditTool(fileCache: FileStateCache, options?: EditToolOpti
         fileCache,
         cwd,
         fileUndoManager: options?.fileUndoManager,
+        undoCall: options?.fileUndoManager?.beginCall(),
         configManager: options?.configManager,
         toolLLM: options?.toolLLM,
         changeTracker: options?.changeTracker,

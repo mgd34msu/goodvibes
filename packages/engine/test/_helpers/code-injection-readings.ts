@@ -10,8 +10,9 @@ export async function createCanonicalLiveCodeSource(nested = false) {
   const root = mkdtempSync(join(tmpdir(), 'canonical-live-code-'));
   const config = new ConfigManager({ configDir: join(root, '.goodvibes') });
   const registry = new MemoryEmbeddingProviderRegistry({ configManager: config });
-  const embedSync = () => { const vector = new Float32Array(384); vector[0] = 1; return { vector, dimensions: 384 }; };
-  registry.register({ id: 'offline-code-provider', label: 'Offline code fixture', dimensions: 384, embedSync, embed: async () => embedSync() }, { makeDefault: true });
+  // Asynchronous only, like every shipped HTTP embedding provider.
+  const embedOne = () => { const vector = new Float32Array(384); vector[0] = 1; return { vector, dimensions: 384 }; };
+  registry.register({ id: 'offline-code-provider', label: 'Offline code fixture', dimensions: 384, embed: async () => embedOne() }, { makeDefault: true });
   const directory = nested ? join(root, 'nested') : root;
   if (nested) mkdirSync(directory);
   const path = join(directory, 'backoff.ts'); writeFileSync(path, 'export async function backoff() { await sleep(base * 2 ** attempt); }\n');

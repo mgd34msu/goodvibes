@@ -87,6 +87,7 @@ import { OverflowHandler } from '../tools/shared/overflow.js';
 import { ModeManager } from '../state/mode-manager.js';
 import { FileUndoManager } from '../state/file-undo.js';
 import { FileStateCache } from '../state/file-cache.js';
+import { FileWatcher } from '../state/file-watcher.js';
 import { ProjectIndex } from '../state/project-index.js';
 import { HookActivityTracker } from '../hooks/activity.js';
 import { HookDispatcher, createHookWorkbench, type HookWorkbench } from '../hooks/index.js';
@@ -598,6 +599,11 @@ function composeClientRuntimeServices(
   });
   const fileCache = new FileStateCache();
   const projectIndex = new ProjectIndex(workingDirectory);
+  // Project files changed outside the write and edit tools: the project index
+  // forgets deleted ones and Change:file:external hooks fire.
+  const fileWatcher = new FileWatcher(projectIndex, { projectRoot: workingDirectory }, hookDispatcher);
+  void fileWatcher.start();
+  disposalScope.registry.add('file watcher', () => fileWatcher.stop());
   const contextAccountingHolder = new ContextAccountingHolder();
   const sessionLiveTurnControls = new SessionLiveTurnControlsHolder();
 

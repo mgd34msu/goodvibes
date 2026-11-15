@@ -46,7 +46,7 @@ describe('receipt-authorized code index', () => {
     const other = (await second.store.searchAuthorized('captured'))[0]?.chunk;
     expect(original).toBeDefined();
     expect(again?.chunkId).toBe(original?.chunkId);
-    expect(other?.chunkId).not.toBe(original?.chunkId);
+    expect(other?.fileRevision).not.toBe(original?.fileRevision);
     expect(original?.fileRevision).toStartWith('authorized-code-');
     expect(original).not.toHaveProperty('contentHash');
   });
@@ -59,9 +59,9 @@ describe('receipt-authorized code index', () => {
     expect(results[0]?.label).toBe('semantic');
     expect(calls.map((call) => call.usage)).toEqual(['record', 'query']);
     expect(calls.every((call) => call.signal === input.signal && typeof call.beforeAttempt === 'function')).toBe(true);
-    expect(phases).toContain('chunk');
-    expect(phases).toContain('cache');
-    expect(phases.at(-1)).toBe('result');
+    // One guard before the file's text leaves, one before prepare publishes;
+    // one before the query embedding and one before search results are returned.
+    expect(phases).toEqual(['embedding', 'result', 'embedding', 'result']);
   });
   test('fails closed on same-ID provider replacement', async () => {
     const { store, registry, input, calls } = setup();
@@ -71,10 +71,10 @@ describe('receipt-authorized code index', () => {
     await expect(store.statsAuthorized()).rejects.toThrow('unchanged registered');
     expect(calls.length).toBe(1);
   });
-  test('denied cache guard prevents writes after embedding', async () => {
-    const { store, input, calls } = setup();
+  test('a denied guard before the embedding request keeps the text from leaving and writes nothing', async () => {
+    const { store, input } = setup();
     await expect(store.prepareAuthorizedSnapshots({ ...input, guard: async (phase) => {
-      if (phase === 'cache' && calls.length) throw new Error('receipt revoked');
+      if (phase === 'embedding') throw new Error('receipt revoked');
     } })).rejects.toThrow('receipt revoked');
     await expect(store.statsAuthorized()).rejects.toThrow('not been prepared');
   });
@@ -167,9 +167,7 @@ describe('receipt-authorized code index', () => {
     const { store, input } = setup();
     const checks: { boundary: string; path: string | undefined }[] = [];
     await store.prepareAuthorizedSnapshots({ ...input, guard: async (boundary, path) => { checks.push({ boundary, path }); } });
-    expect(checks.some((check) => check.boundary === 'chunk' && check.path === 'never-created.txt')).toBe(true);
     expect(checks.filter((check) => check.boundary === 'embedding').every((check) => check.path === 'never-created.txt')).toBe(true);
-    expect(checks.some((check) => check.boundary === 'cache' && check.path === 'never-created.txt')).toBe(true);
     expect(checks.filter((check) => check.boundary === 'result').every((check) => check.path === undefined)).toBe(true);
     checks.length = 0;
     await store.statsAuthorized();

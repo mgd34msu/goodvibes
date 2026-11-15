@@ -12,6 +12,7 @@ import { runValidators, formatValidatorFailure, type ValidatorName, type Validat
 import { FileStateCache } from '../../state/file-cache.js';
 import { ProjectIndex } from '../../state/project-index.js';
 import { FileUndoManager } from '../../state/file-undo.js';
+import { watchIndexedFile } from '../../state/file-watcher.js';
 import type { ConfigManager } from '../../config/manager.js';
 import type { ToolLLM } from '../../config/tool-llm.js';
 import { healToolFile, type CapturedAutoHealBackend } from '../shared/captured-auto-heal.js';
@@ -487,7 +488,9 @@ export function createWriteTool(options?: {
       const results: FileWriteResult[] = [];
       const errors: string[] = [];
       const warnings: string[] = [];
-      const pendingUndo: Array<{ path: string; beforeContent: string | null; afterContent: string; tool: 'write' }> = [];
+      // Every file this call writes is one undo entry.
+      const undoCall = options.fileUndoManager?.beginCall();
+      const pendingUndo: Array<{ path: string; beforeContent: string | null; afterContent: string; tool: 'write'; call: number | undefined }> = [];
       const transactionMode = input.transaction?.mode ?? 'none';
       // Snapshots for atomic rollback: map from resolvedPath -> original content (null = new file)
       const snapshots = new Map<string, string | Buffer | null>();
@@ -715,7 +718,7 @@ export function createWriteTool(options?: {
               const revision = revisions.get(retainedPath);
               if (!revision) throw new Error('Captured failed repair has no owned revision');
               assertCapturedToolWriteRevision(retainedPath, revision);
-              options.fileUndoManager.snapshot({ path: retainedPath, beforeContent, afterContent: content, tool: 'write' });
+              options.fileUndoManager.snapshot({ path: retainedPath, beforeContent, afterContent: content, tool: 'write', call: undoCall });
             } catch (historyError) {
               logger.warn('write tool: failed repair undo snapshot withheld', { path: retainedPath, error: summarizeError(historyError) });
             }
@@ -750,6 +753,7 @@ export function createWriteTool(options?: {
             if (options?.projectIndex && !binaryPayload) {
               try {
                 options.projectIndex.upsertFile(outcome.result.resolved_path, tokenEstimate);
+                watchIndexedFile(options.projectIndex, outcome.result.resolved_path);
               } catch (err) {
                 appendWarning(
                   warnings,
@@ -772,7 +776,7 @@ export function createWriteTool(options?: {
               );
             } else if (options?.fileUndoManager) {
               try {
-                const snapshot = { path: outcome.result.resolved_path, beforeContent, afterContent: content, tool: 'write' as const };
+                const snapshot = { path: outcome.result.resolved_path, beforeContent, afterContent: content, tool: 'write' as const, call: undoCall };
                 if (transactionMode === 'atomic') pendingUndo.push(snapshot);
                 else options.fileUndoManager.snapshot(snapshot);
               } catch (err) {

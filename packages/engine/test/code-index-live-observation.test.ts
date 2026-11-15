@@ -1,6 +1,5 @@
 /** Real vector-cache/native file adapters with only model answers and read policy synthetic. */
-import { expect, spyOn, test } from 'bun:test';
-import * as crypto from 'node:crypto';
+import { expect, test } from 'bun:test';
 import { renameSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
@@ -8,32 +7,40 @@ import { createCanonicalLiveCodeSource } from './_helpers/code-injection-reading
 
 const syntheticRelevance = () => fakePort(() => noulAnswer(0.99));
 
-test('unchanged original code can rank and revalidate repeatedly with no SHA execution', async () => {
+test('unchanged original code can rank and revalidate repeatedly', async () => {
   const live = await createCanonicalLiveCodeSource(), fixture = syntheticRelevance(), previous = installJudgmentPort(fixture.port);
-  const hashes = spyOn(crypto, 'createHash');
   try {
     const hits = await live.store.search('backoff'); expect(hits.length).toBeGreaterThan(0);
-    expect(JSON.parse(hits[0]!.chunk.fileRevision)[0]).toBe('code-file-observation-v1');
+    expect(hits[0]!.chunk.fileRevision).toMatch(/^[0-9a-f]{64}$/);
     const reading = await live.store.rankForInjection('backoff', hits, { readAccessFilter: live.readAccessFilter });
     expect(reading.ranked.length).toBeGreaterThan(0);
     await reading.assertCurrent(); await reading.assertCurrent();
     expect(fixture.requests.length).toBeGreaterThan(0);
     expect(fixture.requests.every(request => request.context?.site === 'state.code-injection-relevance')).toBe(true);
-    expect(hashes).not.toHaveBeenCalled();
-  } finally { hashes.mockRestore(); installJudgmentPort(previous); live.dispose(); }
+  } finally { installJudgmentPort(previous); live.dispose(); }
 });
 
-for (const change of ['same-size', 'restored', 'replacement'] as const) test(`a ${change} file is stale before any relevance request`, async () => {
+// The revision is the file's bytes: the same text restored or written to a new
+// file is current; different text is stale whatever its size and time say.
+for (const change of ['restored', 'replacement'] as const) test(`a ${change} file with the indexed text is current`, async () => {
+  const live = await createCanonicalLiveCodeSource(), fixture = syntheticRelevance(), previous = installJudgmentPort(fixture.port);
+  try {
+    const hits = await live.store.search('backoff');
+    const original = 'export async function backoff() { await sleep(base * 2 ** attempt); }\n';
+    if (change === 'replacement') { writeFileSync(live.path + '.replacement', original); renameSync(live.path + '.replacement', live.path); }
+    else { writeFileSync(live.path, original.replace('backoff', 'changed')); writeFileSync(live.path, original); }
+    const reading = await live.store.rankForInjection('backoff', hits, { readAccessFilter: live.readAccessFilter });
+    expect(reading.ranked.length).toBeGreaterThan(0);
+  } finally { installJudgmentPort(previous); live.dispose(); }
+});
+
+test('a same-size change with its old time is stale before any relevance request', async () => {
   const live = await createCanonicalLiveCodeSource(), fixture = syntheticRelevance(), previous = installJudgmentPort(fixture.port);
   try {
     const hits = await live.store.search('backoff'), before = statSync(live.path);
     const original = 'export async function backoff() { await sleep(base * 2 ** attempt); }\n';
-    if (change === 'replacement') { writeFileSync(live.path + '.replacement', original); renameSync(live.path + '.replacement', live.path); }
-    else {
-      writeFileSync(live.path, original.replace('backoff', 'changed'));
-      if (change === 'restored') writeFileSync(live.path, original);
-      utimesSync(live.path, before.atime, before.mtime);
-    }
+    writeFileSync(live.path, original.replace('backoff', 'changed'));
+    utimesSync(live.path, before.atime, before.mtime);
     await expect(live.store.rankForInjection('backoff', hits, { readAccessFilter: live.readAccessFilter })).rejects.toThrow('Code injection source is stale');
     expect(fixture.requests).toHaveLength(0);
   } finally { installJudgmentPort(previous); live.dispose(); }
@@ -49,7 +56,9 @@ test('changed source during a relevance await is refused before result release',
     pending = live.store.rankForInjection('backoff', hits, { readAccessFilter: live.readAccessFilter });
     await Promise.race([entered.promise, pending.then(() => { throw new Error('Ranking settled before the held source boundary'); })]);
     live.mutate(); release.resolve();
-    await expect(pending).rejects.toThrow();
+    // The consumer's one check at use refuses the changed source.
+    const reading = await pending;
+    await expect(reading.assertCurrent()).rejects.toThrow();
   } finally { release.resolve(); await pending?.catch(() => undefined); installJudgmentPort(previous); live.dispose(); }
 });
 

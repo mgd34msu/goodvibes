@@ -26,6 +26,13 @@
  *     (hash-gated). Any error is caught, logged, and recorded as the last
  *     activity, it never rethrows into the turn.
  *
+ *  4. NOTHING IS DROPPED WHILE PAUSED. An edit made while reindexing is off or
+ *     paused is not queued; the scheduler counts it, and the first reindex
+ *     that finds the gate open again (the next edit, or a host calling
+ *     `resume()`) starts the store's incremental build instead, which re-reads
+ *     every file and re-embeds only those whose bytes changed, so edits made
+ *     by the shell, git or another editor while paused are caught as well.
+ *
  * The most-recent completed reindex is exposed via `lastActivity()` for honest
  * surfacing (e.g. TUI `/codebase status`).
  */
@@ -39,14 +46,11 @@ import { summarizeError } from '../utils/error-display.js';
 /** Default per-path debounce window: long enough to coalesce a burst of edits to one file, short enough that the index trails the working tree by well under a second. */
 export const DEFAULT_REINDEX_DEBOUNCE_MS = 300;
 
-/** Edits made while reindexing is switched off or paused wait here, bounded in count and age, and are applied when it resumes. */
-const MAX_DEFERRED_PATHS = 200;
-const DEFERRED_MAX_AGE_MS = 10 * 60 * 1000;
-const DEFERRED_RETRY_MS = 5_000;
-
 /** The subset of CodeIndexStore this scheduler drives, kept structural so tests can supply a minimal fake. */
 export interface CodeIndexReindexTarget {
   reindexFile(absPath: string, options?: { automatic?: boolean }): Promise<{ indexed: boolean; mode: CodeChunkMode }>;
+  /** The incremental build: skips every file whose bytes are unchanged. Fire and forget. */
+  scheduleBuild(): void;
   stats(): Pick<CodeIndexStats, 'available' | 'indexedChunks'>;
 }
 
@@ -62,7 +66,7 @@ export interface CodeIndexReindexActivity {
   readonly mode?: CodeChunkMode | undefined;
   /** Present exactly when status==='error': the contained failure message. */
   readonly error?: string | undefined;
-  /** Present when the edit was not indexed because reindexing is off or paused: why, and that it will be retried. */
+  /** Present when the edit was not indexed because reindexing is off or paused, or when a resume started a rebuild: what happened. */
   readonly reason?: string | undefined;
 }
 
@@ -125,9 +129,8 @@ export class CodeIndexReindexScheduler {
   private readonly timers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly inFlight = new Set<Promise<void>>();
   private last: CodeIndexReindexActivity | null = null;
-  /** Paths edited while the live gate was closed, with when they were deferred. */
-  private readonly deferred = new Map<string, number>();
-  private retryTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Edits made while the live gate was closed; nonzero means the index missed them and needs the incremental build. */
+  private missedEdits = 0;
   private readonly debounceMs: number;
   private readonly now: () => number;
 
@@ -181,58 +184,46 @@ export class CodeIndexReindexScheduler {
     await Promise.allSettled([...this.inFlight]);
   }
 
-  /** Count of edits waiting for reindexing to be switched back on or resumed. */
-  deferredCount(): number {
-    return this.deferred.size;
+  /** Edits made while reindexing was off or paused that the index has not caught up with yet. */
+  missedCount(): number {
+    return this.missedEdits;
   }
 
   /**
-   * Reindex the edits that were deferred while the gate was closed, if it is open now.
-   * Runs on a timer while any wait; a host may also call it when it resumes reindexing.
-   * Edits older than ten minutes are dropped: a setting left off for good must not hold paths forever.
+   * A host resuming reindexing (setting switched on, governor resumed) calls
+   * this; the next edit does the same. When edits were missed and the gate is
+   * open, the store's incremental build starts. Returns whether it started.
    */
-  retryDeferred(): void {
-    const now = this.now();
-    for (const [path, at] of this.deferred) {
-      if (now - at > DEFERRED_MAX_AGE_MS) this.deferred.delete(path);
-    }
-    if (this.deferred.size === 0) return;
-    if (this.deps.isEnabled && !this.deps.isEnabled()) {
-      this.armRetry();
-      return;
-    }
-    const paths = [...this.deferred.keys()];
-    this.deferred.clear();
-    for (const path of paths) this.track(this.runReindex(path));
+  resume(): boolean {
+    if (this.missedEdits === 0 || !this.gateOpen()) return false;
+    const stats = this.deps.target.stats();
+    if (!stats.available || stats.indexedChunks === 0) return false;
+    const missed = this.missedEdits;
+    this.missedEdits = 0;
+    this.deps.target.scheduleBuild();
+    this.last = {
+      path: '', at: this.now(), status: 'indexed',
+      reason: `reindexing the workspace: ${missed} edit${missed === 1 ? ' was' : 's were'} made while reindexing was paused; only files whose content changed are re-embedded`,
+    };
+    return true;
   }
 
   /** Cancel every pending timer (does not touch in-flight reindexes). */
   dispose(): void {
     for (const timer of this.timers.values()) clearTimeout(timer);
     this.timers.clear();
-    if (this.retryTimer) clearTimeout(this.retryTimer);
-    this.retryTimer = null;
-    this.deferred.clear();
   }
 
-  private defer(absPath: string): void {
-    this.deferred.delete(absPath);
-    if (this.deferred.size >= MAX_DEFERRED_PATHS) {
-      const oldest = this.deferred.keys().next().value;
-      if (oldest !== undefined) this.deferred.delete(oldest);
-    }
-    this.deferred.set(absPath, this.now());
+  private gateOpen(): boolean {
+    return !this.deps.isEnabled || this.deps.isEnabled();
+  }
+
+  private noteMissed(absPath: string): void {
+    this.missedEdits += 1;
     this.last = {
       path: absPath, at: this.now(), status: 'skipped',
-      reason: 'code index reindexing is off or paused; this edit is queued and will be indexed when it resumes',
+      reason: `code index reindexing is off or paused; ${this.missedEdits} edit${this.missedEdits === 1 ? '' : 's'} not yet indexed, the changed files are reindexed when it resumes`,
     };
-    this.armRetry();
-  }
-
-  private armRetry(): void {
-    if (this.retryTimer) return;
-    this.retryTimer = setTimeout(() => { this.retryTimer = null; this.retryDeferred(); }, DEFERRED_RETRY_MS);
-    this.retryTimer.unref?.();
   }
 
   private track(promise: Promise<void>): void {
@@ -243,7 +234,9 @@ export class CodeIndexReindexScheduler {
   private async runReindex(absPath: string): Promise<void> {
     // Live gates, respect a runtime toggle of the setting and never fabricate a
     // one-file index when nothing was ever built.
-    if (this.deps.isEnabled && !this.deps.isEnabled()) { this.defer(absPath); return; }
+    if (!this.gateOpen()) { this.noteMissed(absPath); return; }
+    // The build that catches up on missed edits covers this one too.
+    if (this.missedEdits > 0 && this.resume()) return;
     const stats = this.deps.target.stats();
     if (!stats.available || stats.indexedChunks === 0) return;
 

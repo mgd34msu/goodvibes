@@ -17,6 +17,27 @@ export interface FileOperation {
   tool: 'write' | 'edit';
   /** ISO timestamp of the operation. */
   timestamp: string;
+  /**
+   * The tool call this operation belongs to (from `beginCall()`). Operations of
+   * one call are one undo entry: undone and redone together.
+   */
+  call?: number | undefined;
+}
+
+/**
+ * One undo step: every file one tool call changed. The top-level fields are
+ * the call's first file, so a reader that shows one path still can.
+ */
+export interface FileUndoEntry extends FileOperation {
+  readonly operations: readonly FileOperation[];
+}
+
+/** What an undo or redo did: every file it restored, in the order the call changed them. */
+export interface FileUndoResult {
+  /** The first file, for callers that show one path. */
+  readonly path: string;
+  readonly paths: readonly string[];
+  readonly tool: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -26,12 +47,12 @@ export interface FileOperation {
 const MAX_STACK_SIZE = 50;
 
 /**
- * Raised when the file no longer holds what the operation left, so restoring
- * would overwrite a later change. The file is untouched.
+ * Raised when a file no longer holds what the operation left, so restoring
+ * would overwrite a later change. No file of the entry is touched.
  */
 export class FileUndoConflictError extends Error {
-  constructor(readonly path: string, readonly direction: 'undo' | 'redo') {
-    super(`Cannot ${direction} the change to ${path}: the file was changed after that operation (by you, another tool or another program). The file was left as it is and that history entry was dropped; the next ${direction} acts on the one before it.`);
+  constructor(readonly path: string, readonly direction: 'undo' | 'redo', readonly paths: readonly string[] = [path]) {
+    super(`Cannot ${direction} the change to ${path}${paths.length > 1 ? ` (one of the ${paths.length} files that tool call changed)` : ''}: the file was changed after that operation (by you, another tool or another program). No file was changed and that history entry was dropped; the next ${direction} acts on the one before it.`);
     this.name = 'FileUndoConflictError';
   }
 }
@@ -46,12 +67,31 @@ function readCurrent(path: string): string | null {
   }
 }
 
+/** Put `content` at `path`; null removes the file. */
+function restore(path: string, content: string | null): void {
+  if (content === null) {
+    try { unlinkSync(path); } catch (err) { if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err; }
+  } else {
+    writeFileSync(path, content, 'utf-8');
+  }
+}
+
+function entryOf(operations: FileOperation[]): FileUndoEntry {
+  return { ...operations[0]!, operations };
+}
+
 export class FileUndoManager {
-  private undoStack: FileOperation[] = [];
-  private redoStack: FileOperation[] = [];
+  private undoStack: FileUndoEntry[] = [];
+  private redoStack: FileUndoEntry[] = [];
+  private callSequence = 0;
 
   /** `onFileChanged` lets a file-content cache drop its copy of a path undo or redo rewrote. */
   constructor(private readonly options: { readonly onFileChanged?: (path: string) => void } = {}) {}
+
+  /** A token for one tool call; pass it as `call` on every snapshot of that call. */
+  beginCall(): number {
+    return ++this.callSequence;
+  }
 
   // ---------------------------------------------------------------------------
   // Snapshot, called by write/edit tools after a successful write
@@ -59,116 +99,110 @@ export class FileUndoManager {
 
   /**
    * Record a completed file operation for potential undo/redo.
-   * beforeContent is null when the file was newly created.
+   * beforeContent is null when the file was newly created. An operation with
+   * the same `call` as the newest entry joins it; a second write of the same
+   * file in that call keeps the first before-content and the last after-content.
    */
   snapshot(op: Omit<FileOperation, 'timestamp'>): void {
-    const entry: FileOperation = { ...op, timestamp: new Date().toISOString() };
-
-    this.undoStack.push(entry);
-    // Trim to max stack size, remove oldest entries first
-    if (this.undoStack.length > MAX_STACK_SIZE) {
-      this.undoStack.shift();
+    const operation: FileOperation = { ...op, timestamp: new Date().toISOString() };
+    const top = this.undoStack[this.undoStack.length - 1];
+    if (top && op.call !== undefined && top.call === op.call) {
+      const operations = top.operations as FileOperation[];
+      const same = operations.find((existing) => existing.path === op.path);
+      if (same) same.afterContent = op.afterContent;
+      else operations.push(operation);
+      if (operations[0] === same) top.afterContent = op.afterContent;
+    } else {
+      this.undoStack.push(entryOf([operation]));
+      // Trim to max stack size, remove oldest entries first
+      if (this.undoStack.length > MAX_STACK_SIZE) this.undoStack.shift();
     }
     // Any new operation invalidates the redo stack
     this.redoStack = [];
   }
 
   // ---------------------------------------------------------------------------
-  // Undo
+  // Undo / redo
   // ---------------------------------------------------------------------------
 
   /**
-   * Revert the most recent file operation.
-   * Returns `{ path }` on success, or `null` if nothing to undo.
+   * Revert the most recent tool call's file operations: every file or none.
+   * Every file is checked first; a file changed since the call refuses the
+   * whole entry (FileUndoConflictError, entry dropped, nothing written).
+   * Returns the restored paths, or `null` if nothing to undo.
    */
-  undo(): { path: string; tool: string } | null {
-    const op = this.undoStack.pop();
-    if (!op) return null;
-
-    try {
-      const current = readCurrent(op.path);
-      if (op.beforeContent === null) {
-        // Created by the operation: already gone is the state undo wants.
-        if (current === null) {
-          logger.debug('file-undo: created file is already gone', { path: op.path });
-        } else if (current !== op.afterContent) {
-          throw new FileUndoConflictError(op.path, 'undo');
-        } else {
-          unlinkSync(op.path);
-          logger.debug('file-undo: removed newly created file', { path: op.path });
-        }
-      } else {
-        if (current !== op.afterContent) throw new FileUndoConflictError(op.path, 'undo');
-        writeFileSync(op.path, op.beforeContent, 'utf-8');
-        logger.debug('file-undo: restored previous content', { path: op.path });
-      }
-    } catch (err) {
-      logger.warn('file-undo: undo failed', { path: op.path, error: summarizeError(err) });
-      // A conflict drops the entry (it can never apply again, and keeping it
-      // would block every older operation); a write failure keeps it to retry.
-      if (!(err instanceof FileUndoConflictError)) this.undoStack.push(op);
-      throw err;
-    }
-    this.options.onFileChanged?.(op.path);
-
-    this.redoStack.push(op);
-    if (this.redoStack.length > MAX_STACK_SIZE) {
-      this.redoStack.shift();
-    }
-    return { path: op.path, tool: op.tool };
+  undo(): FileUndoResult | null {
+    return this.apply('undo');
   }
 
-  // ---------------------------------------------------------------------------
-  // Redo
-  // ---------------------------------------------------------------------------
+  /** Re-apply the most recently undone tool call, every file or none. */
+  redo(): FileUndoResult | null {
+    return this.apply('redo');
+  }
 
-  /**
-   * Re-apply the most recently undone file operation.
-   * Returns `{ path }` on success, or `null` if nothing to redo.
-   */
-  redo(): { path: string; tool: string } | null {
-    const op = this.redoStack.pop();
-    if (!op) return null;
-
+  private apply(direction: 'undo' | 'redo'): FileUndoResult | null {
+    const from = direction === 'undo' ? this.undoStack : this.redoStack;
+    const to = direction === 'undo' ? this.redoStack : this.undoStack;
+    const entry = from.pop();
+    if (!entry) return null;
+    const operations = direction === 'undo' ? [...entry.operations].reverse() : [...entry.operations];
+    const paths = entry.operations.map((op) => op.path);
+    const expected = (op: FileOperation): string | null => direction === 'undo' ? op.afterContent : op.beforeContent;
+    const target = (op: FileOperation): string | null => direction === 'undo' ? op.beforeContent : op.afterContent;
+    const done: FileOperation[] = [];
     try {
-      if (readCurrent(op.path) !== op.beforeContent) throw new FileUndoConflictError(op.path, 'redo');
-      writeFileSync(op.path, op.afterContent, 'utf-8');
-      logger.debug('file-undo: re-applied operation', { path: op.path });
+      for (const op of operations) {
+        const current = readCurrent(op.path);
+        // A file the call created and that is already gone is the state undo wants.
+        const settled = direction === 'undo' && op.beforeContent === null && current === null;
+        if (!settled && current !== expected(op)) throw new FileUndoConflictError(op.path, direction, paths);
+      }
+      for (const op of operations) {
+        restore(op.path, target(op));
+        done.push(op);
+        logger.debug(`file-undo: ${direction} applied`, { path: op.path });
+      }
     } catch (err) {
-      logger.warn('file-undo: redo failed', { path: op.path, error: summarizeError(err) });
-      if (!(err instanceof FileUndoConflictError)) this.redoStack.push(op);
+      logger.warn(`file-undo: ${direction} failed`, { path: done.length < operations.length ? operations[done.length]!.path : entry.path, error: summarizeError(err) });
+      // A write failed part way: put back what was already restored, so the
+      // files stay as the call left them, and keep the entry to retry.
+      for (const op of done.reverse()) {
+        try { restore(op.path, expected(op)); } catch (rollbackError) {
+          logger.warn(`file-undo: ${direction} could not put back a file`, { path: op.path, error: summarizeError(rollbackError) });
+        }
+      }
+      // A conflict drops the entry (it can never apply again, and keeping it
+      // would block every older operation); a write failure keeps it to retry.
+      if (!(err instanceof FileUndoConflictError)) from.push(entry);
       throw err;
     }
-    this.options.onFileChanged?.(op.path);
-
-    this.undoStack.push(op);
-    if (this.undoStack.length > MAX_STACK_SIZE) {
-      this.undoStack.shift();
-    }
-    return { path: op.path, tool: op.tool };
+    for (const op of done) this.options.onFileChanged?.(op.path);
+    to.push(entry);
+    if (to.length > MAX_STACK_SIZE) to.shift();
+    return { path: entry.path, paths, tool: entry.tool };
   }
 
   // ---------------------------------------------------------------------------
   // Introspection
   // ---------------------------------------------------------------------------
 
-  /** Number of operations that can be undone. */
+  /** Number of tool calls that can be undone. */
   undoDepth(): number {
     return this.undoStack.length;
   }
 
-  /** Number of operations that can be redone. */
+  /** Number of tool calls that can be redone. */
   redoDepth(): number {
     return this.redoStack.length;
   }
 
-  /** Peek at the most recent undoable operation without popping. */
-  peekUndo(): FileOperation | undefined {
+  /** Peek at the most recent undoable entry without popping. */
+  peekUndo(): FileUndoEntry | undefined {
     return this.undoStack[this.undoStack.length - 1];
   }
 
-  /** Peek at the next redo operation without changing either stack. */
-  peekRedo(): FileOperation | undefined {
+  /** Peek at the next redo entry without changing either stack. */
+  peekRedo(): FileUndoEntry | undefined {
     return this.redoStack[this.redoStack.length - 1];
   }
 

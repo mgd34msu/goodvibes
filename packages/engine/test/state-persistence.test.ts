@@ -97,58 +97,15 @@ describe('state persistence failures', () => {
     await expect(new ProjectIndex(root).load()).rejects.toThrow('ProjectIndex load failed');
   });
 
-  test('FileStateCache reports unreadable cached files instead of returning a cache miss', () => {
-    const dir = tempDir('file-cache-read');
-    mkdirSync(dir, { recursive: true });
-    const file = join(dir, 'tracked.txt');
-    writeFileSync(file, 'cached content', 'utf-8');
-
+  test('FileStateCache compares the bytes a tool just read with what the session last saw', () => {
     const cache = new FileStateCache();
-    cache.update(file, 'cached content');
-    rmSync(file);
-    mkdirSync(file);
-
-    expect(() => cache.lookup(file)).toThrow('FileStateCache failed to read cached file');
-  });
-
-  test('FileStateCache still treats missing cached files as misses', () => {
-    const dir = tempDir('file-cache-missing');
-    mkdirSync(dir, { recursive: true });
-    const file = join(dir, 'tracked.txt');
-
-    const cache = new FileStateCache();
-    cache.update(file, 'cached content');
-
-    expect(cache.lookup(file)).toEqual({ status: 'miss' });
-  });
-
-  for (const mode of ['metadata_only', 'with_content'] as const) test(`FileStateCache detects same-size edits and restoration in ${mode} mode`, () => {
-    const dir = tempDir('file-cache-exact'); mkdirSync(dir, { recursive: true });
-    const file = join(dir, 'tracked.txt'); const original = 'first\nsecond';
-    writeFileSync(file, original);
-    const cache = new FileStateCache({ mode }); cache.update(file, original);
-    const initial = cache.lookup(file);
-    expect(initial.status).toBe('unchanged');
-    expect(initial.entry?.version).toBe(1);
-    if (mode === 'metadata_only') expect(initial.entry).not.toHaveProperty('content');
-    writeFileSync(file, 'FIRST\nsecond');
-    const changed = cache.lookup(file);
-    expect(changed.status).toBe('modified'); expect(changed.entry?.version).toBe(2);
-    if (mode === 'with_content') expect(changed.diff).toContain('+FIRST');
-    else expect(changed.entry).not.toHaveProperty('content');
-    writeFileSync(file, original);
-    expect(cache.lookup(file)).toMatchObject({ status: 'modified', entry: { version: 3 } });
-    expect(cache.checkConflict(file, 1)).toMatchObject({ yourVersion: 1, currentVersion: 3 });
-  });
-
-  test('FileStateCache accounts for private baseline memory and evicts a growing observation', () => {
-    const dir = tempDir('file-cache-growth'); mkdirSync(dir, { recursive: true });
-    const file = join(dir, 'tracked.txt'); writeFileSync(file, 'short');
-    const cache = new FileStateCache({ mode: 'metadata_only', maxMemoryMB: 0.002 });
-    cache.update(file, 'short'); expect(cache.getStats().uniqueFiles).toBe(1);
-    writeFileSync(file, 'x'.repeat(4096));
-    expect(cache.lookup(file)).toMatchObject({ status: 'modified', entry: { byteSize: 4096, tokenEstimate: 1024 } });
-    expect(cache.getStats()).toMatchObject({ uniqueFiles: 0, memoryMB: 0 });
+    const file = '/workspace/tracked.txt';
+    expect(cache.compare(file, 'first\nsecond')).toBe('miss');
+    cache.update(file, 'first\nsecond');
+    expect(cache.compare(file, 'first\nsecond')).toBe('unchanged');
+    expect(cache.compare(file, 'FIRST\nsecond')).toBe('modified');
+    cache.invalidate(file);
+    expect(cache.compare(file, 'FIRST\nsecond')).toBe('miss');
   });
 
   test('SQLiteStore throws on file-backed save failures', async () => {

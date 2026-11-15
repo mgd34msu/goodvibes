@@ -15,12 +15,14 @@ export async function rankLiveCodeInjection(root: string, query: string, hits: r
   const identity = (stat: Stats) => `${stat.dev}:${stat.ino}:${stat.mode}:${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}`;
   const directories = new Map<string, string>([[sourceRoot, identity(lstatSync(sourceRoot))]]);
   const observed = new Map<string, CodeFileObservation>();
+  // One pass authorizes and reads every hit once: before the ranking request,
+  // and again at consumption. The directory identities are compared once at the
+  // end of a pass, after its last await, not around every policy call.
   const check = (): void => { signal.throwIfAborted(); assertSource(); if (realpathSync(root) !== sourceRoot) throw new Error('Code injection root is stale');
     for (const [path, expected] of directories) if (identity(lstatSync(path)) !== expected) throw new Error('Code injection directory is stale'); };
   const authorize = async (path: string): Promise<void> => {
-    check();
+    signal.throwIfAborted();
     if (!(await executePolicyCheck(() => policy(path), signal))) throw new Error('Code injection source is access-restricted');
-    check();
   };
   const sourcePath = (hit: CodeContextResult): string => {
     const path = join(sourceRoot, hit.chunk.path), rel = relative(sourceRoot, path);
@@ -28,7 +30,6 @@ export async function rankLiveCodeInjection(root: string, query: string, hits: r
     return path;
   };
   const read = (hit: CodeContextResult): string => {
-    check();
     const path = sourcePath(hit);
     const source = captureCodeFileObservation(sourceRoot, path, 128 * 1024);
     if (source.revision !== hit.chunk.fileRevision) throw new Error('Code injection source is stale');
@@ -53,6 +54,7 @@ export async function rankLiveCodeInjection(root: string, query: string, hits: r
       }
       await authorize(path); snapshots.push({ hit, code: read(hit) });
     }
+    check();
     const assertCurrent = async () => {
       const assertionTimer = setTimeout(() => controller.abort(new Error('Code injection authority budget exceeded')), 15_000);
       try {
@@ -63,7 +65,7 @@ export async function rankLiveCodeInjection(root: string, query: string, hits: r
       for (const original of observed.values()) original.assertCurrent();
       } finally { clearTimeout(assertionTimer); }
     };
-    const reading = await rankCodeInjectionSnapshots(query, snapshots, { signal, assertCurrent });
+    const reading = await rankCodeInjectionSnapshots(query, snapshots, { signal, assertCurrent, checkedBeforeRequest: true });
     return reading;
   } catch (error) { controller.abort(); throw error; }
   finally { clearTimeout(timer); }

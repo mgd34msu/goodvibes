@@ -63,7 +63,7 @@ export function registerSessionContentCommands(registry: CommandRegistry): void 
     name: 'undo',
     aliases: [],
     description:
-      'Undo last action. /undo rewind reverses the last /rewind. /undo file reverts the last file write/edit. /undo alone removes the last conversation turn',
+      'Undo last action. /undo rewind reverses the last /rewind. /undo file reverts every file the last write/edit call changed. /undo alone removes the last conversation turn',
     usage: '[rewind|file]',
     argsHint: '[rewind|file]',
     async handler(args, ctx) {
@@ -81,7 +81,7 @@ export function registerSessionContentCommands(registry: CommandRegistry): void 
           const result = ctx.workspace.fileUndoManager.undo();
           ctx.print(
             result
-              ? `File reverted: ${result.path} (${result.tool} tool). Use /redo file to re-apply.`
+              ? `${result.paths.length === 1 ? 'File' : `${result.paths.length} files`} reverted (last ${result.tool} call):\n${result.paths.map((path) => `  ${path}`).join('\n')}\nUse /redo file to re-apply.`
               : 'Nothing to undo. No file operations recorded.',
           );
         } catch (err) {
@@ -122,7 +122,9 @@ export function registerSessionContentCommands(registry: CommandRegistry): void 
         }
         try {
           const result = ctx.workspace.fileUndoManager.redo();
-          ctx.print(result ? `File re-applied: ${result.path} (${result.tool} tool).` : 'Nothing to redo.');
+          ctx.print(result
+            ? `${result.paths.length === 1 ? 'File' : `${result.paths.length} files`} re-applied (${result.tool} call):\n${result.paths.map((path) => `  ${path}`).join('\n')}`
+            : 'Nothing to redo.');
         } catch (err) {
           ctx.print(`File redo failed: ${summarizeError(err)}`);
         }

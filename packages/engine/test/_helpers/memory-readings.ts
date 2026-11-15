@@ -91,6 +91,22 @@ type State = Record<string, unknown>;
 function answer(table: Required<MemoryReadingTable>, name: string, question: Question, state: State): unknown {
   if (name === 'completion_required') return noulAnswer(.99);
   if (['false_blocker', 'unfinished', 'unsupported', 'unanswered', 'unnecessary_permission', 'repetitive', 'implementation_presented', 'verification_claimed', 'criteria_altered', 'ineffective_fix', 'irrelevant_verification', 'weakened_criteria', 'missing_results', 'unresolved_conflict'].includes(name)) return noulAnswer(.01);
+  if ('query' in state && Array.isArray(state.candidates) && question.type === 'choice') {
+    // engine.state.knowledge-injection reads every candidate in one Choice:
+    // each candidate's share against "none" is its relevant reading.
+    const query = state.query as string | { task: string; write_scope?: string[] };
+    const task = typeof query === 'string' ? query : query.task;
+    const scope = typeof query === 'string' ? [] : query.write_scope ?? [];
+    const weights: Record<string, number> = { none: 1 };
+    for (const candidate of state.candidates as { id: string; content: RecordText }[]) {
+      const relevant = Math.min(0.999, Math.max(0.001, table.relevance(task, scope, candidate.content).relevant));
+      weights[candidate.id] = relevant / (1 - relevant);
+    }
+    const total = Object.values(weights).reduce((sum, weight) => sum + weight, 0);
+    const probabilities = Object.fromEntries(Object.keys(question.criteria).map((option) => [option, (weights[option] ?? 0) / total]));
+    const choice = Object.entries(probabilities).sort((a, b) => b[1] - a[1])[0]![0];
+    return { type: 'choice', choice, confidence: 0.9, probabilities };
+  }
   if ('task' in state && 'record' in state) {
     const reading = table.relevance(state.task as string, state.write_scope as string[], state.record as RecordText);
     if (name === 'relevant') return noulAnswer(reading.relevant);

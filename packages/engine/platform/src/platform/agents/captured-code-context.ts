@@ -125,24 +125,6 @@ export function createCapturedCodeContext(input: {
   const unregisterAssertion = registerLiveAssertion(authority, async () => {
     if (current && operation && !disposed) { const selected = current; await bounded(signal => assertGeneration(selected, signal)); }
   });
-  const watch = (generation: Generation, signal: AbortSignal): (() => Promise<void>) => {
-    signal.throwIfAborted();
-    const owner = operation!;
-    let running = false;
-    let pending: Promise<void> = Promise.resolve();
-    const timer = setInterval(() => {
-      if (running || signal.aborted) return;
-      running = true;
-      pending = executePolicyCheck(async () => {
-        checkProvider();
-        for (const [path, fp] of generation.directories) if (fingerprint(lstatSync(path, { bigint: true })) !== fp) throw new Error('captured code directory generation changed');
-        for (const file of generation.files) if (fingerprint(lstatSync(join(root, file.path), { bigint: true })) !== file.fingerprint) throw new Error('captured code generation changed');
-      }, signal)
-        .catch((error: unknown) => { owner.abort(error); }).finally(() => { running = false; });
-    }, 100);
-    timer.unref?.();
-    return async () => { clearInterval(timer); await pending; };
-  };
   const bounded = async <T>(work: (signal: AbortSignal) => Promise<T>): Promise<T> => {
     checkSignal();
     if (!operation) throw new Error('captured code operation is unavailable');
@@ -178,7 +160,6 @@ export function createCapturedCodeContext(input: {
         sourceBytes += Number(size);
         return true;
       };
-      let stopWatching: (() => Promise<void>) | undefined;
       let preparedStore: CodeIndexStore | undefined;
       try {
         await withContractInputReadBatch(authority, async () => {
@@ -235,9 +216,9 @@ export function createCapturedCodeContext(input: {
           }
         });
         if (!Number.isSafeInteger(++generationSequence)) throw new Error('Captured code identity exhausted');
+        // Every file was just authorized and read; the generation is guarded
+        // again before each file's chunks leave for the provider and once at the end.
         const generation: Generation = Object.freeze({ files: Object.freeze(files), directories, id: `captured-code-${generationSequence}` });
-        await assertGeneration(generation, signal);
-        stopWatching = watch(generation, signal);
         signal.throwIfAborted();
         if (operation !== owner) throw new Error('captured code operation was replaced');
         const index = new CodeIndexStore(root, ':memory:', registry); preparedStore = index; store = index;
@@ -246,15 +227,15 @@ export function createCapturedCodeContext(input: {
         if (!index.stats().available) { unavailable = 'code index unavailable'; closeIndex(); return; }
         await index.prepareAuthorizedSnapshots({ sourceRevision: generation.id, snapshots: files.map(file => ({ path: file.path, mtimeMs: file.mtimeMs, content: '' })), provider: pinnedProvider, signal, maxChunks: MAX_CHUNKS,
           loadSnapshot: async file => {
-            await assertGeneration(generation, signal, file.path);
             const captured = files.find(candidate => candidate.path === file.path)!;
-            // The guard just compared mutable bytes with this retained text;
-            // chunk/embedding guards still run before the provider sees it.
+            // A mutable file's retained text is what the guard compares the
+            // file with immediately before the provider sees it; an immutable
+            // one is read here against its captured fingerprint.
             return { ...file, content: captured.content ?? bytes(join(root, file.path), captured.fingerprint).content };
           },
           guard: async (_boundary, path) => { signal.throwIfAborted(); await assertGeneration(generation, signal, path); } });
+        // prepareAuthorizedSnapshots ended with the whole-generation guard.
         const stats = Object.freeze({ ...await index.statsAuthorized() });
-        await assertGeneration(generation, signal);
         signal.throwIfAborted();
         if (operation !== owner || store !== index) throw new Error('captured code operation was replaced');
         cachedStats = stats; current = generation;
@@ -269,20 +250,16 @@ export function createCapturedCodeContext(input: {
           : undefined;
         if (overBudget !== undefined && operation === owner) { unavailable = `captured code unavailable: too large (${overBudget})`; return; }
         throw error;
-      } finally { await stopWatching?.(); }
+      }
     },
     async search(query, options) {
       checkSignal();
       if (!store || !current || !operation) return [];
       const selected = current; const selectedStore = store;
-      return bounded(async (signal) => {
-        await assertGeneration(selected, signal);
-        const stopWatching = watch(selected, signal);
-        try {
-          const results = await selectedStore.searchAuthorized(query, options);
-          await assertGeneration(selected, signal);
-          return results;
-        } finally { await stopWatching(); }
+      // The authorized index guards the generation before the query embedding and before returning results.
+      return bounded(async () => {
+        if (current !== selected) throw new Error('captured code generation replaced');
+        return selectedStore.searchAuthorized(query, options);
       });
     },
     async rankForInjection(query, hits) {
@@ -294,7 +271,8 @@ export function createCapturedCodeContext(input: {
           if (current !== selected) throw new Error('captured code generation replaced');
           await assertGeneration(selected, signal);
         };
-        await assertCurrent();
+        // Each hit file is re-read once here; the ranking asks assertCurrent once
+        // before its request and the caller once more at consumption.
         const snapshots = hits.map(hit => {
           const file = selected.files.find(file => file.path === hit.chunk.path);
           if (!file || hit.chunk.fileRevision !== selected.id) throw new Error('captured code hit is stale');
@@ -302,13 +280,9 @@ export function createCapturedCodeContext(input: {
           if (file.content !== undefined && content !== file.content) throw new Error('captured code hit changed');
           return { hit, code: content };
         });
-        const stopWatching = watch(selected, signal);
-        try {
-          const reading = await rankCodeInjectionSnapshots(query, snapshots, { signal, assertCurrent });
-          assertReadingCurrent = reading.assertCurrent;
-          return reading;
-        }
-        finally { await stopWatching(); }
+        const reading = await rankCodeInjectionSnapshots(query, snapshots, { signal, assertCurrent });
+        assertReadingCurrent = reading.assertCurrent;
+        return reading;
       });
     },
     stats() {
@@ -320,7 +294,9 @@ export function createCapturedCodeContext(input: {
       if (!current || !operation) { if (expected !== undefined) throw new Error('captured code generation unavailable'); return; }
       if (expected !== undefined && current.id !== expected) throw new Error('captured code generation replaced');
       const selected = current;
-      await bounded(async signal => { await assertGeneration(selected, signal); await assertReadingCurrent?.(); });
+      // A ranking's own check covers the generation; without one, check it directly.
+      const reading = assertReadingCurrent;
+      await bounded(async signal => { if (reading) await reading(); else await assertGeneration(selected, signal); });
     },
     finishTurn() { assertReadingCurrent = undefined; cachedStats = undefined; current = undefined; const finished = operation; operation = undefined; finished?.abort(); closeIndex(); },
     dispose() { unregisterAssertion(); assertReadingCurrent = undefined; cachedStats = undefined; disposed = true; operation?.abort(); current = undefined; closeIndex(); },

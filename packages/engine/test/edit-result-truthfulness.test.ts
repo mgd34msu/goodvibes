@@ -43,7 +43,10 @@ describe('edit conflict refusal', () => {
     expect(retry.error).toContain('OCC conflict');
     expect(readFileSync(file, 'utf-8')).toBe('const a = 1;\nconst b = 2;\n');
 
-    expect(cache.lookup(file).status).toBe('modified');
+    // Reading the file again records what the session now saw.
+    const current = readFileSync(file, 'utf-8');
+    expect(cache.compare(file, current)).toBe('modified');
+    cache.update(file, current);
     const afterRead = await tool.execute(call);
     expect(afterRead.success).toBe(true);
   });

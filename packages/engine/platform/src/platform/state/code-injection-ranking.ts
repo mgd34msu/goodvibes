@@ -22,21 +22,23 @@ export interface CodeInjectionRanking {
 const held = (reason: string): Error => new Error(`Code injection relevance ${reason}`);
 function record(value: unknown): value is Record<string, unknown> { return !!value && typeof value === 'object' && !Array.isArray(value); }
 
-export async function rankCodeInjectionSnapshots(query: string, inputs: readonly CodeInjectionSnapshot[], options: {
+export interface RankCodeInjectionOptions {
   readonly signal?: AbortSignal | undefined;
   readonly assertCurrent: () => Promise<void>;
-}): Promise<CodeInjectionRanking> {
+  /** The caller authorized and read every hit immediately before this call; the pre-request check is that pass. */
+  readonly checkedBeforeRequest?: boolean | undefined;
+}
+
+export async function rankCodeInjectionSnapshots(query: string, inputs: readonly CodeInjectionSnapshot[], options: RankCodeInjectionOptions): Promise<CodeInjectionRanking> {
   return decisionOrClassic(() => rankDecisionCodeInjectionSnapshots(query, inputs, options), async () => {
     const assertCurrent = async () => { options.signal?.throwIfAborted(); await options.assertCurrent(); options.signal?.throwIfAborted(); };
-    await assertCurrent();
-    // Passive semantic enrichment is omitted; explicit lexical code search remains available.
+    // Passive semantic enrichment is omitted (nothing is sent); explicit lexical code search remains available.
+    options.signal?.throwIfAborted();
     return { provenance: 'classic', ranked: [], assertCurrent };
   });
 }
 
-async function rankDecisionCodeInjectionSnapshots(query: string, inputs: readonly CodeInjectionSnapshot[], options: {
-  readonly signal?: AbortSignal | undefined; readonly assertCurrent: () => Promise<void>;
-}): Promise<CodeInjectionRanking> {
+async function rankDecisionCodeInjectionSnapshots(query: string, inputs: readonly CodeInjectionSnapshot[], options: RankCodeInjectionOptions): Promise<CodeInjectionRanking> {
   // Screen the complete owned source batch, including material beyond clipping limits,
   // before projection, budget checks, port lookup, or any hosted transmission.
   const snapshot = captureOwnedJson({ query, inputs }) as { query: string; inputs: readonly CodeInjectionSnapshot[] };
@@ -51,9 +53,16 @@ async function rankDecisionCodeInjectionSnapshots(query: string, inputs: readonl
   const signal = options.signal ? AbortSignal.any([controller.signal, options.signal]) : controller.signal;
   let authority: JudgmentPortCapture | undefined;
   let model: string | undefined, resultModel: string | undefined;
+  // Authority and the hit files are checked once before the request and once at
+  // consumption (the returned assertCurrent); in between only the signal and the
+  // captured judgment port are compared, which cost no I/O.
   const check = async () => {
     signal.throwIfAborted();
     await options.assertCurrent();
+    signal.throwIfAborted();
+    authority?.assertCurrent();
+  };
+  const checkLocal = (): void => {
     signal.throwIfAborted();
     authority?.assertCurrent();
   };
@@ -62,16 +71,16 @@ async function rankDecisionCodeInjectionSnapshots(query: string, inputs: readonl
   const abort = () => rejectStopped(held('canceled'));
   signal.addEventListener('abort', abort, { once: true });
   const work = async () => {
-    await check();
+    if (options.checkedBeforeRequest) checkLocal(); else await check();
     authority = captureJudgmentPort(SITE, { signal });
     const captured = authority.port; model = captured.model;
     if (typeof model !== 'string' || !model.trim()) throw held('malformed');
     const port: JudgmentPort = { model, ...(captured.recorder ? { recorder: captured.recorder } : {}), async ask(request) {
-      await check();
+      checkLocal();
       const result = await captured.ask({ ...request, model: model!, beforeAsyncAttempt: async () => {
-        await check(); await request.beforeAsyncAttempt?.(); await check();
+        checkLocal(); await request.beforeAsyncAttempt?.(); checkLocal();
       } });
-      await check();
+      checkLocal();
       if (!record(result) || !record(result.answers)) throw held('malformed');
       const answer: unknown = result.answers.match;
       if (!record(answer) || answer.type !== 'noul' || typeof answer.noul !== 'number' || !Number.isFinite(answer.noul)
@@ -83,7 +92,7 @@ async function rankDecisionCodeInjectionSnapshots(query: string, inputs: readonl
     } };
     const candidates = snapshot.inputs.map(({ hit, code }, i) => ({ id: String(i), content: codeChunkView(hit.chunk, code.split('\n').slice(hit.chunk.startLine - 1, hit.chunk.endLine).join('\n')) }));
     const result = await rerankCodeParts(port, snapshot.query, candidates, { site: SITE, signal });
-    await check();
+    checkLocal();
     if (result.ranked.some(entry => entry.reading.outcome !== 'act' || entry.reading.verdict === 'uncertain')) throw held('unsettled');
     return { ranked: Object.freeze(result.ranked.filter(entry => entry.reading.verdict === 'yes')
       .map(entry => Object.freeze({ hit: snapshot.inputs[Number(entry.id)]!.hit, probability: entry.probability }))), assertCurrent: check };

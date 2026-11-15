@@ -183,6 +183,11 @@ export class RouteStore {
     return this.store.dbPath;
   }
 
+  /** Set when the store file was unreadable at open and a fresh one started: what happened and where the old file is. */
+  recoveryNotice(): string | undefined {
+    return this.store.recoveryNotice();
+  }
+
   init(): Promise<void> {
     if (this.closed) return Promise.reject(new HandlerError('RouteStore has been closed', 'ROUTING_STORE_UNINITIALIZED', 500));
     if (this.initialized) return Promise.resolve();

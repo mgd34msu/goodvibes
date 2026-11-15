@@ -18,6 +18,16 @@ export interface MemoryEmbeddingRequest {
   readonly metadata?: Record<string, unknown> | undefined;
 }
 
+/** Several texts for one request, where the provider's endpoint takes a list. */
+export interface MemoryEmbeddingBatchRequest {
+  readonly signal?: AbortSignal | undefined;
+  /** Awaited immediately before every transport attempt of the batch, retries included. */
+  readonly beforeAttempt?: (() => void | Promise<void>) | undefined;
+  readonly texts: readonly string[];
+  readonly dimensions: number;
+  readonly usage: MemoryEmbeddingUsage;
+}
+
 export interface MemoryEmbeddingResult {
   readonly vector: Float32Array | readonly number[];
   readonly dimensions: number;
@@ -47,6 +57,17 @@ export interface MemoryEmbeddingProvider {
   embedSync?(request: MemoryEmbeddingRequest): MemoryEmbeddingResult;
   embed?(request: MemoryEmbeddingRequest): Promise<MemoryEmbeddingResult>;
   status?(): MemoryEmbeddingProviderStatus | Promise<MemoryEmbeddingProviderStatus>;
+}
+
+/** A provider whose endpoint takes a list: one request for many texts, results in the order of `texts`. */
+export interface BatchMemoryEmbeddingProvider extends MemoryEmbeddingProvider {
+  embedMany(request: MemoryEmbeddingBatchRequest): Promise<MemoryEmbeddingResult[]>;
+}
+
+/** The provider's list form, when it has one. */
+export function batchEmbedderOf(provider: MemoryEmbeddingProvider): BatchMemoryEmbeddingProvider['embedMany'] | undefined {
+  const embedMany = (provider as Partial<BatchMemoryEmbeddingProvider>).embedMany;
+  return typeof embedMany === 'function' ? embedMany : undefined;
 }
 
 export interface MemoryEmbeddingDoctorReport {
@@ -196,6 +217,32 @@ export class MemoryEmbeddingProviderRegistry {
       return provider.embedSync(request);
     }
     throw new Error(`Active memory embedding provider '${provider.id}' does not provide embeddings.`);
+  }
+
+  /**
+   * Embed several texts with the active provider: one request when it takes a
+   * list, otherwise one call per text in order. Results follow `texts`.
+   */
+  async embedManyAsync(request: MemoryEmbeddingBatchRequest): Promise<MemoryEmbeddingResult[]> {
+    const provider = this.getDefaultProvider();
+    if (request.texts.length === 0) return [];
+    const embedMany = batchEmbedderOf(provider);
+    if (embedMany) {
+      const results = await embedMany.call(provider, request);
+      if (results.length !== request.texts.length) {
+        throw new Error(`Embedding provider '${provider.id}' returned ${results.length} vectors for ${request.texts.length} texts.`);
+      }
+      return results;
+    }
+    const results: MemoryEmbeddingResult[] = [];
+    for (const text of request.texts) {
+      results.push(await this.embedAsync({
+        text, dimensions: request.dimensions, usage: request.usage,
+        ...(request.signal ? { signal: request.signal } : {}),
+        ...(request.beforeAttempt ? { beforeAttempt: request.beforeAttempt } : {}),
+      }));
+    }
+    return results;
   }
 
   async status(): Promise<MemoryEmbeddingProviderStatus[]> {

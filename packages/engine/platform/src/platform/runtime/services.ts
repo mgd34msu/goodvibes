@@ -121,6 +121,7 @@ import { SessionChangeTracker } from '../sessions/change-tracker.js';
 import { ExecutionPlanManager } from '../core/execution-plan.js';
 import { AdaptivePlanner } from '../core/adaptive-planner.js';
 import { FileStateCache } from '../state/file-cache.js';
+import { FileWatcher } from '../state/file-watcher.js';
 import { ProjectIndex } from '../state/project-index.js';
 import { IdempotencyStore } from './idempotency/index.js';
 import { OverflowHandler } from '../tools/shared/overflow.js';
@@ -955,6 +956,11 @@ function buildRuntimeGraph(product: ProductComposition, disposalScope: AsyncDisp
   const policyRuntimeState = createPolicyRuntimeState(configManager, featureFlags);
   const fileCache = new FileStateCache();
   const projectIndex = new ProjectIndex(workingDirectory);
+  // Project files changed outside the write and edit tools: the project index
+  // forgets deleted ones and Change:file:external hooks fire.
+  const fileWatcher = new FileWatcher(projectIndex, { projectRoot: workingDirectory }, hookDispatcher);
+  void fileWatcher.start();
+  disposalScope.registry.add('file watcher', () => fileWatcher.stop());
   const channelDeliveryRouter = new ChannelDeliveryRouter({
     configManager,
     secretsManager,
@@ -1415,6 +1421,7 @@ function buildRuntimeGraph(product: ProductComposition, disposalScope: AsyncDisp
         await codeIndexStore.reroot(newWorkingDir, codeIndexPath(newWorkingDir));
         moved.push({ name: 'code index', restore: () => codeIndexStore.reroot(previousDir, codeIndexPath(previousDir)) });
         await projectIndex.reroot(newWorkingDir);
+        await fileWatcher.reroot(newWorkingDir);
       } catch (error) {
         let failure: unknown = error;
         for (const store of moved.reverse()) {

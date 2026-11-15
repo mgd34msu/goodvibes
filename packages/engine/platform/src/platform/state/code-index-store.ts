@@ -15,14 +15,15 @@ import { DirectoryWalk } from '../utils/walk-dir.js';
  *   - CodeIntelligence.getSymbols (tree-sitter-backed chunking; the chunking
  *     itself lives in code-index-chunking.ts)
  *   - the file-walk helpers already shipped for the `find` tool
- *     (tools/find/shared.ts: buildGitignoreMatcher, findNestedGitignoreFiles,
- *     collectGlobFiles, isBinary, readTextFile), no new ignore-file parsing
- *     or directory-walk logic. Ignore rules: the ROOT .gitignore plus nested
- *     .gitignore files (each applied relative to its own directory). Nested
- *     coverage is bounded by findNestedGitignoreFiles' own cap (currently the
- *     first 5 nested files found, in walk order), a repo with more nested
- *     .gitignore files than that has the excess UNAPPLIED, same as the find
- *     tool itself.
+ *     (tools/find/shared.ts: createNestedIgnoreMatcher, collectGlobFiles,
+ *     isBinary), no new ignore-file parsing or directory-walk logic. Ignore
+ *     rules: every .gitignore between the root and a file, each applied
+ *     relative to its own directory and read where it lives, with no cap; an
+ *     ignored file is never read or sent to an embedding provider.
+ *
+ * Unchanged files: a file's revision is the SHA-256 of its bytes, so a build
+ * skips every file whose text it already embedded, whatever happened to its
+ * permissions, owner, links or mount (code-file-observation.ts).
  *
  * Storage: a single bun:sqlite database (schema + all table ops live in
  * code-index-db.ts), `code_chunks` (chunk metadata), `code_vectors` (vec0
@@ -48,12 +49,13 @@ import { DirectoryWalk } from '../utils/walk-dir.js';
  * the new database). Aborted builds return stats carrying
  * `abortReason: 'build aborted by reroot'` and never become `lastBuild`.
  *
- * The index never blocks a turn: buildFull() awaits `embedAsync` on a bounded
- * per-file queue with periodic event-loop yields, and every read (`search`,
- * `stats`) returns whatever is currently indexed, it never waits on an
- * in-flight build.
+ * The index never blocks a turn: buildFull() embeds a file's chunks in
+ * batches (one provider request per EMBED_BATCH_SIZE chunks; a rate limit is
+ * waited out inside the provider adapter) with periodic event-loop yields, and
+ * every read (`search`, `stats`) returns whatever is currently indexed, it
+ * never waits on an in-flight build.
  */
-import { dirname, join, relative, sep } from 'node:path';
+import { dirname, relative } from 'node:path';
 import { mkdirSync, statSync } from 'node:fs';
 import type { Database, SQLQueryBindings } from 'bun:sqlite';
 import { createRequire } from 'node:module';
@@ -80,7 +82,7 @@ import {
   countIndexedChunks,
   countIndexedFiles,
   deleteChunksForPath,
-  getChunkById,
+  getChunkByRowId,
   getCodeIndexMeta,
   getFileRevision,
   listIndexedPaths,
@@ -91,12 +93,10 @@ import {
   type VectorRow,
 } from './code-index-db.js';
 import {
-  buildGitignoreMatcher,
   collectGlobFiles,
   createFindDiagnostics,
-  findNestedGitignoreFiles,
+  createNestedIgnoreMatcher,
   isBinary,
-  type FindDiagnostics,
 } from '../tools/find/shared.js';
 import { adoptSqliteDatabase } from './sqlite-file.js';
 import { CodeSourceChangedError, readCodeIndexFile, type CodeFileObservation } from './code-file-observation.js';
@@ -138,6 +138,8 @@ const BUILD_ABORTED_BY_REROOT = 'build aborted by reroot';
 const BUILD_ABORTED_BY_CLOSE = 'build aborted by close';
 /** Consecutive failures (provider down, bad key, full disk) after which a build stops instead of failing every remaining file. */
 const MAX_CONSECUTIVE_INDEX_FAILURES = 5;
+/** Chunks per embedding request during a build: one request per batch instead of one per chunk. */
+const EMBED_BATCH_SIZE = 64;
 /** How long a second process holding the database may block a statement before it fails. */
 const SQLITE_BUSY_TIMEOUT_MS = 5000;
 function distanceToSimilarity(distance: number): number {
@@ -397,9 +399,12 @@ export class CodeIndexStore {
       return this.searchLexical(trimmed, limit);
     }
 
+    // The query is embedded the way the build embedded the chunks: every
+    // shipped HTTP provider embeds asynchronously only.
+    const db = this.db;
     let embedding: Float32Array;
     try {
-      const result = this.embeddingRegistry.embedSync({
+      const result = await this.embeddingRegistry.embedAsync({
         text: trimmed,
         dimensions: MEMORY_VECTOR_DIMS,
         usage: 'query',
@@ -407,20 +412,21 @@ export class CodeIndexStore {
       embedding = normalizeMemoryEmbeddingVector(result.vector, MEMORY_VECTOR_DIMS);
       this.lastSearchError = undefined;
     } catch (err) {
-      // An empty answer here means "could not search", not "nothing matches"; stats() says which.
-      this.lastSearchError = `query embedding failed: ${summarizeError(err)}`;
+      // An empty answer here means "could not search", not "nothing matches"; stats().lastSearchError says which.
+      this.lastSearchError = `code search unavailable: query embedding failed: ${summarizeError(err)}`;
       logger.warn('Code index query embedding failed', { error: summarizeError(err) });
       return [];
     }
+    if (this.db !== db || !this.available) return [];
 
-    const rows = this.db.query<VectorRow, SQLQueryBindings[]>(
-      'SELECT rowid, chunk_id, distance FROM code_vectors WHERE embedding MATCH ? AND k = ? ORDER BY distance',
+    const rows = db.query<VectorRow, SQLQueryBindings[]>(
+      'SELECT rowid, distance FROM code_vectors WHERE embedding MATCH ? AND k = ? ORDER BY distance',
     ).all(embedding, limit) as VectorRow[];
 
     const label: CodeContextResult['label'] = this.hasSemanticProvider() ? 'semantic' : 'lexical';
     const results: CodeContextResult[] = [];
     for (const row of rows) {
-      const chunk = getChunkById(this.db, row.chunk_id);
+      const chunk = getChunkByRowId(db, Number(row.rowid));
       if (!chunk) continue;
       results.push({
         chunk,
@@ -454,8 +460,6 @@ export class CodeIndexStore {
     const epoch = this.epoch;
     input = { ...input, snapshots: input.snapshots.map((snapshot) => ({ ...snapshot })) };
     input.signal.throwIfAborted();
-    await input.guard('cache');
-    input.signal.throwIfAborted();
     await this.init();
     if (this.epoch !== epoch || this.dbPath !== ':memory:') throw new Error('Authorized code index lifecycle changed');
     const db = this.db;
@@ -465,7 +469,6 @@ export class CodeIndexStore {
         throw new Error('Authorized code index lifecycle changed');
       }
     };
-    await input.guard('chunk');
     input.signal.throwIfAborted();
     checkLifecycle();
     await this.ensureIntelligenceReady();
@@ -568,29 +571,19 @@ export class CodeIndexStore {
     const assertCurrent = (): void => {
       if (this.epoch !== callEpoch) throw new Error('Code index reindex superseded during directory reading');
     };
-    const walk = new DirectoryWalk(this.rootDir);
-    let isIgnored: (absPath: string, rel: string) => boolean;
     try {
-      if (options.automatic && await walk.excludesFile(absPath, { beforeAttempt: assertCurrent, site: 'state.code-index.reindex.skip-directory' })) {
+      if (options.automatic && await new DirectoryWalk(this.rootDir).excludesFile(absPath, { beforeAttempt: assertCurrent, site: 'state.code-index.reindex.skip-directory' })) {
         assertCurrent();
         deleteChunksForPath(this.db, rel);
         return { indexed: false, mode: 'empty' };
       }
-      isIgnored = await this.buildIgnoreMatcher(diagnostics, walk, assertCurrent);
-      assertCurrent();
-      // Ignore discovery can suspend on unrelated directories. Recheck the
-      // automatic path after it, without repeating cached semantic readings.
-      if (options.automatic && await walk.excludesFile(absPath, { beforeAttempt: assertCurrent, site: 'state.code-index.reindex.skip-directory' })) {
-        assertCurrent();
-        deleteChunksForPath(this.db, rel);
-        return { indexed: false, mode: 'empty' };
-      }
-      assertCurrent();
     } catch (error) {
       if (this.epoch !== callEpoch) return { indexed: false, mode: 'empty' };
       throw error;
     }
-    if (isIgnored(absPath, rel)) {
+    if (this.epoch !== callEpoch || !this.db) return { indexed: false, mode: 'empty' };
+    // One read attempt per ancestor directory's .gitignore; no walk of the tree.
+    if (createNestedIgnoreMatcher(this.rootDir, diagnostics)(absPath)) {
       deleteChunksForPath(this.db, rel);
       return { indexed: false, mode: 'empty' };
     }
@@ -656,11 +649,10 @@ export class CodeIndexStore {
     const assertCurrent = (): void => {
       if (this.epoch !== buildEpoch) throw new Error('Code index build superseded during directory reading');
     };
-    let isIgnored: (absPath: string, rel: string) => boolean;
+    // Each directory's .gitignore is read once, when the first file below it is checked.
+    const isIgnored = createNestedIgnoreMatcher(this.rootDir, diagnostics);
     let scanned: Set<string>;
     try {
-      isIgnored = await this.buildIgnoreMatcher(diagnostics, walk, assertCurrent);
-      assertCurrent();
       scanned = await collectGlobFiles(this.rootDir, ['**/*'], false, false, diagnostics, walk, { beforeAttempt: assertCurrent });
     } catch (error) {
       if (this.epoch !== buildEpoch) return abortedBuildStats(startedAt, 0, skip, this.abortReason());
@@ -680,7 +672,7 @@ export class CodeIndexStore {
 
     for (const absPath of candidateFiles) {
       const rel = relative(this.rootDir, absPath);
-      if (isIgnored(absPath, rel)) {
+      if (isIgnored(absPath)) {
         skip.ignoredByGitignore++;
         continue;
       }
@@ -819,28 +811,6 @@ export class CodeIndexStore {
   }
 
   /**
-   * Compose the root .gitignore with any nested .gitignore files (each nested
-   * file's patterns apply relative to its own directory, per git semantics).
-   * Nested coverage is bounded by findNestedGitignoreFiles' cap (see module doc).
-   */
-  private async buildIgnoreMatcher(diagnostics: FindDiagnostics, walk: DirectoryWalk, assertCurrent: () => void): Promise<(absPath: string, rel: string) => boolean> {
-    const rootGitignorePath = join(this.rootDir, '.gitignore');
-    const rootMatcher = buildGitignoreMatcher(rootGitignorePath, diagnostics);
-    const nested = (await findNestedGitignoreFiles(this.rootDir, rootGitignorePath, walk, { beforeAttempt: assertCurrent }))
-      .map((path) => ({ dir: dirname(path), matcher: buildGitignoreMatcher(path, diagnostics) }))
-      .filter((entry): entry is { dir: string; matcher: (rel: string) => boolean } => entry.matcher !== null);
-    return (absPath: string, rel: string): boolean => {
-      if (rootMatcher !== null && rootMatcher(rel)) return true;
-      for (const entry of nested) {
-        if (absPath.startsWith(entry.dir + sep) && entry.matcher(relative(entry.dir, absPath))) {
-          return true;
-        }
-      }
-      return false;
-    };
-  }
-
-  /**
    * Index one file's content. Short-circuits on an unchanged file revision (no re-chunk or re-embed),
    * unless forceReembed is set because the embedding provider changed.
    *
@@ -867,8 +837,7 @@ export class CodeIndexStore {
       deleteChunksForPath(db, relPath);
       return { indexed: true, mode: 'empty', chunkCount: 0 };
     }
-    // Old digest-only rows are retired by the cache migration. Reuse only
-    // the same original physical source observation, never a content hash.
+    // Same bytes as the indexed copy: nothing to chunk or embed.
     const existingRevision = forceReembed ? null : getFileRevision(db, relPath);
     if (existingRevision === fileRevision) {
       source.assertCurrent();
@@ -892,11 +861,11 @@ export class CodeIndexStore {
     source.assertCurrent();
 
     const embeddings: Float32Array[] = [];
-    for (const draft of drafts) {
-      const embedding = await this.embedChunkAsync(draft.embedText);
+    for (let start = 0; start < drafts.length; start += EMBED_BATCH_SIZE) {
+      const batch = await this.embedChunksAsync(drafts.slice(start, start + EMBED_BATCH_SIZE).map((draft) => draft.embedText));
       if (this.epoch !== callEpoch || this.db !== db) return null;
       source.assertCurrent();
-      embeddings.push(embedding);
+      embeddings.push(...batch);
     }
 
     // All awaits are done, the delete+write below is synchronous, so the
@@ -927,13 +896,13 @@ export class CodeIndexStore {
     return this.intelligenceReadyPromise;
   }
 
-  private async embedChunkAsync(text: string): Promise<Float32Array> {
-    const result = await this.embeddingRegistry.embedAsync({
-      text,
+  private async embedChunksAsync(texts: readonly string[]): Promise<Float32Array[]> {
+    const results = await this.embeddingRegistry.embedManyAsync({
+      texts,
       dimensions: MEMORY_VECTOR_DIMS,
       usage: 'record',
     });
-    return normalizeMemoryEmbeddingVector(result.vector, MEMORY_VECTOR_DIMS);
+    return results.map((result) => normalizeMemoryEmbeddingVector(result.vector, MEMORY_VECTOR_DIMS));
   }
 }
 

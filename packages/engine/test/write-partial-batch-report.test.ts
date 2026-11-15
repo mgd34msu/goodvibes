@@ -43,8 +43,10 @@ test('a terminal heal failure mid-batch names the files already written and reco
     await expect(call).rejects.toBe(terminal);
     expect(terminal.message).toContain('Files already written by this call before it stopped: one.txt, broken.ts');
     expect(readFileSync(join(root, 'broken.ts'), 'utf8')).toBe('export const x = ;\n');
-    expect(undo.undoDepth()).toBe(2);
-    expect(cache.peek(join(root, 'broken.ts')).status).toBe('unchanged');
+    // Both files the call wrote are one undo entry.
+    expect(undo.undoDepth()).toBe(1);
+    expect(undo.peekUndo()?.operations.length).toBe(2);
+    expect(cache.compare(join(root, 'broken.ts'), readFileSync(join(root, 'broken.ts'), 'utf8'))).toBe('unchanged');
   } finally {
     installJudgmentPort(previous);
     which.mockRestore();

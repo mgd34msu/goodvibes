@@ -13,8 +13,9 @@
  *    fixed-size line windows ('window'), a non-empty file is never silently
  *    dropped.
  *  - Whitespace-only content yields zero chunks ('empty').
- *  - chunk_id is a deterministic tuple of source revision and chunk metadata,
- *    so identical trees always chunk identically.
+ *  - chunk_id is the file's path and the chunk's ordinal in it, so identical
+ *    trees always chunk identically and the id stays short at any path depth.
+ *    The file's revision (SHA-256 of its bytes) is carried on the chunk.
  */
 
 import type { SymbolInfo } from '../intelligence/tree-sitter/queries.js';
@@ -83,7 +84,7 @@ export async function chunkFileContent(
 
   if (topLevel.length > 0) {
     const lines = content.split('\n');
-    const drafts = topLevel.map((symbol) => makeSymbolChunk(relPath, lang, symbol, lines, fileRevision, mtimeMs));
+    const drafts = topLevel.map((symbol, ordinal) => makeSymbolChunk(relPath, ordinal, lang, symbol, lines, fileRevision, mtimeMs));
     return { drafts, mode: 'symbols' };
   }
 
@@ -102,8 +103,14 @@ export async function chunkFileContent(
   return { drafts, mode: 'window' };
 }
 
+/** A file's chunks are replaced together, so path plus ordinal is unique in the index. */
+function chunkIdFor(relPath: string, ordinal: number): string {
+  return `${relPath}#${ordinal}`;
+}
+
 function makeSymbolChunk(
   relPath: string,
+  ordinal: number,
   lang: string,
   symbol: SymbolInfo,
   lines: readonly string[],
@@ -114,7 +121,7 @@ function makeSymbolChunk(
   const endLine = Math.max(symbol.endLine, symbol.line);
   const slice = lines.slice(Math.max(0, startLine - 1), endLine).join('\n');
   const embedText = `${lang} ${symbol.kind} ${symbol.name}\n${slice}`;
-  const chunkId = JSON.stringify([relPath, fileRevision, lang, symbol.kind, symbol.name, startLine, endLine]);
+  const chunkId = chunkIdFor(relPath, ordinal);
   return {
     embedText,
     chunk: {
@@ -153,7 +160,7 @@ function makeWindowChunks(
       const startLine = start + 1;
       const endLine = end;
       const embedText = `${lang} window ${relPath}\n${slice}`;
-      const chunkId = JSON.stringify([relPath, fileRevision, lang, 'window', '', startLine, endLine]);
+      const chunkId = chunkIdFor(relPath, drafts.length);
       drafts.push({
         embedText,
         chunk: {

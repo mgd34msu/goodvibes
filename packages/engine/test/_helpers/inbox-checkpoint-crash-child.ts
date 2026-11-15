@@ -12,6 +12,7 @@ const advance: ImapUidCheckpointAdvance = { kind: 'imap-uid', transition: 'advan
   next: { ...previous, lastTerminalUid: 101 }, coveredUids: [101], terminal: [{ uid: 101, disposition: 'published', itemId: item.id }] };
 let fences = 0;
 await store.commitImapPoll('email', [item], advance, () => {
-  if (++fences === 2 && mode === 'before-rename') process.exit(23);
+  // The fence runs immediately before the commit; exiting there is a crash before anything is written.
+  if (++fences === 1 && mode === 'before-rename') process.exit(23);
 });
 process.exit(24);

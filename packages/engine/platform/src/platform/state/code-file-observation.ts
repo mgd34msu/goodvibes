@@ -1,6 +1,9 @@
-/** Reconstructible code-cache revisions describe the actual physical read.
- * They are neither content digests nor permission/admission credentials. */
-import { lstatSync } from 'node:fs';
+/** One read of a source file for the code index: its text, and a revision that
+ * is the SHA-256 of the bytes read. The revision says "same text", which is the
+ * only fact the index needs to skip a file it already embedded; a permission,
+ * owner, link or mount change re-embeds nothing. Which file the bytes came from
+ * is fenced in memory for the life of the read only, never stored. */
+import { createHash } from 'node:crypto';
 import { basename, dirname, isAbsolute, join, relative } from 'node:path';
 import { captureExistingDirectory } from '../utils/atomic-json-store.js';
 import { fileObservationIdentity, readFileObservation } from '../utils/file-observation.js';
@@ -8,25 +11,23 @@ import { assertCapturedToolReadAccess } from '../tools/shared/captured-input-too
 import { addFindWarning, type FindDiagnostics } from '../tools/find/shared.js';
 import { summarizeError } from '../utils/error-display.js';
 
-/** The observed source (or one of its ancestor directories) is no longer the one that was read. */
+/** The observed source (or its parent directory) is no longer the one that was read. */
 export class CodeSourceChangedError extends Error {
   override readonly name = 'CodeSourceChangedError';
 }
 
 export interface CodeFileObservation {
   readonly content: string;
+  /** SHA-256 (hex) of the bytes read. */
   readonly revision: string;
   readonly size: number;
   readonly mtimeMs: number;
   assertCurrent(): void;
 }
 
-/** Directory modes/owners/incarnations matter; sibling creation does not retire
- * an otherwise original source. The directory owner pins every lookup alias. */
-function directoryIdentity(path: string): readonly string[] {
-  const stat = lstatSync(path, { bigint: true });
-  if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('Code source ancestor is not a physical directory');
-  return [path, stat.dev, stat.ino, stat.mode, stat.uid, stat.gid, stat.birthtimeNs].map(String);
+/** The code index's revision for a file's bytes: 64 hex characters, one hash pass over bytes already in memory. */
+export function codeContentRevision(bytes: Uint8Array): string {
+  return createHash('sha256').update(bytes).digest('hex');
 }
 
 export function captureCodeFileObservation(root: string, path: string, maxBytes = Infinity): CodeFileObservation {
@@ -34,17 +35,12 @@ export function captureCodeFileObservation(root: string, path: string, maxBytes 
   const selected = join(parent.canonical, basename(path)), rel = relative(rootOwner.canonical, selected);
   if (!rel || rel === '..' || rel.startsWith('../') || rel.startsWith('..\\') || isAbsolute(rel)) throw new Error('Code source is outside its original root');
   rootOwner.assertCurrent(); parent.assertCurrent();
-  const directories: Array<readonly string[]> = [];
-  for (let directory = parent.canonical;; directory = dirname(directory)) {
-    directories.push(directoryIdentity(directory));
-    if (dirname(directory) === directory) break;
-  }
-  const observation = readFileObservation(selected, { maxBytes });
+  const observation = readFileObservation(selected, { maxBytes, allowLinks: true });
   const physical = observation.physical;
   const assertCurrent = () => {
     try {
       rootOwner.assertCurrent(); parent.assertCurrent();
-      if (fileObservationIdentity(selected) !== physical) throw new Error('Code source changed after reading');
+      if (fileObservationIdentity(selected, { allowLinks: true }) !== physical) throw new Error('Code source changed after reading');
     } catch (error) {
       // Callers tell "the file moved under us" apart from their own failures by this type.
       if (error instanceof CodeSourceChangedError) throw error;
@@ -53,12 +49,12 @@ export function captureCodeFileObservation(root: string, path: string, maxBytes 
   };
   assertCurrent();
   const content = new TextDecoder('utf-8').decode(observation.bytes);
-  const revision = JSON.stringify(['code-file-observation-v1', rootOwner.canonical, selected, directories, physical]);
+  const revision = codeContentRevision(observation.bytes);
   return Object.freeze({ content, revision, size: observation.bytes.length, mtimeMs: observation.mtimeMs, assertCurrent });
 }
 
-/** Preserve the indexer's original captured-read admission and diagnostics;
- * the resulting text and revision both come from the same nofollow FD read. */
+/** The indexer's read: captured-read admission, then the text and its revision
+ * from the same no-follow descriptor read. */
 export async function readCodeIndexFile(root: string, path: string, diagnostics: FindDiagnostics, maxBytes: number): Promise<CodeFileObservation | null> {
   try {
     await assertCapturedToolReadAccess(path);

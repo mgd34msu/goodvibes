@@ -2,7 +2,7 @@ export { JsonFileStore } from './json-file-store.js';
 export { KVState } from './kv-state.js';
 export { PersistentStore } from './persistent-store.js';
 export { FileStateCache } from './file-cache.js';
-export type { CacheEntry, CacheStatus, ConflictInfo } from './file-cache.js';
+export type { CacheStatus } from './file-cache.js';
 export { ProjectIndex } from './project-index.js';
 export type { FileEntry } from './project-index.js';
 export { ModeManager } from './mode-manager.js';
@@ -16,7 +16,7 @@ export type { HandlerSqliteStoreOptions, HandlerSqliteTransaction } from './daem
 export { TelemetryDB } from './telemetry.js';
 export type { ToolCallRecord, TelemetryFilter, TelemetrySummary } from './telemetry.js';
 export { FileUndoManager } from './file-undo.js';
-export type { FileOperation } from './file-undo.js';
+export type { FileOperation, FileUndoEntry, FileUndoResult } from './file-undo.js';
 export { MemoryStore, memoryRecordTemporalStatus, isMemoryTemporallyActive } from './memory-store.js';
 export { MemoryRegistry } from './memory-registry.js';
 export type {

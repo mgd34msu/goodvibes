@@ -159,7 +159,7 @@ test('a file that became binary loses its chunks when it is reindexed', async ()
 });
 
 test('a failed query embedding is named in the status, and an unopened index says it did not build', async () => {
-  const failing: MemoryEmbeddingProvider = { ...provider('q'), embedSync: () => { throw new Error('query provider down'); } };
+  const failing: MemoryEmbeddingProvider = { ...provider('q'), embed: async () => { throw new Error('query provider down'); } };
   const { store } = setup(failing, { 'a.ts': 'export const alphaMarker = 1;\n' });
   const unopened = await store.buildFull();
   expect(unopened.abortReason).toContain('the code index is not open');
@@ -171,7 +171,7 @@ test('a failed query embedding is named in the status, and an unopened index say
 
 test('a search error does not outlive a later search that never embedded a query', async () => {
   let down = false;
-  const flaky: MemoryEmbeddingProvider = { ...provider('first'), embedSync: (request) => {
+  const flaky: MemoryEmbeddingProvider = { ...provider('first'), embed: async (request) => {
     if (down) throw new Error('query provider down');
     return { vector: embedMemoryText(request.text, request.dimensions), dimensions: request.dimensions };
   } };

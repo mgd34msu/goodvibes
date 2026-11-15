@@ -344,8 +344,10 @@ test('captured vector relevance cannot publish after its source file changes dur
   });
   const previous = installJudgmentPort(fake.port);
   try {
-    await expect(buildPerTurnKnowledgeInjection({ task: ORIGINAL, conversationTail: [], memoryRegistry: { getAll: () => [] },
-      codeIndex: source, codeInjectionEnabled: true, budgetTokens: 4000, relevanceFloor: 95, alreadyInjectedIds: [], turn: 1 })).rejects.toThrow();
+    const result = await buildPerTurnKnowledgeInjection({ task: ORIGINAL, conversationTail: [], memoryRegistry: { getAll: () => [] },
+      codeIndex: source, codeInjectionEnabled: true, budgetTokens: 4000, relevanceFloor: 95, alreadyInjectedIds: [], turn: 1 });
     expect(fake.requests.some(request => request.context?.battery === 'engine.state.code-search')).toBe(true);
+    // The one check at consumption refuses the code the file no longer holds.
+    await expect(result.assertCodeCurrent!()).rejects.toThrow();
   } finally { installJudgmentPort(previous); }
 }));

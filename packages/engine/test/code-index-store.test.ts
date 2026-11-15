@@ -6,7 +6,7 @@ import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
  * the "never silently drop a file" fallback contract.
  */
 import { beforeEach, describe, expect, test, afterEach } from 'bun:test';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, linkSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -240,20 +240,25 @@ describe('CodeIndexStore: never silently drops a non-empty file', () => {
 });
 
 describe('CodeIndexStore: chunk shape', () => {
-  test('chunk_id names the exact source revision and chunk location', async () => {
+  test('unchanged bytes are not re-embedded after a permission change, and a hard-linked file is indexed', async () => {
     const root = makeRoot();
     writeFileSync(join(root, 'a.ts'), TS_FIXTURE);
-    const { registry } = makeCountingRegistry(root);
+    const { registry, callCount } = makeCountingRegistry(root);
     const store = await makeStore(root, registry);
     await store.buildFull();
-
-    const results = await store.search('foo', { limit: 10 });
-    const fooChunk = results.find((r) => r.chunk.symbol === 'foo')?.chunk as CodeChunk;
-    expect(fooChunk).toBeDefined();
-    expect(fooChunk.path).toBe('a.ts');
-    expect(fooChunk.startLine).toBe(1);
-    expect(JSON.parse(fooChunk.chunkId)).toEqual([fooChunk.path, fooChunk.fileRevision, fooChunk.lang, fooChunk.kind, fooChunk.symbol, fooChunk.startLine, fooChunk.endLine]);
-    expect(fooChunk).not.toHaveProperty('contentHash');
+    const afterFirst = callCount();
+    chmodSync(join(root, 'a.ts'), 0o755);
+    chmodSync(root, 0o750);
+    const second = await store.buildFull();
+    expect(callCount()).toBe(afterFirst);
+    expect(second.filesUnchanged).toBe(1);
+    linkSync(join(root, 'a.ts'), join(root, 'b.ts'));
+    await store.buildFull();
+    expect(store.stats().indexedFiles).toBe(2);
+    const chunk = (await store.search('foo', { limit: 10 })).find((r) => r.chunk.symbol === 'foo')?.chunk as CodeChunk;
+    expect(chunk.fileRevision).toMatch(/^[0-9a-f]{64}$/);
+    expect(chunk.chunkId.length).toBeLessThan(64);
+    chmodSync(root, 0o755);
   });
 
   test('old digest-based vector cache rows are retired and rebuilt from actual file observations', async () => {

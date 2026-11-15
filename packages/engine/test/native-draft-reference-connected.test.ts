@@ -82,9 +82,6 @@ async function fixture(message = ORIGINAL_BODY, webhook?: string, preField = fal
       old.run('DROP INDEX idx_drafts_wireReference');
       old.run('ALTER TABLE drafts DROP COLUMN wireReference');
       old.run('ALTER TABLE drafts DROP COLUMN legacyWireReference');
-      // HandlerSqliteStore close only releases its image. The bridge requires
-      // actual persisted pre-field bytes, not unsaved ALTER statements.
-      await old.save();
     } finally { old.close(); }
     const persistedOld = new HandlerSqliteStore({ workingDirectory: directory, fileName: 'drafts.sqlite', schema: [] });
     try {

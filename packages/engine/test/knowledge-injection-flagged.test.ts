@@ -23,5 +23,6 @@ test('a stale record the vector index ranks first is not injected either', async
     semanticCandidates: () => [{ record: stale, distance: 0, similarity: 1, score: 100 }],
   };
   const scored = await selectKnowledgeForTaskScored(registry, 'fix the auth module');
-  expect(scored.map((entry) => entry.injection.id)).toEqual(['mem_fresh']);
+  // The vector index put forward only the stale record, which is excluded; nothing else is asked about.
+  expect(scored.map((entry) => entry.injection.id)).toEqual([]);
 });

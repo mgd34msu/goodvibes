@@ -60,16 +60,15 @@ export function readNotebookFile(
   resolvedPath: string,
   fileCache: FileStateCache,
 ): { notebook: JupyterNotebook; rawContent: string } | { error: string } {
-  const cacheResult = fileCache.peek(resolvedPath);
-  if (cacheResult.status === 'modified') {
-    return { error: occConflictMessage(resolvedPath) };
-  }
-
   let rawContent: string;
   try {
     rawContent = readFileSync(resolvedPath, 'utf-8');
   } catch {
     return { error: `File not found or unreadable: '${resolvedPath}'` };
+  }
+  // Compared with the bytes just read, so the check and the edit see one instant.
+  if (fileCache.compare(resolvedPath, rawContent) === 'modified') {
+    return { error: occConflictMessage(resolvedPath) };
   }
 
   try {
@@ -242,7 +241,7 @@ export function formatNotebookOutput(
 
 export async function executeNotebookEdit(
   input: EditInput,
-  env: { fileCache: FileStateCache; cwd: string; fileUndoManager?: FileUndoManager | undefined; authenticated?: boolean; assertCurrent?: () => void },
+  env: { fileCache: FileStateCache; cwd: string; fileUndoManager?: FileUndoManager | undefined; undoCall?: number | undefined; authenticated?: boolean; assertCurrent?: () => void },
 ): Promise<{ success: boolean; output?: string; error?: string }> {
   const nbOps = input.notebook_operations!;
   const outputFormat = input.output?.format ?? 'minimal';
@@ -304,6 +303,7 @@ export async function executeNotebookEdit(
         beforeContent: rawContent,
         afterContent: newContent,
         tool: 'edit',
+        call: env.undoCall,
       });
     } catch {
       // Undo snapshot failure should not fail the edit.

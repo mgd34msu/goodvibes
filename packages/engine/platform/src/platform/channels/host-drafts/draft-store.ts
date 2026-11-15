@@ -223,6 +223,11 @@ export class DraftSyncStore {
     return this.store.dbPath;
   }
 
+  /** Set when the store file was unreadable at open and a fresh one started: what happened and where the old file is. */
+  recoveryNotice(): string | undefined {
+    return this.store.recoveryNotice();
+  }
+
   init(): Promise<void> {
     if (this.closed) return Promise.reject(new Error('DraftSyncStore is closed'));
     if (this.initialized) return Promise.resolve();
@@ -232,7 +237,6 @@ export class DraftSyncStore {
       // column without decrypting or rewriting the authenticated ciphertext.
       if (this.store.all<{ name: string }>('PRAGMA table_info(drafts)').some(column => column.name === 'messageDigest')) {
         this.store.run('ALTER TABLE drafts DROP COLUMN messageDigest');
-        await this.store.save();
       }
       // Old explicit INSERT/UPDATE statements leave this additive column intact.
       // Allocate a private-safe label once, never a digest of new caller metadata.
@@ -244,7 +248,6 @@ export class DraftSyncStore {
         else channelDraftWireReference(row.id, row.wireReference);
       }
       this.store.run('CREATE UNIQUE INDEX IF NOT EXISTS idx_drafts_wireReference ON drafts (wireReference)');
-      await this.store.save();
       if (!this.closed) this.initialized = true;
     });
     this.initializing = pending;
@@ -255,10 +258,10 @@ export class DraftSyncStore {
     return pending;
   }
 
-  /** Persist the admitted snapshot; shutdown waits for its atomic write. */
+  /** Resolves when every accepted write is on the file (each is one transaction; nothing else is left to write). */
   async save(): Promise<void> {
     this.requireInit();
-    return this.track(this.store.save());
+    return this.track(this.upsertTail);
   }
 
   /** Stop admission immediately and drain accepted work before closing SQLite. */

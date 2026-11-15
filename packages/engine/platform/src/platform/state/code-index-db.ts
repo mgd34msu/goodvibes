@@ -34,7 +34,6 @@ export type ChunkRow = {
 
 export type VectorRow = {
   rowid: number;
-  chunk_id: string;
   distance: number;
 };
 
@@ -46,7 +45,8 @@ export const CHUNK_ROW_COLUMNS =
 
 /** Target `PRAGMA user_version` for the code index store. */
 /** Bump with MEMORY_VECTOR_DIMS (embedding-dims.ts): the vector table's width is fixed when it is created. */
-export const CODE_INDEX_SCHEMA_VERSION = 4;
+/** v5: file_revision is the SHA-256 of the file's bytes, chunk_id is `path#ordinal`, vectors join on rowid. */
+export const CODE_INDEX_SCHEMA_VERSION = 5;
 
 export function createCodeIndexSchema(db: Database): void {
   db.run(`
@@ -66,8 +66,7 @@ export function createCodeIndexSchema(db: Database): void {
   db.run('CREATE INDEX IF NOT EXISTS code_chunks_path_idx ON code_chunks(path)');
   db.run(`
     CREATE VIRTUAL TABLE IF NOT EXISTS code_vectors USING vec0(
-      embedding float[${MEMORY_VECTOR_DIMS}],
-      +chunk_id text
+      embedding float[${MEMORY_VECTOR_DIMS}]
     )
   `);
   db.run(`
@@ -78,19 +77,14 @@ export function createCodeIndexSchema(db: Database): void {
   `);
 }
 
-/** Retire reconstructible old cache rows rather than adopting their digests.
- * Only vector/chunk cache data and its provider provenance are discarded. */
+/** The index is a reconstructible cache: an older layout is dropped whole and the next build re-embeds. */
 export function migrateCodeIndexSchema(db: Database): void {
   // The vector table is dropped, not emptied: an index made at another embedding width keeps that
   // width for as long as the table exists.
   db.run('DROP TABLE IF EXISTS code_vectors');
+  db.run('DROP TABLE IF EXISTS code_chunks');
+  db.run('DROP TABLE IF EXISTS code_index_meta');
   createCodeIndexSchema(db);
-  const columns = db.query<{ name: string }, []>('PRAGMA table_info(code_chunks)').all();
-  if (columns.some(column => column.name === 'content_hash')) db.run('ALTER TABLE code_chunks DROP COLUMN content_hash');
-  if (columns.some(column => column.name === 'file_hash')) db.run('ALTER TABLE code_chunks RENAME COLUMN file_hash TO file_revision');
-  db.run('DELETE FROM code_vectors');
-  db.run('DELETE FROM code_chunks');
-  db.run('DELETE FROM code_index_meta');
 }
 
 export function getCodeIndexMeta(db: Database, key: string): string | null {
@@ -132,11 +126,7 @@ function ensureChunkRowId(db: Database, chunk: CodeChunk): number {
 export function writeChunk(db: Database, chunk: CodeChunk, embedding: Float32Array): void {
   const rowid = ensureChunkRowId(db, chunk);
   db.query('DELETE FROM code_vectors WHERE rowid = ?').run(rowid);
-  db.query('INSERT INTO code_vectors (rowid, embedding, chunk_id) VALUES (?, ?, ?)').run(
-    rowid,
-    embedding,
-    chunk.chunkId,
-  );
+  db.query('INSERT INTO code_vectors (rowid, embedding) VALUES (?, ?)').run(rowid, embedding);
 }
 
 /**
@@ -176,10 +166,10 @@ export function getFileRevision(db: Database, relPath: string): string | null {
   return row?.file_revision ?? null;
 }
 
-export function getChunkById(db: Database, chunkId: string): CodeChunk | null {
-  const row = db.query<ChunkRow, [string]>(
-    `SELECT ${CHUNK_ROW_COLUMNS} FROM code_chunks WHERE chunk_id = ? LIMIT 1`,
-  ).get(chunkId);
+export function getChunkByRowId(db: Database, rowid: number): CodeChunk | null {
+  const row = db.query<ChunkRow, [number]>(
+    `SELECT ${CHUNK_ROW_COLUMNS} FROM code_chunks WHERE rowid = ? LIMIT 1`,
+  ).get(rowid);
   return row ? rowToChunk(row) : null;
 }
 

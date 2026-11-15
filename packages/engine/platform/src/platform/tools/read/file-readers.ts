@@ -6,6 +6,7 @@ import { logger } from '../../utils/logger.js';
 import { isNotebookFile } from '../../utils/notebook.js';
 import { FileStateCache } from '../../state/file-cache.js';
 import { ProjectIndex } from '../../state/project-index.js';
+import { watchIndexedFile } from '../../state/file-watcher.js';
 import { CodeIntelligence } from '../../intelligence/facade.js';
 import type { ImageMode } from './media.js';
 import {
@@ -453,7 +454,8 @@ async function readTextFile(target: ReadTarget, context: ReadExecutionContext, f
     return createReadErrorResult(target, `Cannot decode file as UTF-8: ${message}`, fullBuf.length);
   }
 
-  const cacheResult = fileInput.force ? { status: 'miss' as const } : context.fileCache.lookup(target.resolvedPath);
+  // Compared with the bytes this call just read: one read, one instant.
+  const cacheResult = { status: fileInput.force ? 'miss' as const : context.fileCache.compare(target.resolvedPath, rawContent) };
   context.fileCache.update(target.resolvedPath, rawContent, { tool: 'read' });
 
   const byteSize = Buffer.byteLength(rawContent, 'utf-8');
@@ -517,7 +519,10 @@ async function readTextFile(target: ReadTarget, context: ReadExecutionContext, f
 
 function indexReadFile(context: ReadExecutionContext, path: string, tokens: number): void {
   const local = relative(context.projectIndex.baseDir, path);
-  if (local !== '..' && !local.startsWith('../') && !isAbsolute(local)) context.projectIndex.upsertFile(path, tokens);
+  if (local !== '..' && !local.startsWith('../') && !isAbsolute(local)) {
+    context.projectIndex.upsertFile(path, tokens);
+    watchIndexedFile(context.projectIndex, path);
+  }
 }
 
 export async function readOneFile(

@@ -9,6 +9,7 @@ import { readFileObservation, type FileObservation } from '../../utils/file-obse
 import { tryAcquireCrossProcessLock } from '../../workspace/checkpoint/cross-process-lock.js';
 import { captureOwnedJson } from '../../gate/judgment-input.js';
 import { checkOwnerApproval, grantOwnerApproval, type ApprovalMismatch, type OwnerApproval } from '../../security/owner-approval.js';
+import type { PaymentStoreStop } from '../payment-host-health.js';
 
 const APPROVALS_FILE_VERSION = 1, MAX_PENDING_APPROVALS = 16;
 const missing = (error: unknown): boolean => error !== null && typeof error === 'object' && 'code' in error && error.code === 'ENOENT';
@@ -20,7 +21,7 @@ export class PaymentApprovalStoreError extends Error {
       : kind === 'busy' ? 'Another payment owner is updating approvals. Refresh this purchase before trying again.'
       : kind === 'invalid-request' ? 'The purchase approval must name an action and its content fields.'
       : kind === 'write-uncertain' ? 'The approval write could not be confirmed. Inspect the original purchase and approval evidence before trying again.'
-      : 'Purchase approvals are unreadable, unsupported or changed. Repair the original approval evidence and reopen the payment host.');
+      : 'The purchase approvals file stopped being used because it could not be read, a write could not be confirmed, or the file changed while the daemon was running. Nothing was lost. Restart the daemon to read it again.');
   }
 }
 
@@ -62,6 +63,11 @@ export class DaemonApprovalStore {
   private observedFile = false;
   private unavailable = false;
   constructor(private readonly filePath: string, private readonly now: () => Date = () => new Date()) {}
+
+  /** Why this store stopped itself, or null while it is serving. */
+  stopped(): PaymentStoreStop | null {
+    return this.unavailable ? { store: 'purchase approvals store', reason: 'it could not be read, a write to it could not be confirmed, or its file changed while the daemon was running', path: this.filePath } : null;
+  }
 
   private read(): ApprovalSnapshot {
     if (this.unavailable) throw new PaymentApprovalStoreError('unavailable');

@@ -29,6 +29,7 @@
 import { dayKey, type DayKey } from './day.js';
 import { samePaymentEvidence } from './evidence-equality.js';
 import type { BudgetPool, MinorUnits } from './types.js';
+import type { PaymentStoreStop } from './payment-host-health.js';
 
 export interface BudgetLimits {
   readonly dailyItemMinorUnits: MinorUnits;
@@ -113,6 +114,9 @@ const RECONCILIATION_RETENTION_MS = 90 * 24 * 60 * 60 * 1000;
  * `daemon.timezone` unable to refill a spent pool, see day.ts.
  */
 export class BudgetLedger {
+  /** Why durable accounting stopped itself; an in-memory ledger never does. */
+  stopped(): PaymentStoreStop | null { return null; }
+
   private spend: SpendRecord[] = [];
   private reservations: BudgetReservation[] = [];
   private reconciliations: CheckoutBudgetSettlement[] = [];

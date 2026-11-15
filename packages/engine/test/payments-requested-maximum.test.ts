@@ -84,3 +84,21 @@ test('merchant-only approval and a generic approval do not claim the item exceed
 test('unsafe amounts cannot be rounded into owner notices', () => {
   expect(() => formatMinorUnits(Number.MAX_SAFE_INTEGER + 1, input().budgetCurrency)).toThrow(RangeError);
 });
+
+test('the per-purchase ceiling holds the full total, not the item price alone', () => {
+  const original = input();
+  // Item 10.00 fits a 12.00 ceiling; with tax, fee and delivery the purchase comes to 13.50.
+  const limits = { ...original.limits, perPurchaseCeiling: { enabled: true, minorUnits: 1_200 } };
+  expect(decidePurchase({ ...original, limits, pools: new BudgetLedger().snapshot(limits, Date.now(), 'UTC') })).toMatchObject({
+    kind: 'needs-approval', approvalReasons: ['per-purchase-ceiling'],
+    exceeded: { limit: 'per-purchase-ceiling', availableMinorUnits: 1_200, neededMinorUnits: 1_350, excessMinorUnits: 150 },
+  });
+});
+
+test('a total over the card\'s declared limit is refused with the amounts, before any approval', () => {
+  const result = decidePurchase({ ...input(), cardLimitMinorUnits: 1_300 });
+  expect(result).toMatchObject({ kind: 'refuse', code: 'card-limit-exceeded',
+    exceeded: { limit: 'card-limit', availableMinorUnits: 1_300, neededMinorUnits: 1_350, excessMinorUnits: 50 } });
+  expect(result.kind === 'refuse' && result.reason).toContain('USD 0.50');
+  expect(decidePurchase({ ...input(), cardLimitMinorUnits: 1_350 }).kind).toBe('within-budget');
+});

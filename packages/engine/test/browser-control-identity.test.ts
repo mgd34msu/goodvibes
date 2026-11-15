@@ -263,6 +263,13 @@ describe('BrowserEngine identity effect boundaries', () => {
     await expect(driver.submitOrder('e1')).rejects.toBeInstanceOf(CheckoutSubmitRefused);
     expect(f.effects).toEqual([]); expect(model.requests).toEqual([]);
   });
+  test('an order-placing submit is refused to the browser tools and names the budgeted path; nothing is clicked', async () => {
+    const f = fixture('Place order'); f.setSubmit(); await f.engine.snapshot({}); reading();
+    const refused = await f.engine.click({}, { ref: 'e1' }).catch((error: unknown) => error);
+    expect(refused).toBeInstanceOf(Error);
+    expect((refused as Error).message).toContain('places an order');
+    expect(f.effects).toEqual([]);
+  });
   test('BrowserEngine reports source retirement after a native click as an unknown click outcome', async () => {
     const f = fixture(); await f.engine.snapshot({}); reading();
     let active = true;

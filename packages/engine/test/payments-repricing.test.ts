@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { NONE } from '@goodvibes-jev/judgment';
-import { checkoutAmountCandidates, checkoutRepriceAmount, checkoutRepriceShape, readRepricedCheckout } from '../platform/src/platform/payments/checkout-repricing.js';
+import { checkoutAmountCandidates, checkoutRepriceReading, readRepricedCheckout } from '../platform/src/platform/payments/checkout-repricing.js';
 import { checkoutTerms } from '../platform/src/platform/payments/batteries/checkout-terms.js';
 import type { CheckoutTerms } from '../platform/src/platform/payments/checkout-page.js';
 import type { RawCheckoutReading } from '../platform/src/platform/payments/checkout-extraction.js';
@@ -30,35 +30,24 @@ function fixture() {
   return { previous, reading, current };
 }
 function reader(options: { readonly shape?: number; readonly final?: number; readonly uncertain?: boolean; readonly omit?: string; readonly duplicateFee?: boolean; readonly wrongTotal?: boolean } = {}) {
-  let feePicks = 0;
   return fakePort((name, question, state) => {
     const root = record(state);
     if (name === 'samePurchase') return noulAnswer(options.shape ?? 0.99);
     if (name === 'unchanged') {
       const expected = record(root['expected']);
       expect(expected['tax']).toBe('USD 1.20'); expect(expected['fees']).toBe('USD 0.50'); expect(expected['total']).toBe('USD 15.70');
+      expect(expected['feeLabels']).toEqual(['Mandatory handling']);
       return noulAnswer(options.final ?? 0.99);
     }
-    const context = record(root['context']), role = context['role'];
-    if (typeof role !== 'string' || !Array.isArray(root['candidates'])) throw new Error('Missing exact repricing selector');
-    const rows = root['candidates'].map(row => ({ id: record(row)['id'], content: record(record(row)['content']) }));
-    let literal: string | undefined;
-    if (role.startsWith('unit price')) literal = '12.00';
-    else if (role.startsWith('total sales tax')) literal = '1.20';
-    else if (role.startsWith('delivery price') && role.includes('Standard')) literal = '2.00';
-    else if (role.startsWith('delivery price') && role.includes('Express')) literal = '4.00';
-    else if (role.startsWith('final payable total')) literal = options.wrongTotal ? '12.00' : '15.70';
-    else if (role === 'next-mandatory-fee') {
-      if (!Array.isArray(context['selectedFees'])) throw new Error('Missing prior distinct fee evidence');
-      literal = context['selectedFees'].length === 0 || options.duplicateFee ? '0.50' : undefined;
-    } else throw new Error('Unexpected repricing role');
-    const selected = options.omit && role.startsWith(options.omit) ? undefined : rows.find(row => row.content['literal'] === literal);
-    const id = typeof selected?.id === 'string' ? selected.id : NONE;
-    if (name === 'pick') { if (role === 'next-mandatory-fee') feePicks++; return choiceAnswer(question, id, options.uncertain ? 0.5 : 0.99); }
-    if (!name.startsWith('fits_')) throw new Error('Unexpected repricing question');
-    const index = Number(name.slice(5));
-    expect(feePicks).toBeLessThanOrEqual(2);
-    return noulAnswer(rows[index]?.id === id ? 0.99 : 0.01);
+    if (!Array.isArray(root['candidates'])) throw new Error('Missing exact repricing candidates');
+    const rows = root['candidates'].map(row => record(row));
+    const literal = name === 'line_0' ? '12.00' : name === 'tax' ? '1.20' : name === 'shipping_0' ? '2.00' : name === 'shipping_1' ? '4.00'
+      : name === 'total' ? (options.wrongTotal ? '12.00' : '15.70')
+        : name === 'fee_0' || (name === 'fee_1' && options.duplicateFee) ? '0.50'
+          : name.startsWith('fee_') ? undefined : (() => { throw new Error(`Unexpected repricing question ${name}`); })();
+    const selected = options.omit && name.startsWith(options.omit) ? undefined : rows.find(row => row['literal'] === literal);
+    const id = typeof selected?.['id'] === 'string' ? selected['id'] : NONE;
+    return choiceAnswer(question, id, options.uncertain ? 0.5 : 0.99);
   });
 }
 
@@ -72,12 +61,16 @@ describe('source amount syntax', () => {
   test('negative and invalid full numerals never become positive suffix candidates', () => {
     expect(checkoutAmountCandidates(['-1 234.56; (12.00); −3.00; –4.00; 1,23,456; 1e6; -1e6; 0x10; 10 - 12; 1/2; valid 5.00'], 'USD')?.map(candidate => candidate.content.literal)).toEqual(['5.00']);
   });
+  test('a fee is labelled with the words just before its amount', () => {
+    const candidates = checkoutAmountCandidates(['Cable x1: USD 12.00\nMandatory handling: USD 0.50\nService fee $1.25'], 'USD');
+    expect(candidates?.map(candidate => candidate.content.label)).toEqual(['Cable x1', 'Mandatory handling', 'Service fee']);
+  });
   test('refuses a candidate overflow rather than silently dropping later amounts', () => {
     expect(checkoutAmountCandidates([Array.from({ length: 193 }, (_, index) => `${index}.00`).join('; ')], 'USD')).toBeNull();
   });
 });
 
-test('replacement quote uses exact current source amounts and a complete final verification', async () => {
+test('a replacement quote costs two model requests: one reading and the final terms verification', async () => {
   const input = fixture(), scripted = reader(); let currentChecks = 0;
   const result = await readRepricedCheckout({ ...input, port: scripted.port, assertCurrent: async () => { currentChecks++; } });
   expect(result).not.toBeNull(); if (!result) throw new Error('Fresh fixture quote was not returned');
@@ -86,10 +79,9 @@ test('replacement quote uses exact current source amounts and a complete final v
   expect(result.shippingOptions).toEqual([{ label: 'Standard', cost: '2.00' }, { label: 'Express', cost: '4.00' }]);
   expect(result.statedTotal).toBe('15.70'); expect(Object.isFrozen(result)).toBe(true);
   const extracted = extractCheckout(result, currency); expect(extracted.ok).toBe(true);
+  expect(result.fees.map(fee => fee.label)).toEqual(['Mandatory handling']);
   expect(currentChecks).toBeGreaterThan(1);
-  expect(scripted.requests[0]?.context?.battery).toBe(checkoutRepriceShape.name);
-  expect(scripted.requests.at(-1)?.context?.battery).toBe(checkoutTerms.name);
-  expect(scripted.requests.filter(request => request.context?.battery === checkoutRepriceAmount.name)).toHaveLength(7);
+  expect(scripted.requests.map(request => request.context?.battery)).toEqual([checkoutRepriceReading.name, checkoutTerms.name]);
 });
 
 test('replacement delivery prices can come from native select options absent from rendered body text', async () => {
@@ -102,7 +94,7 @@ test('replacement delivery prices can come from native select options absent fro
   expect(result?.shippingOptions).toEqual([{ label: 'Standard', cost: '2.00' }, { label: 'Express', cost: '4.00' }]);
 });
 
-for (const options of [{ shape: 0.5 }, { shape: 0.01 }, { uncertain: true }, { omit: 'unit price' }, { duplicateFee: true }, { wrongTotal: true }, { final: 0.5 }, { final: 0.01 }])
+for (const options of [{ shape: 0.5 }, { shape: 0.01 }, { uncertain: true }, { omit: 'line_' }, { duplicateFee: true }, { wrongTotal: true }, { final: 0.5 }, { final: 0.01 }])
   test(`unestablished or inconsistent replacement never reaches a new purchase: ${JSON.stringify(options)}`, async () => {
     const input = fixture(), scripted = reader(options);
     expect(await readRepricedCheckout({ ...input, port: scripted.port, assertCurrent: async () => {} })).toBeNull();
@@ -168,9 +160,7 @@ test('explicit free components use the fixed zero option without fabricating a n
     if (name === 'unchanged') {
       expect(record(record(state)['expected'])['total']).toBe('USD 0.00'); return noulAnswer(0.99);
     }
-    const role = record(record(state)['context'])['role'];
-    if (name === 'pick') return choiceAnswer(question, role === 'next-mandatory-fee' ? NONE : 'zero-charge', 0.99);
-    return noulAnswer(role === 'next-mandatory-fee' ? 0.01 : 0.99);
+    return choiceAnswer(question, name.startsWith('fee_') ? NONE : 'zero-charge', 0.99);
   });
   const result = await readRepricedCheckout({ ...input, current, port: scripted.port, assertCurrent: async () => {} });
   expect(result?.statedTotal).toBe('0'); expect(result?.tax).toBe('0'); expect(result?.lines[0]?.unitPrice).toBe('0'); expect(result?.fees).toEqual([]);

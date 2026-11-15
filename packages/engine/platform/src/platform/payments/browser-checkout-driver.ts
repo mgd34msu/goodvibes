@@ -106,6 +106,7 @@ import { checkoutTerms, checkoutTermsView } from './batteries/checkout-terms.js'
 import { registrableDomain } from '../security/public-suffix.js';
 import type { RawCheckoutReading } from './checkout-extraction.js';
 import { readRepricedCheckout } from './checkout-repricing.js';
+import { markPaymentCheckoutAction } from '../security/order-submission.js';
 
 /**
  * The part of a card-material guard this adapter can see.
@@ -527,6 +528,8 @@ class BrowserCheckoutPageDriver implements CheckoutPageDriver {
           throw new CheckoutSubmitRefused('The current checkout could not be verified before submission.');
         }
       } };
+      // The one click the order placement guard admits is this flow's own.
+      markPaymentCheckoutAction(current);
       enteredClick = true;
       result = await engine.click(this.target, { ref: target }, current);
     } catch (error) {

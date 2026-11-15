@@ -9,6 +9,16 @@ export interface PaymentPurchaseStatus {
   readonly unreadable: readonly PaymentUnreadableOperation[];
   /** Approved purchases waiting for the owner to type the card security code (`payments.cvvHandling: 'prompt'`). */
   readonly securityCodes: readonly PaymentSecurityCodeRequestView[];
+  /** Present while a payment store has stopped itself: new purchases are refused with `message` until the daemon restarts. */
+  readonly stopped?: PaymentHostStopView;
+}
+
+/** A payment store that stopped itself, as status shows it. */
+export interface PaymentHostStopView {
+  readonly store: string;
+  readonly reason: string;
+  readonly path?: string;
+  readonly message: string;
 }
 
 /** One purchase waiting for its card security code. Never carries a code. */
@@ -60,9 +70,10 @@ function reference(value: unknown): string {
 
 /** Shared browser/terminal decoder: no stores, native runtime or model calls. */
 export function readPaymentWindowStatus(value: unknown): PaymentPurchaseStatus {
-  // `unreadable` and `securityCodes` are sent only when they have entries.
+  // `unreadable`, `securityCodes` and `stopped` are sent only when they have content.
   const present = value !== null && typeof value === 'object' && !Array.isArray(value) ? value : {};
-  const response = object(value, ['windows', 'operations', ...(['unreadable', 'securityCodes'] as const).filter(key => key in present)]);
+  const response = object(value, ['windows', 'operations', ...(['unreadable', 'securityCodes', 'stopped'] as const).filter(key => key in present)]);
+  const stopped = response['stopped'] === undefined ? undefined : readStopView(response['stopped']);
   const windows = response['windows'];
   const operations = response['operations'];
   const unreadable = response['unreadable'] ?? [];
@@ -91,7 +102,7 @@ export function readPaymentWindowStatus(value: unknown): PaymentPurchaseStatus {
   });
   const ids = new Set<string>(), windowIds = new Set<string>();
   return Object.freeze({ operations: Object.freeze(capturedOperations), unreadable: Object.freeze(capturedUnreadable),
-    securityCodes: Object.freeze(capturedSecurityCodes), windows: Object.freeze(windows.map((entry: unknown): PaymentWindowView => {
+    securityCodes: Object.freeze(capturedSecurityCodes), ...(stopped ? { stopped } : {}), windows: Object.freeze(windows.map((entry: unknown): PaymentWindowView => {
     const row = object(entry, ['purchaseId', 'windowId', 'kind', 'notice', 'deadlineMs']);
     const purchaseId = reference(row['purchaseId']), windowId = reference(row['windowId']);
     if (ids.has(purchaseId) || windowIds.has(windowId)) return failure();
@@ -100,6 +111,15 @@ export function readPaymentWindowStatus(value: unknown): PaymentPurchaseStatus {
       || typeof row['deadlineMs'] !== 'number' || !Number.isFinite(row['deadlineMs'])) return failure();
     return Object.freeze({ purchaseId, windowId, kind: row['kind'], notice: row['notice'], deadlineMs: row['deadlineMs'] });
   })) });
+}
+
+function readStopView(value: unknown): PaymentHostStopView {
+  const present = value !== null && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  const row = object(value, ['store', 'reason', 'message', ...('path' in present ? ['path'] : [])]);
+  const text = (field: unknown): string => typeof field === 'string' && field.length > 0 && field.length <= 2048 ? field : failure();
+  const store = text(row['store']), reason = text(row['reason']), message = text(row['message']);
+  const path = row['path'] === undefined ? undefined : text(row['path']);
+  return Object.freeze({ store, reason, message, ...(path === undefined ? {} : { path }) });
 }
 
 export function readPaymentWindowAnswer(value: unknown): PaymentWindowAnswer {

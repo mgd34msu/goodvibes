@@ -69,9 +69,11 @@ app, not the card the owner's rent comes out of.
 So the design supports both, prefers one:
 
 - a card's `kind`: `'virtual' | 'real'`
-- A virtual card records `issuerCapMinorUnits` as a **declared** fact, the
-  daemon cannot verify it, so it is shown to the owner as "you told us this"
-  and never treated as an enforcement layer of ours.
+- A card records `issuerCapMinorUnits` as a **declared** fact, the daemon
+  cannot verify it, so it is shown to the owner as "you told us this". It is
+  still one of the owner's limits: a purchase whose full total is over it is
+  refused (`card-limit-exceeded`) before anything is held, saying the total,
+  the declared limit and how much over, since the issuer would decline it.
 - Configuring a `real` card is allowed and is not blocked. The recommendation
   to use a virtual card is stated in the `payments.cards.create` description;
   nothing is shown at the point of choice and no acknowledgement is recorded.
@@ -139,6 +141,9 @@ interface PaymentsConfig {
   /** Master switch. Nothing in this capability runs while false. */
   enabled: boolean;                         // default false
 
+  /** True: every purchase needs `/payments approve` first. */
+  confirmEveryPurchase: boolean;            // default FALSE
+  /** The card a purchase that names none is paid with. */
   defaultCardId: string;                    // default ''
 
   /** ISO-4217. What every amount below and every checkout is checked against. */
@@ -155,7 +160,7 @@ interface PaymentsConfig {
     /** Unavoidable charges only: tax, mandatory fees, delivery. */
     dailyOverage: number;                   // default 0
     perPurchaseCeilingEnabled: boolean;     // default TRUE  (owner ruling)
-    /** The most any single purchase may come to. */
+    /** The most any single purchase may come to in total: items, tax, fees, delivery. */
     perPurchaseCeiling: number;             // default 0
     overageToleranceEnabled: boolean;       // default FALSE (owner ruling)
     /** The third pool, drawn on only after the delivery ladder bottoms out. */
@@ -302,8 +307,10 @@ decisions, not delivery costs. A purchase that includes one is treated as an ite
 price change and re-enters the decision order at step 4a.
 
 **Per-purchase ceiling** (`perPurchaseCeilingEnabled`, default **on**) caps a
-single purchase's item price independently of what remains in the daily pool. It
-is a separate question from the daily budget and both must pass.
+single purchase's full total (items, tax, mandatory fees and the delivery the
+ladder chose) independently of what remains in the daily pool. It is a separate
+question from the daily budget and both must pass; a purchase over it asks the
+owner, naming the ceiling and by how much.
 
 **Overage tolerance** (default **off**) ships as a real configurable feature
 rather than a bare switch: enabling it without setting
@@ -369,7 +376,8 @@ The daemon writes budget schema 2, and schema 3 once an owner reconciliation has
 checkout-held records before accounting becomes available, because those files
 cannot establish that an old hold is safe to expire. Unsupported, unreadable or
 malformed accounting disables payment budget operations while preserving the
-file. Repair the original accounting and restart the daemon to reload it.
+file. Restart the daemon to reload it; `payments.budget.status` names the
+stopped ledger and its file until then (§10, "A payment store that stopped itself").
 
 ---
 
@@ -431,7 +439,7 @@ document exists so they cannot again without someone noticing.
     a currency mismatch or a zero daily-item budget refuse immediately (§9.7.1);
     otherwise:
 
-4a. ITEM PRICE vs DAILY ITEM BUDGET  (and the per-purchase ceiling if enabled)
+4a. ITEM PRICE vs DAILY ITEM BUDGET
     ├─ over  →  ABOVE BUDGET, needs explicit approval, continue to 5
     └─ within →  continue to 5
 
@@ -444,6 +452,14 @@ document exists so they cannot again without someone noticing.
             ├─ overageTolerance enabled and the shortfall fits the allowance
             │                                  →  draw tolerance, record, continue to 5
             └─ otherwise                       →  REFUSE           (owner ruling)
+
+4b'. FULL PAYABLE TOTAL vs THE CARD'S DECLARED LIMIT, when the card has one
+    ├─ over  →  REFUSE, naming the total, the limit and the excess
+    └─ within →  continue
+
+4b''. FULL PAYABLE TOTAL vs PER-PURCHASE CEILING, when enabled
+    ├─ over  →  ABOVE BUDGET, needs explicit approval, continue to 5
+    └─ within →  continue
 
 4c. FULL PAYABLE TOTAL vs OWNER'S REQUESTED MAXIMUM, when supplied
     item + tax + mandatory fees + selected delivery
@@ -971,8 +987,13 @@ to the click. They may implement `checkPage`, the code-only check before the car
 that the page is still the merchant's checkout with the same submit control; an
 adapter without it relies on `verifyTerms` alone.
 To support repricing they also implement `readCurrentQuote`, returning a complete
-verified reading for the original purchase. An adapter without that capability
-stops on a changed quote. Returning a replacement reading never permits submit;
+verified reading for the original purchase. The browser adapter reads a changed
+quote in two model requests: one reading (`engine.payments.reprice-reading`)
+that says whether the page is still the same purchase and picks the exact
+current amount for every line, the tax, each delivery option, the total and up
+to three mandatory fees, then the one terms verification of the quote code
+assembled from those amounts. A fee is labelled with the words just before its
+amount. An adapter without that capability stops on a changed quote. Returning a replacement reading never permits submit;
 the flow must complete the new decision and window first.
 Fill-only adapters may omit it. A driver without fresh verification cannot run an
 automated purchase; it is not treated as an unchanged quote. Native evidence reads
@@ -1115,9 +1136,9 @@ purchase's hold.
 
 Only a missing checkout journal means there are no stored checkouts. Damaged
 JSON, invalid records, duplicate purchase IDs, unsupported versions or a changed
-file disable journal operations without replacing the evidence. Restore or
-repair the original payment state and inspect pending merchant orders before
-restarting checkout. A failed removal is reported and retains the live page
+file disable journal operations without replacing the evidence. Restart the
+daemon to read the journal again, then check `payments.purchase.status` for
+purchases that were in progress. A failed removal is reported and retains the live page
 owner. Any uncertain storage write retires that journal instance; reopening
 reads the actual durable file rather than assuming which write landed.
 
@@ -1222,7 +1243,7 @@ missing, previously unused ledger means no recorded purchases. Invalid JSON,
 unsupported versions, invalid financial rows, invalid UTF-8, unsafe file links
 and loss of an observed ledger report unavailable evidence. Reads do not return
 an empty history for these conditions, and a later append cannot erase the
-original file. Restart the payment host after repairing the original evidence.
+original file. Restart the daemon to read the ledger again.
 Valid earlier rows without `merchantDiscovered` retain the owner-named default;
 financial amounts, identities, timestamps and outcomes receive no defaults.
 
@@ -1270,7 +1291,7 @@ original committed budget entry even beyond ordinary history pruning. Once the
 receipt exists, old daily spend can be pruned without repeating that settlement.
 The budget also retains its original private file source: external replacement,
 loss, changed ownership/permissions, or unsafe links make accounting unavailable.
-Repair the original evidence and restart the payment host. When purchase or
+Restart the daemon to read the budget again. When purchase or
 financial-operation history exists, a missing budget is unavailable rather than
 a fresh spending allowance; nothing silently recreates it as empty.
 
@@ -2154,16 +2175,17 @@ verb.
 
 | Method | Access | Returns | Built |
 |---|---|---|---|
-| `payments.budget.status` | `read:payments` | Today's pools, remaining, `dayKey`, timezone, reservation count, whether this node may spend. | yes |
+| `payments.budget.status` | `read:payments` | Today's pools, remaining, `dayKey`, timezone, reservation count, whether this node may spend, and `stopped` while a payment store has stopped itself. | yes |
 | `payments.cards.list` | `read:payments` | Metadata only: id, label, brand, last4, kind, expiry, declared issuer cap, `materialComplete`. | yes |
 | `payments.cards.create` | admin, `write:payments` | Accepts card material; **returns metadata only**. | yes |
 | `payments.cards.delete` | admin, `write:payments` | Deletes the card's metadata row and every derived secret, reporting how many were cleared. | yes |
 | `payments.purchases.list` | `read:payments` | Audit records. | yes |
-| `payments.checkout.begin` | paired admin owner, `write:payments`, explicit request and prior purchase approval | Persists one stable `requestId` and returns `accepted` with its purchase ID. The daemon owns subsequent processing. | yes |
+| `payments.checkout.approve` | paired admin owner, `write:payments`, explicit confirmation | Approves one merchant, item and amount in advance, for five minutes, once. Required before every purchase only when `payments.confirmEveryPurchase` is on. | yes |
+| `payments.checkout.begin` | paired admin owner, `write:payments`, explicit request | Persists one stable `requestId` and returns `accepted` with its purchase ID. The daemon owns subsequent processing. `cardId` may be omitted to pay with `payments.defaultCardId`; `merchantDiscovered` is read as sent. | yes |
 | `payments.checkout.fillCard` | admin, `write:payments` | Types the stored card into an already-open checkout page. | yes |
 | `payments.purchase.approve` / `.deny` | paired admin owner, `write:payments`, explicit confirmation | Answers the exact live window; approve acknowledges an in-budget veto too. | live windows |
 | `payments.purchase.cancel` | paired admin owner, `write:payments`, explicit confirmation | Objects to a live window, or requests stopping the exact admitted operation. Does not undo an order. | yes |
-| `payments.purchase.status` | `read:payments` | Durable operation status and live windows, optionally for one original purchase ID. | yes |
+| `payments.purchase.status` | `read:payments` | Durable operation status and live windows, optionally for one original purchase ID, and `stopped` while a payment store has stopped itself. | yes |
 | `payments.purchase.reconcile` | paired admin owner, `write:payments`, explicit inspected-history confirmation | Records an owner’s merchant-history finding and settles original accounting without another submit. | yes |
 
 The original seven platform verbs, the pre-checkout `payments.checkout.approve`,
@@ -2192,7 +2214,46 @@ inspected (asking for that one purchase by ID refuses with the same reason). Eve
 `purchaseId`, immutable `operationId`, state, last durable phase, creation/update
 times, outcome and parsed total/currency when known. The unfiltered response
 retains all open or financially uncertain operations plus the 100 most recent
-operations. Older identities remain queryable by purchase ID. Complete purchase
+operations. Older identities remain queryable by purchase ID. An operation that
+ended unbought also carries `reason` (the specific sentence: which cart line,
+which limit and by how much, which field), `challengeStep` when a merchant
+verification step waits on the owner, and `exceeded` (`limit`, `setting`,
+`availableMinorUnits`, `neededMinorUnits`, `excessMinorUnits`, `unset`) when a
+limit is why.
+
+When a purchase notice reached the owner and the purchase then ends without
+being bought (refused, stopped, failed, uncertain, or waiting on a verification
+step), the owner gets one closing message on the same channels with that
+reason, the cancellation report, or the step waiting on them. A completed
+purchase has its own report; a daemon stop is told by the next start's recovery.
+
+When a purchase reaches a final state by any route (its own run, boot recovery
+after a crash, or the owner's reconciliation), its encrypted request in
+`payments-requests` is removed and its continuation grant revoked. At start the
+daemon removes every stored request whose purchase is final or has no status
+record, and revokes the grant of one kept as evidence for an owner finding.
+
+### A payment store that stopped itself
+
+Each payment store (budget ledger, checkout journal, purchase ledger, encrypted
+request store, operation records, and the approvals store when approvals are
+required) stops itself when a write could not be confirmed or its file changed
+while the daemon ran, and stays stopped until restart. `payments.purchase.status`
+and `payments.budget.status` then carry `stopped: { store, reason, path,
+message }`, and `payments.checkout.begin` refuses with that message before any
+approval is spent: which store stopped, why, that nothing recorded was lost,
+and that a restart (after checking the named path) is the step.
+
+### Orders placed with the ordinary browser tools
+
+A purchase is budgeted only when it runs through `payments.checkout.begin`. A
+merchant's saved payment method can take an order with one click, so the
+browser refuses to click a submit control whose own label says it places an
+order ("Place order", "Buy now", "Pay now", "Complete purchase", ...) for any
+caller but the payment flow, and says to use `payments.checkout.begin`. The
+recognition is the control's label, checked in code; an order taken by a
+control whose label does not say so (or by pressing Enter in a form) is not
+recognised, and nothing claims such a click was budgeted. Complete purchase
 records remain in `payments.purchases.list`.
 
 To stop processing outside a window, send
@@ -2218,6 +2279,28 @@ Reading status does not mark a notification delivered or change its deadline.
 A live-window answer is distinct from the pre-checkout purchase authorization:
 `payments.checkout.approve` authorizes the initial merchant/item/amount request;
 the final-price window asks about the decision reached for that checkout.
+
+### Pre-approval is optional
+
+By default (`payments.confirmEveryPurchase: false`) the agent buys on the
+owner's behalf inside the limits: `payments.checkout.begin` needs no prior
+approval, and that standing answer stays in settings until the owner changes
+it. Over a limit, or at a shop nobody vouches for, the purchase still asks once
+in its window. An approval given in advance with `payments.checkout.approve`
+(`/payments approve`) is still used: when a begin names the same merchant, item
+and amount (`requestedMax`), it is spent at admission and a final total at or
+below that amount needs no window (the record says `pre-approved`, answered by
+`operator`). With `payments.confirmEveryPurchase: true`, every begin must spend
+a matching approval and must state `requestedMax`.
+
+An approval and a begin are matched by meaning, not spelling, through one
+parser both verbs use: the merchant as its registrable domain in lower case,
+the item with case and spacing folded, and the amount in whole minor units of
+the budget currency, so `25` and `25.00` match. An amount that does not parse
+in the budget currency is refused when the owner approves, not later. The
+approval is spent after the read-only admission steps (identity free, page
+captured) and immediately before the durable admission write, so a stale page
+or a reused `requestId` refuses with the approval still unspent.
 
 The pre-checkout approval store refreshes under a shared file lock for every
 grant and spend, including when two daemon instances have already opened it.

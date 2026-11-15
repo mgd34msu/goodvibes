@@ -72,7 +72,7 @@ import { requireDecisionFeature } from '../runtime/decision-policy.js';
 import { captureOwnedJson, JudgmentInputError } from '../gate/judgment-input.js';
 import { captureMutationDescriptors } from '../utils/file-mutation.js';
 import { captureCheckoutOwnership, CheckoutOwnershipError, type CheckoutOperationOwnership } from './checkout-ownership.js';
-import { decidePurchase, type BudgetDraw } from './decide.js';
+import { decidePurchase, type BudgetDraw, type ExceededLimit } from './decide.js';
 import { readShippingTiers } from './shipping.js';
 import { evaluatePaymentTaint, type OwnerOriginIntent } from './taint-gate.js';
 import { extractCheckout, type ExtractedCheckout, type RawCheckoutReading } from './checkout-extraction.js';
@@ -164,6 +164,13 @@ export interface PurchaseRequest {
    * so the "show the total, then wait" flow cannot run at all.
    */
   readonly listing?: MarketplaceListing | undefined;
+  /**
+   * The amount the owner pre-approved for exactly this merchant and item
+   * (`payments.checkout.approve`), in the budget currency's minor units. Set
+   * by the host from the approval it spent, never read from the wire. A total
+   * at or below it is the owner's answer given in advance: no window opens.
+   */
+  readonly ownerApprovedMaxMinorUnits?: number | undefined;
 }
 
 export type { PurchaseRecord } from './purchase-record.js';
@@ -249,7 +256,11 @@ export interface CheckoutControls {
 export type { ExecutionRefusalCode } from './types.js';
 
 export type CheckoutOutcome =
-  | { readonly kind: 'refused'; readonly code: RefusalCode | ExecutionRefusalCode; readonly reason: string }
+  | {
+      readonly kind: 'refused'; readonly code: RefusalCode | ExecutionRefusalCode; readonly reason: string;
+      /** The limit the purchase did not fit, with its amounts, when a limit is why. */
+      readonly exceeded?: ExceededLimit | undefined;
+    }
   | { readonly kind: 'cancelled'; readonly reason: string; readonly report: string }
   | { readonly kind: 'challenge'; readonly challenge: CheckoutChallenge; readonly reason: string }
   | {
@@ -258,8 +269,8 @@ export type CheckoutOutcome =
       readonly orderId: string | null;
     };
 
-function refused(code: RefusalCode | ExecutionRefusalCode, reason: string): CheckoutOutcome {
-  return { kind: 'refused', code, reason };
+function refused(code: RefusalCode | ExecutionRefusalCode, reason: string, exceeded?: ExceededLimit): CheckoutOutcome {
+  return exceeded === undefined ? { kind: 'refused', code, reason } : { kind: 'refused', code, reason, exceeded };
 }
 
 /**
@@ -525,6 +536,11 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
   try { shippingTiers = await readShippingTiers(checkout.shippingOptions, checkout.currency, ownership); }
   catch (error) { const unreadable = unreadablePageText(error); if (unreadable) return unreadable; throw error; }
   current();
+  // The card's declared limit is one of the owner's limits, so it is read
+  // before the decision; the same read gives the notice its last four digits.
+  const metadata = await deps.cards.metadata(request.cardId);
+  current();
+  const cardLast4 = metadata?.last4 ?? '????';
   const pools = lifecycle.resumedHold ? lifecycle.resumedHold.snapshot(deps.limits, now(), deps.timezone)
     : ledger.snapshot(deps.limits, now(), deps.timezone);
   // Discounts come off the items: the budget draw is the reduced total, and
@@ -543,8 +559,9 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
     budgetCurrency: deps.budgetCurrency,
     preferredTier: request.preferredTier,
     requestedMaximumMinorUnits,
+    cardLimitMinorUnits: metadata?.issuerCapMinorUnits ?? null,
   });
-  if (decision.kind === 'refuse') return refused(decision.code, decision.reason);
+  if (decision.kind === 'refuse') return refused(decision.code, decision.reason, decision.exceeded);
 
   const draw: BudgetDraw = decision.draw;
   const shipping = decision.shipping;
@@ -731,9 +748,6 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
       : refused('no-shipping-address', 'The stored address changed before this purchase could proceed.');
   }
 
-  const metadata = await deps.cards.metadata(request.cardId);
-  current();
-  const cardLast4 = metadata?.last4 ?? '????';
   const poolsAfter = ledger.snapshot(deps.limits, now(), deps.timezone);
 
   const facts = {
@@ -789,6 +803,10 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
   }
   let windowOutcome: string;
   let answeredBy: string | null = null;
+  // The owner approved this merchant, item and amount before the purchase
+  // began; a total within that amount needs no second answer.
+  const preApproved = !resumption && request.ownerApprovedMaxMinorUnits !== undefined
+    && Number.isSafeInteger(request.ownerApprovedMaxMinorUnits) && draw.totalMinorUnits <= request.ownerApprovedMaxMinorUnits;
 
   /**
    * Send one notice, persist its delivery report and deadline, and wait for
@@ -865,7 +883,10 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
     return { state };
   };
 
-  if (windowKind === 'approval') {
+  if (preApproved) {
+    windowOutcome = 'pre-approved';
+    answeredBy = 'operator';
+  } else if (windowKind === 'approval') {
     // Silence DENIES. Undeliverable DENIES. Either because it is over budget,
     // or because nobody can tell the owner what recourse they would have here.
     const message = resumption?.checkpoint.record.windowNotice ?? renderPurchaseNotice({
@@ -922,7 +943,10 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
             ? 'Refused: the window closed with no answer. Silence means no when the shop is not one '
               + 'you have vouched for.'
             : 'Refused: you said no.';
-      return refused(code, aboveBudget || exceedsRequestedMaximum ? why : `${why} ${merchantVerdict.reason}`);
+      // Over a limit, the refusal names the limit and by how much.
+      const limitReason = decision.kind === 'needs-approval' ? decision.reason : undefined;
+      return refused(code, aboveBudget || exceedsRequestedMaximum ? `${why} ${limitReason ?? ''}`.trim() : `${why} ${merchantVerdict.reason}`,
+        decision.kind === 'needs-approval' ? decision.exceeded : undefined);
     }
   } else {
     // WITHIN BUDGET AND RECOURSE ESTABLISHED. Silence PROCEEDS. Undeliverable

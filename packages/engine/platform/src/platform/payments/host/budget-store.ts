@@ -18,6 +18,7 @@ import { fileObservationIdentity, readFileObservation, type FileObservation } fr
 import { lstatSync } from 'node:fs';
 import { logger } from '../../utils/logger.js';
 import { BudgetLedger } from '../budget.js';
+import type { PaymentStoreStop } from '../payment-host-health.js';
 import type {
   BudgetLimits,
   BudgetReservation,
@@ -154,7 +155,7 @@ function loadInitialState(filePath: string): LoadedBudget {
 
 export class PaymentBudgetUnavailableError extends Error {
   override readonly name = 'PaymentBudgetUnavailableError';
-  constructor() { super('Payment budget accounting is unavailable. Repair the original budget ledger before making purchases.'); }
+  constructor() { super('Budget accounting stopped being used because the budget file could not be read, a write could not be confirmed, or the file changed while the daemon was running. Nothing recorded was lost. Restart the daemon to read it again.'); }
 }
 
 /**
@@ -213,6 +214,10 @@ export class DurableBudgetLedger extends BudgetLedger {
         logger.warn('Payment budget ledger migration or pruning could not be persisted. Purchases remain disabled until accounting can be restored.', { filePath });
       }
     }
+  }
+
+  override stopped(): PaymentStoreStop | null {
+    return this.unavailable ? { store: 'budget ledger', reason: 'it could not be read, a write to it could not be confirmed, or its file changed while the daemon was running', path: this.filePath } : null;
   }
 
   private assertAvailable(): void {

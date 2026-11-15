@@ -321,6 +321,7 @@ describe('payments.* is attached to this daemon, not a cataloged 501 facade', ()
   });
 
   test('checkout.begin with owner authority but no approval on file refuses over the wire, naming the approve verb', async () => {
+    fixture.settings.set('payments.confirmEveryPurchase', true);
     // Owner-direct now, but nothing was approved: the persisted approval gate
     // (checkout-handlers.ts, approval-store.ts) refuses with the verb to call,
     // never a schema or transport error, and never a completed purchase
@@ -347,6 +348,7 @@ describe('payments.* is attached to this daemon, not a cataloged 501 facade', ()
     expect(response.status, `answered ${String(response.status)}: ${response.text}`).toBe(403);
     expect(response.body['code']).toBe('OWNER_APPROVAL_REQUIRED');
     expect(String(response.body['error'] ?? response.text)).toContain('payments.checkout.approve');
+    fixture.settings.delete('payments.confirmEveryPurchase');
   });
 
   test('a shared token and explicit-owner header cannot substitute for a paired checkout owner', async () => {

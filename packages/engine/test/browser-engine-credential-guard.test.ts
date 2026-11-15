@@ -447,7 +447,7 @@ describe('current native credential-page purpose', () => {
   });
   test('armed checkout preserves unchanged local secret refs and ordinary submit without card values on the reader wire', async () => {
     const guard = new CardMaterialRedactor(), effects: string[] = [];
-    const rows = [{ ...fixtureRow(EMAIL_STEP_ELEMENTS, 0), name: 'Payment field', control: attributes('text') }, { ...fixtureRow(ORDINARY_ELEMENTS, 0), name: 'Place order', submits: true }];
+    const rows = [{ ...fixtureRow(EMAIL_STEP_ELEMENTS, 0), name: 'Payment field', control: attributes('text') }, { ...fixtureRow(ORDINARY_ELEMENTS, 0), name: 'Continue', submits: true }];
     const engine = await buildEngine('https://merchant.example/checkout', rows, { title: 'Review order', guard, effects,
       arm: (sessionId, pageId) => guard.arm(sessionId, pageId, [{ kind: 'number', value: '4242424242424242' }]) });
     await engine.snapshot({});

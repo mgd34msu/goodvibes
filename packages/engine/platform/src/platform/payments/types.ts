@@ -123,7 +123,7 @@ export interface CardMetadata {
   readonly kind: 'virtual' | 'real';
   readonly expiryMonth: number;
   readonly expiryYear: number;
-  /** Declared by the owner, unverifiable by us. Never treated as enforcement. */
+  /** Declared by the owner, unverifiable by us. A purchase whose full total is over it is refused before anything is held. */
   readonly issuerCapMinorUnits: MinorUnits | null;
   readonly addedAt: string;
 }
@@ -165,6 +165,8 @@ export type RefusalCode =
   | 'item-budget-exceeded-denied'
   | 'item-budget-exceeded-expired'
   | 'per-purchase-ceiling-exceeded'
+  /** The full total is over the limit the owner declared for the chosen card. */
+  | 'card-limit-exceeded'
   | 'overage-pool-exhausted'
   | 'zero-budget'
   | 'total-changed'

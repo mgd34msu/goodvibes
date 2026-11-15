@@ -16,6 +16,8 @@ interface ReconciliationDeps {
   readonly budget: BudgetLedger;
   readonly isPaymentsLeader: () => boolean;
   readonly now?: (() => number) | undefined;
+  /** The end-of-purchase cleanup every settled purchase gets: its stored request and continuation go. */
+  readonly settled?: ((purchaseId: string, operationId: string) => Promise<void>) | undefined;
 }
 function settlementReceipt(checkpoint: PaymentReconciliationCheckpoint): CheckoutBudgetSettlement {
   return { operationId: checkpoint.operationId, purchaseId: checkpoint.purchaseId, outcome: checkpoint.outcome,
@@ -194,6 +196,11 @@ export class PurchaseReconciliations {
       totalMinorUnits: (checkpoint.journal ?? checkpoint.purchase)?.totalMinorUnits ?? null,
       currency: (checkpoint.journal ?? checkpoint.purchase)?.currency ?? null };
     writer.update(operation, current); current();
-    return writer.read();
+    const settled = writer.read();
+    // Settled by the owner's finding: the request kept as evidence until now
+    // has no further use. A failed removal leaves it for the next start's sweep.
+    try { await this.deps.settled?.(settled.purchaseId, settled.operationId); }
+    catch { /* The boot sweep removes it. */ }
+    return settled;
   }
 }

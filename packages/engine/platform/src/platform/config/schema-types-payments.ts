@@ -50,7 +50,8 @@ export interface PaymentsAddressConfig {
 
 export interface PaymentsConfig {
   enabled: boolean;                 // default: false. Master switch
-  defaultCardId: string;            // default: ''. Your preferred card id; a purchase must still name its card
+  confirmEveryPurchase: boolean;    // default: false. Require /payments approve before each purchase
+  defaultCardId: string;            // default: ''. The card a purchase that names none is paid with
   currency: string;                 // default: 'USD'. ISO-4217 the budgets are denominated in
   cvvHandling: CvvHandling;         // default: 'stored'
   budget: PaymentsBudgetConfig;
@@ -79,6 +80,7 @@ export interface PaymentsConfig {
  */
 export type PaymentsConfigKey =
   | 'payments.enabled'
+  | 'payments.confirmEveryPurchase'
   | 'payments.defaultCardId'
   | 'payments.currency'
   | 'payments.cvvHandling'
@@ -114,6 +116,7 @@ export type PaymentsConfigKey =
 /** The value type each payments key carries, for `ConfigValue<K>`. */
 export interface PaymentsConfigValueMap {
   'payments.enabled': boolean;
+  'payments.confirmEveryPurchase': boolean;
   'payments.defaultCardId': string;
   'payments.currency': string;
   'payments.cvvHandling': CvvHandling;

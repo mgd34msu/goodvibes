@@ -13,7 +13,7 @@
  *       LINK:  checkout url from untrusted content          → validate or REFUSE
  *       currency mismatch, recurring charge                 → REFUSE
  *
- *   1.  ITEM PRICE vs DAILY ITEM BUDGET (+ per-purchase ceiling)
+ *   1.  ITEM PRICE vs DAILY ITEM BUDGET; FULL TOTAL vs PER-PURCHASE CEILING
  *       over    → ABOVE BUDGET: explicit approval required
  *                 undeliverable → REFUSE ; silence → DENIED
  *       within  → continue
@@ -23,7 +23,9 @@
  *                 fits at a lower rung → record the step-down, continue
  *                 nothing fits         → tolerance pool, else REFUSE
  *
- *   2b. FULL TOTAL vs OWNER'S REQUESTED MAXIMUM, if supplied
+ *   2b. FULL TOTAL vs THE CARD'S DECLARED LIMIT, if the owner gave one
+ *       over    → REFUSE: the issuer would decline it, no answer changes that
+ *   2c. FULL TOTAL vs OWNER'S REQUESTED MAXIMUM, if supplied
  *       over    → explicit approval required; silence never raises the limit
  *   3.  RESERVE
  *   4.  WITHIN BUDGET → VETO WINDOW (silence PROCEEDS)
@@ -70,11 +72,13 @@ export interface DecisionInput {
   readonly preferredTier: ShippingTier;
   /** Owner's maximum for the entire purchase, including tax, fees and delivery. */
   readonly requestedMaximumMinorUnits?: MinorUnits | undefined;
+  /** The most the chosen card can be charged at once, as the owner declared it when adding the card. */
+  readonly cardLimitMinorUnits?: MinorUnits | null | undefined;
 }
 
 /** The owner's limit a purchase did not fit, with the amounts, in the budget currency's minor units. */
 export interface ExceededLimit {
-  readonly limit: 'daily-item-budget' | 'per-purchase-ceiling' | 'requested-maximum' | 'daily-overage-budget';
+  readonly limit: 'daily-item-budget' | 'per-purchase-ceiling' | 'requested-maximum' | 'daily-overage-budget' | 'card-limit';
   /** The setting that holds it, so a surface can offer to change it. */
   readonly setting?: string | undefined;
   /** What the limit allows right now (for a daily budget, what is left of it today). */
@@ -97,6 +101,7 @@ export type DecisionOutcome =
       readonly kind: 'needs-approval';
       readonly draw: BudgetDraw;
       readonly shipping: ShippingLadderResult;
+      /** Which limit and by how much, with formatted amounts; the owner's notice and any refusal repeat it. */
       readonly reason: string;
       readonly approvalReasons: readonly BudgetApprovalReason[];
       /** The first limit the purchase did not fit, with its amounts. */
@@ -148,12 +153,10 @@ export function decidePurchase(input: DecisionInput): DecisionOutcome {
     return { kind: 'refuse', code: 'invalid-requested-maximum', reason: 'Refused: the requested maximum must be an exact non-negative amount in the budget currency.' };
   }
 
-  // ── Step 1: item price against the daily item budget and the ceiling ────
-  const overCeiling =
-    limits.perPurchaseCeiling.enabled
-    && quoted.itemMinorUnits > limits.perPurchaseCeiling.minorUnits;
+  // ── Step 1: item price against the daily item budget ─────────────────
+  // The per-purchase ceiling is checked against the full total below, once
+  // the delivery option is known: it is "the most one purchase may come to".
   const overDaily = quoted.itemMinorUnits > (itemBudgetUnset ? 0 : pools.item.remaining);
-  const aboveBudget = overCeiling || overDaily;
 
   // ── Step 2: the unavoidable charges, with the ladder ───────────────────
   const fixedUnavoidable = quoted.taxMinorUnits + quoted.mandatoryFeesMinorUnits;
@@ -237,6 +240,22 @@ export function decidePurchase(input: DecisionInput): DecisionOutcome {
     totalMinorUnits: quoted.itemMinorUnits + fixedUnavoidable + shipping.costMinorUnits,
   };
 
+  // ── Step 2b: the card's own declared limit ──────────────────────────────
+  const cardLimit = input.cardLimitMinorUnits;
+  if (cardLimit !== undefined && cardLimit !== null && Number.isSafeInteger(cardLimit) && cardLimit >= 0 && draw.totalMinorUnits > cardLimit) {
+    const excess = draw.totalMinorUnits - cardLimit;
+    return {
+      kind: 'refuse',
+      code: 'card-limit-exceeded',
+      reason: `Refused: this purchase comes to ${money(draw.totalMinorUnits)}, ${money(excess)} over the card's declared limit of ${money(cardLimit)}, `
+        + `so the issuer would decline it. Nothing was bought. Pay with another card, or update the card's declared limit if it has changed.`,
+      exceeded: { limit: 'card-limit', availableMinorUnits: cardLimit, neededMinorUnits: draw.totalMinorUnits,
+        excessMinorUnits: excess, currency: quoted.currency, unset: false },
+    };
+  }
+
+  const overCeiling = limits.perPurchaseCeiling.enabled && draw.totalMinorUnits > limits.perPurchaseCeiling.minorUnits;
+  const aboveBudget = overCeiling || overDaily;
   const approvalReasons: BudgetApprovalReason[] = [];
   if (overDaily) approvalReasons.push('daily-item-budget');
   if (overCeiling) approvalReasons.push('per-purchase-ceiling');
@@ -247,19 +266,20 @@ export function decidePurchase(input: DecisionInput): DecisionOutcome {
       ? { limit: 'daily-item-budget', setting: 'payments.budget.dailyItem', availableMinorUnits: 0, neededMinorUnits: item, excessMinorUnits: item, currency: quoted.currency, unset: true }
       : overCeiling
         ? { limit: 'per-purchase-ceiling', setting: 'payments.budget.perPurchaseCeiling', availableMinorUnits: limits.perPurchaseCeiling.minorUnits,
-            neededMinorUnits: item, excessMinorUnits: item - limits.perPurchaseCeiling.minorUnits, currency: quoted.currency, unset: limits.perPurchaseCeiling.minorUnits <= 0 }
+            neededMinorUnits: draw.totalMinorUnits, excessMinorUnits: draw.totalMinorUnits - limits.perPurchaseCeiling.minorUnits, currency: quoted.currency, unset: limits.perPurchaseCeiling.minorUnits <= 0 }
         : overDaily
           ? { limit: 'daily-item-budget', setting: 'payments.budget.dailyItem', availableMinorUnits: pools.item.remaining,
               neededMinorUnits: item, excessMinorUnits: item - pools.item.remaining, currency: quoted.currency, unset: false }
           : { limit: 'requested-maximum', availableMinorUnits: requestedMaximum!, neededMinorUnits: draw.totalMinorUnits,
               excessMinorUnits: draw.totalMinorUnits - requestedMaximum!, currency: quoted.currency, unset: false };
+    const ceiling = exceeded.limit === 'per-purchase-ceiling';
     const reason = exceeded.unset
-      ? `This item costs ${money(item)} and ${exceeded.limit === 'per-purchase-ceiling' ? 'the per-purchase ceiling' : 'the daily item budget'} is not set (0), so every purchase asks you first. `
-        + `Set ${exceeded.setting} to the most you want ${exceeded.limit === 'per-purchase-ceiling' ? 'one purchase to cost' : 'spent on items in a day'}, and purchases within it will go ahead without asking.`
+      ? `${ceiling ? `This purchase comes to ${money(draw.totalMinorUnits)}` : `This item costs ${money(item)}`} and ${ceiling ? 'the per-purchase ceiling' : 'the daily item budget'} is not set (0), so every purchase asks you first. `
+        + `Set ${exceeded.setting} to the most you want ${ceiling ? 'one purchase to come to' : 'spent on items in a day'}, and purchases within it will go ahead without asking.`
       : aboveBudget
-        ? `This item costs ${money(item)} and ${overCeiling
-          ? `it is over the per-purchase ceiling of ${money(limits.perPurchaseCeiling.minorUnits)} by ${money(exceeded.excessMinorUnits)}`
-          : `only ${money(pools.item.remaining)} is left in today's item budget, ${money(exceeded.excessMinorUnits)} short`}.`
+        ? overCeiling
+          ? `This purchase comes to ${money(draw.totalMinorUnits)} and is over the per-purchase ceiling of ${money(limits.perPurchaseCeiling.minorUnits)} by ${money(exceeded.excessMinorUnits)}.`
+          : `This item costs ${money(item)} and only ${money(pools.item.remaining)} is left in today's item budget, ${money(exceeded.excessMinorUnits)} short.`
         : `The full purchase total ${money(draw.totalMinorUnits)} exceeds the owner's requested maximum ${money(requestedMaximum!)} by ${money(exceeded.excessMinorUnits)}.`;
     return {
       kind: 'needs-approval',

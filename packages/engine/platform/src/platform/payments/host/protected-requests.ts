@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { captureOwnedJson } from '../../gate/judgment-input.js';
+import type { PaymentStoreStop } from '../payment-host-health.js';
 import { encryptStore, decryptStore, SECRETS_STORE_FORMAT_VERSION, type EncryptedStoreEnvelope } from '../../config/secrets-keyfile.js';
 import { observeImportFile, assertImportFileCurrent, type ImportFileObservation } from '../../config/prepared-import.js';
 import { confirmFileDurable, writeFileAtomic } from '../../utils/atomic-json-store.js';
@@ -59,10 +60,21 @@ export interface PaymentRequestStore {
     entry: PaymentReplyHistoryEntry, assertCurrent: () => void): Promise<void>;
   recordReceiveCoverage?(purchaseId: string, operationId: string, binding: PaymentReplyHistoryBinding,
     coverage: PaymentReplyReceiveCoverage, assertCurrent: () => void): Promise<void>;
+  /** Remove a settled purchase's request, retiring its continuation first. Nothing to do when it is gone. */
+  discard?(purchaseId: string, operationId: string, retire: RetireContinuation | undefined): Promise<void>;
+  /**
+   * Boot housekeeping: every stored request is judged by its purchase's
+   * status. `remove` deletes it after retiring its continuation; `retire` keeps
+   * it as evidence and retires only the continuation. A file that cannot be
+   * read is left exactly as found. Returns how many requests were removed.
+   */
+  sweep?(judge: (purchaseId: string, operationId: string) => PaymentRequestVerdict, retire: RetireContinuation | undefined): Promise<number>;
 }
+export type PaymentRequestVerdict = 'remove' | 'retire' | 'keep';
+export type RetireContinuation = (grant: NativeContinuationGrant) => void | Promise<void>;
 export class ProtectedPaymentRequestError extends Error {
   override readonly name = 'ProtectedPaymentRequestError';
-  constructor() { super('The original protected checkout request could not be confirmed. Inspect this purchase status before retrying.'); }
+  constructor() { super('The encrypted purchase request could not be read or written. If purchases keep being refused, the request store has stopped itself: check payments.purchase.status, then restart the daemon.'); }
 }
 /**
  * A refusal that says nothing about the store's files: the owner that asked is
@@ -122,7 +134,8 @@ function own(value: unknown): ProtectedPaymentRequest {
     || controls['twoDigitYear'] !== undefined && typeof controls['twoDigitYear'] !== 'boolean'
     || input['preferredTier'] !== undefined && !tier(input['preferredTier'])
     || input['requestedMax'] !== undefined && (typeof input['requestedMax'] !== 'string' || !/^\d+(?:\.\d{1,3})?$/.test(input['requestedMax']))
-    || input['merchantDiscovered'] !== undefined && typeof input['merchantDiscovered'] !== 'boolean') throw new ProtectedPaymentRequestError();
+    || input['merchantDiscovered'] !== undefined && typeof input['merchantDiscovered'] !== 'boolean'
+    || input['ownerApprovedMaxMinorUnits'] !== undefined && !amount(input['ownerApprovedMaxMinorUnits'])) throw new ProtectedPaymentRequestError();
   const authority = host['authority'];
   if (authority['kind'] !== 'pairing-token' || authority['principalId'] !== row['principalId'] || !text(authority['tokenId'])
     || !text(authority['authorityId']) || !text(authority['authorityRevision']) || !Array.isArray(authority['scopes'])
@@ -154,7 +167,7 @@ function own(value: unknown): ProtectedPaymentRequest {
     if (browserControls.controls.length !== refs.size || browserControls.controls.some(control => !refs.has(control.ref))) throw new ProtectedPaymentRequestError();
   }
   return Object.freeze({ ...row, ...(window ? { window } : {}), ...(replyHistory ? { replyHistory } : {}), evidence: captureRetainedTaintEvidence(row['evidence']),
-    input: optionalFields({ ...input, controls: optionalFields(controls, ['addressFields', 'shippingTargets', 'expirySeparator', 'twoDigitYear']) }, ['preferredTier', 'requestedMax', 'merchantDiscovered']),
+    input: optionalFields({ ...input, controls: optionalFields(controls, ['addressFields', 'shippingTargets', 'expirySeparator', 'twoDigitYear']) }, ['preferredTier', 'requestedMax', 'merchantDiscovered', 'ownerApprovedMaxMinorUnits']),
     host: Object.freeze({ authority, configuration: savedConfig,
       ...(host['browser'] === undefined ? {} : { browser: captureBrowserPageConnection(host['browser']) }),
       ...(browserControls === undefined ? {} : { browserControls }),
@@ -174,6 +187,10 @@ export class ProtectedPaymentRequests implements PaymentRequestStore {
     private readonly beforeReplyReceiveSpans?: () => void,
     private readonly beforeMultiRecipientCheckpoint?: () => void) {}
   get supportsReplyHistory(): boolean { return this.beforeReplyHistory !== undefined; }
+  /** Why this store stopped itself, or null while it is serving. */
+  stopped(): PaymentStoreStop | null {
+    return this.failed ? { store: 'encrypted purchase request store', reason: 'its key, directory or a request file could not be trusted after a write or read that could not be confirmed', path: this.directory } : null;
+  }
   get supportsReplyReceiveCoverage(): boolean { return this.beforeReplyHistory !== undefined && this.beforeReplyReceiveCoverage !== undefined; }
   get supportsReplyReceiveSpans(): boolean { return this.beforeReplyHistory !== undefined && this.beforeReplyReceiveSpans !== undefined; }
   private path(id: string): string { return join(this.directory, `${Buffer.from(checkoutRequestId(id)).toString('base64url')}.json`); }
@@ -236,7 +253,8 @@ export class ProtectedPaymentRequests implements PaymentRequestStore {
     this.key = { bytes, file, owner };
     return bytes;
   }
-  private readOwned(id: string, operationId: string, check: () => void): ProtectedPaymentRequest {
+  /** `operationId` null reads whichever operation the file names, for housekeeping only. */
+  private readOwned(id: string, operationId: string | null, check: () => void): ProtectedPaymentRequest {
     const key = this.keyBytes(false, check), path = this.path(id), entry = lstatSync(path);
     if (!entry.isFile() || entry.isSymbolicLink() || (entry.mode & 0o077) !== 0 || entry.size > MAX_ENVELOPE_BYTES) throw new ProtectedPaymentRequestError();
     const file = readFileObservation(path);
@@ -248,13 +266,54 @@ export class ProtectedPaymentRequests implements PaymentRequestStore {
       || envelope['data'].length % 2 !== 0 || !/^[0-9a-f]+$/.test(envelope['data'])) throw new ProtectedPaymentRequestError();
     const request = own(JSON.parse(decryptStore(envelope as unknown as EncryptedStoreEnvelope, key)));
     this.declareMultiRecipientCheckpoint(request.window);
-    if (request.purchaseId !== id || request.operationId !== operationId) throw new ProtectedPaymentRequestError();
+    if (request.purchaseId !== id || (operationId !== null && request.operationId !== operationId)) throw new ProtectedPaymentRequestError();
     current(check); this.keyBytes(false, check);
     if (fileObservationIdentity(path) !== file.physical) throw new ProtectedPaymentRequestError();
     const previous = this.records.get(id);
-    if (previous && (previous.operationId !== operationId || previous.physical !== file.physical)) throw new ProtectedPaymentRequestError();
-    this.records.set(id, { operationId, physical: file.physical });
+    if (previous && (previous.operationId !== request.operationId || previous.physical !== file.physical)) throw new ProtectedPaymentRequestError();
+    this.records.set(id, { operationId: request.operationId, physical: file.physical });
     return request;
+  }
+
+  async discard(id: string, operationId: string, retire: RetireContinuation | undefined): Promise<void> {
+    if (this.failed) throw new ProtectedPaymentRequestError();
+    let request: ProtectedPaymentRequest;
+    try {
+      try { lstatSync(this.path(id)); } catch (error) { if (absent(error)) return; throw error; }
+      request = this.readOwned(id, null, () => undefined);
+    } catch (error) { throw this.fault(error); }
+    // A different operation's request under the same identity is not this purchase's to remove.
+    if (request.operationId !== operationId) return;
+    if (request.host.continuation && retire) await retire(request.host.continuation);
+    await this.remove(id, operationId, () => undefined);
+  }
+
+  async sweep(judge: (purchaseId: string, operationId: string) => PaymentRequestVerdict, retire: RetireContinuation | undefined): Promise<number> {
+    if (this.failed) return 0;
+    let names: string[];
+    try { names = readdirSync(this.directory); } catch (error) { if (absent(error)) return 0; throw this.fault(error); }
+    let removed = 0;
+    for (const name of names) {
+      if (!name.endsWith('.json') || name.startsWith('.')) continue;
+      let id: string, request: ProtectedPaymentRequest;
+      try {
+        id = checkoutRequestId(Buffer.from(name.slice(0, -'.json'.length), 'base64url').toString('utf8'));
+        if (this.path(id) !== join(this.directory, name)) continue;
+        request = this.readOwned(id, null, () => undefined);
+      } catch {
+        if (this.failed) return removed;
+        continue;
+      }
+      const verdict = judge(id, request.operationId);
+      if (verdict === 'keep') continue;
+      try {
+        if (request.host.continuation && retire) await retire(request.host.continuation);
+        if (verdict === 'remove') { await this.remove(id, request.operationId, () => undefined); removed++; }
+      } catch {
+        if (this.failed) return removed;
+      }
+    }
+    return removed;
   }
   async retain(value: ProtectedPaymentRequest, check: () => void): Promise<void> {
     // Nothing is on disk yet, so a request this store will not accept (or an

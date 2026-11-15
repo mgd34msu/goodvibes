@@ -11,7 +11,7 @@ export {
 export { PAYMENTS_SYNTHETIC_CONFIG_KEYS } from '../config/payment-config-keys.js';
 export { minorUnitExponent } from './money-parsing.js';
 export { readPaymentWindowStatus, readPaymentWindowAnswer, readPaymentSecurityCodeAcceptance } from './window-view.js';
-export type { PaymentWindowView, PaymentWindowAnswer, PaymentPurchaseStatus, PaymentUnreadableOperation, PaymentSecurityCodeRequestView, PaymentSecurityCodeAcceptance } from './window-view.js';
+export type { PaymentWindowView, PaymentWindowAnswer, PaymentPurchaseStatus, PaymentUnreadableOperation, PaymentSecurityCodeRequestView, PaymentSecurityCodeAcceptance, PaymentHostStopView } from './window-view.js';
 
 /**
  * What every surface must show at the moment someone selects
@@ -34,4 +34,4 @@ export const CVV_PROMPT_TRADEOFF_WARNING =
 
 
 export { readPaymentOperation, readPaymentOperationCancellation, paymentOperationDescription, isLivePaymentOperation, canReconcilePaymentOperation, PAYMENT_PURCHASE_RECONCILE_HTTP } from './operation-view.js';
-export type { PaymentOperationView, PaymentOperationState, PaymentOperationCancellation } from './operation-view.js';
+export type { PaymentOperationView, PaymentOperationState, PaymentOperationCancellation, PaymentOperationLimit } from './operation-view.js';

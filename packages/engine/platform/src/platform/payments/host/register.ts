@@ -77,7 +77,7 @@
  * from a call that had material in its arguments.
  */
 import type { BudgetLedger } from '../budget.js';
-import { readDefaultCardId, readPaymentsEnabled, readPaymentsServiceConfig } from '../payments-config.js';
+import { readConfirmEveryPurchase, readDefaultCardId, readPaymentsEnabled, readPaymentsServiceConfig } from '../payments-config.js';
 import type { PaymentsConfigReader } from '../payments-config.js';
 import type { CardMetadata } from '../types.js';
 import type { GatewayMethodCatalog } from '../../control-plane/method-catalog.js';
@@ -92,6 +92,7 @@ import { HandlerError, registerCatalogHandlers } from './handler-plumbing.js';
 import type { TypedHandler, Unregister } from './handler-plumbing.js';
 import { CheckoutServiceHolder, checkoutApproveHandler, checkoutBeginHandler, checkoutFillCardHandler } from './checkout-handlers.js';
 import { purchaseWindowStatusHandler, purchaseWindowAnswerHandler, purchaseSecurityCodeHandler } from './window-handlers.js';
+import { paymentHostStopSentence, paymentHostStopView } from '../payment-host-health.js';
 import { purchaseReconciliationHandler } from './reconciliation-handler.js';
 import type { CheckoutComposition } from './checkout-handlers.js';
 import { CardStoreUnreadableError } from './card-store.js';
@@ -297,6 +298,27 @@ function checkoutNotWired(methodId: string): Error {
 }
 
 // ---------------------------------------------------------------------------
+
+/**
+ * `payments.budget.status`, with the payment host's health beside the pools.
+ *
+ * A stopped budget ledger has no pools to show, so it answers with the one
+ * sentence that names it; any other stopped store is reported as `stopped`
+ * while today's pools are still shown.
+ */
+function budgetStatusHandler(deps: PaymentsHandlerDeps, service: PaymentsGatewayService, holder: CheckoutServiceHolder): TypedHandler<unknown, unknown> {
+  return async () => {
+    const stop = holder.hostStop({ approvals: readConfirmEveryPurchase(deps.config) });
+    if (stop && deps.budget.stopped()) throw new HandlerError(paymentHostStopSentence(stop), 'FAILED_PRECONDITION', 409);
+    const view = await service.budgetStatus();
+    return {
+      enabled: view.enabled, dayKey: view.pools.dayKey, timezone: view.pools.timezone, currency: view.currency,
+      item: view.pools.item, overage: view.pools.overage, tolerance: view.pools.tolerance,
+      reservationCount: view.reservationCount, isPaymentsLeader: view.isPaymentsLeader,
+      ...(stop ? { stopped: paymentHostStopView(stop) } : {}),
+    };
+  };
+}
 
 /**
  * The `PaymentsGatewayService` this daemon hands the platform's registrar.
@@ -551,7 +573,9 @@ export function registerPaymentsMethods(
       { id: 'payments.checkout.approve', handler: checkoutApproveHandler(deps) as TypedHandler<unknown, unknown>, options: { confirm: true } },
       { id: 'payments.checkout.begin', handler: checkoutBeginHandler(deps, checkoutServiceHolder) as TypedHandler<unknown, unknown> },
       { id: 'payments.checkout.fillCard', handler: checkoutFillCardHandler(deps, checkoutServiceHolder) as TypedHandler<unknown, unknown> },
-      { id: 'payments.purchase.status', handler: purchaseWindowStatusHandler(deps.checkout, checkoutServiceHolder.operations) },
+      { id: 'payments.budget.status', handler: budgetStatusHandler(deps, service, checkoutServiceHolder) },
+      { id: 'payments.purchase.status', handler: purchaseWindowStatusHandler(deps.checkout, checkoutServiceHolder.operations,
+        () => checkoutServiceHolder.hostStop({ approvals: readConfirmEveryPurchase(deps.config) })) },
       { id: 'payments.purchase.reconcile', handler: purchaseReconciliationHandler(checkoutServiceHolder.reconciliations), options: { confirm: true } },
       { id: 'payments.purchase.securityCode', handler: purchaseSecurityCodeHandler(deps.checkout), options: { confirm: true } },
       ...(['approve', 'deny', 'cancel'] as const).map(action => ({

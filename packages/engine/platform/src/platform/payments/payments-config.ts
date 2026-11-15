@@ -114,6 +114,11 @@ export function readPaymentsEnabled(config: PaymentsConfigReader): boolean {
   return readBoolean(config, 'payments.enabled', false);
 }
 
+/** Whether every purchase needs the owner's approval (`payments.checkout.approve`) before it may start. */
+export function readConfirmEveryPurchase(config: PaymentsConfigReader): boolean {
+  return readBoolean(config, 'payments.confirmEveryPurchase', false);
+}
+
 export function readDefaultCardId(config: PaymentsConfigReader): string {
   return readString(config, 'payments.defaultCardId', '');
 }

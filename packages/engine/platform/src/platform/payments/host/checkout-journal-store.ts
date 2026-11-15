@@ -11,13 +11,14 @@ import { readFileObservation, type FileObservation } from '../../utils/file-obse
 import { logger } from '../../utils/logger.js';
 import { captureCheckoutRecord } from '../checkout-record.js';
 import type { CheckoutJournal, InFlightCheckout } from '../checkout-registry.js';
+import type { PaymentStoreStop } from '../payment-host-health.js';
 
 const JOURNAL_FILE_VERSION = 1;
 const missing = (error: unknown): boolean => error !== null && typeof error === 'object' && 'code' in error && error.code === 'ENOENT';
 
 export class PaymentCheckoutJournalUnavailableError extends Error {
   override readonly name = 'PaymentCheckoutJournalUnavailableError';
-  constructor() { super('The checkout journal is unavailable. Repair or restore the original payment state and inspect pending purchases before retrying.'); }
+  constructor() { super('The checkout journal stopped being used because it could not be read, a write could not be confirmed, or the file changed while the daemon was running. Nothing recorded was lost. Restart the daemon to read it again, then check payments.purchase.status for purchases that were in progress.'); }
 }
 
 export class DurableCheckoutJournal implements CheckoutJournal {
@@ -39,6 +40,11 @@ export class DurableCheckoutJournal implements CheckoutJournal {
         this.records.set(row.purchaseId, row);
       }
     } catch { this.disable(); }
+  }
+
+  /** Why this journal stopped itself, or null while it is serving. */
+  stopped(): PaymentStoreStop | null {
+    return this.unavailable ? { store: 'checkout journal', reason: 'it could not be read, a write to it could not be confirmed, or its file changed while the daemon was running', path: this.filePath } : null;
   }
 
   private disable(): void {

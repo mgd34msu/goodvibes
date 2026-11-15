@@ -9,6 +9,7 @@ import { dirname, join, resolve } from 'node:path';
 import { resolveAndValidatePath } from '../utils/path-safety.js';
 import type { Locator, Page } from 'playwright-core';
 import { BrowserSessionError, BrowserSessionManager, hasDisplay } from './browser-sessions.js';
+import { isPaymentCheckoutAction, ORDER_SUBMIT_REFUSAL_FIX, placesOrder } from '../security/order-submission.js';
 import type { BrowserAttachOptions, BrowserLaunchOptions, RestoredBrowserPage } from './browser-sessions.js';
 import type { BrowserPageConnection } from './browser-page-connection-data.js';
 import { captureBrowserCheckoutRecovery, type BrowserCheckoutRecovery } from './browser-checkout-recovery-data.js';
@@ -775,6 +776,7 @@ export class BrowserEngine {
     args: { readonly ref: string; readonly button?: 'left' | 'right' | 'middle' | undefined; readonly clickCount?: number | undefined; readonly timeoutMs?: number | undefined },
     ownership?: BrowserActionLifetime,
   ): Promise<Record<string, unknown>> {
+    const paymentFlowSubmit = isPaymentCheckoutAction(ownership);
     args = { ...args }; target = { ...target }; ownership = ownership && { ...ownership };
     const work = new BrowserControlIdentityWork(ownership);
     let attempted = false;
@@ -786,6 +788,10 @@ export class BrowserEngine {
       const credentialCurrent = await this.credentialInteraction(scope.snapshot, sessionId, pageId, work, current, 'click', ownership, args); current();
       const { locator, element, revalidate, passwordInDocument } = await scope.resolve(args.ref);
       credentialCurrent(passwordInDocument); current();
+      if (element.submits && !paymentFlowSubmit && placesOrder(element)) {
+        // An order placed here would bypass the owner's spending limits.
+        throw new BrowserSessionError(`"${element.name}" places an order, and an order placed with the browser tools skips your spending limits, so it was not clicked.`, ORDER_SUBMIT_REFUSAL_FIX);
+      }
       if (element.submits) {
         // Submitting sends data to whoever runs the site. Whether this element
         // submits was recorded when the page was snapshotted, so this is a fact

@@ -58,6 +58,7 @@ import type { PaymentNotifier } from './checkout-flow.js';
 import { retainTaintEvidence, type RetainedTaintEvidence, type UntrustedContentLedger } from '../security/untrusted-content.js';
 import { captureCheckoutWindowCheckpoint, type CheckoutWindowResumption } from './checkout-window-checkpoint.js';
 import type { CurrencyCode, ShippingTier } from './types.js';
+import type { ExceededLimit } from './decide.js';
 
 export { RECOVERY_IO_TIMEOUT_MS } from './checkout-recovery.js';
 export type { CheckoutRecoverySweep, InterruptedCheckoutRecovery } from './checkout-recovery.js';
@@ -83,6 +84,15 @@ export interface PaymentBeginResult {
   readonly steppedDown: boolean;
   /** Set when the merchant interrupted with 3-D Secure, a CAPTCHA or an OTP. */
   readonly challengeStep: string | null;
+  /** The limit a refusal names, with its amounts, when a limit is why. */
+  readonly exceeded?: ExceededLimit | undefined;
+  /**
+   * What the owner is told when a purchase they were sent a notice about ends
+   * without being bought: the refusal, the cancellation report, or the
+   * verification step waiting on them. Never sent for a completed purchase,
+   * which has its own report.
+   */
+  readonly ownerMessage?: string | undefined;
 }
 
 export interface PaymentsServiceConfig {
@@ -177,6 +187,8 @@ export interface BeginCheckoutInput {
   readonly requestedMax?: string | undefined;
   /** True when the storefront was found while browsing rather than named. */
   readonly merchantDiscovered?: boolean | undefined;
+  /** Host-set from a spent owner approval, never read from the wire; see PurchaseRequest. */
+  readonly ownerApprovedMaxMinorUnits?: number | undefined;
 }
 
 /** Host-only invocation facts; never read from the checkout's wire input. */
@@ -319,6 +331,7 @@ export class PaymentsGatewayServiceImpl {
       preferredTier: input.preferredTier ?? config.preferredTier,
       requestedMax: input.requestedMax,
       merchantDiscovered: input.merchantDiscovered ?? false,
+      ...(input.ownerApprovedMaxMinorUnits === undefined ? {} : { ownerApprovedMaxMinorUnits: input.ownerApprovedMaxMinorUnits }),
     };
 
     const cardFields: CardFieldTarget[] = [];
@@ -465,10 +478,11 @@ export class PaymentsGatewayServiceImpl {
 
   private describe(outcome: CheckoutOutcome, purchaseId: string): PaymentBeginResult {
     if (outcome.kind === 'refused') {
-      return { ...this.refused(outcome.reason), purchaseId, outcome: `refused:${outcome.code}` };
+      return { ...this.refused(outcome.reason), purchaseId, outcome: `refused:${outcome.code}`, ownerMessage: outcome.reason,
+        ...(outcome.exceeded ? { exceeded: outcome.exceeded } : {}) };
     }
     if (outcome.kind === 'cancelled') {
-      return { ...this.refused(outcome.reason), purchaseId, outcome: 'cancelled' };
+      return { ...this.refused(outcome.reason), purchaseId, outcome: 'cancelled', ownerMessage: outcome.report };
     }
     if (outcome.kind === 'challenge') {
       return {
@@ -481,6 +495,7 @@ export class PaymentsGatewayServiceImpl {
         shippingTierUsed: null,
         steppedDown: false,
         challengeStep: outcome.challenge.step,
+        ownerMessage: outcome.reason,
       };
     }
     return {

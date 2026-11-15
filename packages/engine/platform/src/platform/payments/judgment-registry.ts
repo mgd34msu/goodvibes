@@ -7,7 +7,7 @@ import { approvalReply, vetoReply } from './batteries/payment-reply.js';
 import { orderMail, orderNumber, refundMail, shipDate, trackingReference } from './batteries/confirmation.js';
 import { securityCodeReply } from './batteries/security-code-reply.js';
 import { checkoutTerms } from './batteries/checkout-terms.js';
-import { checkoutRepriceAmount, checkoutRepriceShape } from './checkout-repricing.js';
+import { checkoutRepriceReading } from './checkout-repricing.js';
 
 /**
  * Every named decision the payments capability makes, for calibration:
@@ -35,5 +35,4 @@ registry.register(shipDate);
 registry.register(refundMail);
 registry.register(securityCodeReply);
 registry.register(checkoutTerms);
-registry.register(checkoutRepriceShape);
-registry.register(checkoutRepriceAmount);
+registry.register(checkoutRepriceReading);

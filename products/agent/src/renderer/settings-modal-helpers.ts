@@ -133,6 +133,7 @@ export const SETTING_LABELS: Partial<Record<string, string>> = {
   'watchers.triggers.onExitStdin': 'On-Exit Standard Input',
   'watchers.triggers.outputTailBytes': 'On-Exit Output Tail',
   'payments.enabled': 'Payments Enabled',
+  'payments.confirmEveryPurchase': 'Approve Every Purchase First',
   'payments.defaultCardId': 'Default Card ID',
   'payments.currency': 'Currency',
   'payments.cvvHandling': 'CVV Handling',

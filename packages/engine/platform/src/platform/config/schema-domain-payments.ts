@@ -30,6 +30,7 @@ import { moneyAmount } from './money-value.js';
 export const paymentsConfigDefaults = {
   payments: {
     enabled: false,
+    confirmEveryPurchase: false,
     defaultCardId: '',
     currency: 'USD',
     cvvHandling: 'stored' as const,
@@ -71,11 +72,18 @@ export const paymentsConfigSettings: ConfigSetting[] = [
       'Master switch for the payment capability. Default OFF. While false the daemon will not price, reserve, or charge anything, and the payments operator methods refuse. Turning it on does not by itself allow a purchase, the daily budgets below start at 0, so nothing goes through until you set an amount.',
   },
   {
+    key: 'payments.confirmEveryPurchase',
+    type: 'boolean',
+    default: false,
+    description:
+      'When true, every purchase needs your approval first, given with /payments approve (or payments.checkout.approve) naming the merchant, the item and the most it may cost, before the agent may start it; the approval lasts five minutes and is used once. Default FALSE: the agent buys on your behalf inside your budgets without asking first, and that standing answer is kept here until you change it. Either way, a purchase over a budget or at a shop nobody vouches for still asks you before it is bought, and an approval you give in advance answers that question for a total up to the amount you named.',
+  },
+  {
     key: 'payments.defaultCardId',
     type: 'string',
     default: '',
     description:
-      'A card id from payments.cards.list, shown as your preferred card. For now every purchase must still name its card: nothing falls back to this setting, and deleting that card does not clear it. The card NUMBER, expiry and CVV live in the daemon secret store and never in config.',
+      'A card id from payments.cards.list. A purchase that names no card is paid with this one; with this empty, every purchase must name its card. Deleting that card does not clear this setting, and a purchase that would use a deleted card is refused saying so. The card NUMBER, expiry and CVV live in the daemon secret store and never in config.',
   },
   {
     key: 'payments.currency',
@@ -117,14 +125,14 @@ export const paymentsConfigSettings: ConfigSetting[] = [
     type: 'boolean',
     default: true,
     description:
-      'When true (DEFAULT), no single purchase may exceed payments.budget.perPurchaseCeiling no matter how much of the daily budget is left. A separate question from the daily budget: both must pass. Turn it off only if you want one purchase to be able to consume the whole day at once.',
+      'When true (DEFAULT), no single purchase may come to more than payments.budget.perPurchaseCeiling in total (items, tax, fees and delivery) without your explicit approval, no matter how much of the daily budget is left. A separate question from the daily budget: both must pass. Turn it off only if you want one purchase to be able to consume the whole day at once.',
   },
   {
     key: 'payments.budget.perPurchaseCeiling',
     type: 'number',
     default: 0,
     description:
-      'The most any single purchase may come to, applied when perPurchaseCeilingEnabled is true. Written the way you would say it, 100 is a hundred, 19.99 is nineteen ninety-nine. Default 0, so with the ceiling on and this unset every purchase needs your explicit approval, the safe direction until you choose a number.',
+      'The most any single purchase may come to in total, items plus tax, fees and delivery, applied when perPurchaseCeilingEnabled is true. A purchase over it asks you first and names the ceiling and by how much. Written the way you would say it, 100 is a hundred, 19.99 is nineteen ninety-nine. Default 0, so with the ceiling on and this unset every purchase needs your explicit approval, the safe direction until you choose a number.',
     ...moneyAmount(),
   },
   {

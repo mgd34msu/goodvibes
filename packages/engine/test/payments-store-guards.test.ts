@@ -479,6 +479,7 @@ describe('payments handlers over a real catalog', () => {
       remove: async () => {},
     };
     await register({ requests: failing });
+    settings.set('payments.confirmEveryPurchase', true);
     await approve();
     const refusal = await failureOf('payments.checkout.begin', beginBody());
     expect(refusal.status).toBe(409);

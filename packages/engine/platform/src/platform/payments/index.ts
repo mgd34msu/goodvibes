@@ -290,4 +290,4 @@ export type {
 } from './payments-gateway-service.js';
 
 export { readPaymentOperation, readPaymentOperationCancellation, paymentOperationDescription, isLivePaymentOperation, canReconcilePaymentOperation, PAYMENT_PURCHASE_RECONCILE_HTTP } from './operation-view.js';
-export type { PaymentOperationView, PaymentOperationState, PaymentOperationCancellation } from './operation-view.js';
+export type { PaymentOperationView, PaymentOperationState, PaymentOperationCancellation, PaymentOperationLimit } from './operation-view.js';

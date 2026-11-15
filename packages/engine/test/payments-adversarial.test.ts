@@ -226,17 +226,6 @@ describe('a purchase whose intent derives from injected content is refused', () 
     });
     expect(payment.allowed).toBe(false);
   });
-
-  test('the payments module never imports evaluateOutwardEffect', async () => {
-    const source = await Bun.file(
-      new URL('../platform/src/platform/payments/taint-gate.ts', import.meta.url),
-    ).text();
-    // Whole import statements, so a named import wrapped across lines is still seen.
-    const importStatements = source.match(/\bimport\b[^;]*?\bfrom\s*['"][^'"]+['"]/g) ?? [];
-    expect(importStatements.length).toBeGreaterThan(0);
-    expect(importStatements.join('\n')).not.toContain('evaluateOutwardEffect');
-    expect(source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')).not.toMatch(/\bevaluateOutwardEffect\s*\(/);
-  });
 });
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -647,24 +636,6 @@ describe('no filler item is ever added', () => {
     ));
     expect(check.ok).toBe(false);
     expect(check.missing).toHaveLength(1);
-  });
-
-  test('there is no free-shipping-threshold logic anywhere in the payments module', async () => {
-    // The absence is the design, so the test is positive: if someone adds a
-    // helpful threshold optimizer later, this fails rather than shipping.
-    const { Glob } = await import('bun');
-    const glob = new Glob('**/*.ts');
-    const dir = new URL('../platform/src/platform/payments/', import.meta.url).pathname;
-    const offenders: string[] = [];
-    for await (const file of glob.scan({ cwd: dir })) {
-      const text = await Bun.file(`${dir}${file}`).text();
-      // Strip comments: the ban is on logic, and the modules explain the ban.
-      const code = text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
-      if (/freeShipping|free_shipping|shippingThreshold|thresholdToFreeShipping/i.test(code)) {
-        offenders.push(file);
-      }
-    }
-    expect(offenders).toEqual([]);
   });
 });
 

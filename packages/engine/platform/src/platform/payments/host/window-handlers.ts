@@ -6,6 +6,7 @@ import type { PaymentReplyInbox } from '../reply-inbox.js';
 import type { CheckoutOperations } from './checkout-operations.js';
 import { PaymentOperationStoreError } from './operation-store.js';
 import { SecurityCodeRequestError, type SecurityCodeRequests } from '../security-code-requests.js';
+import { paymentHostStopView, type PaymentStoreStop } from '../payment-host-health.js';
 interface PaymentWindowHandlerDeps { readonly replies?: PaymentReplyInbox | undefined; readonly securityCodes?: SecurityCodeRequests | undefined }
 
 function scope(scopes: readonly string[], required: string): boolean { return scopes.includes('*') || scopes.includes(required); }
@@ -28,7 +29,9 @@ function forbidden(): HandlerError {
   return new HandlerError('Answering a purchase requires current paired owner access with admin and write:payments. Pair this client and refresh the purchase.', 'FORBIDDEN', 403);
 }
 
-export function purchaseWindowStatusHandler(deps: PaymentWindowHandlerDeps, operations: Pick<CheckoutOperations, 'statusReport'>): TypedHandler<unknown, unknown> {
+/** `stopped` is the payment host's health: the store that stopped itself, if any. */
+export function purchaseWindowStatusHandler(deps: PaymentWindowHandlerDeps, operations: Pick<CheckoutOperations, 'statusReport'>,
+  stopped: () => PaymentStoreStop | null = () => null): TypedHandler<unknown, unknown> {
   return async ({ body, query, context }) => {
     context.signal?.throwIfAborted();
     if (!context.principalId || !scope(context.scopes, 'read:payments') || !authorizedFor(context, 'read:payments')) {
@@ -39,16 +42,17 @@ export function purchaseWindowStatusHandler(deps: PaymentWindowHandlerDeps, oper
     const purchaseId = selected === undefined ? undefined : field(selected, 'purchaseId');
     const replies = deps.replies;
     if (!replies) throw unavailable();
+    const stop = stopped();
     try {
       const { operations: rows, unreadable } = operations.statusReport(purchaseId);
       const securityCodes = deps.securityCodes?.inspect(purchaseId) ?? [];
       // Each optional list is present only when it has entries, so a reader
       // that knows nothing of the field still decodes every ordinary response.
       return { windows: replies.inspect(purchaseId), operations: rows, ...(unreadable.length ? { unreadable } : {}),
-        ...(securityCodes.length ? { securityCodes } : {}) };
+        ...(securityCodes.length ? { securityCodes } : {}), ...(stop ? { stopped: paymentHostStopView(stop) } : {}) };
     }
     catch (error) {
-      throw new HandlerError(error instanceof PaymentOperationStoreError ? error.message
+      throw new HandlerError(stop ? paymentHostStopView(stop).message : error instanceof PaymentOperationStoreError ? error.message
         : 'Purchase status is unavailable. Inspect the original payment evidence before taking further action.', 'FAILED_PRECONDITION', 409);
     }
   };

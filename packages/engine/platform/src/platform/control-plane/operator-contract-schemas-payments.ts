@@ -30,6 +30,12 @@ import {
 import { PAYMENT_OPERATION_STATES } from '../payments/operation-view.js';
 
 /** One daily pool: its limit, what today has spent, what is held, what is left. */
+/** A payment store that stopped itself, and what to do. Present only while one has. */
+const PAYMENT_HOST_STOP_SCHEMA = objectSchema({
+  store: STRING_SCHEMA, reason: STRING_SCHEMA, path: STRING_SCHEMA,
+  message: { ...STRING_SCHEMA, description: 'Which store stopped, why, that nothing recorded was lost, and the step: restart the daemon.' },
+}, ['store', 'reason', 'message']);
+
 const POOL_SCHEMA = objectSchema(
   {
     limit: NUMBER_SCHEMA,
@@ -61,6 +67,8 @@ export const PAYMENTS_BUDGET_STATUS_OUTPUT_SCHEMA = objectSchema(
      * so a second spender would start from a clean daily budget.
      */
     isPaymentsLeader: BOOLEAN_SCHEMA,
+    /** Present while a payment store has stopped itself; new purchases are refused with its message. */
+    stopped: PAYMENT_HOST_STOP_SCHEMA,
   },
   ['enabled', 'dayKey', 'timezone', 'currency', 'item', 'overage', 'tolerance', 'reservationCount', 'isPaymentsLeader'],
 );
@@ -138,6 +146,17 @@ const PAYMENT_OPERATION_SCHEMA = objectSchema({
   updatedAtMs: { type: 'integer', minimum: 0, maximum: 8_640_000_000_000_000 },
   outcome: nullableSchema(STRING_SCHEMA), totalMinorUnits: nullableSchema({ type: 'integer', minimum: 0 }),
   currency: nullableSchema({ type: 'string', pattern: '^[A-Z]{3}$' }),
+  /** The specific reason a purchase ended unbought, as the owner was told it. */
+  reason: nullableSchema({ ...STRING_SCHEMA, maxLength: 4000 }),
+  /** The merchant verification step (3-D Secure, CAPTCHA, one-time code) waiting on the owner. */
+  challengeStep: nullableSchema({ ...STRING_SCHEMA, maxLength: 4000 }),
+  /** The owner limit a refusal names, in minor units of `currency`. */
+  exceeded: nullableSchema(objectSchema({
+    limit: enumSchema(['daily-item-budget', 'per-purchase-ceiling', 'requested-maximum', 'daily-overage-budget', 'card-limit']),
+    setting: STRING_SCHEMA,
+    availableMinorUnits: { type: 'integer', minimum: 0 }, neededMinorUnits: { type: 'integer', minimum: 0 }, excessMinorUnits: { type: 'integer', minimum: 0 },
+    unset: BOOLEAN_SCHEMA,
+  }, ['limit', 'availableMinorUnits', 'neededMinorUnits', 'excessMinorUnits', 'unset'])),
 }, ['purchaseId', 'operationId', 'state', 'phase', 'createdAtMs', 'updatedAtMs', 'outcome', 'totalMinorUnits', 'currency']);
 /** A purchase whose status record could not be read. Present only when one exists. */
 const PAYMENT_UNREADABLE_OPERATION_SCHEMA = objectSchema({ purchaseId: STRING_SCHEMA, reason: STRING_SCHEMA }, ['purchaseId', 'reason']);
@@ -150,6 +169,7 @@ export const PAYMENTS_PURCHASE_STATUS_OUTPUT_SCHEMA = objectSchema({
   operations: { ...arraySchema(PAYMENT_OPERATION_SCHEMA), maxItems: 356 },
   unreadable: { ...arraySchema(PAYMENT_UNREADABLE_OPERATION_SCHEMA), maxItems: 356 },
   securityCodes: { ...arraySchema(PAYMENT_SECURITY_CODE_REQUEST_SCHEMA), maxItems: 256 },
+  stopped: PAYMENT_HOST_STOP_SCHEMA,
 }, ['windows', 'operations']);
 export const PAYMENTS_PURCHASE_SECURITY_CODE_INPUT_SCHEMA = objectSchema({
   purchaseId: STRING_SCHEMA, windowId: STRING_SCHEMA,
@@ -382,7 +402,9 @@ export const PAYMENTS_CHECKOUT_BEGIN_INPUT_SCHEMA = objectSchema(
     checkoutUrl: STRING_SCHEMA,
     /** The owner's own words for what they asked to buy. Never a page title. */
     item: STRING_SCHEMA,
-    cardId: STRING_SCHEMA,
+    cardId: { ...STRING_SCHEMA, description: 'A card id from payments.cards.list. Omitted, the purchase is paid with payments.defaultCardId.' },
+    /** True when the agent found this storefront for the owner rather than the owner naming it. The domain is then graded for recourse instead of taint-checked; an unvouched shop asks the owner. */
+    merchantDiscovered: BOOLEAN_SCHEMA,
     requestedLines: { ...arraySchema(REQUESTED_LINE_SCHEMA), minItems: 1 },
     lines: { ...arraySchema(CHECKOUT_LINE_SCHEMA), minItems: 1 },
     tax: STRING_SCHEMA,
@@ -399,10 +421,10 @@ export const PAYMENTS_CHECKOUT_BEGIN_INPUT_SCHEMA = objectSchema(
     preferredTier: enumSchema(['normal', 'fast', 'fastest']),
     expirySeparator: STRING_SCHEMA,
     twoDigitYear: BOOLEAN_SCHEMA,
-    requestedMax: { ...STRING_SCHEMA, pattern: '^\\d+(?:\\.\\d{1,3})?$', description: 'Owner-requested maximum for the entire purchase, including tax, mandatory fees and delivery. Supply one non-negative decimal amount in the configured budget currency, such as 20.00, without grouping, currency symbols or prose. Precision must fit that currency. Exceeding it requires a new explicit approval; silence never raises it.' },
+    requestedMax: { ...STRING_SCHEMA, pattern: '^\\d+(?:\\.\\d{1,3})?$', description: 'Owner-requested maximum for the entire purchase, including tax, mandatory fees and delivery. Supply one non-negative decimal amount in the configured budget currency, such as 20.00, without grouping, currency symbols or prose. Precision must fit that currency. Exceeding it requires a new explicit approval; silence never raises it. Required while payments.confirmEveryPurchase is on: it is the amount the owner approved.' },
   },
   [
-    'requestId', 'sessionId', 'pageId', 'merchantDomain', 'checkoutUrl', 'item', 'cardId',
+    'requestId', 'sessionId', 'pageId', 'merchantDomain', 'checkoutUrl', 'item',
     'requestedLines', 'lines', 'shippingOptions', 'cardFields', 'placeOrderTarget',
   ],
 );

@@ -15,7 +15,24 @@ export interface PaymentOperationView {
   readonly outcome: string | null;
   readonly totalMinorUnits: number | null;
   readonly currency: string | null;
+  /** The specific reason the purchase ended unbought, as the owner was told it. Absent on older records. */
+  readonly reason?: string | null;
+  /** The verification step (3-D Secure, CAPTCHA, one-time code) waiting on the owner. */
+  readonly challengeStep?: string | null;
+  /** The limit a refusal names, with its amounts in minor units of `currency`. */
+  readonly exceeded?: PaymentOperationLimit | null;
 }
+/** Which owner limit a purchase did not fit, and by how much. */
+export interface PaymentOperationLimit {
+  readonly limit: 'daily-item-budget' | 'per-purchase-ceiling' | 'requested-maximum' | 'daily-overage-budget' | 'card-limit';
+  readonly setting?: string;
+  readonly availableMinorUnits: number;
+  readonly neededMinorUnits: number;
+  readonly excessMinorUnits: number;
+  readonly unset: boolean;
+}
+const OPERATION_LIMITS = ['daily-item-budget', 'per-purchase-ceiling', 'requested-maximum', 'daily-overage-budget', 'card-limit'];
+const MAX_OPERATION_TEXT = 4_000;
 export interface PaymentOperationCancellation {
   readonly purchaseId: string;
   readonly operationId: string;
@@ -55,6 +72,7 @@ const REFUSAL_MESSAGES: Readonly<Record<RefusalCode | ExecutionRefusalCode | Ope
   'item-budget-exceeded-denied': 'The above-budget purchase was denied.',
   'item-budget-exceeded-expired': 'The above-budget approval expired without approval.',
   'per-purchase-ceiling-exceeded': 'The purchase exceeded the configured per-purchase ceiling.',
+  'card-limit-exceeded': 'The full purchase total is over the limit declared for the chosen card, so the issuer would decline it. Nothing was bought. Pay with another card, or update the card\'s declared limit.',
   'overage-pool-exhausted': 'The overage budget could not cover tax, fees and delivery.',
   'zero-budget': 'No spending budget is configured.',
   'total-changed': 'The checkout total or delivery selection changed before payment.',
@@ -96,6 +114,9 @@ function refusalMessage(code: string): string | undefined {
   return Object.hasOwn(REFUSAL_MESSAGES, code) ? REFUSAL_MESSAGES[code as keyof typeof REFUSAL_MESSAGES] : undefined;
 }
 export function paymentOperationDescription(operation: PaymentOperationView): string {
+  // The sentence the purchase itself composed (which line, which limit and
+  // by how much, which step) says more than the generic one for its code.
+  if (operation.reason && (operation.state === 'refused' || operation.state === 'attention' || operation.state === 'cancelled')) return operation.reason;
   if (operation.outcome === 'owner-confirmed-purchased') return 'You confirmed this order in the merchant’s history. Original payment accounting is settled; no new order was submitted.';
   if (operation.outcome === 'owner-confirmed-not-purchased') return 'You confirmed no order was placed. The original unspent hold was released; any already committed spend remains recorded without crediting a budget. No new order was submitted.';
   if (operation.outcome?.startsWith('owner-reconciliation-pending-')) return 'Your merchant-history finding was saved, but payment bookkeeping has not finished. Refresh and repeat that same finding; do not place another order.';
@@ -125,7 +146,10 @@ export function readPaymentOperation(value: unknown): PaymentOperationView {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return fail();
   const row = value as Record<string, unknown>;
   const keys = ['purchaseId', 'operationId', 'state', 'phase', 'createdAtMs', 'updatedAtMs', 'outcome', 'totalMinorUnits', 'currency'];
-  if (Object.keys(row).length !== keys.length || Object.keys(row).some(key => !keys.includes(key))
+  const optional = ['reason', 'challengeStep', 'exceeded'];
+  const text = (value: unknown): boolean => value === undefined || value === null || (typeof value === 'string' && value.length > 0 && value.length <= MAX_OPERATION_TEXT);
+  if (keys.some(key => !Object.hasOwn(row, key)) || Object.keys(row).some(key => !keys.includes(key) && !optional.includes(key))
+    || !text(row['reason']) || !text(row['challengeStep']) || !(row['exceeded'] === undefined || row['exceeded'] === null || readOperationLimit(row['exceeded']) !== null)
     || typeof row['purchaseId'] !== 'string' || !row['purchaseId'] || row['purchaseId'].length > 256
     || typeof row['operationId'] !== 'string' || !row['operationId'] || row['operationId'].length > 256
     || typeof row['state'] !== 'string' || !(PAYMENT_OPERATION_STATES as readonly string[]).includes(row['state'])
@@ -134,9 +158,25 @@ export function readPaymentOperation(value: unknown): PaymentOperationView {
     || !(row['outcome'] === null || (typeof row['outcome'] === 'string' && /^(?:purchased|submitted-unverified|refunded|owner-(?:confirmed|reconciliation-pending)-(?:purchased|not-purchased)|refused(?::[a-z-]+)?|cancelled|decision-unavailable|decision-disabled|reply-source-unavailable|challenge:(?:3d-secure|captcha|otp|unknown))$/.test(row['outcome'])))
     || !(row['totalMinorUnits'] === null || (typeof row['totalMinorUnits'] === 'number' && Number.isSafeInteger(row['totalMinorUnits']) && row['totalMinorUnits'] >= 0))
     || !(row['currency'] === null || (typeof row['currency'] === 'string' && /^[A-Z]{3}$/.test(row['currency'])))) return fail();
+  const exceeded = row['exceeded'] === undefined || row['exceeded'] === null ? null : readOperationLimit(row['exceeded']);
   return Object.freeze({ purchaseId: row['purchaseId'], operationId: row['operationId'], state: row['state'] as PaymentOperationState,
     phase: row['phase'] as PaymentOperationView['phase'], createdAtMs: row['createdAtMs'] as number, updatedAtMs: row['updatedAtMs'] as number,
-    outcome: row['outcome'] as string | null, totalMinorUnits: row['totalMinorUnits'] as number | null, currency: row['currency'] as string | null });
+    outcome: row['outcome'] as string | null, totalMinorUnits: row['totalMinorUnits'] as number | null, currency: row['currency'] as string | null,
+    ...(typeof row['reason'] === 'string' ? { reason: row['reason'] } : {}),
+    ...(typeof row['challengeStep'] === 'string' ? { challengeStep: row['challengeStep'] } : {}),
+    ...(exceeded ? { exceeded } : {}) });
+}
+function readOperationLimit(value: unknown): PaymentOperationLimit | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const row = value as Record<string, unknown>;
+  const amount = (key: string): boolean => typeof row[key] === 'number' && Number.isSafeInteger(row[key]) && (row[key] as number) >= 0;
+  if (Object.keys(row).some(key => !['limit', 'setting', 'availableMinorUnits', 'neededMinorUnits', 'excessMinorUnits', 'unset'].includes(key))
+    || typeof row['limit'] !== 'string' || !OPERATION_LIMITS.includes(row['limit'])
+    || !(row['setting'] === undefined || (typeof row['setting'] === 'string' && /^payments\.[a-zA-Z.]{1,80}$/.test(row['setting'])))
+    || !amount('availableMinorUnits') || !amount('neededMinorUnits') || !amount('excessMinorUnits') || typeof row['unset'] !== 'boolean') return null;
+  return Object.freeze({ limit: row['limit'] as PaymentOperationLimit['limit'], ...(typeof row['setting'] === 'string' ? { setting: row['setting'] } : {}),
+    availableMinorUnits: row['availableMinorUnits'] as number, neededMinorUnits: row['neededMinorUnits'] as number,
+    excessMinorUnits: row['excessMinorUnits'] as number, unset: row['unset'] as boolean });
 }
 export function readPaymentOperationCancellation(value: unknown): PaymentOperationCancellation {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid purchase stop acknowledgement. Refresh status.');

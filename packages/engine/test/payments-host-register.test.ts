@@ -418,8 +418,9 @@ describe('payments.checkout.begin: what actually gates entry', () => {
     expect(refusal.message).toContain('not available');
   });
 
-  test('an owner-direct begin with no approval on file refuses, naming the approve verb', async () => {
+  test('with confirmEveryPurchase on, an owner-direct begin with no approval on file refuses, naming the approve verb', async () => {
     settings.set('payments.enabled', true);
+    settings.set('payments.confirmEveryPurchase', true);
     await registerWithSeam();
 
     const refusal = await refusalOf('payments.checkout.begin', {
@@ -433,6 +434,7 @@ describe('payments.checkout.begin: what actually gates entry', () => {
 
   test('the approval is single use: the begin that spent it succeeds past the gate, the next one refuses', async () => {
     settings.set('payments.enabled', true);
+    settings.set('payments.confirmEveryPurchase', true);
     await registerWithSeam();
     await approvePurchase();
 
@@ -455,6 +457,7 @@ describe('payments.checkout.begin: what actually gates entry', () => {
 
   test('a begin whose content differs from what was approved refuses and leaves the approval unspent', async () => {
     settings.set('payments.enabled', true);
+    settings.set('payments.confirmEveryPurchase', true);
     await registerWithSeam();
     await approvePurchase('20.00');
 
@@ -478,6 +481,7 @@ describe('payments.checkout.begin: what actually gates entry', () => {
 
   test('an expired approval refuses and says so', async () => {
     settings.set('payments.enabled', true);
+    settings.set('payments.confirmEveryPurchase', true);
     let nowMs = Date.parse('2026-08-21T12:00:00.000Z');
     await registerWithSeam({ approvals: freshApprovals(() => new Date(nowMs)) });
     await approvePurchase();

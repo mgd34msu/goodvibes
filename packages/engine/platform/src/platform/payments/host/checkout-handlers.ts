@@ -24,21 +24,18 @@ import { PurchaseReconciliations } from './purchase-reconciliation.js';
  * daemon-handler-composition.ts/ci-watch-composition.ts exist as their own
  * modules; no behavioural change from being here rather than there.
  *
- * ── Why these two verbs are local wrappers, not the platform's own route ───────
+ * ── Why these verbs are local wrappers, not the platform's own route ────────
  *
  * `registerPaymentsGatewayMethods`'s own `createPaymentsCheckoutBeginHandler`/
  * `createPaymentsCheckoutFillCardHandler` call
  * `service.beginCheckout(input)`/`service.fillCardIntoCheckout(input)` with no
- * invocation context at all. This daemon's whole "approving a purchase is a
- * distinct act" ruling (see `checkoutBeginHandler` below) needs
- * `context.explicitUserRequest`, which only reaches a handler attached through
- * this daemon's own `registerCatalogHandlers` (register.ts). So both verbs are
- * attached there as local wrappers, reading and shaping the SAME wire shapes
- * `routes/payments.ts` does (ported here rather than imported, since the platform
- * does not publish those parsing functions on their own), and calling into the
- * ONE `PaymentsGatewayServiceImpl` a registration's checkout pair shares for
- * its whole life (see `CheckoutServiceHolder` below for why one, not one per
- * call).
+ * invocation context at all. Admission here needs `context.explicitUserRequest`
+ * and the paired principal, which only reach a handler attached through this
+ * daemon's own `registerCatalogHandlers` (register.ts). So the verbs are
+ * attached there as local wrappers, reading the same wire shapes
+ * `routes/payments.ts` does and calling into the ONE
+ * `PaymentsGatewayServiceImpl` a registration's checkout pair shares for its
+ * whole life (see `CheckoutServiceHolder` below for why one, not one per call).
  */
 import { checkAddress } from '../address.js';
 import type { GateInput } from '../gates.js';
@@ -50,7 +47,11 @@ import type { MerchantJudgePort } from '../merchant-recourse.js';
 import type { PaymentNotifier } from '../payment-ports.js';
 import type { PaymentReplyInbox } from '../reply-inbox.js';
 import { PaymentsGatewayServiceImpl } from '../payments-gateway-service.js';
-import { readCvvHandling, readPaymentsEnabled, readPaymentsServiceConfig } from '../payments-config.js';
+import { readConfirmEveryPurchase, readCvvHandling, readDefaultCardId, readPaymentsEnabled, readPaymentsServiceConfig } from '../payments-config.js';
+import { minorUnitExponent, parseRequestedMaximum } from '../money-parsing.js';
+import { registrableDomain } from '../../security/public-suffix.js';
+import { paymentHostStop, PaymentHostStoppedError, type PaymentStoreHealth, type PaymentStoreStop } from '../payment-host-health.js';
+import type { CurrencyCode } from '../types.js';
 import type { SecurityCodeRequests } from '../security-code-requests.js';
 import { SHIPPING_TIERS } from '../types.js';
 import type { ShippingTier } from '../types.js';
@@ -190,8 +191,11 @@ function readStringRows(value: unknown, field: string): string[] {
   return value.map((entry, index) => requireString(entry, `${field}[${String(index)}]`));
 }
 
+/** What the begin parser needs from settings: amounts are read in the budget currency, and an unnamed card is the default one. */
+interface BeginInputSettings { readonly budgetCurrency: CurrencyCode; readonly defaultCardId: string }
+
 /** The exact shape `PaymentsGatewayServiceImpl.beginCheckout` wants, read off the wire. */
-function parseBeginCheckoutInput(params: Record<string, unknown>): Parameters<PaymentsGatewayServiceImpl['beginCheckout']>[0] {
+function parseBeginCheckoutInput(params: Record<string, unknown>, settings: BeginInputSettings): Parameters<PaymentsGatewayServiceImpl['beginCheckout']>[0] {
   const requestedLines = readObjectRows(params['requestedLines'], 'requestedLines', true).map((entry, index) => ({
     label: requireString(entry['label'], `requestedLines[${String(index)}].label`),
     quantity: requireQuantity(entry['quantity'], `requestedLines[${String(index)}].quantity`),
@@ -234,16 +238,24 @@ function parseBeginCheckoutInput(params: Record<string, unknown>): Parameters<Pa
   const checkedReading = readCheckoutReadingInput(reading);
   if (!checkedReading.ok) throw new HandlerError(`${checkedReading.field}: ${checkedReading.reason}`, 'INVALID_ARGUMENT', 400);
   const requestedMax = params['requestedMax'] === undefined ? undefined : requireString(params['requestedMax'], 'requestedMax');
-  if (requestedMax !== undefined && !/^\d+(?:\.\d{1,3})?$/.test(requestedMax)) {
-    throw invalid('requestedMax', 'must be a plain amount such as 25 or 25.00.');
+  if (requestedMax !== undefined && parseRequestedMaximum(requestedMax, settings.budgetCurrency) === null) {
+    throw invalid('requestedMax', `must be a plain amount in ${settings.budgetCurrency} such as ${plainAmountExample(settings.budgetCurrency)}.`);
   }
+  // A purchase that names no card is paid with the owner's default card.
+  const defaultCard = settings.defaultCardId.trim();
+  if (params['cardId'] === undefined && defaultCard.length === 0) {
+    throw invalid('cardId', 'is required: name a card from payments.cards.list, or set payments.defaultCardId.');
+  }
+  const cardId = params['cardId'] === undefined ? defaultCard : requireString(params['cardId'], 'cardId');
+  const discovered = params['merchantDiscovered'];
+  if (discovered !== undefined && typeof discovered !== 'boolean') throw invalid('merchantDiscovered', 'must be true or false.');
   return {
     sessionId: requireString(params['sessionId'], 'sessionId'),
     pageId: requireString(params['pageId'], 'pageId'),
     merchantDomain: requireString(params['merchantDomain'], 'merchantDomain'),
     checkoutUrl: requireString(params['checkoutUrl'], 'checkoutUrl'),
     item: requireString(params['item'], 'item'),
-    cardId: requireString(params['cardId'], 'cardId'),
+    cardId,
     requestedLines,
     reading,
     controls: {
@@ -256,18 +268,18 @@ function parseBeginCheckoutInput(params: Record<string, unknown>): Parameters<Pa
     },
     preferredTier: optionalShippingTier(params['preferredTier']),
     requestedMax,
-    // The platform's own route (routes/payments.ts) never reads this field off the
-    // wire at all: `PaymentBeginCheckoutInput` has no `merchantDiscovered`
-    // property, and `service.beginCheckout` is called with it simply absent,
-    // which `checkout-flow.ts` then defaults to false. This daemon matches
-    // that byte for byte rather than trusting a caller-supplied flag:
-    // `merchantDiscovered` skips the taint check on the merchant and the
-    // checkout url (taint-gate.ts), and nothing on this wire path can attest
-    // that a page was actually browsed to rather than simply named by
-    // whoever is calling. A future attested-discovery flow may reintroduce
-    // this deliberately, with its own provenance, not as a bare wire field.
-    merchantDiscovered: false,
+    // Read as sent. True only moves the merchant and checkout url from the
+    // taint check to the recourse judge (taint-gate.ts, merchant-recourse.ts),
+    // and a merchant nobody vouches for turns the window into an approval that
+    // silence denies, so the flag can never make spending more automatic.
+    // The item and any stated maximum are taint-checked either way.
+    merchantDiscovered: discovered === true,
   };
+}
+
+function plainAmountExample(currency: CurrencyCode): string {
+  const exponent = minorUnitExponent(currency);
+  return exponent === 0 ? '2500' : `25 or 25.${'0'.repeat(exponent)}`;
 }
 
 /** The exact shape `PaymentsGatewayServiceImpl.fillCardIntoCheckout` wants, read off the wire. */
@@ -408,8 +420,10 @@ export class CheckoutServiceHolder {
   ) {
     this.restoreWindow = deps.checkout.restoreWindow?.bind(deps.checkout);
     this.retireContinuation = deps.checkout.retireContinuation?.bind(deps.checkout);
+    const notifier = deps.checkout.notifier;
     this.operations = new CheckoutOperations(deps.checkout.operations, journal, deps.purchases,
-      (input, id, owner) => this.runAdmittedCheckout(input, id, owner), deps.now, deps.checkout.requests, deps.checkout.replies);
+      (input, id, owner) => this.runAdmittedCheckout(input, id, owner), deps.now, deps.checkout.requests, deps.checkout.replies,
+      { notify: async message => { await notifier.deliver({ kind: 'notice', message }); }, retire: this.retireContinuation });
     // A reconciled purchase's journal record is removed outside the registry;
     // its page must not stay claimed by that settled purchase until restart.
     const reconciliationJournal: CheckoutJournal = Object.freeze({ list: () => journal.list(), put: (record: InFlightCheckout) => journal.put(record),
@@ -418,7 +432,8 @@ export class CheckoutServiceHolder {
         try { await this.registry.forgetRemoved(id); } catch { /* The page is freed on restart instead. */ }
       } });
     this.reconciliations = new PurchaseReconciliations({ operations: deps.checkout.operations, journal: reconciliationJournal,
-      purchases: deps.purchases, budget: deps.budget, isPaymentsLeader: deps.isPaymentsLeader, now: deps.now });
+      purchases: deps.purchases, budget: deps.budget, isPaymentsLeader: deps.isPaymentsLeader, now: deps.now,
+      settled: (purchaseId, operationId) => this.operations.settledElsewhere(purchaseId, operationId) });
     this.registry = new CheckoutRegistry({ list: () => journal.list(),
       remove: async id => { await journal.remove(id); this.operations.released(id); },
       put: async record => { await journal.put(record); this.operations.progress(record); } });
@@ -456,6 +471,10 @@ export class CheckoutServiceHolder {
     const sweep = await this.recovery.recoverInterruptedCheckouts();
     if (sweep.swept) {
       await this.operations.recover();
+      // Requests of purchases that ended (by any route, including a crash) go
+      // now; windows being resumed were retained above and are kept.
+      try { await this.operations.sweepSettledRequests(); }
+      catch { /* A request that cannot be judged stays for the next start. */ }
       const restore = this.restoreWindow;
       if (restore) this.operations.resumeInterruptedWindows(async (request, owner) => {
         const restored = await restore(request, owner);
@@ -475,9 +494,10 @@ export class CheckoutServiceHolder {
     return sweep;
   }
 
-  admit(id: string, input: BeginCheckoutInput, source: DetachedCheckoutSource, requestCurrent: () => void, consume: () => void) {
+  admit(id: string, input: BeginCheckoutInput, source: DetachedCheckoutSource, requestCurrent: () => void,
+    admitInput: (input: BeginCheckoutInput) => BeginCheckoutInput | void) {
     if (this.closed) throw new CheckoutOwnershipError();
-    return this.operations.admit(id, input, source, requestCurrent, consume);
+    return this.operations.admit(id, input, source, requestCurrent, admitInput);
   }
 
   private async runAdmittedCheckout(input: BeginCheckoutInput, id: string, owner: DetachedCheckoutOwner) {
@@ -507,6 +527,28 @@ export class CheckoutServiceHolder {
       ...(securityCodePrompt ? { securityCodePrompt } : {}),
       ...(cardWithheldByCvvPrompt ? { cardWithheldByCvvPrompt } : {}),
     };
+  }
+
+  /**
+   * The first payment store that has stopped itself, or null. The approvals
+   * store counts only when approvals are required: with pre-approval off a
+   * purchase does not need it.
+   */
+  hostStop(options: { readonly approvals: boolean }): PaymentStoreStop | null {
+    const deps = this.deps, journal = this.journal as CheckoutJournal & { stopped?: () => PaymentStoreStop | null };
+    const requests = deps.checkout.requests as (PaymentRequestStore & { stopped?: () => PaymentStoreStop | null }) | undefined;
+    const stores: PaymentStoreHealth[] = [
+      () => deps.budget.stopped(),
+      () => journal.stopped?.() ?? null,
+      () => requests?.stopped?.() ?? null,
+      () => this.operations.stopped(),
+      () => {
+        try { deps.purchases.assertAvailable(); return null; }
+        catch { return { store: 'purchase ledger', reason: 'it could not be read, a write to it could not be confirmed, or its file changed while the daemon was running' }; }
+      },
+      ...(options.approvals ? [() => deps.checkout.approvals.stopped()] : []),
+    ];
+    return paymentHostStop(stores);
   }
 
   /** The daemon types the card itself when its own purchase reaches payment.
@@ -571,19 +613,34 @@ const CHECKOUT_UNAVAILABLE_MESSAGE =
 export const CHECKOUT_APPROVAL_ACTION = 'payments.checkout.begin';
 
 /**
- * The exact fields an approval binds, built the same way on both sides.
+ * The exact fields an approval binds, read the same way on both sides.
  *
- * On the approve side the values are what the owner typed; on the begin side
- * they are read from the begin call itself (`merchantDomain`, `item`,
- * `requestedMax`). One builder for both is what makes the fingerprint a
- * comparison of the deed rather than two modules' ideas of it.
+ * The owner types the approval and the agent types the begin call, so the
+ * fields are compared by meaning, not spelling: the merchant as its
+ * registrable domain in lower case, the item with case and spacing folded,
+ * and the amount as whole minor units of the budget currency ("25" and
+ * "25.00" are the same approval). One parser for both verbs.
  */
 export function checkoutApprovalContent(input: {
   readonly merchantDomain: string;
   readonly item: string;
-  readonly amount: string | undefined;
+  readonly amountMinorUnits: number | undefined;
 }): Readonly<Record<string, string | undefined>> {
-  return { merchant: input.merchantDomain, item: input.item, amount: input.amount };
+  return { merchant: approvalMerchant(input.merchantDomain), item: approvalItem(input.item),
+    amount: input.amountMinorUnits === undefined ? undefined : String(input.amountMinorUnits) };
+}
+function approvalMerchant(value: string): string {
+  let host = value.trim().toLowerCase();
+  try { if (/^[a-z][a-z0-9+.-]*:\/\//.test(host)) host = new URL(host).hostname; } catch { /* Compared as typed. */ }
+  return registrableDomain(host) ?? host;
+}
+function approvalItem(value: string): string {
+  return value.normalize('NFKC').replace(/\s+/g, ' ').trim().toLowerCase();
+}
+/** An approval amount as the owner may type it: a plain amount, optionally with the budget currency's code or a currency sign. */
+function approvalAmount(raw: string, currency: CurrencyCode): number | null {
+  const plain = raw.trim().replace(new RegExp(`^${currency}\\s*|\\s*${currency}$`, 'i'), '').replace(/^[$€£¥]\s*/, '').trim();
+  return parseRequestedMaximum(plain, currency);
 }
 
 /** How a begin call names the approve verb when it refuses, per mismatch. */
@@ -598,75 +655,69 @@ function approvalRefusalMessage(mismatch: string): string {
   }
   if (mismatch === 'different-content' || mismatch === 'no-content-binding') {
     return 'The owner approval on file was for a different purchase: its merchant, item or amount does not '
-      + 'match this begin call (the amount is compared against requestedMax). Call payments.checkout.approve '
-      + 'with exactly what this begin call names, then begin again.';
+      + 'match this begin call (the amount is compared against requestedMax). payments.confirmEveryPurchase is on, '
+      + 'so ask the owner to approve exactly this merchant, item and amount with /payments approve (payments.checkout.approve), then begin again.';
   }
-  return 'This purchase has no owner approval on file. A human approves it first, out of band from this '
-    + 'call: invoke payments.checkout.approve with this purchase\'s merchantDomain, item and amount (the '
-    + 'begin call\'s requestedMax), then begin within five minutes.';
+  return 'payments.confirmEveryPurchase is on and this purchase has no owner approval on file. Ask the owner to '
+    + 'approve it with /payments approve <merchant> <item> <amount> (payments.checkout.approve; the amount is this begin call\'s requestedMax), '
+    + 'then begin within five minutes.';
 }
 
 /**
- * Spend the one approval matching this begin call, or refuse naming the
- * approve verb. Consuming before the service runs is the platform store's own
- * safe direction: an approval taken for a begin that then refuses on a later
- * gate is spent, never silently reusable.
+ * Spend the one approval matching this begin call. Null when none matches;
+ * whether that refuses is the caller's (payments.confirmEveryPurchase).
  */
-function consumeCheckoutApproval(
-  approvals: DaemonApprovalStore,
-  input: { readonly merchantDomain: string; readonly item: string; readonly requestedMax?: string | undefined },
-): void {
+function takeCheckoutApproval(approvals: DaemonApprovalStore, content: Readonly<Record<string, string | undefined>>):
+  { readonly taken: true } | { readonly taken: false; readonly mismatch: string } {
   let taken: ReturnType<DaemonApprovalStore['take']>;
   try {
-    taken = approvals.take({
-      action: CHECKOUT_APPROVAL_ACTION,
-      content: checkoutApprovalContent({
-        merchantDomain: input.merchantDomain,
-        item: input.item,
-        amount: input.requestedMax,
-      }),
-    });
+    taken = approvals.take({ action: CHECKOUT_APPROVAL_ACTION, content });
   } catch (error) {
     // A failed confirmation may follow publication. Never claim the grant
     // is unspent or restore an in-memory copy over the actual file.
     void error;
     throw new HandlerError(
-      'Spending the approval could not be confirmed. This request did not submit a purchase. Inspect its original status and approval evidence before trying again.',
+      'Spending the approval could not be confirmed. This request did not submit a purchase. Read payments.purchase.status, then restart the daemon if purchases stay paused.',
       'INTERNAL_ERROR',
       500,
     );
   }
-  if (taken.approval === null) {
-    throw new HandlerError(approvalRefusalMessage(taken.mismatch), 'OWNER_APPROVAL_REQUIRED', 403);
-  }
+  return taken.approval === null ? { taken: false, mismatch: taken.mismatch } : { taken: true };
 }
 
 /**
  * `payments.checkout.approve`.
  *
- * The distinct act the platform's owner-approval ruling requires: a HUMAN, on a
- * surface with command authority, names one purchase and approves it. The
- * registration (register.ts) puts this handler behind the same confirmation
- * gate every destructive verb in this daemon uses (`confirm: true` in the
- * body AND the explicit-user-request context flag), and the handler passes
- * `surface: 'owner-direct'` from its own code path, never from an argument,
- * which is the property `grantOwnerApproval` exists to enforce.
+ * The owner approves one purchase in advance: merchant, item and the most it
+ * may cost. The registration (register.ts) puts this handler behind the same
+ * confirmation gate every destructive verb in this daemon uses (`confirm: true`
+ * AND the explicit-user-request context flag), and the handler passes
+ * `surface: 'owner-direct'` from its own code path, never from an argument.
  *
- * The minted record is persisted (approval-store.ts), single-use, bound to
- * the exact merchant + item + amount fields named here, and expires in five
- * minutes. `payments.checkout.begin` spends it; see `checkoutBeginHandler`.
+ * The amount is parsed here, in the budget currency, and an amount no begin
+ * call could match is refused before anything is recorded. The minted record
+ * is persisted (approval-store.ts), single-use, bound to the fields as
+ * `checkoutApprovalContent` reads them, and expires in five minutes.
+ * `payments.checkout.begin` spends it; see `checkoutBeginHandler`.
  */
 export function checkoutApproveHandler(deps: PaymentsHandlerDeps): TypedHandler<unknown, Record<string, unknown>> {
   return async ({ body }) => {
     const params = asRecord(body);
     const merchantDomain = requireString(params['merchantDomain'], 'merchantDomain');
     const item = requireString(params['item'], 'item');
-    const amount = requireString(params['amount'], 'amount');
+    const typed = requireString(params['amount'], 'amount');
+    const currency = readPaymentsServiceConfig(deps.config).budgetCurrency;
+    // Refused here, not at begin: an approval no begin could ever match is not recorded.
+    const amountMinorUnits = approvalAmount(typed, currency);
+    if (amountMinorUnits === null) throw invalid('amount', `must be one amount in ${currency} such as ${plainAmountExample(currency)}; nothing was approved.`);
+    const exponent = minorUnitExponent(currency);
+    const amount = exponent === 0 ? String(amountMinorUnits)
+      : `${String(Math.floor(amountMinorUnits / 10 ** exponent))}.${String(amountMinorUnits % 10 ** exponent).padStart(exponent, '0')}`;
     let approval;
     try {
       approval = deps.checkout.approvals.grant({
         action: CHECKOUT_APPROVAL_ACTION,
-        content: checkoutApprovalContent({ merchantDomain, item, amount }),
+        content: checkoutApprovalContent({ merchantDomain, item, amountMinorUnits }),
       });
     } catch (error) {
       // A full store is a plain refusal that names its cap; nothing was recorded.
@@ -692,8 +743,6 @@ export function checkoutApproveHandler(deps: PaymentsHandlerDeps): TypedHandler<
 /**
  * `payments.checkout.begin`.
  *
- * ── What actually gates a purchase here ────────────────────────────────────
- *
  * Admission requires explicit-user-request metadata AND the transport's
  * current paired administrative principal with write:payments. A body flag
  * does not mint that authority. The original request remains current until
@@ -701,34 +750,21 @@ export function checkoutApproveHandler(deps: PaymentsHandlerDeps): TypedHandler<
  * retaining original paired authorization, host settings and browser source,
  * independently of the socket. Accepted never means successfully purchased.
  *
- * ── The genuine owner-approval record, consumed here ───────────────────────
+ * Inside the owner's limits the agent buys on the owner's behalf: no prior
+ * approval is needed unless `payments.confirmEveryPurchase` is on. An approval
+ * the owner gave in advance (`payments.checkout.approve`) matching this
+ * merchant, item and `requestedMax` is spent at admission, after the
+ * read-only steps and immediately before the durable admission write, and a
+ * final total within it needs no window. With `payments.confirmEveryPurchase`
+ * on, a begin with no matching approval is refused naming `/payments approve`.
  *
- * Behind that outer gate sits the distinct-act approval the platform's
- * owner-approval ruling describes (platform/security/owner-approval.ts): a
- * persisted record that a human called `payments.checkout.approve`, out of
- * band from whatever conversation produced this begin call, naming ONE
- * purchase by merchant, item and amount. This handler spends exactly one
- * matching record per begin (`DaemonApprovalStore.take`, approval-store.ts:
- * single-use, content-bound via the platform's own fingerprint, five-minute TTL)
- * and refuses, naming the approve verb, when none matches. The record is
- * consumed BEFORE the service runs, which is the platform store's own safe
- * direction: a taken approval whose begin then refuses on a later gate is
- * spent, never quietly retried.
+ * Before any of that, one health read: a payment store that stopped itself
+ * refuses the purchase with the sentence that names it, approval unspent.
  *
- * The binding fields are `merchantDomain`, `item` and `requestedMax`, read
- * from THIS begin call and fingerprinted the same way the approve verb
- * fingerprinted what the owner typed, so a begin whose merchant, item or
- * amount differs from what was approved is `different-content`, not a match.
- * An earlier mechanism that armed `seam.armSubmitApproval` with a
- * content-free approval was deleted rather than shipped, because an approval
- * with no content binding clears nothing real; this record is the strong
- * form, minted with the exact fields.
- *
- * The money controls downstream of both gates are unchanged: the budget
- * ledger (RESERVE, step 5), the purchase notices and their approval/veto
- * decision windows (NOTICE + WINDOW, step 6), and the card-material guard
- * (`cardFieldGuard`, armed only immediately before typing, never before).
- * See `checkout-flow.ts`'s own header for the full order.
+ * The money controls downstream are unchanged: the budget ledger (RESERVE,
+ * step 5), the purchase notices and their approval/veto windows (NOTICE +
+ * WINDOW, step 6), and the card-material guard (`cardFieldGuard`, armed only
+ * immediately before typing, never before). See `checkout-flow.ts`'s header.
  */
 export function checkoutBeginHandler(deps: PaymentsHandlerDeps, holder: CheckoutServiceHolder): TypedHandler<unknown, Record<string, unknown>> {
   return async ({ body, context }) => holder.run(async () => {
@@ -736,23 +772,43 @@ export function checkoutBeginHandler(deps: PaymentsHandlerDeps, holder: Checkout
     // can say so instead of leaving the caller to find out on the next begin.
     let approvalSpent = false;
     const spentNote = (message: string): string => (approvalSpent
-      ? `${message} The owner's approval for this purchase was spent: have the owner approve it again with payments.checkout.approve and begin with a new requestId.`
+      ? `${message} The owner's approval for this purchase was spent: ask the owner to approve it again (payments.checkout.approve) and begin with a new requestId.`
       : message);
     try {
-      const params = asRecord(body), id = checkoutRequestId(params['requestId']), input = parseBeginCheckoutInput(params);
+      const config = readPaymentsServiceConfig(deps.config), confirmEvery = readConfirmEveryPurchase(deps.config);
+      const params = asRecord(body), id = checkoutRequestId(params['requestId']);
+      const input = parseBeginCheckoutInput(params, { budgetCurrency: config.budgetCurrency, defaultCardId: readDefaultCardId(deps.config) });
+      if (confirmEvery && input.requestedMax === undefined) {
+        throw invalid('requestedMax', 'is required while payments.confirmEveryPurchase is on: it is the amount the owner approved.');
+      }
       const seam = deps.checkout.seam();
       if (!seam) throw new HandlerError(CHECKOUT_UNAVAILABLE_MESSAGE, 'FAILED_PRECONDITION', 409);
       const source = retainDetachedCheckout(deps, seam, context);
       const admission = retainCheckoutInvocation(deps, seam, context);
-      deps.purchases.assertAvailable();
-      const operation = await holder.admit(id, input, source, admission.assertCurrent, () => {
-        consumeCheckoutApproval(deps.checkout.approvals, input);
+      // One health read, before any approval is spent: a stopped store names
+      // itself here instead of failing later with its own sentence.
+      const stop = holder.hostStop({ approvals: confirmEvery });
+      if (stop) throw new PaymentHostStoppedError(stop);
+      const amountMinorUnits = input.requestedMax === undefined ? undefined : parseRequestedMaximum(input.requestedMax, config.budgetCurrency) ?? undefined;
+      const content = checkoutApprovalContent({ merchantDomain: input.merchantDomain, item: input.item, amountMinorUnits });
+      const operation = await holder.admit(id, input, source, admission.assertCurrent, admitted => {
+        // An approval binds an amount, so a begin without one cannot match any.
+        if (amountMinorUnits === undefined) return admitted;
+        let taken: ReturnType<typeof takeCheckoutApproval>;
+        try { taken = takeCheckoutApproval(deps.checkout.approvals, content); }
+        catch (error) { if (confirmEvery) throw error; return admitted; }
+        if (!taken.taken) {
+          if (confirmEvery) throw new HandlerError(approvalRefusalMessage(taken.mismatch), 'OWNER_APPROVAL_REQUIRED', 403);
+          return admitted;
+        }
         approvalSpent = true;
+        return { ...admitted, ownerApprovedMaxMinorUnits: amountMinorUnits };
       });
       return { outcome: 'accepted', purchaseId: operation.purchaseId, reason: null, merchantOrderId: null,
         totalMinorUnits: null, currency: null, shippingTierUsed: null, steppedDown: false, challengeStep: null };
     } catch (error) {
       if (error instanceof HandlerError) throw error;
+      if (error instanceof PaymentHostStoppedError) throw new HandlerError(error.message, 'FAILED_PRECONDITION', 409);
       if (error instanceof PaymentOperationStoreError && error.kind === 'invalid') throw new HandlerError(error.message, 'INVALID_ARGUMENT', 400);
       if (error instanceof PaymentOperationStoreError || error instanceof PaymentPurchaseLedgerError || error instanceof PaymentCheckoutJournalUnavailableError || error instanceof ProtectedPaymentRequestError || error instanceof BrowserPageConnectionError) {
         throw new HandlerError(spentNote(error.message), error instanceof PaymentOperationStoreError && error.kind === 'exists' ? 'ALREADY_EXISTS' : 'FAILED_PRECONDITION', 409);

@@ -20,7 +20,6 @@ import { connectedHostOperatorTokenPath } from '../runtime/connected-host-auth.t
 import { join } from 'node:path';
 import { AgentConfigManager, type ConfigManager } from '../config/index.ts';
 import { ensureDaemonConfigMigrated } from '../config/ensure-daemon-config-migrated.ts';
-import { ensureDaemonEnabledMigrated } from '../config/ensure-daemon-enabled-migrated.ts';
 import { formatProviderModel, getModelIdFromProviderModel, getProviderIdFromModel } from '../config/provider-model.ts';
 import { readOnboardingCheckMarkers } from '../runtime/onboarding/index.ts';
 import { GlobalNetworkTransportInstaller } from '@/runtime/index.ts';
@@ -135,17 +134,6 @@ export async function prepareShellCliRuntime(
   const writeNotice = startupNoticeWriter(cli, { out: console.log, err: console.error });
   const daemonConfigNotice = ensureDaemonConfigMigrated(bootstrapHomeDirectory);
   if (daemonConfigNotice) writeNotice(`[goodvibes] ${daemonConfigNotice}`);
-  // A `daemon.enabled: false` left over from when the key meant "do not embed a
-  // daemon in this process" now means "do not look for a daemon at all", which
-  // is how a machine ends up unable to reach the platform with no way to say
-  // so. Reset it ONCE, with a receipt, before the config manager reads it,
-  // after this pass a false the user sets is theirs and is kept. Idempotent;
-  // announces once.
-  const daemonEnabledNotice = ensureDaemonEnabledMigrated({
-    homeDir: bootstrapHomeDirectory,
-    workingDir: bootstrapWorkingDir,
-  });
-  if (daemonEnabledNotice) writeNotice(`[goodvibes] ${daemonEnabledNotice}`);
   const configManager = new AgentConfigManager({
     workingDir: bootstrapWorkingDir,
     homeDir: bootstrapHomeDirectory,

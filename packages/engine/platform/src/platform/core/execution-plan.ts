@@ -10,7 +10,7 @@ import { captureJudgmentPort, type JudgmentPortCapture, type JudgmentReadingOpti
 import { JudgmentAuthorityRetiredError } from '@goodvibes-jev/engine/errors';
 import { assertJudgmentInput, JudgmentInputError } from '../gate/judgment-input.js';
 import { planItemStatus } from './batteries/plan-item-status.js';
-import { existsSync, readdirSync } from 'node:fs';
+import { existsSync, readdirSync, rmSync } from 'node:fs';
 import { readJsonFileOrQuarantine, writeJsonFileAtomic } from '../utils/atomic-json-store.js';
 import { logger } from '../utils/logger.js';
 import { join } from 'node:path';
@@ -124,8 +124,11 @@ function planParseFailure(err: unknown, aborted: boolean): unknown {
   return new PlanStatusUnavailableError();
 }
 
+/** One of the five state words in any case, with a space or hyphen for the underscore ("In progress"). */
 function canonicalStatus(label: string | undefined): PlanItemStatus | undefined {
-  return (Object.keys(STATUS_LABEL) as PlanItemStatus[]).find(status => label === STATUS_LABEL[status] || label === status);
+  if (!label) return undefined;
+  const word = label.trim().toUpperCase().replace(/[\s-]+/g, '_');
+  return (Object.keys(STATUS_LABEL) as PlanItemStatus[]).find(status => word === STATUS_LABEL[status]);
 }
 
 function checkboxStatus(checkbox: string): PlanItemStatus {
@@ -255,19 +258,8 @@ export class ExecutionPlanManager {
   /** Get the active plan for the current session, if any. */
   getActive(sessionId?: string): ExecutionPlan | null {
     try {
-      let pointer: { planId: string | null; sessionId?: string | null } | null = null;
-      if (sessionId) {
-        // The session's own pointer is authoritative once it exists, even when
-        // it records "no active plan". A pointer written before per-session
-        // pointers existed is honoured only for the session it names.
-        pointer = this.readPointer(this.sessionPointerFile(sessionId), 'core/execution-plan-pointer');
-        if (!pointer) {
-          const legacy = this.readPointer(this.activeFile, 'core/execution-plan-pointer');
-          if (legacy && legacy.sessionId === sessionId) pointer = legacy;
-        }
-      } else {
-        pointer = this.readPointer(this.activeFile, 'core/execution-plan-pointer');
-      }
+      // A session reads only its own pointer; no pointer means no active plan.
+      const pointer = this.readPointer(sessionId ? this.sessionPointerFile(sessionId) : this.activeFile, 'core/execution-plan-pointer');
       if (!pointer) return null;
       const { planId, sessionId: activeSessionId } = pointer;
       if (!planId) return null;
@@ -287,7 +279,9 @@ export class ExecutionPlanManager {
   private setActive(planId: string | null, sessionId?: string | null): void {
     this.incarnation = {};
     if (sessionId) {
-      writeJsonFileAtomic(this.sessionPointerFile(sessionId), { planId, sessionId });
+      // A dismissed plan leaves no pointer behind: absence is "no active plan".
+      if (planId === null) rmSync(this.sessionPointerFile(sessionId), { force: true });
+      else writeJsonFileAtomic(this.sessionPointerFile(sessionId), { planId, sessionId });
     }
     if (planId === null) {
       // Only rewrite an existing pointer, absence already means "no active plan".
@@ -301,17 +295,6 @@ export class ExecutionPlanManager {
       }
       writeJsonFileAtomic(this.activeFile, { planId: null, sessionId: sessionId ?? null });
       return;
-    }
-    // Carry a pointer written before per-session pointers existed over to its
-    // own session before the shared pointer is replaced.
-    try {
-      const shared = this.readPointer(this.activeFile, 'core/execution-plan-pointer');
-      if (shared?.planId && shared.sessionId && shared.sessionId !== sessionId
-        && !existsSync(this.sessionPointerFile(shared.sessionId))) {
-        writeJsonFileAtomic(this.sessionPointerFile(shared.sessionId), { planId: shared.planId, sessionId: shared.sessionId });
-      }
-    } catch (err) {
-      logger.warn('ExecutionPlanManager: could not carry the previous active plan pointer over', { error: String(err) });
     }
     writeJsonFileAtomic(this.activeFile, { planId, sessionId: sessionId ?? null });
   }
@@ -491,25 +474,36 @@ export class ExecutionPlanManager {
     const controller = new AbortController();
     const signal = options.signal ? AbortSignal.any([options.signal, controller.signal]) : controller.signal;
     const assertCurrent = () => { signal.throwIfAborted(); options.assertCurrent?.(); if (!isClassicOperation()) authority?.assertCurrent(); };
+    // A plan repeats a handful of labels; each distinct label is read once per
+    // parse (null: it was read by its checkbox because the reader was off).
+    const labelReadings = new Map<string, PlanItemStatus | null>();
+    let screened = false;
+    const classicIssue = (label: string, line: number) => parseIssues.push({ line, text: label,
+      reason: 'Classic used the explicit checkbox; the noncanonical status label was not semantically interpreted.' });
     const readStatus = async (checkbox: string, label: string | undefined, line: number): Promise<PlanItemStatus> => {
       assertCurrent();
       const canonical = canonicalStatus(label);
       if (canonical !== undefined) return canonical;
       if (!label) return checkboxStatus(checkbox);
+      const known = labelReadings.get(label);
+      if (known === null) { classicIssue(label, line); return checkboxStatus(checkbox); }
+      if (known !== undefined) return known;
       return decisionOrClassic(async () => {
-        // Screen the COMPLETE markdown before the first projection/transmission,
+        // Screen the COMPLETE markdown once, before the first projection/transmission,
         // including unrelated lines and later items; never send a partial safe prefix.
-        assertJudgmentInput({ markdown });
+        if (!screened) { assertJudgmentInput({ markdown }); screened = true; }
         authority ??= captureJudgmentPort('engine.core.plan-item-status', { signal, assertCurrent: options.assertCurrent });
         const run = await planItemStatus.run(authority.port, { label }, { site: 'engine.core.plan-item-status', signal: authority.signal });
         assertCurrent();
         if (run.readings.status.outcome !== 'act' || !Object.hasOwn(STATUS_LABEL, run.readings.status.choice)) throw new PlanStatusUnavailableError();
         run.recordAction(`Read plan item state: ${run.readings.status.choice}`);
         assertCurrent();
+        labelReadings.set(label, run.readings.status.choice);
         return run.readings.status.choice;
       }, () => {
         assertCurrent();
-        parseIssues.push({ line, text: label, reason: 'Classic used the explicit checkbox; the noncanonical status label was not semantically interpreted.' });
+        labelReadings.set(label, null);
+        classicIssue(label, line);
         return checkboxStatus(checkbox);
       });
     };

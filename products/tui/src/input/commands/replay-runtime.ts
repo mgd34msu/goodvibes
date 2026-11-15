@@ -6,8 +6,8 @@ export function registerReplayRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
     name: 'replay',
     aliases: ['rep'],
-    description: 'Deterministic replay: load, step, seek, diff, and export recorded runs',
-    usage: '[load [runId] | step [n] | seek <rev> | diff | export <path>]',
+    description: 'Replay recorded runs: load, step, seek, compare two runs, and export',
+    usage: '[load [runId] | step [n] | seek <rev> | diff <runId> | export <path>]',
     argsHint: '[load|step|seek|diff|export]',
     async handler(args, ctx) {
       const replayEngine = requireReplayEngine(ctx);

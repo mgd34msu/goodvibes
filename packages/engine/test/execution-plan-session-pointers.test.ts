@@ -48,23 +48,6 @@ describe('active plan per session', () => {
     expect(manager.list().map((plan) => plan.title).sort()).toEqual(['Plan A', 'Plan B']);
   });
 
-  test('a pointer written before per-session pointers existed still resolves for its session', () => {
-    const dir = root();
-    const writer = new ExecutionPlanManager(dir);
-    const plan = writer.create('Plan A', [], 'session-a');
-    // Remove the per-session pointer to leave only the shared one.
-    rmSync(join(dir, '.goodvibes', 'plans', 'active'), { recursive: true, force: true });
-    expect(existsSync(join(dir, '.goodvibes', 'plans', 'active.json'))).toBe(true);
-
-    const reader = new ExecutionPlanManager(dir);
-    expect(reader.getActive('session-a')?.id).toBe(plan.id);
-    expect(reader.getActive('session-b')).toBeNull();
-
-    // A second session creating a plan does not orphan the first one's old pointer.
-    reader.create('Plan B', [], 'session-b');
-    expect(reader.getActive('session-a')?.id).toBe(plan.id);
-  });
-
   test('a session id with path characters cannot write outside the plans directory', () => {
     const dir = root();
     const manager = new ExecutionPlanManager(dir);

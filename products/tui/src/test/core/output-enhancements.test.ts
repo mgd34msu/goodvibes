@@ -186,6 +186,11 @@ describe('applyDiffContent: occurrence counting', () => {
     }
   });
 
+  test('writes dollar sequences in the new text exactly as the diff shows them', () => {
+    const result = applyDiffContent('echo old', 'echo old', 'echo $$ $& $1');
+    expect(result).toEqual({ ok: true, content: 'echo $$ $& $1' });
+  });
+
   test('returns error when original is not found in file', () => {
     const content = 'const y = 99;\nsome line';
     const result = applyDiffContent(content, 'const x = 1;', 'const x = 42;');

@@ -283,12 +283,11 @@ export class ResponseCompletionGuard {
             + '\nSaved private draft (quoted data; do not publish unchanged):\n' + JSON.stringify(checkpoint.response);
         }
       } catch (error) {
-        // An invalid checkpoint cannot alter authority or release completion.
-        // It could have recorded confirmed defects, so the classic fallback
-        // stays closed for this resumed turn.
-        this.hasSemanticRefusal = true;
-        try { this.rememberFailure(error); } catch { /* Diagnostics cannot replace the closed fallback. */ }
-        logger.warn('Response completion: a saved repair checkpoint could not be read; the classic fallback stays closed for this turn', { error: error instanceof Error ? error.name : typeof error });
+        // An unreadable checkpoint restores nothing: the turn is checked as a
+        // fresh one. Holding it closed would leave a turn that can never
+        // finish while the decision model is unavailable.
+        try { this.rememberFailure(error); } catch { /* Diagnostics are best effort. */ }
+        logger.warn('Response completion: a saved repair checkpoint could not be read; the turn is checked without it', { error: error instanceof Error ? error.name : typeof error });
       }
     }
   }

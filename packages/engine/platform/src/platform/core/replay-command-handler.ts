@@ -5,7 +5,7 @@
  *   /replay load <runId>    , load a recorded run by ID
  *   /replay step [n]        , advance n steps (default 1)
  *   /replay seek <rev>      , jump to a specific revision
- *   /replay diff            , run diff mode and report mismatches
+ *   /replay diff <runId>    , compare the loaded run with another recorded run
  *   /replay export <path>   , export replay report to a JSON file
  *
  * The handler delegates to an injected `DeterministicReplayEngine`
@@ -130,7 +130,7 @@ export async function handleReplayCommand(
             ? ['', 'Note: some records were redacted at rest, secrets appear as [REDACTED_*] markers; the content shown is post-redaction.']
             : []),
           '',
-          'Use /replay step to advance, /replay seek <rev> to jump, /replay diff to compare.',
+          'Use /replay step to advance, /replay seek <rev> to jump, /replay diff <runId> to compare with another run.',
         ].join('\n'),
       };
     }
@@ -219,24 +219,44 @@ export async function handleReplayCommand(
         };
       }
 
-      const mismatches = engine.diff();
-
-      if (engine.getSnapshot().diffSource === 'none') {
+      const otherRunId = args[0];
+      if (!otherRunId) {
         return {
           ok: false,
-          output: 'No replay source: nothing was compared. A re-execution of the run must supply its events; an empty result here is not evidence of determinism.',
+          output: `Usage: /replay diff <runId>\n\nCompares the loaded run "${snap.runId}" with another recorded run, event by event. List recorded runs with /replay load.`,
         };
       }
+      if (otherRunId === snap.runId) {
+        return {
+          ok: false,
+          output: `Run "${otherRunId}" is the loaded run; nothing was compared. Name a different recorded run (list them with /replay load).`,
+        };
+      }
+      if (!ledger) {
+        return {
+          ok: false,
+          output: `Cannot compare with run "${otherRunId}": this session has no run ledger to read it from; nothing was compared.`,
+        };
+      }
+      const otherEntries = ledger.readRunEntries(otherRunId);
+      if (otherEntries.length === 0) {
+        return {
+          ok: false,
+          output: `No ledger entries found for run "${otherRunId}"; nothing was compared.\n\nVerify the run ID with /replay load (no arguments).`,
+        };
+      }
+
+      const mismatches = engine.diff(otherEntries, { runId: otherRunId });
 
       if (mismatches.length === 0) {
         return {
           ok: true,
-          output: `Diff complete for run "${snap.runId}": no mismatches found across ${snap.totalRevisions} revision${snap.totalRevisions === 1 ? '' : 's'}. Replay is deterministic.`,
+          output: `Runs "${snap.runId}" and "${otherRunId}" match: the same ${snap.totalRevisions} event${snap.totalRevisions === 1 ? '' : 's'} in the same order, with the same payload fields and turn outcomes.`,
         };
       }
 
       const lines: string[] = [
-        `Diff complete for run "${snap.runId}": ${mismatches.length} mismatch${mismatches.length === 1 ? '' : 'es'} found.`,
+        `Compared run "${snap.runId}" with "${otherRunId}": ${mismatches.length} difference${mismatches.length === 1 ? '' : 's'} found.`,
         '',
       ];
       for (const m of mismatches) {
@@ -299,7 +319,7 @@ export async function handleReplayCommand(
           '  /replay load [runId]      - load a recorded run (omit runId to list)',
           '  /replay step [n]          - advance n steps (default 1)',
           '  /replay seek <rev>        - jump to a specific revision',
-          '  /replay diff              - compare replayed vs recorded (mismatch report)',
+          '  /replay diff <runId>      - compare the loaded run with another recorded run',
           '  /replay export <path>     - export report to JSON file',
           '',
           statusLine,

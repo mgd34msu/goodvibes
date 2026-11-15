@@ -42,12 +42,12 @@ describe('resuming with a saved repair checkpoint', () => {
       review: { findings: [{ ...completionFinding('unfinished'), assessment: 'confirmed' }] }, response: 'Done.' });
   }
 
-  test('keeps the classic fallback closed when a saved checkpoint cannot be read', () => {
+  test('an unreadable checkpoint is recorded and does not hold the turn', () => {
     const conversation = new ConversationManager();
     const store = new UnreadableOriginals();
     checkpointed(store, conversation);
     const guard = new ResponseCompletionGuard({ request: 'Write review.md.', conversation, verificationStore: store });
-    expect((guard as unknown as { hasSemanticRefusal: boolean }).hasSemanticRefusal).toBe(true);
+    expect((guard as unknown as { hasSemanticRefusal: boolean }).hasSemanticRefusal).toBe(false);
     expect([...store.proposals.keys()].some(key => key.includes('completion-verification-failure'))).toBe(true);
   });
 

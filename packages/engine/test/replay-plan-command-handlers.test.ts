@@ -14,13 +14,22 @@ function loadedEngine(root: string): DeterministicReplayEngine {
 }
 
 describe('/replay diff', () => {
-  test('without a replayed stream it says nothing was compared instead of claiming determinism', async () => {
+  test('compares the loaded run with another recorded run from the ledger', async () => {
     const root = mkdtempSync(join(tmpdir(), 'gv-replay-diff-'));
     try {
-      const result = await handleReplayCommand({ replayEngine: loadedEngine(root) }, 'diff', []);
-      expect(result.ok).toBe(false);
-      expect(result.output).toContain('nothing was compared');
-      expect(result.output).not.toContain('Replay is deterministic');
+      const at = (rev: number, eventName: string) => ({ rev, eventName, payload: {}, ts: rev }) as never;
+      const runs: Record<string, never[]> = { a: [at(1, 'TURN_SUBMITTED'), at(2, 'TOOL_CALLED')], b: [at(1, 'TURN_SUBMITTED')] };
+      const ledger = { readRunEntries: (id: string) => runs[id] ?? [], listRunIds: () => Object.keys(runs), readRunSnapshot: () => null };
+      const deps = { replayEngine: new DeterministicReplayEngine(root) };
+      expect((await handleReplayCommand(deps, 'load', ['a'], ledger)).ok).toBe(true);
+
+      const compared = await handleReplayCommand(deps, 'diff', ['b'], ledger);
+      expect(compared.ok).toBe(true);
+      expect(deps.replayEngine.getSnapshot().diffSource).toBe('recorded-run');
+      expect(deps.replayEngine.getSnapshot().mismatches.map(m => m.kind)).toEqual(['missing_event']);
+
+      expect((await handleReplayCommand(deps, 'diff', ['b'])).ok).toBe(false);
+      expect((await handleReplayCommand(deps, 'diff', ['missing'], ledger)).ok).toBe(false);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

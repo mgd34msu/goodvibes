@@ -58,6 +58,13 @@ describe('canonical plan status boundary', () => {
     expect(result.items?.[0]?.status).toBe('failed'); expect(fake.requests).toHaveLength(1);
     expect(fake.requests[0]?.context?.battery).toBe('engine.core.plan-item-status');
   });
+  test('decision-model requests per parse: one per distinct label, not one per item', async () => {
+    const fake = reading('complete'); installJudgmentPort(fake.port);
+    const items = Array.from({ length: 30 }, (_, index) => `- [x] Step ${index} -- All done`).join('\n');
+    const result = await manager().parseFromMarkdown(`# Plan\n## Phase 1\n${items}\n- [ ] Last -- in progress`);
+    expect(result.items?.map(item => item.status)).toEqual([...Array(30).fill('complete'), 'in_progress']);
+    expect(fake.requests).toHaveLength(1);
+  });
   test('complete source is screened before any request, including late ignored lines', async () => {
     const fake = reading(); installJudgmentPort(fake.port);
     await expect(manager().parseFromMarkdown('# Plan\n## Phase 1\n- [ ] A -- DONE\npassword=private-value')).rejects.toBeInstanceOf(JudgmentInputError);

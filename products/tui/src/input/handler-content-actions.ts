@@ -6,7 +6,7 @@ import { activeTokens } from '../renderer/theme.ts';
 import { readFileSync, writeFileSync } from 'node:fs';
 import '../utils/clipboard.ts';
 
-import type { ConversationManager } from '../core/conversation';
+import { applyDiffContent, type ConversationManager } from '../core/conversation';
 import type { PermissionCategory } from '@goodvibes-jev/engine/platform/platform/permissions';
 
 import type { CommandContext } from './command-registry.ts';
@@ -76,20 +76,12 @@ export function handleDiffApply(
         return;
       }
       try {
-        const content = readFileSync(resolvedPath, 'utf-8');
-        if (diff.original && content.includes(diff.original)) {
-          const occurrenceCount = content.split(diff.original).length - 1;
-          if (occurrenceCount > 1) {
-            conversationManager.log(`[Diff apply failed: pattern found ${occurrenceCount} times in ${diff.filePath} - ambiguous]`, {
-              fg: activeTokens().error,
-            });
-          } else {
-            const newContent = content.replace(diff.original, () => diff.updated);
-            writeFileSync(resolvedPath, newContent, 'utf-8');
-            conversationManager.log(`[Applied diff to ${diff.filePath}]`, { fg: activeTokens().success });
-          }
+        const applied = applyDiffContent(readFileSync(resolvedPath, 'utf-8'), diff.original, diff.updated);
+        if (applied.ok) {
+          writeFileSync(resolvedPath, applied.content, 'utf-8');
+          conversationManager.log(`[Applied diff to ${diff.filePath}]`, { fg: activeTokens().success });
         } else {
-          conversationManager.log(`[Diff apply failed: original text not found in ${diff.filePath}]`, { fg: activeTokens().error });
+          conversationManager.log(`[Diff apply failed: ${applied.error} in ${diff.filePath}]`, { fg: activeTokens().error });
         }
       } catch (err) {
         const msg = summarizeError(err);

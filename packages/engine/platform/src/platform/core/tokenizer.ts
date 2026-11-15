@@ -36,8 +36,23 @@ export class InputTokenizer {
   private isPasting = false;
   private pasteContent = '';
   private pasteOverflowed = false;
+  private pasteSeenChars = 0;
+  private droppedPasteChars: number | undefined;
+
+  /**
+   * The size in characters of the last paste dropped for exceeding the limit,
+   * once, after its end marker arrived; undefined when none was dropped since
+   * the last call. A host calls this after `feed` to tell the person why the
+   * paste did not appear.
+   */
+  public takeDroppedPaste(): { readonly chars: number; readonly limit: number } | undefined {
+    const chars = this.droppedPasteChars;
+    this.droppedPasteChars = undefined;
+    return chars === undefined ? undefined : { chars, limit: MAX_PASTE_CHARS };
+  }
 
   private appendPaste(text: string): void {
+    this.pasteSeenChars += text.length;
     if (this.pasteOverflowed) return;
     if (this.pasteContent.length + text.length > MAX_PASTE_CHARS) {
       logger.warn('[InputTokenizer] paste exceeded the size limit and was dropped', { limit: MAX_PASTE_CHARS });
@@ -64,6 +79,7 @@ export class InputTokenizer {
         this.isPasting = true;
         this.pasteContent = '';
         this.pasteOverflowed = false;
+        this.pasteSeenChars = 0;
         this.buffer = this.buffer.slice(PASTE_START.length);
         continue;
       }
@@ -73,6 +89,7 @@ export class InputTokenizer {
         if (endIdx !== -1) {
           this.appendPaste(this.buffer.slice(0, endIdx));
           if (!this.pasteOverflowed) tokens.push({ type: 'text', value: this.pasteContent });
+          else this.droppedPasteChars = this.pasteSeenChars;
           this.isPasting = false;
           this.pasteContent = '';
           this.pasteOverflowed = false;

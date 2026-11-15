@@ -1,14 +1,12 @@
 /**
  * DeterministicReplayEngine.
  *
- * Consumes a recorded snapshot + typed event ledger to replay a run
- * deterministically. Supports stepwise transitions, seekable revision
- * positioning, and diff mode that reports expected-vs-replayed mismatches
- * with classifiers.
+ * Holds one recorded run (its start snapshot and its ordered ledger entries)
+ * for stepping, seeking and export, and compares it event by event with
+ * another event stream: a second recorded run, or a re-execution's events.
  *
- * The engine does not re-emit live runtime events through a separate bus, it maintains
- * its own replay-local state tree built by folding ledger entries over the
- * initial snapshot. This isolation ensures replay never affects live state.
+ * The engine never re-emits events onto a live bus, so replay cannot affect
+ * live state.
  */
 import { GATE_EVENT_TYPES } from '../../events/gate.js';
 import { writeFile } from 'node:fs/promises';
@@ -99,19 +97,12 @@ export interface ReplayTurnSummary {
 
 // ── Replay state ───────────────────────────────────────────────────────────
 
-/**
- * The replay-local state tree at a given revision.
- *
- * Built by folding ledger entries over the initial snapshot; each step
- * produces a new immutable frame.
- */
+/** One position in the loaded run: rev 0 is the start snapshot, every later rev one ledger entry. */
 export interface ReplayFrame {
   /** The revision this frame represents (0 = initial snapshot). */
   readonly rev: number;
-  /** The event that produced this frame (absent for the initial snapshot). */
+  /** The event recorded at this revision (absent for the initial snapshot). */
   readonly entry?: LedgerEntry | undefined;
-  /** Domain state at this revision, merged from snapshot + events applied so far. */
-  readonly domains: Record<string, Record<string, unknown>>;
 }
 
 // ── Engine status ──────────────────────────────────────────────────────────
@@ -135,10 +126,12 @@ export interface ReplayEngineSnapshot {
   readonly turnSummaries: readonly ReplayTurnSummary[];
   /**
    * What the last `diff()` compared the recording against. `none` means no
-   * replayed events were supplied, so nothing was compared and an empty
-   * mismatch list does not mean the run is deterministic.
+   * events were supplied, so nothing was compared and an empty mismatch list
+   * does not mean the run is deterministic.
    */
-  readonly diffSource?: 'none' | 'replayed-events' | undefined;
+  readonly diffSource?: 'none' | 'replayed-events' | 'recorded-run' | undefined;
+  /** The run compared with, when `diffSource` is `recorded-run`. */
+  readonly comparedRunId?: string | undefined;
 }
 
 // ── DeterministicReplayEngine ──────────────────────────────────────────────
@@ -153,7 +146,7 @@ export interface ReplayEngineSnapshot {
  * engine.step();          // advance one event
  * engine.step(5);         // advance five events
  * engine.seek(10);        // jump to rev 10
- * const report = engine.diff(replayedEntries);  // compare the recording to a re-execution's events
+ * const report = engine.diff(otherEntries, { runId: 'other' });  // compare with another recorded run
  * engine.export('replay.json');  // write report inside the project root
  * ```
  */
@@ -170,10 +163,10 @@ export class DeterministicReplayEngine {
     return this._snapshot;
   }
   private _entries: LedgerEntry[] = [];
-  private _frames: ReplayFrame[] = [];
   private _currentFrameIndex = 0;
   private _mismatches: ReplayMismatch[] = [];
-  private _diffSource: 'none' | 'replayed-events' = 'none';
+  private _diffSource: 'none' | 'replayed-events' | 'recorded-run' = 'none';
+  private _comparedRunId: string | undefined;
   private _turnSummaries: ReplayTurnSummary[] = [];
   private readonly _subscribers = new Set<() => void>();
 
@@ -203,34 +196,18 @@ export class DeterministicReplayEngine {
     this._snapshot = snapshot;
     this._mismatches = [];
     this._diffSource = 'none';
+    this._comparedRunId = undefined;
 
-    // Sort by revision ascending; validate rev sequence.
     const sorted = [...entries].sort((a, b) => a.rev - b.rev);
     this._entries = sorted;
     this._turnSummaries = this._deriveTurnSummaries(sorted);
-
-    // Build the initial frame from the snapshot.
-    const initialDomains = this._snapshotToDomains(snapshot);
-    const initialFrame: ReplayFrame = {
-      rev: 0,
-      domains: initialDomains,
-    };
-
-    // Pre-build all frames by folding entries over the initial snapshot.
-    this._frames = [initialFrame];
-    for (const entry of sorted) {
-      const prev = this._frames[this._frames.length - 1];
-      const next = this._applyEntry(prev!, entry);
-      this._frames.push(next);
-    }
-
     this._currentFrameIndex = 0;
     this._status = sorted.length === 0 ? 'exhausted' : 'loaded';
 
     logger.debug('[DeterministicReplayEngine] run loaded', {
       runId,
       revisions: sorted.length,
-      domains: Object.keys(initialDomains).length,
+      domains: snapshot.domains.length,
     });
 
     this._notify();
@@ -252,24 +229,22 @@ export class DeterministicReplayEngine {
     }
 
     const stepped: ReplayFrame[] = [];
+    const last = this._entries.length;
     for (let i = 0; i < n; i++) {
-      if (this._currentFrameIndex >= this._frames.length - 1) {
+      if (this._currentFrameIndex >= last) {
         this._status = 'exhausted';
         break;
       }
       this._currentFrameIndex++;
       this._status = 'running';
-      stepped.push(this._frames[this._currentFrameIndex]!);
+      stepped.push(this._frameAt(this._currentFrameIndex)!);
     }
 
-    if (this._currentFrameIndex >= this._frames.length - 1) {
+    if (this._currentFrameIndex >= last) {
       this._status = 'exhausted';
     }
 
-    if (stepped.length > 0) {
-      const afterSnap = this.getSnapshot();
-      this._notify();
-    }
+    if (stepped.length > 0) this._notify();
 
     return stepped;
   }
@@ -288,11 +263,11 @@ export class DeterministicReplayEngine {
       return;
     }
 
-    const clamped = Math.max(0, Math.min(targetRev, this._frames.length - 1));
+    const clamped = Math.max(0, Math.min(targetRev, this._entries.length));
     this._currentFrameIndex = clamped;
     if (clamped === 0) {
       this._status = 'loaded';
-    } else if (clamped >= this._frames.length - 1) {
+    } else if (clamped >= this._entries.length) {
       this._status = 'exhausted';
     } else {
       this._status = 'running';
@@ -304,37 +279,38 @@ export class DeterministicReplayEngine {
   }
 
   /**
-   * Run diff mode: compare the recording against the events a re-execution
-   * produced.
+   * Compare the loaded run, event by event, with another stream: a second
+   * recorded run (pass its `runId`) or the events a re-execution produced.
    *
-   * The loaded frames are folded from the recording itself, so they can never
-   * disagree with it; a comparison needs an independent stream, passed as
-   * `replayed`. Without one nothing is compared: the result is empty, the
-   * snapshot's `diffSource` is `none`, and the caller must not present that as
-   * "no divergence".
+   * Without a stream nothing is compared: the result is empty, the snapshot's
+   * `diffSource` is `none`, and the caller must not present that as "no
+   * divergence".
    *
    * Diff analysis covers:
-   * - Missing events (recorded entry has no corresponding replayed entry)
-   * - Extra events (replayed entries past the recorded sequence)
+   * - Missing events (a loaded entry has no counterpart in the other stream)
+   * - Extra events (entries of the other stream past the loaded sequence)
    * - Payload mismatches (event name matches, but key payload fields differ)
    * - Ordering violations (different event at the same position)
    * - Per-turn terminal outcome and stop-reason divergence
    *
-   * @param replayed - Ledger entries produced by re-executing the run, in any order.
+   * @param replayed - The other stream's ledger entries, in any order.
+   * @param source   - `runId` when the other stream is a recorded run.
    * @returns Ordered list of mismatches (by rev).
    */
-  diff(replayed?: readonly LedgerEntry[]): ReplayMismatch[] {
-    if (this._status === 'idle' || this._frames.length === 0) {
+  diff(replayed?: readonly LedgerEntry[], source?: { readonly runId: string }): ReplayMismatch[] {
+    if (this._status === 'idle') {
       return [];
     }
     if (replayed === undefined) {
-      logger.warn('[DeterministicReplayEngine] diff called without replayed events; nothing was compared', { runId: this._runId });
+      logger.warn('[DeterministicReplayEngine] diff called without events to compare; nothing was compared', { runId: this._runId });
       this._mismatches = [];
       this._diffSource = 'none';
+      this._comparedRunId = undefined;
       this._notify();
       return [];
     }
 
+    const other = source ? `run "${source.runId}"` : 'the replay';
     const replayedEntries = [...replayed].sort((a, b) => a.rev - b.rev);
     const mismatches: ReplayMismatch[] = [];
     const maxRev = Math.max(this._entries.length, replayedEntries.length);
@@ -351,7 +327,7 @@ export class DeterministicReplayEngine {
           ownerDomain: this._inferOwnerDomain(replayedEntry.eventName),
           failureMode: 'extra_event',
           relatedTurnId: this._extractTurnId(replayedEntry.payload),
-          description: `Rev ${replayedEntry.rev}: event "${replayedEntry.eventName}" was replayed but does not exist in the recording.`,
+          description: `Rev ${replayedEntry.rev}: event "${replayedEntry.eventName}" is in ${other} but not in the loaded run.`,
           eventName: replayedEntry.eventName,
         });
         continue;
@@ -365,7 +341,7 @@ export class DeterministicReplayEngine {
           ownerDomain: this._inferOwnerDomain(recorded.eventName),
           failureMode: 'missing_event',
           relatedTurnId: this._extractTurnId(recorded.payload),
-          description: `Rev ${recorded.rev}: recorded event "${recorded.eventName}" was not replayed.`,
+          description: `Rev ${recorded.rev}: event "${recorded.eventName}" of the loaded run is missing from ${other}.`,
           eventName: recorded.eventName,
         });
         continue;
@@ -380,7 +356,7 @@ export class DeterministicReplayEngine {
           ownerDomain: this._inferOwnerDomain(recorded.eventName),
           failureMode: 'ordering_violation',
           relatedTurnId: this._extractTurnId(recorded.payload, replayedEntry.payload),
-          description: `Rev ${recorded.rev}: expected event "${recorded.eventName}" but replayed "${replayedEntry.eventName}". Possible ordering violation.`,
+          description: `Rev ${recorded.rev}: the loaded run has "${recorded.eventName}" where ${other} has "${replayedEntry.eventName}". Possible ordering difference.`,
           eventName: recorded.eventName,
           recordedSummary: recorded.eventName,
           replayedSummary: replayedEntry.eventName,
@@ -399,10 +375,11 @@ export class DeterministicReplayEngine {
       }
     }
 
-    mismatches.push(...this._diffTurnSummaries(replayedEntries));
+    mismatches.push(...this._diffTurnSummaries(replayedEntries, other));
 
     this._mismatches = mismatches;
-    this._diffSource = 'replayed-events';
+    this._diffSource = source ? 'recorded-run' : 'replayed-events';
+    this._comparedRunId = source?.runId;
     this._notify();
 
     logger.debug('[DeterministicReplayEngine] diff complete', {
@@ -422,7 +399,8 @@ export class DeterministicReplayEngine {
    * - `totalRevisions`
    * - `currentRev`
    * - `mismatches`
-   * - `frames` (condensed: rev, eventName, domainNames only, no full state)
+   * - `baselineDomains` (domain names of the start snapshot)
+   * - `frames` (condensed: rev and eventName)
    *
    * @param filePath - Absolute path to write the JSON report.
    * @returns A promise that resolves when the file is written.
@@ -443,15 +421,13 @@ export class DeterministicReplayEngine {
     const report = {
       runId: this._runId,
       exportedAt: Date.now(),
-      totalRevisions: this._frames.length - 1,
+      totalRevisions: this._entries.length,
       currentRev: this._currentFrameIndex,
       mismatches: this._mismatches,
+      ...(this._comparedRunId !== undefined ? { comparedRunId: this._comparedRunId } : {}),
       turnSummaries: this._turnSummaries,
-      frames: this._frames.map((f) => ({
-        rev: f.rev,
-        eventName: f.entry?.eventName ?? null,
-        domainNames: Object.keys(f.domains),
-      })),
+      baselineDomains: this._snapshot?.domains.map((d) => d.domain) ?? [],
+      frames: [{ rev: 0, eventName: null }, ...this._entries.map((e) => ({ rev: e.rev, eventName: e.eventName }))],
     };
 
     try {
@@ -470,12 +446,13 @@ export class DeterministicReplayEngine {
     return {
       status: this._status,
       runId: this._runId,
-      currentRev: this._frames[this._currentFrameIndex]?.rev ?? 0,
-      totalRevisions: this._frames.length - 1,
-      currentFrame: this._frames[this._currentFrameIndex] ?? null,
+      currentRev: this._frameAt(this._currentFrameIndex)?.rev ?? 0,
+      totalRevisions: this._entries.length,
+      currentFrame: this._frameAt(this._currentFrameIndex),
       mismatches: this._mismatches,
       turnSummaries: this._turnSummaries,
       diffSource: this._diffSource,
+      ...(this._comparedRunId !== undefined ? { comparedRunId: this._comparedRunId } : {}),
     };
   }
 
@@ -494,61 +471,22 @@ export class DeterministicReplayEngine {
     this._runId = null;
     this._snapshot = null;
     this._entries = [];
-    this._frames = [];
     this._currentFrameIndex = 0;
     this._mismatches = [];
     this._diffSource = 'none';
+    this._comparedRunId = undefined;
     this._turnSummaries = [];
     this._notify();
   }
 
   // ── Private helpers ────────────────────────────────────────────────────
 
-  /**
-   * Convert a RuntimeStateSnapshot into a flat domain map.
-   */
-  private _snapshotToDomains(
-    snapshot: RuntimeStateSnapshot,
-  ): Record<string, Record<string, unknown>> {
-    const domains: Record<string, Record<string, unknown>> = {};
-    for (const entry of snapshot.domains) {
-      domains[entry.domain] = { ...entry.state };
-    }
-    return domains;
-  }
-
-  /**
-   * Apply a single ledger entry to the previous frame, producing a new frame.
-   *
-   * Event payloads are merged into the domain state by convention:
-   * the payload is treated as a partial update to the event's implied domain
-   * (derived from the event name prefix, e.g. "turn:" → "turn" domain).
-   * Unknown domain prefixes are collected into a synthetic "_events" domain.
-   */
-  private _applyEntry(prev: ReplayFrame, entry: LedgerEntry): ReplayFrame {
-    // Derive domain from event name prefix (e.g. "turn:start" → "turn").
-    // Events without a colon separator fall back to the synthetic "_events" domain.
-    const rawDomain = entry.eventName.split(':')[0];
-    const domain = rawDomain && rawDomain !== entry.eventName ? rawDomain : '_events';
-    const prevDomainState = prev.domains[domain]! ?? {};
-
-    const payload = entry.payload as Record<string, unknown> | null | undefined;
-    const merged: Record<string, unknown> = {
-      ...prevDomainState,
-      _lastEvent: entry.eventName,
-      _lastRev: entry.rev,
-      _lastTs: entry.ts,
-      ...(payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : {}),
-    };
-
-    return {
-      rev: entry.rev,
-      entry,
-      domains: {
-        ...prev.domains,
-        [domain]: merged,
-      },
-    };
+  /** Index 0 is the start snapshot; index i is the i-th entry. Null when no run is loaded. */
+  private _frameAt(index: number): ReplayFrame | null {
+    if (this._status === 'idle' || index < 0 || index > this._entries.length) return null;
+    if (index === 0) return { rev: 0 };
+    const entry = this._entries[index - 1]!;
+    return { rev: entry.rev, entry };
   }
 
   /**
@@ -691,7 +629,7 @@ export class DeterministicReplayEngine {
     return summaries;
   }
 
-  private _diffTurnSummaries(replayedEntries: readonly LedgerEntry[]): ReplayMismatch[] {
+  private _diffTurnSummaries(replayedEntries: readonly LedgerEntry[], other: string): ReplayMismatch[] {
     const recorded = this._deriveTurnSummaries(this._entries);
     const replayed = this._deriveTurnSummaries(replayedEntries);
 
@@ -708,7 +646,7 @@ export class DeterministicReplayEngine {
           ownerDomain: 'turn',
           failureMode: 'missing_terminal_summary',
           relatedTurnId: recordedSummary.turnId,
-          description: `Rev ${recordedSummary.terminalRev}: missing terminal replay summary for turn "${recordedSummary.turnId}".`,
+          description: `Rev ${recordedSummary.terminalRev}: turn "${recordedSummary.turnId}" ended in the loaded run but has no ending in ${other}.`,
           recordedSummary: `${recordedSummary.outcome}/${recordedSummary.stopReason ?? 'none'}`,
         });
         continue;
@@ -722,7 +660,7 @@ export class DeterministicReplayEngine {
           ownerDomain: 'turn',
           failureMode: 'terminal_outcome_diverged',
           relatedTurnId: recordedSummary.turnId,
-          description: `Rev ${recordedSummary.terminalRev}: turn "${recordedSummary.turnId}" terminal outcome diverged (recorded ${recordedSummary.outcome}, replayed ${replayedSummary.outcome}).`,
+          description: `Rev ${recordedSummary.terminalRev}: turn "${recordedSummary.turnId}" terminal outcome diverged (loaded run ${recordedSummary.outcome}, ${other} ${replayedSummary.outcome}).`,
           recordedSummary: `${recordedSummary.outcome}/${recordedSummary.stopReason ?? 'none'}`,
           replayedSummary: `${replayedSummary.outcome}/${replayedSummary.stopReason ?? 'none'}`,
         });
@@ -737,7 +675,7 @@ export class DeterministicReplayEngine {
           ownerDomain: 'turn',
           failureMode: 'stop_reason_diverged',
           relatedTurnId: recordedSummary.turnId,
-          description: `Rev ${recordedSummary.terminalRev}: turn "${recordedSummary.turnId}" stop reason diverged (recorded ${recordedSummary.stopReason ?? 'none'}, replayed ${replayedSummary.stopReason ?? 'none'}).`,
+          description: `Rev ${recordedSummary.terminalRev}: turn "${recordedSummary.turnId}" stop reason diverged (loaded run ${recordedSummary.stopReason ?? 'none'}, ${other} ${replayedSummary.stopReason ?? 'none'}).`,
           recordedSummary: `${recordedSummary.outcome}/${recordedSummary.stopReason ?? 'none'}`,
           replayedSummary: `${replayedSummary.outcome}/${replayedSummary.stopReason ?? 'none'}`,
         });

@@ -14,6 +14,7 @@
  * told to stop.
  */
 import { serveAcpAgent, type AcpStdio } from '@goodvibes-jev/engine/platform/platform/acp';
+import { resolveGoodVibesHome } from '@goodvibes-jev/engine/platform/platform/config';
 
 export const ACP_USAGE = 'Usage: goodvibes acp   (speaks the Agent Client Protocol on stdin/stdout; configure it as the editor\'s agent-server command)';
 
@@ -54,21 +55,25 @@ export async function runAcpCommand(input: RunAcpCommandInput): Promise<number> 
     return 2;
   }
   return withConsoleOnStderr(input.stderr, async () => {
+    let dispose: (() => Promise<void>) | undefined;
     try {
-      const { connection, dispose } = await serveAcpAgent(
-        { homeDirectory: input.env.GOODVIBES_HOME ?? input.env.HOME ?? input.cwd },
-        input.stdio,
-      );
+      // The same tree root every other entry point uses, so an editor that
+      // launches this with HOME unset or GOODVIBES_HOME blank still reaches the
+      // installed settings and accounts rather than the project directory.
+      const served = await serveAcpAgent({ homeDirectory: resolveGoodVibesHome(input.env) }, input.stdio);
+      dispose = served.dispose;
       const stopped = new Promise<void>((resolve) => {
         if (input.signal?.aborted) resolve();
         else input.signal?.addEventListener('abort', () => resolve(), { once: true });
       });
-      await Promise.race([connection.closed, stopped]);
-      await dispose().catch(() => {});
+      await Promise.race([served.connection.closed, stopped]);
       return 0;
     } catch (error) {
       input.stderr(`goodvibes acp: ${error instanceof Error ? error.message : String(error)}`);
       return 1;
+    } finally {
+      // A stream that broke mid-session still releases the embedded sessions.
+      await dispose?.().catch(() => {});
     }
   });
 }

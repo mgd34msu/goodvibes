@@ -7,9 +7,9 @@ import { resolveDaemonEnabled } from '@goodvibes-jev/engine/platform/platform/co
 import type { OnboardingCheckMarkersState } from '../runtime/onboarding/index.ts';
 import { formatRuntimeEndpointBinding, resolveRuntimeEndpointBinding } from '@goodvibes-jev/engine/terminal-shell';
 import type { RuntimeEndpointBinding, RuntimeEndpointId } from '@goodvibes-jev/engine/terminal-shell';
-import { classifyBindPosture, isNetworkFacing } from './network-posture.ts';
+import { classifyBindPosture, isNetworkFacing } from '@goodvibes-jev/engine/terminal-shell';
 import type { GoodVibesCliOutputFormat } from '@goodvibes-jev/engine/terminal-shell';
-import type { CliServicePosture } from './service-posture.ts';
+import { serviceSettingsIssues, type CliServicePosture } from './service-posture.ts';
 import type { InstallSelfCheckFinding } from '../runtime/install-self-check.ts';
 import { getProviderIdFromModel } from '@goodvibes-jev/engine/platform/platform/providers';
 import { describeConfiguredEffort } from '../providers/reasoning-effort-surface.ts';
@@ -305,6 +305,32 @@ export function buildCliExposureReport(options: CliStatusOptions): readonly CliE
   });
 }
 
+type ServiceFindingText = Pick<CliDoctorFinding, 'cause' | 'impact' | 'action'>;
+
+const SERVICE_FINDING_TEXT: Readonly<Record<string, ServiceFindingText>> = {
+  'service-disabled-for-server-surfaces': {
+    cause: 'One or more daemon, control-plane, listener, or web settings are enabled while service.enabled is false.',
+    impact: 'The configured surfaces may not start automatically or survive restarts.',
+    action: 'Enable service mode or disable the server-backed surfaces you do not want.',
+  },
+  'service-autostart-disabled': {
+    cause: 'A service definition is installed and service.autostart is false.',
+    impact: 'GoodVibes does not start after login or reboot.',
+    action: 'Set service.autostart to true if the daemon, listener or web surfaces should stay available.',
+  },
+  'service-restart-disabled': {
+    cause: 'service.enabled is true and service.restartOnFailure is false.',
+    impact: 'A crashed daemon or listener stays down until it is started again.',
+    action: 'Set service.restartOnFailure to true, then run goodvibes service install to rewrite the definition.',
+  },
+};
+
+const SERVICE_FINDING_FALLBACK: ServiceFindingText = {
+  cause: 'The service inspection found a mismatch between the configured service and surface state and what is running.',
+  impact: 'Daemon, control-plane, listener, or web availability may not match the configuration.',
+  action: 'Run goodvibes service check and apply the install, start or setting change it names.',
+};
+
 export function buildCliDoctorFindings(options: CliStatusOptions): readonly CliDoctorFinding[] {
   const config = options.configManager;
   const serviceEnabled = config.get('service.enabled') === true;
@@ -350,55 +376,13 @@ export function buildCliDoctorFindings(options: CliStatusOptions): readonly CliD
     });
   }
 
-  if (serverBackedEnabled && !serviceEnabled) {
-    findings.push({
-      id: 'service-disabled-for-server-surfaces',
-      area: 'service',
-      severity: 'warning',
-      summary: 'Server-backed surfaces are enabled but service mode is off.',
-      cause: 'One or more daemon, control-plane, listener, or web settings are enabled while service.enabled is false.',
-      impact: 'The configured surfaces may not start automatically or survive restarts.',
-      action: 'Enable service mode or disable the server-backed surfaces you do not want.',
-    });
-  }
-
-  if (serviceEnabled && !serviceAutostart) {
-    findings.push({
-      id: 'service-autostart-disabled',
-      area: 'service',
-      severity: 'warning',
-      summary: 'Service mode is enabled but autostart is off.',
-      cause: 'service.enabled is true and service.autostart is false.',
-      impact: 'GoodVibes may not start after login or reboot even though service mode is selected.',
-      action: 'Enable service.autostart if the daemon/listener/web surfaces should stay available.',
-    });
-  }
-
-  if (serviceEnabled && !restartOnFailure) {
-    findings.push({
-      id: 'service-restart-disabled',
-      area: 'service',
-      severity: 'warning',
-      summary: 'Service restart-on-failure is off.',
-      cause: 'service.enabled is true and service.restartOnFailure is false.',
-      impact: 'A crashed daemon or listener may stay down until manually restarted.',
-      action: 'Enable service.restartOnFailure for durable daemon/listener operation.',
-    });
-  }
-
-  if (options.service) {
-    for (const issue of options.service.issues) {
-      if (findings.some((finding) => finding.summary === issue)) continue;
-      findings.push({
-        id: `service-lifecycle-${findings.length}`,
-        area: 'service',
-        severity: 'warning',
-        summary: issue,
-        cause: 'The service lifecycle inspection found a mismatch between configured service/surface state and observed host state.',
-        impact: 'Daemon, control-plane, listener, or web availability may not match the configuration.',
-        action: 'Run goodvibes service check and apply the suggested service install/start/configuration fix.',
-      });
-    }
+  // Service facts come from the posture builder under fixed ids; doctor adds
+  // only the cause, impact and action for each id.
+  const serviceIssues = options.service?.findings
+    ?? serviceSettingsIssues({ enabled: serviceEnabled, autostart: serviceAutostart, restartOnFailure, serverBackedEnabled });
+  for (const issue of serviceIssues) {
+    const text = SERVICE_FINDING_TEXT[issue.id] ?? SERVICE_FINDING_FALLBACK;
+    findings.push({ id: issue.id, area: 'service', severity: 'warning', summary: issue.summary, ...text });
   }
 
   if (!marker?.exists) {

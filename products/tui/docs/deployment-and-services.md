@@ -97,6 +97,8 @@ The fullscreen `/config` workspace exposes service settings under `Service`:
 
 Changing `service.autostart` from the TUI is intended to reconcile the OS service, not just update JSON. On Linux this means writing/enabling/disabling the user `systemd` service. When service mode is enabled for the first time, the TUI installs the service definition, reloads user units, and starts/enables the daemon service if autostart is on. Disabling service mode or autostart removes/disables the OS-level autostart path.
 
+`goodvibes service install`, `start` and `restart` act on the service as these settings describe it and change no setting; when a setting disagrees with what was done (for example `service.autostart` off while the platform starts the installed service at login) the command prints one line saying so. `start` and `restart` report `ok` only when the managed service is running and its enabled control-plane and HTTP-listener endpoints accept a connection, waiting up to ten seconds for that; otherwise they print the first problem and exit 1.
+
 Use these commands to inspect the live state:
 
 ```sh

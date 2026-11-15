@@ -20,7 +20,7 @@ import { formatPairingOffers, formatPostureCapabilities, pairingPostureNotice } 
 import { defaultPairingTokenName } from '@goodvibes-jev/engine/platform/platform/pairing';
 import { formatHttpOrigin, pairingOriginUsesStableHost, refreshStableHostInputs, stableUrlHostForBindHost } from '@goodvibes-jev/engine/platform/platform/pairing';
 import { formatRuntimeEndpointBinding, resolveRuntimeEndpointBinding } from '@goodvibes-jev/engine/terminal-shell';
-import { classifyBindPosture, isNetworkFacing } from './network-posture.ts';
+import { classifyBindPosture, isNetworkFacing } from '@goodvibes-jev/engine/terminal-shell';
 import type { CliCommandRuntime } from '@goodvibes-jev/engine/terminal-shell';
 import type { RuntimeServices } from '../runtime/services.ts';
 import {
@@ -258,7 +258,7 @@ export const { renderSubscriptions } = createCliSubscriptionView<CliCommandRunti
   time: (timestamp) => new Date(timestamp).toISOString(),
 });
 
-export const { handleSecrets } = createCliSecretsCommand<CliCommandRuntime>({
+export const { runSecrets } = createCliSecretsCommand<CliCommandRuntime>({
   createSecrets: (runtime) =>
     new SecretsManager({ projectRoot: runtime.workingDirectory, globalHome: runtime.homeDirectory, configManager: runtime.configManager }),
   binary: () => 'goodvibes',

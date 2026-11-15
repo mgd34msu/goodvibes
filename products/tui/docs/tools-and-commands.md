@@ -820,7 +820,7 @@ For the exec sandbox and what REPL and MCP isolation currently is, see [Sandbox]
 
 Three flags control which session is active when the TUI opens:
 
-- `--continue`: resumes the most recently active session for the current working directory (reads the last-session pointer file; does nothing when no pointer exists).
+- `--continue`: resumes the most recently active session for the current working directory (reads the last-session pointer file; when no pointer exists it says so and starts a new conversation as a plain launch would).
 - `--resume [id]`, `-r [id]`: resumes a specific session by id. When the id is omitted, resolves via the same last-session pointer as `--continue`.
 - `--fork [id]`: forks a session into a new branch. Bare `--fork` forks the session already active when the TUI starts; `--fork <id>` resumes the named session first, then forks it.
 

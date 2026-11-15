@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { classifyBindPosture, isLoopbackHost } from '../../cli/network-posture.ts';
+import { classifyBindPosture, isLoopbackHost } from '@goodvibes-jev/engine/terminal-shell';
 
 describe('bind posture', () => {
   test('real loopback addresses are local', () => {

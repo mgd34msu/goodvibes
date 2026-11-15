@@ -195,10 +195,10 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
   surfaces: {
     usage: [
       'surfaces [list]',
-      'surfaces check',
-      'surfaces show <surfaceId>',
+      'surfaces check [<web|listener|control-plane|surfaceId>]',
+      'surfaces show <web|listener|control-plane|surfaceId>',
       'surfaces enable <web|listener|control-plane|surfaceId>',
-      'surfaces disable <surfaceId>',
+      'surfaces disable <web|listener|control-plane|surfaceId>',
     ],
     summary: 'Inspect and configure browser, control-plane, HTTP listener, and external integration surfaces.',
     examples: ['surfaces check', 'surfaces enable web', 'surfaces enable slack'],

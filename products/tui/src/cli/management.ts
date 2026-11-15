@@ -28,7 +28,7 @@ import { buildListenerTestResult, formatListenerTestResult, handleSurfacesComman
 import {
   buildControlPlaneStatusResult,
   formatControlPlaneStatus,
-  handleSecrets,
+  runSecrets,
   handleSessions,
   handleTasks,
   renderPairing,
@@ -87,50 +87,58 @@ export {
 const HOST_RESTART_NOTE = 'A running host picks this up at its next sign-in or session check (within a few seconds) and ends that user\'s sessions then; no restart is needed.';
 const SESSIONS_NOT_REACHABLE = 'Sessions are held in memory by the running host and this command cannot reach them. Restart the host to end all of its sessions.';
 
-async function renderAuth(runtime: CliCommandRuntime): Promise<string> {
-  return await withRuntimeServices(runtime, (services) => {
+interface AuthCommandResult {
+  readonly output: string;
+  readonly exitCode: number;
+}
+
+async function renderAuth(runtime: CliCommandRuntime): Promise<AuthCommandResult> {
+  const ok = (output: string): AuthCommandResult => ({ output, exitCode: 0 });
+  const notFound = (output: string): AuthCommandResult => ({ output, exitCode: 1 });
+  const usage = (output: string): AuthCommandResult => ({ output, exitCode: 2 });
+  return await withRuntimeServices(runtime, (services): AuthCommandResult => {
     const [sub = 'status', ...rawRest] = runtime.cli.commandArgs;
     const rest = commandValues(rawRest);
     if (sub === 'add-user' || sub === 'add') {
       const username = rest[0];
-      if (!username) return 'Usage: goodvibes auth add-user <username> [--password <value>|--password-stdin] [--role <role>]';
+      if (!username) return usage('Usage: goodvibes auth add-user <username> [--password <value>|--password-stdin] [--role <role>]');
       const password = readPassword(rawRest);
-      if (!password) return 'Usage: goodvibes auth add-user <username> [--password <value>|--password-stdin] [--role <role>]';
+      if (!password) return usage('Usage: goodvibes auth add-user <username> [--password <value>|--password-stdin] [--role <role>]');
       const roles = readOptionValues(rawRest, '--role').filter((role) => role.length > 0);
       const user = services.localUserAuthManager.addUser(username, password, roles.length > 0 ? roles : ['user']);
-      return `Auth user added: ${user.username} (${user.roles.join(', ') || 'no roles'})`;
+      return ok(`Auth user added: ${user.username} (${user.roles.join(', ') || 'no roles'})`);
     }
     if (sub === 'delete-user' || sub === 'remove-user') {
       const username = rest[0];
-      if (!username) return 'Usage: goodvibes auth delete-user <username>';
-      return services.localUserAuthManager.deleteUser(username) ? `Auth user deleted: ${username}\n${HOST_RESTART_NOTE}` : `No auth user found: ${username}`;
+      if (!username) return usage('Usage: goodvibes auth delete-user <username>');
+      return services.localUserAuthManager.deleteUser(username) ? ok(`Auth user deleted: ${username}\n${HOST_RESTART_NOTE}`) : notFound(`No auth user found: ${username}`);
     }
     if (sub === 'rotate-password' || sub === 'passwd') {
       const username = rest[0];
-      if (!username) return 'Usage: goodvibes auth rotate-password <username> [--password <value>|--password-stdin]';
+      if (!username) return usage('Usage: goodvibes auth rotate-password <username> [--password <value>|--password-stdin]');
       const password = readPassword(rawRest);
-      if (!password) return 'Usage: goodvibes auth rotate-password <username> [--password <value>|--password-stdin]';
+      if (!password) return usage('Usage: goodvibes auth rotate-password <username> [--password <value>|--password-stdin]');
       services.localUserAuthManager.rotatePassword(username, password);
-      return `Auth password rotated: ${username}\n${HOST_RESTART_NOTE}`;
+      return ok(`Auth password rotated: ${username}\n${HOST_RESTART_NOTE}`);
     }
     if (sub === 'revoke-session') {
       const token = rest[0];
-      if (!token) return 'Usage: goodvibes auth revoke-session <session-id-or-token>';
-      return services.localUserAuthManager.revokeSession(token) ? 'Auth session revoked.' : `No auth session found in this process. ${SESSIONS_NOT_REACHABLE}`;
+      if (!token) return usage('Usage: goodvibes auth revoke-session <session-id-or-token>');
+      return services.localUserAuthManager.revokeSession(token) ? ok('Auth session revoked.') : notFound(`No auth session found in this process. ${SESSIONS_NOT_REACHABLE}`);
     }
     if (sub === 'revoke-sessions') {
       const username = rest[0];
-      if (!username) return 'Usage: goodvibes auth revoke-sessions <username>';
+      if (!username) return usage('Usage: goodvibes auth revoke-sessions <username>');
       const count = services.localUserAuthManager.revokeSessionsForUser(username);
-      return count > 0 ? `Auth sessions revoked for ${username}: ${count}` : `No auth sessions revoked for ${username} in this process. ${SESSIONS_NOT_REACHABLE}`;
+      return count > 0 ? ok(`Auth sessions revoked for ${username}: ${count}`) : notFound(`No auth sessions revoked for ${username} in this process. ${SESSIONS_NOT_REACHABLE}`);
     }
     if (sub === 'clear-bootstrap') {
-      return services.localUserAuthManager.clearBootstrapCredentialFile()
+      return ok(services.localUserAuthManager.clearBootstrapCredentialFile()
         ? 'Bootstrap credential file removed.'
-        : 'Bootstrap credential file was already absent.';
+        : 'Bootstrap credential file was already absent.');
     }
     if (sub !== 'status' && sub !== 'list' && sub !== 'users' && sub !== 'sessions') {
-      return 'Usage: goodvibes auth [status|users|sessions|add-user|delete-user|rotate-password|revoke-session|revoke-sessions|clear-bootstrap]';
+      return usage('Usage: goodvibes auth [status|users|sessions|add-user|delete-user|rotate-password|revoke-session|revoke-sessions|clear-bootstrap]');
     }
     const snapshot = services.localUserAuthManager.inspect();
     const paths = readAuthPaths(runtime);
@@ -141,16 +149,16 @@ async function renderAuth(runtime: CliCommandRuntime): Promise<string> {
       permissionMode: runtime.configManager.get('permissions.mode'),
     };
     if (sub === 'users') {
-      return formatJsonOrText(runtime.cli)(
+      return ok(formatJsonOrText(runtime.cli)(
         value.users,
         [
           `GoodVibes auth users (${value.users.length})`,
           ...value.users.map((user) => `  ${user.username} (${user.roles.join(', ') || 'no roles'})`),
         ].join('\n'),
-      );
+      ));
     }
     if (sub === 'sessions') {
-      return formatJsonOrText(runtime.cli)(
+      return ok(formatJsonOrText(runtime.cli)(
         snapshot.sessions,
         [
           `GoodVibes auth sessions in this process (${snapshot.sessions.length}); a running host's sessions are not listed`,
@@ -159,9 +167,9 @@ async function renderAuth(runtime: CliCommandRuntime): Promise<string> {
               `  ${session.username} expires=${new Date(session.expiresAt).toISOString()} id=${session.id}`,
           ),
         ].join('\n'),
-      );
+      ));
     }
-    return formatJsonOrText(runtime.cli)(
+    return ok(formatJsonOrText(runtime.cli)(
       value,
       [
         'GoodVibes auth',
@@ -173,7 +181,7 @@ async function renderAuth(runtime: CliCommandRuntime): Promise<string> {
         `  bootstrap credential: ${paths.bootstrapCredentialPresent ? 'present' : 'missing'} (${paths.bootstrapCredentialPath})`,
         `  operator tokens: ${paths.operatorTokenPresent ? 'present' : 'missing'} (${paths.operatorTokenPath})`,
       ].join('\n'),
-    );
+    ));
   }, { modelData: 'skip' });
 }
 
@@ -201,9 +209,9 @@ export async function handleGoodVibesCliCommand(runtime: CliCommandRuntime): Pro
         return { handled: true, exitCode: exitCodeForText(output) };
       }
       case 'auth': {
-        const output = await renderAuth(runtime);
-        console.log(output);
-        return { handled: true, exitCode: exitCodeForText(output) };
+        const result = await renderAuth(runtime);
+        console.log(result.output);
+        return { handled: true, exitCode: result.exitCode };
       }
       case 'subscription': {
         const output = await renderSubscriptions(runtime);
@@ -211,9 +219,9 @@ export async function handleGoodVibesCliCommand(runtime: CliCommandRuntime): Pro
         return { handled: true, exitCode: exitCodeForText(output) };
       }
       case 'secrets': {
-        const output = await handleSecrets(runtime);
-        console.log(output);
-        return { handled: true, exitCode: exitCodeForText(output) };
+        const result = await runSecrets(runtime);
+        console.log(result.output);
+        return { handled: true, exitCode: result.exitCode };
       }
       case 'sessions': {
         const output = await handleSessions(runtime);

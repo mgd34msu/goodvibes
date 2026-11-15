@@ -87,19 +87,6 @@ describe('goodvibes plugin bundles', () => {
     expect(list.exitCode).toBe(1);
   });
 
-  test('--non-interactive does not record a bundle that needs quarantine', async () => {
-    const manifest = scaffoldCapabilityBundleManifest('demo-bundle');
-    const risky = { ...manifest, capabilities: { ...manifest.capabilities, runtime: ['shell'] } };
-    const manifestPath = join(root, 'bundle.json');
-    const bytes = JSON.stringify(risky);
-    writeFileSync(manifestPath, bytes, 'utf-8');
-    const pin = computeSha256(new TextEncoder().encode(bytes));
-    const result = await handlePluginCommand(makeRuntime(root, ['plugin', 'bundles', 'install', manifestPath, '--sha256', pin, '--non-interactive']));
-    const list = await handlePluginCommand(makeRuntime(root, ['plugin', 'bundles', 'list']));
-    expect(list.output).toContain('No capability bundles installed');
-    expect(result.output).not.toContain('Recorded (not yet activated)');
-  });
-
   test('browse lists a governed marketplace index (name, capability summary, pin)', async () => {
     const manifest = scaffoldCapabilityBundleManifest('demo-bundle');
     // Browse displays the publisher's declared pin; it does not read bundle bytes.

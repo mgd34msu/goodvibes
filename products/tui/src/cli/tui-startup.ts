@@ -229,6 +229,47 @@ export function applyInitialTuiCliState(options: {
   // Seeded prompt is always applied synchronously, regardless of session branch.
   applySeededCliPrompt(cli, input);
 
+  // The normal first-run steps: the onboarding fast path for a new user, or the
+  // wizard where a returning user left it.
+  const runFirstRunSteps = (): void => {
+    if (!globalOnboardingMarker.exists) {
+      // Fast path: get a brand-new user to a working session in the fewest steps.
+      // Falls back to the full wizard when the surface can't detect providers.
+      // Trust stays undecided here on purpose, the first non-read tool
+      // request is what raises the trust question now (see main.ts's
+      // trustPromptRef), not this startup branch.
+      startOnboardingFastPath({ input, commandContext, shellPaths, render });
+    } else {
+      // User has completed onboarding before but left a wizard session in progress.
+      // Reopen the wizard at the last saved step so they can continue or dismiss.
+      const progressState = readWizardProgress(shellPaths);
+      if (hasResumableWizardProgress(shellPaths, { state: progressState })) {
+        const { payload } = progressState;
+        if (payload !== null) {
+          input.openOnboardingWizard({
+            mode: payload.mode,
+            reset: true,
+            preload: (wizard) => {
+              wizard.setStep(payload.stepIndex);
+              for (const [fieldId, value] of payload.toggleState) wizard.toggleState.set(fieldId, value);
+              for (const [fieldId, value] of payload.radioState) wizard.radioState.set(fieldId, value);
+              for (const [fieldId, value] of payload.textState) wizard.textState.set(fieldId, value);
+            },
+          });
+        }
+      }
+      // Returning user, no wizard to resume, nothing else to do at startup:
+      // trust (if still undecided) is asked at the first non-read tool
+      // request, not here, see main.ts's trustPromptRef wiring.
+    }
+  };
+  // --continue or bare --resume with no saved conversation: say so, then start
+  // as a plain launch would rather than opening an unexplained empty session.
+  const nothingToContinue = (): void => {
+    commandContext.print('No previous conversation to continue. This is a new one; /session list shows saved ones.');
+    runFirstRunSteps();
+  };
+
   if (cli.command === 'onboarding') {
     input.openOnboardingWizard({ mode: 'edit', reset: true });
   } else if (cli.command === 'sessions' && cli.commandArgs[0] === 'resume') {
@@ -251,6 +292,7 @@ export function applyInitialTuiCliState(options: {
         recovery: continueRecovery,
       });
     }
+    nothingToContinue();
   } else if (cli.flags.resume !== undefined) {
     // --resume [id]: explicit id dispatches directly; bare form (sentinel 'latest') resolves via pointer
     if (cli.flags.resume !== 'latest') {
@@ -267,6 +309,7 @@ export function applyInitialTuiCliState(options: {
           recovery: continueRecovery,
         });
       }
+      nothingToContinue();
     }
   } else if (cli.flags.fork !== undefined) {
     // --fork [id]: fork specific session (true = bare fork-current; string = explicit id to resume then fork)
@@ -280,35 +323,8 @@ export function applyInitialTuiCliState(options: {
         .then(() => commandRegistry.execute('session', ['fork'], commandContext))
         .then(() => render());
     }
-  } else if (!globalOnboardingMarker.exists) {
-    // Fast path: get a brand-new user to a working session in the fewest steps.
-    // Falls back to the full wizard when the surface can't detect providers.
-    // Trust stays undecided here on purpose, the first non-read tool
-    // request is what raises the trust question now (see main.ts's
-    // trustPromptRef), not this startup branch.
-    startOnboardingFastPath({ input, commandContext, shellPaths, render });
   } else {
-    // User has completed onboarding before but left a wizard session in progress.
-    // Reopen the wizard at the last saved step so they can continue or dismiss.
-    const progressState = readWizardProgress(shellPaths);
-    if (hasResumableWizardProgress(shellPaths, { state: progressState })) {
-      const { payload } = progressState;
-      if (payload !== null) {
-        input.openOnboardingWizard({
-          mode: payload.mode,
-          reset: true,
-          preload: (wizard) => {
-            wizard.setStep(payload.stepIndex);
-            for (const [fieldId, value] of payload.toggleState) wizard.toggleState.set(fieldId, value);
-            for (const [fieldId, value] of payload.radioState) wizard.radioState.set(fieldId, value);
-            for (const [fieldId, value] of payload.textState) wizard.textState.set(fieldId, value);
-          },
-        });
-      }
-    }
-    // Returning user, no wizard to resume, nothing else to do at startup:
-    // trust (if still undecided) is asked at the first non-read tool
-    // request, not here, see main.ts's trustPromptRef wiring.
+    runFirstRunSteps();
   }
 }
 

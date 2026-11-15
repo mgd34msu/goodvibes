@@ -29,7 +29,6 @@ import { resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/platform/platf
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { formatRuntimeEndpointBinding } from '@goodvibes-jev/engine/terminal-shell';
 import type { RuntimeEndpointId } from '@goodvibes-jev/engine/terminal-shell';
-import './network-posture.ts';
 import { redactText } from '@goodvibes-jev/engine/terminal-shell';
 import type { JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
 import { captureStrictJudgmentJson } from '@goodvibes-jev/engine/platform/platform/gate';
@@ -47,18 +46,75 @@ export interface CliServicePosture {
   };
   readonly endpoints: readonly CliServiceEndpointPosture[];
   readonly log: CliServiceLogPosture;
+  /** The summaries of `findings`, in the same order. */
   readonly issues: readonly string[];
+  /** Each issue with a fixed id, so doctor and scripts can track one fact across runs. */
+  readonly findings: readonly CliServiceIssue[];
 }
 
-const ENDPOINTS: readonly {
+export interface CliServiceIssue {
+  readonly id: string;
+  readonly summary: string;
+}
+
+/** The service settings and the one observed fact (installed) the setting rules depend on. */
+export interface CliServiceSettingsFacts {
+  readonly enabled: boolean;
+  readonly autostart: boolean;
+  readonly restartOnFailure: boolean;
+  /** The daemon or any server-backed endpoint is switched on. */
+  readonly serverBackedEnabled: boolean;
+  /** Whether a platform service definition exists; undefined when the caller did not look. */
+  readonly installed?: boolean;
+}
+
+/**
+ * The service setting rules, stated once. `goodvibes service status`, `doctor`
+ * and `listener test` all read these, so a fact is reported once under one id.
+ */
+export function serviceSettingsIssues(facts: CliServiceSettingsFacts): CliServiceIssue[] {
+  const issues: CliServiceIssue[] = [];
+  if (facts.serverBackedEnabled && !facts.enabled) {
+    issues.push({ id: 'service-disabled-for-server-surfaces', summary: 'Server-backed surfaces are enabled but service mode is off.' });
+  }
+  // Autostart is off by default, so it only matters once a service is installed.
+  if (facts.enabled && facts.installed === true && !facts.autostart) {
+    issues.push({ id: 'service-autostart-disabled', summary: 'The service is installed but autostart is off, so it does not start at login.' });
+  }
+  if (facts.enabled && !facts.restartOnFailure) {
+    issues.push({ id: 'service-restart-disabled', summary: 'Service mode is enabled but restart-on-failure is off.' });
+  }
+  return issues;
+}
+
+/** Endpoint issues from the shared rule, each under an id naming its endpoint(s). */
+function endpointIssues(endpoints: readonly CliServiceEndpointPosture[], probe: boolean | undefined): CliServiceIssue[] {
+  const issues: CliServiceIssue[] = [];
+  for (const endpoint of endpoints) {
+    for (const summary of serviceEndpointIssues([endpoint], probe)) issues.push({ id: `endpoint-unreachable-${endpoint.id}`, summary });
+  }
+  const enabled = endpoints.filter((endpoint) => endpoint.enabled);
+  for (const [index, left] of enabled.entries()) {
+    for (const right of enabled.slice(index + 1)) {
+      for (const summary of serviceEndpointIssues([left, right], false)) issues.push({ id: `endpoint-conflict-${left.id}-${right.id}`, summary });
+    }
+  }
+  return issues;
+}
+
+type EndpointDefinition = {
   readonly id: RuntimeEndpointId;
   readonly label: string;
   readonly enabledKey: Parameters<ConfigManager['get']>[0];
-}[] = [
+};
+
+/** The endpoints the daemon binds a socket for. */
+const LISTENING_ENDPOINTS: readonly EndpointDefinition[] = [
   { id: 'controlPlane', label: 'control plane', enabledKey: 'controlPlane.enabled' },
   { id: 'httpListener', label: 'HTTP listener', enabledKey: 'danger.httpListener' },
-  { id: 'web', label: 'web surface', enabledKey: 'web.enabled' },
 ];
+/** Nothing listens on web.host:web.port: the control-plane listener serves the web bundle, so web is reachable when it is. */
+const WEB_ENDPOINT: EndpointDefinition = { id: 'web', label: 'web surface', enabledKey: 'web.enabled' };
 
 const SOURCE_PACKAGE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
@@ -348,12 +404,18 @@ export async function buildCliServicePosture(
     capturedStatus.actionError === undefined ? undefined : await redactText(capturedStatus.actionError, { ...options, assertCurrent });
   assertCurrent();
   const status = actionError === undefined ? capturedStatus : { ...capturedStatus, actionError };
-  const endpoints = await readServiceEndpoints(runtime, ENDPOINTS, {
+  const listening = await readServiceEndpoints(runtime, LISTENING_ENDPOINTS, {
     probe: options.probe,
     assertCurrent,
     probeTcp,
     mayProbe: () => true,
   });
+  const [web] = await readServiceEndpoints(runtime, [WEB_ENDPOINT], { probe: false, assertCurrent, probeTcp, mayProbe: () => false });
+  const controlPlaneReachable = listening.find((endpoint) => endpoint.id === 'controlPlane')?.reachable;
+  const endpoints: CliServiceEndpointPosture[] = [
+    ...listening,
+    ...(web === undefined ? [] : [options.probe && web.enabled && controlPlaneReachable !== undefined ? { ...web, reachable: controlPlaneReachable } : web]),
+  ];
 
   const config = {
     enabled: runtime.configManager.get('service.enabled') === true,
@@ -362,30 +424,20 @@ export async function buildCliServicePosture(
     daemonEnabled: resolveDaemonEnabled(runtime.configManager),
   };
   const serverBackedEnabled = config.daemonEnabled || endpoints.some((endpoint) => endpoint.enabled);
-  const issues: string[] = [];
-
-  if (serverBackedEnabled && !config.enabled) {
-    issues.push('Server-backed surfaces are enabled but service mode is off.');
-  }
-  if (config.enabled && !config.autostart) {
-    issues.push('Service mode is enabled but autostart is off.');
-  }
-  if (config.enabled && !config.restartOnFailure) {
-    issues.push('Service mode is enabled but restart-on-failure is off.');
-  }
+  const findings: CliServiceIssue[] = serviceSettingsIssues({ ...config, serverBackedEnabled, installed: status.installed });
   if (config.enabled && !status.installed) {
-    issues.push('Service mode is enabled but no platform service definition is installed.');
+    findings.push({ id: 'service-not-installed', summary: 'Service mode is enabled but no platform service definition is installed.' });
   }
   if (config.enabled && !status.running) {
-    issues.push('Service mode is enabled but the managed service is not running.');
+    findings.push({ id: 'service-not-running', summary: 'Service mode is enabled but the managed service is not running.' });
   }
   if (status.actionError) {
-    issues.push(`Service manager reported an error: ${status.actionError}`);
+    findings.push({ id: 'service-manager-error', summary: `Service manager reported an error: ${status.actionError}` });
   }
-  issues.push(...serviceEndpointIssues(endpoints, options.probe));
+  findings.push(...endpointIssues(endpoints, options.probe));
   const log = await readServiceLogPosture(status.logPath, options.logTailBytes ?? 4096, { ...options, assertCurrent });
   if (log.readError) {
-    issues.push(`Service log exists but could not be read: ${log.readError}`);
+    findings.push({ id: 'service-log-unreadable', summary: `Service log exists but could not be read: ${log.readError}` });
   }
 
   assertCurrent();
@@ -398,8 +450,27 @@ export async function buildCliServicePosture(
     },
     endpoints,
     log,
-    issues,
+    issues: findings.map((finding) => finding.summary),
+    findings,
   };
+}
+
+export interface CliServiceReadiness {
+  readonly running: boolean;
+  /** Enabled listening endpoints that did not accept a TCP connection. */
+  readonly unreachable: readonly CliServiceEndpointPosture[];
+}
+
+/**
+ * Whether the service is up: the platform's running state and one TCP connect
+ * per enabled listening endpoint. It reads no log and asks no model, so a
+ * caller waiting for a just-started daemon can repeat it cheaply.
+ */
+export async function probeServiceReadiness(runtime: CliServiceRuntime, manager: CliServiceStatusManager): Promise<CliServiceReadiness> {
+  const status = reconcileSystemdServiceStatus(runtime, manager.status(), {});
+  if (!status.running) return { running: false, unreachable: [] };
+  const endpoints = await readServiceEndpoints(runtime, LISTENING_ENDPOINTS, { probe: true, assertCurrent: () => {}, probeTcp, mayProbe: () => true });
+  return { running: true, unreachable: endpoints.filter((endpoint) => endpoint.enabled && endpoint.reachable === false) };
 }
 
 export function formatCliServicePosture(posture: CliServicePosture, json = false): string {

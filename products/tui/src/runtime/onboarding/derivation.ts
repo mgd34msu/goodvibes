@@ -4,6 +4,7 @@ import {
   onboardingIntegrationSignalCount,
   deriveOnboardingState,
 } from '@goodvibes-jev/engine/terminal-shell/onboarding-signals';
+import { isLoopbackHost } from '@goodvibes-jev/engine/terminal-shell';
 import { deriveReopenEditAcknowledgementState as deriveAcknowledgements } from '@goodvibes-jev/engine/terminal-shell/onboarding-signals';
 import { countConfiguredSurfaceKinds, hasExternalIntegrations } from '@goodvibes-jev/engine/terminal-shell/onboarding-signals';
 import '@goodvibes-jev/engine/terminal-shell/onboarding-values';
@@ -30,21 +31,9 @@ function hasBrowserAccess(snapshot: OnboardingSnapshotState): boolean {
   return snapshot.bindSettings.web.enabled;
 }
 
-function isLoopbackHost(host: string | null | undefined): boolean {
-  const normalized = (host ?? '').trim().toLowerCase();
-  if (normalized.length === 0) return false;
-  return (
-    normalized === 'localhost' ||
-    normalized === '::1' ||
-    normalized === '[::1]' ||
-    normalized === '0:0:0:0:0:0:0:1' ||
-    /^127(?:\.\d{1,3}){3}$/.test(normalized)
-  );
-}
-
 function isRemoteBind(hostMode: string, host: string | null | undefined): boolean {
   if (hostMode === 'network') return true;
-  if (hostMode === 'custom') return !isLoopbackHost(host);
+  if (hostMode === 'custom') return !isLoopbackHost(host ?? undefined);
   return false;
 }
 

@@ -6,7 +6,7 @@ Most flags below are global (available regardless of the subcommand in use). `--
 
 ### `--continue`
 
-Resume the most recently active session for the current working directory. Reads the last-session pointer file written by `persistConversation`; does nothing when no pointer file exists.
+Resume the most recently active session for the current working directory. Reads the last-session pointer file written by `persistConversation`. When no pointer file exists it says so in the transcript and starts a new conversation the way a plain launch does (onboarding included for a new user).
 
 ```sh
 goodvibes --continue

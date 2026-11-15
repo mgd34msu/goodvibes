@@ -175,6 +175,7 @@ describe('CLI status and doctor output', () => {
           modifiedAt: 1,
         },
         issues: [],
+        findings: [],
       },
     });
 

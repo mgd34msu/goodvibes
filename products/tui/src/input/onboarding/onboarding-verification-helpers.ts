@@ -1,3 +1,4 @@
+import { isLoopbackHost } from '@goodvibes-jev/engine/terminal-shell';
 import type { OnboardingVerificationItem } from '../../runtime/onboarding/index.ts';
 
 /**
@@ -18,17 +19,12 @@ export function extractAuthorizationCode(input: string): string | null {
 }
 
 /**
- * Return true if the value is a recognized loopback host (localhost, 127.x.x.x,
- * ::1, or [::1]).  Tolerates null / undefined / empty values by returning false.
+ * The platform's one loopback rule (localhost, *.localhost, 127.0.0.0/8, ::1 in
+ * any spelling), so onboarding agrees with `goodvibes status` about which binds
+ * are local. Null, undefined and empty values are not loopback.
  */
 export function isLoopbackHostValue(value: string | null | undefined): boolean {
-  const normalized = (value ?? '').trim().toLowerCase();
-  if (normalized.length === 0) return false;
-  return normalized === 'localhost'
-    || normalized === '::1'
-    || normalized === '[::1]'
-    || normalized === '0:0:0:0:0:0:0:1'
-    || /^127(?:\.\d{1,3}){3}$/.test(normalized);
+  return isLoopbackHost(value ?? undefined);
 }
 
 /** Priority rank used when de-duplicating verification items by id. */

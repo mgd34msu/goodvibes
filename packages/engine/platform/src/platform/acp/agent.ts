@@ -55,6 +55,7 @@ import type {
 } from '@agentclientprotocol/sdk';
 import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
+import { resolveGoodVibesHome } from '../config/goodvibes-home.js';
 import {
   createEmbeddedSession,
   type EmbeddedRunEvent,
@@ -130,7 +131,7 @@ export function translateAcpMcpServers(
 }
 
 export interface AcpAgentOptions {
-  /** Home directory handed to the embedded daemon. Defaults to $HOME. */
+  /** Tree root handed to the embedded daemon. Defaults to the process's GoodVibes home. */
   readonly homeDirectory?: string | undefined;
   /** Substrate override; defaults to `createEmbeddedSession`. */
   readonly sessionFactory?: EmbeddedSessionFactory | undefined;
@@ -274,7 +275,7 @@ export class GoodVibesAcpAgent implements Agent {
       (async ({ workspace, requestPermission, mcpServers: servers }) =>
         createEmbeddedSession({
           workspace,
-          homeDirectory: this.options.homeDirectory ?? process.env.HOME ?? process.cwd(),
+          homeDirectory: this.options.homeDirectory ?? resolveGoodVibesHome(),
           requestPermission,
           ...(servers && servers.length > 0 ? { mcpServers: servers } : {}),
         }));

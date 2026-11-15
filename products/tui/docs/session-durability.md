@@ -142,12 +142,13 @@ the startup recovery modal, and the in-TUI session browser are every resume path
 through `resumeSessionCore`, which calls `replayJournalForSession`, so the gap is closed on
 whichever path the user takes.
 
-### Known limit: `--continue` with no last-session pointer
+### `--continue` with no last-session pointer
 
 If a session was killed before the first snapshot was written (i.e., no last-session pointer
-exists), `--continue` does nothing. It does not fall through to onboarding or start any other
-flow. The journal for that session is still present on disk. **Recovery path:** launch the TUI
-normally; the startup recovery modal (see "The startup recovery modal" in
-[getting-started.md](getting-started.md)) offers to resume from the recovery snapshot if one
-exists, or use `/session resume <id>` once a snapshot exists. This is a known limit with no
-automatic workaround. It only affects sessions that were never snapshotted.
+exists), `--continue` and a bare `--resume` print "No previous conversation to continue. This is
+a new one; /session list shows saved ones." in the transcript and then start as a plain launch
+would: onboarding for a new user, or the setup wizard where a returning user left it. The journal
+for the unsnapshotted session is still present on disk. **Recovery path:** the startup recovery
+modal (see "The startup recovery modal" in [getting-started.md](getting-started.md)) offers to
+resume from the recovery snapshot if one exists, or use `/session resume <id>` once a snapshot
+exists.

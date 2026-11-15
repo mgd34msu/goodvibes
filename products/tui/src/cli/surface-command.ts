@@ -7,7 +7,7 @@ import {
 } from '@goodvibes-jev/engine/platform/platform/integrations';
 import { enableFeatureFlags, getMissingSurfaceFeatureFlags, getServerSurfaceFeatureFlags, surfaceFeatureGateSettingsKeys } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { formatRuntimeEndpointBinding, resolveRuntimeEndpointBinding } from '@goodvibes-jev/engine/terminal-shell';
-import { classifyBindPosture, isNetworkFacing } from './network-posture.ts';
+import { classifyBindPosture, isNetworkFacing } from '@goodvibes-jev/engine/terminal-shell';
 import type { CliCommandRuntime, RuntimeEndpointId } from '@goodvibes-jev/engine/terminal-shell';
 import {
   applyTargetEndpointFlagsOrDefault,
@@ -19,6 +19,7 @@ import {
   readAuthPaths,
   yesNo,
 } from './management-utils.ts';
+import { serviceSettingsIssues } from './service-posture.ts';
 
 export const SURFACE_CONFIGS = [
   ['slack', 'Slack', ['surfaces.slack.signingSecret', 'surfaces.slack.botToken']],
@@ -42,6 +43,37 @@ const ENDPOINT_LABELS: Readonly<Record<RuntimeEndpointId, string>> = {
   httpListener: 'http-listener',
 };
 
+/** The endpoint names every verb accepts, mapped to the endpoint they mean. */
+const ENDPOINT_TARGETS: Readonly<Record<string, RuntimeEndpointId>> = {
+  web: 'web',
+  listener: 'httpListener',
+  'http-listener': 'httpListener',
+  'control-plane': 'controlPlane',
+  controlPlane: 'controlPlane',
+};
+
+type SurfaceTarget =
+  | { readonly kind: 'endpoint'; readonly endpoint: RuntimeEndpointId }
+  | { readonly kind: 'external'; readonly id: (typeof SURFACE_CONFIGS)[number][0] };
+
+/** One target table for list, show, check, enable and disable. */
+function resolveSurfaceTarget(target: string): SurfaceTarget | undefined {
+  const endpoint = ENDPOINT_TARGETS[target];
+  if (endpoint) return { kind: 'endpoint', endpoint };
+  const external = SURFACE_CONFIGS.find(([id]) => id === target);
+  return external ? { kind: 'external', id: external[0] } : undefined;
+}
+
+function unknownSurface(target: string): { readonly output: string; readonly exitCode: number } {
+  const valid = ['web', 'listener', 'control-plane', ...SURFACE_CONFIGS.map(([id]) => id)];
+  return { output: `Unknown surface: ${target}. Valid surfaces: ${valid.join(', ')}.`, exitCode: 2 };
+}
+
+function missingSurfaceKeys(config: ConfigManager, id: string): string[] {
+  const requiredKeys = SURFACE_CONFIGS.find(([surfaceId]) => surfaceId === id)?.[2] ?? [];
+  return requiredKeys.filter((key) => !isPresentConfigValue(config.get(key as ConfigKey)));
+}
+
 /** Every key an enable can write, so a refused flag can put them all back. */
 const SURFACE_ENABLE_KEYS: readonly string[] = [
   ...(['web', 'controlPlane', 'httpListener'] as const).flatMap((endpoint) => [`${endpoint}.hostMode`, `${endpoint}.host`, `${endpoint}.port`]),
@@ -63,6 +95,8 @@ export async function handleSurfacesCommand(runtime: CliCommandRuntime): Promise
   const target = rest[0];
   if (sub === 'enable' || sub === 'disable') {
     if (!target) return { output: `Usage: goodvibes surfaces ${sub} <web|listener|control-plane|surfaceId>`, exitCode: 2 };
+    const resolved = resolveSurfaceTarget(target);
+    if (!resolved) return unknownSurface(target);
     const enabled = sub === 'enable';
     // A refused flag leaves nothing half-applied: the endpoint step runs before the enable
     // writes, and whatever it set before failing is put back.
@@ -73,7 +107,7 @@ export async function handleSurfacesCommand(runtime: CliCommandRuntime): Promise
     };
     /** Endpoints this command moved off their previous binding, for the success line. */
     const reached: RuntimeEndpointId[] = [];
-    if (target === 'web') {
+    if (resolved.kind === 'endpoint' && resolved.endpoint === 'web') {
       if (enabled) {
         const webError = applyTargetEndpointFlagsOrDefault(runtime, 'web');
         if (webError) return refuse(webError);
@@ -92,7 +126,7 @@ export async function handleSurfacesCommand(runtime: CliCommandRuntime): Promise
       }
       config.setDynamic('web.enabled', enabled);
     }
-    else if (target === 'listener' || target === 'http-listener') {
+    else if (resolved.kind === 'endpoint' && resolved.endpoint === 'httpListener') {
       if (enabled) {
         const listenerError = applyTargetEndpointFlagsOrDefault(runtime, 'httpListener');
         if (listenerError) return refuse(listenerError);
@@ -100,7 +134,7 @@ export async function handleSurfacesCommand(runtime: CliCommandRuntime): Promise
       }
       config.setDynamic('danger.httpListener', enabled);
     }
-    else if (target === 'control-plane' || target === 'controlPlane') {
+    else if (resolved.kind === 'endpoint') {
       if (enabled) {
         const controlPlaneError = applyTargetEndpointFlagsOrDefault(runtime, 'controlPlane');
         if (controlPlaneError) return refuse(controlPlaneError);
@@ -109,18 +143,17 @@ export async function handleSurfacesCommand(runtime: CliCommandRuntime): Promise
       config.setDynamic('controlPlane.enabled', enabled);
       config.setDynamic('daemon.enabled', enabled);
     }
-    else if (SURFACE_CONFIGS.some(([id]) => id === target)) {
+    else {
       if (enabled) {
         // An external surface receives its traffic on the HTTP listener, so enabling one opens that listener.
         const listenerError = applyTargetEndpointFlagsOrDefault(runtime, 'httpListener');
         if (listenerError) return refuse(listenerError);
         reached.push('httpListener');
-        enableFeatureFlags(config, getServerSurfaceFeatureFlags({ serverBacked: true, externalSurfaces: [target] }));
+        enableFeatureFlags(config, getServerSurfaceFeatureFlags({ serverBacked: true, externalSurfaces: [resolved.id] }));
         config.setDynamic('danger.httpListener', true);
       }
-      config.setDynamic(`surfaces.${target}.enabled` as ConfigKey, enabled);
+      config.setDynamic(`surfaces.${resolved.id}.enabled` as ConfigKey, enabled);
     }
-    else return { output: `Unknown surface: ${target}`, exitCode: 1 };
     if (enabled) {
       enableServicePosture(config);
     }
@@ -134,21 +167,33 @@ export async function handleSurfacesCommand(runtime: CliCommandRuntime): Promise
           lines.push(`  ${ENDPOINT_LABELS[endpoint]} is reachable from other machines on the network. Pass --hostname 127.0.0.1 to keep it on this machine.`);
         }
       }
+      if (resolved.kind === 'external') {
+        // Enabled is not working: name what the channel still lacks.
+        const missing = missingSurfaceKeys(config, resolved.id);
+        if (missing.length > 0) {
+          lines.push(`  still needs: ${missing.join(', ')}. Set each in the TUI with /config set <key> <value> (a token may be a goodvibes://secrets/ reference), then run goodvibes surfaces check ${resolved.id}.`);
+        }
+      }
     } else {
       lines.push('  Its network settings are left as they are; run `goodvibes surfaces list` to see them.');
     }
     return { output: lines.join('\n'), exitCode: 0 };
   }
   if (sub !== 'list' && sub !== 'status' && sub !== 'check' && sub !== 'show') {
-    return { output: 'Usage: goodvibes surfaces [list|check|show <surfaceId>|enable <surfaceId>|disable <surfaceId>]', exitCode: 2 };
+    return { output: 'Usage: goodvibes surfaces [list|check [<surface>]|show <surface>|enable <surface>|disable <surface>]   (surface: web, listener, control-plane or a channel id)', exitCode: 2 };
   }
+  const resolved = target ? resolveSurfaceTarget(target) : undefined;
+  if (target && !resolved) return unknownSurface(target);
+  const endpointTarget = resolved?.kind === 'endpoint' ? resolved.endpoint : undefined;
+  const externalTarget = resolved?.kind === 'external' ? resolved.id : undefined;
   const controlPlane = resolveRuntimeEndpointBinding(config, 'controlPlane');
   const web = resolveRuntimeEndpointBinding(config, 'web');
   const httpListener = resolveRuntimeEndpointBinding(config, 'httpListener');
   const includeProbe = sub === 'check';
-  const targetExternalSurface = target && SURFACE_CONFIGS.some(([id]) => id === target);
-  const shouldProbeControlPlane = includeProbe && !target;
-  const shouldProbeListener = includeProbe && (!target || targetExternalSurface);
+  /** Endpoints this run reports on: all of them, or the one named. */
+  const shows = (endpoint: RuntimeEndpointId): boolean => !endpointTarget || endpointTarget === endpoint;
+  const shouldProbeControlPlane = includeProbe && (!target || endpointTarget === 'controlPlane' || endpointTarget === 'web');
+  const shouldProbeListener = includeProbe && (!target || externalTarget !== undefined || endpointTarget === 'httpListener');
   // Nothing listens on web.host:web.port; the control-plane listener serves the web bundle, so it is the one probed.
   const [controlPlaneReachable, listenerReachable] = includeProbe
     ? await Promise.all([
@@ -170,8 +215,7 @@ export async function handleSurfacesCommand(runtime: CliCommandRuntime): Promise
       missingFeatureFlags,
     };
   });
-  const filteredSurfaces = target ? externalSurfaces.filter((surface) => surface.id === target) : externalSurfaces;
-  if (target && filteredSurfaces.length === 0) return { output: `Unknown surface: ${target}`, exitCode: 1 };
+  const filteredSurfaces = !target ? externalSurfaces : externalSurfaces.filter((surface) => surface.id === externalTarget);
   const ntfyTopics = resolveGoodVibesNtfyTopics({
     chatTopic: String(config.get('surfaces.ntfy.chatTopic' as ConfigKey) || GOODVIBES_NTFY_CHAT_TOPIC),
     agentTopic: String(config.get('surfaces.ntfy.agentTopic' as ConfigKey) || GOODVIBES_NTFY_AGENT_TOPIC),
@@ -179,12 +223,16 @@ export async function handleSurfacesCommand(runtime: CliCommandRuntime): Promise
   });
   const readinessIssues: string[] = [];
   for (const [endpointLabel, endpointBinding] of [['controlPlane', controlPlane], ['web', web], ['httpListener', httpListener]] as const) {
+    if (!shows(endpointLabel)) continue;
     if (!endpointBinding.recognized) {
       readinessIssues.push(`${endpointLabel}.hostMode '${endpointBinding.hostMode}' is not a recognized mode (local|network|custom); the daemon cannot bind this endpoint until it is corrected.`);
     }
   }
-  if (shouldProbeControlPlane && controlPlane.recognized && config.get('controlPlane.enabled') === true && !controlPlaneReachable) {
+  if (shouldProbeControlPlane && endpointTarget !== 'web' && controlPlane.recognized && config.get('controlPlane.enabled') === true && !controlPlaneReachable) {
     readinessIssues.push(`Control plane is enabled but not reachable on ${controlPlane.host}:${controlPlane.port}.`);
+  }
+  if (endpointTarget === 'web' && includeProbe && config.get('web.enabled') === true && controlPlane.recognized && !controlPlaneReachable) {
+    readinessIssues.push(`Web is enabled but the control plane that serves it is not reachable on ${controlPlane.host}:${controlPlane.port}.`);
   }
   if (shouldProbeListener && httpListener.recognized && config.get('danger.httpListener') === true && !listenerReachable) {
     readinessIssues.push(`HTTP listener is enabled but not reachable on ${httpListener.host}:${httpListener.port}.`);
@@ -229,16 +277,17 @@ export async function handleSurfacesCommand(runtime: CliCommandRuntime): Promise
       recognized: httpListener.recognized,
       reachable: listenerReachable,
     },
+    ...(target ? { target } : {}),
     surfaces: filteredSurfaces,
     readinessIssues,
   };
+  const reachableText = (reachable: boolean | undefined): string => includeProbe && reachable !== undefined ? ` reachable=${yesNo(reachable)}` : '';
   const output = formatJsonOrText(runtime.cli)(value, [
     'GoodVibes surfaces',
-    `  control-plane: ${yesNo(value.controlPlane.enabled)} (${formatRuntimeEndpointBinding(value.controlPlane)})${includeProbe && value.controlPlane.reachable !== undefined ? ` reachable=${yesNo(value.controlPlane.reachable)}` : ''}`,
-    `  web: ${yesNo(value.web.enabled)} (${formatRuntimeEndpointBinding(value.web)})${includeProbe && value.web.reachable !== undefined ? ` reachable=${yesNo(value.web.reachable)}` : ''}`,
-    `  http-listener: ${yesNo(value.httpListener.enabled)} (${formatRuntimeEndpointBinding(value.httpListener)})${includeProbe && value.httpListener.reachable !== undefined ? ` reachable=${yesNo(value.httpListener.reachable)}` : ''}`,
-    '',
-    'External surfaces:',
+    ...(shows('controlPlane') ? [`  control-plane: ${yesNo(value.controlPlane.enabled)} (${formatRuntimeEndpointBinding(value.controlPlane)})${reachableText(value.controlPlane.reachable)}`] : []),
+    ...(shows('web') ? [`  web: ${yesNo(value.web.enabled)} (${formatRuntimeEndpointBinding(value.web)})${reachableText(value.web.reachable)}`] : []),
+    ...(shows('httpListener') ? [`  http-listener: ${yesNo(value.httpListener.enabled)} (${formatRuntimeEndpointBinding(value.httpListener)})${reachableText(value.httpListener.reachable)}`] : []),
+    ...(endpointTarget ? [] : ['', 'External surfaces:']),
     ...value.surfaces.map((surface) => `  ${surface.label.padEnd(16)} enabled=${yesNo(surface.enabled)} ready=${yesNo(surface.ready)}${surface.enabled && surface.missing.length > 0 ? ` missing=${surface.missing.join(',')}` : ''}${surface.enabled && surface.missingFeatureFlags.length > 0 ? ` settingsOff=${surfaceFeatureGateSettingsKeys(surface.missingFeatureFlags).join(',')}` : ''}`),
     ...(filteredSurfaces.some((surface) => surface.id === 'ntfy') ? [
       '',
@@ -313,9 +362,16 @@ export async function buildListenerTestResult(runtime: CliCommandRuntime): Promi
   const issues: string[] = [];
   if (!binding.recognized) issues.push(`httpListener.hostMode '${binding.hostMode}' is not a recognized mode (local|network|custom); the daemon cannot bind until it is corrected.`);
   if (enabled !== true) issues.push('HTTP listener is disabled.');
-  if (enabled === true && service.enabled !== true) issues.push('HTTP listener is enabled but service mode is off.');
-  if (enabled === true && service.autostart !== true) issues.push('HTTP listener is enabled but service autostart is off.');
-  if (enabled === true && service.restartOnFailure !== true) issues.push('HTTP listener is enabled but service restart-on-failure is off.');
+  if (enabled === true) {
+    // The same service rules doctor and service status read; whether a service
+    // is installed is not looked up here, so the autostart rule does not apply.
+    issues.push(...serviceSettingsIssues({
+      enabled: service.enabled === true,
+      autostart: service.autostart === true,
+      restartOnFailure: service.restartOnFailure === true,
+      serverBackedEnabled: true,
+    }).map((issue) => issue.summary));
+  }
   if (isNetworkFacing(enabled, binding) && !auth.userStorePresent) issues.push('Network-facing listener has no local auth user store.');
   if (isNetworkFacing(enabled, binding) && auth.bootstrapCredentialPresent) issues.push('Network-facing listener still has a bootstrap credential file.');
   for (const surface of surfaces) {

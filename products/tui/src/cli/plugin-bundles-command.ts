@@ -192,12 +192,9 @@ async function handleInstall(runtime: CliCommandRuntime, ref: string | undefined
     };
   }
   const plan = planBundleActivation(validation.manifest);
-  if (runtime.cli.flags.yes && runtime.cli.flags.nonInteractive && plan.quarantine.required) {
-    return {
-      output: formatJsonOrText(runtime, { ok: false, committed: false, plan }, `${renderPlan(plan, false)}\nNot recorded: this bundle is quarantined and a person has to read the plan. Re-run with --yes in a terminal, without --non-interactive.`),
-      exitCode: 1,
-    };
-  }
+  // --yes records the plan as shown, quarantine included. A record loads
+  // nothing and the withheld capabilities stay withheld, so a script or agent
+  // that passed --yes gets the same record a person at a terminal would.
   const committed = runtime.cli.flags.yes;
   if (committed) {
     let existing: InstalledBundleRecord[];

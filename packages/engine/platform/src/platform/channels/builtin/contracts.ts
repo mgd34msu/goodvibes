@@ -1,4 +1,5 @@
-import { ChannelPolicyManager } from '../policy-manager.js';
+import { RefusalError, refusal } from '@goodvibes-jev/engine/errors';
+import { admitByAllowlists, ChannelPolicyManager, type ChannelAllowlists } from '../policy-manager.js';
 import type {
   ChannelAccountRecord,
   ChannelAllowlistEditInput,
@@ -7,6 +8,8 @@ import type {
   ChannelAllowlistTarget,
   ChannelAllowlistTargetKind,
   ChannelConversationKind,
+  ChannelDirectoryEntry,
+  ChannelDirectoryScope,
   ChannelDoctorCheck,
   ChannelDoctorReport,
   ChannelDoctorStatus,
@@ -19,14 +22,15 @@ import type {
   ChannelTargetResolveOptions,
 } from '../types.js';
 import type { ChannelPlugin } from '../plugin-registry.js';
-import { resolveChannelHealthState, unobservableRuntime } from '../health.js';
+import { unobservableRuntime } from '../health.js';
+import { builtinCredentialFacts, builtinHealthState } from './health.js';
 import {
   CHANNEL_SETUP_VERSION,
   type BuiltinChannelRuntimeDeps,
   configSectionForSurface,
 } from './shared.js';
 import { renderBuiltinPolicy, surfaceLabelForBuiltin } from './presentation.js';
-import { getBuiltinSetupSchema } from './setup-schema.js';
+import { builtinSendCredentials, getBuiltinSetupSchema } from './setup-schema.js';
 
 interface BuiltinContractContext {
   readonly deps: BuiltinChannelRuntimeDeps;
@@ -130,22 +134,27 @@ export async function getBuiltinDoctorReport(
       : 'No durable configuration is present for this surface.',
     effectiveAccount.configured ? undefined : 'setup',
   );
+  // The credentials checked are the ones the setup schema says this surface
+  // needs to SEND (builtinSendCredentials), not "any secret": a signing secret
+  // alone cannot send, and ntfy on a public topic needs nothing at all.
+  const credentials = builtinCredentialFacts(effectiveAccount);
+  const needsNone = builtinSendCredentials(surface, { provider: effectiveAccount.metadata['provider'], mode: effectiveAccount.metadata['mode'] }).length === 0;
   pushCheck(
     'credentials',
-    'Credentials linked',
-    effectiveAccount.linked ? 'pass' : effectiveAccount.configured ? 'warn' : 'fail',
-    effectiveAccount.linked
-      ? 'At least one secret source is available.'
+    'Credentials needed to send',
+    credentials.declared ? 'pass' : effectiveAccount.configured ? 'warn' : 'fail',
+    credentials.declared
+      ? needsNone ? 'This surface sends without a credential.' : 'The credentials this surface needs to send are declared.'
       : effectiveAccount.configured
-        ? 'Configuration exists but no linked credentials were detected.'
+        ? 'Configuration exists but the credentials this surface needs to send are not declared.'
         : 'No credentials were detected.',
-    effectiveAccount.linked ? undefined : 'retest',
+    credentials.declared ? undefined : 'setup',
   );
   // Declared is not resolved. A `goodvibes://secrets/...` reference naming a
   // key that lives in ANOTHER surface's store passes every check above this one
   // and sends nothing, the exact configuration that made a Telegram bot answer
   // "Missing Telegram bot token" while its reported health read fine.
-  const unresolvedSecrets = effectiveAccount.secrets.filter((secret) => secret.configured && secret.resolved === false);
+  const unresolvedSecrets = credentials.unresolved;
   if (unresolvedSecrets.length > 0) {
     pushCheck(
       'credentials-resolve',
@@ -254,16 +263,8 @@ export async function getBuiltinDoctorReport(
   return {
     surface,
     ...(accountId ? { accountId } : {}),
-    state: resolveChannelHealthState({
-      enabled: effectiveAccount.enabled,
-      // `linked` rather than `configured`: a surface can hold an account
-      // identity (a workspace or topic id) and still have no credential that
-      // resolves, and that surface cannot send.
-      configured: effectiveAccount.linked || surface === 'tui' || surface === 'web',
-      credentialResolves: surface === 'tui' || surface === 'web'
-        || effectiveAccount.secrets.some((secret) => secret.resolved ?? secret.configured),
-      runtime,
-    }),
+    // The same rule the status snapshot and the account record read.
+    state: builtinHealthState(effectiveAccount, effectiveAccount.enabled, runtime).state,
     runtime,
     summary,
     checkedAt: Date.now(),
@@ -291,75 +292,197 @@ export async function getBuiltinLifecycleState(
   };
 }
 
+/** Input to the built-in allowlist edit: the shared shape plus the lock-out guard's facts. */
+export interface BuiltinAllowlistEditInput extends ChannelAllowlistEditInput {
+  /** Apply the edit even though it would refuse the caller's own conversation. */
+  readonly force?: boolean | undefined;
+  /** The caller's own provider user id on this surface, kept admitted unless `force`. */
+  readonly callerUserId?: string | undefined;
+  /** The caller's own conversation id (group or channel) on this surface. */
+  readonly callerConversationId?: string | undefined;
+  readonly callerConversationKind?: ChannelConversationKind | undefined;
+}
+
+/** The id each surface's allowlist compares, said in the refusal so the caller can supply it. */
+function allowlistIdForm(surface: ChannelSurface, kind: ChannelAllowlistTargetKind): string {
+  if (kind === 'user') {
+    switch (surface) {
+      case 'slack': return 'Slack member id (U0123ABCD)';
+      case 'discord': return 'Discord user id (a number)';
+      case 'telegram': return 'Telegram user id (a number)';
+      case 'matrix': return 'Matrix user id (@name:server)';
+      case 'signal': case 'whatsapp': case 'telephony': case 'imessage': case 'bluebubbles': return 'phone number or handle the bridge reports';
+      default: return `${surface} user id`;
+    }
+  }
+  switch (surface) {
+    case 'slack': return 'Slack conversation id (C0123ABCD)';
+    case 'discord': return 'Discord channel id (a number)';
+    case 'telegram': return 'Telegram chat id (a number)';
+    case 'matrix': return 'Matrix room id (!room:server)';
+    default: return `${surface} ${kind} id`;
+  }
+}
+
+const TYPED_ID = /^(user|direct|dm|channel|group):(.+)$/i;
+
+function typedIdKind(prefix: string): ChannelAllowlistTargetKind {
+  const lower = prefix.toLowerCase();
+  if (lower === 'user' || lower === 'direct' || lower === 'dm') return 'user';
+  return lower === 'channel' ? 'channel' : 'group';
+}
+
+function directoryScopeFor(kind: ChannelAllowlistTargetKind): ChannelDirectoryScope {
+  return kind === 'user' ? 'users' : kind === 'channel' ? 'channels' : 'groups';
+}
+
+/** The provider id an exact directory match stands for, or null when the entry is not of the kind asked. */
+function allowlistIdFromEntry(kind: ChannelAllowlistTargetKind, entry: ChannelDirectoryEntry): string | null {
+  if (kind === 'user') {
+    if (entry.kind !== 'user' && entry.kind !== 'member' && entry.kind !== 'self') return null;
+    // A route entry's id is the binding's, not the person's; only provider and member entries name a person.
+    return typeof entry.metadata['externalId'] === 'string' ? null : entry.id;
+  }
+  if (entry.kind === 'user' || entry.kind === 'member' || entry.kind === 'self' || entry.kind === 'service') return null;
+  return entry.groupId ?? entry.id;
+}
+
+function entryNamedBy(entry: ChannelDirectoryEntry, needle: string): boolean {
+  return [entry.id, entry.handle, entry.label, entry.groupId, ...(entry.aliases ?? [])]
+    .some((value) => typeof value === 'string' && value.replace(/^[@#]/, '').toLowerCase() === needle);
+}
+
+/**
+ * Turn allowlist candidates into the provider ids ingress compares.
+ *
+ * A candidate resolves when it is written as a typed id (`user:U123`,
+ * `channel:C123`) or names exactly one directory entry of the asked kind; the
+ * live provider directory is searched, so a person's name or handle becomes
+ * their provider id. Anything else is `unresolved`: a name stored as typed
+ * matches no sender and, once the list is non-empty, refuses everyone else.
+ */
 export async function resolveBuiltinAllowlist(
   context: BuiltinContractContext,
   surface: ChannelSurface,
   input: ChannelAllowlistEditInput,
-  options: { readonly createIfMissing?: boolean } = {},
 ): Promise<ChannelAllowlistResolution> {
   const requested = [...(input.add ?? []), ...(input.remove ?? [])];
   const resolved: ChannelAllowlistTarget[] = [];
   const unresolved: string[] = [];
+  const reasons: Record<string, string> = {};
   const seen = new Set<string>();
   for (const rawInput of requested) {
     const candidate = rawInput.trim();
     if (!candidate || seen.has(candidate)) continue;
     seen.add(candidate);
-    const target = await context.resolveTarget(surface, {
-      input: candidate,
-      // A lookup answers from what exists; only an edit may mint a target.
-      createIfMissing: options.createIfMissing === true,
-      ...(input.kind ? { preferredKind: preferredConversationKindForAllowlist(input.kind) } : {}),
-    });
-    if (!target) {
-      unresolved.push(candidate);
+    const typed = candidate.replace(new RegExp(`^${surface}:`, 'i'), '').match(TYPED_ID);
+    if (typed) {
+      const typedKind = typedIdKind(typed[1] ?? '');
+      const id = (typed[2] ?? '').trim();
+      if (!id || (input.kind && input.kind !== typedKind)) {
+        unresolved.push(candidate);
+        reasons[candidate] = `it is written as a ${typedKind} id but the edit is for kind ${input.kind}`;
+        continue;
+      }
+      resolved.push({ kind: typedKind, input: candidate, id, label: id, metadata: { source: 'typed-id' } });
       continue;
     }
-    const kind = input.kind ?? allowlistTargetKindForResolvedTarget(target);
-    const id = allowlistTargetId(kind, target);
-    if (!id) {
+    const kind = input.kind;
+    if (!kind) {
       unresolved.push(candidate);
+      reasons[candidate] = 'no kind was given, so it is not known whether it names a person or a conversation';
       continue;
     }
-    resolved.push({
-      kind,
-      input: candidate,
-      id,
-      label: target.display ?? target.to,
-      metadata: { target },
-    });
+    const needle = candidate.replace(/^[@#]/, '').toLowerCase();
+    let entries: readonly ChannelDirectoryEntry[] = [];
+    try {
+      entries = await context.deps.channelPlugins.queryDirectory(surface, { query: needle, scope: directoryScopeFor(kind), limit: 20, live: true });
+    } catch (error) {
+      unresolved.push(candidate);
+      reasons[candidate] = `the ${surface} directory could not be read (${error instanceof Error ? error.message : String(error)})`;
+      continue;
+    }
+    const matches = entries
+      .filter((entry) => entryNamedBy(entry, needle))
+      .map((entry) => ({ entry, id: allowlistIdFromEntry(kind, entry) }))
+      .filter((match): match is { entry: ChannelDirectoryEntry; id: string } => match.id !== null);
+    const ids = new Set(matches.map((match) => match.id));
+    if (ids.size !== 1) {
+      unresolved.push(candidate);
+      reasons[candidate] = ids.size === 0 ? `no ${kind} on ${surface} is named that` : `it names ${ids.size} different ${kind}s`;
+      continue;
+    }
+    const match = matches[0]!;
+    resolved.push({ kind, input: candidate, id: match.id, label: match.entry.label, metadata: { source: 'directory', directoryEntryId: match.entry.id } });
   }
   return {
     surface,
     resolved,
     unresolved,
-    metadata: {},
+    metadata: Object.keys(reasons).length > 0 ? { reasons } : {},
   };
 }
 
+function refuseAllowlistEdit(code: string, reason: string, next: readonly string[]): never {
+  throw new RefusalError(refusal({ code, state: 'the allowlist was not changed', reason, next, status: 409 }));
+}
+
+/**
+ * Edit a surface's allowlists. The edit names its kind, every added entry must
+ * resolve to a provider id, and an edit that would refuse the caller's own
+ * conversation is refused unless `force` is set; each refusal changes nothing
+ * and says what to pass instead.
+ */
 export async function editBuiltinAllowlist(
   context: BuiltinContractContext,
   surface: ChannelSurface,
-  input: ChannelAllowlistEditInput,
+  input: BuiltinAllowlistEditInput,
 ): Promise<ChannelAllowlistEditResult> {
   await context.channelPolicy.start();
-  const resolution = await resolveBuiltinAllowlist(context, surface, input, { createIfMissing: true });
   const addInputs = new Set((input.add ?? []).map((value) => value.trim()).filter(Boolean));
   const removeInputs = new Set((input.remove ?? []).map((value) => value.trim()).filter(Boolean));
+  const typedOnly = [...addInputs, ...removeInputs].every((value) => TYPED_ID.test(value.replace(new RegExp(`^${surface}:`, 'i'), '')));
+  if (!input.kind && !typedOnly) {
+    refuseAllowlistEdit('CHANNEL_ALLOWLIST_KIND_REQUIRED', 'An allowlist edit must say whether it lists people or conversations.',
+      ['Pass kind: user, channel or group, or write each entry as user:<id>, channel:<id> or group:<id>.']);
+  }
+  const resolution = await resolveBuiltinAllowlist(context, surface, input);
+  const unresolvedAdds = resolution.unresolved.filter((value) => addInputs.has(value));
+  if (unresolvedAdds.length > 0) {
+    const reasons = (resolution.metadata['reasons'] ?? {}) as Record<string, string>;
+    const kind = input.kind ?? 'user';
+    refuseAllowlistEdit('CHANNEL_ALLOWLIST_UNRESOLVED',
+      `These entries do not resolve to a ${surface} id: ${unresolvedAdds.map((value) => `'${value}'${reasons[value] ? ` (${reasons[value]})` : ''}`).join(', ')}.`,
+      [`Pass the ${allowlistIdForm(surface, kind)} as ${kind}:<id>, or check the name with the resolve-allowlist action.`]);
+  }
   const added = resolution.resolved.filter((entry) => addInputs.has(entry.input));
   const removed = resolution.resolved.filter((entry) => removeInputs.has(entry.input));
   const existing = context.channelPolicy.getPolicy(surface);
   const scoped = Boolean(input.groupId || input.channelId || input.workspaceId);
+  const ids = (entries: readonly ChannelAllowlistTarget[], kind: ChannelAllowlistTargetKind) => entries.filter((entry) => entry.kind === kind).map((entry) => entry.id);
+  const nextLists = (current: ChannelAllowlists) => ({
+    allowlistUserIds: applyAllowlistChanges(current.allowlistUserIds, ids(added, 'user'), ids(removed, 'user')),
+    allowlistChannelIds: applyAllowlistChanges(current.allowlistChannelIds, ids(added, 'channel'), ids(removed, 'channel')),
+    allowlistGroupIds: applyAllowlistChanges(current.allowlistGroupIds, ids(added, 'group'), ids(removed, 'group')),
+  });
 
-  if (scoped) {
-    // The group is the one matching EVERY scope field given: matching on any
-    // one of them would let an edit scoped to (group A, workspace W) rewrite
-    // another group's policy that merely shares W.
-    const match = existing.groupPolicies.find((entry) => (
+  // The group is the one matching EVERY scope field given: matching on any one
+  // of them would let an edit scoped to (group A, workspace W) rewrite another
+  // group's policy that merely shares W.
+  const match = scoped
+    ? existing.groupPolicies.find((entry) => (
       (!input.groupId || entry.groupId === input.groupId)
       && (!input.channelId || entry.channelId === input.channelId)
       && (!input.workspaceId || entry.workspaceId === input.workspaceId)
-    ));
+    ))
+    : undefined;
+  const before: ChannelAllowlists = scoped
+    ? { allowlistUserIds: match?.allowlistUserIds ?? [], allowlistChannelIds: match?.allowlistChannelIds ?? [], allowlistGroupIds: match?.allowlistGroupIds ?? [] }
+    : existing;
+  const after = nextLists(before);
+  if (input.force !== true) assertCallerStaysAdmitted(surface, input, before, after);
+
+  if (scoped) {
     const scopeKey = [input.groupId, input.channelId, input.workspaceId].filter(Boolean).join(':') || 'scope';
     const nextGroup = {
       id: match?.id ?? `allowlist:${surface}:${scopeKey}`,
@@ -367,9 +490,7 @@ export async function editBuiltinAllowlist(
       ...(input.groupId ? { groupId: input.groupId } : match?.groupId ? { groupId: match.groupId } : {}),
       ...(input.channelId ? { channelId: input.channelId } : match?.channelId ? { channelId: match.channelId } : {}),
       ...(input.workspaceId ? { workspaceId: input.workspaceId } : match?.workspaceId ? { workspaceId: match.workspaceId } : {}),
-      allowlistUserIds: applyAllowlistChanges(match?.allowlistUserIds ?? [], added.filter((entry) => entry.kind === 'user').map((entry) => entry.id), removed.filter((entry) => entry.kind === 'user').map((entry) => entry.id)),
-      allowlistChannelIds: applyAllowlistChanges(match?.allowlistChannelIds ?? [], added.filter((entry) => entry.kind === 'channel').map((entry) => entry.id), removed.filter((entry) => entry.kind === 'channel').map((entry) => entry.id)),
-      allowlistGroupIds: applyAllowlistChanges(match?.allowlistGroupIds ?? [], added.filter((entry) => entry.kind === 'group').map((entry) => entry.id), removed.filter((entry) => entry.kind === 'group').map((entry) => entry.id)),
+      ...after,
       metadata: match?.metadata ?? {},
     };
     const updated = await context.channelPolicy.upsertPolicy(surface, {
@@ -378,25 +499,51 @@ export async function editBuiltinAllowlist(
         nextGroup,
       ],
     });
-    return {
-      surface,
-      updatedPolicy: updated,
-      resolution,
-      metadata: { scoped: true, groupPolicyId: nextGroup.id },
-    };
+    return { surface, updatedPolicy: updated, resolution, metadata: { scoped: true, groupPolicyId: nextGroup.id, rule: ALLOWLIST_RULE } };
   }
 
-  const updated = await context.channelPolicy.upsertPolicy(surface, {
-    allowlistUserIds: applyAllowlistChanges(existing.allowlistUserIds, added.filter((entry) => entry.kind === 'user').map((entry) => entry.id), removed.filter((entry) => entry.kind === 'user').map((entry) => entry.id)),
-    allowlistChannelIds: applyAllowlistChanges(existing.allowlistChannelIds, added.filter((entry) => entry.kind === 'channel').map((entry) => entry.id), removed.filter((entry) => entry.kind === 'channel').map((entry) => entry.id)),
-    allowlistGroupIds: applyAllowlistChanges(existing.allowlistGroupIds, added.filter((entry) => entry.kind === 'group').map((entry) => entry.id), removed.filter((entry) => entry.kind === 'group').map((entry) => entry.id)),
-  });
-  return {
-    surface,
-    updatedPolicy: updated,
-    resolution,
-    metadata: { scoped: false },
-  };
+  const updated = await context.channelPolicy.upsertPolicy(surface, after);
+  return { surface, updatedPolicy: updated, resolution, metadata: { scoped: false, rule: ALLOWLIST_RULE } };
+}
+
+/** The rule the edited lists are applied by (admitByAllowlists), stated in every edit result. */
+const ALLOWLIST_RULE = 'A direct conversation is admitted when the user list is empty or holds its sender. A group, channel or thread is '
+  + 'admitted when its conversation is on the group or channel list, or its sender is on the user list; empty lists restrict nobody.';
+
+/**
+ * Refuse an edit that would shut out the caller: their own conversation when
+ * they named it, and otherwise the first restriction of an empty user list,
+ * which admits only the listed ids from then on and so refuses whoever owns
+ * the surface unless they are among them.
+ */
+function assertCallerStaysAdmitted(
+  surface: ChannelSurface,
+  input: BuiltinAllowlistEditInput,
+  before: ChannelAllowlists,
+  after: ChannelAllowlists,
+): void {
+  if (input.callerUserId || input.callerConversationId) {
+    const kind = input.callerConversationKind ?? (input.callerConversationId ? 'group' : 'direct');
+    const subject = {
+      conversationKind: kind,
+      userId: input.callerUserId,
+      groupId: input.callerConversationId,
+      channelId: input.callerConversationId,
+    };
+    const was = admitByAllowlists(before, subject);
+    const now = admitByAllowlists(after, subject);
+    if (was.allowed && !now.allowed) {
+      refuseAllowlistEdit('CHANNEL_ALLOWLIST_LOCKOUT',
+        `This edit would refuse your own ${surface} conversation (${now.reason}).`,
+        ['Add your own id in the same edit, or pass force: true to apply it anyway.']);
+    }
+    return;
+  }
+  if (before.allowlistUserIds.length === 0 && after.allowlistUserIds.length > 0) {
+    refuseAllowlistEdit('CHANNEL_ALLOWLIST_LOCKOUT',
+      `The ${surface} user list is empty, so this edit would admit only ${after.allowlistUserIds.join(', ')} from now on and refuse every other sender, including the owner unless listed.`,
+      ['Pass callerUserId with your own id so the edit keeps you admitted, add your own id in the same edit, or pass force: true.']);
+  }
 }
 
 function getConfiguredSetupVersion(context: BuiltinContractContext, surface: ChannelSurface): number {
@@ -415,22 +562,4 @@ function applyAllowlistChanges(existing: readonly string[], add: readonly string
     if (value.trim()) next.delete(value.trim());
   }
   return [...next].sort((a, b) => a.localeCompare(b));
-}
-
-function preferredConversationKindForAllowlist(kind: ChannelAllowlistTargetKind): ChannelConversationKind {
-  if (kind === 'user') return 'direct';
-  if (kind === 'channel') return 'channel';
-  return 'group';
-}
-
-function allowlistTargetKindForResolvedTarget(target: ChannelResolvedTarget): ChannelAllowlistTargetKind {
-  if (target.kind === 'direct') return 'user';
-  if (target.kind === 'channel') return 'channel';
-  return 'group';
-}
-
-function allowlistTargetId(kind: ChannelAllowlistTargetKind, target: ChannelResolvedTarget): string | null {
-  if (kind === 'user') return target.to || null;
-  if (kind === 'channel') return target.channelId ?? target.to ?? null;
-  return target.groupId ?? target.threadId ?? target.channelId ?? target.to ?? null;
 }

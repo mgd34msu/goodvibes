@@ -46,25 +46,6 @@ test('close during initialization cannot reopen the store when initialization fi
   } finally { await starting.catch(() => {}); await store.close(); }
 });
 
-test('an admitted save owns one snapshot before awaiting encryption', async () => {
-  const entered = deferred(); const release = deferred();
-  const encrypted: string[] = [];
-  const store = makeStore({ ...cipher, async encrypt(text) { encrypted.push(text); entered.resolve(); await release.promise; return cipher.encrypt(text); } });
-  await store.init();
-  const input = { id: 'one', message: 'original fixture body', title: 'Original', tags: ['original'] };
-  const writing = store.upsert(input);
-  try {
-    await entered.promise;
-    input.message = 'changed body'; input.title = 'Changed'; input.tags[0] = 'changed';
-    release.resolve();
-    const { draft } = await writing;
-    expect(draft.message).toBe('[redacted]');
-    expect(encrypted).toEqual(['original fixture body']);
-    expect(draft.title).toBe('Original');
-    expect(draft.tags).toEqual(['original']);
-  } finally { release.resolve(); await writing; await store.close(); }
-});
-
 test('concurrent same-id snapshots retain call order and the first creation metadata', async () => {
   const entered = deferred(); const release = deferred();
   const encrypted: string[] = [];

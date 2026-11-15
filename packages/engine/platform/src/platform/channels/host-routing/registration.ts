@@ -18,7 +18,7 @@
 
 import type { RoutingHostContext as HandlerContext } from './registration-types.js';
 import { assertConfirmed } from '../../control-plane/host-handlers.js';
-import { requestsNativeAdmission, retainNativeMutationRequest, runNativeMutation } from '../../control-plane/native-mutation.js';
+import { requestsNativeAdmission, runNativeMutation } from '../../control-plane/native-mutation.js';
 import {
   registerCatalogHandlers,
   HandlerError,
@@ -204,10 +204,7 @@ export function registerRoutingMethods(ctx: HandlerContext): RoutingRegistration
     return work;
   };
   const admit = (handler: TypedHandler<unknown, unknown>, mutation = false): TypedHandler<unknown, unknown> =>
-    (input) => {
-      const assertReceived = mutation && requestsNativeAdmission(input.body) ? retainNativeMutationRequest(input.body) : () => {};
-      return own(() => { assertReceived(); input.context.signal?.throwIfAborted(); return handler(input); }, mutation);
-    };
+    (input) => own(() => { input.context.signal?.throwIfAborted(); return handler(input); }, mutation);
 
   let initPromise: Promise<void> | null = null;
   const ensureInit = async (): Promise<void> => {
@@ -243,10 +240,8 @@ export function registerRoutingMethods(ctx: HandlerContext): RoutingRegistration
   const assignHandler: TypedHandler<RoutingAssignBody, RoutingAssignResult> = async ({ body, context }) => {
     const autonomous = requestsNativeAdmission(body);
     if (!autonomous) assertConfirmed(body, context);
-    const assertRequest = autonomous ? retainNativeMutationRequest(body) : () => {};
     context.signal?.throwIfAborted();
     await ensureInit();
-    assertRequest(); context.signal?.throwIfAborted();
     const profileId = optionalString(body.profileId);
     if (profileId === undefined) {
       throw new HandlerError('profileId is required', 'ROUTING_INVALID_PROFILE_ID', 400);
@@ -270,10 +265,11 @@ export function registerRoutingMethods(ctx: HandlerContext): RoutingRegistration
       profileId,
       ...(label !== undefined ? { label } : {}),
     };
-    const target = autonomous ? store.retainTarget('channel', channelId) : undefined;
+    // The row this assignment read; an autonomous write applies only to it.
+    const selected = autonomous ? store.selectRow('channel', channelId) : undefined;
     const { route, created } = await runNativeMutation({ host: ctx.nativeMutationHost, method: ASSIGN_METHOD, body, context,
-      target: { channelId, current: target?.target ?? null }, assertTargetCurrent: () => { assertRequest(); if (closed) throw closedError(); target?.assertCurrent(); },
-      mutate: (assertCurrent, _admission, withPublication) => store.upsert(input, autonomous ? assertCurrent : undefined, withPublication) });
+      target: { channelId, current: selected?.target ?? null }, assertTargetCurrent: () => { if (closed) throw closedError(); },
+      mutate: (assertCurrent, _admission, withPublication) => store.upsert(input, autonomous ? assertCurrent : undefined, withPublication, selected?.updatedAt) });
     // A surface that owns its own profiles can legitimately name one this host has never seen,
     // so a typo is surfaced to the operator log rather than refused.
     if (ctx.hasProfile !== undefined && !ctx.hasProfile(profileId)) {
@@ -306,18 +302,16 @@ export function registerRoutingMethods(ctx: HandlerContext): RoutingRegistration
   const deleteHandler: TypedHandler<RoutingDeleteBody, RoutingDeleteResult> = async ({ body, context }) => {
     const autonomous = requestsNativeAdmission(body);
     if (!autonomous) assertConfirmed(body, context);
-    const assertRequest = autonomous ? retainNativeMutationRequest(body) : () => {};
     context.signal?.throwIfAborted();
     await ensureInit();
-    assertRequest(); context.signal?.throwIfAborted();
     const assignmentId = optionalString(body.assignmentId);
     if (assignmentId === undefined) {
-      throw new Error('assignmentId is required');
+      throw new HandlerError('assignmentId is required; list the routes to find it.', 'ROUTING_INVALID_ASSIGNMENT_ID', 400);
     }
-    const target = autonomous ? store.retainTarget('assignment', assignmentId) : undefined;
+    const selected = autonomous ? store.selectRow('assignment', assignmentId) : undefined;
     const deleted = await runNativeMutation({ host: ctx.nativeMutationHost, method: DELETE_METHOD, body, context,
-      target: { assignmentId, current: target?.target ?? null }, assertTargetCurrent: () => { assertRequest(); if (closed) throw closedError(); target?.assertCurrent(); },
-      mutate: (assertCurrent, _admission, withPublication) => store.delete(assignmentId, autonomous ? assertCurrent : undefined, withPublication) });
+      target: { assignmentId, current: selected?.target ?? null }, assertTargetCurrent: () => { if (closed) throw closedError(); },
+      mutate: (assertCurrent, _admission, withPublication) => store.delete(assignmentId, autonomous ? assertCurrent : undefined, withPublication, selected?.updatedAt) });
     ctx.logger.info('channels.routing.delete', {
       assignmentId,
       deleted,

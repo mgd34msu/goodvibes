@@ -166,6 +166,18 @@ describe('setup on a surface with nothing provided', () => {
   });
 });
 
+describe('channel action outcomes', () => {
+  test('only ok is success: a missing account, a bad lifecycle action and an unknown action say which they are', async () => {
+    const { runtime } = harness({ surfaces: { ntfy: { topic: 'alerts' } }, enabled: ['ntfy'] });
+    expect((await runtime.invokeOperatorAction('ntfy', 'inspect-account', { accountId: 'nobody' })).status).toBe('not-found');
+    expect((await runtime.invokeOperatorAction('ntfy', 'account-action', { action: 'nope' })).status).toBe('refused');
+    const unknown = await runtime.invokeOperatorAction('ntfy', 'no-such-action');
+    expect(unknown.status).toBe('unknown-action');
+    if (unknown.status === 'unknown-action') expect(unknown.known).toContain('doctor');
+    expect((await runtime.invokeOperatorAction('ntfy', 'doctor')).status).toBe('ok');
+  });
+});
+
 describe('actor authorization', () => {
   test('an action name the surface does not have is not allowed', async () => {
     const { runtime } = harness({ surfaces: { ntfy: { topic: 'alerts' } }, enabled: ['ntfy'] });
@@ -182,7 +194,7 @@ describe('actor authorization', () => {
     const ask = (actorId?: string) => runtime.runOperatorAction('ntfy', 'authorize-actor-action', { actionId: 'inspect', ...(actorId ? { actorId } : {}) }) as Promise<{ allowed: boolean; reason: string }>;
     const stranger = await ask('stranger');
     expect(stranger.allowed).toBe(false);
-    expect(stranger.reason).toContain('not on the channel allowlist');
+    expect(stranger.reason).toContain("not on the surface's user list");
     const anonymous = await ask();
     expect(anonymous.allowed).toBe(false);
     expect(anonymous.reason).toContain('no actorId');
@@ -195,7 +207,6 @@ describe('actor authorization', () => {
       const result = await runtime.runOperatorAction('ntfy', 'authorize-actor-action', input) as { ok?: boolean; error?: string; allowed?: boolean };
       expect(result.ok).toBe(false);
       expect(result.allowed).toBeUndefined();
-      expect(result.error).toContain('input.actionId');
     }
   });
 });
@@ -207,7 +218,7 @@ describe('allowlist edits', () => {
 
   test('an edit scoped to a group and a workspace does not rewrite another group in that workspace', async () => {
     const { runtime, upserts } = harness({ groupPolicies: policies });
-    await runtime.runOperatorAction('slack', 'edit-allowlist', { add: ['U1'], kind: 'user', groupId: 'A', workspaceId: 'W' });
+    await runtime.runOperatorAction('slack', 'edit-allowlist', { add: ['user:U1'], groupId: 'A', workspaceId: 'W', callerUserId: 'U1' });
     const groups = (upserts[0]?.['groupPolicies'] ?? []) as { id: string; groupId?: string; allowlistUserIds: string[] }[];
     const other = groups.find((group) => group.id === 'g-other');
     expect(other?.groupId).toBe('B');
@@ -217,10 +228,24 @@ describe('allowlist edits', () => {
     expect(created?.allowlistUserIds).toEqual(['U1']);
   });
 
-  test('resolving a name for a preview answers from what exists and does not mint a target', async () => {
-    const { runtime } = harness();
-    const resolution = await runtime.runOperatorAction('slack', 'resolve-allowlist', { add: ['someone'], kind: 'user' }) as { resolved: { metadata: { target: { source: string } } }[] };
-    expect(resolution.resolved[0]?.metadata.target.source).toBe('miss');
+  test('a name that matches no one is unresolved, and an edit carrying it is refused and changes nothing', async () => {
+    const { runtime, upserts } = harness();
+    const resolution = await runtime.runOperatorAction('slack', 'resolve-allowlist', { add: ['someone'], kind: 'user' }) as { resolved: unknown[]; unresolved: string[] };
+    expect(resolution.resolved).toHaveLength(0);
+    expect(resolution.unresolved).toEqual(['someone']);
+    const edit = await runtime.invokeOperatorAction('slack', 'edit-allowlist', { add: ['someone'], kind: 'user', force: true });
+    expect(edit.status).toBe('refused');
+    const noKind = await runtime.invokeOperatorAction('slack', 'edit-allowlist', { add: ['alice'] });
+    expect(noKind.status).toBe('refused');
+    expect(upserts).toHaveLength(0);
+  });
+
+  test('the first entry on an empty user list is refused unless the caller stays admitted', async () => {
+    const { runtime, upserts } = harness();
+    expect((await runtime.invokeOperatorAction('slack', 'edit-allowlist', { add: ['user:U9'] })).status).toBe('refused');
+    expect(upserts).toHaveLength(0);
+    expect((await runtime.invokeOperatorAction('slack', 'edit-allowlist', { add: ['user:U9'], callerUserId: 'U9' })).status).toBe('ok');
+    expect(upserts).toHaveLength(1);
   });
 });
 

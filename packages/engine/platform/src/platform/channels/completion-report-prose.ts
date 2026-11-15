@@ -17,11 +17,11 @@
  * who asked. It belongs in the transcript and in operator surfaces; on a lock
  * screen it is paperwork where an answer should be.
  *
- * The source of that shape is fixed too (a conversational spawn no longer asks
- * for a report at all). This module is the boundary half of the same fix, and
- * it is deliberate duplication: any future prompt or archetype change can
- * reintroduce the shape, and no such change should be able to put a form back
- * on someone's phone.
+ * A conversational spawn is not asked for the form at all, and its answer is
+ * never passed through here: headings are a guess, and an ordinary answer
+ * written under Summary / Issues / Verification lost everything but its first
+ * section. reply-render.ts applies this only to a run whose `replyStyle` is
+ * `report`, the runs the template above is given to.
  *
  * Pure string work, no I/O, no clock, no surface knowledge.
  */

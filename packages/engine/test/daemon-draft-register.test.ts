@@ -102,17 +102,16 @@ describe('registerDraftMethods', () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  test('caller confirmation cannot edit or delete a native wire reference without its paired owner', async () => {
+  test('a confirmed save or delete by wire reference acts on the one row it names', async () => {
     const privateId = 'draft-20261011000001-deadbeef';
     const saved = await store.upsert({ id: privateId, message: 'original' });
     const reference = saved.draft.wireReference;
-    await expect(catalog.invoke(SAVE, confirmedSave({ id: reference, message: 'edited' })))
-      .rejects.toMatchObject({ status: 403, code: 'NATIVE_DRAFT_REFERENCE_FORBIDDEN' });
-    await expect(catalog.invoke(DELETE, invocation({ draftId: reference, confirm: true }, { explicit: true })))
-      .rejects.toMatchObject({ status: 403, code: 'NATIVE_DRAFT_REFERENCE_FORBIDDEN' });
-    expect(store.count()).toBe(1); expect(store.get(reference)).toBeNull();
-    expect(store.get(privateId)?.wireReference).toBe(reference);
-    expect(store.get(privateId)?.message).toBe(saved.draft.message);
+    const edited = await catalog.invoke(SAVE, confirmedSave({ id: reference, message: 'edited' })) as { draft: { id: string }; created: boolean };
+    expect(edited.created).toBe(false);
+    expect(edited.draft.id).toBe(reference);
+    expect(store.count()).toBe(1);
+    expect(await catalog.invoke(DELETE, invocation({ draftId: reference, confirm: true }, { explicit: true }))).toMatchObject({ deleted: true });
+    expect(store.count()).toBe(0);
   });
 
   test('attaches handlers to the four canonical platform descriptors', () => {
@@ -146,7 +145,7 @@ describe('registerDraftMethods', () => {
     expect(listed.drafts.length).toBe(1);
   });
 
-  test('get returns a flat redacted draft, or a notFound marker', async () => {
+  test('get returns the draft with its text to the owner, or a notFound marker', async () => {
     const saved = (await catalog.invoke(
       SAVE,
       confirmedSave({ message: 'body' }),
@@ -158,8 +157,11 @@ describe('registerDraftMethods', () => {
     };
     expect(got.notFound).toBeUndefined();
     expect(got.id).toBe(saved.draft.id);
-    expect(got.message).toBe('[redacted]');
+    expect(got.message).toBe('body');
     expect(got).not.toHaveProperty('messageDigest');
+    const notOwner = invocation({ draftId: saved.draft.id });
+    (notOwner.context as { admin: boolean }).admin = false;
+    expect(((await catalog.invoke(GET, notOwner)) as { message: string }).message).toBe('[redacted]');
 
     const missing = (await catalog.invoke(GET, invocation({ draftId: 'ghost' }))) as {
       notFound: boolean;

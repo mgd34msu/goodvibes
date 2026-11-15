@@ -13,7 +13,8 @@ import {
 
 describe('agent channel tools', () => {
   test('tools that actuate devices, edit allowlists or run account actions are flagged and say so to the agent', () => {
-    const tools = listBuiltinAgentTools({ listTools: listBuiltinTools, runTool: async () => ({}) } as never, 'homeassistant' as never);
+    const enabled = { surfaceDeliveryEnabled: () => true };
+    const tools = listBuiltinAgentTools({ deps: enabled, listTools: listBuiltinTools, invokeTool: async () => ({ status: 'ok', result: {} }) } as never, 'homeassistant' as never);
     const byName = new Map(tools.map((tool) => [tool.definition.name, tool.definition.description]));
     for (const name of ['homeassistant_call_service', 'homeassistant_fire_event', 'homeassistant_allowlist_edit', 'homeassistant_account_action']) {
       expect(byName.get(name)).toContain('only when the owner asked');
@@ -21,6 +22,15 @@ describe('agent channel tools', () => {
     expect(byName.get('homeassistant_states')).not.toContain('only when the owner asked');
     expect(listBuiltinTools('slack' as never).find((tool) => tool.name === 'slack_allowlist_edit')?.metadata.dangerous).toBe(true);
     expect(listBuiltinTools('slack' as never).find((tool) => tool.name === 'slack_status')?.metadata.dangerous).toBeUndefined();
+    // Each provider operation is its own tool, flagged from the operation table.
+    expect(listBuiltinTools('slack' as never).find((tool) => tool.name === 'slack_runtime_stop')?.metadata.dangerous).toBe(true);
+    expect(listBuiltinTools('slack' as never).find((tool) => tool.name === 'slack_runtime_status')?.metadata.dangerous).toBeUndefined();
+    expect(listBuiltinTools('ntfy' as never).find((tool) => tool.name === 'ntfy_poll')?.metadata.dangerous).toBe(true);
+  });
+
+  test('a switched-off surface offers the agent no tools', () => {
+    const disabled = { surfaceDeliveryEnabled: () => false };
+    expect(listBuiltinAgentTools({ deps: disabled, listTools: listBuiltinTools, invokeTool: async () => ({ status: 'ok', result: {} }) } as never, 'slack' as never)).toHaveLength(0);
   });
 });
 

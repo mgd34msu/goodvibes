@@ -82,6 +82,11 @@ export function getBuiltinSetupSchema(surface: ChannelSurface): ChannelSetupSche
             envKeys: ['SLACK_APP_TOKEN'],
             configKeys: ['surfaces.slack.appToken'],
           }),
+          secretTarget(surface, 'webhookUrl', 'Webhook URL', false, 'Posts outbound messages into one channel without a bot token.', {
+            serviceName: 'slack',
+            serviceField: 'webhookUrl',
+            envKeys: ['SLACK_WEBHOOK_URL'],
+          }),
         ],
         externalSteps: [
           'Create or install the Slack app with the required bot scopes.',
@@ -117,6 +122,11 @@ export function getBuiltinSetupSchema(surface: ChannelSurface): ChannelSetupSche
             serviceField: 'publicKey',
             envKeys: ['DISCORD_PUBLIC_KEY'],
             configKeys: ['surfaces.discord.publicKey'],
+          }),
+          secretTarget(surface, 'webhookUrl', 'Webhook URL', false, 'Posts outbound messages into one channel without a bot token.', {
+            serviceName: 'discord',
+            serviceField: 'webhookUrl',
+            envKeys: ['DISCORD_WEBHOOK_URL'],
           }),
         ],
         externalSteps: [
@@ -583,6 +593,51 @@ export function getBuiltinSetupSchema(surface: ChannelSurface): ChannelSetupSche
         ],
         metadata: {},
       };
+  }
+}
+
+/**
+ * Which credentials a surface needs before it can SEND, as alternatives: the
+ * surface can send when every target id in at least one alternative resolves.
+ * An empty list means the surface sends with no credential at all (ntfy on a
+ * public topic, a bridge that takes no token, the generic webhook).
+ *
+ * This is the one statement of it. Health, the account record and the doctor
+ * read it; each used to guess from "the primary secret" or "any secret", which
+ * called tokenless ntfy unconfigured, Twilio degraded for want of a bridge
+ * token, and Slack linked on the strength of its signing secret alone.
+ *
+ * `settings` carries the two values that change the answer: telephony's
+ * provider and mode.
+ */
+export function builtinSendCredentials(
+  surface: ChannelSurface,
+  settings: { readonly provider?: unknown; readonly mode?: unknown } = {},
+): readonly (readonly string[])[] {
+  switch (surface) {
+    case 'slack':
+    case 'discord':
+      return [['primary'], ['webhookUrl']];
+    case 'google-chat':
+      return [['webhookUrl']];
+    case 'homeassistant':
+    case 'telegram':
+    case 'whatsapp':
+    case 'mattermost':
+    case 'matrix':
+      return [['primary']];
+    case 'msteams':
+    case 'bluebubbles':
+      return [['password']];
+    case 'telephony':
+      return settings.provider === 'bridge' || settings.mode === 'bridge' ? [] : [['authToken']];
+    case 'tui':
+    case 'web':
+    case 'ntfy':
+    case 'webhook':
+    case 'signal':
+    case 'imessage':
+      return [];
   }
 }
 

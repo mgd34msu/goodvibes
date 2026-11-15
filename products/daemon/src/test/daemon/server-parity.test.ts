@@ -2318,17 +2318,16 @@ async function proveAutonomousRead(): Promise<void> {
     expect(authorizeBody.result.allowed).toBe(true);
     expect(authorizeBody.result.actionAvailable).toBe(true);
 
-    const providerApi = await fetch(`http://127.0.0.1:${boundPort}/api/channels/actions/slack/provider-api`, {
+    const providerApi = await fetch(`http://127.0.0.1:${boundPort}/api/channels/actions/slack/oauth-url`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${TEST_TOKEN}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ operation: 'oauth_url', clientId: 'C123' }),
+      body: JSON.stringify({ clientId: 'C123' }),
     });
     expect(providerApi.status, providerApi.status === 200 ? undefined : (await providerApi.clone().text()).slice(0, 500)).toBe(200);
-    const providerApiBody = await providerApi.json() as { result: { ok: boolean; url?: string } };
-    expect(providerApiBody.result.ok).toBe(true);
+    const providerApiBody = await providerApi.json() as { result: { url?: string } };
     expect(providerApiBody.result.url).toContain('slack.com/oauth/v2/authorize');
 
     const integratedAccounts = await fetch(`http://127.0.0.1:${boundPort}/api/accounts`, {

@@ -16,6 +16,7 @@ import { summarizeError } from '../utils/error-display.js';
 import { renderNoticeForSurface } from '../email/inbound-notice-channels.js';
 import type { StructuredNotice } from '../email/inbound-notice.js';
 import { resolveSecretInput } from '../config/secret-refs.js';
+import { resolveSurfaceSecret } from '../channels/builtin/surface-secrets.js';
 import { isOwnerFacingProgress } from '../agents/progress-audience.js';
 import { renderAgentCompletionAnswer } from '../agents/completion-answer.js';
 import {
@@ -885,31 +886,22 @@ export class DaemonSurfaceDeliveryHelper {
     await deliverWebhookApprovalUpdate(this.approvalDeliveryDeps(), approval, binding);
   }
 
+  // Every surface credential is read through the setup schema's statement of
+  // where it lives (channels/builtin/surface-secrets.ts), the reader setup uses.
   private async resolveSlackWebhookUrl(): Promise<string | null> {
-    return await this.context.serviceRegistry.resolveSecret('slack', 'webhookUrl')
-      ?? process.env.SLACK_WEBHOOK_URL
-      ?? null;
+    return resolveSurfaceSecret(this.context, 'slack', 'webhookUrl');
   }
 
   private async resolveSlackBotToken(): Promise<string | null> {
-    return await this.context.serviceRegistry.resolveSecret('slack', 'primary')
-      ?? await this.resolveConfigSecret(this.context.configManager.get('surfaces.slack.botToken'))
-      ?? process.env.SLACK_BOT_TOKEN
-      ?? null;
+    return resolveSurfaceSecret(this.context, 'slack', 'primary');
   }
 
   private async resolveNtfyToken(): Promise<string | null> {
-    return await this.context.serviceRegistry.resolveSecret('ntfy', 'primary')
-      ?? await this.resolveConfigSecret(this.context.configManager.get('surfaces.ntfy.token'))
-      ?? process.env.NTFY_ACCESS_TOKEN
-      ?? null;
+    return resolveSurfaceSecret(this.context, 'ntfy', 'primary');
   }
 
   private async resolveDiscordBotToken(): Promise<string | null> {
-    return await this.context.serviceRegistry.resolveSecret('discord', 'primary')
-      ?? await this.resolveConfigSecret(this.context.configManager.get('surfaces.discord.botToken'))
-      ?? process.env.DISCORD_BOT_TOKEN
-      ?? null;
+    return resolveSurfaceSecret(this.context, 'discord', 'primary');
   }
 
   private async resolveConfigSecret(value: unknown): Promise<string | null> {

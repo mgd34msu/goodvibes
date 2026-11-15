@@ -14,11 +14,12 @@
  *
  * A draft is composed on one surface and very often finished on another: the
  * phone writes it, the terminal sends it. So the store of record is the
- * daemon's, `channels.drafts.*`, and this file is a mirror, for the same
- * reason the routing table has one: a draft composed while the daemon was
- * unreachable is work the operator did, and losing it because a peer was busy
- * would be worse than holding it. A held draft says `pending` and carries the
- * daemon's own words.
+ * daemon's, `channels.drafts.*`, and this file is an outbox: it holds the
+ * drafts this Agent wrote, so one composed while the daemon was unreachable is
+ * not lost (it says `pending` and carries the daemon's own words), and a draft
+ * written elsewhere is brought in from the daemon, text and all, when it is
+ * sent from here (`adoptDaemonDraft`). The daemon's list carries no text; its
+ * `get` serves the text to the owner.
  *
  * Sends always route through the EXISTING `deliverAgentChannelMessage` path
  * (which wraps `ChannelDeliveryRouter.deliver` via the agent_channel_send
@@ -118,7 +119,7 @@ export interface ChannelDraft {
   readonly syncError?: string;
   /** Where this view of the draft came from. Never persisted. */
   readonly origin?: 'local' | 'daemon';
-  /** The daemon never returns a draft's text, so a row only it holds has none to show. Never persisted. */
+  /** The daemon's list carries no text; open the draft (`fetchDaemonDraft`) to read it. Never persisted. */
   readonly bodyUnavailable?: true;
 }
 
@@ -560,19 +561,60 @@ export async function fetchDaemonDraft(
   if (!result.ok) return { error: result.error, kind: result.kind };
   if (!isRecord(result.body) || result.body.notFound === true) return { draft: null };
   const parsed = parseDraft(result.body);
-  return { draft: parsed ? { ...parsed, daemonSyncState: 'synced' as const, origin: 'daemon' as const } : null };
+  if (!parsed) return { draft: null };
+  // The daemon serves the text to its owner; any other caller gets the marker.
+  const readable = parsed.message !== '[redacted]';
+  return { draft: { ...parsed, daemonSyncState: 'synced' as const, origin: 'daemon' as const, ...(readable ? {} : { bodyUnavailable: true as const }) } };
+}
+
+/**
+ * Bring a draft only the daemon holds into this outbox, so it can be sent from
+ * here: "the phone writes it, the terminal sends it". Null when the daemon has
+ * no such draft. Refused, with the step that works, when the daemon would not
+ * serve its text or it sends to a webhook whose URL stays with the surface that
+ * composed it.
+ */
+export async function adoptDaemonDraft(
+  shellPaths: ShellPaths,
+  draftId: string,
+  options: ChannelDraftStoreOptions,
+): Promise<ChannelDraft | null> {
+  if (!options.invoke) return null;
+  const fetched = await fetchDaemonDraft(options.invoke, draftId);
+  if (!('draft' in fetched)) throw new Error(`Draft ${draftId} is not in this outbox and the daemon could not be asked for it: ${fetched.error}`);
+  const held = fetched.draft;
+  if (!held) return null;
+  if (held.bodyUnavailable) {
+    throw new Error(`Draft ${draftId} is on the daemon, which serves its text only to the owner's credential; nothing was sent. Connect this Agent with the owner's pairing, or send it from the surface that composed it.`);
+  }
+  if (held.webhook || held.webhookSecretKey) {
+    throw new Error(`Draft ${draftId} sends to a webhook whose URL stays with the surface that composed it; nothing was sent. Send it from there, or save it here again with its webhook.`);
+  }
+  const path = channelDraftFilePath(shellPaths);
+  const assertCurrent = retainChannelStoreSource(path, options);
+  const { origin: _origin, bodyUnavailable: _body, ...rest } = held;
+  const adopted: ChannelDraft = { ...rest, daemonSyncState: 'synced' };
+  return runStoreFileUpdateSync(path, () => {
+    const fresh = writableDraftSnapshot(shellPaths);
+    const index = matchingDraftIndex(fresh.drafts, draftId);
+    if (index >= 0) return fresh.drafts[index]!;
+    writeDrafts(path, [adopted, ...fresh.drafts], assertCurrent, options);
+    return adopted;
+  });
 }
 
 /**
  * One list from two stores.
  *
- * The daemon never returns a draft's text (it answers `[redacted]`) and may not
- * have learned a delivery outcome yet, so for an id both stores hold, this
- * mirror's text, status and delivery outcome are the true ones: only the daemon's identity,
- * update time and sync state are taken from it. A draft only the daemon has is
- * listed with `bodyUnavailable`, since its text cannot be read back through this
- * API. A draft only the local mirror has is kept and shown as pending, because
- * that is exactly the draft an operator would otherwise think they had lost.
+ * The daemon's list carries no text (it answers `[redacted]`) and may not have
+ * learned a delivery outcome yet, so for an id both stores hold, this outbox's
+ * text, status and delivery outcome are the true ones: only the daemon's
+ * identity, update time and sync state are taken from it. A draft only the
+ * daemon has is listed with `bodyUnavailable`: its text is one `get` away
+ * (`fetchDaemonDraft`), and sending it brings it into this outbox
+ * (`adoptDaemonDraft`). A draft only this outbox has is kept and shown as
+ * pending, because that is exactly the draft an operator would otherwise think
+ * they had lost.
  */
 export function mergeDraftViews(
   daemonDrafts: readonly ChannelDraft[],
@@ -750,7 +792,8 @@ export async function queueDraftToSend(
   options: ChannelDraftStoreOptions = {},
 ): Promise<ChannelDraftQueueResult> {
   options.signal?.throwIfAborted(); options.assertCurrent?.();
-  const draft = getDraft(shellPaths, draftId);
+  // A draft written on another surface is on the daemon, the store of record.
+  const draft = getDraft(shellPaths, draftId) ?? await adoptDaemonDraft(shellPaths, draftId, options);
   if (!draft) throw new Error(`Draft not found: ${draftId}`);
   if (draft.status === 'sent') throw new Error(`Draft ${draftId} is already sent.`);
   // A draft still queued long after it was handed to delivery was abandoned by
@@ -912,7 +955,7 @@ export function formatChannelDraftList(snapshot: ChannelDraftSnapshot): string {
     `  total: ${snapshot.drafts.length}`,
     `  status: ${snapshot.parseError ? 'attention' : snapshot.exists ? 'ready' : 'empty'}`,
     ...(snapshot.parseError ? [`  parse error: ${snapshot.parseError}`] : []),
-    '  policy: drafts are agent-local; sends require queueDraftToSend + deliverAgentChannelMessage with explicit user confirmation',
+    '  policy: the daemon holds the drafts; this file is the outbox for ones it has not taken yet. Sends require queueDraftToSend + deliverAgentChannelMessage with explicit user confirmation',
     '',
   ];
   if (snapshot.drafts.length === 0) {
@@ -920,7 +963,7 @@ export function formatChannelDraftList(snapshot: ChannelDraftSnapshot): string {
   } else {
     for (const draft of snapshot.drafts) {
       const targetPart = draft.channel ?? draft.route ?? (draft.webhook || draft.webhookSecretKey ? 'webhook=[redacted]' : null) ?? draft.link ?? 'no-target';
-      const preview = draft.bodyUnavailable ? '(text held on the daemon, not readable here)' : `${draft.message.slice(0, 60)}${draft.message.length > 60 ? '...' : ''}`;
+      const preview = draft.bodyUnavailable ? '(text on the daemon; open the draft to read it)' : `${draft.message.slice(0, 60)}${draft.message.length > 60 ? '...' : ''}`;
       lines.push(`  [${draft.status}] ${draft.id}  target=${targetPart}  ${preview}`);
     }
   }

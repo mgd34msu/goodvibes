@@ -65,6 +65,83 @@ function normalizeConversationKind(input: ChannelIngressPolicyInput): ChannelCon
   return 'service';
 }
 
+/** The three allowlists that apply to one message: the surface's, or a matching group policy's. */
+export interface ChannelAllowlists {
+  readonly allowlistUserIds: readonly string[];
+  readonly allowlistGroupIds: readonly string[];
+  readonly allowlistChannelIds: readonly string[];
+}
+
+/** The conversation a message (or a would-be sender) is in. */
+export interface ChannelAllowlistSubject {
+  /** `direct` for a one-to-one conversation; anything else is a shared conversation. */
+  readonly conversationKind: ChannelConversationKind;
+  readonly userId?: string | undefined;
+  readonly groupId?: string | undefined;
+  readonly channelId?: string | undefined;
+}
+
+/**
+ * Who the allowlists admit. One rule, read by ingress, by actor checks and by
+ * the allowlist edit's lock-out check:
+ *
+ * - A direct conversation is judged by the user list alone. Adapters pass a
+ *   direct chat's id as its group id, and judging it against the group list
+ *   refused the owner's own direct chat the moment any group was listed.
+ * - A shared conversation (group, channel, thread) is admitted when the
+ *   conversation is on the group or channel list, OR its sender is on the user
+ *   list. A listed group admits everyone in it; a listed person is admitted
+ *   wherever they write.
+ * - An empty list restricts nobody; when every list that applies is empty the
+ *   message is admitted. An empty user list also means the surface has no
+ *   owner yet (see `evaluateIngress`).
+ */
+export function admitByAllowlists(
+  lists: ChannelAllowlists,
+  subject: ChannelAllowlistSubject,
+): { readonly allowed: true } | { readonly allowed: false; readonly reason: string } {
+  const users = lists.allowlistUserIds;
+  const senderListed = subject.userId !== undefined && users.includes(subject.userId);
+  if (subject.conversationKind === 'direct') {
+    if (users.length === 0 || senderListed) return { allowed: true };
+    return { allowed: false, reason: subject.userId ? 'user-not-allowlisted' : 'missing-user-identity' };
+  }
+  const groups = lists.allowlistGroupIds;
+  const channels = lists.allowlistChannelIds;
+  if (users.length === 0 && groups.length === 0 && channels.length === 0) return { allowed: true };
+  const conversationListed = (subject.groupId !== undefined && groups.includes(subject.groupId))
+    || (subject.channelId !== undefined && channels.includes(subject.channelId));
+  if (conversationListed || senderListed) return { allowed: true };
+  if (groups.length > 0) return { allowed: false, reason: subject.groupId ? 'group-not-allowlisted' : 'missing-group-identity' };
+  if (channels.length > 0) return { allowed: false, reason: subject.channelId ? 'channel-not-allowlisted' : 'missing-channel-identity' };
+  return { allowed: false, reason: subject.userId ? 'user-not-allowlisted' : 'missing-user-identity' };
+}
+
+/**
+ * Whether an actor (a sender writing to the surface directly) is admitted, and
+ * why, in words a person or an agent can act on. The same rule ingress applies.
+ */
+export function describeActorAdmission(
+  policy: ChannelAllowlists,
+  actorId: string | undefined,
+): { readonly admitted: boolean; readonly reason: string } {
+  const decision = admitByAllowlists(policy, { conversationKind: 'direct', userId: actorId });
+  if (decision.allowed) {
+    return {
+      admitted: true,
+      reason: policy.allowlistUserIds.length === 0
+        ? 'No owner is set on this surface yet, so every sender is admitted until the first identified sender becomes its owner.'
+        : `Actor '${actorId}' is on the surface's user list.`,
+    };
+  }
+  return {
+    admitted: false,
+    reason: actorId === undefined
+      ? 'The surface admits only the senders on its user list and no actorId was given; name the actor to check.'
+      : `Actor '${actorId}' is not on the surface's user list; add them with the allowlist edit action (kind user) first.`,
+  };
+}
+
 function selectGroupPolicy(policy: ChannelPolicyRecord, input: ChannelIngressPolicyInput): ChannelGroupPolicyRecord | undefined {
   const selectors = ['groupId', 'channelId', 'workspaceId'] as const;
   const specificity = (entry: ChannelGroupPolicyRecord) => selectors.filter(key => Boolean(entry[key])).length;
@@ -334,6 +411,10 @@ export class ChannelPolicyManager {
       && allowTextCommandsWithoutMention
       && Boolean(command)
       && isAuthorizedControlCommand;
+    const listed = admitByAllowlists(
+      { allowlistUserIds, allowlistGroupIds, allowlistChannelIds },
+      { conversationKind: parentKind === 'direct' ? 'direct' : conversationKind, userId: input.userId, groupId: input.groupId, channelId: input.channelId },
+    );
     let allowed = true;
     let reason = 'allowed';
     if (!policy.enabled) {
@@ -348,24 +429,9 @@ export class ChannelPolicyManager {
     } else if (conversationKind === 'thread' && !allowThreadMessages) {
       allowed = false;
       reason = 'thread-messages-disabled';
-    } else if (allowlistGroupIds.length > 0 && input.groupId && !allowlistGroupIds.includes(input.groupId)) {
+    } else if (!listed.allowed) {
       allowed = false;
-      reason = 'group-not-allowlisted';
-    } else if (allowlistGroupIds.length > 0 && !input.groupId) {
-      allowed = false;
-      reason = 'missing-group-identity';
-    } else if (allowlistUserIds.length > 0 && input.userId && !allowlistUserIds.includes(input.userId)) {
-      allowed = false;
-      reason = 'user-not-allowlisted';
-    } else if (allowlistUserIds.length > 0 && !input.userId) {
-      allowed = false;
-      reason = 'missing-user-identity';
-    } else if (allowlistChannelIds.length > 0 && input.channelId && !allowlistChannelIds.includes(input.channelId)) {
-      allowed = false;
-      reason = 'channel-not-allowlisted';
-    } else if (allowlistChannelIds.length > 0 && !input.channelId) {
-      allowed = false;
-      reason = 'missing-channel-identity';
+      reason = listed.reason;
     } else if (requireMention && !input.mentioned && !bypassMention) {
       allowed = false;
       reason = 'mention-required';

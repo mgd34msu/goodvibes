@@ -1,18 +1,28 @@
-import type { ServiceSecretField } from '../../config/service-registry.js';
 import { resolveWebBinding } from '../../daemon/host-resolver.js';
+import { unobservableRuntime } from '../health.js';
 import type { ProviderRuntimeSurface } from '../provider-runtime.js';
 import type {
   ChannelAccountAction,
   ChannelAccountRecord,
+  ChannelRuntimeObservation,
   ChannelSecretStatus,
   ChannelSurface,
 } from '../types.js';
+import { accountStateForHealth, authStateForCredentials, builtinHealthState } from './health.js';
+import { getBuiltinSetupSchema } from './setup-schema.js';
 import type { BuiltinChannelRuntimeDeps } from './shared.js';
+import { readSurfaceSecret } from './surface-secrets.js';
 import { resolveBuiltinConfigSecret } from './surfaces.js';
 
 interface BuiltinAccountContext {
   readonly deps: BuiltinChannelRuntimeDeps;
   readonly providerRuntimeStatus: (surface: ProviderRuntimeSurface) => unknown;
+  /**
+   * What this node sees of the surface's live path. The account's `state` and
+   * `authState` are read off the same health answer the status snapshot gives;
+   * an absent observer is an honest `unknown`.
+   */
+  readonly observeRuntime?: ((surface: ChannelSurface) => ChannelRuntimeObservation) | undefined;
 }
 
 export async function buildBuiltinAccount(
@@ -21,7 +31,7 @@ export async function buildBuiltinAccount(
 ): Promise<ChannelAccountRecord> {
   switch (surface) {
     case 'tui':
-      return finalizeBuiltinChannelAccount({
+      return finalizeBuiltinChannelAccount(context, {
         surface,
         label: 'Terminal UI',
         enabled: true,
@@ -31,7 +41,7 @@ export async function buildBuiltinAccount(
         metadata: { managed: 'local' },
       });
     case 'web':
-      return finalizeBuiltinChannelAccount({
+      return finalizeBuiltinChannelAccount(context, {
         surface,
         label: 'Web control plane',
         enabled: Boolean(context.deps.configManager.get('web.enabled') || context.deps.configManager.get('controlPlane.enabled')),
@@ -46,13 +56,8 @@ export async function buildBuiltinAccount(
       });
     case 'slack': {
       const workspaceId = String(context.deps.configManager.get('surfaces.slack.workspaceId') || '') || undefined;
-      const secrets = await Promise.all([
-        describeBuiltinSecret(context.deps, 'primary', 'Bot token', context.deps.configManager.get('surfaces.slack.botToken'), ['SLACK_BOT_TOKEN'], 'slack', 'primary'),
-        describeBuiltinSecret(context.deps, 'signingSecret', 'Signing secret', context.deps.configManager.get('surfaces.slack.signingSecret'), ['SLACK_SIGNING_SECRET'], 'slack', 'signingSecret'),
-        describeBuiltinSecret(context.deps, 'appToken', 'App token', context.deps.configManager.get('surfaces.slack.appToken'), ['SLACK_APP_TOKEN'], 'slack', 'appToken'),
-        describeBuiltinSecret(context.deps, 'webhookUrl', 'Webhook URL', undefined, ['SLACK_WEBHOOK_URL'], 'slack', 'webhookUrl'),
-      ]);
-      return finalizeBuiltinChannelAccount({
+      const secrets = await describeSchemaSecrets(context.deps, surface);
+      return finalizeBuiltinChannelAccount(context, {
         surface,
         label: 'Slack',
         enabled: context.deps.surfaceDeliveryEnabled('slack'),
@@ -67,12 +72,8 @@ export async function buildBuiltinAccount(
     }
     case 'discord': {
       const applicationId = String(context.deps.configManager.get('surfaces.discord.applicationId') || '') || undefined;
-      const secrets = await Promise.all([
-        describeBuiltinSecret(context.deps, 'primary', 'Bot token', context.deps.configManager.get('surfaces.discord.botToken'), ['DISCORD_BOT_TOKEN'], 'discord', 'primary'),
-        describeBuiltinSecret(context.deps, 'publicKey', 'Public key', context.deps.configManager.get('surfaces.discord.publicKey'), ['DISCORD_PUBLIC_KEY'], 'discord', 'publicKey'),
-        describeBuiltinSecret(context.deps, 'webhookUrl', 'Webhook URL', undefined, ['DISCORD_WEBHOOK_URL'], 'discord', 'webhookUrl'),
-      ]);
-      return finalizeBuiltinChannelAccount({
+      const secrets = await describeSchemaSecrets(context.deps, surface);
+      return finalizeBuiltinChannelAccount(context, {
         surface,
         label: 'Discord',
         enabled: context.deps.surfaceDeliveryEnabled('discord'),
@@ -87,10 +88,8 @@ export async function buildBuiltinAccount(
       });
     }
     case 'ntfy': {
-      const secrets = await Promise.all([
-        describeBuiltinSecret(context.deps, 'primary', 'Access token', undefined, ['NTFY_ACCESS_TOKEN'], 'ntfy', 'primary'),
-      ]);
-      return finalizeBuiltinChannelAccount({
+      const secrets = await describeSchemaSecrets(context.deps, surface);
+      return finalizeBuiltinChannelAccount(context, {
         surface,
         label: 'ntfy',
         enabled: context.deps.surfaceDeliveryEnabled('ntfy'),
@@ -107,11 +106,11 @@ export async function buildBuiltinAccount(
       });
     }
     case 'webhook': {
-      const secrets = await Promise.all([
-        describeBuiltinSecret(context.deps, 'secret', 'Shared secret', context.deps.configManager.get('surfaces.webhook.secret')),
-        describeBuiltinSecret(context.deps, 'defaultTarget', 'Default target', context.deps.configManager.get('surfaces.webhook.defaultTarget')),
-      ]);
-      return finalizeBuiltinChannelAccount({
+      const secrets = [
+        ...await describeSchemaSecrets(context.deps, surface),
+        await describeConfigSecret(context.deps, 'defaultTarget', 'Default target', context.deps.configManager.get('surfaces.webhook.defaultTarget')),
+      ];
+      return finalizeBuiltinChannelAccount(context, {
         surface,
         label: 'Generic webhook',
         enabled: context.deps.surfaceDeliveryEnabled('webhook'),
@@ -125,11 +124,8 @@ export async function buildBuiltinAccount(
     }
     case 'homeassistant': {
       const surfaces = context.deps.configManager.getCategory('surfaces');
-      const secrets = await Promise.all([
-        describeBuiltinSecret(context.deps, 'primary', 'Long-lived access token', surfaces.homeassistant.accessToken, ['HOMEASSISTANT_ACCESS_TOKEN', 'HOME_ASSISTANT_ACCESS_TOKEN', 'HA_ACCESS_TOKEN'], 'homeassistant', 'primary'),
-        describeBuiltinSecret(context.deps, 'webhookSecret', 'Webhook secret', surfaces.homeassistant.webhookSecret, ['HOMEASSISTANT_WEBHOOK_SECRET', 'HOME_ASSISTANT_WEBHOOK_SECRET', 'HA_GOODVIBES_WEBHOOK_SECRET'], 'homeassistant', 'signingSecret'),
-      ]);
-      return finalizeBuiltinChannelAccount({
+      const secrets = await describeSchemaSecrets(context.deps, surface);
+      return finalizeBuiltinChannelAccount(context, {
         surface,
         label: 'Home Assistant',
         enabled: context.deps.surfaceDeliveryEnabled('homeassistant'),
@@ -148,11 +144,8 @@ export async function buildBuiltinAccount(
     }
     case 'telegram': {
       const surfaces = context.deps.configManager.getCategory('surfaces');
-      const secrets = await Promise.all([
-        describeBuiltinSecret(context.deps, 'primary', 'Bot token', surfaces.telegram.botToken, ['TELEGRAM_BOT_TOKEN'], 'telegram', 'primary'),
-        describeBuiltinSecret(context.deps, 'webhookSecret', 'Webhook secret', surfaces.telegram.webhookSecret, ['TELEGRAM_WEBHOOK_SECRET'], 'telegram', 'signingSecret'),
-      ]);
-      return finalizeBuiltinChannelAccount({
+      const secrets = await describeSchemaSecrets(context.deps, surface);
+      return finalizeBuiltinChannelAccount(context, {
         surface,
         label: 'Telegram',
         enabled: context.deps.surfaceDeliveryEnabled('telegram'),
@@ -168,11 +161,8 @@ export async function buildBuiltinAccount(
     }
     case 'google-chat': {
       const surfaces = context.deps.configManager.getCategory('surfaces');
-      const secrets = await Promise.all([
-        describeBuiltinSecret(context.deps, 'webhookUrl', 'Webhook URL', surfaces.googleChat.webhookUrl, ['GOOGLE_CHAT_WEBHOOK_URL'], 'google-chat', 'webhookUrl'),
-        describeBuiltinSecret(context.deps, 'verificationToken', 'Verification token', surfaces.googleChat.verificationToken, ['GOOGLE_CHAT_VERIFICATION_TOKEN'], 'google-chat', 'signingSecret'),
-      ]);
-      return finalizeBuiltinChannelAccount({
+      const secrets = await describeSchemaSecrets(context.deps, surface);
+      return finalizeBuiltinChannelAccount(context, {
         surface,
         label: 'Google Chat',
         enabled: context.deps.surfaceDeliveryEnabled('google-chat'),
@@ -187,10 +177,8 @@ export async function buildBuiltinAccount(
     }
     case 'signal': {
       const surfaces = context.deps.configManager.getCategory('surfaces');
-      const secrets = await Promise.all([
-        describeBuiltinSecret(context.deps, 'primary', 'Bridge token', surfaces.signal.token, ['SIGNAL_BRIDGE_TOKEN'], 'signal', 'primary'),
-      ]);
-      return finalizeBuiltinChannelAccount({
+      const secrets = await describeSchemaSecrets(context.deps, surface);
+      return finalizeBuiltinChannelAccount(context, {
         surface,
         label: 'Signal',
         enabled: context.deps.surfaceDeliveryEnabled('signal'),
@@ -206,12 +194,11 @@ export async function buildBuiltinAccount(
     }
     case 'whatsapp': {
       const surfaces = context.deps.configManager.getCategory('surfaces');
-      const secrets = await Promise.all([
-        describeBuiltinSecret(context.deps, 'primary', 'Access token', surfaces.whatsapp.accessToken, ['WHATSAPP_ACCESS_TOKEN', 'WHATSAPP_BRIDGE_TOKEN'], 'whatsapp', 'primary'),
-        describeBuiltinSecret(context.deps, 'verifyToken', 'Verify token', surfaces.whatsapp.verifyToken, ['WHATSAPP_VERIFY_TOKEN']),
-        describeBuiltinSecret(context.deps, 'signingSecret', 'Signing secret', surfaces.whatsapp.signingSecret, ['WHATSAPP_SIGNING_SECRET', 'WHATSAPP_BRIDGE_TOKEN'], 'whatsapp', 'signingSecret'),
-      ]);
-      return finalizeBuiltinChannelAccount({
+      const secrets = [
+        ...await describeSchemaSecrets(context.deps, surface),
+        await describeConfigSecret(context.deps, 'verifyToken', 'Verify token', surfaces.whatsapp.verifyToken, ['WHATSAPP_VERIFY_TOKEN']),
+      ];
+      return finalizeBuiltinChannelAccount(context, {
         surface,
         label: 'WhatsApp',
         enabled: context.deps.surfaceDeliveryEnabled('whatsapp'),
@@ -228,13 +215,11 @@ export async function buildBuiltinAccount(
     }
     case 'telephony': {
       const surfaces = context.deps.configManager.getCategory('surfaces');
-      const secrets = await Promise.all([
-        describeBuiltinSecret(context.deps, 'accountSid', 'Account SID', surfaces.telephony.accountSid, ['TWILIO_ACCOUNT_SID']),
-        describeBuiltinSecret(context.deps, 'authToken', 'Auth token', surfaces.telephony.authToken, ['TWILIO_AUTH_TOKEN'], 'telephony', 'authToken'),
-        describeBuiltinSecret(context.deps, 'primary', 'Bridge token', surfaces.telephony.token, ['TELEPHONY_BRIDGE_TOKEN'], 'telephony', 'primary'),
-        describeBuiltinSecret(context.deps, 'signingSecret', 'Webhook secret', surfaces.telephony.webhookSecret, ['TELEPHONY_WEBHOOK_SECRET', 'TWILIO_WEBHOOK_SECRET'], 'telephony', 'signingSecret'),
-      ]);
-      return finalizeBuiltinChannelAccount({
+      const secrets = [
+        await describeConfigSecret(context.deps, 'accountSid', 'Account SID', surfaces.telephony.accountSid, ['TWILIO_ACCOUNT_SID']),
+        ...await describeSchemaSecrets(context.deps, surface),
+      ];
+      return finalizeBuiltinChannelAccount(context, {
         surface,
         label: 'Telephony',
         enabled: context.deps.surfaceDeliveryEnabled('telephony'),
@@ -253,10 +238,8 @@ export async function buildBuiltinAccount(
     }
     case 'imessage': {
       const surfaces = context.deps.configManager.getCategory('surfaces');
-      const secrets = await Promise.all([
-        describeBuiltinSecret(context.deps, 'primary', 'Bridge token', surfaces.imessage.token, ['IMESSAGE_BRIDGE_TOKEN'], 'imessage', 'primary'),
-      ]);
-      return finalizeBuiltinChannelAccount({
+      const secrets = await describeSchemaSecrets(context.deps, surface);
+      return finalizeBuiltinChannelAccount(context, {
         surface,
         label: 'iMessage',
         enabled: context.deps.surfaceDeliveryEnabled('imessage'),
@@ -272,10 +255,8 @@ export async function buildBuiltinAccount(
     }
     case 'msteams': {
       const surfaces = context.deps.configManager.getCategory('surfaces');
-      const secrets = await Promise.all([
-        describeBuiltinSecret(context.deps, 'appPassword', 'App password', surfaces.msteams.appPassword, ['MSTEAMS_APP_PASSWORD'], 'msteams', 'password'),
-      ]);
-      return finalizeBuiltinChannelAccount({
+      const secrets = await describeSchemaSecrets(context.deps, surface);
+      return finalizeBuiltinChannelAccount(context, {
         surface,
         label: 'Microsoft Teams',
         enabled: context.deps.surfaceDeliveryEnabled('msteams'),
@@ -294,10 +275,8 @@ export async function buildBuiltinAccount(
     }
     case 'bluebubbles': {
       const surfaces = context.deps.configManager.getCategory('surfaces');
-      const secrets = await Promise.all([
-        describeBuiltinSecret(context.deps, 'password', 'Server password', surfaces.bluebubbles.password, ['BLUEBUBBLES_PASSWORD'], 'bluebubbles', 'password'),
-      ]);
-      return finalizeBuiltinChannelAccount({
+      const secrets = await describeSchemaSecrets(context.deps, surface);
+      return finalizeBuiltinChannelAccount(context, {
         surface,
         label: 'BlueBubbles',
         enabled: context.deps.surfaceDeliveryEnabled('bluebubbles'),
@@ -313,10 +292,8 @@ export async function buildBuiltinAccount(
     }
     case 'mattermost': {
       const surfaces = context.deps.configManager.getCategory('surfaces');
-      const secrets = await Promise.all([
-        describeBuiltinSecret(context.deps, 'primary', 'Bot token', surfaces.mattermost.botToken, ['MATTERMOST_BOT_TOKEN'], 'mattermost', 'primary'),
-      ]);
-      return finalizeBuiltinChannelAccount({
+      const secrets = await describeSchemaSecrets(context.deps, surface);
+      return finalizeBuiltinChannelAccount(context, {
         surface,
         label: 'Mattermost',
         enabled: context.deps.surfaceDeliveryEnabled('mattermost'),
@@ -332,10 +309,8 @@ export async function buildBuiltinAccount(
     }
     case 'matrix': {
       const surfaces = context.deps.configManager.getCategory('surfaces');
-      const secrets = await Promise.all([
-        describeBuiltinSecret(context.deps, 'primary', 'Access token', surfaces.matrix.accessToken, ['MATRIX_ACCESS_TOKEN'], 'matrix', 'primary'),
-      ]);
-      return finalizeBuiltinChannelAccount({
+      const secrets = await describeSchemaSecrets(context.deps, surface);
+      return finalizeBuiltinChannelAccount(context, {
         surface,
         label: 'Matrix',
         enabled: context.deps.surfaceDeliveryEnabled('matrix'),
@@ -365,53 +340,49 @@ export async function resolveBuiltinAccount(
 }
 
 /**
- * Describe one credential field, both whether it is DECLARED and whether the
- * declaration resolves.
- *
- * It used to report only the first. A config value is present whether it is a
- * literal token or a `goodvibes://secrets/...` reference, so a reference naming
- * a key that is absent from the store this process reads counted as configured,
- * and everything downstream treated the surface as set up. Measured on this
- * project's own machine: the daemon's `surfaces.telegram.botToken` referenced
- * `goodvibes/TELEGRAM_BOT_TOKEN` while the daemon's store was `{}` and the token
- * sat in the agent's and the TUI's stores. Sends failed with "Missing Telegram
- * bot token"; the reported health said fine.
+ * Describe every credential the surface's setup schema declares, both whether
+ * it is DECLARED and whether the declaration resolves, from the same reader the
+ * send paths use (`readSurfaceSecret`), so the account cannot report a
+ * credential the senders do not see or miss one they do.
  *
  * Resolution is cheap, a store read, no network, no send attempt, so there is
- * no excuse for inferring it from presence.
+ * no excuse for inferring it from presence: a `goodvibes://secrets/...`
+ * reference to a key absent from the store this process reads is `unresolved`,
+ * which is the one source that explains a silent channel.
  */
-async function describeBuiltinSecret(
+async function describeSchemaSecrets(
+  deps: BuiltinChannelRuntimeDeps,
+  surface: ChannelSurface,
+): Promise<ChannelSecretStatus[]> {
+  return Promise.all(getBuiltinSetupSchema(surface).secretTargets.map(async (target): Promise<ChannelSecretStatus> => {
+    const reading = await readSurfaceSecret(deps, surface, target.id);
+    return {
+      field: target.id,
+      label: target.label,
+      configured: reading.declared,
+      resolved: reading.value !== null,
+      source: reading.source,
+    };
+  }));
+}
+
+/** A setting that is not a setup-schema credential but is reported beside them (an account SID, a default target). */
+async function describeConfigSecret(
   deps: BuiltinChannelRuntimeDeps,
   field: string,
   label: string,
   configValue: unknown,
   envKeys: readonly string[] = [],
-  serviceName?: string,
-  serviceField?: ServiceSecretField,
 ): Promise<ChannelSecretStatus> {
-  const serviceValue = serviceName && serviceField
-    ? await deps.serviceRegistry.resolveSecret(serviceName, serviceField)
-    : null;
   const configPresent = hasConfiguredValue(configValue);
-  // Only resolve what is declared: an absent value has nothing to look up.
   const configResolved = configPresent ? await resolveBuiltinConfigSecret(deps, configValue) : null;
   const envPresent = envKeys.some((key) => hasConfiguredValue(process.env[key]));
   return {
     field,
     label,
-    configured: Boolean(serviceValue || configPresent || envPresent),
-    resolved: Boolean(serviceValue || configResolved || envPresent),
-    source: serviceValue
-      ? 'service-registry'
-      : configResolved
-        ? 'config'
-        : envPresent
-          ? 'env'
-          // Declared, and it resolved to nothing here. The one source value the
-          // old shape could not say, and the one that explains a silent channel.
-          : configPresent
-            ? 'unresolved'
-            : 'missing',
+    configured: configPresent || envPresent,
+    resolved: Boolean(configResolved || envPresent),
+    source: configResolved ? 'config' : envPresent ? 'env' : configPresent ? 'unresolved' : 'missing',
   };
 }
 
@@ -473,7 +444,7 @@ function buildBuiltinAccountActions(configured: boolean, linked: boolean): reado
 /** The account id a surface reports when it has no identity of its own. */
 const FALLBACK_ACCOUNT_ID_PREFIX = 'surface:';
 
-function finalizeBuiltinChannelAccount(input: {
+function finalizeBuiltinChannelAccount(context: BuiltinAccountContext, input: {
   surface: ChannelSurface;
   label: string;
   enabled: boolean;
@@ -490,32 +461,14 @@ function finalizeBuiltinChannelAccount(input: {
   const hasIdentity = Boolean(input.workspaceId)
     || (Boolean(input.accountId) && !input.accountId!.startsWith(FALLBACK_ACCOUNT_ID_PREFIX));
   const configured = Boolean(input.selfContained) || hasIdentity || input.secrets.some((entry) => entry.configured);
-  // `linked` is what is DECLARED (health reads it as such). Whether the surface
-  // can actually send is a separate question: a `goodvibes://secrets/...`
-  // reference to an absent key, or only a signing secret with no bot token,
-  // cannot send, and the state must not read healthy for it. Surfaces with a
-  // primary credential are judged by it; the rest by whether any of theirs
-  // resolves.
-  const linked = input.secrets.some((entry) => entry.configured);
-  const primary = input.secrets.find((entry) => entry.field === 'primary');
-  // A webhook URL is a complete send path on its own (Slack and Discord post
-  // through it with no bot token), so a resolvable one keeps the surface healthy.
-  const webhookSends = input.secrets.some((entry) => entry.field === 'webhookUrl' && entry.configured && entry.resolved !== false);
-  const canSend = input.selfContained === true || webhookSends || (primary
-    ? primary.configured && primary.resolved !== false
-    : input.secrets.some((entry) => entry.configured && entry.resolved !== false));
-  const state = !configured
-    ? input.enabled ? 'unconfigured' : 'disabled'
-    : input.enabled
-      ? canSend ? 'healthy' : 'degraded'
-      : 'disabled';
-  const authState = !configured
-    ? 'not-configured'
-    : canSend
-      ? 'linked'
-      : input.enabled
-        ? 'degraded'
-        : 'configured';
+  // `state` and `authState` are not decided here. They are read off the one
+  // health answer the status snapshot gives (credentials judged by the setup
+  // schema's send rule, the live path checked first), so the account view and
+  // the status view cannot disagree about whether this surface works.
+  const runtime = context.observeRuntime?.(input.surface)
+    ?? unobservableRuntime('no runtime observer was supplied, so liveness was not checked');
+  const { state: health, facts } = builtinHealthState({ surface: input.surface, configured, secrets: input.secrets, metadata: input.metadata }, input.enabled, runtime);
+  const linked = facts.declared;
   const id = input.accountId || input.workspaceId || `surface:${input.surface}`;
   return {
     id,
@@ -524,12 +477,12 @@ function finalizeBuiltinChannelAccount(input: {
     enabled: input.enabled,
     configured,
     linked,
-    state,
-    authState,
+    state: accountStateForHealth(health),
+    authState: authStateForCredentials(facts, input.enabled),
     ...(input.accountId ? { accountId: input.accountId } : {}),
     ...(input.workspaceId ? { workspaceId: input.workspaceId } : {}),
     secrets: input.secrets,
     actions: buildBuiltinAccountActions(configured, linked),
-    metadata: input.metadata,
+    metadata: { ...input.metadata, health },
   };
 }

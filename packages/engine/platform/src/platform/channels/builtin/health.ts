@@ -22,10 +22,15 @@ import type { TelegramIngressStatus } from '../telegram/ingress.js';
 import { observedRuntime, resolveChannelHealthState, unobservableRuntime } from '../health.js';
 import type {
   ChannelAccountRecord,
+  ChannelAccountState,
+  ChannelAuthState,
+  ChannelHealthState,
   ChannelRuntimeObservation,
+  ChannelSecretStatus,
   ChannelStatusSnapshot,
   ChannelSurface,
 } from '../types.js';
+import { builtinSendCredentials } from './setup-schema.js';
 
 /**
  * Surfaces whose inbound path is a webhook this daemon merely registers.
@@ -170,40 +175,86 @@ export interface BuiltinSnapshotInput {
   readonly metadata: Record<string, unknown>;
 }
 
-/**
- * Whether a credential for this surface is declared.
- *
- * Deliberately NOT `account.configured`: that flag is true for every surface,
- * because the account id falls back to the literal `surface:<name>` when no
- * real identifier is set, so `Boolean(accountId || ...)` can never be false.
- * `linked` is the honest reading, at least one secret is declared somewhere.
- * The two surfaces with nothing to configure are named, rather than being swept
- * in by a rule that would also sweep in a surface that failed to resolve.
- */
-function credentialDeclared(account: ChannelAccountRecord): boolean {
-  if (account.surface === 'tui' || account.surface === 'web') return true;
-  return account.linked;
+/** What a surface's credentials say about whether it can send, by the setup schema's rule. */
+export interface BuiltinCredentialFacts {
+  /** The credentials the surface needs to send are declared (or it needs none and has its settings). */
+  readonly declared: boolean;
+  /** Those credentials resolve in the store this process reads. */
+  readonly resolves: boolean;
+  /** Declared credentials that resolve to nothing here. */
+  readonly unresolved: readonly ChannelSecretStatus[];
 }
 
+/** The account fields the credential rule reads. */
+export type BuiltinCredentialAccount = Pick<ChannelAccountRecord, 'surface' | 'configured' | 'secrets' | 'metadata'>;
+
 /**
- * Whether a declared credential actually resolves in the store this process
- * reads. `resolved` is absent only on a record built by an older describer;
- * falling back to `configured` there keeps the previous reading rather than
- * inventing a failure out of a missing field.
+ * Read the account's credentials against `builtinSendCredentials`, the setup
+ * schema's statement of what the surface needs to send. A surface that needs
+ * none is declared when its settings are (an ntfy topic), and resolves unless
+ * a credential it does carry points at nothing.
  */
-function credentialResolves(account: ChannelAccountRecord): boolean {
-  if (account.surface === 'tui' || account.surface === 'web') return true;
-  return account.secrets.some((secret) => secret.resolved ?? secret.configured);
+export function builtinCredentialFacts(account: BuiltinCredentialAccount): BuiltinCredentialFacts {
+  const unresolved = account.secrets.filter((secret) => secret.configured && secret.resolved === false);
+  const alternatives = builtinSendCredentials(account.surface, {
+    provider: account.metadata['provider'],
+    mode: account.metadata['mode'],
+  });
+  if (alternatives.length === 0) {
+    return { declared: account.configured, resolves: unresolved.length === 0, unresolved };
+  }
+  const byField = new Map(account.secrets.map((secret) => [secret.field, secret]));
+  const declared = alternatives.some((fields) => fields.every((field) => byField.get(field)?.configured === true));
+  const resolves = alternatives.some((fields) => fields.every((field) => {
+    const secret = byField.get(field);
+    return secret !== undefined && (secret.resolved ?? secret.configured);
+  }));
+  return { declared, resolves, unresolved };
+}
+
+/** The account's posture, read off the one health answer rather than decided again. */
+export function accountStateForHealth(state: ChannelHealthState): ChannelAccountState {
+  switch (state) {
+    case 'healthy':
+    case 'unknown':
+      return 'healthy';
+    case 'degraded':
+    case 'dead':
+    case 'unresolved':
+      return 'degraded';
+    case 'unconfigured':
+      return 'unconfigured';
+    case 'disabled':
+      return 'disabled';
+  }
+}
+
+/** The credential posture, from the same facts the health answer used. */
+export function authStateForCredentials(facts: BuiltinCredentialFacts, enabled: boolean): ChannelAuthState {
+  if (!facts.declared) return 'not-configured';
+  if (facts.resolves) return 'linked';
+  return enabled ? 'degraded' : 'configured';
+}
+
+/** The health answer for an account, the rule `buildBuiltinStatusSnapshot` applies. */
+export function builtinHealthState(
+  account: BuiltinCredentialAccount,
+  enabled: boolean,
+  runtime: ChannelRuntimeObservation,
+): { readonly state: ChannelHealthState; readonly facts: BuiltinCredentialFacts } {
+  const facts = builtinCredentialFacts(account);
+  return {
+    facts,
+    state: resolveChannelHealthState({ enabled, configured: facts.declared, credentialResolves: facts.resolves, runtime }),
+  };
 }
 
 /**
  * Say which fields are declared and do not resolve, so the reported reason
  * names the setting to fix instead of the symptom.
  */
-function describeUnresolvedCredentials(account: ChannelAccountRecord): string {
-  const fields = account.secrets
-    .filter((secret) => secret.configured && secret.resolved === false)
-    .map((secret) => secret.label);
+function describeUnresolvedCredentials(account: ChannelAccountRecord, facts: BuiltinCredentialFacts): string {
+  const fields = facts.unresolved.map((secret) => secret.label);
   const named = fields.length > 0 ? fields.join(', ') : 'its credential';
   return `${account.label} is configured but cannot send: ${named} names a secret that does not resolve in the store `
     + 'this process reads. A goodvibes://secrets/... reference pointing at a key held in another surface\'s store '
@@ -213,20 +264,13 @@ function describeUnresolvedCredentials(account: ChannelAccountRecord): string {
 
 /** One snapshot, built the same way for every built-in surface. */
 export function buildBuiltinStatusSnapshot(input: BuiltinSnapshotInput): ChannelStatusSnapshot {
-  const configured = credentialDeclared(input.account);
-  const resolves = credentialResolves(input.account);
-  const state = resolveChannelHealthState({
-    enabled: input.enabled,
-    configured,
-    credentialResolves: resolves,
-    runtime: input.runtime,
-  });
+  const { state, facts } = builtinHealthState(input.account, input.enabled, input.runtime);
   // An unresolvable credential IS an observation, we looked in the store and
   // the secret was not there, so it replaces the live-path reason rather than
   // leaving the reader with "nothing watches this surface" as the account of a
   // channel that provably cannot send.
   const runtime = state === 'unresolved'
-    ? observedRuntime(false, describeUnresolvedCredentials(input.account))
+    ? observedRuntime(false, describeUnresolvedCredentials(input.account, facts))
     : input.runtime;
   return {
     id: `surface:${input.surface}`,
@@ -234,8 +278,8 @@ export function buildBuiltinStatusSnapshot(input: BuiltinSnapshotInput): Channel
     label: input.label,
     state,
     enabled: input.enabled,
-    configured,
-    credentialResolves: resolves,
+    configured: facts.declared,
+    credentialResolves: facts.resolves,
     runtime,
     ...(input.account.accountId ? { accountId: input.account.accountId } : {}),
     metadata: input.metadata,

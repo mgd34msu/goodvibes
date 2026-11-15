@@ -41,9 +41,11 @@ export interface ChannelHealthInput {
  * Ordered deliberately:
  *
  * 1. An operator who switched a surface off is not owed a fault.
- * 2. A surface with nothing declared cannot be dead, it was never alive.
- * 3. An OBSERVED working path beats every inference below it. Direct evidence
- *    that messages are flowing outranks a guess drawn from credential shape.
+ * 2. An OBSERVED working path beats every inference below it. Direct evidence
+ *    that messages are flowing outranks a guess drawn from credential shape,
+ *    including the guess that nothing is set up: a connected ntfy topic that
+ *    needs no token is working, not unconfigured.
+ * 3. A surface with nothing declared cannot be dead, it was never alive.
  * 4. A declared credential that resolves to nothing is a definite, named
  *    failure. It ranks above `unknown` and above `dead` because it says WHICH
  *    thing to fix, and above `unconfigured` because the operator believes this
@@ -53,10 +55,10 @@ export interface ChannelHealthInput {
  */
 export function resolveChannelHealthState(input: ChannelHealthInput): ChannelHealthState {
   if (!input.enabled) return 'disabled';
-  if (!input.configured) return 'unconfigured';
   if (input.runtime.observable && input.runtime.running === true) {
     return input.runtime.lastError ? 'degraded' : 'healthy';
   }
+  if (!input.configured) return 'unconfigured';
   if (!(input.credentialResolves ?? input.configured)) return 'unresolved';
   if (!input.runtime.observable || input.runtime.running === null) return 'unknown';
   return 'dead';

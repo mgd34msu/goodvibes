@@ -20,6 +20,7 @@ import { logger } from '../utils/logger.js';
 import { postToPublicWebhook, validatePublicWebhookUrl } from '../utils/url-safety.js';
 import type { HostResolver } from '../tools/fetch/pinned-request.js';
 import { summarizeError } from '../utils/error-display.js';
+import { resolveSurfaceSecret } from '../channels/builtin/surface-secrets.js';
 
 type RouteBinding = import('../automation/routes.js').AutomationRouteBinding;
 
@@ -31,9 +32,9 @@ export interface SurfaceApprovalDeliveryDeps {
   ) => string | undefined;
   readonly resolveSlackWebhookUrl: () => Promise<string | null>;
   readonly resolveSlackBotToken: () => Promise<string | null>;
-  /** The ntfy access token: registry, then `surfaces.ntfy.token`, then the environment. Registry and environment only when absent. */
+  /** The ntfy access token; the setup schema's reader (registry, `surfaces.ntfy.token`, environment) when absent. */
   readonly resolveNtfyToken?: (() => Promise<string | null>) | undefined;
-  /** The Discord bot token: registry, then `surfaces.discord.botToken`, then the environment. Registry and environment only when absent. */
+  /** The Discord bot token; the setup schema's reader (registry, `surfaces.discord.botToken`, environment) when absent. */
   readonly resolveDiscordBotToken?: (() => Promise<string | null>) | undefined;
   readonly signWebhookPayload: (body: string, secret: string) => string;
   /** Resolves a delivery host before posting; the system resolver when absent (utils/url-safety.ts). */
@@ -105,12 +106,10 @@ export async function deliverDiscordApprovalUpdate(
   const webUrl = deps.controlPlaneWebUrl({ approvalId: approval.id, sessionId: approval.sessionId });
   const isPending = isPendingApproval(approval);
   const summary = approval.request.analysis.summary;
-  const webhookUrl =
-    await deps.serviceRegistry.resolveSecret('discord', 'webhookUrl')
-    ?? process.env.DISCORD_WEBHOOK_URL;
+  const webhookUrl = await resolveSurfaceSecret(deps, 'discord', 'webhookUrl');
   const botToken = deps.resolveDiscordBotToken
     ? await deps.resolveDiscordBotToken() ?? undefined
-    : await deps.serviceRegistry.resolveSecret('discord', 'primary') ?? process.env.DISCORD_BOT_TOKEN;
+    : await resolveSurfaceSecret(deps, 'discord', 'primary') ?? undefined;
   const discord = new DiscordIntegration(webhookUrl ?? undefined, botToken ?? undefined);
   const content = isPending
     ? `Approval required for \`${approval.request.tool}\`: ${summary}${webUrl ? `\n${webUrl}` : ''}`
@@ -151,7 +150,7 @@ export async function deliverNtfyApprovalUpdate(
     String(deps.configManager.get('surfaces.ntfy.baseUrl') ?? 'https://ntfy.sh'),
     deps.resolveNtfyToken
       ? await deps.resolveNtfyToken() ?? undefined
-      : await deps.serviceRegistry.resolveSecret('ntfy', 'primary') ?? process.env.NTFY_ACCESS_TOKEN ?? undefined,
+      : await resolveSurfaceSecret(deps, 'ntfy', 'primary') ?? undefined,
   );
   const priority = resolveNtfyDefaultPriority(deps.configManager.get('surfaces.ntfy.defaultPriority'));
   await ntfy.publish(topic, `${isPending ? 'Approval required' : `Approval ${approval.status}`}: ${summary}`, {

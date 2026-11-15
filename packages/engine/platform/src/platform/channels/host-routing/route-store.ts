@@ -1,8 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { HandlerSqliteStore } from '../../state/daemon-handler-sqlite-store.js';
 import { GatewayVerbError as HandlerError } from '../../control-plane/routes/gateway-verb-error.js';
-import { retainMutationStorage } from '../../control-plane/native-mutation.js';
-import { captureMutationDescriptors, type MutationPublication } from '../../utils/file-mutation.js';
+import type { MutationPublication } from '../../utils/file-mutation.js';
 
 /**
  * A persisted channel-to-profile routing assignment, in the exact shape the
@@ -171,11 +170,8 @@ export class RouteStore {
   private initializing: Promise<void> | null = null;
   private closing: Promise<void> | null = null;
   private readonly active = new Set<Promise<unknown>>();
-  private readonly generations = new Map<string, number>();
-  private readonly workingDirectory: string;
 
   constructor(options: { workingDirectory: string }) {
-    this.workingDirectory = options.workingDirectory;
     this.store = new HandlerSqliteStore({
       workingDirectory: options.workingDirectory,
       fileName: 'channel-routes.sqlite',
@@ -294,11 +290,20 @@ export class RouteStore {
    * when an existing row was updated. The assignmentId is stable across updates
    * (it is preserved from the existing row). Persists to disk after the write.
    */
-  upsert(input: RouteUpsertInput, assertCurrent?: () => void, withPublication?: MutationPublication): Promise<RouteUpsertResult> {
-    return this.own(() => this.writeRoute(input, assertCurrent, withPublication));
+  upsert(input: RouteUpsertInput, assertCurrent?: () => void, withPublication?: MutationPublication, expectedUpdatedAt?: string | null): Promise<RouteUpsertResult> {
+    return this.own(() => this.writeRoute(input, assertCurrent, withPublication, expectedUpdatedAt));
   }
 
-  private async writeRoute(input: RouteUpsertInput, assertCurrent?: () => void, withPublication?: MutationPublication): Promise<RouteUpsertResult> {
+  /**
+   * The row a request selects, read once. An autonomous write passes its
+   * `updatedAt` back (null when there was none) and applies only to that row.
+   */
+  selectRow(kind: 'channel' | 'assignment', id: string): { readonly target: RoutingChannelRoute | null; readonly updatedAt: string | null } {
+    const target = kind === 'channel' ? this.findByChannelId(id) : this.findById(id);
+    return { target, updatedAt: target?.updatedAt ?? null };
+  }
+
+  private async writeRoute(input: RouteUpsertInput, assertCurrent?: () => void, withPublication?: MutationPublication, expectedUpdatedAt?: string | null): Promise<RouteUpsertResult> {
     this.requireInit();
     assertCurrent?.();
     const profileId = typeof input.profileId === 'string' ? input.profileId.trim() : '';
@@ -315,8 +320,9 @@ export class RouteStore {
     // Staged on a private copy and published only once it is on disk, for every
     // caller: a write that fails to save leaves the live table, which the
     // resolver reads, exactly as it was.
-    const result = await this.store.persistTransaction(transaction => {
+    return this.store.persistTransaction(transaction => {
       const existing = transaction.get<RouteRow>('SELECT * FROM routes WHERE channelId = ?', [channelId]);
+      if (expectedUpdatedAt !== undefined) assertRouteUnchanged(`the routing assignment for ${channelId}`, existing, expectedUpdatedAt);
       const assignmentId = existing?.assignmentId ?? randomUUID();
       if (existing) transaction.run('UPDATE routes SET profileId = ?, label = ?, surfaceKind = ?, routeId = ?, updatedAt = ? WHERE assignmentId = ?',
         [profileId, label, surfaceKind, routeId ?? null, now, assignmentId]);
@@ -326,51 +332,44 @@ export class RouteStore {
       if (!row) throw new HandlerError('Failed to read admitted route', 'ROUTING_WRITE_FAILED', 500);
       return { route: rowToRoute(row), created: existing === null };
     }, assertCurrent ?? (() => {}), withPublication);
-    this.markMutation(result.route);
-    return result;
-  }
-
-  private markMutation(route: RoutingChannelRoute): void {
-    for (const key of [`channel:${route.channelId}`, `assignment:${route.assignmentId}`]) {
-      this.generations.set(key, (this.generations.get(key) ?? 0) + 1);
-    }
-  }
-
-  retainTarget(kind: 'channel' | 'assignment', id: string): { readonly target: RoutingChannelRoute | null; readonly assertCurrent: () => void } {
-    this.requireInit();
-    const key = `${kind}:${id}`, generation = this.generations.get(key) ?? 0;
-    const current = () => kind === 'channel' ? this.findByChannelId(id) : this.findById(id);
-    const target = current(), before = JSON.stringify(target);
-    const storage = retainMutationStorage(this.store.dbPath, this.workingDirectory);
-    const ownerCurrent = captureMutationDescriptors(this, ['store', 'findByChannelId', 'findById', 'writeRoute', 'deleteRoute']);
-    const storeCurrent = captureMutationDescriptors(this.store, ['get', 'run', 'persistTransaction']);
-    return { target, assertCurrent: () => {
-      this.requireInit(); ownerCurrent(); storeCurrent(); storage();
-      if ((this.generations.get(key) ?? 0) !== generation || JSON.stringify(current()) !== before) {
-        throw new HandlerError('Native routing target changed', 'NATIVE_MUTATION_STALE', 409);
-      }
-    } };
   }
 
   /**
    * Delete an assignment by assignmentId. Returns true when a row was removed,
    * false when no matching assignment existed. Persists to disk after a delete.
    */
-  delete(assignmentId: string, assertCurrent?: () => void, withPublication?: MutationPublication): Promise<boolean> {
-    return this.own(() => this.deleteRoute(assignmentId, assertCurrent, withPublication));
+  delete(assignmentId: string, assertCurrent?: () => void, withPublication?: MutationPublication, expectedUpdatedAt?: string | null): Promise<boolean> {
+    return this.own(() => this.deleteRoute(assignmentId, assertCurrent, withPublication, expectedUpdatedAt));
   }
 
-  private async deleteRoute(assignmentId: string, assertCurrent?: () => void, withPublication?: MutationPublication): Promise<boolean> {
+  private async deleteRoute(assignmentId: string, assertCurrent?: () => void, withPublication?: MutationPublication, expectedUpdatedAt?: string | null): Promise<boolean> {
     this.requireInit();
     assertCurrent?.();
     const id = typeof assignmentId === 'string' ? assignmentId.trim() : '';
     if (id.length === 0) {
       throw new HandlerError('assignmentId is required', 'ROUTING_INVALID_ASSIGNMENT_ID', 400);
     }
-    const existing = this.findById(id);
-    if (!existing) return false;
-    await this.store.persistTransaction(transaction => transaction.run('DELETE FROM routes WHERE assignmentId = ?', [id]), assertCurrent ?? (() => {}), withPublication);
-    this.markMutation(existing);
-    return true;
+    return this.store.persistTransaction(transaction => {
+      const existing = transaction.get<RouteRow>('SELECT * FROM routes WHERE assignmentId = ?', [id]);
+      if (expectedUpdatedAt !== undefined) assertRouteUnchanged(`the routing assignment ${id}`, existing, expectedUpdatedAt);
+      if (!existing) return false;
+      transaction.run('DELETE FROM routes WHERE assignmentId = ?', [id]);
+      return true;
+    }, assertCurrent ?? (() => {}), withPublication);
   }
+}
+
+/** The compare half of the compare-and-set, run inside the write's transaction. */
+function assertRouteUnchanged(what: string, row: { readonly updatedAt: string } | null, expectedUpdatedAt: string | null): void {
+  const now = row?.updatedAt ?? null;
+  if (now === expectedUpdatedAt) return;
+  throw new HandlerError(
+    now === null
+      ? `${what} was deleted after this request read it; nothing was written. Read the routes again and retry.`
+      : expectedUpdatedAt === null
+        ? `${what} was created at ${now} after this request looked; nothing was written. Read it and retry.`
+        : `${what} changed at ${now} after this request read it (at ${expectedUpdatedAt}); nothing was written. Read it again and retry.`,
+    'ROUTING_CHANGED',
+    409,
+  );
 }

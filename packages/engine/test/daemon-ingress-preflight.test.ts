@@ -75,7 +75,7 @@ for (const [patch, source, reason] of [
   [{ allowlistUserIds: ['another-owner'] }, {}, 'user-not-allowlisted'],
   [{ allowlistUserIds: ['owner'] }, { userId: undefined }, 'missing-user-identity'],
   [{ dmPolicy: 'deny' }, {}, 'direct-messages-disabled'],
-  [{ allowlistChannelIds: ['channel-a'] }, { channelId: 'channel-b' }, 'channel-not-allowlisted'],
+  [{ allowlistChannelIds: ['channel-a'] }, { channelId: 'channel-b', conversationKind: 'channel', userId: 'stranger' }, 'channel-not-allowlisted'],
 ] as const) test(`denied ${reason} does not judge or retain raw source text, but preserves denial bookkeeping`, async () => {
   const h = await fixture(patch as Partial<ChannelPolicyRecord>);
   const text = 'PRIVATE-SOURCE-TEXT for room 872'; const logs: string[] = []; const original = logger.info;

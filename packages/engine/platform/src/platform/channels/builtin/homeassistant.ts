@@ -185,16 +185,17 @@ export function listHomeAssistantOperatorActions(): ChannelOperatorActionDescrip
       required: ['template'],
       additionalProperties: true,
     }),
-    action(surface, 'homeassistant-publish-goodvibes-event', 'Publish GoodVibes event', 'Publish a GoodVibes message event into Home Assistant.', {
+    action(surface, 'homeassistant-publish-goodvibes-event', 'Publish GoodVibes event', 'Publish a GoodVibes message event into Home Assistant on the configured GoodVibes event type. Any other event type goes through homeassistant-fire-event.', {
       type: 'object',
       properties: {
         title: { type: 'string' },
         body: { type: 'string' },
         status: { type: 'string' },
+        type: { type: 'string' },
         metadata: { type: 'object', additionalProperties: true },
       },
       required: ['body'],
-      additionalProperties: true,
+      additionalProperties: false,
     }),
   ];
 }
@@ -521,8 +522,10 @@ async function renderHomeAssistantTemplate(deps: BuiltinChannelRuntimeDeps, inpu
 async function publishGoodVibesEvent(deps: BuiltinChannelRuntimeDeps, input?: Record<string, unknown>): Promise<Record<string, unknown>> {
   const body = readString(input?.body ?? input?.message ?? input?.text);
   if (!body) return { ok: false, error: 'body is required.' };
-  const eventType = readString(input?.eventType ?? input?.event_type)
-    ?? resolveHomeAssistantEventType(deps.configManager);
+  // Always the configured GoodVibes event type: a caller-chosen type here would
+  // fire any event on the Home Assistant bus without the dangerous flag that
+  // homeassistant-fire-event carries for exactly that.
+  const eventType = resolveHomeAssistantEventType(deps.configManager);
   const result = await (await createHomeAssistantClient(deps)).publishGoodVibesEvent(eventType, {
     type: readString(input?.type) ?? 'message',
     body,

@@ -9,16 +9,26 @@ import type {
   ChannelTargetResolveOptions,
 } from '../types.js';
 import type { BuiltinChannelRuntimeDeps, ManagedSurface } from './shared.js';
-import { resolveDiscordBotToken, resolveSlackBotToken } from './surfaces.js';
-// One rule applied identically on every surface: a conversation that has
-// already written to us is a target with no configuration at all.
-import { directoryEntriesFromBindings } from './directory-bindings.js';
+import { resolveSurfaceSecret } from './surface-secrets.js';
 import { logger } from '../../utils/logger.js';
 
 /** Provider pages are fetched at a fixed size; `limit` only bounds what is returned. */
 const PROVIDER_PAGE_SIZE = 200;
-/** A workspace larger than this many pages is searched up to the cap and the result says so in the log. */
+/** A workspace larger than this many pages is searched up to the cap, and the answer is marked truncated. */
 const PROVIDER_MAX_PAGES = 10;
+
+const TRUNCATED = Symbol('channel-directory-truncated');
+
+/** Mark a directory answer as cut short by the provider page cap; carried through filters by `keepTruncation`. */
+function markTruncated<T extends ChannelDirectoryEntry[]>(entries: T, truncated: boolean): T {
+  if (truncated) Object.defineProperty(entries, TRUNCATED, { value: true, enumerable: false });
+  return entries;
+}
+
+/** True when a directory answer stopped at the provider page cap, so a name past it may exist. */
+export function isTruncatedDirectory(entries: readonly unknown[]): boolean {
+  return (entries as unknown as { [TRUNCATED]?: boolean })[TRUNCATED] === true;
+}
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -62,8 +72,11 @@ export async function resolveBuiltinTarget(
   if (directoryEntry) {
     return resolveDirectoryEntryTarget(surface, options, directoryEntry, explicit);
   }
+  const searchTruncated = isTruncatedDirectory(directoryEntries);
   if (explicit) {
-    return directoryError ? { ...explicit, metadata: { ...explicit.metadata, directoryError } } : explicit;
+    return directoryError || searchTruncated
+      ? { ...explicit, metadata: { ...explicit.metadata, ...(directoryError ? { directoryError } : {}), ...(searchTruncated ? { searchTruncated: true } : {}) } }
+      : explicit;
   }
 
   const kind = inferBuiltinTargetConversationKind(input, options);
@@ -81,6 +94,8 @@ export async function resolveBuiltinTarget(
       fallback: true,
       createIfMissing: Boolean(options.createIfMissing),
       ...(directoryError ? { directoryError } : {}),
+      // Nothing matched within the pages searched; past the cap it may exist.
+      ...(searchTruncated ? { searchTruncated: true } : {}),
     },
   };
   return {
@@ -211,14 +226,30 @@ export function resolveBuiltinSessionTarget(target: ChannelResolvedTarget): stri
   return `channel:${target.surface}:${stableId.toLowerCase()}`;
 }
 
+/**
+ * Known conversations (the route directory, the only producer of them), and
+ * with `live` the provider's own directory after them. A conversation is
+ * listed once: a provider entry with the id a known conversation already
+ * carries is dropped.
+ */
 export async function lookupBuiltinDirectory(
   context: BuiltinTargetContext,
   surface: ManagedSurface,
   query: string,
   options?: ChannelDirectoryQueryOptions,
 ): Promise<ChannelDirectoryEntry[]> {
+  const { entries, truncated } = await lookupBuiltinDirectoryWithTruncation(context, surface, query, options);
+  return markTruncated(entries, truncated);
+}
+
+export async function lookupBuiltinDirectoryWithTruncation(
+  context: BuiltinTargetContext,
+  surface: ManagedSurface,
+  query: string,
+  options?: ChannelDirectoryQueryOptions,
+): Promise<{ readonly entries: ChannelDirectoryEntry[]; readonly truncated: boolean }> {
   const routeEntries = await lookupBuiltinRouteDirectory(context, surface, query, options);
-  if (!options?.live || surface === 'webhook') return routeEntries;
+  if (!options?.live || surface === 'webhook') return { entries: routeEntries, truncated: false };
   let providerEntries: ChannelDirectoryEntry[];
   try {
     providerEntries = await lookupBuiltinProviderDirectory(context, surface, query, options);
@@ -238,13 +269,19 @@ export async function lookupBuiltinDirectory(
     }
     providerEntries = [];
   }
+  // A known conversation is keyed by its binding id but names its provider id
+  // as `groupId`/`handle`; both forms are claimed so the provider's own entry
+  // for the same conversation is not listed a second time.
   const seen = new Set<string>();
-  return [...routeEntries, ...providerEntries].filter((entry) => {
-    const key = `${entry.surface}:${entry.id}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
+  for (const entry of routeEntries) {
+    seen.add(entry.id);
+    if (entry.groupId) seen.add(entry.groupId);
+    if (entry.kind !== 'member' && entry.handle) seen.add(entry.handle);
+  }
+  return {
+    entries: [...routeEntries, ...providerEntries.filter((entry) => !seen.has(entry.id))],
+    truncated: isTruncatedDirectory(providerEntries),
+  };
 }
 
 export async function lookupBuiltinProviderDirectory(
@@ -257,13 +294,13 @@ export async function lookupBuiltinProviderDirectory(
   const limit = Math.max(1, Math.min(100, options?.limit ?? 20));
   const scope = options?.scope ?? 'all';
   if (surface === 'slack') {
-    const token = await resolveSlackBotToken(context.deps);
-    // A conversation that has already written to us is a real target with no
-    // configuration at all (see directoryEntriesFromBindings); the optional
-    // fields below only matter for INITIATING contact.
-    if (!token) return filterProviderDirectory(directoryEntriesFromBindings(context, surface, 'slack'), needle, limit);
+    const token = await resolveSurfaceSecret(context.deps, 'slack', 'primary');
+    // Known conversations come from the route directory; without a token there
+    // is no provider directory to add to them.
+    if (!token) return [];
     const slack = new SlackIntegration(undefined, token);
     const entries: ChannelDirectoryEntry[] = [];
+    let truncated = false;
     // A token may be allowed one half (channels:read without users:read). A half that is refused is
     // left out and logged; the lookup fails only when every half it tried failed.
     let halvesTried = 0;
@@ -271,7 +308,9 @@ export async function lookupBuiltinProviderDirectory(
     const readHalf = async (what: string, read: () => Promise<ChannelDirectoryEntry[]>): Promise<void> => {
       halvesTried += 1;
       try {
-        entries.push(...await read());
+        const half = await read();
+        truncated ||= isTruncatedDirectory(half);
+        entries.push(...half);
       } catch (error) {
         halfFailures.push(error);
         logger.warn(`Slack ${what} directory could not be read; the rest is still searched`, { surface, error: errorText(error) });
@@ -300,7 +339,7 @@ export async function lookupBuiltinProviderDirectory(
             isDirect: Boolean(channel.is_im),
             isGroupConversation: !channel.is_im,
             searchText: [channel.id, channel.name].filter(Boolean).join(' '),
-            metadata: { provider: 'slack', raw: channel },
+            metadata: { provider: 'slack' },
           })),
         };
       }));
@@ -324,23 +363,20 @@ export async function lookupBuiltinProviderDirectory(
               workspaceId: String(context.deps.configManager.get('surfaces.slack.workspaceId') || '') || undefined,
               isDirect: true,
               searchText: [user.id, user.name, user.real_name, display].filter(Boolean).join(' '),
-              metadata: { provider: 'slack', raw: user },
+              metadata: { provider: 'slack' },
             };
           }),
         };
       }));
     }
     if (halvesTried > 0 && halfFailures.length === halvesTried) throw halfFailures[0];
-    return filterProviderDirectory(entries, needle, limit);
+    return markTruncated(filterProviderDirectory(entries, needle, limit), truncated);
   }
 
   if (surface === 'discord') {
-    const token = await resolveDiscordBotToken(context.deps);
+    const token = await resolveSurfaceSecret(context.deps, 'discord', 'primary');
     const guildId = String(context.deps.configManager.get('surfaces.discord.guildId') || '');
-    // A conversation that has already written to us is a real target with no
-    // configuration at all (see directoryEntriesFromBindings); the optional
-    // fields below only matter for INITIATING contact.
-    if (!token || !guildId) return filterProviderDirectory(directoryEntriesFromBindings(context, surface, 'discord'), needle, limit);
+    if (!token || !guildId) return [];
     const discord = new DiscordIntegration(undefined, token);
     const entries: ChannelDirectoryEntry[] = [];
     if (scope === 'all' || scope === 'channels' || scope === 'groups' || scope === 'peers') {
@@ -361,15 +397,16 @@ export async function lookupBuiltinProviderDirectory(
           parentId: typeof channel.parent_id === 'string' ? channel.parent_id : undefined,
           isGroupConversation: true,
           searchText: [id, name].join(' '),
-          metadata: { provider: 'discord', raw: channel },
+          metadata: { provider: 'discord' },
         });
       }
     }
+    let truncated = false;
     if (scope === 'all' || scope === 'users' || scope === 'members' || scope === 'peers') {
       // Listing members needs a privileged gateway intent; channels are still
       // searchable without it, so a refusal here leaves the answer partial.
       try {
-        entries.push(...await collectMatchingPages('discord members', needle, limit, async (cursor) => {
+        const members = await collectMatchingPages('discord members', needle, limit, async (cursor) => {
           const members = await discord.listGuildMembers(guildId, {
             token,
             limit: PROVIDER_PAGE_SIZE,
@@ -394,11 +431,13 @@ export async function lookupBuiltinProviderDirectory(
                 workspaceId: guildId,
                 isDirect: true,
                 searchText: [id, username, nick].filter(Boolean).join(' '),
-                metadata: { provider: 'discord', raw: member },
+                metadata: { provider: 'discord' },
               }];
             }),
           };
-        }));
+        });
+        truncated = isTruncatedDirectory(members);
+        entries.push(...members);
       } catch (error) {
         logger.warn('Discord member directory could not be read; only channels are listed', {
           surface,
@@ -406,17 +445,16 @@ export async function lookupBuiltinProviderDirectory(
         });
       }
     }
-    return filterProviderDirectory(entries, needle, limit);
+    return markTruncated(filterProviderDirectory(entries, needle, limit), truncated);
   }
 
   const surfaces = context.deps.configManager.getCategory('surfaces');
 
   if (surface === 'ntfy') {
     const topic = String(context.deps.configManager.get('surfaces.ntfy.topic') || '');
-    // A conversation that has already written to us is a real target with no
-    // configuration at all (see directoryEntriesFromBindings); the optional
-    // fields below only matter for INITIATING contact.
-    if (!topic) return filterProviderDirectory(directoryEntriesFromBindings(context, surface, 'ntfy'), needle, limit);
+    // The configured defaults are what this half adds; known conversations come
+    // from the route directory whether or not any default is set.
+    if (!topic) return [];
     return filterProviderDirectory([{
       id: topic,
       surface,
@@ -456,13 +494,9 @@ export async function lookupBuiltinProviderDirectory(
   }
 
   if (surface === 'telegram') {
+    // Known conversations come from the route directory; this half adds the
+    // configured default chat and the bot itself.
     const candidates: ChannelDirectoryEntry[] = [];
-    // Every known conversation is a real target, whether or not the operator
-    // ever filled in `defaultChatId`. Those fields exist to INITIATE contact;
-    // a chat the bot has already talked to needs no configuration at all, and
-    // gating the directory on them is what left a fresh install able to
-    // receive messages but unable to answer them.
-    candidates.push(...directoryEntriesFromBindings(context, surface, 'telegram'));
     if (surfaces.telegram.defaultChatId) {
       candidates.push({
         id: surfaces.telegram.defaultChatId,
@@ -491,10 +525,9 @@ export async function lookupBuiltinProviderDirectory(
   }
 
   if (surface === 'google-chat') {
-    // A conversation that has already written to us is a real target with no
-    // configuration at all (see directoryEntriesFromBindings); the optional
-    // fields below only matter for INITIATING contact.
-    if (!surfaces.googleChat.spaceId && !surfaces.googleChat.appId) return filterProviderDirectory(directoryEntriesFromBindings(context, surface, 'google-chat'), needle, limit);
+    // The configured defaults are what this half adds; known conversations come
+    // from the route directory whether or not any default is set.
+    if (!surfaces.googleChat.spaceId && !surfaces.googleChat.appId) return [];
     return filterProviderDirectory([{
       id: surfaces.googleChat.spaceId || surfaces.googleChat.appId,
       surface,
@@ -509,10 +542,9 @@ export async function lookupBuiltinProviderDirectory(
   }
 
   if (surface === 'signal') {
-    // A conversation that has already written to us is a real target with no
-    // configuration at all (see directoryEntriesFromBindings); the optional
-    // fields below only matter for INITIATING contact.
-    if (!surfaces.signal.defaultRecipient && !surfaces.signal.account) return filterProviderDirectory(directoryEntriesFromBindings(context, surface, 'signal'), needle, limit);
+    // The configured defaults are what this half adds; known conversations come
+    // from the route directory whether or not any default is set.
+    if (!surfaces.signal.defaultRecipient && !surfaces.signal.account) return [];
     return filterProviderDirectory([{
       id: surfaces.signal.defaultRecipient || surfaces.signal.account,
       surface,
@@ -526,10 +558,9 @@ export async function lookupBuiltinProviderDirectory(
   }
 
   if (surface === 'whatsapp') {
-    // A conversation that has already written to us is a real target with no
-    // configuration at all (see directoryEntriesFromBindings); the optional
-    // fields below only matter for INITIATING contact.
-    if (!surfaces.whatsapp.defaultRecipient && !surfaces.whatsapp.phoneNumberId) return filterProviderDirectory(directoryEntriesFromBindings(context, surface, 'whatsapp'), needle, limit);
+    // The configured defaults are what this half adds; known conversations come
+    // from the route directory whether or not any default is set.
+    if (!surfaces.whatsapp.defaultRecipient && !surfaces.whatsapp.phoneNumberId) return [];
     return filterProviderDirectory([{
       id: surfaces.whatsapp.defaultRecipient || surfaces.whatsapp.phoneNumberId,
       surface,
@@ -547,10 +578,9 @@ export async function lookupBuiltinProviderDirectory(
   }
 
   if (surface === 'telephony') {
-    // A conversation that has already written to us is a real target with no
-    // configuration at all (see directoryEntriesFromBindings); the optional
-    // fields below only matter for INITIATING contact.
-    if (!surfaces.telephony.defaultRecipient && !surfaces.telephony.fromNumber && !surfaces.telephony.accountSid) return filterProviderDirectory(directoryEntriesFromBindings(context, surface, 'telephony'), needle, limit);
+    // The configured defaults are what this half adds; known conversations come
+    // from the route directory whether or not any default is set.
+    if (!surfaces.telephony.defaultRecipient && !surfaces.telephony.fromNumber && !surfaces.telephony.accountSid) return [];
     return filterProviderDirectory([{
       id: surfaces.telephony.defaultRecipient || surfaces.telephony.fromNumber || surfaces.telephony.accountSid,
       surface,
@@ -568,10 +598,9 @@ export async function lookupBuiltinProviderDirectory(
   }
 
   if (surface === 'imessage') {
-    // A conversation that has already written to us is a real target with no
-    // configuration at all (see directoryEntriesFromBindings); the optional
-    // fields below only matter for INITIATING contact.
-    if (!surfaces.imessage.defaultChatId && !surfaces.imessage.account) return filterProviderDirectory(directoryEntriesFromBindings(context, surface, 'imessage'), needle, limit);
+    // The configured defaults are what this half adds; known conversations come
+    // from the route directory whether or not any default is set.
+    if (!surfaces.imessage.defaultChatId && !surfaces.imessage.account) return [];
     return filterProviderDirectory([{
       id: surfaces.imessage.defaultChatId || surfaces.imessage.account,
       surface,
@@ -586,9 +615,6 @@ export async function lookupBuiltinProviderDirectory(
 
   if (surface === 'msteams') {
     const candidates: ChannelDirectoryEntry[] = [];
-    // Same rule as every other surface: a conversation that has written to us
-    // is a target with no configuration at all.
-    candidates.push(...directoryEntriesFromBindings(context, surface, 'msteams'));
     if (surfaces.msteams.defaultConversationId) {
       candidates.push({
         id: surfaces.msteams.defaultConversationId,
@@ -621,10 +647,9 @@ export async function lookupBuiltinProviderDirectory(
   }
 
   if (surface === 'bluebubbles') {
-    // A conversation that has already written to us is a real target with no
-    // configuration at all (see directoryEntriesFromBindings); the optional
-    // fields below only matter for INITIATING contact.
-    if (!surfaces.bluebubbles.defaultChatGuid && !surfaces.bluebubbles.account) return filterProviderDirectory(directoryEntriesFromBindings(context, surface, 'bluebubbles'), needle, limit);
+    // The configured defaults are what this half adds; known conversations come
+    // from the route directory whether or not any default is set.
+    if (!surfaces.bluebubbles.defaultChatGuid && !surfaces.bluebubbles.account) return [];
     return filterProviderDirectory([{
       id: surfaces.bluebubbles.defaultChatGuid || surfaces.bluebubbles.account,
       surface,
@@ -638,10 +663,9 @@ export async function lookupBuiltinProviderDirectory(
   }
 
   if (surface === 'mattermost') {
-    // A conversation that has already written to us is a real target with no
-    // configuration at all (see directoryEntriesFromBindings); the optional
-    // fields below only matter for INITIATING contact.
-    if (!surfaces.mattermost.defaultChannelId && !surfaces.mattermost.teamId) return filterProviderDirectory(directoryEntriesFromBindings(context, surface, 'mattermost'), needle, limit);
+    // The configured defaults are what this half adds; known conversations come
+    // from the route directory whether or not any default is set.
+    if (!surfaces.mattermost.defaultChannelId && !surfaces.mattermost.teamId) return [];
     return filterProviderDirectory([{
       id: surfaces.mattermost.defaultChannelId || surfaces.mattermost.teamId,
       surface,
@@ -656,10 +680,9 @@ export async function lookupBuiltinProviderDirectory(
   }
 
   if (surface === 'matrix') {
-    // A conversation that has already written to us is a real target with no
-    // configuration at all (see directoryEntriesFromBindings); the optional
-    // fields below only matter for INITIATING contact.
-    if (!surfaces.matrix.defaultRoomId && !surfaces.matrix.userId) return filterProviderDirectory(directoryEntriesFromBindings(context, surface, 'matrix'), needle, limit);
+    // The configured defaults are what this half adds; known conversations come
+    // from the route directory whether or not any default is set.
+    if (!surfaces.matrix.defaultRoomId && !surfaces.matrix.userId) return [];
     return filterProviderDirectory([{
       id: surfaces.matrix.defaultRoomId || surfaces.matrix.userId,
       surface,
@@ -718,12 +741,10 @@ async function lookupBuiltinRouteDirectory(
                 typeof entry.handle === 'string' ? entry.handle : '',
                 typeof entry.label === 'string' ? entry.label : '',
               ].filter(Boolean).join(' ').trim() || undefined,
+              // Ids that tie the member to its conversation, never the stored record.
               metadata: {
-                ...entry,
                 parentBindingId: binding.id,
-                sessionId: binding.sessionId,
-                jobId: binding.jobId,
-                runId: binding.runId,
+                ...(binding.sessionId ? { sessionId: binding.sessionId } : {}),
               },
             }))
         : [];
@@ -761,15 +782,14 @@ async function lookupBuiltinRouteDirectory(
             ? metadata.aliases.filter((value): value is string => typeof value === 'string')
             : []),
         ].filter(Boolean).join(' ').trim() || undefined,
+        // The binding's ids only. Its stored metadata holds inbound payload
+        // fields, which have no place in a directory answer an agent reads.
         metadata: {
           externalId: binding.externalId,
-          channelId: binding.channelId,
-          threadId: binding.threadId,
-          sessionId: binding.sessionId,
-          jobId: binding.jobId,
-          runId: binding.runId,
+          ...(binding.channelId ? { channelId: binding.channelId } : {}),
+          ...(binding.threadId ? { threadId: binding.threadId } : {}),
+          ...(binding.sessionId ? { sessionId: binding.sessionId } : {}),
           surfaceId: binding.surfaceId,
-          ...metadata,
         },
       };
       return [mainEntry, ...memberEntries];
@@ -881,11 +901,13 @@ async function collectMatchingPages(
   for (let page = 0; page < PROVIDER_MAX_PAGES; page += 1) {
     const result = await fetchPage(cursor);
     found.push(...filterProviderDirectory(result.entries, needle, Number.MAX_SAFE_INTEGER));
-    if (found.length >= limit || !result.next) return found;
+    // An exact name is the conversation or person being looked for; the pages
+    // after it can only add near misses, each one a request against a rate limit.
+    if (found.length >= limit || !result.next || (needle && pickBestDirectoryEntry(found, needle))) return found;
     cursor = result.next;
   }
   logger.warn('Provider directory search stopped at its page cap', { what, pages: PROVIDER_MAX_PAGES, matches: found.length });
-  return found;
+  return markTruncated(found, true);
 }
 
 function filterProviderDirectory(entries: readonly ChannelDirectoryEntry[], needle: string, limit: number): ChannelDirectoryEntry[] {

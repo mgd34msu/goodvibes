@@ -6,11 +6,42 @@ import type {
   ChannelSurface,
   ChannelToolDescriptor,
 } from '../types.js';
+import { providerOperationsFor } from './provider-operations.js';
 import {
   HOME_ASSISTANT_SURFACE,
   listHomeAssistantOperatorActions,
   listHomeAssistantTools,
 } from './homeassistant.js';
+
+const ALLOWLIST_ENTRY_PROPERTIES = {
+  add: { type: 'array', items: { type: 'string' }, description: 'Names, handles, or typed ids such as user:U0123 or channel:C0123.' },
+  remove: { type: 'array', items: { type: 'string' } },
+  kind: { type: 'string', enum: ['user', 'channel', 'group'], description: 'Whether the entries are people (user) or conversations (channel, group). Required unless every entry is a typed id.' },
+};
+
+const ALLOWLIST_EDIT_PROPERTIES = {
+  ...ALLOWLIST_ENTRY_PROPERTIES,
+  groupId: { type: 'string' },
+  channelId: { type: 'string' },
+  workspaceId: { type: 'string' },
+  metadata: { type: 'object' },
+  force: { type: 'boolean', description: 'Apply even though the edit would refuse the caller\'s own conversation.' },
+  callerUserId: { type: 'string', description: 'Your own provider user id on this surface, kept admitted.' },
+  callerConversationId: { type: 'string', description: 'The id of the conversation you are writing from, kept admitted.' },
+  callerConversationKind: { type: 'string', enum: ['direct', 'group', 'channel', 'thread', 'service'] },
+};
+
+const DIRECTORY_INPUT_SCHEMA = {
+  type: 'object',
+  properties: {
+    query: { type: 'string' },
+    scope: { type: 'string', enum: ['all', 'self', 'users', 'peers', 'groups', 'channels', 'threads', 'services', 'members'] },
+    groupId: { type: 'string' },
+    limit: { type: 'number' },
+    live: { type: 'boolean', description: 'Also search the provider directory (needs the surface credential).' },
+  },
+  additionalProperties: false,
+};
 
 export function listBuiltinCapabilities(
   surface: ChannelSurface,
@@ -209,17 +240,9 @@ export function listBuiltinOperatorActions(surface: ChannelSurface): ChannelOper
       id: 'list-directory',
       surface,
       label: 'List directory',
-      description: 'Search or scope the route-backed channel directory.',
+      description: 'Search the conversations this surface already knows; with live, the provider directory too.',
       dangerous: false,
-      inputSchema: {
-        type: 'object',
-        properties: {
-          query: { type: 'string' },
-          scope: { type: 'string' },
-          groupId: { type: 'string' },
-          limit: { type: 'number' },
-        },
-      },
+      inputSchema: DIRECTORY_INPUT_SCHEMA,
       metadata: {},
     },
     {
@@ -240,7 +263,7 @@ export function listBuiltinOperatorActions(surface: ChannelSurface): ChannelOper
         type: 'object',
         properties: {
           accountId: { type: 'string' },
-          action: { type: 'string' },
+          action: { type: 'string', enum: ['inspect', 'setup', 'retest', 'connect', 'disconnect', 'start', 'stop', 'login', 'logout', 'wait_login'] },
         },
         required: ['action'],
       },
@@ -288,16 +311,12 @@ export function listBuiltinOperatorActions(surface: ChannelSurface): ChannelOper
       id: 'resolve-allowlist',
       surface,
       label: 'Resolve allowlist entries',
-      description: 'Resolve allowlist candidates into stable user, channel, or group identifiers.',
+      description: 'Resolve allowlist candidates (names, handles or typed ids) into the provider ids ingress compares; candidates that match nothing are listed as unresolved.',
       dangerous: false,
       inputSchema: {
         type: 'object',
-        properties: {
-          add: { type: 'array', items: { type: 'string' } },
-          remove: { type: 'array', items: { type: 'string' } },
-          kind: { type: 'string' },
-        },
-        additionalProperties: true,
+        properties: ALLOWLIST_ENTRY_PROPERTIES,
+        additionalProperties: false,
       },
       metadata: {},
     },
@@ -305,46 +324,24 @@ export function listBuiltinOperatorActions(surface: ChannelSurface): ChannelOper
       id: 'edit-allowlist',
       surface,
       label: 'Edit allowlist',
-      description: 'Apply allowlist additions or removals at the surface or scoped group/channel level.',
+      description: 'Add or remove allowlist entries at the surface or a scoped group/channel. Requires kind; refuses entries that do not resolve to a provider id and edits that would refuse the caller\'s own conversation (unless force).',
       dangerous: true,
       inputSchema: {
         type: 'object',
-        properties: {
-          add: { type: 'array', items: { type: 'string' } },
-          remove: { type: 'array', items: { type: 'string' } },
-          kind: { type: 'string' },
-          groupId: { type: 'string' },
-          channelId: { type: 'string' },
-          workspaceId: { type: 'string' },
-        },
-        additionalProperties: true,
+        properties: ALLOWLIST_EDIT_PROPERTIES,
+        additionalProperties: false,
       },
       metadata: {},
     },
-    {
-      id: 'provider-api',
+    ...providerOperationsFor(surface).map((operation): ChannelOperatorActionDescriptor => ({
+      id: operation.id,
       surface,
-      label: 'Run provider-native API operation',
-      description: 'Run provider-native operations such as OAuth URL generation, live directory lookup, Discord command registration, or ntfy polling.',
-      dangerous: false,
-      inputSchema: {
-        type: 'object',
-        properties: {
-          operation: { type: 'string' },
-          query: { type: 'string' },
-          scope: { type: 'string' },
-          limit: { type: 'number' },
-          clientId: { type: 'string' },
-          redirectUri: { type: 'string' },
-          guildId: { type: 'string' },
-          topic: { type: 'string' },
-          since: { type: 'string' },
-        },
-        required: ['operation'],
-        additionalProperties: true,
-      },
-      metadata: {},
-    },
+      label: operation.label,
+      description: operation.description,
+      dangerous: operation.dangerous,
+      inputSchema: operation.inputSchema,
+      metadata: { providerOperation: true },
+    })),
   ];
   if (surface === 'telegram') actions.push(
     { id: 'cursor-migration-preview', surface, label: 'Review previous Telegram cursor',
@@ -372,7 +369,7 @@ export function listBuiltinTools(surface: ChannelSurface): ChannelToolDescriptor
 }
 
 function listUnflaggedBuiltinTools(surface: ChannelSurface): ChannelToolDescriptor[] {
-  const tools = [
+  const tools: ChannelToolDescriptor[] = [
     {
       id: `${surface}:account`,
       surface,
@@ -450,12 +447,8 @@ function listUnflaggedBuiltinTools(surface: ChannelSurface): ChannelToolDescript
       actionIds: ['resolve-allowlist'],
       inputSchema: {
         type: 'object',
-        properties: {
-          add: { type: 'array', items: { type: 'string' } },
-          remove: { type: 'array', items: { type: 'string' } },
-          kind: { type: 'string' },
-        },
-        additionalProperties: true,
+        properties: ALLOWLIST_ENTRY_PROPERTIES,
+        additionalProperties: false,
       },
       metadata: {},
     },
@@ -467,15 +460,8 @@ function listUnflaggedBuiltinTools(surface: ChannelSurface): ChannelToolDescript
       actionIds: ['edit-allowlist'],
       inputSchema: {
         type: 'object',
-        properties: {
-          add: { type: 'array', items: { type: 'string' } },
-          remove: { type: 'array', items: { type: 'string' } },
-          kind: { type: 'string' },
-          groupId: { type: 'string' },
-          channelId: { type: 'string' },
-          workspaceId: { type: 'string' },
-        },
-        additionalProperties: true,
+        properties: ALLOWLIST_EDIT_PROPERTIES,
+        additionalProperties: false,
       },
       metadata: {},
     },
@@ -483,18 +469,9 @@ function listUnflaggedBuiltinTools(surface: ChannelSurface): ChannelToolDescript
       id: `${surface}:directory`,
       surface,
       name: `${surface}_directory`,
-      description: `Query the ${surface} channel directory and group membership view.`,
+      description: `Search the ${surface} conversations already known; pass live to search the provider directory too.`,
       actionIds: ['list-directory'],
-      inputSchema: {
-        type: 'object',
-        properties: {
-          query: { type: 'string' },
-          scope: { type: 'string' },
-          groupId: { type: 'string' },
-          limit: { type: 'number' },
-        },
-        additionalProperties: false,
-      },
+      inputSchema: DIRECTORY_INPUT_SCHEMA,
       metadata: {},
     },
     {
@@ -513,13 +490,13 @@ function listUnflaggedBuiltinTools(surface: ChannelSurface): ChannelToolDescript
       id: `${surface}:account_action`,
       surface,
       name: `${surface}_account_action`,
-      description: `Run an account lifecycle action (start, stop, login, logout) for the ${surface} surface.`,
+      description: `Run an account lifecycle action (setup, start, stop, login, logout and the rest) for the ${surface} surface; setup takes the surface's credentials and settings.`,
       actionIds: ['account-action'],
       inputSchema: {
         type: 'object',
         properties: {
           accountId: { type: 'string' },
-          action: { type: 'string' },
+          action: { type: 'string', enum: ['inspect', 'setup', 'retest', 'connect', 'disconnect', 'start', 'stop', 'login', 'logout', 'wait_login'] },
         },
         required: ['action'],
         additionalProperties: true,
@@ -567,30 +544,18 @@ function listUnflaggedBuiltinTools(surface: ChannelSurface): ChannelToolDescript
       },
       metadata: {},
     },
-    {
-      id: `${surface}:provider`,
-      surface,
-      name: `${surface}_provider`,
-      description: `Run provider-native operations for the ${surface} surface.`,
-      actionIds: ['provider-api'],
-      inputSchema: {
-        type: 'object',
-        properties: {
-          operation: { type: 'string' },
-          query: { type: 'string' },
-          scope: { type: 'string' },
-          limit: { type: 'number' },
-          clientId: { type: 'string' },
-          redirectUri: { type: 'string' },
-          guildId: { type: 'string' },
-          topic: { type: 'string' },
-          since: { type: 'string' },
-        },
-        required: ['operation'],
-        additionalProperties: true,
-      },
-      metadata: {},
-    },
+    ...providerOperationsFor(surface).filter((operation) => operation.agentTool).map((operation): ChannelToolDescriptor => {
+      const suffix = operation.id.replace(/-/g, '_');
+      return {
+        id: `${surface}:${suffix}`,
+        surface,
+        name: `${surface}_${suffix}`,
+        description: `${operation.description} (${surface})`,
+        actionIds: [operation.id],
+        inputSchema: operation.inputSchema,
+        metadata: {},
+      };
+    }),
   ];
   return surface === HOME_ASSISTANT_SURFACE
     ? [...tools, ...listHomeAssistantTools()]

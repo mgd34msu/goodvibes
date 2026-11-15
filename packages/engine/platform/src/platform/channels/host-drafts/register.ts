@@ -1,9 +1,9 @@
 /**
- * channels.drafts.* handler surface (Channel Drafts / Draft Sync Backend).
+ * channels.drafts.* handler surface: the store of record for channel drafts.
  *
  * Attaches host handlers to the four platform-registered builtin descriptors:
- *   channels.drafts.list    read:channels      read-only
- *   channels.drafts.get     read:channels      read-only
+ *   channels.drafts.list    read:channels      metadata only
+ *   channels.drafts.get     read:channels      one draft; its text for the owner
  *   channels.drafts.save    write:channels     access:admin, confirm-gated
  *   channels.drafts.delete  write:channels     access:admin, dangerous, confirm-gated
  *
@@ -11,11 +11,13 @@
  * registered with handler:undefined). This module NEVER re-declares any of
  * them, it looks each up via catalog.get(id) (inside registerCatalogHandler)
  * and re-registers with the wrapped handler. Manual save/delete retain explicit
- * confirmation. Autonomous calls require fresh recorded native admission under
- * current paired owner authority, retained through durable publication.
+ * confirmation. An autonomous call goes through `runNativeMutation`, which
+ * checks the paired owner; its write is a compare-and-set on the row it read.
  *
- * SECURITY: the message body is encrypted at rest and NEVER returned (the wire
- * `message` field carries a fixed redaction marker). Webhooks are
+ * SECURITY: the message body is encrypted at rest. `list` answers a fixed
+ * redaction marker for it; `get` decrypts it for an owner (admin) caller, the
+ * principal that can already send any text through the channel, so a draft
+ * written on one device can be read and sent from another. Webhooks are
  * encrypted at rest and ALWAYS redacted on read; RAW webhook tokens submitted
  * to save are REJECTED, the agent must redact ('[redacted]') or pass a
  * goodvibes://secrets/ reference before transmission.
@@ -26,13 +28,10 @@ import { createAtRestCipher } from '../../config/daemon-credential-store.js';
 import { HandlerError } from '../../control-plane/host-handlers.js';
 import { registerCatalogHandlers } from '../../control-plane/host-handlers.js';
 import { assertConfirmed } from '../../control-plane/host-handlers.js';
-import { requestsNativeAdmission, retainNativeMutationRequest, runNativeMutation } from '../../control-plane/native-mutation.js';
+import { requestsNativeAdmission, runNativeMutation } from '../../control-plane/native-mutation.js';
 import type { TypedHandler } from '../../control-plane/host-handlers.js';
 import { snapshotJudgmentInput } from '../../gate/judgment-input.js';
-import { captureMutationDescriptors } from '../../utils/file-mutation.js';
 import { channelDraftWireReference, isNativeDraftWireReference } from './wire-reference.js';
-import { retainNativeDraftReferenceRequest, assertNativeDraftReferenceRequest,
-  resolveNativeDraftReferenceRequest, releaseNativeDraftReferenceRequest } from './native-reference.js';
 import {
   ALL_DRAFT_STATUSES,
   DraftSyncStore,
@@ -309,13 +308,13 @@ export function registerDraftMethods(
   let closing: Promise<void> | undefined;
   let mutationTail: Promise<unknown> = Promise.resolve();
   const active = new Set<Promise<unknown>>();
+  const closedError = () => new HandlerError('The draft service is shutting down; nothing was changed. Retry once the daemon is back.', 'DRAFT_SURFACE_CLOSED', 409);
   const admit = (handler: TypedHandler<unknown, unknown>, mutation = false): TypedHandler<unknown, unknown> => (input) => {
-    if (closed) return Promise.reject(new HandlerError('Draft surface is closed', 'DRAFT_SURFACE_CLOSED', 409));
-    const assertReceived = mutation && requestsNativeAdmission(input.body) ? retainNativeMutationRequest(input.body) : () => {};
+    if (closed) return Promise.reject(closedError());
     // Track before a store/cipher callback can reenter teardown. Writes are
     // serialized through persistence, so delete cannot be undone by an older
     // save that was still encrypting its body when the delete arrived.
-    const work = (mutation ? mutationTail : Promise.resolve()).then(() => { assertReceived(); input.context.signal?.throwIfAborted(); return handler(input); });
+    const work = (mutation ? mutationTail : Promise.resolve()).then(() => { input.context.signal?.throwIfAborted(); return handler(input); });
     active.add(work);
     if (mutation) mutationTail = work.then(() => {}, () => {});
     void work.then(() => active.delete(work), () => active.delete(work));
@@ -329,97 +328,74 @@ export function registerDraftMethods(
     return { drafts, total: store.count(query.status) };
   };
 
-  const getHandler: TypedHandler<unknown, GetResponse> = async ({ body }) => {
+  const getHandler: TypedHandler<unknown, GetResponse> = async ({ body, context }) => {
     await ensureInit();
     const id = parseDraftId(body);
     const privateId = isNativeDraftWireReference(id) ? store.resolveReferenceId(id) : id;
-    const record = privateId === undefined ? null : store.get(privateId);
+    // The owner reads the text, so a draft written on one device can be
+    // finished and sent on another; anyone else gets the redacted record.
+    const record = privateId === undefined ? null : context.admin ? await store.getReadable(privateId) : store.get(privateId);
     if (record === null) { snapshotJudgmentInput({ draftId: id }); return { notFound: true, id }; }
     return { ...record, id: channelDraftWireReference(record.id, record.wireReference) };
+  };
+
+  /**
+   * The selected row as admission sees it: under its wire reference, never its
+   * stored id, which can be one the card-material screen refuses to read.
+   */
+  const publicRow = (row: DraftRecord | null): DraftRecord | null =>
+    row === null ? null : { ...row, id: channelDraftWireReference(row.id, row.wireReference) };
+
+  /** A wire reference or id names exactly one stored row; a reference that names none is refused. */
+  const selectStoredId = (requested: string): string => {
+    if (!isNativeDraftWireReference(requested)) return requested;
+    const selected = store.resolveReferenceId(requested);
+    if (selected === undefined) {
+      throw new HandlerError(`No draft is stored under the reference ${requested}; list the drafts to find it.`, 'NATIVE_DRAFT_REFERENCE_UNAVAILABLE', 404);
+    }
+    return selected;
   };
 
   const saveHandler: TypedHandler<unknown, SaveResponse> = async ({ body, context }) => {
     const autonomous = requestsNativeAdmission(body);
     if (!autonomous) assertConfirmed(body, context);
-    const assertRequest = autonomous ? retainNativeMutationRequest(body) : () => {};
-    const ownerCurrent = captureMutationDescriptors(ctx, ['catalog', 'credentials', 'workingDirectory', 'nativeMutationHost']);
-    const referenceRequest = retainNativeDraftReferenceRequest(body, context, () => {
-      assertRequest(); ownerCurrent(); if (closed) throw new HandlerError('Draft surface closed', 'DRAFT_SURFACE_CLOSED', 409);
-    });
-    try {
-      context.signal?.throwIfAborted();
-      await ensureInit();
-      assertRequest(); context.signal?.throwIfAborted();
-      if (referenceRequest) assertNativeDraftReferenceRequest(referenceRequest);
-      const input = parseSaveInput(body);
-      const reference = referenceRequest ? await resolveNativeDraftReferenceRequest(referenceRequest, store) : undefined;
-      if (referenceRequest) assertNativeDraftReferenceRequest(referenceRequest);
-      assertRequest(); context.signal?.throwIfAborted();
-      if (reference) validateWebhook(reference.target.webhook);
-      if (reference) input.id = reference.id;
-      else if (input.id !== undefined && isNativeDraftWireReference(input.id)) {
-        const selected = store.resolveReferenceId(input.id);
-        if (selected === undefined) throw new HandlerError('Native draft reference is unavailable', 'NATIVE_DRAFT_REFERENCE_UNAVAILABLE', 404);
-        input.id = selected;
-      }
-      const selectedId = input.id ?? opaqueUuid();
-      if (autonomous) input.id = selectedId;
-      const target = reference ?? (autonomous ? store.retainTarget(selectedId) : undefined);
-      return await runNativeMutation({ host: ctx.nativeMutationHost, method: SAVE_ID, body, context,
-        target: { id: reference?.reference ?? input.id ?? null, current: target?.target ?? null, encryption: 'native daemon at-rest key' },
-        assertTargetCurrent: () => {
-          assertRequest(); if (closed) throw new Error('Draft surface closed');
-          if (referenceRequest) assertNativeDraftReferenceRequest(referenceRequest);
-          target?.assertCurrent();
-        },
-        async mutate(assertCurrent, _admission, withPublication) {
-          // A manual save is staged and published as one write: one that cannot
-          // be saved leaves the mirror as it was instead of active in memory.
-          const result = await store.upsert(input, autonomous ? assertCurrent : undefined, withPublication, !autonomous);
-          if (!reference) return { ...result, draft: { ...result.draft, id: result.draft.wireReference } };
-          if (result.draft.id !== reference.id) throw new HandlerError('Native draft publication changed', 'NATIVE_DRAFT_REFERENCE_STALE', 409);
-          return { ...result, draft: { ...result.draft, id: reference.reference } };
-        } });
-    } finally {
-      if (referenceRequest) releaseNativeDraftReferenceRequest(referenceRequest);
-    }
+    context.signal?.throwIfAborted();
+    await ensureInit();
+    // Parsed once into a value nothing downstream can change; every later step
+    // reads this value, so none has to check that the request is still the same.
+    const parsed = parseSaveInput(body);
+    const publicId = parsed.id;
+    const id = publicId === undefined ? (autonomous ? opaqueUuid() : undefined) : selectStoredId(publicId);
+    const input: DraftSaveInput = Object.freeze({ ...parsed, ...(id !== undefined ? { id } : {}), ...(parsed.tags ? { tags: Object.freeze([...parsed.tags]) as string[] } : {}) });
+    // The row this save read. An autonomous write applies only to it.
+    const selected = autonomous && id !== undefined ? store.selectRow(id) : undefined;
+    return await runNativeMutation({ host: ctx.nativeMutationHost, method: SAVE_ID, body, context,
+      target: { id: publicRow(selected?.target ?? null)?.id ?? publicId ?? id ?? null, current: publicRow(selected?.target ?? null), encryption: 'native daemon at-rest key' },
+      assertTargetCurrent: () => { if (closed) throw closedError(); },
+      async mutate(assertCurrent, _admission, withPublication) {
+        // A manual save is staged and published as one write: one that cannot
+        // be saved leaves the store as it was instead of changed in memory only.
+        const result = await store.upsert(input, autonomous ? assertCurrent : undefined, withPublication, !autonomous, selected?.updatedAt);
+        const wireId = publicId !== undefined && isNativeDraftWireReference(publicId) ? publicId : result.draft.wireReference;
+        return { ...result, draft: { ...result.draft, id: wireId } };
+      } });
   };
 
   const deleteHandler: TypedHandler<unknown, DeleteResponse> = async ({ body, context }) => {
     const autonomous = requestsNativeAdmission(body);
     if (!autonomous) assertConfirmed(body, context);
-    const assertRequest = autonomous ? retainNativeMutationRequest(body) : () => {};
-    const ownerCurrent = captureMutationDescriptors(ctx, ['catalog', 'credentials', 'workingDirectory', 'nativeMutationHost']);
-    const referenceRequest = retainNativeDraftReferenceRequest(body, context, () => {
-      assertRequest(); ownerCurrent(); if (closed) throw new HandlerError('Draft surface closed', 'DRAFT_SURFACE_CLOSED', 409);
-    }, 'draftId');
-    try {
-      context.signal?.throwIfAborted();
-      await ensureInit();
-      assertRequest(); context.signal?.throwIfAborted();
-      if (referenceRequest) assertNativeDraftReferenceRequest(referenceRequest);
-      const reference = referenceRequest ? await resolveNativeDraftReferenceRequest(referenceRequest, store) : undefined;
-      if (referenceRequest) assertNativeDraftReferenceRequest(referenceRequest);
-      assertRequest(); context.signal?.throwIfAborted();
-      if (reference) validateWebhook(reference.target.webhook);
-      const requestedId = parseDraftId(body);
-      const draftId = reference?.id ?? (isNativeDraftWireReference(requestedId) ? store.resolveReferenceId(requestedId) : requestedId);
-      if (draftId === undefined) throw new HandlerError('Native draft reference is unavailable', 'NATIVE_DRAFT_REFERENCE_UNAVAILABLE', 404);
-      const publicId = reference?.reference ?? requestedId;
-      const target = reference ?? (autonomous ? store.retainTarget(draftId) : undefined);
-      return await runNativeMutation({ host: ctx.nativeMutationHost, method: DELETE_ID, body, context,
-        target: { id: publicId, current: target?.target ?? null }, assertTargetCurrent: () => {
-          assertRequest(); if (closed) throw new Error('Draft surface closed');
-          if (referenceRequest) assertNativeDraftReferenceRequest(referenceRequest);
-          target?.assertCurrent();
-        },
-        async mutate(assertCurrent, _admission, withPublication) {
-          const deleted = await store.deleteAdmitted(draftId, assertCurrent, withPublication);
-          return { deleted, draftId: publicId };
-        } });
-    } finally {
-      if (referenceRequest) releaseNativeDraftReferenceRequest(referenceRequest);
-    }
+    context.signal?.throwIfAborted();
+    await ensureInit();
+    const requestedId = parseDraftId(body);
+    const draftId = selectStoredId(requestedId);
+    const selected = autonomous ? store.selectRow(draftId) : undefined;
+    return await runNativeMutation({ host: ctx.nativeMutationHost, method: DELETE_ID, body, context,
+      target: { id: publicRow(selected?.target ?? null)?.id ?? requestedId, current: publicRow(selected?.target ?? null) },
+      assertTargetCurrent: () => { if (closed) throw closedError(); },
+      async mutate(assertCurrent, _admission, withPublication) {
+        const deleted = await store.deleteAdmitted(draftId, assertCurrent, withPublication, selected?.updatedAt);
+        return { deleted, draftId: requestedId };
+      } });
   };
 
   const unregister = registerCatalogHandlers(ctx.catalog, [

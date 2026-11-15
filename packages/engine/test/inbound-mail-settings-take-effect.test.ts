@@ -146,25 +146,17 @@ describe('an inbound-mail setting edit reaches the running source', () => {
     }
   });
 
-  test('keys that decide WHICH source is built are deliberately not watched', async () => {
+  test('keys that decide WHICH source is built reach the supervisor, which rebuilds the source', async () => {
     const config = fakeConfig({ 'surfaces.email.inbound.enabled': true });
     const { calls, supervisor } = fakeSupervisor();
     await runtimeWith(config, supervisor).startInboundMail();
 
-    // A re-probe cannot change what the running source IS, so wiring these here
-    // would look like they took effect while they did not, the same defect one
-    // level up. They need a restart, which is a separate decision.
-    for (const key of [
-      'surfaces.email.inbound.accounts',
-      'surfaces.email.inbound.source',
-      'surfaces.email.inbound.mode',
-      'surfaces.email.imap.mailbox',
-    ]) {
-      expect(config.subscriberCount(key)).toBe(0);
+    for (const key of ['surfaces.email.inbound.accounts', 'surfaces.email.inbound.source', 'surfaces.email.imap.mailbox']) {
+      const before = calls.recheckNow;
       config.change(key);
+      pastCoalesceWindow();
+      expect(calls.recheckNow).toBe(before + 1);
     }
-    pastCoalesceWindow();
-    expect(calls.recheckNow).toBe(0);
   });
 
   test('a settings page that writes five keys re-probes once, not five times', async () => {

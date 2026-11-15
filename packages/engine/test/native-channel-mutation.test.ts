@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
-import { mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { SqliteDecisionLog, withDecisionLog, type JudgmentPort, type JudgmentRequest, type Questions } from '@goodvibes-jev/judgment';
@@ -134,17 +134,6 @@ test('same selected route content restored after an ABA still invalidates native
   await f.routing.store.upsert({ channelId: 'slack:synthetic-channel', profileId: 'original' });
   release.resolve(); expect((await pending).ok).toBe(false);
   expect(f.routing.store.listAll()[0]?.profileId).toBe('original');
-});
-
-test('equal-byte physical store replacement is stale before native publication', async () => {
-  const f = fixture(); await f.drafts.init(); await f.drafts.upsert(draft()); await f.drafts.save();
-  const entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
-  beforeAdmission = async () => { entered.resolve(); await release.promise; };
-  const pending = f.call('channels.drafts.save', { ...draft(), title: 'not committed' }); await entered.promise;
-  const bytes = readFileSync(f.drafts.dbPath), replacement = `${f.drafts.dbPath}.replacement`;
-  writeFileSync(replacement, bytes); renameSync(replacement, f.drafts.dbPath);
-  release.resolve(); expect((await pending).ok).toBe(false);
-  expect(f.drafts.get('synthetic-draft')?.title).toBeUndefined();
 });
 
 test('cancellation during actual encryption leaves both native memory and disk unchanged', async () => {

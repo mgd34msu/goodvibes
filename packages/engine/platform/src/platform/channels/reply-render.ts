@@ -113,24 +113,37 @@ const MAX_COMPLETION_REPORT_REWRITES = 4;
  * It belongs in the transcript, so only the report SPAN is rewritten, prose
  * written around it survives intact.
  *
- * BOTH forms are handled, because the report reached the owner's phone in both:
- * once as `{"version":1,"archetype":"engineer",...}`, and again, after that
- * was fixed, as the prose form the base agent prompt asks for, a filled-in
- * `Summary: / Changes: / Decisions:` template with `Changes: None` under a
- * greeting. The prose half lives in completion-report-prose.ts.
+ * The JSON form is recognised by its own discriminators (`version: 1` and an
+ * `archetype`), so it is always replaced. The prose form (`Summary: /
+ * Changes: / Decisions:`) is recognised only by its headings, which an
+ * ordinary answer uses too: a review answered under Summary / Issues /
+ * Verification lost everything but its summary. So the prose pass runs only
+ * for a run that was asked for the form, `replyStyle: 'report'`; a
+ * conversational run's answer, and any run whose style the caller did not
+ * state, is delivered as written.
  *
  * The JSON pass runs first: a report can carry BOTH (prose sections above, a
  * fenced JSON block below), and the JSON pass would otherwise be handed text
  * the prose pass had already truncated.
  */
-export function renderWithoutCompletionReport(text: string): string {
+export function renderWithoutCompletionReport(text: string, replyStyle?: ChannelReplyStyle): string {
   let out = text;
   for (let pass = 0; pass < MAX_COMPLETION_REPORT_REWRITES; pass += 1) {
     const span = findCompletionReportSpan(out);
     if (!span) break;
     out = `${out.slice(0, span.start)}${span.summary}${out.slice(span.end)}`;
   }
-  return stripProseCompletionReport(out).replace(/\n{3,}/g, '\n\n').trim();
+  const stripped = replyStyle === 'report' ? stripProseCompletionReport(out) : out;
+  return stripped.replace(/\n{3,}/g, '\n\n').trim();
+}
+
+/** Whether the run that produced a reply was asked for the completion form (see AgentRecord.replyStyle). */
+export type ChannelReplyStyle = 'report' | 'conversational';
+
+/** Options for rendering a reply body. */
+export interface ChannelReplyRenderOptions {
+  /** The producing run's reply style; absent means the text is delivered as written. */
+  readonly replyStyle?: ChannelReplyStyle | undefined;
 }
 
 /**
@@ -170,7 +183,11 @@ function assistantTextForVisibility(text: string, reasoningVisibility: ChannelRe
  */
 const MAX_EVENT_STATUS_CHARS = 400;
 
-export function eventLine(event: ChannelRenderEvent, reasoningVisibility: ChannelReasoningVisibility): string | null {
+export function eventLine(
+  event: ChannelRenderEvent,
+  reasoningVisibility: ChannelReasoningVisibility,
+  options: ChannelReplyRenderOptions = {},
+): string | null {
   // The gate. Everything below this line is text a person in a conversation
   // receives, so nothing written for an operator gets past it, see
   // channels/render-audience.ts for the incident that put it here. Placed at
@@ -182,7 +199,7 @@ export function eventLine(event: ChannelRenderEvent, reasoningVisibility: Channe
       if (!event.text?.trim()) return null;
       const body = assistantTextForVisibility(event.text, reasoningVisibility);
       if (!body.trim()) return null;
-      const rendered = renderWithoutCompletionReport(body);
+      const rendered = renderWithoutCompletionReport(body, options.replyStyle);
       return rendered.length > 0 ? rendered : null;
     }
     case 'reasoning':
@@ -284,11 +301,11 @@ function progressStatusLine(explicitText: string, policy: ChannelRenderPolicy): 
  * the reasoning policy has to be applied to it here or a suppressed surface
  * receives the model's reasoning as the answer.
  */
-function visibleFinalBody(explicitText: string, policy: ChannelRenderPolicy): string | null {
+function visibleFinalBody(explicitText: string, policy: ChannelRenderPolicy, options: ChannelReplyRenderOptions): string | null {
   if (explicitText.trim().length === 0) return null;
   const visible = assistantTextForVisibility(explicitText, policy.reasoningVisibility);
   if (visible.trim().length === 0) return null;
-  return renderWithoutCompletionReport(visible);
+  return renderWithoutCompletionReport(visible, options.replyStyle);
 }
 
 /**
@@ -325,10 +342,11 @@ export function buildRenderedFinalParts(
   explicitText: string,
   events: readonly ChannelRenderEvent[],
   policy: ChannelRenderPolicy,
+  options: ChannelReplyRenderOptions = {},
 ): string[] {
-  const visible = visibleFinalBody(explicitText, policy);
+  const visible = visibleFinalBody(explicitText, policy, options);
   if (visible !== null && policy.format !== 'json') return splitIntoChunks(visible, policy.maxChunkChars);
-  const single = buildRenderedText(explicitText, events, policy, 'final');
+  const single = buildRenderedText(explicitText, events, policy, 'final', options);
   return single ? [single] : [];
 }
 
@@ -337,9 +355,10 @@ export function buildRenderedText(
   events: readonly ChannelRenderEvent[],
   policy: ChannelRenderPolicy,
   phase: ChannelRenderPhase,
+  options: ChannelReplyRenderOptions = {},
 ): string {
   if (phase === 'final') {
-    const visible = visibleFinalBody(explicitText, policy);
+    const visible = visibleFinalBody(explicitText, policy, options);
     if (visible !== null) return trimText(visible, policy.maxChunkChars);
   }
   // A partial answer is not progress. Streaming `assistant_text` fragments into
@@ -357,7 +376,7 @@ export function buildRenderedText(
     : events.filter((event) => event.kind !== 'assistant_text');
   const eventLines = renderableEvents
     .slice(-policy.maxEventsPerUpdate)
-    .map((event) => eventLine(event, policy.reasoningVisibility))
+    .map((event) => eventLine(event, policy.reasoningVisibility, options))
     .filter((line): line is string => Boolean(line && line.trim().length > 0));
   // The status line is what the agent is doing RIGHT NOW, so it reads last,
   // the newest thing on a lock screen. On the progress phase this is the only

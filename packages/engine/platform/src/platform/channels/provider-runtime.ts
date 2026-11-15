@@ -1,7 +1,7 @@
 import type { ConfigManager } from '../config/manager.js';
 import type { SecretsManager } from '../config/secrets.js';
 import type { ServiceRegistry } from '../config/service-registry.js';
-import { resolveSecretInput } from '../config/secret-refs.js';
+import { resolveSurfaceSecret } from './builtin/surface-secrets.js';
 import {
   DiscordGatewayClient,
   DiscordIntegration,
@@ -392,7 +392,7 @@ export class ChannelProviderRuntimeManager {
       this.markError('discord', 'Discord bot token is required for Gateway runtime.');
       return this.result('discord', false, 'Discord bot token is required for Gateway runtime.');
     }
-    const webhookUrl = await this.deps.serviceRegistry.resolveSecret('discord', 'webhookUrl') ?? process.env.DISCORD_WEBHOOK_URL;
+    const webhookUrl = await resolveSurfaceSecret(this.deps, 'discord', 'webhookUrl') ?? undefined;
     if (generation !== this.discordGeneration) return this.result('discord', false, 'Discord Gateway start was cancelled by stop().');
     const discord = new DiscordIntegration(webhookUrl, botToken);
     const client: DiscordGatewayClient = new DiscordGatewayClient({
@@ -594,39 +594,22 @@ export class ChannelProviderRuntimeManager {
     if (this.ntfyAborts.size === 0) this.markError('ntfy', message);
   }
 
+  // Every token is read through the setup schema's statement of where it lives
+  // (channels/builtin/surface-secrets.ts), the same reader setup and delivery use.
   private async resolveSlackBotToken(): Promise<string | null> {
-    const serviceValue = await this.deps.serviceRegistry.resolveSecret('slack', 'primary');
-    const configValue = await this.resolveConfigSecret(this.deps.configManager.get('surfaces.slack.botToken'));
-    return serviceValue
-      || configValue
-      || process.env.SLACK_BOT_TOKEN
-      || null;
+    return resolveSurfaceSecret(this.deps, 'slack', 'primary');
   }
 
   private async resolveSlackAppToken(): Promise<string | null> {
-    const serviceValue = await this.deps.serviceRegistry.resolveSecret('slack', 'appToken');
-    const configValue = await this.resolveConfigSecret(this.deps.configManager.get('surfaces.slack.appToken'));
-    return serviceValue
-      || configValue
-      || process.env.SLACK_APP_TOKEN
-      || null;
+    return resolveSurfaceSecret(this.deps, 'slack', 'appToken');
   }
 
   private async resolveDiscordBotToken(): Promise<string | null> {
-    const serviceValue = await this.deps.serviceRegistry.resolveSecret('discord', 'primary');
-    if (serviceValue) return serviceValue;
-    const configValue = await this.resolveConfigSecret(this.deps.configManager.get('surfaces.discord.botToken'));
-    return configValue
-      || process.env.DISCORD_BOT_TOKEN
-      || null;
+    return resolveSurfaceSecret(this.deps, 'discord', 'primary');
   }
 
   private async resolveNtfyToken(): Promise<string | null> {
-    const serviceValue = await this.deps.serviceRegistry.resolveSecret('ntfy', 'primary');
-    return serviceValue
-      || await this.resolveConfigSecret(this.deps.configManager.get('surfaces.ntfy.token'))
-      || process.env.NTFY_ACCESS_TOKEN
-      || null;
+    return resolveSurfaceSecret(this.deps, 'ntfy', 'primary');
   }
 
   private resolveNtfyTopics(): string[] {
@@ -784,12 +767,5 @@ export class ChannelProviderRuntimeManager {
     };
   }
 
-  private async resolveConfigSecret(value: unknown): Promise<string | null> {
-    return resolveSecretInput(value, {
-      resolveLocalSecret: this.deps.secretsManager
-        ? (key) => this.deps.secretsManager!.get(key)
-        : undefined,
-      homeDirectory: this.deps.secretsManager?.getGlobalHome?.() ?? undefined,
-    });
-  }
+
 }

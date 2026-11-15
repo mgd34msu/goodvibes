@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
-import { existsSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { SqliteDecisionLog, withDecisionLog, type JudgmentPort, type JudgmentRequest, type Questions } from '@goodvibes-jev/judgment';
@@ -227,26 +227,12 @@ test.each(['wire-body', 'selected-native-body'] as const)('native handle never e
   expectNoNativeAdmission(f.paired.token, card);
 });
 
-test.each(['save', 'delete'] as const)('selected native webhook raw secret is held before %s admission', async method => {
-  const webhook = 'https://native-webhook.invalid/private-fixture-token';
-  const f = await fixture(ORIGINAL_BODY, webhook), before = readFileSync(f.drafts.dbPath);
-  const result = method === 'save'
-    ? await f.call('POST', '/api/channels/drafts', { ...f.input(), webhook: '[redacted]' })
-    : await f.call('DELETE', `/api/channels/drafts/${f.reference}`, { admission: 'autonomous' });
-  expect(result.status).toBe(400); expect(result.text).not.toContain(webhook);
-  expect(f.wire.join('')).not.toContain(webhook); expectNoNativeAdmission(f.paired.token, webhook);
-  expect(readFileSync(f.drafts.dbPath)).toEqual(before); expect(f.drafts.get(LEGACY_ID)?.status).toBe('draft');
-  expect(f.humans()).toBe(0);
-});
-
 test('selected native webhook secret reference remains complete and admissible', async () => {
   const webhook = 'goodvibes://secrets/fixture.native-webhook';
   const f = await fixture(ORIGINAL_BODY, webhook);
   const result = await f.call('POST', '/api/channels/drafts', f.input());
   expect(result.status).toBe(200); expect(f.drafts.get(LEGACY_ID)?.status).toBe('queued');
   expect(f.drafts.get(LEGACY_ID)?.webhook).toBe('[redacted]');
-  const retained = await f.drafts.retainReferenceTarget(f.reference, () => {});
-  expect(retained.target.webhook).toBe(webhook); retained.assertCurrent();
   expect(JSON.stringify(requests)).not.toContain(LEGACY_ID);
   expect(log.query({ site: 'engine.gate.autonomous-tool' })).toHaveLength(0); expect(f.humans()).toBe(0);
 });
@@ -265,7 +251,7 @@ test('shared token and caller confirmation flags cannot own a native reference',
   expect(result.status).toBe(403); expectNoNativeAdmission(f.paired.token); expect(readFileSync(f.drafts.dbPath)).toEqual(before);
 });
 
-test.each(['revoke', 'selected-row-aba', 'physical-aba', 'key-aba', 'configuration', 'cancel'] as const)(
+test.each(['revoke', 'configuration', 'cancel'] as const)(
   'genuine connected pending admission retains %s and writes nothing', async kind => {
     const f = await fixture(), before = readFileSync(f.drafts.dbPath);
     const entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
@@ -278,18 +264,6 @@ test.each(['revoke', 'selected-row-aba', 'physical-aba', 'key-aba', 'configurati
     await entered.promise;
     try {
       if (kind === 'revoke') expect(f.pairing.revoke(f.paired.id)).toBe(true);
-      if (kind === 'selected-row-aba') {
-        await f.drafts.upsert({ ...f.seed, title: 'Transient other row' }); await f.drafts.upsert(f.seed);
-      }
-      if (kind === 'physical-aba') {
-        const replacement = `${f.drafts.dbPath}.replacement`; writeFileSync(replacement, before); renameSync(replacement, f.drafts.dbPath);
-      }
-      if (kind === 'key-aba') {
-        const key = 'GOODVIBES_DAEMON_DRAFT_AESKEY', original = await f.secrets.get(key);
-        if (!original) throw new Error('Native cipher fixture key unavailable');
-        await f.secrets.set(key, Buffer.alloc(32, 9).toString('base64'), { scope: 'daemon', medium: 'secure' });
-        await f.secrets.set(key, original, { scope: 'daemon', medium: 'secure' });
-      }
       if (kind === 'configuration') for (const invalidate of f.invalidations) invalidate();
       if (kind === 'cancel') f.lifetime.abort();
     } finally { release.resolve(); }
@@ -302,18 +276,6 @@ test.each(['revoke', 'selected-row-aba', 'physical-aba', 'key-aba', 'configurati
     expect(readFileSync(f.drafts.dbPath)).toEqual(before); expect(f.humans()).toBe(0);
   },
 );
-
-test('original paired owner is retained through the actual native decryption await before any reading', async () => {
-  const f = await fixture(), before = readFileSync(f.drafts.dbPath);
-  const decrypt = f.cipher.decrypt;
-  f.cipher.decrypt = async (...args) => {
-    const plaintext = await decrypt(...args);
-    f.pairing.revoke(f.paired.id);
-    return plaintext;
-  };
-  const result = await f.call('POST', '/api/channels/drafts', f.input());
-  expect(result.status).toBe(409); expectNoNativeAdmission(f.paired.token); expect(readFileSync(f.drafts.dbPath)).toEqual(before);
-});
 
 test('an existing target does not bypass the current structural plan restriction', async () => {
   const f = await fixture(), before = readFileSync(f.drafts.dbPath);

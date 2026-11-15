@@ -1,4 +1,7 @@
+import { createHash } from 'node:crypto';
 import type { Tool } from '../types/tools.js';
+import { resolveEmailPassword } from '../email/email-config.js';
+import { SURFACE_EMAIL_PASSWORD_REF } from '../email/surface-config.js';
 import type {
   ChannelAccountLifecycleAction,
   ChannelAccountLifecycleResult,
@@ -25,6 +28,7 @@ import { observeBuiltinRuntime } from './builtin/health.js';
 import {
   buildBuiltinContractHooks,
   editBuiltinAllowlist,
+  type BuiltinAllowlistEditInput,
   getBuiltinDoctorReport,
   getBuiltinLifecycleState,
   listBuiltinRepairActions,
@@ -46,8 +50,18 @@ import type { InboundMailHealthEntry } from '../email/inbound/health.js';
 import {
   authorizeBuiltinActorAction,
   runBuiltinAccountAction,
-  runBuiltinProviderApi,
 } from './builtin/account-actions.js';
+import { findProviderOperation } from './builtin/provider-operations.js';
+import {
+  actionNotFound,
+  actionOk,
+  actionRefused,
+  legacyActionValue,
+  outcomeOfActionResult,
+  runChannelAction,
+  unknownChannelAction,
+  type ChannelActionOutcome,
+} from './action-outcome.js';
 import {
   readConversationKind,
   readDirectoryScope,
@@ -76,6 +90,8 @@ export class BuiltinChannelRuntime {
   private telegramRestartTimer: ReturnType<typeof setTimeout> | null = null;
   private inboundMailConfigUnsubscribes: Array<() => void> = [];
   private inboundMailRecheckTimer: ReturnType<typeof setTimeout> | null = null;
+  private inboundMailPasswordDigest: string | null | undefined = undefined;
+  private inboundMailPendingRestart: string | null = null;
   private consumerConflictHandler: ((detail: string) => void) | null = null;
   private surfaceResponsibility: ((surface: ChannelSurface) => boolean) | null = null;
   private telegramCredentialUnsubscribe: (() => void) | null = null;
@@ -267,31 +283,28 @@ export class BuiltinChannelRuntime {
   }
 
   /**
-   * Re-probe the mailbox when a setting the running source re-reads changes.
+   * Look at the mailbox again when anything it depends on changes.
    *
-   * These seven keys and no others, because the list is not "everything about
-   * email", it is exactly what `source-factory.ts`'s connection port resolves
-   * again inside every `open()`. A corrected host, port or account is therefore
-   * picked up by the reconnect this triggers, and an owner is told within
-   * seconds whether the correction worked instead of waiting out
-   * `capabilityRecheckMinutes`. Both spellings of host and account are watched
-   * because `readSurfaceEmailSettings` genuinely reads both, and subscribing to
-   * the one the owner did not edit is a subscription that never fires.
+   * Three kinds of change, each with the effect it really has:
    *
-   * What is deliberately NOT here: `surfaces.email.inbound.accounts`, `.mode`,
-   * `.source` and the mailbox. Those decide which source is BUILT and which
-   * mailbox it opens, so acting on them means a restart, not a re-probe,
-   * `recheckNow()` on a running source cannot change what that source is. Wiring
-   * them here would look like they took effect and they would not, which is the
-   * failure this whole item is about, reproduced one level up.
+   * - What the running source re-reads on every reconnect (host, port,
+   *   account user, under both spellings `readSurfaceEmailSettings` reads):
+   *   `recheckNow()` makes that reconnect now instead of at the next
+   *   `capabilityRecheckMinutes`.
+   * - What decides which source is built and which mailbox it opens (the
+   *   source, the account list, the mailbox): `recheckNow()` sees the
+   *   supervisor's start inputs changed and rebuilds the source, so the
+   *   change takes effect without a restart.
+   * - The inbound mode, which the watcher's settings fix when the daemon
+   *   composes them: nothing here can apply it, so status says it waits for a
+   *   restart instead of reading as though it took effect.
    *
-   * The password is not here either, and cannot be: it lives in the secrets
-   * store, which has no change subscription. The reconnect still re-resolves it,
-   * so a rotated password is picked up by any recheck, it just does not cause
-   * one.
+   * The password lives in the secret store, which does announce changes. A
+   * change that leaves the mail password as it was does nothing; a corrected
+   * password rechecks at once, the way Telegram restarts on a corrected token.
    *
    * Coalesced the same way the Telegram watcher coalesces its restart: saving a
-   * settings page writes several keys, and one re-probe per key would be four
+   * settings page writes several keys, and one re-probe per key would be several
    * reconnections against a mail server for one edit.
    */
   private watchInboundMailConfig(): void {
@@ -304,6 +317,9 @@ export class BuiltinChannelRuntime {
       'surfaces.email.imap.user',
       'surfaces.email.user',
       'surfaces.email.username',
+      'surfaces.email.imap.mailbox',
+      'surfaces.email.inbound.source',
+      'surfaces.email.inbound.accounts',
     ] as const;
     const recheck = (): void => {
       if (this.inboundMailRecheckTimer) clearTimeout(this.inboundMailRecheckTimer);
@@ -315,6 +331,36 @@ export class BuiltinChannelRuntime {
     };
     for (const key of keys) {
       this.inboundMailConfigUnsubscribes.push(this.deps.configManager.subscribe(key, recheck));
+    }
+    const startedMode = this.deps.configManager.get('surfaces.email.inbound.mode');
+    this.inboundMailConfigUnsubscribes.push(this.deps.configManager.subscribe('surfaces.email.inbound.mode', (mode) => {
+      this.inboundMailPendingRestart = mode === startedMode ? null : `surfaces.email.inbound.mode changed to '${String(mode)}' and takes effect after the daemon restarts`;
+      if (this.inboundMailPendingRestart) logger.info('Inbound mail mode changed; it takes effect after the daemon restarts', { mode });
+    }));
+    if (typeof this.deps.secretsManager?.onDidChange === 'function') {
+      void this.readInboundMailPasswordDigest().then((digest) => { this.inboundMailPasswordDigest ??= digest; });
+      const unsubscribe = this.deps.secretsManager.onDidChange(() => {
+        void this.readInboundMailPasswordDigest().then((digest) => {
+          if (digest === this.inboundMailPasswordDigest) return;
+          this.inboundMailPasswordDigest = digest;
+          if (this.inboundMailConfigUnsubscribes.length > 0) recheck();
+        });
+      });
+      this.inboundMailConfigUnsubscribes.push(unsubscribe);
+    }
+  }
+
+  /**
+   * A digest of the mail password as the source would resolve it, or null when
+   * it does not resolve. Kept so an unrelated secret write does not reconnect
+   * to the mail server; the value itself is never held here.
+   */
+  private async readInboundMailPasswordDigest(): Promise<string | null> {
+    try {
+      const password = await resolveEmailPassword(SURFACE_EMAIL_PASSWORD_REF, this.deps.secretsManager);
+      return createHash('sha256').update(password).digest('hex');
+    } catch {
+      return null;
     }
   }
 
@@ -342,7 +388,13 @@ export class BuiltinChannelRuntime {
    * whether a credential happens to be present in the config file.
    */
   inboundMailHealth(): InboundMailHealthEntry | null {
-    return this.deps.inboundMail?.health() ?? null;
+    const health = this.deps.inboundMail?.health() ?? null;
+    if (!health || !this.inboundMailPendingRestart) return health;
+    return {
+      ...health,
+      reason: `${health.reason} ${this.inboundMailPendingRestart}.`,
+      metadata: { ...health.metadata, pendingRestart: this.inboundMailPendingRestart },
+    };
   }
 
   /**
@@ -393,12 +445,24 @@ export class BuiltinChannelRuntime {
       notifyApprovalViaRouter: (surface, approval, binding) => this.notifyApprovalViaRouter(surface, approval, binding),
       providerRuntimeStatus: (surface) => this.providerRuntimeStatus(surface),
     });
+    // The outcome-returning entry points, so the registry's invokeTool and
+    // invokeOperatorAction can tell not-found from refused from unknown for
+    // every built-in surface.
+    for (const plugin of this.deps.channelPlugins.list()) {
+      if (!plugin.id.startsWith('surface:')) continue;
+      const surface = plugin.surface;
+      this.deps.channelPlugins.setOutcomeHandlers(plugin.id, {
+        invokeTool: (toolId, input) => this.invokeTool(surface, toolId, input),
+        invokeOperatorAction: (actionId, input) => this.invokeOperatorAction(surface, actionId, input),
+      });
+    }
   }
 
   private accountContext() {
     return {
       deps: this.deps,
       providerRuntimeStatus: (surface: ProviderRuntimeSurface) => this.providerRuntimeStatus(surface),
+      observeRuntime: (surface: ChannelSurface) => this.observeSurfaceRuntime(surface),
     };
   }
 
@@ -435,152 +499,157 @@ export class BuiltinChannelRuntime {
     return listBuiltinTools(surface);
   }
 
+  /** The older signature: the answer, or null. `invokeTool` says which outcome it was. */
   async runTool(surface: ChannelSurface, toolId: string, input?: Record<string, unknown>): Promise<unknown> {
-    const tool = this.listTools(surface).find((entry) => entry.id === toolId || entry.name === toolId);
-    if (!tool) return null;
-    const actionId = tool.actionIds[0]!;
-    if (!actionId) return null;
-    return this.runOperatorAction(surface, actionId, input);
+    return legacyActionValue(await this.invokeTool(surface, toolId, input), surface);
   }
 
+  async invokeTool(surface: ChannelSurface, toolId: string, input?: Record<string, unknown>): Promise<ChannelActionOutcome> {
+    const tools = this.listTools(surface);
+    const tool = tools.find((entry) => entry.id === toolId || entry.name === toolId);
+    const actionId = tool?.actionIds[0];
+    if (!actionId) return unknownChannelAction(surface, 'tool', toolId, tools.map((entry) => entry.name));
+    return this.invokeOperatorAction(surface, actionId, input);
+  }
+
+  /** The older signature: the answer, or null. `invokeOperatorAction` says which outcome it was. */
   async runOperatorAction(
     surface: ChannelSurface,
     actionId: string,
     input?: Record<string, unknown>,
   ): Promise<unknown> {
+    return legacyActionValue(await this.invokeOperatorAction(surface, actionId, input), surface);
+  }
+
+  /**
+   * Run one operator action. Total: every call ends ok, not found, refused, or
+   * unknown action (with the surface's action ids), and only ok is success.
+   */
+  async invokeOperatorAction(
+    surface: ChannelSurface,
+    actionId: string,
+    input?: Record<string, unknown>,
+  ): Promise<ChannelActionOutcome> {
+    return runChannelAction(() => this.dispatchOperatorAction(surface, actionId, input));
+  }
+
+  private async dispatchOperatorAction(
+    surface: ChannelSurface,
+    actionId: string,
+    input?: Record<string, unknown>,
+  ): Promise<ChannelActionOutcome> {
     if (surface === 'telegram' && (actionId === 'cursor-migration-preview' || actionId === 'cursor-migration-commit')) {
       if (!this.telegramIngress) throw new TelegramOffsetStoreError('unavailable');
-      if (actionId === 'cursor-migration-preview') return this.telegramIngress.previewCursorMigration();
+      if (actionId === 'cursor-migration-preview') return actionOk(await this.telegramIngress.previewCursorMigration());
       if (input?.confirm !== true || typeof input.previewId !== 'string' || Object.keys(input).some(key => key !== 'confirm' && key !== 'previewId')) {
         throw new TelegramOffsetStoreError('invalid-request');
       }
-      return this.telegramIngress.commitCursorMigration({ previewId: input.previewId, confirm: true });
+      return actionOk(await this.telegramIngress.commitCursorMigration({ previewId: input.previewId, confirm: true }));
     }
     if (surface === 'homeassistant') {
       const homeAssistantResult = await runHomeAssistantOperatorAction({ deps: this.deps }, actionId, input);
-      if (homeAssistantResult.handled) return homeAssistantResult.result;
+      if (homeAssistantResult.handled) return outcomeOfActionResult(homeAssistantResult.result);
     }
-    if (actionId === 'inspect-account') {
-      const accountId = typeof input?.accountId === 'string' ? input.accountId : undefined;
-      return accountId ? this.resolveAccount(surface, accountId) : this.buildAccount(surface);
-    }
-    if (actionId === 'inspect-status') {
-      return this.deps.channelPlugins.listStatus().then((entries) => entries.find((entry) => entry.surface === surface) ?? null);
-    }
-    if (actionId === 'setup-schema') {
-      return this.getSetupSchema(surface);
-    }
-    if (actionId === 'doctor') {
-      const accountId = typeof input?.accountId === 'string' ? input.accountId : undefined;
-      return this.getDoctorReport(surface, accountId);
-    }
-    if (actionId === 'repair-actions') {
-      const accountId = typeof input?.accountId === 'string' ? input.accountId : undefined;
-      return this.listRepairActions(surface, accountId);
-    }
-    if (actionId === 'lifecycle-state') {
-      const accountId = typeof input?.accountId === 'string' ? input.accountId : undefined;
-      return this.getLifecycleState(surface, accountId);
-    }
-    if (actionId === 'list-directory') {
-      const scope = readDirectoryScope(input?.scope);
-      return this.deps.channelPlugins.queryDirectory(surface, {
-        query: typeof input?.query === 'string' ? input.query : undefined,
-        ...(scope ? { scope } : {}),
-        groupId: typeof input?.groupId === 'string' ? input.groupId : undefined,
-        limit: typeof input?.limit === 'number' ? input.limit : undefined,
-      });
-    }
-    if (actionId === 'list-capabilities') {
-      return this.listCapabilities(surface);
-    }
-    if (actionId === 'account-action') {
-      const action = readLifecycleAction(input?.action ?? input?.accountAction);
-      if (!action) {
-        return {
-          surface,
-          ok: false,
-          error: 'account-action requires a valid lifecycle action.',
-        };
+    const providerOperation = findProviderOperation(surface, actionId);
+    if (providerOperation) return providerOperation.run({ deps: this.deps }, surface, input);
+    const accountId = typeof input?.accountId === 'string' ? input.accountId : undefined;
+    switch (actionId) {
+      case 'inspect-account': {
+        if (!accountId) return actionOk(await this.buildAccount(surface));
+        const account = await this.resolveAccount(surface, accountId);
+        return account
+          ? actionOk(account)
+          : actionNotFound(`The ${surface} account '${accountId}'`, [`Call inspect-account without accountId to see the ${surface} account and its id.`]);
       }
-      return this.runAccountAction(
-        surface,
-        action,
-        typeof input?.accountId === 'string' ? input.accountId : undefined,
-        input,
-      );
-    }
-    if (actionId === 'resolve-target') {
-      const targetInput = typeof input?.target === 'string'
-        ? input.target
-        : typeof input?.input === 'string'
-          ? input.input
-          : typeof input?.query === 'string'
-            ? input.query
-            : '';
-      if (targetInput.trim().length === 0) {
-        return {
-          surface,
-          ok: false,
-          error: 'resolve-target requires "target" or "input".',
-        };
+      case 'inspect-status': {
+        const status = (await this.deps.channelPlugins.listStatus()).find((entry) => entry.surface === surface);
+        return status ? actionOk(status) : actionNotFound(`A status for ${surface}`, ['Check that the surface is registered in this daemon.']);
       }
-      const preferredKind = readConversationKind(input?.preferredKind);
-      return this.resolveTarget(surface, {
-        input: targetInput,
-        ...(typeof input?.accountId === 'string' ? { accountId: input.accountId } : {}),
-        ...(preferredKind ? { preferredKind } : {}),
-        ...(typeof input?.threadId === 'string' ? { threadId: input.threadId } : {}),
-        ...(typeof input?.createIfMissing === 'boolean' ? { createIfMissing: input.createIfMissing } : {}),
-        ...(typeof input?.live === 'boolean' ? { live: input.live } : {}),
-      });
-    }
-    if (actionId === 'authorize-actor-action') {
-      const requestedAction = typeof input?.actionId === 'string' ? input.actionId.trim() : '';
-      if (!requestedAction) {
-        return {
-          surface,
-          ok: false,
-          error: 'authorize-actor-action requires input.actionId, the action to check; it was missing or empty, so nothing was evaluated.',
-        };
+      case 'setup-schema':
+        return actionOk(this.getSetupSchema(surface));
+      case 'doctor':
+        return actionOk(await this.getDoctorReport(surface, accountId));
+      case 'repair-actions':
+        return actionOk(await this.listRepairActions(surface, accountId));
+      case 'lifecycle-state':
+        return actionOk(await this.getLifecycleState(surface, accountId));
+      case 'list-directory': {
+        const scope = readDirectoryScope(input?.scope);
+        const entries = await this.deps.channelPlugins.queryDirectory(surface, {
+          query: typeof input?.query === 'string' ? input.query : undefined,
+          ...(scope ? { scope } : {}),
+          groupId: typeof input?.groupId === 'string' ? input.groupId : undefined,
+          limit: typeof input?.limit === 'number' ? input.limit : undefined,
+          ...(input?.live === true ? { live: true } : {}),
+        });
+        return actionOk(entries);
       }
-      const targetInput = typeof input?.target === 'string' ? input.target : undefined;
-      const target = targetInput
-        ? await this.resolveTarget(surface, {
-            input: targetInput,
-            ...(typeof input?.accountId === 'string' ? { accountId: input.accountId } : {}),
-          })
-        : undefined;
-      return this.authorizeActorAction(surface, {
-        actionId: requestedAction,
-        ...(typeof input?.actorId === 'string' ? { actorId: input.actorId } : {}),
-        ...(typeof input?.accountId === 'string' ? { accountId: input.accountId } : {}),
-        ...(target ? { target } : {}),
-        metadata: {},
-      });
+      case 'list-capabilities':
+        return actionOk(await this.listCapabilities(surface));
+      case 'account-action': {
+        const action = readLifecycleAction(input?.action ?? input?.accountAction);
+        if (!action) {
+          return actionRefused({
+            code: 'CHANNEL_ACCOUNT_ACTION_UNKNOWN',
+            state: 'nothing was run',
+            reason: `account-action needs action, one of: ${CHANNEL_ACCOUNT_LIFECYCLE_ACTIONS.join(', ')}; it was ${typeof (input?.action ?? input?.accountAction) === 'string' ? `'${String(input?.action ?? input?.accountAction)}'` : 'missing'}.`,
+            next: [`Pass action as one of: ${CHANNEL_ACCOUNT_LIFECYCLE_ACTIONS.join(', ')}.`],
+          });
+        }
+        const result = await this.runAccountAction(surface, action, accountId, input);
+        return outcomeOfActionResult(result, [`Run the ${surface} doctor to see what the surface needs.`]);
+      }
+      case 'resolve-target': {
+        const targetInput = typeof input?.target === 'string'
+          ? input.target
+          : typeof input?.input === 'string'
+            ? input.input
+            : typeof input?.query === 'string'
+              ? input.query
+              : '';
+        if (targetInput.trim().length === 0) {
+          return actionRefused({ state: 'nothing was resolved', reason: 'resolve-target needs the target to resolve.', next: ['Pass target, for example #channel or @person.'] });
+        }
+        const preferredKind = readConversationKind(input?.preferredKind);
+        const target = await this.resolveTarget(surface, {
+          input: targetInput,
+          ...(accountId ? { accountId } : {}),
+          ...(preferredKind ? { preferredKind } : {}),
+          ...(typeof input?.threadId === 'string' ? { threadId: input.threadId } : {}),
+          ...(typeof input?.createIfMissing === 'boolean' ? { createIfMissing: input.createIfMissing } : {}),
+          ...(typeof input?.live === 'boolean' ? { live: input.live } : {}),
+        });
+        return target
+          ? actionOk(target)
+          : actionNotFound(`A ${surface} target named '${targetInput}'`, ['Search the surface directory with live: true, or pass a typed id such as channel:<id>.']);
+      }
+      case 'authorize-actor-action': {
+        const requestedAction = typeof input?.actionId === 'string' ? input.actionId.trim() : '';
+        if (!requestedAction) {
+          return actionRefused({
+            state: 'nothing was evaluated',
+            reason: 'authorize-actor-action needs actionId, the action to check; it was missing or empty.',
+            next: ['Pass actionId, for example start or logout.'],
+          });
+        }
+        const targetInput = typeof input?.target === 'string' ? input.target : undefined;
+        const target = targetInput
+          ? await this.resolveTarget(surface, { input: targetInput, ...(accountId ? { accountId } : {}) })
+          : undefined;
+        return actionOk(await this.authorizeActorAction(surface, {
+          actionId: requestedAction,
+          ...(typeof input?.actorId === 'string' ? { actorId: input.actorId } : {}),
+          ...(accountId ? { accountId } : {}),
+          ...(target ? { target } : {}),
+          metadata: {},
+        }));
+      }
+      case 'resolve-allowlist':
+        return actionOk(await this.resolveAllowlist(surface, readAllowlistEditInput(input)));
+      case 'edit-allowlist':
+        return actionOk(await this.editAllowlist(surface, readAllowlistEditInput(input)));
     }
-    if (actionId === 'resolve-allowlist') {
-      return this.resolveAllowlist(surface, {
-        ...(Array.isArray(input?.add) ? { add: input.add.filter((entry): entry is string => typeof entry === 'string') } : {}),
-        ...(Array.isArray(input?.remove) ? { remove: input.remove.filter((entry): entry is string => typeof entry === 'string') } : {}),
-        ...(input?.kind === 'user' || input?.kind === 'channel' || input?.kind === 'group' ? { kind: input.kind } : {}),
-      });
-    }
-    if (actionId === 'edit-allowlist') {
-      return this.editAllowlist(surface, {
-        ...(Array.isArray(input?.add) ? { add: input.add.filter((entry): entry is string => typeof entry === 'string') } : {}),
-        ...(Array.isArray(input?.remove) ? { remove: input.remove.filter((entry): entry is string => typeof entry === 'string') } : {}),
-        ...(typeof input?.groupId === 'string' ? { groupId: input.groupId } : {}),
-        ...(typeof input?.channelId === 'string' ? { channelId: input.channelId } : {}),
-        ...(typeof input?.workspaceId === 'string' ? { workspaceId: input.workspaceId } : {}),
-        ...(input?.kind === 'user' || input?.kind === 'channel' || input?.kind === 'group' ? { kind: input.kind } : {}),
-        ...(typeof input?.metadata === 'object' && input.metadata !== null ? { metadata: input.metadata as Record<string, unknown> } : {}),
-      });
-    }
-    if (actionId === 'provider-api') {
-      return this.runProviderApi(surface, input);
-    }
-    return null;
+    return unknownChannelAction(surface, 'action', actionId, this.listOperatorActions(surface).map((action) => action.id));
   }
 
   private buildContractHooks(surface: ChannelSurface): Pick<
@@ -650,7 +719,7 @@ export class BuiltinChannelRuntime {
     return renderBuiltinChannelEvent({
       deps: this.deps,
       listTools: (currentSurface) => this.listTools(currentSurface),
-      runTool: (currentSurface, toolId, input) => this.runTool(currentSurface, toolId, input),
+      invokeTool: (currentSurface, toolId, input) => this.invokeTool(currentSurface, toolId, input),
     }, surface, request);
   }
 
@@ -662,7 +731,7 @@ export class BuiltinChannelRuntime {
     await notifyBuiltinApprovalViaRouter({
       deps: this.deps,
       listTools: (currentSurface) => this.listTools(currentSurface),
-      runTool: (currentSurface, toolId, input) => this.runTool(currentSurface, toolId, input),
+      invokeTool: (currentSurface, toolId, input) => this.invokeTool(currentSurface, toolId, input),
     }, surface, approval, binding);
   }
 
@@ -670,7 +739,7 @@ export class BuiltinChannelRuntime {
     return listBuiltinAgentTools({
       deps: this.deps,
       listTools: (currentSurface) => this.listTools(currentSurface),
-      runTool: (currentSurface, toolId, input) => this.runTool(currentSurface, toolId, input),
+      invokeTool: (currentSurface, toolId, input) => this.invokeTool(currentSurface, toolId, input),
     }, surface);
   }
 
@@ -697,14 +766,6 @@ export class BuiltinChannelRuntime {
       buildAccount: (currentSurface) => this.buildAccount(currentSurface),
       resolveAccount: (currentSurface, currentAccountId) => this.resolveAccount(currentSurface, currentAccountId),
     }, surface, request);
-  }
-
-  private async runProviderApi(surface: ChannelSurface, input?: Record<string, unknown>): Promise<unknown> {
-    return runBuiltinProviderApi({
-      deps: this.deps,
-      buildAccount: (currentSurface) => this.buildAccount(currentSurface),
-      resolveAccount: (currentSurface, currentAccountId) => this.resolveAccount(currentSurface, currentAccountId),
-    }, surface, input);
   }
 
   private parseExplicitTarget(
@@ -759,4 +820,28 @@ export class BuiltinChannelRuntime {
   ): Promise<ChannelDirectoryEntry[]> {
     return lookupBuiltinDirectory({ deps: this.deps }, surface, query, { ...options, live: false });
   }
+}
+
+const CHANNEL_ACCOUNT_LIFECYCLE_ACTIONS: readonly ChannelAccountLifecycleAction[] = [
+  'inspect', 'setup', 'retest', 'connect', 'disconnect', 'start', 'stop', 'login', 'logout', 'wait_login',
+];
+
+function readAllowlistEditInput(input: Record<string, unknown> | undefined): BuiltinAllowlistEditInput {
+  const strings = (value: unknown) => Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : undefined;
+  const add = strings(input?.add);
+  const remove = strings(input?.remove);
+  const callerKind = readConversationKind(input?.callerConversationKind);
+  return {
+    ...(add ? { add } : {}),
+    ...(remove ? { remove } : {}),
+    ...(typeof input?.groupId === 'string' ? { groupId: input.groupId } : {}),
+    ...(typeof input?.channelId === 'string' ? { channelId: input.channelId } : {}),
+    ...(typeof input?.workspaceId === 'string' ? { workspaceId: input.workspaceId } : {}),
+    ...(input?.kind === 'user' || input?.kind === 'channel' || input?.kind === 'group' ? { kind: input.kind } : {}),
+    ...(typeof input?.metadata === 'object' && input.metadata !== null ? { metadata: input.metadata as Record<string, unknown> } : {}),
+    ...(input?.force === true ? { force: true } : {}),
+    ...(typeof input?.callerUserId === 'string' && input.callerUserId.trim() ? { callerUserId: input.callerUserId.trim() } : {}),
+    ...(typeof input?.callerConversationId === 'string' && input.callerConversationId.trim() ? { callerConversationId: input.callerConversationId.trim() } : {}),
+    ...(callerKind ? { callerConversationKind: callerKind } : {}),
+  };
 }

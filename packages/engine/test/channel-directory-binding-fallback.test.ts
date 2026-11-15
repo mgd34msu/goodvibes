@@ -10,11 +10,11 @@
  * deliver nothing, with no error anywhere.
  *
  * This walks every managed surface with a completely EMPTY configuration and
- * one inbound route binding, and asserts the directory still offers that
- * conversation as a target.
+ * one inbound route binding, and asserts the directory offers that
+ * conversation as a target exactly once, live lookup or not.
  */
 import { describe, expect, test } from 'bun:test';
-import { lookupBuiltinProviderDirectory } from '../platform/src/platform/channels/builtin/targets.ts';
+import { lookupBuiltinDirectory } from '../platform/src/platform/channels/builtin/targets.ts';
 import type { ManagedSurface } from '../platform/src/platform/channels/builtin/shared.ts';
 
 const SURFACES: readonly ManagedSurface[] = [
@@ -50,6 +50,7 @@ function contextWithBinding(surface: string) {
       serviceRegistry: { resolveSecret: async () => null, get: () => undefined },
       secretsManager: { get: () => null, getGlobalHome: () => undefined },
       routeBindings: {
+        start: async () => undefined,
         listBindings: () => [{
           id: `route-${surface}`,
           surfaceKind: surface,
@@ -70,13 +71,15 @@ function contextWithBinding(surface: string) {
 describe('channel directory: a conversation that wrote to us is always a target', () => {
   for (const surface of SURFACES) {
     test(`${surface} offers the originating conversation with no configuration`, async () => {
-      const entries = await lookupBuiltinProviderDirectory(
-        contextWithBinding(surface) as never,
-        surface,
-        '',
-        { limit: 20 },
-      );
-      expect(entries.length).toBeGreaterThan(0);
+      for (const live of [false, true]) {
+        const entries = await lookupBuiltinDirectory(
+          contextWithBinding(surface) as never,
+          surface,
+          '',
+          { limit: 20, live },
+        );
+        expect(entries.filter((entry) => entry.handle === 'inbound-conversation-1' || entry.id === 'inbound-conversation-1')).toHaveLength(1);
+      }
     });
   }
 });

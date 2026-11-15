@@ -190,11 +190,58 @@ of the service registry, config, environment variables, or a derived value;
 `unresolved` marks a value that is declared but resolves to nothing, distinct
 from `missing`, which marks a value that was never declared at all.
 
+Where a surface's credential lives is stated once, in its setup schema's secret
+targets (service-registry slot, config key, environment variables). Setup
+stores a credential in the secret store and writes the matching
+`goodvibes://secrets/...` reference into that config key, so delivery, the
+provider connection and status all find it; a setup that stored a credential
+this daemon cannot read back answers `ok: false` and says so.
+
+An account's `state` and `authState` are read off the same health answer the
+status snapshot gives. Which credentials a surface needs before it can send is
+also stated once: none for ntfy, a bridge-mode telephony line, Signal, iMessage
+and the generic webhook; a bot token or a webhook URL for Slack and Discord; the
+auth token for direct Twilio telephony; the surface's token or password
+elsewhere. A connection observed to be open is healthy whatever the credentials
+say, so tokenless ntfy reads healthy and can carry the dead-channel notice.
+
+Every channel tool and operator action call ends in one of four outcomes: ok,
+not found, refused, or unknown action (with the surface's valid action ids).
+Only ok is reported as success; the others carry the reason and the next step.
+Provider-native operations are separate actions, each with a closed input and
+its own dangerous flag: `runtime-status`, `live-directory`, `oauth-url` and
+`subscribe-url` read; `runtime-start`, `runtime-stop`, `register-command`
+(Discord) and `poll` (ntfy) are flagged. A surface's agent tools are offered
+only while the surface is switched on.
+
+## Allowlists
+
+A direct conversation is admitted when the surface's user list is empty or
+holds its sender. A group, channel or thread is admitted when the conversation
+is on the group or channel list, or its sender is on the user list. Empty lists
+restrict nobody, and an empty user list means the surface has no owner yet.
+
+An allowlist edit names its `kind` (`user`, `channel` or `group`) unless every
+entry is a typed id (`user:U0123`, `channel:C0123`). Names and handles are
+looked up in the provider directory and stored as provider ids; an entry that
+matches no one, or more than one, refuses the whole edit and nothing changes.
+An edit that would refuse the caller's own conversation (`callerUserId`,
+`callerConversationId`), or that puts the first entry on an empty user list
+without keeping the caller, is refused unless `force` is set.
+
 ## Directory and targets
 
 Directory entries represent self, users, channels, groups, threads, members,
 and services. Target resolution can use explicit input, provider directories,
 route bindings, normalized identifiers, synthetic targets, or miss records.
+
+The conversations a surface already knows (every conversation that has written
+to it) come from its route bindings, are listed once, and stay listed when a
+default target is configured. With `live`, the provider's own directory is
+searched after them. Entries carry ids, kind, label and handle, never raw
+provider records or stored binding metadata. A provider search stops at the
+first exact name; one that stops at its page limit is marked `truncated`, and a
+target that matched nothing within it says `searchTruncated`.
 
 This is what lets a client resolve names like a Slack channel, Discord thread,
 or Home Assistant service target before dispatching work.

@@ -2,31 +2,32 @@ import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import { logger } from '../../utils/logger.js';
 import type { AtRestCipher } from '../../config/daemon-credential-store.js';
 import { HandlerSqliteStore } from '../../state/daemon-handler-sqlite-store.js';
-import { retainMutationStorage } from '../../control-plane/native-mutation.js';
-import { captureMutationDescriptors, type MutationPublication } from '../../utils/file-mutation.js';
+import type { MutationPublication } from '../../utils/file-mutation.js';
 import { HandlerError } from '../../control-plane/host-handlers.js';
 import { channelDraftWireReference, createChannelDraftWireReference, isHistoricalDraftWireReference, matchesHistoricalDraftWireReference } from './wire-reference.js';
 
 // ---------------------------------------------------------------------------
-// Draft Sync Backend store (rebased onto the daemon handler foundation).
+// Channel drafts, the store of record.
 //
-// Mirrors the agent's local draft store (channels/drafts.json) server-side so
-// drafts are visible across surfaces. The agent's local file remains the source
-// of truth; this store is a sync mirror. Conflict resolution (most-recent
-// updatedAt wins) is the integrator's concern, this store performs a plain
-// upsert and records the supplied/derived updatedAt. The one rule enforced here
-// is that a save never replaces a newer row with an older one (DRAFT_STALE), and
-// that a draft recorded as sent stays sent (DRAFT_ALREADY_SENT), so another
-// surface cannot send it again by saving an earlier copy.
+// A draft is composed on one surface and very often finished on another: the
+// phone writes it, the terminal sends it. This daemon-side store is the one
+// every surface reads, and the Agent's local file is an outbox for saves made
+// while the daemon could not be reached. Two rules are enforced here: a save
+// never replaces a newer row with an older one (DRAFT_STALE), and a draft
+// recorded as sent stays sent (DRAFT_ALREADY_SENT), so another surface cannot
+// send it again by saving an earlier copy.
+//
+// An autonomous save or delete names the row it read; the write is a
+// compare-and-set on that row's `updatedAt` inside the one transaction, and a
+// row that moved is refused as DRAFT_CHANGED with the time it moved.
 //
 // SECURITY POSTURE:
-//   - The plaintext message body is NEVER persisted. It is encrypted at rest
-//     via the daemon at-rest cipher (AES-256-GCM) as `bodyEnc`.
+//   - The message body is encrypted at rest (AES-256-GCM, the daemon at-rest
+//     cipher) as `bodyEnc`. `list` never decrypts it: rows carry a fixed
+//     '[redacted]' marker. `getReadable` decrypts one draft for an owner
+//     (admin) caller, who can already send any text through the channel.
 //   - The webhook URL is encrypted at rest (`webhookEnc`) and is ALWAYS
-//     redacted ('[redacted]') in every list/get response, the raw URL never
-//     leaves the store.
-//   - Responses carry a fixed '[redacted]' message marker. They neither
-//     decrypt the body nor publish a deterministic token for private text.
+//     redacted ('[redacted]') in every response; the raw URL never leaves.
 // ---------------------------------------------------------------------------
 
 /** Redact a stored webhook for responses: present → '[redacted]', else undefined. */
@@ -163,13 +164,6 @@ interface DraftRow {
   sendError: string | null;
 }
 
-export interface NativeDraftReferenceTarget {
-  readonly id: string;
-  readonly reference: string;
-  readonly target: Readonly<DraftRecord>;
-  readonly assertCurrent: () => void;
-}
-
 function nullable(value: string | undefined): string | null {
   return value === undefined ? null : value;
 }
@@ -213,11 +207,8 @@ export class DraftSyncStore {
   private closing: Promise<void> | null = null;
   private readonly active = new Set<Promise<unknown>>();
   private upsertTail: Promise<void> = Promise.resolve();
-  private readonly generations = new Map<string, number>();
-  private readonly workingDirectory: string;
 
   constructor(options: DraftSyncStoreOptions) {
-    this.workingDirectory = options.workingDirectory;
     this.store = new HandlerSqliteStore({
       workingDirectory: options.workingDirectory,
       fileName: options.fileName ?? 'drafts.sqlite',
@@ -310,19 +301,33 @@ export class DraftSyncStore {
    * channel/route/link → NULL). That includes sentResponseId/sendError, which
    * belong to the `sent`/`failed` snapshot they came with.
    */
-  async upsert(input: DraftSaveInput, assertCurrent?: () => void, withPublication?: MutationPublication, persist = false): Promise<DraftSaveResult> {
+  /**
+   * `expectedUpdatedAt` is the row the caller read: its `updatedAt`, or null for
+   * "no such draft yet". When given, the write applies only if the row is still
+   * that one, checked inside the transaction (DRAFT_CHANGED otherwise).
+   */
+  async upsert(
+    input: DraftSaveInput,
+    assertCurrent?: () => void,
+    withPublication?: MutationPublication,
+    persist = false,
+    expectedUpdatedAt?: string | null,
+  ): Promise<DraftSaveResult> {
     this.requireInit();
-    // A caller can mutate its object while encryption awaits a credential.
-    // Own one snapshot, including tags, before yielding to the cipher.
-    const snapshot: DraftSaveInput = { ...input, ...(input.tags ? { tags: [...input.tags] } : {}) };
     // The same ID may be saved concurrently. Creation detection and write-back
     // run in admission order, preserving the first creation metadata.
-    const pending = this.upsertTail.then(() => this.performUpsert(snapshot, assertCurrent, withPublication, persist));
+    const pending = this.upsertTail.then(() => this.performUpsert(input, assertCurrent, withPublication, persist, expectedUpdatedAt));
     this.upsertTail = pending.then(() => {}, () => {});
     return this.track(pending);
   }
 
-  private async performUpsert(input: DraftSaveInput, assertCurrent?: () => void, withPublication?: MutationPublication, persist = false): Promise<DraftSaveResult> {
+  private async performUpsert(
+    input: DraftSaveInput,
+    assertCurrent: (() => void) | undefined,
+    withPublication: MutationPublication | undefined,
+    persist: boolean,
+    expectedUpdatedAt: string | null | undefined,
+  ): Promise<DraftSaveResult> {
     const encryptionChecks: Array<() => void> = [];
     const current = assertCurrent ? () => { assertCurrent(); for (const check of encryptionChecks) check(); } : undefined;
     const retainEncryption = (check: () => void) => { encryptionChecks.push(check); };
@@ -378,6 +383,7 @@ export class DraftSyncStore {
         : null;
 
     const write = (target: Pick<HandlerSqliteStore, 'run' | 'get'>) => {
+      if (expectedUpdatedAt !== undefined) assertRowUnchanged(target, id, expectedUpdatedAt);
       target.run(
       `INSERT INTO drafts (
          id, wireReference, legacyWireReference, version, createdAt, updatedAt, status, title, bodyEnc,
@@ -423,27 +429,28 @@ export class DraftSyncStore {
     // `persist` stages and publishes the write as one unit, so a save that fails
     // leaves the mirror, which other readers see live, as it was. Without it the
     // row is changed in memory only and the caller saves.
-    const result = current || persist
+    return current || persist
       ? await this.store.persistTransaction(write, current ?? (() => {}), withPublication)
       : write(this.store);
-    this.generations.set(id, (this.generations.get(id) ?? 0) + 1);
-    return result;
   }
 
-  /** Pin this selected row and its native generation before a hosted reading. */
-  retainTarget(id: string): { readonly target: DraftRecord | null; readonly assertCurrent: () => void } {
+  /** The row a request selects, read once: the redacted record and the `updatedAt` its write will compare. */
+  selectRow(id: string): { readonly target: DraftRecord | null; readonly updatedAt: string | null } {
     this.requireInit();
-    const generation = this.generations.get(id) ?? 0;
-    const bytes = JSON.stringify(this.store.get('SELECT * FROM drafts WHERE id = ?', [id]));
-    const storage = retainMutationStorage(this.dbPath, this.workingDirectory);
-    const ownerCurrent = captureMutationDescriptors(this, ['store', 'cipher', 'now', 'generateId', 'performUpsert', 'getRow', 'fallbackRow']);
-    const cipherCurrent = captureMutationDescriptors(this.cipher, ['encrypt', 'decrypt']);
-    const storeCurrent = captureMutationDescriptors(this.store, ['get', 'run', 'persistTransaction']);
-    return { target: this.get(id), assertCurrent: () => {
-      this.requireInit(); ownerCurrent(); cipherCurrent(); storeCurrent(); storage();
-      if ((this.generations.get(id) ?? 0) !== generation
-        || JSON.stringify(this.store.get('SELECT * FROM drafts WHERE id = ?', [id])) !== bytes) throw new Error('Native draft target changed');
-    } };
+    const target = this.get(id);
+    return { target, updatedAt: target?.updatedAt ?? null };
+  }
+
+  /**
+   * One draft with its text, for a caller entitled to read it (the owner). The
+   * webhook stays redacted. Null when there is no such draft.
+   */
+  async getReadable(id: string): Promise<DraftRecord | null> {
+    this.requireInit();
+    const row = this.store.get<{ bodyEnc: string }>('SELECT bodyEnc FROM drafts WHERE id = ?', [id]);
+    const record = this.get(id);
+    if (!row || !record) return null;
+    return { ...record, message: await this.track(this.cipher.decrypt(row.bodyEnc)) };
   }
 
   /** Exhaustive native lookup. A handle identifies only one existing row, never a new draft. */
@@ -457,46 +464,15 @@ export class DraftSyncStore {
     return matching[0];
   }
 
-  /** Capture the full native plaintext only for private privacy/admission subjects. */
-  async retainReferenceTarget(reference: string, assertCurrent: () => void): Promise<NativeDraftReferenceTarget> {
-    assertCurrent(); this.requireInit();
-    const id = this.resolveReferenceId(reference);
-    if (id === undefined) throw new HandlerError('Native draft reference is unavailable', 'NATIVE_DRAFT_REFERENCE_UNAVAILABLE', 404);
-    const selected = this.retainTarget(id);
-    const row = this.store.get<DraftRow & { bodyEnc: string }>('SELECT * FROM drafts WHERE id = ?', [id]);
-    const record = selected.target;
-    if (!row || !record) throw new HandlerError('Native draft reference is unavailable', 'NATIVE_DRAFT_REFERENCE_UNAVAILABLE', 404);
-    const ownerCurrent = captureMutationDescriptors(this, ['retainReferenceTarget', 'resolveReferenceId', 'retainTarget']);
-    const checks: Array<() => void> = [];
-    const baseCurrent = () => {
-      assertCurrent(); ownerCurrent(); selected.assertCurrent();
-      if (this.resolveReferenceId(reference) !== id) throw new HandlerError('Native draft reference changed', 'NATIVE_DRAFT_REFERENCE_STALE', 409);
-      assertCurrent();
-    };
-    const current = () => { baseCurrent(); for (const check of checks) check(); baseCurrent(); };
-    const retainCurrent = (check: () => void) => { checks.push(check); };
-    const pending = (async () => {
-      current();
-      const message = await this.cipher.decrypt(row.bodyEnc, baseCurrent, retainCurrent);
-      current();
-      const webhook = row.webhookEnc === null ? undefined : await this.cipher.decrypt(row.webhookEnc, baseCurrent, retainCurrent);
-      current();
-      if (record.tags) Object.freeze(record.tags);
-      const target = Object.freeze({ ...record, id: reference, message, ...(webhook === undefined ? {} : { webhook }) });
-      return { id, reference, target, assertCurrent: current };
-    })();
-    return this.track(pending);
-  }
-
-  async deleteAdmitted(id: string, assertCurrent: () => void, withPublication?: MutationPublication): Promise<boolean> {
+  /** Delete as one staged write; with `expectedUpdatedAt`, only the row the caller read. */
+  async deleteAdmitted(id: string, assertCurrent: () => void, withPublication?: MutationPublication, expectedUpdatedAt?: string | null): Promise<boolean> {
     this.requireInit();
-    const result = await this.track(this.store.persistTransaction(transaction => {
+    return this.track(this.store.persistTransaction(transaction => {
+      if (expectedUpdatedAt !== undefined) assertRowUnchanged(transaction, id, expectedUpdatedAt);
       const existed = transaction.get('SELECT id FROM drafts WHERE id = ?', [id]) !== null;
       if (existed) transaction.run('DELETE FROM drafts WHERE id = ?', [id]);
       return existed;
     }, assertCurrent, withPublication));
-    if (result) this.generations.set(id, (this.generations.get(id) ?? 0) + 1);
-    return result;
   }
 
   /** List drafts, newest-updated first, optionally filtered by status. */
@@ -541,10 +517,7 @@ export class DraftSyncStore {
   delete(id: string): boolean {
     this.requireInit();
     const existed = this.getRow(id) !== null;
-    if (existed) {
-      this.store.run('DELETE FROM drafts WHERE id = ?', [id]);
-      this.generations.set(id, (this.generations.get(id) ?? 0) + 1);
-    }
+    if (existed) this.store.run('DELETE FROM drafts WHERE id = ?', [id]);
     return existed;
   }
 
@@ -590,6 +563,26 @@ export class DraftSyncStore {
       sendError: status === 'failed' ? nullable(input.sendError) : null,
     };
   }
+}
+
+/**
+ * The compare half of the compare-and-set: the row is still the one the
+ * request read. Runs inside the write's transaction, so nothing can move it
+ * between this check and the write.
+ */
+function assertRowUnchanged(target: Pick<HandlerSqliteStore, 'get'>, id: string, expectedUpdatedAt: string | null): void {
+  const row = target.get<{ updatedAt: string }>('SELECT updatedAt FROM drafts WHERE id = ?', [id]);
+  const now = row?.updatedAt ?? null;
+  if (now === expectedUpdatedAt) return;
+  throw new HandlerError(
+    now === null
+      ? `Draft ${id} was deleted after this request read it; nothing was written. Read the drafts again and retry.`
+      : expectedUpdatedAt === null
+        ? `Draft ${id} was created on another surface at ${now} after this request looked; nothing was written. Read it and retry.`
+        : `Draft ${id} changed on another surface at ${now} after this request read it (at ${expectedUpdatedAt}); nothing was written. Read it again and retry.`,
+    'DRAFT_CHANGED',
+    409,
+  );
 }
 
 function clampLimit(limit: number | undefined): number {

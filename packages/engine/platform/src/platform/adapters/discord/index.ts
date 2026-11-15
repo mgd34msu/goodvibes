@@ -3,6 +3,7 @@ import { logger } from '../../utils/logger.js';
 import { DiscordIntegration, DiscordInteractionResponseType, DiscordInteractionType } from '../../integrations/index.js';
 import type { SurfaceAdapterContext } from '../types.js';
 import { summarizeError } from '../../utils/error-display.js';
+import { resolveSurfaceSecret } from '../../channels/builtin/surface-secrets.js';
 import { policyReplyText, readTextBodyWithinLimit } from '../helpers.js';
 import { answerSurfaceControl, gateAnswerText, runSurfaceMessage, submitSurfaceMessage, surfaceOutcomeResponse } from '../surface-message.js';
 
@@ -30,8 +31,8 @@ export async function handleDiscordSurfaceWebhook(req: Request, context: Surface
   if (rawBody instanceof Response) return rawBody;
 
   const discord = new DiscordIntegration(
-    await context.serviceRegistry.resolveSecret('discord', 'webhookUrl') ?? process.env.DISCORD_WEBHOOK_URL,
-    await context.serviceRegistry.resolveSecret('discord', 'primary') ?? process.env.DISCORD_BOT_TOKEN,
+    await resolveSurfaceSecret(context, 'discord', 'webhookUrl') ?? undefined,
+    await resolveSurfaceSecret(context, 'discord', 'primary') ?? undefined,
   );
 
   const valid = await discord.verifySignature(rawBody, signature, timestamp, publicKey);

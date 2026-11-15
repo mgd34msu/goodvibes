@@ -1,6 +1,7 @@
 import type { AutomationRouteBinding } from '../automation/routes.js';
 import type { SharedApprovalRecord } from '../control-plane/index.js';
 import type { ChannelIngressAlarm } from './ingress-alarm.js';
+import { outcomeFromLegacyValue, unknownChannelAction, type ChannelActionOutcome } from './action-outcome.js';
 import { summarizeError } from '../utils/error-display.js';
 import type { Tool } from '../types/tools.js';
 import type {
@@ -86,8 +87,19 @@ export interface ChannelPlugin {
   readonly listAgentTools?: (() => readonly Tool[]) | undefined;
 }
 
+/**
+ * A plugin's tool and action entry points that state their outcome. The
+ * built-in runtime supplies them; a plugin without them is read through its
+ * `runTool` / `runOperatorAction` answer.
+ */
+export interface ChannelOutcomeHandlers {
+  readonly invokeTool: (toolId: string, input?: Record<string, unknown>) => Promise<ChannelActionOutcome>;
+  readonly invokeOperatorAction: (actionId: string, input?: Record<string, unknown>) => Promise<ChannelActionOutcome>;
+}
+
 export class ChannelPluginRegistry {
   private readonly plugins = new Map<string, ChannelPlugin>();
+  private readonly outcomeHandlers = new Map<string, ChannelOutcomeHandlers>();
   private readonly pluginsBySurface = new Map<ChannelSurface, ChannelPlugin>();
   private readonly pluginsByPath = new Map<string, ChannelPlugin>();
   private readonly featureFlags: FeatureFlagReader;
@@ -420,6 +432,29 @@ export class ChannelPluginRegistry {
     return plugin.runTool(toolId, input);
   }
 
+  /** Attach outcome-stating entry points to the plugin registered under `pluginId`. */
+  setOutcomeHandlers(pluginId: string, handlers: ChannelOutcomeHandlers): void {
+    this.outcomeHandlers.set(pluginId, handlers);
+  }
+
+  /**
+   * Run a channel tool and say what came of it: ok, not found, refused, or
+   * unknown tool (with the surface's tool names). Only `ok` is a success.
+   */
+  async invokeTool(
+    surface: ChannelSurface,
+    toolId: string,
+    input?: Record<string, unknown>,
+  ): Promise<ChannelActionOutcome> {
+    const plugin = this.getBySurface(surface);
+    if (!plugin) return unknownChannelAction(surface, 'surface', toolId, []);
+    const handlers = this.outcomeHandlers.get(plugin.id);
+    if (handlers) return handlers.invokeTool(toolId, input);
+    const known = (await this.listTools(surface)).map((tool) => tool.name);
+    if (!plugin.runTool) return unknownChannelAction(surface, 'tool', toolId, known);
+    return outcomeFromLegacyValue(await plugin.runTool(toolId, input), surface, 'tool', toolId, known);
+  }
+
   async listOperatorActions(surface?: ChannelSurface): Promise<ChannelOperatorActionDescriptor[]> {
     const plugins = surface ? [this.getBySurface(surface)].filter((value): value is ChannelPlugin => value !== null) : this.list();
     const actions: ChannelOperatorActionDescriptor[] = [];
@@ -438,6 +473,24 @@ export class ChannelPluginRegistry {
     const plugin = this.getBySurface(surface);
     if (!plugin?.runOperatorAction) return null;
     return plugin.runOperatorAction(actionId, input);
+  }
+
+  /**
+   * Run an operator action and say what came of it: ok, not found, refused, or
+   * unknown action (with the surface's action ids). Only `ok` is a success.
+   */
+  async invokeOperatorAction(
+    surface: ChannelSurface,
+    actionId: string,
+    input?: Record<string, unknown>,
+  ): Promise<ChannelActionOutcome> {
+    const plugin = this.getBySurface(surface);
+    if (!plugin) return unknownChannelAction(surface, 'surface', actionId, []);
+    const handlers = this.outcomeHandlers.get(plugin.id);
+    if (handlers) return handlers.invokeOperatorAction(actionId, input);
+    const known = (await this.listOperatorActions(surface)).map((action) => action.id);
+    if (!plugin.runOperatorAction) return unknownChannelAction(surface, 'action', actionId, known);
+    return outcomeFromLegacyValue(await plugin.runOperatorAction(actionId, input), surface, 'action', actionId, known);
   }
 
   listAgentTools(surface?: ChannelSurface): Tool[] {

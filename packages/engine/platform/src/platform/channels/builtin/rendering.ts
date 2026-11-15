@@ -9,12 +9,15 @@ import type {
   ChannelSurface,
   ChannelToolDescriptor,
 } from '../types.js';
+import { describeActionFailure, type ChannelActionOutcome } from '../action-outcome.js';
 import type { BuiltinChannelRuntimeDeps } from './shared.js';
+import { isManagedSurface } from './surfaces.js';
+import { isTruncatedDirectory } from './targets.js';
 
 interface BuiltinRenderingContext {
   readonly deps: BuiltinChannelRuntimeDeps;
   readonly listTools: (surface: ChannelSurface) => ChannelToolDescriptor[];
-  readonly runTool: (surface: ChannelSurface, toolId: string, input?: Record<string, unknown>) => Promise<unknown>;
+  readonly invokeTool: (surface: ChannelSurface, toolId: string, input?: Record<string, unknown>) => Promise<ChannelActionOutcome>;
 }
 
 export async function renderBuiltinChannelEvent(
@@ -78,10 +81,20 @@ export async function notifyBuiltinApprovalViaRouter(
   });
 }
 
+/**
+ * A surface's channel tools as agent tools, offered only while the surface is
+ * switched on: a disabled surface's thirteen-odd definitions are cost on every
+ * request and a call to any of them could only fail.
+ *
+ * The result says what happened. Only an `ok` outcome is `success: true`; a
+ * refusal, a missing record and an unknown action each carry their reason and
+ * the next step, and a directory search cut short says so.
+ */
 export function listBuiltinAgentTools(
   context: BuiltinRenderingContext,
   surface: ChannelSurface,
 ): readonly Tool[] {
+  if (!isManagedSurface(surface) || !context.deps.surfaceDeliveryEnabled(surface)) return [];
   return context.listTools(surface).map((descriptor): Tool => ({
     definition: {
       name: descriptor.name,
@@ -90,23 +103,36 @@ export function listBuiltinAgentTools(
         : descriptor.description,
       parameters: descriptor.inputSchema ?? {
         type: 'object',
-        additionalProperties: true,
+        additionalProperties: false,
       },
       sideEffects: ['network', 'state'],
       concurrency: 'serial',
       ...(descriptor.metadata.dangerous === true ? { dangerous: true } : {}),
     },
     execute: async (args) => {
-      const result = await context.runTool(surface, descriptor.id, args);
-      if (result === null) {
+      const outcome = await context.invokeTool(surface, descriptor.id, args);
+      if (outcome.status !== 'ok') {
         return {
           success: false,
-          error: `Unknown channel tool '${descriptor.id}' for surface '${surface}'.`,
+          error: describeActionFailure(outcome),
+          output: JSON.stringify({
+            surface,
+            toolId: descriptor.id,
+            outcome: outcome.status,
+            refusal: outcome.refusal,
+            ...(outcome.status === 'unknown-action' ? { known: outcome.known } : {}),
+            ...(outcome.status === 'refused' && outcome.detail !== undefined ? { detail: outcome.detail } : {}),
+          }, null, 2),
         };
       }
       return {
         success: true,
-        output: JSON.stringify({ surface, toolId: descriptor.id, result }, null, 2),
+        output: JSON.stringify({
+          surface,
+          toolId: descriptor.id,
+          result: outcome.result,
+          ...(Array.isArray(outcome.result) && isTruncatedDirectory(outcome.result) ? { truncated: true, note: 'The provider directory search stopped at its page limit; a narrower query may find more.' } : {}),
+        }, null, 2),
       };
     },
   }));

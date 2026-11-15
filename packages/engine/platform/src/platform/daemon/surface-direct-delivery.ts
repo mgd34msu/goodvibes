@@ -25,6 +25,7 @@ import type { ServiceRegistry } from '../config/service-registry.js';
 import type { AgentManager } from '../tools/agent/index.js';
 import { SlackIntegration, DiscordIntegration, NtfyIntegration, resolveNtfyDefaultPriority } from '../integrations/index.js';
 import { logger } from '../utils/logger.js';
+import { resolveSurfaceSecret } from '../channels/builtin/surface-secrets.js';
 import { postToPublicWebhook, validatePublicWebhookUrl } from '../utils/url-safety.js';
 import type { HostResolver } from '../tools/fetch/pinned-request.js';
 import { resolveReachableBaseUrl } from '../utils/reachable-base-url.js';
@@ -38,9 +39,9 @@ export interface SurfaceDirectDeliveryDeps {
   readonly resolveSlackBotToken: () => Promise<string | null>;
   /** surfaces.webhook.defaultTarget, resolved when it is a secret reference. */
   readonly resolveWebhookDefaultTarget: () => Promise<string | null>;
-  /** The ntfy access token: registry, then `surfaces.ntfy.token`, then the environment. Registry and environment only when absent. */
+  /** The ntfy access token; the setup schema's reader (registry, `surfaces.ntfy.token`, environment) when absent. */
   readonly resolveNtfyToken?: (() => Promise<string | null>) | undefined;
-  /** The Discord bot token: registry, then `surfaces.discord.botToken`, then the environment. Registry and environment only when absent. */
+  /** The Discord bot token; the setup schema's reader (registry, `surfaces.discord.botToken`, environment) when absent. */
   readonly resolveDiscordBotToken?: (() => Promise<string | null>) | undefined;
   readonly signWebhookPayload: (body: string, secret: string) => string;
   /** Resolves a delivery host before posting; the system resolver when absent (utils/url-safety.ts). */
@@ -49,12 +50,12 @@ export interface SurfaceDirectDeliveryDeps {
 
 async function ntfyToken(deps: SurfaceDirectDeliveryDeps): Promise<string | undefined> {
   if (deps.resolveNtfyToken) return await deps.resolveNtfyToken() ?? undefined;
-  return await deps.serviceRegistry.resolveSecret('ntfy', 'primary') ?? process.env.NTFY_ACCESS_TOKEN ?? undefined;
+  return await resolveSurfaceSecret(deps, 'ntfy', 'primary') ?? undefined;
 }
 
 async function discordBotToken(deps: SurfaceDirectDeliveryDeps): Promise<string | undefined> {
   if (deps.resolveDiscordBotToken) return await deps.resolveDiscordBotToken() ?? undefined;
-  return await deps.serviceRegistry.resolveSecret('discord', 'primary') ?? process.env.DISCORD_BOT_TOKEN ?? undefined;
+  return await resolveSurfaceSecret(deps, 'discord', 'primary') ?? undefined;
 }
 
 /**
@@ -91,7 +92,7 @@ export async function deliverSurfaceProgress(
   }
   if (pending.surfaceKind === 'discord') {
     const discord = new DiscordIntegration(
-      await deps.serviceRegistry.resolveSecret('discord', 'webhookUrl') ?? process.env.DISCORD_WEBHOOK_URL ?? undefined,
+      await resolveSurfaceSecret(deps, 'discord', 'webhookUrl') ?? undefined,
       await discordBotToken(deps),
     );
     if (pending.applicationId && pending.interactionToken) {
@@ -156,7 +157,7 @@ export async function deliverDiscordAgentReply(
   message: string,
 ): Promise<void> {
   const discord = new DiscordIntegration(
-    await deps.serviceRegistry.resolveSecret('discord', 'webhookUrl') ?? process.env.DISCORD_WEBHOOK_URL ?? undefined,
+    await resolveSurfaceSecret(deps, 'discord', 'webhookUrl') ?? undefined,
     await discordBotToken(deps),
   );
   if (pending.applicationId && pending.interactionToken) {

@@ -18,13 +18,19 @@
  * the underlying ask. Non-exec requests, and any request while the sandbox is
  * inactive, pass through byte-for-byte unchanged.
  *
+ * The network a command on the owner's egress allowlist needs is not asked here:
+ * the exec runner asks it once, inside the call that runs the command, with the
+ * exact boundary plan (`askedAtRun` on the platform decision). So the owner is
+ * never asked the same question twice for one command, and no answer given here
+ * outlives the call it was given for.
+ *
  * This runs INSIDE the permission machinery's ask layer (like trustGatedAsk), so
  * it composes with the real layer chain and is only ever consulted for execs the
  * base policy already resolved to "ask", it can never turn a deny into an allow,
  * and the frozen catastrophic block is untouched.
  */
-import { decideSandboxedExec, readCommandNeeds, recordGateEscalationApproval } from '@goodvibes-jev/engine/platform/platform/runtime/permissions/sandbox-policy';
-import { detectSandboxAvailability, probeSandboxHost, type SandboxAvailability } from '@goodvibes-jev/engine/platform/platform/tools/exec/sandbox';
+import { decideSandboxedExec, readCommandNeeds, type SandboxPolicyDecision } from '@goodvibes-jev/engine/platform/platform/runtime/permissions/sandbox-policy';
+import { execCommandText, hostSandboxAvailability, type SandboxAvailability } from '@goodvibes-jev/engine/platform/platform/tools/exec/sandbox';
 import type { ApprovalRaise } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { JudgmentAuthorityRetiredError, decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
 import type {
@@ -56,11 +62,11 @@ export interface SandboxExecAskDeps {
   /** The `sandbox.egressAllowlist` command base names. */
   readonly readEgressAllowlist: () => readonly string[];
   /**
-   * Honest host availability of the exec sandbox backend. Probing the host spawns
-   * bwrap, so the caller passes a memoized probe, invoked at most once, and only
-   * when an exec ask actually arrives while the feature + config are on.
+   * Host availability of the exec sandbox backend: the one reading the exec tool
+   * was registered with (`hostSandboxAvailability`, probed once per process), so
+   * the gate never calls a command contained that the tool runs on the host.
    */
-  readonly detectAvailability: () => SandboxAvailability;
+  readonly availability: () => SandboxAvailability;
 }
 
 /**
@@ -72,7 +78,7 @@ export interface SandboxExecAskDeps {
  * was never wired, so it must not be trusted), while the config switch and the
  * allowlist are read live (a sandbox switched off mid-session runs unsandboxed, so
  * the ask must go to the owner). Call this where the tools are registered. The host
- * probe (a bwrap spawn) is deferred to first use inside createSandboxExecAsk.
+ * availability is the exec tool's own, taken when it was registered.
  */
 export function sandboxExecAskDepsFromRuntime(
   configManager: Pick<ConfigManager, 'get' | 'getCategory'>,
@@ -84,14 +90,16 @@ export function sandboxExecAskDepsFromRuntime(
     isSandboxFeatureEnabled: () => featureEnabled,
     isSandboxConfigEnabled: () => wiredAtStartup && Boolean(configManager.getCategory('sandbox').enabled),
     readEgressAllowlist: () => readSandboxExecList(configManager, SANDBOX_EGRESS_ALLOWLIST_CONFIG_KEY),
-    detectAvailability: () => detectSandboxAvailability(probeSandboxHost()),
+    availability: hostSandboxAvailability,
   };
 }
 
 /**
- * Pull the shell command text(s) out of an exec request's args. Only entries whose
- * text is plainly the `cmd` the owner sees are read; a `cmd_base64` entry runs text
- * other than `cmd`, so it is left out here and `execArgsNeedOwner` sends it to the owner.
+ * Pull the shell command text(s) out of an exec request's args, read the way the
+ * exec tool reads them (`execCommandText`: a `cmd_base64` entry is judged by the
+ * text it decodes to). An entry the tool would refuse (invalid base64, or `cmd`
+ * and `cmd_base64` that disagree) is left out here and `execArgsNeedOwner` sends
+ * the request to the owner.
  */
 export function extractExecCommands(request: PermissionPromptRequest): string[] {
   const args = request.args ?? {};
@@ -111,8 +119,21 @@ function entryText(entry: unknown): string | null {
   if (typeof entry === 'string') return entry;
   if (!entry || typeof entry !== 'object') return null;
   const record = entry as Record<string, unknown>;
-  if (record.cmd_base64 !== undefined && record.cmd_base64 !== null && record.cmd_base64 !== '') return null;
-  return typeof record.cmd === 'string' && record.cmd.length > 0 ? record.cmd : null;
+  const cmd = optionalText(record.cmd);
+  const encoded = optionalText(record.cmd_base64);
+  if (cmd === null || encoded === null) return null;
+  try {
+    const text = execCommandText({ cmd, cmd_base64: encoded });
+    return text.length > 0 ? text : null;
+  } catch {
+    return null;
+  }
+}
+
+/** A string field, undefined when absent, null when it holds something other than text. */
+function optionalText(value: unknown): string | undefined | null {
+  if (value === undefined || value === null) return undefined;
+  return typeof value === 'string' ? value : null;
 }
 
 function nonEmptyString(value: unknown): string | undefined {
@@ -123,8 +144,8 @@ function nonEmptyString(value: unknown): string | undefined {
  * True when the request carries something the gate's command reading does not
  * cover, so the owner must be asked rather than the sandbox decision trusted:
  * host-side `file_ops` (they run on the host before any command, outside the
- * boundary), a command entry the gate cannot read as plain `cmd` text (such as `cmd_base64`), or a working directory
- * other than the one the commands were judged against.
+ * boundary), a command entry the exec tool would refuse to read, or a working
+ * directory other than the one the commands were judged against.
  */
 export function execArgsNeedOwner(request: PermissionPromptRequest): boolean {
   const args = request.args ?? {};
@@ -157,23 +178,20 @@ function isExecRequest(request: PermissionPromptRequest): boolean {
  * policy. Only exec asks are considered; everything else delegates unchanged.
  */
 export function createSandboxExecAsk(deps: SandboxExecAskDeps, ask: PermissionRequestHandler): PermissionRequestHandler {
-  let cachedAvailability: SandboxAvailability | null = null;
-  const availability = (): SandboxAvailability => {
-    if (cachedAvailability === null) cachedAvailability = deps.detectAvailability();
-    return cachedAvailability;
-  };
-
   return async (request, options) => {
     // Classic keeps actual OS containment but asks the owner instead of semantically inferring host-access needs.
     if (decisionModelPolicyState().operation === 'classic') return ask(request, options);
     if (!isExecRequest(request)) return ask(request, options);
+    // The exec runner's own escalation ask comes back through the same raiser; it is the
+    // one place that question is put to the owner, so it is never relaxed here.
+    if (request.attribution?.kind === 'sandbox-escalation') return ask(request, options);
     const commands = extractExecCommands(request);
     if (commands.length === 0 || execArgsNeedOwner(request)) return ask(request, options);
 
     // The sandbox is genuinely active only when the feature flag AND the config
     // switch are on AND the host can actually provide a boundary.
     const featureAndConfig = deps.isSandboxFeatureEnabled() && deps.isSandboxConfigEnabled();
-    const sandboxActive = featureAndConfig && availability().available;
+    const sandboxActive = featureAndConfig && deps.availability().available;
     if (!sandboxActive) return ask(request, options);
 
     const egressAllowlist = [...deps.readEgressAllowlist()];
@@ -194,31 +212,34 @@ export function createSandboxExecAsk(deps: SandboxExecAskDeps, ask: PermissionRe
     ));
     assertCurrent();
 
-    // A batch auto-allows only when EVERY command is boundary-safe. If any needs
-    // host access, the whole ask surfaces with the union of named escalations.
-    if (decisions.every((decision) => decision.effect === 'allow')) {
-      return Promise.resolve({ approved: true });
-    }
-
-    const escalations = dedupe(decisions.flatMap((decision) => decision.escalations));
-    const decision = await ask(annotateExecAsk(request, { sandboxed: true, sandboxEscalations: escalations }), options);
-    // The card named the escalations, so approving it answers the exec-time ask for the same commands.
-    if (decision.approved) commands.forEach((command, index) => { if (decisions[index]?.effect === 'ask') recordGateEscalationApproval(command); });
-    return decision;
+    // A batch auto-allows only when no command leaves a question for this card:
+    // each is boundary-safe, or its one escalation is the allowlisted network the
+    // runner asks inside its own call. Otherwise the whole ask surfaces with the
+    // union of the escalations this card decides.
+    if (!decisions.some(asksHere)) return { approved: true };
+    const escalations = dedupe(decisions.flatMap(escalationsAskedHere));
+    return ask(annotateExecAsk(request, { sandboxed: true, sandboxEscalations: escalations }), options);
   };
+}
+
+/** The escalations of one decision that this gate puts to the owner (not the runner's own ask). */
+function escalationsAskedHere(decision: SandboxPolicyDecision): string[] {
+  return decision.escalations.filter((escalation) => escalation !== decision.askedAtRun);
+}
+
+/** True when a decision needs the owner at this gate: an unassessed ask, or an escalation the runner does not ask. */
+function asksHere(decision: SandboxPolicyDecision): boolean {
+  return decision.effect === 'ask' && (decision.escalations.length === 0 || escalationsAskedHere(decision).length > 0);
 }
 
 /**
  * The same sandbox-aware exec policy in front of an approval raiser, for the
  * asks a worker raises (it has no permission manager of its own). The gate is
- * built per ask so the caller's signal and routing travel with it; the host
- * probe is cached across asks.
+ * built per ask so the caller's signal and routing travel with it.
  */
 export function sandboxAwareApprovalRaiser(deps: SandboxExecAskDeps, raise: ApprovalRaise): ApprovalRaise {
-  let availability: SandboxAvailability | null = null;
-  const cachedDeps: SandboxExecAskDeps = { ...deps, detectAvailability: () => (availability ??= deps.detectAvailability()) };
   return ({ request, ...extras }) =>
-    createSandboxExecAsk(cachedDeps, (annotated, execution) =>
+    createSandboxExecAsk(deps, (annotated, execution) =>
       raise({ ...extras, request: annotated, ...(execution?.signal ? { signal: execution.signal } : {}) }),
     )(request, extras.signal ? { signal: extras.signal } : undefined);
 }

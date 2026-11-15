@@ -44,7 +44,21 @@ describe('edit approval shows the text the edit tool will write', () => {
   test('an item with only base64 fields is drawn, and an empty base64 replacement deletes', () => {
     const lines = writeDiffLines(edit([{ path: 'a.ts', find_base64: b64('old'), replace_base64: '' }]), undefined);
     expect(lines).toContain('-old');
-    expect(lines).toContain('+');
+    expect(lines!.some((line) => line.startsWith('+'))).toBe(false);
+  });
+  test('no edit is left off: a long edit shows its first lines and counts the rest', () => {
+    const many = (prefix: string): string => Array.from({ length: 6 }, (_, i) => `${prefix}${i}`).join('\n');
+    const lines = writeDiffLines(edit([{ path: 'a.ts', find: many('old'), replace: many('new') }, { path: 'b.ts', find: 'x', replace: 'y' }]), undefined)!;
+    expect(lines).toContain('@@ a.ts @@');
+    expect(lines).toContain('-old0');
+    expect(lines).toContain(' … +2 more lines');
+    expect(lines).toContain('@@ b.ts @@');
+    expect(lines).toContain('+y');
+  });
+  test('a write shows the content of every file it writes', () => {
+    const request = { callId: 'c', tool: 'write', category: 'write', args: { files: [{ path: 'a.txt', content: 'one\n' }, { path: 'b.bin', content_base64: b64('two') }] } } as PermissionPromptRequest;
+    const lines = writeDiffLines(request, undefined)!;
+    expect(lines).toEqual(['@@ a.txt @@', '+one', '@@ b.bin @@', '+two']);
   });
   test('hunk selection accepts base64-only items', () => {
     const request = edit([

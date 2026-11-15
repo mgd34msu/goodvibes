@@ -32,6 +32,8 @@ export interface BrokerApprovalCardBroker extends ApprovalRequesterLookup {
       readonly rememberTier?: RememberTier;
       readonly reason?: string;
       readonly modifiedArgs?: Record<string, unknown>;
+      /** The hunks the owner kept; the broker builds the applied edit list from its own copy of the request. */
+      readonly selectedHunks?: readonly number[];
       readonly actor: string;
       readonly actorSurface?: string;
     },
@@ -135,6 +137,7 @@ export function handleBrokerApprovalChange(params: BrokerApprovalChangeParams): 
           ...(decision.rememberTier ? { rememberTier: decision.rememberTier } : {}),
           ...(decision.reason ? { reason: decision.reason } : {}),
           ...(decision.modifiedArgs ? { modifiedArgs: decision.modifiedArgs } : {}),
+          ...(decision.selectedHunks ? { selectedHunks: decision.selectedHunks } : {}),
           actor: 'tui',
           actorSurface: 'tui',
         }).catch((error: unknown) => {

@@ -34,9 +34,12 @@ import { spawnSync } from 'node:child_process';
 import { mkdtempSync, realpathSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { consumeGateEscalationApproval, decideSandboxedExec, egressAllowed, readCommandNeeds } from '../../runtime/permissions/sandbox-policy.js';
+import { decideSandboxedExec, egressAllowed, readCommandNeeds } from '../../runtime/permissions/sandbox-policy.js';
 import { DEFAULT_CONTROL_PLANE_PORT } from '../../config/control-plane-base-url.js';
 import type { ExecCommandResult } from './schema.js';
+
+// The one reading of the text an exec entry runs; an approval reader judges the same text.
+export { execCommandText } from './schema.js';
 
 /** Operator-facing per-command exec sandbox configuration (`sandbox.*`). */
 export interface ExecSandboxConfig {
@@ -453,9 +456,8 @@ export async function brokerSandboxEscalation(
     baseEffectWhenNotSandboxed: 'ask',
   });
   if (decision.effect !== 'ask' || decision.escalations.length === 0) return reportContainedRun();
-  // The owner already answered this exact question on the approval card for this command. An autonomous
-  // run keeps its own admission, which a reused answer cannot stand in for.
-  if (!currentExternalOperationSource() && consumeGateEscalationApproval(command)) return reportContainedRun();
+  // This is the one place the owner is asked for this escalation: inside the call that runs the command,
+  // with its exact plan. An approval gate in front of exec leaves it here (decision.askedAtRun).
   assertCurrent();
   const approved = await sandbox.requestEscalation(Object.freeze({
     command,
@@ -536,6 +538,20 @@ export function attachSandboxMeta(result: ExecCommandResult, plan: ExecSandboxPl
     ...(plan.sandboxed ? { sandbox_network: plan.network } : {}),
     ...(plan.escalationsGranted.length > 0 ? { sandbox_escalations: plan.escalationsGranted } : {}),
   };
+}
+
+let hostAvailability: SandboxAvailability | undefined;
+
+/**
+ * The host's sandbox availability, probed once per process. The exec tool at
+ * registration and the approval gates that auto-allow a contained command read
+ * this one value, so a gate can never call a command contained while the exec
+ * tool runs it on the host. Installing bubblewrap or enabling user namespaces
+ * takes effect on the next start.
+ */
+export function hostSandboxAvailability(): SandboxAvailability {
+  hostAvailability ??= detectSandboxAvailability(probeSandboxHost());
+  return hostAvailability;
 }
 
 /**

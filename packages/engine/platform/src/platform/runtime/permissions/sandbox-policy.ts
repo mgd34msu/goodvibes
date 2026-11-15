@@ -37,6 +37,13 @@ export interface SandboxPolicyDecision {
   readonly escalations: string[];
   /** Human-readable justification for the decision. */
   readonly reason: string;
+  /**
+   * The one escalation the exec runner itself puts to the owner, with the exact
+   * plan, right before the command starts: network for a command on the egress
+   * allowlist. An approval gate in front of the runner leaves this one to the
+   * runner, so the owner is asked once, inside the call that runs the command.
+   */
+  readonly askedAtRun?: string | undefined;
 }
 
 export interface SandboxPolicyInput {
@@ -169,31 +176,6 @@ export function egressAllowed(command: string, egressAllowlist: readonly string[
   return unlistedBaseNames(command, egressAllowlist).length === 0;
 }
 
-/** How long the owner's answer at the approval gate stays usable by the exec that follows it. */
-const GATE_APPROVAL_TTL_MS = 60_000;
-const gateApprovals = new Map<string, number[]>();
-
-/**
- * Remember that the owner approved `command` at the approval gate with its host-access escalations
- * named on the card, so the exec that runs it next does not ask the same question again.
- */
-export function recordGateEscalationApproval(command: string, now: number = Date.now()): void {
-  const live = (gateApprovals.get(command) ?? []).filter((at) => now - at < GATE_APPROVAL_TTL_MS);
-  live.push(now);
-  gateApprovals.set(command, live);
-  for (const [key, times] of gateApprovals) {
-    if (times.every((at) => now - at >= GATE_APPROVAL_TTL_MS)) gateApprovals.delete(key);
-  }
-}
-
-/** Use up one recorded gate approval for `command`. False when the owner was not asked at the gate, or the answer is too old. */
-export function consumeGateEscalationApproval(command: string, now: number = Date.now()): boolean {
-  const live = (gateApprovals.get(command) ?? []).filter((at) => now - at < GATE_APPROVAL_TTL_MS);
-  const used = live.shift() !== undefined;
-  if (live.length > 0) gateApprovals.set(command, live); else gateApprovals.delete(command);
-  return used;
-}
-
 /**
  * Decide, for a single exec, whether the active sandbox turns a base "ask" into
  * an "allow", or whether the command still needs a named escalation ask.
@@ -214,13 +196,11 @@ export function decideSandboxedExec(input: SandboxPolicyInput): SandboxPolicyDec
   };
 
   const escalations: string[] = [];
+  let askedAtRun: string | undefined;
   if (input.needs.needsNetwork) {
     const unlisted = unlistedBaseNames(input.command, input.egressAllowlist);
-    escalations.push(
-      unlisted.length === 0
-        ? 'wants network (on egress allowlist, granted inside the boundary once approved)'
-        : `wants network (not on egress allowlist: ${unlisted.join(', ')}; denied inside the boundary and approval does not change that; add it to sandbox.egressAllowlist)`,
-    );
+    if (unlisted.length === 0) askedAtRun = 'wants network (on egress allowlist, granted inside the boundary once approved)';
+    escalations.push(askedAtRun ?? `wants network (not on egress allowlist: ${unlisted.join(', ')}; denied inside the boundary and approval does not change that; add it to sandbox.egressAllowlist)`);
   }
   if (input.needs.needsPrivilege) {
     escalations.push('wants host privilege escalation (the boundary never grants it: approving lets the command run inside the boundary without root, so it fails where it needs root)');
@@ -232,6 +212,7 @@ export function decideSandboxedExec(input: SandboxPolicyInput): SandboxPolicyDec
       sandboxed: true,
       escalations,
       reason: `runs inside the sandbox boundary but needs host access: ${escalations.join('; ')}`,
+      ...(askedAtRun ? { askedAtRun } : {}),
     };
   }
 

@@ -17,9 +17,11 @@
  *
  * The thing being approved is the whole card: every command (in full,
  * wrapped), the target path(s), URLs or task, or for a tool with no known
- * subject the whole argument object (permissions/subject.ts in the engine). Risk shows as one colored chip. Edits show
- * the actual diff with tinted rows; hunk-selectable edits give every hunk its
- * own checkbox. Every other fact (directory, sandbox, policy judgment, review
+ * subject the whole argument object (permissions/subject.ts in the engine). Risk shows as one colored chip. Writes
+ * and edits show the change of every file and every edit with tinted rows;
+ * hunk-selectable edits give every hunk its own checkbox. Nothing is left off
+ * the card: a long change shows its first lines and counts the rest, and the
+ * card scrolls when it is taller than the screen. Every other fact (directory, sandbox, policy judgment, review
  * reasons, the raw arguments) is one key away (d), wrapped in full. Choices are
  * buttons: arrows pick, Enter confirms, and y / a / n (and 1-9 for remember
  * tiers) still work. "Allow for session ▸" opens the remember tiers as a
@@ -31,6 +33,7 @@
 
 import type { PermissionCategory, PermissionPromptRequest, PermissionRequestAnalysis } from '@goodvibes-jev/engine/platform/platform/permissions';
 import { buildPermissionApprovalBrief, buildRememberOptions, execFileOperationLines, fallbackAnalysis } from '@goodvibes-jev/engine/platform/platform/permissions';
+import { decodeBase64 } from '@goodvibes-jev/engine/platform/platform/control-plane/approval-hunk-apply';
 import { activeTokens } from '../renderer/theme.ts';
 import {
   beginModal,
@@ -50,14 +53,12 @@ import { drawRow, measureRow, type KitRow, type KitSpan } from '../renderer/surf
 import { editItemText, type HunkSelectionState } from './hunk-selection.ts';
 import { readSandboxAskAnnotation } from './sandbox-exec-gate.ts';
 
-/** Hunks listed before a "+N more hunks" trailer. */
-export const MAX_VISIBLE_HUNKS = 8;
-/** Diff rows shown for a whole-file write before a "+N more" trailer. */
-const MAX_DIFF_LINES = 10;
-/** Target rows listed before they collapse to an "N files: …" summary. */
-const MAX_TARGET_ROWS = 3;
-/** Diff rows shown under one hunk before a trailer. */
-const MAX_HUNK_LINES = 6;
+/**
+ * Diff lines drawn for one change (a file's content, one edit, one hunk)
+ * before a trailer counts the rest. Every change is drawn; this bounds only
+ * how much of each, so a huge write costs one screen of rows, not its size.
+ */
+const MAX_CHANGE_LINES = 10;
 
 /** What the card shows beyond the request itself. */
 export interface PermissionCardState {
@@ -219,22 +220,49 @@ function diffRows(lines: readonly string[], width: number): CardRow[] {
   return rows;
 }
 
-/** Unified-diff text for a whole-file write or an edit list (not hunk mode), capped with an honest trailer. */
+/** The first MAX_CHANGE_LINES lines of one change, then a trailer counting the rest. */
+function cappedChange(lines: readonly string[]): string[] {
+  if (lines.length <= MAX_CHANGE_LINES) return [...lines];
+  return [...lines.slice(0, MAX_CHANGE_LINES), ` … +${lines.length - MAX_CHANGE_LINES} more lines`];
+}
+
+/** Lines of a text, without the empty line a trailing newline would add. */
+function textLines(text: string): string[] {
+  return text === '' ? [] : text.replace(/\n$/, '').split('\n');
+}
+
+/** One file's new content as added lines under a header; binary content is named, not drawn. */
+function contentChange(path: string, text: string): string[] {
+  if (/[\u0000\uFFFD]/.test(text)) return [`@@ ${path}: binary content, not shown @@`];
+  const lines = textLines(text);
+  return [`@@ ${path}${lines.length === 0 ? ' (empty file)' : ''} @@`, ...cappedChange(lines.map((line) => `+${line}`))];
+}
+
+/**
+ * Unified-diff text for a whole-file write or an edit list (not hunk mode).
+ * Every file and every edit gets its own header and its first lines; a longer
+ * change ends in a trailer counting the lines not drawn, so no change is
+ * approved without appearing on the card. The card scrolls when they do not fit.
+ */
 export function writeDiffLines(request: PermissionPromptRequest, hunkState: HunkSelectionState | undefined): string[] | null {
   if (hunkState || request.category !== 'write') return null;
   const args = request.args ?? {};
   const target = typeof args.path === 'string' ? args.path : typeof args.file === 'string' ? args.file : '';
   const out: string[] = [];
-  if (typeof args.content === 'string') {
-    const contentLines = args.content.split('\n');
-    out.push(`@@ ${target || '(new content)'} @@`);
-    for (const line of contentLines.slice(0, MAX_DIFF_LINES)) out.push(`+${line}`);
-    if (contentLines.length > MAX_DIFF_LINES) out.push(` … +${contentLines.length - MAX_DIFF_LINES} more lines`);
-    return out;
+  // The write tool's own shape: files[] of { path, content | content_base64 }.
+  if (Array.isArray(args.files)) {
+    for (const file of args.files) {
+      if (!file || typeof file !== 'object') continue;
+      const entry = file as Record<string, unknown>;
+      const path = typeof entry.path === 'string' ? entry.path : '(no path)';
+      const text = typeof entry.content_base64 === 'string'
+        ? decodeBase64(entry.content_base64)
+        : typeof entry.content === 'string' ? entry.content : null;
+      if (text !== null) out.push(...contentChange(path, text));
+    }
   }
+  if (typeof args.content === 'string') out.push(...contentChange(target || '(new content)', args.content));
   if (Array.isArray(args.edits)) {
-    let budget = MAX_DIFF_LINES;
-    let hidden = 0;
     for (const edit of args.edits) {
       if (!edit || typeof edit !== 'object') continue;
       const e = edit as { path?: unknown; find?: unknown; replace?: unknown; find_base64?: unknown; replace_base64?: unknown };
@@ -248,23 +276,16 @@ export function writeDiffLines(request: PermissionPromptRequest, hunkState: Hunk
         ...(typeof e.find_base64 === 'string' ? { find_base64: e.find_base64 } : {}),
         ...(typeof e.replace_base64 === 'string' ? { replace_base64: e.replace_base64 } : {}),
       });
-      const findLines = text.find.split('\n');
-      const replaceLines = text.replace.split('\n');
-      const need = 1 + findLines.length + replaceLines.length;
-      if (budget < need) {
-        hidden += 1;
-        continue;
-      }
       out.push(`@@ ${typeof e.path === 'string' ? e.path : target} @@`);
-      for (const line of findLines) out.push(`-${line}`);
-      for (const line of replaceLines) out.push(`+${line}`);
-      budget -= need;
+      out.push(...cappedChange(editChangeLines(text)));
     }
-    if (out.length === 0) return null;
-    if (hidden > 0) out.push(` … +${hidden} more edits`);
-    return out;
   }
-  return null;
+  return out.length > 0 ? out : null;
+}
+
+/** An edit as removed find lines and added replacement lines; an empty replacement adds none. */
+function editChangeLines(text: { readonly find: string; readonly replace: string }): string[] {
+  return [...text.find.split('\n').map((l) => `-${l}`), ...(text.replace === '' ? [] : text.replace.split('\n').map((l) => `+${l}`))];
 }
 
 function subjectRows(request: PermissionPromptRequest, width: number): CardRow[] {
@@ -284,35 +305,29 @@ function subjectRows(request: PermissionPromptRequest, width: number): CardRow[]
       spans: [{ text: p === 0 && i === 0 ? '$ ' : '  ', fg: t.textFaint }, { text: line, fg: t.text }],
     })))), ...fileOpRows];
   }
+  // Every path, one row each (the card scrolls): an approval covers each of them.
   const values = brief.subjectKind === 'path' ? brief.subjectValues.map((p) => relativize(p, request.workingDirectory)) : brief.subjectValues;
-  // Up to three paths are listed in full; more collapse to a summary (the
-  // complete list stays in the details' Args row).
-  if (brief.subjectKind === 'path' && values.length > MAX_TARGET_ROWS) {
-    const base = (p: string): string => p.replace(/[/\\]+$/, '').split(/[/\\]/).pop() ?? p;
-    return [...labelled(brief.subjectLabel, `${values.length} files: ${values.slice(0, 2).map(base).join(', ')}, +${values.length - 2} more`, width, t.text), ...fileOpRows];
-  }
   return [...values.flatMap((value, i) => labelled(i === 0 ? brief.subjectLabel : '', value, width, t.text)), ...fileOpRows];
 }
 
+/**
+ * Every hunk, each with its checkbox and its first lines. All are selected by
+ * default and applied on Enter, so none is left off the card; the card
+ * scrolls and keeps the cursor's hunk in view.
+ */
 function hunkRows(hunkState: HunkSelectionState, width: number): CardRow[] {
   const t = activeTokens();
   const rows: CardRow[] = [];
   const { hunks, cursor, selected } = hunkState;
   rows.push(...textRows(`${selected.size} of ${hunks.length} hunks selected`, width + 4, { fg: t.textMuted }));
-  hunks.slice(0, MAX_VISIBLE_HUNKS).forEach((hunk, i) => {
+  hunks.forEach((hunk, i) => {
     const on = selected.has(i);
     wrapLines(`${i + 1}. ${hunk.path}`, Math.max(4, width)).forEach((part, k) => rows.push({
       spans: [{ text: k === 0 ? (on ? '[x] ' : '[ ] ') : '    ', fg: on ? t.success : t.textFaint, bold: true }, { text: part, fg: on ? t.text : t.textMuted }],
       cursor: i === cursor,
     }));
-    const text = editItemText(hunk);
-    const lines = [...text.find.split('\n').map((l) => `-${l}`), ...text.replace.split('\n').map((l) => `+${l}`)];
-    const shown = diffRows(lines.slice(0, MAX_HUNK_LINES), width);
-    rows.push(...insetRows(lines.length > MAX_HUNK_LINES
-      ? [...shown, { spans: [{ text: `+${lines.length - MAX_HUNK_LINES} more lines`, fg: t.textFaint }] }]
-      : shown));
+    rows.push(...insetRows(diffRows(cappedChange(editChangeLines(editItemText(hunk))), width)));
   });
-  if (hunks.length > MAX_VISIBLE_HUNKS) rows.push({ spans: [{ text: `+${hunks.length - MAX_VISIBLE_HUNKS} more hunks`, fg: t.textFaint }] });
   return rows;
 }
 

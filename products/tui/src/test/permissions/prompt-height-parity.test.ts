@@ -6,8 +6,8 @@
  *
  *  - every card shape fits the screen it is drawn on, with its buttons in view;
  *  - the hunk under the cursor is always visible, whatever the cursor;
- *  - the subject shows the real path(s), never a JSON blob; many files
- *    collapse to an "N files: …" summary; the raw args stay in the details;
+ *  - the subject shows the real path(s), never a JSON blob, every one of
+ *    them; every hunk is drawn; the raw args stay in the details;
  *  - details are one key (d) away, and the requester and the exact rule
  *    "Allow for session" remembers are shown.
  */
@@ -85,9 +85,10 @@ describe('permission dialog layout', () => {
     }
   });
 
-  test('more than eight hunks are counted, not dropped', () => {
-    const text = promptCardText(WIDTH, makeRequest(20), makeHunkState(20)).join('\n');
-    expect(text).toContain('+12 more hunks');
+  test('every hunk that Enter would apply is drawn on the card', () => {
+    const text = promptCardText(WIDTH, makeRequest(20), makeHunkState(20), undefined, undefined, undefined, 200).join('\n');
+    for (let i = 0; i < 20; i++) expect(text).toContain(`${i + 1}. file${i}.ts`);
+    expect(text).toContain('+ replacement19');
   });
 
   test('partial selection is shown on the checkboxes and the count', () => {
@@ -119,9 +120,9 @@ describe('permission dialog layout', () => {
     expect(argsRow!).toContain('{"files"');
   });
 
-  test('many files collapse to an "N files: …" summary', () => {
+  test('every path an approval covers is listed', () => {
     const text = promptCardText(WIDTH, makeFilesRequest('write', 'write', Array.from({ length: 6 }, (_, i) => `f${i}.ts`)), undefined, false).join('\n');
-    expect(text).toContain('6 files: f0.ts, f1.ts, +4 more');
+    for (let i = 0; i < 6; i++) expect(text).toContain(`f${i}.ts`);
   });
 
   test('details are one key away: closed by default, opened with d', () => {

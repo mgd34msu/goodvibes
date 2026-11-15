@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { consumeGateEscalationApproval } from '@goodvibes-jev/engine/platform/platform/runtime/permissions/sandbox-policy';
 import type { SandboxAvailability } from '@goodvibes-jev/engine/platform/platform/tools/exec/sandbox';
 import type { PermissionExecutionOptions, PermissionPromptRequest, PermissionPromptDecision } from '@goodvibes-jev/engine/platform/platform/permissions';
 import {
@@ -52,7 +51,7 @@ function deps(overrides: Partial<SandboxExecAskDeps> = {}): SandboxExecAskDeps {
     isSandboxFeatureEnabled: () => true,
     isSandboxConfigEnabled: () => true,
     readEgressAllowlist: () => [],
-    detectAvailability: () => AVAILABLE,
+    availability: () => AVAILABLE,
     ...overrides,
   };
 }
@@ -229,7 +228,7 @@ describe('createSandboxExecAsk', () => {
   it('does not auto-allow when the host cannot provide a boundary', async () => {
     let asked = false;
     const ask = async (): Promise<PermissionPromptDecision> => { asked = true; return { approved: false }; };
-    const gate = createSandboxExecAsk(deps({ detectAvailability: () => UNAVAILABLE }), ask);
+    const gate = createSandboxExecAsk(deps({ availability: () => UNAVAILABLE }), ask);
     await gate(execRequest('echo hello'));
     expect(asked).toBe(true);
   });
@@ -248,25 +247,25 @@ describe('createSandboxExecAsk', () => {
     expect(asked).toBe(true);
   });
 
-  it('memoizes the host probe across asks', async () => {
-    let probes = 0;
-    const ask = async (): Promise<PermissionPromptDecision> => ({ approved: false });
-    const gate = createSandboxExecAsk(deps({ detectAvailability: () => { probes++; return AVAILABLE; } }), ask);
-    await gate(execRequest('echo a'));
-    await gate(execRequest('echo b'));
-    expect(probes).toBe(1);
-  });
 });
 
-describe('the owner\'s answer on the card reaches the exec', () => {
-  it('an approved card is remembered for its command, so the exec does not ask again; a refused card is not', async () => {
-    const approvedCommand = 'curl https://example.com';
-    const refusedCommand = 'curl https://x.test';
-    await createSandboxExecAsk(deps({ readEgressAllowlist: () => ['curl'] }), async () => ({ approved: true }))(execRequest(approvedCommand));
-    await createSandboxExecAsk(deps({ readEgressAllowlist: () => ['curl'] }), async () => ({ approved: false }))(execRequest(refusedCommand));
-    expect(consumeGateEscalationApproval(refusedCommand)).toBe(false);
-    expect(consumeGateEscalationApproval(approvedCommand)).toBe(true);
-    expect(consumeGateEscalationApproval(approvedCommand)).toBe(false);
+describe('the owner is asked once per command', () => {
+  it('leaves the network of an allowlisted command to the exec runner, which asks inside its own call', async () => {
+    let asked = 0;
+    const gate = createSandboxExecAsk(deps({ readEgressAllowlist: () => ['curl'] }), async () => { asked++; return { approved: false }; });
+    expect(await gate(execRequest('curl https://example.com'))).toEqual({ approved: true });
+    expect(asked).toBe(0);
+  });
+
+  it('puts the exec runner\'s own escalation ask to the owner, never approving it itself', async () => {
+    let asked = 0;
+    const raise = sandboxAwareApprovalRaiser(deps({ readEgressAllowlist: () => ['curl'] }), async () => { asked++; return { approved: false }; });
+    const escalation: PermissionPromptRequest = {
+      ...execRequest('curl https://example.com'),
+      attribution: { kind: 'sandbox-escalation', sandbox: 'exec-sandbox', escalations: ['wants network'] },
+    };
+    expect((await raise({ request: escalation })).approved).toBe(false);
+    expect(asked).toBe(1);
   });
 });
 
@@ -291,11 +290,4 @@ describe('sandboxAwareApprovalRaiser', () => {
     expect(readSandboxAskAnnotation(raised[0]?.request)?.sandboxed).toBe(true);
   });
 
-  it('probes the host once across asks', async () => {
-    let probes = 0;
-    const raise = sandboxAwareApprovalRaiser(deps({ detectAvailability: () => { probes += 1; return AVAILABLE; } }), async () => ({ approved: false }));
-    await raise({ request: execRequest('ls') });
-    await raise({ request: execRequest('pwd') });
-    expect(probes).toBe(1);
-  });
 });

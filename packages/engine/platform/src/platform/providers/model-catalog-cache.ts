@@ -306,15 +306,29 @@ function isCatalogCacheStale(cache: CatalogCacheFile): boolean {
   return cache.ttlMs <= 0 || isTtlCacheStale(cache);
 }
 
+/** The raw models.dev feed and the published facts of each of its providers. */
+export interface CatalogFeed {
+  readonly json: unknown;
+  readonly providers: readonly ProviderFacts[];
+}
+
+/** Read the models.dev GitHub repository. Uses a 30-second timeout for the fetch. */
+export async function fetchCatalogFeed(): Promise<CatalogFeed> {
+  const json = await fetchModelCatalogRepository() as unknown;
+  const providers = json !== null && typeof json === 'object' && !Array.isArray(json) ? providerFactsOf(json as ModelsDevResponse) : [];
+  return { json, providers };
+}
+
 /**
- * Read the models.dev GitHub repository and normalize its records, reading each
- * provider's access (remembered in `accessPath` when given) before the tiers
- * are set. Uses a 30-second timeout for the fetch.
+ * Read the models.dev GitHub repository and normalize its records, reading the
+ * access of each provider not already known (remembered in `accessPath` when
+ * given) before the tiers are set. The registry's refresh publishes first and
+ * reads after (registry-catalog-lifecycle.ts); this waits for the readings.
  */
 export async function fetchCatalog(options: { readonly accessPath?: string | undefined } = {}): Promise<CatalogModel[]> {
-  const json = await fetchModelCatalogRepository() as unknown as ModelsDevResponse;
-  const access = await new ProviderAccessReadings({ path: options.accessPath }).readAll(providerFactsOf(json));
-  const models = transformModelsDevResponse(json, access);
+  const feed = await fetchCatalogFeed();
+  const access = await new ProviderAccessReadings({ path: options.accessPath }).readAll(feed.providers);
+  const models = transformModelsDevResponse(feed.json, access);
   logger.debug('[model-catalog] Loaded models from the models.dev GitHub repository', { count: models.length });
   return models;
 }

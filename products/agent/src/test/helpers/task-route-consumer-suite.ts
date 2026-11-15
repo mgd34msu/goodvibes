@@ -130,7 +130,7 @@ describe(`${kind} engine task-route consumer`, () => {
     expect(evidence.action.detail.length).toBeGreaterThan(56);
   });
 
-  test.each([0.5, 0.57])('catalog reading %s stays typed and never publishes a ready route', async probability => {
+  test.each([0.5, 0.57])('an unsure catalog reading %s is left out of the matches and does not hold the plan', async probability => {
     using log = new SqliteDecisionLog(':memory:');
     const fake = taskRoutePort({ [args.query]: {
       pick: 'host-runtime-diagnostics', catalogFits: { 'document-run-compare': probability, document_ops: probability },
@@ -140,31 +140,30 @@ describe(`${kind} engine task-route consumer`, () => {
     expect(result.success).toBe(true);
     if (!result.success) throw new Error(result.error);
     const body = JSON.parse(result.output!);
-    expect(body.status).toBe('uncertain');
-    expect(body.preferred).toBeUndefined();
-    expect(body.workspaceMatches).toBeUndefined();
-    expect(body.harnessModeMatches).toBeUndefined();
+    expect(body.status).toBe('ready');
+    expect(body.preferred.id).toBe('host-runtime-diagnostics');
+    expect(body.workspaceMatches.map((record: { id: string }) => record.id)).not.toContain('document-run-compare');
+    expect(body.harnessModeMatches.map((record: { id: string }) => record.id)).not.toContain('document_ops');
     const ranked = body.judgment.workspace.find((entry: { id: string }) => entry.id === 'document-run-compare');
     expect(ranked.probability).toBe(probability);
     expect(ranked.reading.outcome).not.toBe('act');
     const entry = log.get(ranked.decisionId)!;
     expect(entry.status).toBe('answered');
     expect(readingsOf(entry)).toMatchObject({ candidate: expect.stringMatching(/^\d+$/), match: ranked.reading });
-    expect(actionOf(log.get(body.judgment.selection.decisionId)!)).toBe('uncertain: no route published');
-    expect(body.nextAction).not.toMatch(/human|approval|confirm|escalat/i);
+    expect(actionOf(log.get(body.judgment.selection.decisionId)!)).toBe('preferred host-runtime-diagnostics');
   });
 
-  test('uncertain effect slots cannot become an authorized or ordinary route', async () => {
+  test('an unsure slot the chosen route does not use does not hold the plan', async () => {
     using log = new SqliteDecisionLog(':memory:');
     const fake = taskRoutePort({ [args.query]: { pick: 'host-runtime-diagnostics', slots: { changes: 0.5 } } });
     installJudgmentPort(withDecisionLog(fake.port, log));
     const result = await caller(kind).execute({ ...args });
     if (!result.success) throw new Error(result.error);
     const body = JSON.parse(result.output!);
-    expect(body.status).toBe('uncertain');
-    expect(body.preferred).toBeUndefined();
+    expect(body.status).toBe('ready');
+    expect(body.preferred).toMatchObject({ id: 'host-runtime-diagnostics', requiresConfirmation: false });
     expect(body.judgment.slots.readings.changes).toMatchObject({ verdict: 'uncertain', probability: 0.5 });
-    expect(actionOf(log.get(body.judgment.slots.decisionId)!)).toBe('uncertain: no route published');
+    expect(actionOf(log.get(body.judgment.slots.decisionId)!)).toBe('planned host-runtime-diagnostics');
   });
 
   test('an uncertain selector cannot disguise itself as main conversation', async () => {
@@ -179,6 +178,8 @@ describe(`${kind} engine task-route consumer`, () => {
     expect(body.status).toBe('uncertain');
     expect(body.preferred).toBeUndefined();
     expect(body.judgment.selection.outcome).not.toBe('act');
+    expect(body.unsure.reading).toBe('route selection');
+    expect(body.candidates.every((candidate: { confidence: string }) => candidate.confidence === 'low')).toBe(true);
   });
 
   test('catalog matches follow reading probabilities rather than local substring or registry order', async () => {

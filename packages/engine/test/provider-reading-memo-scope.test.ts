@@ -56,4 +56,5 @@ test('an alternate-api reading joined from another caller does not carry that ca
   await expect(first).rejects.toBeDefined();
   gate.resolve();
   expect(await second).toBe(true);
+  expect(fake.requests).toHaveLength(1);
 });

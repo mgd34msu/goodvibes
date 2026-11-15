@@ -3,47 +3,24 @@ import { withDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform
 import { JudgmentError } from '@goodvibes-jev/judgment';
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import type { ArtifactRecord } from '@goodvibes-jev/engine/platform/platform/artifacts';
-import { modelReasonTheme, routingRegistry } from '@goodvibes-jev/engine/platform/platform/routing';
+import { modelReasonTheme } from '@goodvibes-jev/engine/platform/platform/routing';
 import { SqliteDecisionLog, withDecisionLog, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { formatComparisonSynthesis } from '../../tools/agent-model-compare-judgment.ts';
-import { readComparisonReasonThemes } from '../../tools/agent-model-compare-themes.ts';
-import { createComparisonOperation } from '../../tools/agent-model-compare-operation.ts';
-import type { AgentModelCompareArtifactStore, LoadedComparisonJudgment } from '../../tools/agent-model-compare-types.ts';
+import { formatComparisonSynthesis, parseJudgmentArtifactPayload } from '../../tools/agent-model-compare-judgment.ts';
+import { forgetComparisonReasonThemes, readComparisonReasonThemes, type JudgmentWithThemes } from '../../tools/agent-model-compare-themes.ts';
 import { cleanupResearchScreeningFixtures, exactSensitiveSpans, ordinaryResearchOwner, researchScreeningFixture } from '../helpers/research-screening.ts';
 
 let previous: ReturnType<typeof installJudgmentPort>;
-beforeEach(() => { previous = installJudgmentPort(undefined); });
+beforeEach(() => { previous = installJudgmentPort(undefined); forgetComparisonReasonThemes(); });
 afterEach(async () => { installJudgmentPort(previous); await cleanupResearchScreeningFixtures(); });
-function fixture() {
-  const judgment: LoadedComparisonJudgment = { artifact: { artifactId: 'judgment-a', mimeType: 'application/json', sizeBytes: 1 },
-    judgmentId: 'synthetic-judgment', comparisonId: 'synthetic-comparison', winnerBlindId: 'B', sourceArtifactId: 'comparison-a',
-    reasons: 'The losing response claimed clear and fast; I did not prefer those qualities.', notes: '', revealIncludedInJudgment: false };
-  const contents: Record<string, unknown> = {
-    'judgment-a': { schema: 'goodvibes.agent.model_compare_judgment.v1', judgmentId: judgment.judgmentId, comparisonId: judgment.comparisonId,
-      winnerBlindId: 'B', sourceArtifactId: 'comparison-a', reasons: judgment.reasons, notes: '', originalUnknown: 'complete judgment metadata' },
-    'comparison-a': { schema: 'goodvibes.agent.model_compare.v1', comparisonId: judgment.comparisonId,
-      prompt: 'Full original prompt, including its tail.', systemPrompt: 'Original system prompt.', rubric: 'Original rubric.',
-      candidates: [{ blindId: 'A', status: 'completed', content: 'Actual losing response.' },
-        { blindId: 'B', status: 'completed', content: 'Actual winning response, including its tail.', usage: { inputTokens: 7, outputTokens: 11 } }],
-      sourceArtifact: { artifactId: 'source-a' }, originalUnknown: 'complete comparison metadata' },
-    'source-a': 'Full original source document, including its tail.',
-  };
-  const bytes = (id: string) => Buffer.from(typeof contents[id] === 'string' ? contents[id] as string : JSON.stringify(contents[id]));
-  const records = Object.fromEntries(Object.keys(contents).map(id => [id, { id, kind: 'data', mimeType: id === 'source-a' ? 'text/plain' : 'application/json',
-    sizeBytes: bytes(id).byteLength, createdAt: 0, acquisitionMode: 'inline-data', fetchMode: 'not-applicable',
-    metadata: { provenance: 'owned synthetic artifact', unknownField: 'complete provenance metadata' },
-    contentPath: '/synthetic/transport/' + id, metadataPath: '/synthetic/transport/' + id + '.json' } satisfies ArtifactRecord]));
-  const store: AgentModelCompareArtifactStore = { create: async () => { throw new Error('No writes in theme reader'); },
-    get: id => records[id], list: () => Object.values(records),
-    async readContent(id) {
-      const record = records[id]; if (!record) throw new Error('Unknown synthetic artifact');
-      return { record, buffer: Buffer.from(typeof contents[id] === 'string' ? contents[id] as string : JSON.stringify(contents[id])) };
-    } };
-  const report = { request: { mode: 'synthesis', includeReasons: true, unrecognizedOriginal: 'complete request metadata' },
-    limit: 20, includeReasons: true, filters: {} };
-  return { judgment, contents, records, store, report };
+
+function judgment(id = 'judgment-a', reasons = 'The losing response claimed clear and fast; I did not prefer those qualities.'): JudgmentWithThemes {
+  return { artifact: { artifactId: id, mimeType: 'application/json', sizeBytes: 1 },
+    judgmentId: `synthetic-${id}`, comparisonId: 'synthetic-comparison', winnerBlindId: 'B', sourceArtifactId: 'comparison-a',
+    reasons, notes: '', revealIncludedInJudgment: false };
+}
+function synthesis(judgments: readonly JudgmentWithThemes[], readingOptions: Parameters<typeof formatComparisonSynthesis>[0]['readingOptions'], includeReasons = true) {
+  return formatComparisonSynthesis({ judgments, limit: 20, includeReasons, filters: {}, storeAvailable: true, readingOptions });
 }
 function suspended() {
   let start!: () => void, release!: () => void;
@@ -52,109 +29,95 @@ function suspended() {
   return { start, release, started, gate };
 }
 
-test('actual registered six-question reader preserves full originals, provenance and recorded action', async () => {
-  const f = fixture(), fake = fakePort(name => noulAnswer(name === 'faithfulness' ? 0.999 : 0.001));
+test('the reading sees only the reasons, notes and chosen label, and records its action', async () => {
+  const fake = fakePort(name => noulAnswer(name === 'faithfulness' ? 0.999 : 0.001));
   using log = new SqliteDecisionLog(':memory:');
   installJudgmentPort(withDecisionLog(fake.port, log));
-  const reading = await readComparisonReasonThemes(f.judgment, f.store, f.report, { sourceOwner: ordinaryResearchOwner() });
+  const reading = await readComparisonReasonThemes(judgment(), { sourceOwner: ordinaryResearchOwner() });
   expect(reading.status).toBe('settled');
-  if (reading.status !== 'settled') throw new Error('Synthetic registered theme read was held');
-  // Deliberately counter to legacy keywords: canonical readings alone determine the themes.
+  if (reading.status !== 'settled') throw new Error('Synthetic theme read was held');
   expect(reading.themes).toEqual(['faithfulness']);
-  expect(reading.provenance).toMatchObject({ battery: modelReasonTheme.name, version: 2, model: 'jev-1.13.0' });
-  expect(typeof reading.provenance.decisionId).toBe('string');
+  expect(reading.stored).toMatchObject({ battery: modelReasonTheme.name, version: modelReasonTheme.version, model: 'jev-1.13.0' });
   expect(fake.requests).toHaveLength(1);
   expect(Object.keys(fake.requests[0]!.questions)).toEqual(['actionable', 'clarity', 'faithfulness', 'context', 'safety', 'efficiency']);
-  const state = JSON.stringify(fake.requests[0]!.state);
-  for (const text of ['Full original prompt, including its tail.', 'Original system prompt.', 'Actual winning response, including its tail.',
-    'Full original source document, including its tail.', 'complete judgment metadata', 'complete comparison metadata',
-    'complete provenance metadata', 'complete request metadata']) expect(state).toContain(text);
-  expect(state).not.toContain('/synthetic/transport/');
-  const entries = log.query(); expect(entries).toHaveLength(1);
-  expect(JSON.stringify(entries[0])).toContain('classified preference themes: faithfulness');
+  expect(fake.requests[0]!.state).toEqual({ judgment: { winner: 'B', reasons: judgment().reasons, notes: '' } });
+  expect(JSON.stringify(log.query())).toContain('classified preference themes: faithfulness');
 });
 
-test('unsettled readings remain unresolved rather than uncategorized or keyword classified', async () => {
-  const f = fixture(), fake = fakePort(() => noulAnswer(0.5));
+test('two syntheses over the same judgments read each once; stored themes are never read', async () => {
+  const fake = fakePort(name => noulAnswer(name === 'clarity' ? 0.999 : 0.001));
+  installJudgmentPort(fake.port);
+  const judgments = Array.from({ length: 10 }, (_, index) => judgment(`judgment-${index}`, `Reason ${index}: B was easier to follow.`));
+  const options = { sourceOwner: ordinaryResearchOwner() };
+  expect(await synthesis(judgments, options)).toContain('Clear/scannable communication: 10 judgments');
+  expect(fake.requests).toHaveLength(10);
+  expect(await synthesis(judgments, options)).toContain('Clear/scannable communication: 10 judgments');
+  expect(fake.requests).toHaveLength(10);
+  const stored = { ...judgment('stored'), reasonThemes: { battery: modelReasonTheme.name, version: modelReasonTheme.version, themes: ['safety' as const], model: 'jev-1.13.0' } };
+  expect(await synthesis([stored], options)).toContain('Safety and risk handling: 1 judgment');
+  expect(fake.requests).toHaveLength(10);
+});
+
+test('themes read when a judgment is saved are parsed back from its artifact', () => {
+  const reasonThemes = { battery: modelReasonTheme.name, version: modelReasonTheme.version, themes: ['context'], model: 'jev-1.13.0', decisionId: 'd-1' };
+  const loaded = parseJudgmentArtifactPayload({ schema: 'goodvibes.agent.model_compare_judgment.v1', judgmentId: 'j', comparisonId: 'c',
+    winnerBlindId: 'A', reasons: 'r', notes: '', reasonThemes }, { artifactId: 'a', mimeType: 'application/json', sizeBytes: 1 });
+  expect(loaded?.reasonThemes).toEqual(reasonThemes as never);
+  const malformed = parseJudgmentArtifactPayload({ schema: 'goodvibes.agent.model_compare_judgment.v1', reasonThemes: { ...reasonThemes, themes: ['made-up'] } },
+    { artifactId: 'a', mimeType: 'application/json', sizeBytes: 1 });
+  expect(malformed?.reasonThemes).toBeUndefined();
+});
+
+test('unsettled readings stay unresolved, and the synthesis says why', async () => {
+  const fake = fakePort(() => noulAnswer(0.5));
   using log = new SqliteDecisionLog(':memory:'); installJudgmentPort(withDecisionLog(fake.port, log));
-  const report = await formatComparisonSynthesis({ artifactStore: f.store, judgments: [f.judgment], request: f.report.request,
-    limit: 20, includeReasons: true, filters: {}, storeAvailable: true, readingOptions: { sourceOwner: ordinaryResearchOwner() } });
+  const report = await synthesis([judgment()], { sourceOwner: ordinaryResearchOwner() });
   expect(report).toContain('Unresolved preference signal: 1 judgment');
+  expect(report).toContain('not classified (1): the decision model was unsure whether the reasons state');
   expect(report).not.toContain('Uncategorized preference signal');
-  expect(report).not.toContain('Clear/scannable communication:');
   expect(report).toContain('No selected model was changed.');
   expect(JSON.stringify(log.query())).toContain('held preference theme classification');
 });
 
-test('only six settled negative readings produce the existing uncategorized bucket', async () => {
-  const f = fixture(), fake = fakePort(() => noulAnswer(0.001)); installJudgmentPort(fake.port);
-  const report = await formatComparisonSynthesis({ artifactStore: f.store, judgments: [f.judgment], limit: 20,
-    includeReasons: false, filters: {}, storeAvailable: true, readingOptions: { sourceOwner: ordinaryResearchOwner() } });
+test('only six settled negative readings produce the uncategorized bucket', async () => {
+  installJudgmentPort(fakePort(() => noulAnswer(0.001)).port);
+  const report = await synthesis([judgment()], { sourceOwner: ordinaryResearchOwner() }, false);
   expect(report).toContain('Uncategorized preference signal: 1 judgment');
   expect(report).not.toContain('Unresolved preference signal');
 });
 
-test('missing source ownership makes zero theme requests', async () => {
-  const f = fixture(), fake = fakePort(() => noulAnswer(0.999)); installJudgmentPort(fake.port);
-  expect(await readComparisonReasonThemes(f.judgment, f.store, f.report, {})).toEqual({ status: 'held' });
+test('missing source screening makes zero theme requests and says so', async () => {
+  const fake = fakePort(() => noulAnswer(0.999)); installJudgmentPort(fake.port);
+  const reading = await readComparisonReasonThemes(judgment(), {});
+  expect(reading).toMatchObject({ status: 'held', reason: expect.stringContaining('no source screening') });
   expect(fake.requests).toHaveLength(0);
 });
 
-test('card-shaped numeric artifact metadata remains held before thematic dispatch', async () => {
-  const f = fixture(), fake = fakePort(() => noulAnswer(0.999)); installJudgmentPort(fake.port);
-  // Synthetic epoch-shaped data that also satisfies the canonical card-number screen.
-  Object.defineProperty(f.records['judgment-a']!, 'createdAt', { value: 1791691300001, enumerable: true });
-  expect(await readComparisonReasonThemes(f.judgment, f.store, f.report, { sourceOwner: ordinaryResearchOwner() })).toEqual({ status: 'held' });
+test('sensitive text in the reasons cannot enter the theme request', async () => {
+  const secret = 'synthetic-sensitive-marker';
+  const privacy = researchScreeningFixture({ spans: exactSensitiveSpans([secret]) });
+  const fake = fakePort(() => noulAnswer(0.999)); installJudgmentPort(fake.port);
+  expect(await readComparisonReasonThemes(judgment('judgment-a', `B was clear. ${secret}`), { sourceOwner: privacy.owner })).toMatchObject({ status: 'held' });
   expect(fake.requests).toHaveLength(0);
+  expect(JSON.stringify(privacy.calls)).toContain(secret);
 });
 
-test('artifact method descriptor admission does not execute an accessor', async () => {
-  const f = fixture(), fake = fakePort(() => noulAnswer(0.999)); let accessorCalls = 0;
-  installJudgmentPort(fake.port);
-  Object.defineProperty(f.store, 'readContent', { enumerable: true, get() { accessorCalls++; throw new Error('Synthetic borrowed getter'); } });
-  expect(await readComparisonReasonThemes(f.judgment, f.store, f.report, { sourceOwner: ordinaryResearchOwner() })).toEqual({ status: 'held' });
-  expect(accessorCalls).toBe(0); expect(fake.requests).toHaveLength(0);
-});
-
-for (const location of ['comparison', 'judgment', 'provenance', 'request', 'source'] as const) {
-  test(`sensitive original ${location} content cannot enter thematic dispatch`, async () => {
-    const f = fixture(), secret = 'synthetic-sensitive-marker';
-    if (location === 'comparison') (f.contents['comparison-a'] as Record<string, unknown>).unknownSecret = secret;
-    if (location === 'judgment') (f.contents['judgment-a'] as Record<string, unknown>).unknownSecret = secret;
-    if (location === 'provenance') Object.defineProperty(f.records['comparison-a']!.metadata, 'unknownSecret', { value: secret, enumerable: true });
-    if (location === 'request') f.report.request.unrecognizedOriginal = secret;
-    if (location === 'source') f.contents['source-a'] = secret;
-    const privacy = researchScreeningFixture({ spans: exactSensitiveSpans([secret]) });
-    const fake = fakePort(() => noulAnswer(0.999)); installJudgmentPort(fake.port);
-    expect(await readComparisonReasonThemes(f.judgment, f.store, f.report, { sourceOwner: privacy.owner })).toEqual({ status: 'held' });
-    expect(fake.requests).toHaveLength(0);
-    expect(JSON.stringify(privacy.calls)).toContain(secret);
-  });
-}
-
-test('wrong comparison association holds before dispatch', async () => {
-  const f = fixture(), fake = fakePort(() => noulAnswer(0.999)); installJudgmentPort(fake.port);
-  (f.contents['comparison-a'] as Record<string, unknown>).comparisonId = 'different-comparison';
-  expect(await readComparisonReasonThemes(f.judgment, f.store, f.report, { sourceOwner: ordinaryResearchOwner() })).toEqual({ status: 'held' });
-  expect(fake.requests).toHaveLength(0);
-});
-
-test('cancelled privacy screening makes zero thematic requests', async () => {
-  const f = fixture(), pending = suspended(), controller = new AbortController();
+test('cancelled privacy screening makes zero theme requests', async () => {
+  const pending = suspended(), controller = new AbortController();
   const privacy = researchScreeningFixture({ beforeProposal: async () => { pending.start(); await pending.gate; } });
   const fake = fakePort(() => noulAnswer(0.999)); installJudgmentPort(fake.port);
-  const reading = readComparisonReasonThemes(f.judgment, f.store, f.report, { sourceOwner: privacy.owner, signal: controller.signal });
+  const reading = readComparisonReasonThemes(judgment(), { sourceOwner: privacy.owner, signal: controller.signal });
   const outcome = reading.then(value => ({ value }), error => ({ error: error as unknown }));
   await pending.started; controller.abort(); pending.release();
   expect(await outcome).toHaveProperty('error');
   expect(fake.requests).toHaveLength(0);
 });
 
-test('source-owner freshness guard survives asynchronous privacy acquisition', async () => {
-  const f = fixture(), pending = suspended(); let current = true;
+test('the caller\'s freshness check survives asynchronous screening', async () => {
+  const pending = suspended(); let current = true;
   const privacy = researchScreeningFixture({ beforeProposal: async () => { pending.start(); await pending.gate; } });
   const fake = fakePort(() => noulAnswer(0.999)); installJudgmentPort(fake.port);
-  const reading = readComparisonReasonThemes(f.judgment, f.store, f.report, { sourceOwner: privacy.owner,
+  const reading = readComparisonReasonThemes(judgment(), { sourceOwner: privacy.owner,
     assertCurrent: () => { if (!current) throw new Error('Synthetic source revision expired'); } });
   const outcome = reading.then(value => ({ value }), error => ({ error: error as unknown }));
   await pending.started; current = false; pending.release();
@@ -163,140 +126,70 @@ test('source-owner freshness guard survives asynchronous privacy acquisition', a
   expect(fake.requests).toHaveLength(0);
 });
 
-test('actual comparison operation rejects changed source provenance during screening', async () => {
-  const f = fixture(), pending = suspended();
-  const operation = createComparisonOperation({ artifactStore: f.store, modelCatalog: { listModels: () => [] },
-    providerRegistry: { getForModel: () => { throw new Error('No provider acquisition'); } } }, { mode: 'synthesis' });
-  const privacy = researchScreeningFixture({ beforeProposal: async () => { pending.start(); await pending.gate; } });
-  const fake = fakePort(() => noulAnswer(0.999)); installJudgmentPort(fake.port);
-  const reading = readComparisonReasonThemes(f.judgment, operation.deps.artifactStore, f.report,
-    { sourceOwner: privacy.owner, assertCurrent: operation.assertCurrent });
-  const outcome = reading.then(value => ({ value }), error => ({ error: error as unknown }));
-  await pending.started;
-  Object.defineProperty(f.records['source-a']!.metadata, 'newProvenance', { value: 'Changed while screening', enumerable: true });
-  pending.release();
-  const result = await outcome;
-  expect('error' in result && result.error instanceof Error ? result.error.message : null).toBe('Comparison source artifact changed during this operation.');
-  expect(fake.requests).toHaveLength(0);
-});
-
-test('actual comparison operation refuses content not matching its source hash', async () => {
-  const f = fixture(), operation = createComparisonOperation({ artifactStore: f.store, modelCatalog: { listModels: () => [] },
-    providerRegistry: { getForModel: () => { throw new Error('No provider acquisition'); } } }, { mode: 'synthesis' });
-  f.contents['source-a'] = 'Synthetic tampered body';
-  const fake = fakePort(() => noulAnswer(0.999)); installJudgmentPort(fake.port);
-  expect(await readComparisonReasonThemes(f.judgment, operation.deps.artifactStore, f.report,
-    { sourceOwner: ordinaryResearchOwner(), assertCurrent: operation.assertCurrent })).toEqual({ status: 'held' });
-  expect(fake.requests).toHaveLength(0);
-});
-
-test('replacing the installed port while an answer is pending cannot publish themes', async () => {
-  const f = fixture(), pending = suspended(), fake = fakePort(() => noulAnswer(0.999));
+test('replacing the installed port while an answer is pending holds the reading', async () => {
+  const pending = suspended(), fake = fakePort(() => noulAnswer(0.999));
   const delayed: JudgmentPort = { ...fake.port, async ask(request) { pending.start(); await pending.gate; return fake.port.ask(request); } };
   installJudgmentPort(delayed);
-  const reading = readComparisonReasonThemes(f.judgment, f.store, f.report, { sourceOwner: ordinaryResearchOwner() });
+  const reading = readComparisonReasonThemes(judgment(), { sourceOwner: ordinaryResearchOwner() });
   await pending.started; installJudgmentPort(fakePort(() => noulAnswer(0.001)).port); pending.release();
-  expect(await reading).toEqual({ status: 'held' });
+  expect(await reading).toMatchObject({ status: 'held' });
 });
 
-test('complete provider response admission refuses private unknown fields before classification', async () => {
-  const f = fixture(), fake = fakePort(() => noulAnswer(0.999));
-  const borrowed: JudgmentPort = { ...fake.port, async ask(request) {
+test('a response carrying private unknown fields is refused before classification', async () => {
+  const fake = fakePort(() => noulAnswer(0.999));
+  installJudgmentPort({ ...fake.port, async ask(request) {
     return { ...await fake.port.ask(request), unrecognizedOriginal: { apiKey: 'synthetic-response-private-marker' } };
-  } };
-  installJudgmentPort(borrowed);
-  expect(await readComparisonReasonThemes(f.judgment, f.store, f.report, { sourceOwner: ordinaryResearchOwner() })).toEqual({ status: 'held' });
+  } });
+  expect(await readComparisonReasonThemes(judgment(), { sourceOwner: ordinaryResearchOwner() })).toMatchObject({ status: 'held' });
   expect(fake.requests).toHaveLength(1);
 });
 
-test('complete response descriptor capture does not execute an accessor', async () => {
-  const f = fixture(), fake = fakePort(() => noulAnswer(0.999)); let accessorCalls = 0;
-  const borrowed: JudgmentPort = { ...fake.port, async ask(request) {
-    const response = await fake.port.ask(request);
-    Object.defineProperty(response, 'unrecognizedOriginal', { enumerable: true, get() { accessorCalls++; return 'synthetic'; } });
-    return response;
-  } };
-  installJudgmentPort(borrowed);
-  expect(await readComparisonReasonThemes(f.judgment, f.store, f.report, { sourceOwner: ordinaryResearchOwner() })).toEqual({ status: 'held' });
-  expect(accessorCalls).toBe(0);
+test('a newer Jev release answers; an unrelated model cannot', async () => {
+  const fake = fakePort(() => noulAnswer(0.999));
+  installJudgmentPort({ ...fake.port, async ask(request) { return { ...await fake.port.ask(request), model: 'jev-9.99.0' }; } });
+  expect(await readComparisonReasonThemes(judgment(), { sourceOwner: ordinaryResearchOwner() }))
+    .toMatchObject({ status: 'settled', stored: { model: 'jev-9.99.0' } });
+  installJudgmentPort({ ...fake.port, async ask(request) { return { ...await fake.port.ask(request), model: 'unrelated-model' }; } });
+  expect(await readComparisonReasonThemes(judgment('judgment-b'), { sourceOwner: ordinaryResearchOwner() })).toMatchObject({ status: 'held' });
 });
 
-test('latest alias accepts a newer Jev response and preserves its resolved identity', async () => {
-  const f = fixture(), fake = fakePort(() => noulAnswer(0.999));
-  const borrowed: JudgmentPort = { ...fake.port, async ask(request) { return { ...await fake.port.ask(request), model: 'jev-9.99.0' }; } };
-  installJudgmentPort(borrowed);
-  expect(await readComparisonReasonThemes(f.judgment, f.store, f.report, { sourceOwner: ordinaryResearchOwner() }))
-    .toMatchObject({ status: 'settled', provenance: { model: 'jev-9.99.0' } });
-});
-
-test('a non-Jev response cannot classify preference themes', async () => {
-  const f = fixture(), fake = fakePort(() => noulAnswer(0.999));
-  const borrowed: JudgmentPort = { ...fake.port, async ask(request) { return { ...await fake.port.ask(request), model: 'unrelated-model' }; } };
-  installJudgmentPort(borrowed);
-  expect(await readComparisonReasonThemes(f.judgment, f.store, f.report, { sourceOwner: ordinaryResearchOwner() })).toEqual({ status: 'held' });
-});
-
-test('mutating the registered definition while an answer is pending holds the read', async () => {
-  const f = fixture(), pending = suspended(), fake = fakePort(() => noulAnswer(0.999));
-  const delayed: JudgmentPort = { ...fake.port, async ask(request) { pending.start(); await pending.gate; return fake.port.ask(request); } };
-  installJudgmentPort(delayed);
-  const reading = readComparisonReasonThemes(f.judgment, f.store, f.report, { sourceOwner: ordinaryResearchOwner() });
-  await pending.started;
-  const descriptor = Object.getOwnPropertyDescriptor(modelReasonTheme, 'version')!;
-  try { Object.defineProperty(modelReasonTheme, 'version', { ...descriptor, value: 3 }); pending.release();
-    expect(await reading).toEqual({ status: 'held' });
-  } finally { Object.defineProperty(modelReasonTheme, 'version', descriptor); }
-  expect(routingRegistry.get(modelReasonTheme.name)).toBe(modelReasonTheme);
-});
-
-test('Classic keeps saved winner analytics without loading original artifacts for optional semantic themes', async () => {
-  const f = fixture(); let asks = 0, loads = 0;
+test('Classic keeps saved winner analytics without asking anything', async () => {
+  let asks = 0;
   installJudgmentPort({ model: 'fixture', async ask() { asks++; throw new Error('must not ask'); } });
-  const store: AgentModelCompareArtifactStore = { ...f.store, async readContent() { loads++; throw new Error('optional theme reader must not load originals'); } };
   await withDecisionModelPolicy(() => 'Classic - Off', async () => {
-    expect(await readComparisonReasonThemes(f.judgment, store, f.report, {})).toEqual({ status: 'not-evaluated', provenance: 'classic' });
-    const text = await formatComparisonSynthesis({ artifactStore: store, judgments: [f.judgment], limit: 20,
-      includeReasons: true, filters: {}, storeAvailable: true, readingOptions: {} });
+    expect(await readComparisonReasonThemes(judgment(), {})).toEqual({ status: 'not-evaluated', provenance: 'classic' });
+    const text = await synthesis([judgment()], {});
     expect(text).toContain('judgments 1; revealed 0; hidden 1; compared comparisons 1');
     expect(text).toContain('Unassessed preference themes (Classic): 1 judgment');
-    expect(text).toContain('not categorized; saved winner counts');
-    expect(text).not.toContain('Uncategorized preference signal');
     expect(text).not.toContain('Unresolved preference signal');
-    expect(text).toContain('No selected model was changed.');
-    expect(asks).toBe(0); expect(loads).toBe(0);
+    expect(asks).toBe(0);
   });
 });
 
-test('Preferred actual theme exhaustion switches the whole synthesis without reloading or reclassifying later judgments', async () => {
-  const f = fixture(); let asks = 0, loads = 0;
+test('an unavailable decision model switches the synthesis to Classic', async () => {
+  let asks = 0;
   installJudgmentPort({ model: 'fixture', async ask() { asks++; throw new JudgmentError('unavailable', 'fixture exhausted'); } });
-  const load = f.store.readContent;
-  if (!load) throw new Error('Fixture lacks artifact reads');
-  const store: AgentModelCompareArtifactStore = { ...f.store, async readContent(id) { loads++; return load.call(f.store, id); } };
   await withDecisionModelPolicy(() => 'Preferred', async () => {
-    const text = await formatComparisonSynthesis({ artifactStore: store, judgments: [f.judgment, { ...f.judgment, judgmentId: 'another-saved-judgment' }],
-      limit: 20, includeReasons: true, filters: {}, storeAvailable: true, readingOptions: { sourceOwner: ordinaryResearchOwner() } });
-    expect(text).toContain('Unassessed preference themes (Classic): 2 judgments');
-    expect(text).not.toContain('Uncategorized preference signal');
-    expect(asks).toBe(1); expect(loads).toBe(3);
+    const text = await synthesis([judgment(), judgment('judgment-b'), judgment('judgment-c', 'B was easier to follow.')], { sourceOwner: ordinaryResearchOwner() });
+    expect(text).toContain('Unassessed preference themes (Classic): 3 judgments');
+    expect(asks).toBeLessThanOrEqual(2);
     expect(decisionModelPolicyState()).toMatchObject({ operation: 'classic', reason: 'unavailable' });
   });
 });
 
-for (const kind of ['rejected', 'invalid-response', 'invalid-request', 'aborted'] as const) test(`theme ${kind} stays held rather than activating Classic`, async () => {
-  const f = fixture();
+for (const kind of ['rejected', 'invalid-response', 'invalid-request', 'aborted'] as const) test(`a ${kind} reading is held with its cause rather than activating Classic`, async () => {
   installJudgmentPort({ model: 'fixture', async ask() { throw new JudgmentError(kind, 'fixture failure'); } });
   await withDecisionModelPolicy(() => 'Preferred', async () => {
-    expect(await readComparisonReasonThemes(f.judgment, f.store, f.report, { sourceOwner: ordinaryResearchOwner() })).toEqual({ status: 'held' });
+    expect(await readComparisonReasonThemes(judgment(), { sourceOwner: ordinaryResearchOwner() })).toMatchObject({ status: 'held', reason: expect.any(String) });
     expect(decisionModelPolicyState().operation).toBe('decision');
   });
 });
 
-test('Classic theme omission still enforces cancellation and synchronous native ownership', async () => {
-  const f = fixture(); const abort = new AbortController(); abort.abort();
+test('Classic still honours cancellation and synchronous ownership', async () => {
+  const abort = new AbortController(); abort.abort();
   await withDecisionModelPolicy(() => 'Classic - Off', async () => {
-    await expect(readComparisonReasonThemes(f.judgment, f.store, f.report, { signal: abort.signal })).rejects.toThrow();
-    await expect(readComparisonReasonThemes(f.judgment, f.store, f.report, { assertCurrent: () => Promise.resolve() })).rejects.toThrow();
-    await expect(readComparisonReasonThemes(f.judgment, f.store, f.report, { assertCurrent() { throw new Error('native owner retired'); } })).rejects.toThrow();
+    await expect(readComparisonReasonThemes(judgment(), { signal: abort.signal })).rejects.toThrow();
+    await expect(readComparisonReasonThemes(judgment(), { assertCurrent: () => Promise.resolve() })).rejects.toThrow();
+    await expect(readComparisonReasonThemes(judgment(), { assertCurrent() { throw new Error('native owner retired'); } })).rejects.toThrow();
   });
 });

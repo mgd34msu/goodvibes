@@ -60,18 +60,18 @@ describe('ModelTierStore on disk', () => {
 
 describe('ProviderAccessReadings on disk', () => {
   const provider: ProviderFacts = { id: 'p', name: 'P', envVars: [], sampleModels: [] };
-  const answering = (local: number, plan: number) => fakePort((name) => noulAnswer(name === 'local' ? local : plan)).port;
+  const answering = (plan: number) => fakePort(() => noulAnswer(plan)).port;
 
   test('an entry with an access value outside the known ones is read again rather than trusted', async () => {
     const path = join(makeProjectTempDir('access-store'), 'provider-access.json');
-    installJudgmentPort(answering(0.99, 0.01));
-    expect((await new ProviderAccessReadings({ path }).readAll([provider])).get('p')).toBe('local');
+    installJudgmentPort(answering(0.99));
+    expect((await new ProviderAccessReadings({ path }).readAll([provider])).get('p')).toBe('subscription');
     const file = JSON.parse(readFileSync(path, 'utf-8')) as { entries: Record<string, { access: string }> };
     file.entries['p']!.access = 'bogus';
     file.entries['q'] = null as never;
     writeFileSync(path, JSON.stringify(file));
 
-    installJudgmentPort(answering(0.01, 0.01));
+    installJudgmentPort(answering(0.01));
     expect((await new ProviderAccessReadings({ path }).readAll([provider])).get('p')).toBe('metered');
   });
 });

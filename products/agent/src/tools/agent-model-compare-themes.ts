@@ -1,116 +1,116 @@
 import { decisionOrClassic, isClassicOperation, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime';
-import { matchesJudgmentModel } from '@goodvibes-jev/judgment';
-import { captureJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { captureOwnedJson, prepareJudgmentResult } from '@goodvibes-jev/engine/platform/platform/gate';
-import { modelReasonTheme, MODEL_REASON_THEME_LABELS, routingRegistry, type ModelReasonTheme } from '@goodvibes-jev/engine/platform/platform/routing';
+import { captureJudgmentPort, JudgmentAuthorityRetiredError } from '@goodvibes-jev/engine/errors';
+import { prepareJudgmentResult } from '@goodvibes-jev/engine/platform/platform/gate';
+import { modelReasonTheme, MODEL_REASON_THEME_LABELS, type ModelReasonTheme } from '@goodvibes-jev/engine/platform/platform/routing';
 import { assertProjectionCurrent, ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
-import { toJson, type YesNoReading } from '@goodvibes-jev/judgment';
-import { captureCatalogMethods } from './agent-harness-catalog-ranking.ts';
-import { captureModelReadingInput, assertModelReadingInputCurrent, withModelReadingSource, type ModelReadingOptions } from './agent-harness-model-reading-source.ts';
-import type { AgentModelCompareArtifactStore, LoadedComparisonJudgment } from './agent-model-compare-types.ts';
+import { JudgmentError, matchesJudgmentModel } from '@goodvibes-jev/judgment';
+import { withModelReadingSource, type ModelReadingOptions } from './agent-harness-model-reading-source.ts';
+import type { LoadedComparisonJudgment } from './agent-model-compare-types.ts';
+
+/** The themes read for one judgment, stored on the judgment artifact when it is saved. */
+export interface StoredReasonThemes {
+  readonly battery: string;
+  readonly version: number;
+  readonly themes: readonly ModelReasonTheme[];
+  readonly model: string;
+  readonly decisionId?: string | undefined;
+}
 
 export type ComparisonThemeReading =
-  | { readonly status: 'held' }
+  | { readonly status: 'held'; readonly reason: string }
   | { readonly status: 'not-evaluated'; readonly provenance: 'classic' }
-  | { readonly status: 'settled'; readonly themes: readonly ModelReasonTheme[];
-      readonly readings: Readonly<Record<ModelReasonTheme, YesNoReading>>;
-      readonly provenance: { readonly battery: string; readonly version: number; readonly model: string; readonly requestId: string | undefined; readonly decisionId: string | undefined } };
+  | { readonly status: 'settled'; readonly themes: readonly ModelReasonTheme[]; readonly stored: StoredReasonThemes };
 
-/** Keep complete authored metadata. Filesystem transport locations are not evidence. */
-function artifactEvidence(record: unknown): unknown {
-  const captured = captureOwnedJson(record);
-  if (!captured || typeof captured !== 'object' || Array.isArray(captured)) throw new ToolInputProjectionError('held');
-  return Object.fromEntries(Object.entries(captured).filter(([key]) => key !== 'contentPath' && key !== 'metadataPath'));
-}
-function object(value: unknown): Record<string, unknown> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new ToolInputProjectionError('held');
-  return value as Record<string, unknown>;
+/** A judgment as loaded from its artifact, with the themes stored on it when they were read at save. */
+export type JudgmentWithThemes = LoadedComparisonJudgment & { readonly reasonThemes?: StoredReasonThemes | undefined };
+
+/** What a theme reading reads: the chosen blind label and the author's own reasons and notes. */
+export type ThemeSource = Pick<LoadedComparisonJudgment, 'winnerBlindId' | 'reasons' | 'notes'>;
+
+const THEME_NAMES = Object.keys(MODEL_REASON_THEME_LABELS) as ModelReasonTheme[];
+const NOT_EVALUATED: ComparisonThemeReading = { status: 'not-evaluated', provenance: 'classic' };
+
+/** Stored themes from a judgment artifact's payload, or undefined when absent or malformed. */
+export function parseStoredReasonThemes(value: unknown): StoredReasonThemes | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  const themes = record.themes;
+  if (typeof record.battery !== 'string' || typeof record.version !== 'number' || typeof record.model !== 'string'
+    || !Array.isArray(themes) || !themes.every((theme): theme is ModelReasonTheme => (THEME_NAMES as readonly unknown[]).includes(theme))) return undefined;
+  return {
+    battery: record.battery, version: record.version, themes, model: record.model,
+    ...(typeof record.decisionId === 'string' ? { decisionId: record.decisionId } : {}),
+  };
 }
 
-/** One six-question call per judgment, only after every original source is preserved by its owner. */
-export async function readComparisonReasonThemes(judgment: LoadedComparisonJudgment,
-  store: AgentModelCompareArtifactStore | undefined, report: unknown, options: ModelReadingOptions): Promise<ComparisonThemeReading> {
-  return withConfiguredDecisionModelPolicy(() => readOwnedComparisonReasonThemes(judgment, store, report, options));
+/** The themes stored on a judgment when the current version of the reading produced them. */
+export function currentStoredThemes(judgment: JudgmentWithThemes): StoredReasonThemes | undefined {
+  const stored = judgment.reasonThemes;
+  return stored && stored.battery === modelReasonTheme.name && stored.version === modelReasonTheme.version ? stored : undefined;
 }
 
-async function readOwnedComparisonReasonThemes(judgment: LoadedComparisonJudgment,
-  store: AgentModelCompareArtifactStore | undefined, report: unknown, options: ModelReadingOptions): Promise<ComparisonThemeReading> {
+/** Settled readings per decision-port installation, keyed by the text read, so a second synthesis asks nothing. */
+let settledReadings = new WeakMap<object, Map<string, ComparisonThemeReading>>();
+const SETTLED_LIMIT = 512;
+
+/** Forget every remembered theme reading (a test seam and a decision-model change both use a fresh installation). */
+export function forgetComparisonReasonThemes(): void {
+  settledReadings = new WeakMap();
+}
+
+/**
+ * One reading of which themes the author gave as reasons, from the reasons and
+ * notes only. The text is screened by the source owner before the decision
+ * model sees it; with no source owner nothing is sent. Under Classic nothing is
+ * asked. A hold says why.
+ */
+export async function readComparisonReasonThemes(judgment: ThemeSource, options: ModelReadingOptions): Promise<ComparisonThemeReading> {
+  return withConfiguredDecisionModelPolicy(() => readOwnedComparisonReasonThemes(judgment, options));
+}
+
+async function readOwnedComparisonReasonThemes(judgment: ThemeSource, options: ModelReadingOptions): Promise<ComparisonThemeReading> {
   options.signal?.throwIfAborted(); assertProjectionCurrent(options.assertCurrent);
-  // No original artifact needs to be loaded merely to report that semantic
-  // categorization is disabled. Native analytics use their already loaded records.
-  if (isClassicOperation()) return { status: 'not-evaluated', provenance: 'classic' };
+  if (isClassicOperation()) return NOT_EVALUATED;
+  if (!options.sourceOwner) return { status: 'held', reason: 'this runtime has no source screening, so the reasons were not sent to the decision model' };
+  const state = { judgment: { winner: judgment.winnerBlindId, reasons: judgment.reasons, notes: judgment.notes } };
+  const key = JSON.stringify([modelReasonTheme.version, state]);
   try {
-    if (!store || !judgment.sourceArtifactId || !options.sourceOwner) return { status: 'held' };
-    const storeCurrent = captureCatalogMethods(store, ['readContent', 'get', 'list']);
-    const readContent = store.readContent;
-    if (typeof readContent !== 'function') return { status: 'held' };
-    const ownerCurrent = captureCatalogMethods(options.sourceOwner, ['capture', 'screen', 'project', 'release']);
-    const current = () => { options.signal?.throwIfAborted(); assertProjectionCurrent(options.assertCurrent); storeCurrent(); ownerCurrent(); };
-    const load = async (id: string, json: boolean) => {
-      current(); const { record, buffer } = await readContent.call(store, id); current();
-      if (record.id !== id || buffer.byteLength > 1_000_000) throw new ToolInputProjectionError('held');
-      const text = new TextDecoder('utf-8', { fatal: true }).decode(buffer);
-      return { artifact: artifactEvidence(record), content: json ? JSON.parse(text) as unknown : text };
-    };
-    const originalJudgment = await load(judgment.artifact.artifactId, true);
-    const savedJudgment = object(originalJudgment.content);
-    if (savedJudgment.schema !== 'goodvibes.agent.model_compare_judgment.v1'
-      || savedJudgment.judgmentId !== judgment.judgmentId || savedJudgment.comparisonId !== judgment.comparisonId
-      || savedJudgment.sourceArtifactId !== judgment.sourceArtifactId || savedJudgment.winnerBlindId !== judgment.winnerBlindId
-      || savedJudgment.reasons !== judgment.reasons || savedJudgment.notes !== judgment.notes) throw new ToolInputProjectionError('held');
-    const originalComparison = await load(judgment.sourceArtifactId, true);
-    const comparison = object(originalComparison.content);
-    if (comparison.schema !== 'goodvibes.agent.model_compare.v1' || comparison.comparisonId !== judgment.comparisonId
-      || typeof comparison.prompt !== 'string' || !Array.isArray(comparison.candidates)
-      || !comparison.candidates.some(candidate => object(candidate).blindId === judgment.winnerBlindId)) throw new ToolInputProjectionError('held');
-    const sourceReference = comparison.sourceArtifact == null ? undefined : object(comparison.sourceArtifact);
-    if (sourceReference && typeof sourceReference.artifactId !== 'string') throw new ToolInputProjectionError('held');
-    const originalSource = sourceReference ? await load(sourceReference.artifactId as string, false) : null;
-    const source = { judgment, comparison, originalJudgment, originalComparison, originalSource, report };
-    return await withModelReadingSource(source, { ...options, assertCurrent: current }, async (state, scoped): Promise<ComparisonThemeReading> => {
-      return decisionOrClassic<ComparisonThemeReading>(async () => {
-        scoped.assertCurrent?.();
-        const methodsCurrent = captureCatalogMethods(modelReasonTheme, ['run', 'name', 'version', 'model', 'accuracyFloor', 'items']);
-        if (routingRegistry.get('agent.models.reason-theme') !== modelReasonTheme) throw new ToolInputProjectionError('held');
-        const definition = () => ({ name: modelReasonTheme.name, version: modelReasonTheme.version, model: modelReasonTheme.model,
-          accuracyFloor: modelReasonTheme.accuracyFloor, items: modelReasonTheme.items });
-        const definitionBytes = JSON.stringify(captureModelReadingInput(definition()));
-        const definitionCurrent = () => {
-          methodsCurrent();
-          if (routingRegistry.get(modelReasonTheme.name) !== modelReasonTheme) throw new ToolInputProjectionError('held');
-          assertModelReadingInputCurrent(definition(), definitionBytes);
-        };
-        const port = captureJudgmentPort(modelReasonTheme.name, { signal: scoped.signal,
-          assertCurrent: () => { scoped.assertCurrent?.(); definitionCurrent(); }, prepareResultCapture: prepareJudgmentResult });
-        try {
-          // Interface-shaped artifact records lack a JSON index signature. The owner
-          // already admitted the complete immutable tree; serialize that same tree.
-          const wireState = toJson(state);
-          if (!wireState || typeof wireState !== 'object' || Array.isArray(wireState)) throw new ToolInputProjectionError('held');
-          const run = await modelReasonTheme.run(port.port, wireState, { site: modelReasonTheme.name, signal: port.signal });
-          port.assertCurrent();
-          if (!matchesJudgmentModel(port.port.model, run.result.model) || run.result.requestedModel !== port.port.model) throw new ToolInputProjectionError('held');
-          const names = Object.keys(MODEL_REASON_THEME_LABELS) as ModelReasonTheme[];
-          const settled = names.every(name => run.readings[name].outcome === 'act');
-          const themes = settled ? names.filter(name => run.readings[name].verdict === 'yes') : [];
-          run.recordAction(settled ? themes.length ? `classified preference themes: ${themes.join(', ')}` : 'uncategorized affirmative preference' : 'held preference theme classification');
-          port.assertCurrent();
-          if (!settled) return { status: 'held' };
-          return { status: 'settled', themes, readings: run.readings,
-            provenance: { battery: modelReasonTheme.name, version: modelReasonTheme.version, model: run.result.model,
-              requestId: run.result.requestId, decisionId: run.result.decisionId } };
-        } finally {
-          const restriction = port.consumeObservation();
-          const retained = () => { scoped.signal?.throwIfAborted(); port.signal.throwIfAborted(); definitionCurrent();
-            if (!isClassicOperation()) restriction.assertCurrent(); };
-          scoped.retainCurrent?.(retained, modelReasonTheme.name + ':port');
-          retained();
-        }
-      }, () => { scoped.assertCurrent?.(); return { status: 'not-evaluated', provenance: 'classic' }; },
-      () => { scoped.signal?.throwIfAborted(); scoped.assertCurrent?.(); return true; });
-    });
-  } catch {
+    return await withModelReadingSource(state, options, async (screened, scoped) => decisionOrClassic<ComparisonThemeReading>(async () => {
+      const port = captureJudgmentPort(modelReasonTheme.name, { signal: scoped.signal, assertCurrent: scoped.assertCurrent, prepareResultCapture: prepareJudgmentResult });
+      let remembered = settledReadings.get(port.identity);
+      const known = remembered?.get(key);
+      if (known) return known;
+      const run = await modelReasonTheme.run(port.port, screened, { site: modelReasonTheme.name, signal: port.signal });
+      port.assertCurrent();
+      if (!matchesJudgmentModel(port.port.model, run.result.model) || run.result.requestedModel !== port.port.model) {
+        return { status: 'held', reason: `the reading came from ${run.result.model}, not the configured decision model` };
+      }
+      const unsure = THEME_NAMES.filter(name => run.readings[name].outcome !== 'act');
+      const themes = THEME_NAMES.filter(name => run.readings[name].verdict === 'yes');
+      run.recordAction(unsure.length ? 'held preference theme classification'
+        : themes.length ? `classified preference themes: ${themes.join(', ')}` : 'uncategorized affirmative preference');
+      port.assertCurrent();
+      if (unsure.length) return { status: 'held', reason: `the decision model was unsure whether the reasons state ${unsure.map(name => MODEL_REASON_THEME_LABELS[name].toLowerCase()).join(', ')}` };
+      const reading: ComparisonThemeReading = { status: 'settled', themes, stored: {
+        battery: modelReasonTheme.name, version: modelReasonTheme.version, themes, model: run.result.model,
+        ...(run.result.decisionId === undefined ? {} : { decisionId: run.result.decisionId }),
+      } };
+      if (!remembered) { remembered = new Map(); settledReadings.set(port.identity, remembered); }
+      if (remembered.size >= SETTLED_LIMIT) remembered.delete(remembered.keys().next().value!);
+      remembered.set(key, reading);
+      return reading;
+    }, () => NOT_EVALUATED));
+  } catch (error) {
     options.signal?.throwIfAborted(); assertProjectionCurrent(options.assertCurrent);
-    return { status: 'held' };
+    // A sibling reading found the decision model unavailable and switched this operation to Classic.
+    if (isClassicOperation()) return NOT_EVALUATED;
+    return { status: 'held', reason: holdReason(error) };
   }
+}
+
+function holdReason(error: unknown): string {
+  if (error instanceof ToolInputProjectionError) return 'source screening did not clear the reasons for the decision model';
+  if (error instanceof JudgmentAuthorityRetiredError) return 'the decision model changed while it was reading';
+  if (error instanceof JudgmentError) return `the decision model request failed (${error.kind})`;
+  return 'the reading failed before it settled';
 }

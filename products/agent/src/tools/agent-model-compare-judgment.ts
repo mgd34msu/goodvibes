@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { agentRecordNonce } from '../utils/record-nonce.ts';
 import type { AgentModelCompareArtifactStore, AgentModelCompareModelCatalog, AgentModelCompareRouteUpdateResult, AgentModelCompareToolArgs, CompareCandidateResult, LoadedComparisonJudgment, SavedComparisonArtifact, StoredComparison } from './agent-model-compare-types.ts';
 import { MODEL_REASON_THEME_LABELS } from './agent-model-compare-types.ts';
-import { readComparisonReasonThemes } from './agent-model-compare-themes.ts';
+import { currentStoredThemes, parseStoredReasonThemes, readComparisonReasonThemes, type ComparisonThemeReading, type JudgmentWithThemes, type StoredReasonThemes } from './agent-model-compare-themes.ts';
 import type { ModelReadingOptions } from './agent-harness-model-reading-source.ts';
 import { isModelCompareJudgmentArtifact, listSelectableModels, toSavedComparisonArtifact } from './agent-model-compare-run.ts';
 import { listAllArtifacts, readBoolean, readComparisonTag, readRecord, readString, previewText } from './agent-model-compare-utils.ts';
@@ -39,6 +39,7 @@ export function judgmentArtifactText(input: {
   readonly reasons: string;
   readonly notes: string;
   readonly reveal: boolean;
+  readonly reasonThemes?: StoredReasonThemes | undefined;
 }): string {
   return `${JSON.stringify({
     schema: 'goodvibes.agent.model_compare_judgment.v1',
@@ -63,6 +64,7 @@ export function judgmentArtifactText(input: {
     } : {}),
     reasons: input.reasons,
     notes: input.notes,
+    ...(input.reasonThemes ? { reasonThemes: input.reasonThemes } : {}),
     revealIncludedInJudgment: input.reveal,
     routeHandoff: modelRouteHandoff(input.winner, input.reveal),
     candidates: input.comparison.candidates.map((candidate) => ({
@@ -87,9 +89,14 @@ export async function saveComparisonJudgmentArtifact(input: {
   readonly reasons: string;
   readonly notes: string;
   readonly reveal: boolean;
+  /** When given, the reason themes are read once now and stored on the judgment, so a synthesis only counts them. */
+  readonly readingOptions?: ModelReadingOptions | undefined;
 }): Promise<SavedComparisonArtifact> {
   if (!input.artifactStore) throw new Error('Cannot save judgment because the artifact store is unavailable.');
   const judgmentId = `jdg_${agentRecordNonce()}`;
+  const themes = input.readingOptions
+    ? await readComparisonReasonThemes({ winnerBlindId: input.winner.blindId, reasons: input.reasons, notes: input.notes }, input.readingOptions)
+    : undefined;
   const descriptor = await input.artifactStore.create({
     kind: 'data',
     mimeType: 'application/json',
@@ -101,6 +108,7 @@ export async function saveComparisonJudgmentArtifact(input: {
       reasons: input.reasons,
       notes: input.notes,
       reveal: input.reveal,
+      ...(themes?.status === 'settled' ? { reasonThemes: themes.stored } : {}),
     }),
     metadata: {
       purpose: 'agent-model-compare-judgment',
@@ -158,7 +166,7 @@ export function formatJudgmentResult(input: {
   return lines.join('\n');
 }
 
-export function parseJudgmentArtifactPayload(value: unknown, artifact: SavedComparisonArtifact, metadata: Record<string, unknown> = {}): LoadedComparisonJudgment | null {
+export function parseJudgmentArtifactPayload(value: unknown, artifact: SavedComparisonArtifact, metadata: Record<string, unknown> = {}): JudgmentWithThemes | null {
   const payload = readRecord(value);
   if (!payload || readString(payload.schema) !== 'goodvibes.agent.model_compare_judgment.v1') return null;
   const winnerModel = readRecord(payload.winnerModel);
@@ -170,6 +178,7 @@ export function parseJudgmentArtifactPayload(value: unknown, artifact: SavedComp
     || readString(payload.sourceDocumentId)
     || readString(metadata.documentId)
     || readString(metadata.sourceDocumentId);
+  const reasonThemes = parseStoredReasonThemes(payload.reasonThemes);
   return {
     artifact,
     judgmentId: readString(payload.judgmentId) || `judgment_from_${artifact.artifactId}`,
@@ -182,6 +191,7 @@ export function parseJudgmentArtifactPayload(value: unknown, artifact: SavedComp
     ...(benchmarkKind ? { benchmarkKind } : {}),
     ...(taskType ? { taskType } : {}),
     ...(documentId ? { documentId } : {}),
+    ...(reasonThemes ? { reasonThemes } : {}),
     ...(registryKey ? {
       winnerModel: {
         registryKey,
@@ -196,7 +206,7 @@ export function parseJudgmentArtifactPayload(value: unknown, artifact: SavedComp
 export async function loadJudgmentFromArtifact(
   artifactStore: AgentModelCompareArtifactStore | undefined,
   artifactId: string,
-): Promise<LoadedComparisonJudgment | null> {
+): Promise<JudgmentWithThemes | null> {
   if (!artifactStore?.readContent) return null;
   const { record, buffer } = await artifactStore.readContent(artifactId);
   let payload: unknown;
@@ -209,7 +219,7 @@ export async function loadJudgmentFromArtifact(
 }
 
 export interface SavedJudgmentsLoad {
-  readonly judgments: readonly LoadedComparisonJudgment[];
+  readonly judgments: readonly JudgmentWithThemes[];
   /** Judgment artifacts that could not be read or parsed in the part of the store that was scanned. */
   readonly unreadable: number;
 }
@@ -222,7 +232,7 @@ export async function loadSavedJudgments(
 ): Promise<SavedJudgmentsLoad> {
   if (!artifactStore?.list || !artifactStore.readContent) return { judgments: [], unreadable: 0 };
   const artifacts = listAllArtifacts(artifactStore).filter(isModelCompareJudgmentArtifact);
-  const matched: LoadedComparisonJudgment[] = [];
+  const matched: JudgmentWithThemes[] = [];
   let unreadable = 0;
   const BATCH = 25;
   for (let start = 0; start < artifacts.length && matched.length < limit; start += BATCH) {
@@ -549,11 +559,42 @@ export function pushSynthesisTheme(
   map.set(label, judgments);
 }
 
+/** Theme readings in flight at once for judgments that carry no stored themes. */
+const THEME_READ_CONCURRENCY = 4;
+
+/**
+ * Each judgment's themes: the ones stored on it when it was saved, otherwise
+ * one reading of its reasons and notes, a few at a time; a reading already
+ * settled in this process is not asked again.
+ */
+async function synthesisThemeReadings(judgments: readonly JudgmentWithThemes[], options: ModelReadingOptions): Promise<readonly ComparisonThemeReading[]> {
+  const readings = new Array<ComparisonThemeReading>(judgments.length);
+  // Judgments with the same label, reasons and notes share one reading.
+  const missing = new Map<string, number[]>();
+  for (const [index, judgment] of judgments.entries()) {
+    const stored = currentStoredThemes(judgment);
+    if (stored) { readings[index] = { status: 'settled', themes: stored.themes, stored }; continue; }
+    const key = JSON.stringify([judgment.winnerBlindId, judgment.reasons, judgment.notes]);
+    missing.set(key, [...missing.get(key) ?? [], index]);
+  }
+  const groups = [...missing.values()];
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    while (next < groups.length) {
+      const indexes = groups[next++]!;
+      const reading = await readComparisonReasonThemes(judgments[indexes[0]!]!, options);
+      for (const index of indexes) readings[index] = reading;
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(THEME_READ_CONCURRENCY, groups.length) }, worker));
+  return readings;
+}
+
 export async function formatComparisonSynthesis(input: {
   readonly artifactStore?: AgentModelCompareArtifactStore | undefined;
   readonly request?: unknown;
   readonly readingOptions: ModelReadingOptions;
-  readonly judgments: readonly LoadedComparisonJudgment[];
+  readonly judgments: readonly JudgmentWithThemes[];
   readonly limit: number;
   readonly includeReasons: boolean;
   readonly filters: ComparisonAnalyticsFilters;
@@ -578,9 +619,11 @@ async function formatOwnedComparisonSynthesis(input: Parameters<typeof formatCom
   const taskCounts = new Map<string, number>();
   const documentCounts = new Map<string, number>();
   const themes = new Map<string, LoadedComparisonJudgment[]>();
+  const holds = new Map<string, number>();
   let notEvaluated = 0;
   let revealed = 0;
-  for (const judgment of input.judgments) {
+  const readings = await synthesisThemeReadings(input.judgments, input.readingOptions);
+  for (const [index, judgment] of input.judgments.entries()) {
     comparisonIds.add(judgment.comparisonId);
     incrementOptionalDimension(benchmarkCounts, judgment.benchmarkKind);
     incrementOptionalDimension(taskCounts, judgment.taskType);
@@ -589,13 +632,13 @@ async function formatOwnedComparisonSynthesis(input: Parameters<typeof formatCom
       revealed += 1;
       incrementCount(modelWinners, `${judgment.winnerModel.registryKey} (${judgment.winnerModel.displayName})`);
     }
-    const reading = await readComparisonReasonThemes(judgment, input.artifactStore,
-      { request: input.request ?? null, limit: input.limit, includeReasons: input.includeReasons, filters: input.filters, storeAvailable: input.storeAvailable }, input.readingOptions);
+    const reading = readings[index]!;
     if (reading.status === 'not-evaluated') {
       notEvaluated++;
       pushSynthesisTheme(themes, 'Unassessed preference themes (Classic)', judgment);
     } else if (reading.status === 'held') {
       pushSynthesisTheme(themes, 'Unresolved preference signal', judgment);
+      incrementCount(holds, reading.reason);
     } else if (reading.themes.length === 0) {
       pushSynthesisTheme(themes, 'Uncategorized preference signal', judgment);
     } else {
@@ -627,6 +670,7 @@ async function formatOwnedComparisonSynthesis(input: Parameters<typeof formatCom
   if (notEvaluated) lines.push(`  Classic operation: ${countPhrase(notEvaluated, 'judgment')} not categorized; saved winner counts and authored reasons remain available.`);
   for (const [label, judgments] of themeCounts) {
     lines.push(`  ${label}: ${countPhrase(judgments.length, 'judgment')}`);
+    if (label === 'Unresolved preference signal') for (const [reason, count] of sortedCounts(holds)) lines.push(`    not classified (${count}): ${reason}`);
     if (!input.includeReasons) continue;
     const example = judgments.find((judgment) => judgment.reasons || judgment.notes);
     if (!example) continue;

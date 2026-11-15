@@ -17,6 +17,7 @@ import {
   type TaskRouteArgs,
   type TaskRouteReadOptions,
 } from '../../platform/src/platform/routing/task-routes/index.js';
+import type { HeldTaskRoutePlan } from '../../platform/src/platform/routing/task-routes/planner.js';
 
 import { taskRouteSourceFixture } from '../_helpers/task-route-source.js';
 
@@ -239,11 +240,15 @@ describe('preferred route and alternatives', () => {
   test.each([
     { pick: 'host-runtime-diagnostics', fits: { 'host-runtime-diagnostics': 0.2 } },
     { pick: 'host-runtime-diagnostics', pickConfidence: 0.5 },
-  ])('unresolved selection does not publish a ready fallback or chosen route', async script => {
+  ])('an unsure selection holds the plan, names the reading and offers the routes at low confidence', async script => {
     installJudgmentPort(scriptedPort(script).port);
     const result = await planTaskRoute({ query: 'check daemon health' });
     expect(result.status).toBe('uncertain');
     expect('preferred' in result).toBe(false);
+    const held = result as HeldTaskRoutePlan;
+    expect(held.unsure.reading).toBe('route selection');
+    expect(held.candidates.length).toBeGreaterThan(0);
+    expect(held.candidates.every((candidate) => candidate.confidence === 'low')).toBe(true);
   });
 
   test('the request preview is cut to 120 characters, 220 with parameters', async () => {
@@ -275,14 +280,13 @@ describe('slot readings shape the route', () => {
     });
   });
 
-  test('a clear no leaves the route read-only; an unsure reading keeps the plan unresolved', async () => {
+  test('a clear no leaves the route read-only; an unsure reading keeps the confirmation boundary', async () => {
     const readOnly = await settings(0.1);
     expect(readOnly.preferred.requiresConfirmation).toBe(false);
     expect(readOnly.preferred.missingFields).toBeUndefined();
-    installJudgmentPort(scriptedPort({ pick: 'agent-settings-configuration', slots: { changes: 0.5 } }).port);
-    const unsure = await planTaskRoute({ query: 'change the theme setting' });
-    expect(unsure.status).toBe('uncertain');
-    expect('preferred' in unsure).toBe(false);
+    const unsure = await settings(0.5);
+    expect(unsure.status).toBe('ready');
+    expect(unsure.preferred.requiresConfirmation).toBe(true);
   });
 
   test('channel task and target pick the channel variant and its route strings', async () => {
@@ -321,7 +325,7 @@ describe('slot readings shape the route', () => {
     expect(status.preferred.supportingRoutes?.[0]).toBe('channels action:"setup" includeParameters:true');
   });
 
-  test('a named model provider fills the provider route; a weak reading keeps the plan unresolved', async () => {
+  test('a named model provider fills the provider route; a weak reading keeps the generic route', async () => {
     const named = await plan('connect OpenRouter subscription', { pick: 'model-provider-account-posture', slots: { changes: 0.9 }, named: { modelProvider: 'openrouter' } });
     expect(named.preferred).toMatchObject({
       modelRoute: 'models action:"provider" providerId:"openrouter" includeParameters:true',
@@ -331,8 +335,9 @@ describe('slot readings shape the route', () => {
       pick: 'model-provider-account-posture', named: { modelProvider: 'openrouter' }, namedConfidence: 0.5,
     }).port);
     const weak = await planTaskRoute({ query: 'connect OpenRouter subscription' }, { namedIds: LISTINGS });
-    expect(weak.status).toBe('uncertain');
-    expect('preferred' in weak).toBe(false);
+    expect(weak.status).toBe('ready');
+    if (weak.status !== 'ready') throw new Error('weak named id held the plan');
+    expect(weak.preferred.modelRoute).not.toContain('providerId:"openrouter"');
   });
 
   test('listing field insertion order does not falsely invalidate an unchanged source', async () => {

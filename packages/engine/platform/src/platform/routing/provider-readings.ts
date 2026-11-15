@@ -119,18 +119,18 @@ async function readsAsDecisionAlternateApi(error: { readonly status?: number | u
   owner.assertCurrent();
   let memo = alternateApiMemos.get(owner.identity);
   if (!memo) { memo = new ReadingMemo<boolean>(256); alternateApiMemos.set(owner.identity, memo); }
-  const key = JSON.stringify(state);
-  const own = { read: false };
-  const start = () => memo.get(key, async () => {
-    own.read = true;
-    const run = await alternateApi.run(owner.port, state, { site, signal: owner.signal, beforeAttempt: owner.assertCurrent });
-    owner.assertCurrent();
+  // The shared read belongs to no caller: it carries only the installation's
+  // lifetime, so a caller that joins it never inherits another caller's abort
+  // or staleness. Each caller waits on it under its own signal and checks its
+  // own source afterwards.
+  const result = memo.get(JSON.stringify(state), async () => {
+    const shared = captureJudgmentPort(site, { prepareResultCapture: prepareJudgmentResult });
+    const run = await alternateApi.run(shared.port, state, { site, signal: shared.signal, beforeAttempt: shared.assertCurrent });
+    shared.assertCurrent();
     const unsupported = holds(run.readings.unsupported);
     run.recordAction(unsupported ? 'use-other-api' : 'rethrow');
-    owner.assertCurrent();
     return unsupported;
   });
-  owner.assertCurrent();
   let abort = () => {};
   const stopped = new Promise<never>((_, reject) => {
     abort = () => reject(new JudgmentAuthorityRetiredError());
@@ -138,18 +138,9 @@ async function readsAsDecisionAlternateApi(error: { readonly status?: number | u
     if (owner.signal.aborted) abort();
   });
   try {
-    let result: boolean;
-    try {
-      result = await Promise.race([start(), stopped]);
-    } catch (error) {
-      // A read joined from another caller carries that caller's abort and staleness. When this caller is
-      // still current the failure is not its own, and the failed entry is gone, so read once for itself.
-      if (own.read || owner.signal.aborted) throw error;
-      owner.assertCurrent();
-      result = await Promise.race([start(), stopped]);
-    }
+    const unsupported = await Promise.race([result, stopped]);
     owner.assertCurrent();
-    return result;
+    return unsupported;
   } finally { owner.signal.removeEventListener('abort', abort); }
 }
 

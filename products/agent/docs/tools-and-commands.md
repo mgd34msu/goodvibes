@@ -103,7 +103,7 @@ An agent or a background process can take over the whole terminal. `Enter` on an
 
 ## `agent_harness`
 
-Use `route action:"plan" query:"..."` first when a plain user task could map to several GoodVibes surfaces. It returns the preferred visible route, alternatives, missing fields, confirmation boundary, workspace matches, and harness mode matches without running tools.
+Use `route action:"plan" query:"..."` first when a plain user task could map to several GoodVibes surfaces. It returns the preferred visible route, alternatives, missing fields, confirmation boundary, workspace matches, and harness mode matches without running tools. When the route choice itself is unsure, the plan has `status:"uncertain"`, names the unsure reading, and lists the candidate routes at low confidence with no preferred one: pick the candidate that matches the request, or ask the user.
 
 Routing wording maps to these surfaces before any mutation or live effect:
 

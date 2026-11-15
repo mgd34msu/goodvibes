@@ -6,12 +6,14 @@ import { drainOwned } from '@goodvibes-jev/judgment/decisions';
  * route selection (route-selector.ts) and the slot readings (slots.ts); code
  * then composes the plan.
  *
- * A plan is ready only when the selected route, slots, named targets and
- * supplied catalog readings permit action. Unresolved readings remain typed
- * diagnostics in an uncertain plan, with no executable route recommendation.
- * Confident none means main conversation; uncertainty never implies none.
- * Alternatives contain only actionable fitting routes. All original readings
- * and decision ids remain available under judgment, independent of display limits.
+ * A plan is held only when the route selection itself is unsure. An unsure
+ * slot or named target takes the documented safe default (slots.ts: an effect
+ * keeps its confirmation boundary, a variant is off, a target stays generic),
+ * and an unsure catalog row is left out of the matches. A held plan names the
+ * unsure reading and offers the fitting routes at low confidence; it never
+ * prefers one. Confident none means main conversation; uncertainty never
+ * implies none. All original readings and decision ids remain available under
+ * judgment, independent of display limits.
  */
 import { captureJudgmentPort, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
 import { isDeepStrictEqual, types as nodeTypes } from 'node:util';
@@ -37,6 +39,7 @@ import type {
   TaskRoutePlan,
   TaskRouteSlots,
   TaskRouteReadOptions,
+  UncertainPlan,
 } from './types.js';
 
 export const TASK_ROUTE_SITE = 'routing.task-route.plan';
@@ -136,6 +139,12 @@ async function catalogMatches(
 function selectionEvidence(selection: Selection): Omit<Selection, 'recordAction'> {
   const { recordAction: _recordAction, ...evidence } = selection;
   return evidence;
+}
+
+/** A held plan: which reading was unsure, and the fitting routes at low confidence for the caller to choose from. */
+export interface HeldTaskRoutePlan extends UncertainPlan {
+  readonly unsure: { readonly reading: 'route selection'; readonly outcome: Outcome; readonly leading: string; readonly probability: number };
+  readonly candidates: readonly TaskRouteCandidate[];
 }
 
 const MISSING_REQUEST: MissingRequestPlan = {
@@ -286,23 +295,23 @@ export async function planTaskRoute(
       workspace: workspaceMatches.ranked,
       harness: harnessModeMatches.ranked,
     };
-    const unresolved = selection.outcome !== 'act'
-      || Object.values(slotRun.readings).some(reading => reading.outcome !== 'act')
-      || Object.values(slotRun.named).some(reading => reading.outcome !== 'act')
-      || [...workspaceMatches.ranked, ...harnessModeMatches.ranked].some(entry => entry.reading.outcome !== 'act');
-    if (unresolved) {
-      selection.recordAction('uncertain: no route published');
-      slotRun.recordAction('uncertain: no route published');
+    const ranked = rankRoutes(protectedRequest, selection, slotRun.slots);
+    if (selection.outcome !== 'act') {
+      const leading = ranked[0]!;
+      selection.recordAction(`held: route selection unsure between ${ranked.length} routes`);
+      slotRun.recordAction('held: route selection unsure');
       const restriction = authority.consumeObservation();
       publicationCurrent = () => { sourceCurrent(); restriction.assertCurrent(); sourceCurrent(); };
       retainCurrent?.(publicationCurrent, TASK_ROUTE_SITE); assertOriginal(); publicationCurrent();
-      return {
+      const held: HeldTaskRoutePlan = {
         status: 'uncertain', request: previewText(protectedRequest, includeParameters ? 220 : 120), judgment,
-        nextAction: 'Resolve the outstanding Jev readings against current context before choosing a route.',
-        policy: 'This incomplete read-only plan authorizes no dispatch or effects.',
+        unsure: { reading: 'route selection', outcome: selection.outcome, leading: leading.draft.id, probability: leading.score },
+        candidates: ranked.slice(0, limit).map((route) => ({ ...describeRoute(route, includeParameters), confidence: 'low' as const })),
+        nextAction: 'The route selection was unsure, so no route is preferred. Choose the candidate that matches what the user asked for, or ask the user which outcome they want; each candidate keeps its own confirmation boundary.',
+        policy: 'This held read-only plan authorizes no dispatch or effects.',
       };
+      return held;
     }
-    const ranked = rankRoutes(protectedRequest, selection, slotRun.slots);
     const candidates = ranked.slice(0, limit).map((route) => describeRoute(route, includeParameters));
     const preferred = candidates[0]!;
     selection.recordAction(`preferred ${preferred.id}`);

@@ -1,9 +1,9 @@
 import { dirname } from 'node:path';
 import { logger } from '../utils/logger.js';
-import { getProviderAccessPath } from './model-catalog-cache.js';
+import { fetchCatalogFeed, getProviderAccessPath, transformModelsDevResponse, type CatalogFeed } from './model-catalog-cache.js';
 import { summarizeError } from '../utils/error-display.js';
+import { ProviderAccessReadings } from '../routing/catalog-access.js';
 import {
-  fetchCatalog,
   isCatalogCacheStale,
   loadCatalogCache,
   notifyCatalogChanges,
@@ -74,17 +74,27 @@ export function refreshProviderCatalog(ctx: CatalogLifecycleContext): Promise<vo
 
 const refreshesInFlight = new Map<string, Promise<void>>();
 
+/**
+ * The catalog is published at once with every provider access already known
+ * (remembered readings and local addresses); providers not yet read are read
+ * after, and the catalog is published again only when a reading changed a
+ * provider's access. A failed reading leaves the published catalog standing
+ * and is asked again on the next refresh.
+ */
 async function applyCatalogRefresh(ctx: CatalogLifecycleContext): Promise<void> {
   const previous = [...ctx.getCatalogModels()];
   const { cachePath, tmpPath } = ctx.getCatalogCachePaths();
-  const models = await fetchCatalog({ accessPath: getProviderAccessPath(dirname(cachePath)) });
-  if (models.length === 0) {
-    // Not a success: the caller asked for a refresh and nothing was refreshed.
-    throw new Error('The model catalog feed returned no models, so the existing catalog was kept unchanged.');
+  const feed = await fetchCatalogFeed();
+  const readings = new ProviderAccessReadings({ path: getProviderAccessPath(dirname(cachePath)) });
+  const known = readings.known(feed.providers);
+  publishCatalog(ctx, feed, known, cachePath, tmpPath);
+  try {
+    await readings.readMissing(feed.providers);
+  } catch (error) {
+    logger.warn('[model-catalog] Some provider access readings did not complete; their models keep the paid tier until the next refresh', { error: summarizeError(error) });
   }
-  saveCatalogCache(models, cachePath, tmpPath);
-  ctx.updateCatalogState(models);
-  ctx.afterCatalogApplied();
+  const read = readings.known(feed.providers);
+  if ([...read].some(([id, access]) => known.get(id) !== access)) publishCatalog(ctx, feed, read, cachePath, tmpPath);
   const favorites = await ctx.favoritesStore.load();
   notifyCatalogChanges(
     previous,
@@ -92,5 +102,16 @@ async function applyCatalogRefresh(ctx: CatalogLifecycleContext): Promise<void> 
     favorites,
     ctx.benchmarkStore.getTopBenchmarkModelIds(10),
   );
+}
+
+function publishCatalog(ctx: CatalogLifecycleContext, feed: CatalogFeed, access: Parameters<typeof transformModelsDevResponse>[1], cachePath: string, tmpPath: string): void {
+  const models = transformModelsDevResponse(feed.json, access);
+  if (models.length === 0) {
+    // Not a success: the caller asked for a refresh and nothing was refreshed.
+    throw new Error('The model catalog feed returned no models, so the existing catalog was kept unchanged.');
+  }
+  saveCatalogCache(models, cachePath, tmpPath);
+  ctx.updateCatalogState(models);
+  ctx.afterCatalogApplied();
   logger.debug('[model-catalog] Catalog updated', { count: models.length });
 }

@@ -14,12 +14,10 @@
  * plain request/response; there is no stream). On an older daemon the section is
  * simply absent and the surface keeps its plain busy state.
  *
- * A successful install also invalidates the sibling voice caches (['voice','status'],
- * ['voice','config']), useVoice.ts's own literal query keys, matched here rather than
- * introduced as a second key for the same data, since the install call may newly
- * configure tts.provider/tts.voice (or make the 'local' provider's capabilities
- * non-empty), and both surfaces need to see that immediately, not on their next
- * unrelated refetch.
+ * A successful install also invalidates useVoice.ts's ['voice','status'] and the one
+ * shared config entry (queryKeys.config), since the install call may newly configure
+ * tts.provider/tts.voice (or make the 'local' provider's capabilities non-empty), and
+ * both surfaces need to see that immediately, not on their next unrelated refetch.
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { client as platformClient } from '../lib/goodvibes';

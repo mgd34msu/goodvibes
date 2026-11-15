@@ -204,6 +204,8 @@ Parser limits to know about:
 - A flag that takes a value refuses a value that begins with `-`. Use the long form with an equals sign: `--prompt='- item'`.
 - Unquoted words in a prompt that equal a command name or alias (`doctor`, `auth`, `task`) are read as that command. Quote the whole prompt.
 - The `secrets` and `cluster` helpers read the word after any `--flag` as its value, so put flags after the positional arguments.
+- After `run`, `status`, `help`, `completion` and the other commands that take only these global flags, an option the parser does not know (`--max-turn`, `--timout=5m`) is refused with exit `2` instead of being ignored. Commands with options of their own (`secrets`, `auth`, `sessions` and the like) read those options themselves.
+- A lone first word one or two letters away from a command (`goodvibes staus`) is refused as a mistyped command and the error names the command it is close to. To start with that word as the first prompt, put `--` before it: `goodvibes -- staus`.
 
 ## Meta
 

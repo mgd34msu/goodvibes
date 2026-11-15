@@ -142,8 +142,8 @@ describe('/payments card on the selected daemon', () => {
     await f.run(['card']);
     await f.submitAll(ANSWERS);
     const text = f.printed.join('\n');
-    expect(text).toContain('did not confirm the request');
-    expect(text).toContain('/payments status');
+    expect(text).toContain('Nothing was saved');
+    expect(text).toContain('/payments card');
     expect(text).not.toContain('rejected card');
     expect(leaked(text)).toBe(false);
   });

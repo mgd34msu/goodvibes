@@ -281,6 +281,16 @@ const GLOBAL_FLAGS: readonly CommandFlagSpec<FlagField>[] = [
   { field: 'answerPermissions', tokens: ['--answer-permissions'], kind: 'boolean', summary: 'run: with stream-json, read PERMISSION_ANSWER lines on stdin for the owner prompts the run raises' },
 ];
 const names = [...new Set<GoodVibesCliCommand>(['tui', ...Object.values(COMMAND_ALIASES)])];
+/**
+ * Commands that take only the global flags. Every other command's handler (or
+ * the slash command that reuses it) reads options of its own from
+ * `commandArgs`, so an option the catalog does not know reaches it there; after
+ * one of these words a mistyped option is refused instead of being dropped and
+ * its value joined into the prompt.
+ */
+const GLOBAL_FLAGS_ONLY: ReadonlySet<GoodVibesCliCommand> = new Set<GoodVibesCliCommand>([
+  'tui', 'run', 'status', 'completion', 'help', 'version',
+]);
 const COMMANDS: readonly CommandSpec<GoodVibesCliCommand, FlagField>[] = [
   {
     name: 'unknown',
@@ -297,7 +307,7 @@ const COMMANDS: readonly CommandSpec<GoodVibesCliCommand, FlagField>[] = [
       .map(([token]) => token),
     flags: [],
     passthrough: false,
-    lenientUnknownFlags: true,
+    lenientUnknownFlags: !GLOBAL_FLAGS_ONLY.has(name),
     subcommands: [],
   })),
 ];

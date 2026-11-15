@@ -1,4 +1,3 @@
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 /**
  * cli-redaction.ts, masking credential-bearing values out of anything a
  * front-end writes to a file a person might hand to someone else (a support
@@ -8,27 +7,32 @@ import { drainOwned } from '@goodvibes-jev/judgment/decisions';
  * then prints it. Which config paths hold credentials:
  *
  *  - a key of the platform's config schema is answered by the platform's own
- *    declaration (SECRET_BEARING_CONFIG_PATHS): code, the platform declares
- *    its keys, and the pre-commit credential-scope check keeps that list whole;
+ *    declaration (SECRET_BEARING_CONFIG_PATHS), and so is every list element
+ *    or leaf under one whose value passes that setting's own validator: the
+ *    schema then says what each part is, so no reading is needed. A value the
+ *    validator refuses holds something the schema did not declare, and its
+ *    parts are read like any undeclared path;
  *  - any other path (a provider's key, an env map under an MCP server, a
  *    header map, payment card fields) is read by Jev with the
- *    `config.credential-key` reading, from the path and never the value, and
- *    its value is kept in the clear only on a confident no.
+ *    `config.credential-key` reading, from the path and never the value, once
+ *    per path with list indices folded together, and its value is kept in the
+ *    clear only on a confident no.
  *
- * This replaced a trailing-word path pattern and a hand-kept copy of the
- * declared keys that had drifted from the platform's list.
+ * The tree is captured once. Classification and masking work on that detached
+ * copy, so nothing between the capture and the result needs re-checking; the
+ * result's `assertCurrent` is the one source check, for the caller to run
+ * immediately before it publishes.
  */
 import {
   CONFIG_SCHEMA,
-  configKeyDescription,
   captureStructuredCredentialReferenceConfigValue,
   isStructuredCredentialReferenceConfigKey,
   isDeclaredSecretBearingConfigKey,
   readCredentialKey,
 } from '@goodvibes-jev/engine/platform/platform/config';
 import { mapLimit } from '@goodvibes-jev/judgment';
-import { captureJudgmentPort, type JudgmentPortCapture, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
-import { decisionOrClassic, isClassicOperation } from '@goodvibes-jev/engine/platform/platform/runtime';
+import type { JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
+import { decisionOrClassic } from '@goodvibes-jev/engine/platform/platform/runtime';
 import { captureOwnedJson, retainStrictJudgmentJson } from '@goodvibes-jev/engine/platform/platform/gate';
 import { redactSensitiveDataAsync, redactStructuredDataAsync } from '@goodvibes-jev/engine/platform/platform/utils';
 import { supportBundleFields } from './support-bundle-fields.js';
@@ -42,52 +46,57 @@ export const CONFIG_PATH_CREDENTIAL_SITE = 'terminal-shell.redaction.config-path
 const PATH_READING_CONCURRENCY = 8;
 
 const SCHEMA_KEYS: ReadonlySet<string> = new Set(CONFIG_SCHEMA.map((setting) => setting.key));
+const SCHEMA_VALIDATORS: ReadonlyMap<string, (value: unknown) => boolean> = new Map(
+  CONFIG_SCHEMA.flatMap((setting) => (setting.validate ? [[setting.key, setting.validate] as const] : [])),
+);
 
-/** Unknown config paths keep values private unless a current reading confidently excludes credentials. */
+/** Whether a setting's value has the shape its schema declares, so the declaration covers every part of it. */
+function holdsDeclaredShape(key: string, value: unknown): boolean {
+  const validate = SCHEMA_VALIDATORS.get(key);
+  if (!validate) return false;
+  try { return validate(value); } catch { return false; }
+}
+
+/**
+ * The schema key whose declaration answers for a path: the key itself, or the
+ * setting it sits under when that setting's value has its declared shape
+ * (`shaped`, filled while walking the tree). Undefined means the path is read.
+ */
+function declaredSetting(path: string, shaped: ReadonlySet<string> = new Set()): string | undefined {
+  if (SCHEMA_KEYS.has(path)) return path;
+  for (let end = path.lastIndexOf('.'); end > 0; end = path.lastIndexOf('.', end - 1)) {
+    const prefix = path.slice(0, end);
+    if (SCHEMA_KEYS.has(prefix)) return shaped.has(prefix) ? prefix : undefined;
+  }
+  return undefined;
+}
+
+/** The path a reading is asked about: list indices fold together, so one reading covers every element of a list. */
+function readingPath(path: string): string {
+  return path.split('.').filter((segment) => !/^\d+$/.test(segment)).join('.');
+}
+
+/** Unknown config paths keep values private unless a reading confidently excludes credentials. */
 export async function isSensitiveConfigPath(path: string, options: JudgmentReadingOptions = {}): Promise<boolean> {
-  const source = captureConfig(path, options);
-  source.assertCurrent();
-  if (SCHEMA_KEYS.has(path)) return isDeclaredSecretBearingConfigKey(path);
+  if (isStructuredCredentialReferenceConfigKey(path)) return true;
+  const setting = declaredSetting(path);
+  if (setting !== undefined) return isDeclaredSecretBearingConfigKey(setting);
   return decisionOrClassic(async () => {
-  const reading = await readCredentialKey({ key: path, description: configKeyDescription(path) }, CONFIG_PATH_CREDENTIAL_SITE,
-    { ...options, assertCurrent: source.assertCurrent });
-  source.assertCurrent();
-  return !(reading.verdict === 'no' && reading.outcome === 'act');
-  }, () => { source.assertCurrent(); return true; });
+    const reading = await readCredentialKey({ key: readingPath(path), description: '' }, CONFIG_PATH_CREDENTIAL_SITE, options);
+    return !(reading.verdict === 'no' && reading.outcome === 'act');
+  }, () => true);
 }
 
 function captureConfig(config: unknown, options: JudgmentReadingOptions) {
   // Raw values stay local. This structural capture does not authorize transmission.
   const retained = retainStrictJudgmentJson(config);
-  const snapshot = retained.snapshot;
-  const signal = options.signal, callerCurrent = options.assertCurrent;
-  const sourceCurrent = () => {
-    signal?.throwIfAborted();
-    if (options.signal !== signal || options.assertCurrent !== callerCurrent) throw new Error('Config changed during redaction.');
+  const callerCurrent = options.assertCurrent;
+  const assertCurrent = (): void => {
+    options.signal?.throwIfAborted();
     retained.assertCurrent();
+    callerCurrent?.();
   };
-  const assertSource = () => {
-    sourceCurrent();
-    const result: unknown = callerCurrent?.();
-    if (result !== undefined) {
-      drainOwned(result);
-      throw new Error('Config ownership must be synchronous.');
-    }
-    sourceCurrent();
-  };
-  let owner: JudgmentPortCapture | undefined;
-  const assertCurrent = () => {
-    assertSource(); owner?.signal.throwIfAborted();
-    if (owner && !isClassicOperation()) owner.assertCurrent();
-  };
-  const readingOptions = () => {
-    assertSource();
-    owner ??= captureJudgmentPort(CONFIG_PATH_CREDENTIAL_SITE, { ...options, assertCurrent: assertSource });
-    owner.assertCurrent();
-    return { ...options, signal: owner.signal, assertCurrent: owner.assertCurrent };
-  };
-  assertSource();
-  return { snapshot, assertCurrent, readingOptions };
+  return { snapshot: retained.snapshot, assertCurrent };
 }
 
 // Redaction rule for sensitive config paths:
@@ -106,8 +115,9 @@ function structuredReferenceValue(path: string, value: unknown): boolean {
   catch { return false; }
 }
 
-/** Every path in the tree whose value would be masked if the path is sensitive, with that value. */
-function valuePaths(value: unknown, path: string, out: Map<string, unknown>): void {
+/** Every path in the tree whose value would be masked if the path is sensitive, with that value; `shaped` collects the settings whose value has its declared shape. */
+function valuePaths(value: unknown, path: string, out: Map<string, unknown>, shaped: Set<string>): void {
+  if (SCHEMA_KEYS.has(path) && value !== null && typeof value === 'object' && holdsDeclaredShape(path, value)) shaped.add(path);
   if (isStructuredCredentialReferenceConfigKey(path)) {
     if (!structuredReferenceValue(path, value)) out.set(path, value);
     return;
@@ -118,20 +128,32 @@ function valuePaths(value: unknown, path: string, out: Map<string, unknown>): vo
   const container = value !== null && typeof value === 'object';
   if (path && holdsValue(value) && (!container || SCHEMA_KEYS.has(path))) out.set(path, value);
   if (Array.isArray(value)) {
-    value.forEach((item, index) => valuePaths(item, `${path}.${index}`, out));
+    value.forEach((item, index) => valuePaths(item, `${path}.${index}`, out, shaped));
   } else if (value && typeof value === 'object') {
-    for (const [key, nested] of Object.entries(value)) valuePaths(nested, path ? `${path}.${key}` : key, out);
+    for (const [key, nested] of Object.entries(value)) valuePaths(nested, path ? `${path}.${key}` : key, out, shaped);
   }
 }
 
-/** The sensitive paths of a config tree, asked once for the whole tree. */
-async function sensitivePaths(source: ReturnType<typeof captureConfig>, candidates: ReadonlyMap<string, unknown>): Promise<ReadonlySet<string>> {
+/** The sensitive paths of a config tree: declared paths by lookup, each distinct undeclared path read once. */
+async function sensitivePaths(candidates: ReadonlyMap<string, unknown>, shaped: ReadonlySet<string>, options: JudgmentReadingOptions): Promise<ReadonlySet<string>> {
   const paths = [...candidates.keys()];
-  const sensitive = await mapLimit(paths, PATH_READING_CONCURRENCY, async (path) =>
-    isStructuredCredentialReferenceConfigKey(path) ? true
-      : isSensitiveConfigPath(path, SCHEMA_KEYS.has(path) || isClassicOperation() ? { assertCurrent: source.assertCurrent } : source.readingOptions()));
-  source.assertCurrent();
-  return new Set(paths.filter((_path, index) => sensitive[index]));
+  const verdicts = new Map<string, boolean>();
+  const unread = new Set<string>();
+  for (const path of paths) {
+    if (isStructuredCredentialReferenceConfigKey(path)) continue;
+    const setting = declaredSetting(path, shaped);
+    if (setting === undefined) unread.add(readingPath(path));
+  }
+  // Readings are not effects; only the abort signal reaches them. The source check belongs to the publisher.
+  const readingOptions: JudgmentReadingOptions = options.signal ? { signal: options.signal } : {};
+  const keys = [...unread];
+  const read = await mapLimit(keys, PATH_READING_CONCURRENCY, (key) => isSensitiveConfigPath(key, readingOptions));
+  keys.forEach((key, index) => verdicts.set(key, read[index] === true));
+  return new Set(paths.filter((path) => {
+    if (isStructuredCredentialReferenceConfigKey(path)) return true;
+    const setting = declaredSetting(path, shaped);
+    return setting !== undefined ? isDeclaredSecretBearingConfigKey(setting) : verdicts.get(readingPath(path)) === true;
+  }));
 }
 
 function redactUnknown(value: unknown, path: string, sensitive: ReadonlySet<string>, redactedPaths: string[]): unknown {
@@ -184,19 +206,16 @@ function sensitiveValues(candidates: ReadonlyMap<string, unknown>, sensitive: Re
 export async function prepareConfigRedaction(config: unknown, options: JudgmentReadingOptions = {}): Promise<PreparedConfigRedaction> {
   const source = captureConfig(config, options);
   const candidates = new Map<string, unknown>();
-  valuePaths(source.snapshot, '', candidates);
-  const sensitive = await sensitivePaths(source, candidates);
-  source.assertCurrent();
+  const shaped = new Set<string>();
+  valuePaths(source.snapshot, '', candidates, shaped);
+  const sensitive = await sensitivePaths(candidates, shaped, options);
   const redactedPaths: string[] = [];
   const value = redactUnknown(source.snapshot, '', sensitive, redactedPaths);
-  const values = sensitiveValues(candidates, sensitive);
-  source.assertCurrent();
-  return { value, redactedPaths, sensitiveValues: values, assertCurrent: source.assertCurrent };
+  return { value, redactedPaths, sensitiveValues: sensitiveValues(candidates, sensitive), assertCurrent: source.assertCurrent };
 }
 
 export async function redactConfig(config: unknown, options: JudgmentReadingOptions = {}): Promise<RedactedConfigResult> {
   const prepared = await prepareConfigRedaction(config, options);
-  prepared.assertCurrent();
   return { value: prepared.value, redactedPaths: prepared.redactedPaths, assertCurrent: prepared.assertCurrent };
 }
 
@@ -205,9 +224,7 @@ export function redactText(input: string, options: JudgmentReadingOptions = {}):
 }
 
 export async function collectSensitiveConfigValues(config: unknown, options: JudgmentReadingOptions = {}): Promise<readonly string[]> {
-  const prepared = await prepareConfigRedaction(config, options);
-  prepared.assertCurrent();
-  return prepared.sensitiveValues;
+  return (await prepareConfigRedaction(config, options)).sensitiveValues;
 }
 
 export async function redactSerializedSecrets(serialized: string, secretValues: readonly string[], options: JudgmentReadingOptions = {}): Promise<string> {

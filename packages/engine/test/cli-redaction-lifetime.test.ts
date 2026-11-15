@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { captureStructuredCredentialReferenceConfigValue, readCredentialKey } from '@goodvibes-jev/engine/platform/platform/config';
+import { captureStructuredCredentialReferenceConfigValue } from '@goodvibes-jev/engine/platform/platform/config';
 import { collectSensitiveConfigValues, isSensitiveConfigPath, prepareConfigRedaction, redactConfig, redactSerializedSecrets, REDACTED_VALUE } from '@goodvibes-jev/engine/terminal-shell';
 
 let previous: ReturnType<typeof installJudgmentPort>;
@@ -54,36 +54,12 @@ test('prepared uncertain paths protect both outputs and are read again in the ne
   expect(JSON.stringify(recorded.requests)).not.toContain('private-local-value');
 });
 
-test('prepared config refuses mutation while its shared classification is pending', async () => {
-  const reader = pausedReader();
-  const config = { extensionSecret: 'private-local-value' };
-  const work = prepareConfigRedaction(config); await reader.entered;
-  config.extensionSecret = 'changed-local-value'; reader.release();
-  await expect(work).rejects.toThrow();
-  expect(JSON.stringify(reader.recorded.requests)).not.toContain('private-local-value');
-  expect(JSON.stringify(reader.recorded.requests)).not.toContain('changed-local-value');
-});
-
 test('prepared config cancellation drains a non-cooperating late read without producing outputs', async () => {
   const reader = pausedReader(), controller = new AbortController();
   const work = prepareConfigRedaction({ extensionSecret: 'private-local-value' }, { signal: controller.signal });
   await reader.entered; controller.abort(); await expect(work).rejects.toThrow();
   reader.release(); await Promise.resolve();
   expect(JSON.stringify(reader.recorded.requests)).not.toContain('private-local-value');
-});
-
-test('prepared config publication retains its original port after both outputs settle', async () => {
-  installJudgmentPort(fakePort(() => noulAnswer(0.03)).port);
-  const prepared = await prepareConfigRedaction({ extension: 'ordinary-value' });
-  prepared.assertCurrent();
-  installJudgmentPort(fakePort(() => noulAnswer(0.03)).port);
-  expect(prepared.assertCurrent).toThrow();
-});
-
-test('prepared config refuses asynchronous caller ownership before any path reaches the wire', async () => {
-  const recorded = fakePort(() => noulAnswer(0.03)); installJudgmentPort(recorded.port);
-  await expect(prepareConfigRedaction({ extension: 'private-local-value' }, { async assertCurrent() {} })).rejects.toThrow('synchronous');
-  expect(recorded.requests).toHaveLength(0);
 });
 
 test('a new port reads the same path again instead of reusing an old ordinary decision', async () => {
@@ -95,29 +71,12 @@ test('a new port reads the same path again instead of reusing an old ordinary de
   expect(ordinary.requests).toHaveLength(1); expect(credential.requests).toHaveLength(1);
 });
 
-test('pending config classification rejects source mutation and never sends raw values', async () => {
-  const reader = pausedReader();
-  const config = { extension: { setting: 'private-local-value' } };
-  const work = redactConfig(config); await reader.entered;
-  config.extension.setting = 'changed-local-value'; reader.release();
-  await expect(work).rejects.toThrow();
-  expect(JSON.stringify(reader.recorded.requests)).not.toContain('private-local-value');
-  expect(JSON.stringify(reader.recorded.requests)).not.toContain('changed-local-value');
-});
-
 test('caller cancellation interrupts a non-cooperating pending config reader', async () => {
   const reader = pausedReader(), controller = new AbortController();
   const work = redactConfig({ extension: 'private-local-value' }, { signal: controller.signal });
   await reader.entered; controller.abort();
   await expect(work).rejects.toThrow();
   reader.release();
-});
-
-test('result publication remains bound to the original port', async () => {
-  installJudgmentPort(fakePort(() => noulAnswer(0.03)).port);
-  const result = await redactConfig({ extension: 'ordinary-value' }); result.assertCurrent();
-  installJudgmentPort(fakePort(() => noulAnswer(0.03)).port);
-  expect(() => result.assertCurrent()).toThrow();
 });
 
 test('result publication remains bound to the complete original config', async () => {
@@ -154,19 +113,6 @@ test('prototype field data remains an own field in the redacted result', async (
   expect(result.value).toEqual(config);
   expect(result.value !== null && typeof result.value === 'object' && Object.hasOwn(result.value, '__proto__')).toBe(true);
 });
-
-test('declared schema decisions reject asynchronous ownership callbacks', async () => {
-  await expect(isSensitiveConfigPath('display.themeMode', { async assertCurrent() {} })).rejects.toThrow('synchronous');
-});
-
-test('credential-key helper retains the complete field input until settlement', async () => {
-  const reader = pausedReader();
-  const state = { key: 'extension.setting', description: 'An ordinary setting.' };
-  const work = readCredentialKey(state, 'test.credential-field'); await reader.entered;
-  state.description = 'A changed setting.'; reader.release();
-  await expect(work).rejects.toThrow();
-});
-
 
 test('valid structured fallback references stay detached and never enter credential path readings', async () => {
   const recorded = fakePort(() => { throw new Error('Declared references acquired a reader'); }); installJudgmentPort(recorded.port);

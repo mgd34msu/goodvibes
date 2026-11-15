@@ -1,10 +1,9 @@
 import type { ConfigKey, ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { AudioCaptureOpener } from '@goodvibes-jev/engine/platform/platform/voice';
 import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
-import { LocalStreamingAudioPlayer, type StreamingAudioPlayer } from './player.js';
+import { sharedStreamingAudioPlayer, type StreamingAudioPlayer } from './player.js';
 import type { playActivationSound } from './activation-sound.js';
 import type { TerminalWakeRuntime, TerminalWakeRuntimeDeps } from './wake-runtime.js';
-import type { VoiceCaptureIndicatorKind } from '../voice-capture-status.js';
 export interface VoiceCaptureBindings {
   readonly configManager: ConfigManager;
   readonly managedVoiceRoot: string;
@@ -32,16 +31,16 @@ export function createVoiceCapturePorts(
     warn,
     openCapture: routes.createOpener({ warn }),
     resolveTranscriber: routes.resolveTranscriber,
-    player: deps.player ?? new LocalStreamingAudioPlayer(),
+    player: deps.player ?? sharedStreamingAudioPlayer(),
   };
 }
-export function wireTerminalWakeCapture<Kind extends Extract<VoiceCaptureIndicatorKind, `wake-${string}`>>(
+export function wireTerminalWakeCapture(
   deps: VoiceCaptureBindings,
   ports: ReturnType<typeof createVoiceCapturePorts>,
   runtime: {
-    readonly wireWakeRuntime: (deps: TerminalWakeRuntimeDeps) => TerminalWakeRuntime<Kind>;
+    readonly wireWakeRuntime: (deps: TerminalWakeRuntimeDeps) => TerminalWakeRuntime;
     readonly startWakeRuntime: (
-      runtime: TerminalWakeRuntime<Kind>,
+      runtime: TerminalWakeRuntime,
       deps: Pick<TerminalWakeRuntimeDeps, 'subscribeConfig'>,
     ) => readonly (() => void)[];
     readonly playActivationSound: typeof playActivationSound;

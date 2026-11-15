@@ -374,7 +374,8 @@ describe('which paths are read, and what the code does with the reading', () => 
     expect(await isSensitiveConfigPath('mcp.servers.github.env.UNSURE_SETTING')).toBe(true);
     answer = () => 0.03;
     expect(await isSensitiveConfigPath('mcp.servers.fs.args.0')).toBe(false);
-    expect(asked).toEqual(['mcp.servers.github.env.UNSURE_SETTING', 'mcp.servers.fs.args.0']);
+    // List elements fold into one reading of the list path.
+    expect(asked).toEqual(['mcp.servers.github.env.UNSURE_SETTING', 'mcp.servers.fs.args']);
   });
 
   test('a user-named env key under an MCP server is masked when read as a credential', async () => {

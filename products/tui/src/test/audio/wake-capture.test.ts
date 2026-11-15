@@ -501,11 +501,12 @@ describe('a confirmed wake drives the whole downstream chain', () => {
     expect(harness.loadedModelPaths).toHaveLength(1);
     await harness.runtime.stop();
     await harness.runtime.refresh();
-    expect(harness.runtime.status()?.kind).toBe('wake-listening');
+    // The replacement's recorder is open; no frame has arrived yet, so the chip reports no audio rather than listening.
+    expect(harness.runtime.status()?.kind).toBe('wake-no-audio');
     const notices = [...harness.notices];
     finish(stubEmbeddingSession());
     await retired;
-    expect(harness.runtime.status()?.kind).toBe('wake-listening');
+    expect(harness.runtime.status()?.kind).toBe('wake-no-audio');
     expect(harness.spawns.calls).toHaveLength(1);
     expect(harness.notices).toEqual(notices);
     await harness.runtime.stop();
@@ -923,7 +924,8 @@ describe('the two rows that used to be refused now run a real stage', () => {
     await harness.runtime.refresh();
     expect(harness.suppression.processed()).toBe(0);
     expect(harness.notices.some((line) => line.includes('speex'))).toBe(true);
-    expect(harness.runtime.status()).toBeNull();
+    // A refused start leaves the stopped chip with its reason, not an empty footer.
+    expect(harness.runtime.status()?.kind).toBe('wake-latched');
   });
 
   test('vadThreshold above 0 loads the speech gate and consults it for every frame', async () => {
@@ -1000,7 +1002,8 @@ describe('enabling wake detection after the installation provisioned the model',
 
     // Started, with no setup command run and no config beyond the two rows.
     expect(harness.spawns.processes.length).toBe(1);
-    expect(harness.runtime.status()?.kind).toBe('wake-listening');
+    // Open, but no frame has arrived yet: the chip says so instead of claiming to listen.
+    expect(harness.runtime.status()?.kind).toBe('wake-no-audio');
     expect(harness.notices.join('\n')).not.toContain('/voice wake setup');
 
     // And it loaded EXACTLY the installed artifacts: the pinned classifier from

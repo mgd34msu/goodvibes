@@ -24,10 +24,10 @@ export function openBrowser(
   try {
     protocol = new URL(url).protocol;
   } catch {
-    return 'browser open refused: not a valid address';
+    return 'browser open refused: not a valid web address; copy it into a browser yourself';
   }
   // A caller that wrote the file itself (an export it just made) may open it; a web address from elsewhere never gets that.
-  if (protocol !== 'http:' && protocol !== 'https:' && !(seams.allowFile && protocol === 'file:')) return `browser open refused: ${protocol} addresses are not opened`;
+  if (protocol !== 'http:' && protocol !== 'https:' && !(seams.allowFile && protocol === 'file:')) return `browser open refused: only http and https addresses are opened, not ${protocol}; copy it into a browser yourself if you trust it`;
   const platform = seams.platform ?? process.platform;
   // cmd treats & in an OAuth URL as a command separator, so Windows goes through the URL handler directly instead.
   const command = platform === 'darwin' ? 'open' : platform === 'win32' ? 'rundll32' : 'xdg-open';

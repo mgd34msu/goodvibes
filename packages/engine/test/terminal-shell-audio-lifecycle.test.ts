@@ -96,16 +96,41 @@ describe('streaming player', () => {
     await playing;
     expect(sink.killed).toBe(false);
   });
+
+  test('a player that exits with an error is reported with its exit code, not as played', async () => {
+    const sink = new FakeSink();
+    const player = playerFor(sink);
+    async function* one(): AsyncIterable<VoiceAudioChunk> { yield chunk(1); }
+    const playing = player.play(one(), {});
+    sink.emit('spawn');
+    await settle();
+    sink.emit('close', 2, null);
+    await expect(playing).rejects.toThrow('exited with code 2');
+  });
+
+  test('stop() cuts every sound the player started, not only the last', async () => {
+    const sinks = [new FakeSink(), new FakeSink()];
+    let next = 0;
+    const player = new LocalStreamingAudioPlayer({
+      command: { command: '/fake/mpv', args: ['-'], label: 'fake-mpv' },
+      spawnProcess: (() => sinks[next++]) as never,
+    });
+    async function* one(): AsyncIterable<VoiceAudioChunk> { yield chunk(1); }
+    const first = player.play(one(), {});
+    const second = player.play(one(), {});
+    for (const sink of sinks) sink.emit('spawn');
+    await settle();
+    player.stop();
+    for (const sink of sinks) sink.emit('close', null, 'SIGTERM');
+    await Promise.all([first, second]);
+    expect(sinks.map((sink) => sink.killed)).toEqual([true, true]);
+  });
 });
 
 describe('wake runtime settings applied while listening', () => {
   const { startWakeRuntime } = createTerminalWakeRuntime({
     surface: 'tui',
     capabilities: () => ({}),
-    indicator: () => null,
-    refusalKind: () => null,
-    liveStatus: false,
-    diagnostics: false,
     provisionOnEnable: false,
     missingModels: (reason) => reason,
     draftNotice: '',
@@ -134,6 +159,13 @@ describe('wake runtime settings applied while listening', () => {
       await settle();
       expect(calls).toEqual(['stop', 'refresh']);
     }
+  });
+
+  test('a write that changes several restart rows restarts the listener once', async () => {
+    const { calls, listeners } = wire();
+    for (const key of ['voice.wake.inputDevice', 'voice.wake.captureCommand', 'voice.wake.models']) listeners.get(key)?.();
+    await settle();
+    expect(calls).toEqual(['stop', 'refresh']);
   });
 
   test('rows read per utterance or per status read do not restart it', async () => {

@@ -109,23 +109,16 @@ export async function renderConfigValue(key: string, value: unknown): Promise<st
   }
   if (value === undefined) return 'unset';
   if (value !== null && typeof value === 'object') {
-    const redacted = await redactConfig({ [key]: value });
-    const printable = JSON.stringify(readRedactedEntry(redacted, key));
-    redacted.assertCurrent();
-    return printable;
+    return JSON.stringify(readRedactedEntry(await redactConfig({ [key]: value }), key));
   }
   return typeof value === 'string' ? value : JSON.stringify(value);
 }
 
-/** A redactor may replace the document; only an own data field can be consumed. */
+/** The one entry of a redacted single-key document; anything else prints as redacted. */
 function readRedactedEntry(redacted: Awaited<ReturnType<typeof redactConfig>>, key: string): unknown {
-  redacted.assertCurrent();
   const document = redacted.value;
-  if (document === null || typeof document !== 'object' || Array.isArray(document)) return REDACTED_VALUE;
-  const descriptor = Object.getOwnPropertyDescriptor(document, key);
-  if (!descriptor || !('value' in descriptor)) return REDACTED_VALUE;
-  const value: unknown = descriptor.value;
-  return value;
+  if (document === null || typeof document !== 'object' || Array.isArray(document) || !Object.hasOwn(document, key)) return REDACTED_VALUE;
+  return (document as Record<string, unknown>)[key];
 }
 
 function schemaFor(deps: ConfigCommandDeps, key: string): ConfigSetting | undefined {
@@ -143,16 +136,15 @@ function writeFailure(key: string, error: unknown, deps: ConfigCommandDeps): Con
   return failure(`could not write ${key}.`, deps);
 }
 
-/** Finish classification before mutation; a refused reader must leave settings alone. */
+/** Finish classification before mutation; a value that cannot be shown safely leaves settings alone. */
 type PreparedWrite =
-  | { readonly kind: 'ready'; readonly assertCurrent: () => void }
+  | { readonly kind: 'ready' }
   | { readonly kind: 'refused'; readonly result: ConfigCommandResult };
 
 async function prepareWrite(deps: ConfigCommandDeps, key: string, value: unknown): Promise<PreparedWrite> {
   try {
-    const redacted = await redactConfig({ [key]: value });
-    redacted.assertCurrent();
-    return { kind: 'ready', assertCurrent: redacted.assertCurrent };
+    await redactConfig({ [key]: value });
+    return { kind: 'ready' };
   } catch {
     return { kind: 'refused', result: failure(`could not prepare safe output for ${key}; settings were not changed.`, deps) };
   }
@@ -195,7 +187,6 @@ async function listResult(deps: ConfigCommandDeps): Promise<ConfigCommandResult>
     const redacted = await redactConfig(
       Object.fromEntries(rows.map((row) => [row.key, row.value])),
     );
-    redacted.assertCurrent();
     return {
       exitCode: 0,
       lines: [JSON.stringify({
@@ -254,8 +245,6 @@ async function setResult(deps: ConfigCommandDeps, key: string, rawValue: string)
   const value = parseConfigValueText(rawValue);
   const preparation = await prepareWrite(deps, key, value);
   if (preparation.kind === 'refused') return preparation.result;
-  try { preparation.assertCurrent(); }
-  catch { return failure(`could not prepare safe output for ${key}; settings were not changed.`, deps); }
   const credentialText = typeof value === 'string' && isDeclaredSecretBearingConfigKey(key) && !isSecretRefInput(value.trim()) ? value : undefined;
   const storedInSecretStore = credentialText !== undefined && isSecretConfigKey(key) && deps.openSecretStore !== undefined;
   // A cleared credential holds no secret, so clearing stays an ordinary write.
@@ -310,8 +299,6 @@ async function unsetResult(deps: ConfigCommandDeps, key: string): Promise<Config
   }
   const preparation = await prepareWrite(deps, key, schemaFor(deps, key)?.default);
   if (preparation.kind === 'refused') return preparation.result;
-  try { preparation.assertCurrent(); }
-  catch { return failure(`could not prepare safe output for ${key}; settings were not changed.`, deps); }
   try {
     deps.configManager.reset(key);
   } catch {

@@ -152,15 +152,32 @@ export interface WakeEngineFactoryOptions {
     readonly loadSession?: ((modelPath: string) => Promise<WakeInferenceSession>) | undefined;
 }
 /**
+ * The `createEngine` callback the platform listener drives, plus the means to
+ * free what it loaded once that listener is done.
+ */
+export interface WakeEngineFactory {
+    (): Promise<WakeWordEngine>;
+    /** Release every inference session the factory loaded. Idempotent; later calls to the factory refuse. */
+    release(): Promise<void>;
+}
+/**
  * Build the `createEngine` callback the platform listener drives.
  *
- * The listener calls it on EVERY start including a restart, because a restart
- * exists to recover from a runtime that died, so the sessions are created here
- * per call rather than captured once.
+ * The listener calls it on every open, including each restart after a capture
+ * stream died. The sessions do not depend on the capture stream, so the models
+ * are loaded once per listener and the same engine is reset and handed back on
+ * a reopen; a load that failed is retried by the next open. The listener's
+ * owner calls `release()` when it stops that listener, which frees the WASM
+ * memory garbage collection would never reclaim.
  */
-export function createWakeEngineFactory(options: WakeEngineFactoryOptions): () => Promise<WakeWordEngine> {
+export function createWakeEngineFactory(options: WakeEngineFactoryOptions): WakeEngineFactory {
     const load = options.loadSession ?? loadWakeSession;
-    return async () => {
+    type Built = { readonly engine: WakeWordEngine; readonly sessions: readonly WakeInferenceSession[] };
+    let built: Promise<Built> | null = null;
+    /** The finished build, once it has finished, so release() frees it at once rather than waiting on a load. */
+    let ready: Built | null = null;
+    let released = false;
+    const build = async () => {
         if (options.loadSession === undefined)
             configureOnnxRuntime(options.assetDirectory);
         // A later load that throws would otherwise strand the sessions already created, once per failed start attempt.
@@ -176,9 +193,6 @@ export function createWakeEngineFactory(options: WakeEngineFactoryOptions): () =
             for (const model of options.models) {
                 models.push({ id: model.id, session: await loadTracked(model.path) });
             }
-            // Loaded per start, like every other session here: a restart exists to
-            // recover from a runtime that died, and a gate session carried over from the
-            // dead run would be the one piece that did not recover.
             const gate = options.vad ?? (options.vadPath === undefined ? undefined : { path: options.vadPath, ready: true });
             let vad: WakeVadGate | undefined;
             if (options.settings.vadThreshold > 0) {
@@ -188,7 +202,7 @@ export function createWakeEngineFactory(options: WakeEngineFactoryOptions): () =
                     throw new Error('Wake speech gate paths disagree.');
                 vad = { session: await loadTracked(gate.path), threshold: options.settings.vadThreshold };
             }
-            return new WakeWordEngine({
+            const engine = new WakeWordEngine({
                 embedding,
                 models,
                 tuning: options.settings.tuning,
@@ -196,9 +210,48 @@ export function createWakeEngineFactory(options: WakeEngineFactoryOptions): () =
                 ...(vad !== undefined ? { vad } : {}),
                 warn: options.warn,
             });
+            return { engine, sessions: created };
         } catch (error) {
-            await Promise.all(created.map((session) => session.release?.().catch(() => undefined)));
+            await releaseSessions(created);
             throw error;
         }
     };
+    const factory = async (): Promise<WakeWordEngine> => {
+        if (released)
+            throw new Error('The wake engine was released when its listener stopped.');
+        if (built === null) {
+            const pending = build();
+            built = pending;
+            pending.then((result) => {
+                if (built === pending)
+                    ready = result;
+            }, () => {
+                if (built === pending)
+                    built = null;
+            });
+        }
+        const { engine } = await built;
+        if (released)
+            throw new Error('The wake engine was released when its listener stopped.');
+        // A reopened stream must not inherit half a phrase or a cooldown from the run that died.
+        engine.reset();
+        return engine;
+    };
+    return Object.assign(factory, {
+        async release(): Promise<void> {
+            released = true;
+            const pending = built, finished = ready;
+            built = null;
+            ready = null;
+            if (finished !== null) {
+                await releaseSessions(finished.sessions);
+                return;
+            }
+            // A load still in flight may never settle; its sessions are freed when it does, without holding the caller.
+            pending?.then((result) => releaseSessions(result.sessions), () => undefined);
+        },
+    });
+}
+async function releaseSessions(sessions: readonly WakeInferenceSession[]): Promise<void> {
+    await Promise.all(sessions.map((session) => session.release?.().catch(() => undefined)));
 }

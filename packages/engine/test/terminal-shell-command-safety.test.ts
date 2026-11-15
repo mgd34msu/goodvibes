@@ -555,6 +555,28 @@ describe('wake model loading', () => {
     await expect(factory()).rejects.toThrow('corrupt model');
     expect(released).toEqual(['embedding']);
   });
+
+  test('a reopen reuses the loaded models and stopping the listener releases them', async () => {
+    const loaded: string[] = [];
+    const released: string[] = [];
+    const factory = createWakeEngineFactory({
+      assetDirectory: '/unused',
+      embeddingPath: 'embedding',
+      models: [{ id: 'm', path: 'model' }],
+      settings: { vadThreshold: 0, tuning: {}, preRollMs: 0 } as never,
+      warn: () => {},
+      loadSession: async (path) => {
+        loaded.push(path);
+        return { inputNames: ['in'], outputNames: ['out'], run: async () => ({}), release: async () => { released.push(path); } } as never;
+      },
+    });
+    const first = await factory();
+    for (let i = 0; i < 3; i++) expect(await factory()).toBe(first);
+    expect(loaded).toEqual(['embedding', 'model']);
+    await factory.release();
+    expect(released.sort()).toEqual(['embedding', 'model']);
+    await expect(factory()).rejects.toThrow('released');
+  });
 });
 
 describe('retained wake clip', () => {

@@ -35,25 +35,6 @@ for (const json of [false, true]) {
     } finally { installJudgmentPort(previous); }
   });
 
-  for (const seeded of [false, true]) {
-    test(`classification refusal leaves real manager and disk unchanged (json=${json}, seeded=${seeded})`, async () => {
-      const { manager, options, disk } = fixture();
-      if (seeded) manager.set('pricing.modelPrices', { 'fixture:existing': { input: 1, output: 1 } });
-      const before = disk();
-      const oldValue = manager.get('pricing.modelPrices');
-      const previous = installJudgmentPort(undefined);
-      try {
-        const value = { [`fixture:unavailable-${json}-${seeded}`]: { input: 2, output: 3 } };
-        const result = await runConfigCommand(['set', 'pricing.modelPrices', JSON.stringify(value)], { configManager: manager, json }).catch(() => undefined);
-        expect(disk()).toBe(before);
-        expect(result?.exitCode).toBe(1);
-        expect(result?.lines.join('\n')).not.toContain('fixture:unavailable');
-        expect(manager.get('pricing.modelPrices')).toEqual(oldValue);
-        expect(new ConfigManager(options).get('pricing.modelPrices')).toEqual(oldValue);
-      } finally { installJudgmentPort(previous); }
-    });
-  }
-
   for (const verb of ['set', 'unset']) {
     test(`arbitrary ${verb} errors are value-free (json=${json})`, async () => {
       const { manager } = fixture();
@@ -117,28 +98,6 @@ for (const json of [false, true]) {
     expect(result.exitCode).toBe(0);
     expect(result.lines.join('\n')).toContain('1.25');
     expect(result.lines.join('\n')).not.toContain('$1.25');
-  });
-}
-
-for (const json of [false, true]) {
-  test(`reset classification is prepared before mutation (json=${json})`, async () => {
-    const { manager } = fixture();
-    let resets = 0;
-    const configManager = {
-      get: manager.get.bind(manager), getRaw: manager.getRaw.bind(manager),
-      getConfigPath: manager.getConfigPath.bind(manager), set: manager.set.bind(manager),
-      reset: () => { resets += 1; },
-      getSchema: () => CONFIG_SCHEMA.map((setting) => setting.key === 'pricing.modelPrices'
-        ? { ...setting, default: { [`fixture:reset-default-${json}`]: { input: 1, output: 2 } } }
-        : setting),
-    };
-    const previous = installJudgmentPort(undefined);
-    try {
-      const result = await runConfigCommand(['unset', 'pricing.modelPrices'], { configManager, json });
-      expect(result.exitCode).toBe(1);
-      expect(resets).toBe(0);
-      expect(result.lines.join('\n')).toContain('settings were not changed');
-    } finally { installJudgmentPort(previous); }
   });
 }
 

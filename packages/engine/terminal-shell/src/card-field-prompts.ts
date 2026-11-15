@@ -5,6 +5,7 @@ import { isPairedOperatorPrincipal } from './native/native-paired-principal.js';
 import { RetainedOperatorConnection } from './retained-operator-connection.js';
 import type { PaymentWindowCommandPolicy } from './payment-window-command.js';
 import { stripDangerousAnsi } from './ansi-sanitize.js';
+import { classifyFailure } from '@goodvibes-jev/engine/errors';
 
 export type CardFieldId = 'label' | 'kind' | 'number' | 'expiry' | 'cvv' | 'cardholderName';
 export interface CardField {
@@ -47,20 +48,44 @@ export interface CardSummary {
   readonly materialComplete: boolean;
 }
 
-/** One field's problem in words. It never contains the value, because a rejected card number is still a card number. */
-function cardFieldProblem(key: CardFieldId, raw: string): string | null {
+/**
+ * One field's problem in words. It never contains the value, because a rejected card number is still a card number.
+ * Checked when the field is typed, so a wrong field is asked again on the spot instead of after all six answers.
+ */
+function cardFieldProblem(key: CardFieldId, raw: string, now: Date = new Date()): string | null {
   const text = raw.trim();
   switch (key) {
     case 'label': return text.length === 0 ? 'A label is required so you can tell cards apart.' : null;
     case 'kind': return text.length === 0 || /^(virtual|real)$/i.test(text) ? null : "The kind is 'virtual' or 'real'.";
     case 'number': {
       const digits = text.replace(/[\s-]/g, '');
-      return /^\d{13,19}$/.test(digits) ? null : 'A card number is 13 to 19 digits.';
+      if (!/^\d{13,19}$/.test(digits)) return 'A card number is 13 to 19 digits.';
+      return passesLuhn(digits) ? null : 'That card number fails the check every card number passes, so a digit is wrong or two are swapped.';
     }
-    case 'expiry': return parseCardExpiry(text) === null ? 'Expiry must look like MM/YY, for example 09/29.' : null;
+    case 'expiry': {
+      const expiry = parseCardExpiry(text);
+      if (expiry === null) return 'Expiry must look like MM/YY, for example 09/29.';
+      // A card works through the last day of its expiry month.
+      const expired = expiry.year < now.getFullYear() || (expiry.year === now.getFullYear() && expiry.month < now.getMonth() + 1);
+      return expired ? 'That expiry date has already passed. Enter the date on the current card.' : null;
+    }
     case 'cvv': return /^\d{3,4}$/.test(text) ? null : 'The security code is 3 or 4 digits.';
     case 'cardholderName': return text.length === 0 ? 'Enter the name as printed on the card.' : null;
   }
+}
+
+/** The card-number checksum (ISO/IEC 7812): every issued card number passes it. */
+function passesLuhn(digits: string): boolean {
+  let sum = 0;
+  for (let i = 0; i < digits.length; i++) {
+    let digit = digits.charCodeAt(digits.length - 1 - i) - 48;
+    if (i % 2 === 1) {
+      digit *= 2;
+      if (digit > 9) digit -= 9;
+    }
+    sum += digit;
+  }
+  return sum % 10 === 0;
 }
 
 /** "MM/YY" or "MM/YYYY"; a two-digit year means 20YY. */
@@ -159,7 +184,7 @@ export function createCardEntryPrompter<Context extends CardPromptContext>(
           if (cancelled) return;
           // The message is chosen by the host client, never the host's own text, which could quote the request.
           // A CardHostError is raised before the request leaves this process.
-          ctx.print(`[payments] ${describeCardFailure(error)}${error instanceof CardHostError ? ' Nothing was sent.' : ''}`);
+          ctx.print(`[payments] ${describeCardFailure(error, 'add')}${error instanceof CardHostError ? ' Nothing was sent.' : ''}`);
         }
         finished = true;
         ctx.renderRequest();
@@ -180,11 +205,41 @@ export function createCardEntryPrompter<Context extends CardPromptContext>(
   };
 }
 
-/** Fixed text for a failed host call; a daemon message is never passed through. */
-export function describeCardFailure(error: unknown): string {
-  return error instanceof CardHostError
-    ? error.message
-    : 'The daemon did not confirm the request. Check the selected host, its pairing and the payments scope, and run /payments status to see which cards it holds before trying again.';
+/**
+ * Fixed text for a failed host call, chosen by the status the daemon answered
+ * with. The daemon's own message is never passed through: a refusal can quote
+ * the request, and the request held the card.
+ */
+export function describeCardFailure(error: unknown, attempt: 'add' | 'remove' = 'add'): string {
+  if (error instanceof CardHostError) return error.message;
+  const unchanged = attempt === 'add' ? 'Nothing was saved' : 'Nothing was removed';
+  const rerun = attempt === 'add' ? '/payments card' : '/payments card remove <id> confirm';
+  const status = failureStatus(error);
+  const category = classifyFailure(error)?.category;
+  if (status === 400 || status === 422) {
+    return attempt === 'add'
+      ? `The daemon rejected a card field as invalid (it needs a number with enough digits, an expiry month from 1 to 12 with a four-digit year, and a 3 or 4 digit security code). ${unchanged}; run ${rerun} to enter the card again.`
+      : `The daemon rejected the card id. ${unchanged}; /payments status lists each card with its id.`;
+  }
+  if (category === 'authentication' || category === 'authorization') {
+    return `The selected daemon refused this terminal's credential for payments. ${unchanged}. Check the selected host, its pairing and the payments scope, then run ${rerun} again.`;
+  }
+  if (status === 409) {
+    return `The daemon's card store cannot be read. ${unchanged}. The daemon's log names the file to repair; then run ${rerun} again.`;
+  }
+  if (status !== undefined && status >= 500) {
+    return `The daemon could not ${attempt === 'add' ? 'store' : 'remove'} the card. ${unchanged}. Run ${rerun} again; if it fails again, the daemon's log has the reason.`;
+  }
+  return `The daemon did not answer, so it is not known whether the card was ${attempt === 'add' ? 'stored' : 'removed'}. Run /payments status to see which cards it holds before trying again.`;
+}
+
+function failureStatus(error: unknown): number | undefined {
+  if (!error || typeof error !== 'object') return undefined;
+  const own = (error as { readonly status?: unknown }).status;
+  if (typeof own === 'number') return own;
+  const body = (error as { readonly body?: unknown }).body;
+  const nested = body && typeof body === 'object' ? (body as { readonly status?: unknown }).status : undefined;
+  return typeof nested === 'number' ? nested : undefined;
 }
 
 /** A refusal whose text is safe to print: written here, never copied from the host's response. */
@@ -319,7 +374,7 @@ export function createPaymentCardCommands<Context extends CardPromptContext>(pol
         ? `[payments] Card ${stripDangerousAnsi(id)} was deleted from the selected daemon. Cancel it with the issuer too if it should stop working everywhere.`
         : `[payments] The daemon reported no card with id ${stripDangerousAnsi(id)}; nothing was removed. /payments status lists the cards it holds.`);
     } catch (error: unknown) {
-      context.print(`[payments] ${describeCardFailure(error)}`);
+      context.print(`[payments] ${describeCardFailure(error, 'remove')}`);
     }
     context.renderRequest();
   }

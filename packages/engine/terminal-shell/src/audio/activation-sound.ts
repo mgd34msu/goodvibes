@@ -13,10 +13,12 @@
  *  - `custom`, the file named by `voice.wake.activationSoundPath`.
  *  - `none`  , silent.
  *
- * Playback reuses the streaming player the spoken-turn path already owns
- * (player.ts), so a host with mpv or ffplay needs nothing extra and a host with
- * neither degrades to silence with a reported reason rather than an exception in
- * the middle of a capture.
+ * Playback uses the process's one streaming player, the same instance spoken
+ * turns use (player.ts), so a host with mpv or ffplay needs nothing extra, a
+ * host with neither degrades to silence with a reported reason rather than an
+ * exception in the middle of a capture, and `/tts stop` or quitting cuts the
+ * chime too. A player that exits with an error is reported with its exit code
+ * and last error line.
  */
 import { readFileSync } from 'node:fs';
 import { extname } from 'node:path';

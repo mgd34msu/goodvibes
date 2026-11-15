@@ -1,7 +1,7 @@
 import { accessSync, constants } from 'node:fs';
 import { delimiter, join } from 'node:path';
 import { spawn } from 'node:child_process';
-import type { Writable } from 'node:stream';
+import type { Readable, Writable } from 'node:stream';
 import type { VoiceAudioChunk } from '@goodvibes-jev/engine/platform/platform/voice';
 
 export interface StreamingAudioPlayerCommand {
@@ -32,7 +32,9 @@ export interface StreamingAudioPlaybackOptions {
 
 interface SpawnProcess {
   readonly stdin: Writable;
-  once(event: 'close', listener: () => void): this;
+  /** The player's error output; its last line names why a sound could not be played. */
+  readonly stderr?: Readable | null | undefined;
+  once(event: 'close', listener: (code?: number | null, signal?: NodeJS.Signals | null) => void): this;
   once(event: 'spawn', listener: () => void): this;
   once(event: 'error', listener: (error: unknown) => void): this;
   kill(signal?: NodeJS.Signals | number): boolean;
@@ -51,9 +53,14 @@ export interface LocalStreamingAudioPlayerOptions {
   readonly command?: StreamingAudioPlayerCommand | null;
 }
 
+/**
+ * The terminal's one audio output. Speech and the wake chime share it so that
+ * `/tts stop` and quitting cut every sound it started, not only the last one.
+ */
 export class LocalStreamingAudioPlayer implements StreamingAudioPlayer {
   readonly command: StreamingAudioPlayerCommand | null;
-  private activeProcess: SpawnProcess | null = null;
+  /** Every sink still running; a deliberate stop removes it before killing it. */
+  private readonly live = new Set<SpawnProcess>();
   private readonly spawnProcess: SpawnProcessFactory;
 
   constructor(options: LocalStreamingAudioPlayerOptions = {}) {
@@ -77,16 +84,22 @@ export class LocalStreamingAudioPlayer implements StreamingAudioPlayer {
     }
     if (options.signal?.aborted) return;
 
+    const label = this.command.label;
     const proc = this.spawnProcess(this.command.command, buildPlayerArgs(this.command, options.format));
-    this.activeProcess = proc;
+    this.live.add(proc);
+    const lastError = trackLastErrorLine(proc);
     const abort = () => {
       try { proc.stdin.destroy(); } catch { /* ignore */ }
       try { proc.kill('SIGTERM'); } catch { /* ignore */ }
     };
     options.signal?.addEventListener('abort', abort, { once: true });
+    // A sink cut on purpose (abort signal or stop()) is not a playback failure, whatever it exits with.
+    const cut = () => options.signal?.aborted === true || !this.live.has(proc);
     // Recorded from spawn so a sink that died between chunks is not waited on for a 'close' that already fired.
     let closed = false;
-    proc.once('close', () => { closed = true; });
+    const exited = new Promise<number | null>((resolve) => {
+      proc.once('close', (code) => { closed = true; resolve(typeof code === 'number' ? code : null); });
+    });
     let playedOut = false;
 
     try {
@@ -96,50 +109,57 @@ export class LocalStreamingAudioPlayer implements StreamingAudioPlayer {
       // clipped the beginning of playback. A spawn failure rejects here so the
       // caller can report it honestly rather than swallowing a dead player.
       await awaitReady(proc, options.signal);
-      if (options.signal?.aborted) return;
+      if (cut()) return;
 
       for await (const chunk of chunks) {
-        if (options.signal?.aborted) break;
+        if (cut()) break;
         if (chunk.data.byteLength === 0) continue;
         try {
           await writeStdin(proc, chunk.data);
         } catch (error) {
           // An intentional interrupt destroys stdin under a pending write; that is not a playback failure.
-          if (options.signal?.aborted) return;
-          throw error;
+          if (cut()) return;
+          // A closed pipe means the player went away; its exit code and last error line say why.
+          abort();
+          const code = await exited;
+          if (cut()) return;
+          throw playerFailure(label, code, lastError(), error);
         }
       }
 
       // An intentional interrupt (turn cancel / quit chord / /tts stop) has
-      // already torn the process down via `abort` and must cut immediately,
-      // do not wait on a graceful drain. A natural end-of-speech, by contrast,
-      // closes stdin and waits for the sink to play out every buffered sample
-      // so the tail of the response is never truncated.
-      if (options.signal?.aborted) return;
+      // already torn the process down and must cut immediately, do not wait
+      // on a graceful drain. A natural end-of-speech, by contrast, closes
+      // stdin and waits for the sink to play out every buffered sample so the
+      // tail of the response is never truncated.
+      if (cut()) return;
       try { proc.stdin.end(); } catch { /* ignore */ }
-      if (!closed) await waitForExit(proc);
+      const code = await exited;
       playedOut = true;
+      if (code !== null && code !== 0 && !cut()) throw playerFailure(label, code, lastError());
     } finally {
       options.signal?.removeEventListener('abort', abort);
       // A failed stream (the chunk iterator threw) must not leave the sink reading stdin forever. A natural drain is left alone so the tail is not cut.
       if (!playedOut && !closed) abort();
-      if (this.activeProcess === proc) this.activeProcess = null;
+      this.live.delete(proc);
     }
   }
 
   stop(): void {
-    const proc = this.activeProcess;
-    this.activeProcess = null;
-    if (!proc) return;
-    try { proc.stdin.destroy(); } catch { /* ignore */ }
-    try { proc.kill('SIGTERM'); } catch { /* ignore */ }
+    const procs = [...this.live];
+    this.live.clear();
+    for (const proc of procs) {
+      try { proc.stdin.destroy(); } catch { /* ignore */ }
+      try { proc.kill('SIGTERM'); } catch { /* ignore */ }
+    }
   }
 
   waitForDrain(timeoutMs: number): Promise<void> {
-    const proc = this.activeProcess;
-    if (!proc) return Promise.resolve();
+    const procs = [...this.live];
+    if (procs.length === 0) return Promise.resolve();
     return new Promise((resolve) => {
       let settled = false;
+      let open = procs.length;
       const settle = () => {
         if (settled) return;
         settled = true;
@@ -147,9 +167,41 @@ export class LocalStreamingAudioPlayer implements StreamingAudioPlayer {
         resolve();
       };
       const timer = setTimeout(settle, timeoutMs);
-      proc.once('close', settle);
+      for (const proc of procs) proc.once('close', () => { if (--open === 0) settle(); });
     });
   }
+}
+
+let sharedPlayer: LocalStreamingAudioPlayer | undefined;
+
+/**
+ * The process's one terminal audio player, built (and PATH scanned) on first use.
+ * Spoken turns and the wake chime both default to it.
+ */
+export function sharedStreamingAudioPlayer(): LocalStreamingAudioPlayer {
+  sharedPlayer ??= new LocalStreamingAudioPlayer();
+  return sharedPlayer;
+}
+
+/** Keep the last non-empty line the player wrote to stderr, bounded so a chatty player costs nothing. */
+function trackLastErrorLine(proc: SpawnProcess): () => string {
+  let tail = '';
+  proc.stderr?.on('data', (data: Buffer | string) => {
+    tail = (tail + String(data)).slice(-512);
+  });
+  return () => {
+    const lines = tail.split(/\r?\n/).map((line) => line.trim()).filter((line) => line.length > 0);
+    return lines.at(-1) ?? '';
+  };
+}
+
+function playerFailure(label: string, code: number | null, lastLine: string, cause?: unknown): Error {
+  const detail = lastLine ? `: ${lastLine}` : '';
+  if (code !== null && code !== 0) {
+    return new Error(`the audio player (${label}) exited with code ${code}${detail}`, cause === undefined ? undefined : { cause });
+  }
+  const reason = cause instanceof Error ? cause.message : String(cause ?? 'it stopped reading audio');
+  return new Error(`the audio player (${label}) stopped before the sound finished (${reason})${detail}`, cause === undefined ? undefined : { cause });
 }
 
 export function resolveStreamingAudioPlayerCommand(env: NodeJS.ProcessEnv = process.env): StreamingAudioPlayerCommand | null {
@@ -243,7 +295,7 @@ export function findExecutable(name: string, env: NodeJS.ProcessEnv, platform: s
 }
 
 function defaultSpawnProcess(command: string, args: readonly string[]): SpawnProcess {
-  return spawn(command, [...args], { stdio: ['pipe', 'ignore', 'ignore'] });
+  return spawn(command, [...args], { stdio: ['pipe', 'ignore', 'pipe'] });
 }
 
 function writeStdin(proc: SpawnProcess, data: Uint8Array): Promise<void> {
@@ -252,11 +304,5 @@ function writeStdin(proc: SpawnProcess, data: Uint8Array): Promise<void> {
       if (error) reject(error);
       else resolve();
     });
-  });
-}
-
-function waitForExit(proc: SpawnProcess): Promise<void> {
-  return new Promise((resolve) => {
-    proc.once('close', () => resolve());
   });
 }

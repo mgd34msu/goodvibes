@@ -1,23 +1,17 @@
 import {
   createTerminalWakeRuntime,
-  phaseWakeIndicator,
   type TerminalWakeRuntime,
   type TerminalWakeRuntimeDeps,
 } from '@goodvibes-jev/engine/terminal-shell/audio/wake-runtime';
 import { describeWakeBlockers, describeWakeLimitations, terminalWakeCapabilities } from '../core/wake-provision-status.ts';
 import { describeTranscriptionFailure } from '../core/voice-stt-gateway.ts';
-import type { VoiceCaptureIndicatorKind } from '../core/voice-capture-status.ts';
 export type { WakeProvisionSnapshot, WakeRuntimeTestSeams } from '@goodvibes-jev/engine/terminal-shell/audio/wake-runtime';
 /** TUI enablement remains read-only: provisioning is an explicit install/setup act. */
 export type WakeRuntimeDeps = Omit<TerminalWakeRuntimeDeps, 'ensureProvisioned' | 'enumerateInputDevices'>;
-export type WakeRuntime = TerminalWakeRuntime<Extract<VoiceCaptureIndicatorKind, `wake-${string}`>>;
+export type WakeRuntime = TerminalWakeRuntime;
 export const { wireWakeRuntime, startWakeRuntime } = createTerminalWakeRuntime({
   surface: 'tui',
   capabilities: terminalWakeCapabilities,
-  indicator: phaseWakeIndicator,
-  refusalKind: () => null,
-  liveStatus: false,
-  diagnostics: false,
   provisionOnEnable: false,
   missingModels: (reason) =>
     `[Wake] voice.wake.enabled is on, but the wake models are not provisioned (${reason}), ` +

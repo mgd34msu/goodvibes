@@ -1,4 +1,3 @@
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 /**
  * Reads whether an undeclared config key holds credential material, through
  * the `config.credential-key` battery. The declared list in
@@ -7,32 +6,19 @@ import { drainOwned } from '@goodvibes-jev/judgment/decisions';
  */
 import type { YesNoReading } from '@goodvibes-jev/judgment';
 import { captureJudgmentPort, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
-import { admitJudgmentJson, captureStrictJudgmentJson } from '../gate/judgment-result.js';
-import { isDeepStrictEqual } from 'node:util';
+import { admitJudgmentJson } from '../gate/judgment-result.js';
 import { credentialKey, type CredentialKeyState } from './batteries/credential-key.js';
 import { isSecretBearingConfigKey } from './secret-bearing-config-keys.js';
 import { CONFIG_SCHEMA } from './schema.js';
 import { decisionOrClassic } from '../runtime/decision-policy.js';
 
-/** Jev's reading of whether `state.key` holds a credential. Throws when no reading can be made. */
+/**
+ * Jev's reading of whether `state.key` holds a credential. Throws when no reading can be made.
+ * The state is admitted once as an immutable snapshot; the caller's `assertCurrent`, when given, runs before each attempt.
+ */
 export async function readCredentialKey(state: CredentialKeyState, site: string, options: JudgmentReadingOptions = {}): Promise<YesNoReading> {
   const snapshot = admitJudgmentJson(state);
-  const signal = options.signal, callerCurrent = options.assertCurrent;
-  const sourceCurrent = () => {
-    signal?.throwIfAborted();
-    if (options.signal !== signal || options.assertCurrent !== callerCurrent
-      || !isDeepStrictEqual(captureStrictJudgmentJson(state), snapshot)) throw new Error('Credential field source changed.');
-  };
-  const assertCurrent = () => {
-    sourceCurrent();
-    const result: unknown = callerCurrent?.();
-    if (result !== undefined) {
-      drainOwned(result);
-      throw new Error('Credential field ownership must be synchronous.');
-    }
-    sourceCurrent();
-  };
-  const owner = captureJudgmentPort(site, { ...options, assertCurrent });
+  const owner = captureJudgmentPort(site, options);
   const run = await credentialKey.run(owner.port, snapshot, { site, signal: owner.signal, beforeAttempt: owner.assertCurrent });
   owner.assertCurrent();
   return run.readings.credential;

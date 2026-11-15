@@ -13,12 +13,13 @@
  * seam the engine leaves for a product to have opinions the engine itself
  * must not.
  *
- * GLOBAL_FLAGS is every flag this vocabulary recognizes; no command declares
- * flags of its own beyond them, which is this vocabulary's actual current
- * shape: an operator-facing subcommand's own arguments (`auth add-user
- * --role admin`, `secrets delete KEY`) are this catalog's `commandArgs`
- * output, interpreted by that subcommand's own handler, not by anything
- * declared here.
+ * GLOBAL_FLAGS is every flag this vocabulary recognizes. A command whose
+ * handler reads options of its own (`auth add-user --role admin`, `secrets
+ * set KEY --stdin`, `pair --name phone`) is listed in OWNS_OPTIONS: an
+ * unknown option after its word reaches that handler in `commandArgs`. Every
+ * other command takes only the global flags, so a mistyped option after its
+ * word (`run --max-turn 3`) is refused instead of being dropped and its value
+ * joined into the prompt.
  */
 import { AUTO_REGISTER_CATALOG, BUILTIN_PROVIDER_ENV_KEYS } from '@goodvibes-jev/engine/platform/platform/providers';
 import type { CliCatalog, CommandFlagSpec, CommandSpec, EngineParseResult } from './cli-catalog-types.js';
@@ -233,12 +234,16 @@ const GLOBAL_FLAGS: readonly CommandFlagSpec<GoodVibesCliFlagField>[] = [
 ];
 
 /**
- * Every command word this vocabulary accepts. Every entry declares no flags
- * of its own (see the file header) and is lenient toward an unmatched option
- * token once its own word has been consumed, this vocabulary's real current
- * shape is one flat set of global flags, with a subcommand's further
- * arguments left for its own handler downstream.
+ * Commands whose handler parses its own subcommand options from `commandArgs`.
+ * Only these let an option the catalog does not know through; their handlers
+ * are where those options are read.
  */
+const OWNS_OPTIONS: ReadonlySet<GoodVibesCliCommand> = new Set<GoodVibesCliCommand>([
+  'service', 'doctor', 'models', 'providers', 'auth', 'subscription', 'secrets', 'sessions', 'tasks',
+  'pair', 'surfaces', 'support-bundle', 'hooks', 'plugin',
+]);
+
+/** Every command word this vocabulary accepts. */
 const COMMANDS: readonly CommandSpec<GoodVibesCliCommand, GoodVibesCliFlagField>[] = ([
   ['tui', ['app']],
   ['run', ['exec', 'e']],
@@ -275,7 +280,7 @@ const COMMANDS: readonly CommandSpec<GoodVibesCliCommand, GoodVibesCliFlagField>
   aliases,
   flags: [],
   passthrough: false,
-  lenientUnknownFlags: true,
+  lenientUnknownFlags: OWNS_OPTIONS.has(name),
   subcommands: [],
 })) as readonly CommandSpec<GoodVibesCliCommand, GoodVibesCliFlagField>[];
 
@@ -339,11 +344,10 @@ export const GOODVIBES_CLI_CATALOG: CliCatalog<GoodVibesCliCommand, GoodVibesCli
   commands: COMMANDS,
   globalFlags: GLOBAL_FLAGS,
   defaultCommand: 'tui',
-  // Preserves this vocabulary's exact current behavior: an unrecognized first
-  // word has never been refused here (unlike a daemon-shaped catalog, which
-  // opts into 'reject' instead), it silently becomes an ordinary positional
-  // under the default command, e.g. feeding the prompt-from-positionals rule
-  // above when combined with --print.
+  // An unrecognized first word becomes an ordinary positional under the
+  // default command: `goodvibes "fix the bug"` opens the app with that first
+  // prompt, and with --print it is the run prompt. A lone word one or two
+  // edits from a command word is refused by the engine as a typo.
   unmatchedFirstToken: 'passthrough',
   createDefaultFlags,
   postProcess,

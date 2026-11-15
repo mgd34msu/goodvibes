@@ -246,45 +246,15 @@ describe('config with no or a wrong subcommand', () => {
 });
 
 describe('renderConfigValue: the redaction rule, stated directly', () => {
-  test('plain-text rendering applies canonical redaction to nested values without sending values to the reader', async () => {
-    const secret = 'owned-fixture-private-value';
+  test('an object setting is classified by its declaration, with no reading and no judgment port', async () => {
     const states: unknown[] = [];
-    const previous = installJudgmentPort(fakePort((_name, _question, state) => {
-      states.push(state);
-      return noulAnswer((state as { key: string }).key === 'pricing.modelPrices.fixture.authToken' ? 0.99 : 0.01);
-    }).port);
+    const previous = installJudgmentPort(fakePort((_name, _question, state) => { states.push(state); return noulAnswer(0.99); }).port);
     try {
-      const text = await renderConfigValue('pricing.modelPrices', { fixture: { authToken: secret, input: 1 } });
-      expect(text).not.toContain(secret);
-      expect(JSON.parse(text)).toEqual({ fixture: { authToken: REDACTED_VALUE, input: 1 } });
-      expect(states.length).toBeGreaterThan(0);
-      expect(JSON.stringify(states)).not.toContain(secret);
-    } finally { installJudgmentPort(previous); }
-  });
-  test('object settings stay redacted through list, get, set and unset receipts', async () => {
-    const key = 'pricing.modelPrices';
-    const value = { commandFixture: { authToken: 'dummy-nested-command-value', input: 2 } };
-    const previous = installJudgmentPort(fakePort((_name, _question, state) =>
-      noulAnswer((state as { key: string }).key === `${key}.commandFixture.authToken` ? 0.99 : 0.01),
-    ).port);
-    try {
-      for (const json of [false, true]) {
-        const { manager } = fakeManager({ [key]: value });
-        for (const args of [['list'], ['get', key], ['set', key, JSON.stringify(value)], ['unset', key]]) {
-          const result = await runConfigCommand(args, deps(manager, json));
-          expect(result.exitCode).toBe(0);
-          if (args[0] !== 'unset') expect(result.lines.join('\n')).toContain(REDACTED_VALUE);
-          expect(result.lines.join('\n')).not.toContain(value.commandFixture.authToken);
-        }
-      }
-    } finally { installJudgmentPort(previous); }
-  });
-  test('an unavailable path reader refuses object rendering before returning values', async () => {
-    const previous = installJudgmentPort(undefined);
-    try {
-      await expect(renderConfigValue('pricing.modelPrices', {
-        unavailableCommandFixture: { nested: 'dummy-unclassified-value' },
-      })).rejects.toThrow();
+      const value = { 'fixture:model': { input: 1, output: 2 } };
+      expect(JSON.parse(await renderConfigValue('pricing.modelPrices', value))).toEqual(value);
+      expect(states).toHaveLength(0);
+      installJudgmentPort(undefined);
+      expect(JSON.parse(await renderConfigValue('pricing.modelPrices', value))).toEqual(value);
     } finally { installJudgmentPort(previous); }
   });
   test('a non-credential key prints its value', async () => {

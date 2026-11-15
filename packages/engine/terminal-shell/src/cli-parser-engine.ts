@@ -18,8 +18,14 @@
  *    wants; a catalog earns the strict behavior by declaring `'reject'`.
  * 2. Every refusal is a refusal. A flag that belongs to another surface, a
  *    flag this command does not take (unless the command opts into lenient
- *    unknown-flag passthrough), a missing value, each produces an error
- *    line, never an accept-and-ignore.
+ *    unknown-flag passthrough because its own handler reads its options), a
+ *    missing value, each produces an error line, never an accept-and-ignore.
+ *
+ * A catalog that lets an unmatched first word through (a terminal app seeds
+ * its first prompt from it) still refuses a lone word one or two edits away
+ * from a command word: `goodvibes staus` is a typo, not a prompt, and opening
+ * the full-screen app for it hides the mistake. `--` before the word keeps it
+ * as a prompt.
  */
 import {
   catalogCommandSpec,
@@ -126,6 +132,48 @@ function findCommandWordToken(
   return first;
 }
 
+/** Edit distance with adjacent transpositions, capped: anything above `limit` reports `limit + 1`. */
+function editDistance(a: string, b: string, limit: number): number {
+  if (Math.abs(a.length - b.length) > limit) return limit + 1;
+  const rows: number[][] = [];
+  for (let i = 0; i <= a.length; i += 1) {
+    const row: number[] = [i];
+    for (let j = 1; j <= b.length; j += 1) {
+      if (i === 0) { row.push(j); continue; }
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      let best = Math.min(rows[i - 1]![j]! + 1, row[j - 1]! + 1, rows[i - 1]![j - 1]! + cost);
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) best = Math.min(best, rows[i - 2]![j - 2]! + 1);
+      row.push(best);
+    }
+    rows.push(row);
+  }
+  return Math.min(rows[a.length]![b.length]!, limit + 1);
+}
+
+/**
+ * The command word an unmatched token was most likely meant to be, or
+ * undefined when none is close: one edit for a word of up to four letters, two
+ * for a longer one. Words under three letters are never suggested from, so a
+ * short prompt is not mistaken for `qr` or `e`.
+ */
+export function nearestCommandWord<TCommand extends string, TField extends string>(
+  catalog: Pick<CliCatalog<TCommand, TField, unknown>, 'commands'>,
+  token: string,
+): string | undefined {
+  const word = token.toLowerCase();
+  if (word.length < 3) return undefined;
+  const limit = word.length <= 4 ? 1 : 2;
+  let best: { readonly word: string; readonly distance: number } | undefined;
+  for (const spec of catalog.commands) {
+    for (const candidate of [spec.name, ...spec.aliases]) {
+      if (candidate.length < 3) continue;
+      const distance = editDistance(word, candidate, limit);
+      if (distance <= limit && (best === undefined || distance < best.distance)) best = { word: candidate, distance };
+    }
+  }
+  return best?.word;
+}
+
 function parsePort(value: string, optionName: string, errors: string[]): number | undefined {
   if (!/^\d+$/.test(value)) {
     errors.push(`${optionName} must be a port number from 1 to 65535.`);
@@ -230,6 +278,7 @@ export function parseWithCatalog<TCommand extends string, TField extends string,
   let command: TCommand = catalog.defaultCommand;
   let rawCommand: string | undefined;
   let sawCommand = false;
+  let nearMiss: { readonly token: string; readonly suggestion: string } | undefined;
 
   if (found) {
     const resolved = resolveCatalogCommand(catalog, found.token);
@@ -251,6 +300,8 @@ export function parseWithCatalog<TCommand extends string, TField extends string,
       // command stays the catalog default and sawCommand stays false, so the
       // REST of argv is also parsed in the pre-command (strict) posture,
       // matching a single unmatched word never partially unlocking anything.
+      const suggestion = nearestCommandWord(catalog, found.token);
+      if (suggestion !== undefined) nearMiss = { token: found.token, suggestion };
     } else {
       command = resolved;
       rawCommand = found.token;
@@ -392,6 +443,11 @@ export function parseWithCatalog<TCommand extends string, TField extends string,
     }
     if (catalog.postFlag) flags=catalog.postFlag(flags,flagSpec);
     if (flagSpec.warning) warnings.push(flagSpec.warning);
+  }
+
+  // A lone near-miss word is a mistyped command; a longer line is a prompt that happens to start with one.
+  if (nearMiss !== undefined && positionals.length === 1) {
+    errors.push(`Unknown command: ${nearMiss.token}. Did you mean \`${binary} ${nearMiss.suggestion}\`? To start with "${nearMiss.token}" as the first prompt instead, run: ${binary} -- ${nearMiss.token}`);
   }
 
   const result: EngineParseResult<TCommand, TFlags> = {

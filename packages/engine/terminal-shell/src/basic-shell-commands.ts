@@ -2,18 +2,14 @@ import type { TerminalSlashCommand } from './command-registry.js';
 export interface BasicShellCommandContext {
   readonly print: (message: string) => void;
   readonly pasteFromClipboard?: (() => { readonly pasted: boolean }) | undefined;
-  readonly reloadSystemPrompt?: (() => string) | undefined;
-  readonly renderRequest: () => void;
-  /** Lets go of a daemon-hosted session so the next message starts a new one. */
-  readonly abandonHostedSession?: (() => void) | undefined;
-  readonly session: {
-    readonly conversationManager: { resetAll(): void; rebuildHistory(): unknown };
-    readonly runtime: { systemPrompt: string };
-  };
 }
+/**
+ * /reset is not here: it is an alias of /clear (shell-core-actions.ts), whose
+ * startFreshConversation saves a copy and resets the journal, recovery point,
+ * rewind anchors and usage counters together.
+ */
 export function createBasicShellCommands<Context extends BasicShellCommandContext>(): {
   readonly paste: TerminalSlashCommand<Context>;
-  readonly reset: TerminalSlashCommand<Context>;
 } {
   return {
     paste: {
@@ -27,18 +23,6 @@ export function createBasicShellCommands<Context extends BasicShellCommandContex
         }
         const result = context.pasteFromClipboard();
         if (!result.pasted) context.print('Clipboard does not contain supported text or image data.');
-      },
-    },
-    reset: {
-      name: 'reset',
-      aliases: [],
-      description: 'Full reset: clear display and conversation context',
-      handler(_args, context) {
-        context.session.conversationManager.resetAll();
-        context.abandonHostedSession?.();
-        if (context.reloadSystemPrompt) context.session.runtime.systemPrompt = context.reloadSystemPrompt();
-        context.session.conversationManager.rebuildHistory();
-        context.renderRequest();
       },
     },
   };

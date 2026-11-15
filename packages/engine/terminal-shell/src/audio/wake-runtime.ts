@@ -60,10 +60,10 @@ export interface TerminalWakeRuntimeDeps {
   readonly setTimeout?: ((handler: () => void, ms: number) => unknown) | undefined;
   readonly clearTimeout?: ((handle: unknown) => void) | undefined;
 }
-type WakeKind = Extract<VoiceCaptureIndicatorKind, `wake-${string}`>;
-export interface TerminalWakeRuntime<Kind extends WakeKind = WakeKind> {
+export type WakeKind = Extract<VoiceCaptureIndicatorKind, `wake-${string}`>;
+export interface TerminalWakeRuntime {
   refresh(): Promise<void>;
-  status(): VoiceCaptureIndicatorState<Kind> | null;
+  status(): VoiceCaptureIndicatorState<WakeKind> | null;
   settings(): WakeRuntimeSettings;
   stop(): Promise<void>;
 }
@@ -76,16 +76,7 @@ export interface TerminalWakeRuntime<Kind extends WakeKind = WakeKind> {
 function stoppedWithReason(state: WakeListenerState, phase: WakeListenerState['phase']): boolean {
   return phase === 'idle' && state.lastError !== null;
 }
-export function phaseWakeIndicator(
-  state: WakeListenerState,
-  phase: WakeListenerState['phase'],
-): Exclude<WakeKind, 'wake-starting' | 'wake-no-audio' | 'wake-no-microphone'> | null {
-  if (phase === 'starting' || phase === 'listening') return 'wake-listening';
-  if (phase === 'capturing-utterance') return 'wake-capturing';
-  if (phase === 'restarting') return 'wake-restarting';
-  if (phase === 'latched' || stoppedWithReason(state, phase)) return 'wake-latched';
-  return null;
-}
+/** The wake chip, derived only from capture truth (a stream open, frames arriving), never from intent. */
 export function liveWakeIndicator(state: WakeListenerState): WakeKind | null {
   const claim = describeWakeListening(state);
   if (claim.kind === 'listening') return state.phase === 'capturing-utterance' ? 'wake-capturing' : 'wake-listening';
@@ -97,14 +88,18 @@ export function liveWakeIndicator(state: WakeListenerState): WakeKind | null {
   if (stoppedWithReason(state, state.phase)) return 'wake-latched';
   return null;
 }
-/** One owned listener/transcription lifetime, with product provisioning and display policies. */
-export function createTerminalWakeRuntime<Kind extends WakeKind>(policy: {
+/** The chip a refused start leaves: a missing microphone says so; any other refusal is the stopped chip. */
+function refusalKind(refusal: string): WakeKind {
+  return refusal === 'no-microphone' ? 'wake-no-microphone' : 'wake-latched';
+}
+/**
+ * One owned listener/transcription lifetime. Both terminal apps show the same
+ * chip and record the same diagnostics; whether enabling wake fetches missing
+ * models is the one product difference.
+ */
+export function createTerminalWakeRuntime(policy: {
   readonly surface: Parameters<typeof resolveWakeRuntimeSettings>[1];
   readonly capabilities: (provision: Pick<WakeProvisionSnapshot, 'vadReady'>) => WakeSurfaceCapabilities;
-  readonly indicator: (state: WakeListenerState, phase: WakeListenerState['phase']) => Kind | null;
-  readonly refusalKind: (refusal: string) => Kind | null;
-  readonly liveStatus: boolean;
-  readonly diagnostics: boolean;
   readonly provisionOnEnable: boolean;
   readonly missingModels: (reason: string) => string;
   readonly draftNotice: string;
@@ -113,22 +108,20 @@ export function createTerminalWakeRuntime<Kind extends WakeKind>(policy: {
   readonly describeLimitations: (settings: WakeRuntimeSettings) => readonly string[];
   readonly describeTranscriptionFailure: (error: unknown) => string;
 }) {
-  function wireWakeRuntime(deps: TerminalWakeRuntimeDeps): TerminalWakeRuntime<Kind> {
+  function wireWakeRuntime(deps: TerminalWakeRuntimeDeps): TerminalWakeRuntime {
     let listener: WakeListener | null = null;
     let lifetime: AbortController | null = null;
     let starting: Promise<void> | null = null;
     let epoch = 0;
     let startingEpoch = 0;
-    let phase: WakeListenerState['phase'] = 'idle';
-    let deviceLabel: string | null = null;
-    let detail: string | undefined;
     let vadReady = false;
-    let refusal: { readonly kind: Kind; readonly message: string } | null = null;
+    // Frees the running listener's inference sessions once that listener has stopped.
+    let releaseEngine: (() => Promise<void>) | null = null;
+    let refusal: { readonly kind: WakeKind; readonly message: string } | null = null;
     const readProvision = () => (deps.provisionStatus ?? ((root) => wakeProvisionStatus({ managedRoot: root })))(deps.managedRoot);
     const resolve = (): WakeRuntimeSettings =>
-      resolveWakeRuntimeSettings(deps.readConfig, policy.surface, policy.capabilities(policy.liveStatus ? { vadReady } : readProvision()));
+      resolveWakeRuntimeSettings(deps.readConfig, policy.surface, policy.capabilities({ vadReady }));
     const diagnostic = (ok: boolean, operation: string, error: string | undefined, message: string): void => {
-      if (!policy.diagnostics) return;
       recordVoiceDiagnostic(deps.managedRoot, {
         at: new Date().toISOString(),
         operation,
@@ -161,16 +154,15 @@ export function createTerminalWakeRuntime<Kind extends WakeKind>(policy: {
       }
       if (!resolution.available) {
         deps.notify(`[Wake] Captured the utterance after the wake phrase but could not transcribe it: ${resolution.reason}`);
-        if (policy.diagnostics)
-          recordVoiceDiagnostic(deps.managedRoot, {
-            at: new Date().toISOString(),
-            operation: 'wake-transcribe',
-            route: 'none',
-            ok: false,
-            provider: 'none',
-            configSource: 'no speech-to-text route resolved on this surface',
-            error: resolution.reason,
-          });
+        recordVoiceDiagnostic(deps.managedRoot, {
+          at: new Date().toISOString(),
+          operation: 'wake-transcribe',
+          route: 'none',
+          ok: false,
+          provider: 'none',
+          configSource: 'no speech-to-text route resolved on this surface',
+          error: resolution.reason,
+        });
         deps.render();
         return;
       }
@@ -187,16 +179,15 @@ export function createTerminalWakeRuntime<Kind extends WakeKind>(policy: {
         if (signal.aborted) return;
         const message = policy.describeTranscriptionFailure(error);
         deps.notify(`[Wake] Transcription failed: ${message}`);
-        if (policy.diagnostics)
-          recordVoiceDiagnostic(deps.managedRoot, {
-            at: new Date().toISOString(),
-            operation: 'wake-transcribe',
-            route: 'none',
-            ok: false,
-            provider: 'every available route',
-            configSource: "this surface's resolved speech-to-text routes",
-            error: message,
-          });
+        recordVoiceDiagnostic(deps.managedRoot, {
+          at: new Date().toISOString(),
+          operation: 'wake-transcribe',
+          route: 'none',
+          ok: false,
+          provider: 'every available route',
+          configSource: "this surface's resolved speech-to-text routes",
+          error: message,
+        });
         deps.render();
         return;
       }
@@ -252,27 +243,24 @@ export function createTerminalWakeRuntime<Kind extends WakeKind>(policy: {
           `[Wake] Loading ${unpinned.length} custom model${unpinned.length === 1 ? '' : 's'} that ${unpinned.length === 1 ? 'is' : 'are'} not checksum-pinned: ${unpinned.map((model) => `${model.id} (${model.path})`).join(', ')}`,
         );
       const current = () => owned() && listener === active;
+      const engines = createWakeEngineFactory({
+        assetDirectory: deps.assetDirectory,
+        embeddingPath: paths.embeddingPath,
+        models: models.map((model) => ({ id: model.id, path: model.path })),
+        vad: { path: paths.vadPath, ready: vadReady },
+        settings,
+        warn: deps.warn,
+        ...(deps.loadSession !== undefined ? { loadSession: deps.loadSession } : {}),
+      });
       const active = new WakeListener({
         settings,
         openCapture: deps.openCapture,
-        createEngine: createWakeEngineFactory({
-          assetDirectory: deps.assetDirectory,
-          embeddingPath: paths.embeddingPath,
-          models: models.map((model) => ({ id: model.id, path: model.path })),
-          vad: { path: paths.vadPath, ready: vadReady },
-          settings,
-          warn: deps.warn,
-          ...(deps.loadSession !== undefined ? { loadSession: deps.loadSession } : {}),
-        }),
+        createEngine: engines,
         ...(deps.createNoiseSuppression !== undefined ? { createNoiseSuppression: deps.createNoiseSuppression } : {}),
         recordDiagnostic: (entry) => recordVoiceDiagnostic(deps.managedRoot, entry),
         handlers: {
-          onStateChange(state) {
-            if (!current()) return;
-            phase = state.phase;
-            deviceLabel = state.deviceLabel;
-            if (state.phase === 'latched') detail = state.latchReason ?? undefined;
-            deps.render();
+          onStateChange() {
+            if (current()) deps.render();
           },
           onWake(event) {
             if (!current()) return;
@@ -282,21 +270,16 @@ export function createTerminalWakeRuntime<Kind extends WakeKind>(policy: {
           onUtterance(utterance) {
             if (current()) void transcribe(utterance, settings, controller.signal);
           },
-          ...(policy.diagnostics
-            ? {
-                onDeviceBinding(binding: NonNullable<WakeListenerState['deviceBinding']>) {
-                  if (!current()) return;
-                  if (binding.state !== 'pinned' && binding.state !== 'default') {
-                    deps.notify(`[Wake] ${binding.message}`);
-                    diagnostic(binding.usable, 'wake-input-device', undefined, binding.message);
-                  } else if (binding.state === 'pinned') deps.notify(`[Wake] ${binding.message}`);
-                  deps.render();
-                },
-              }
-            : {}),
+          onDeviceBinding(binding: NonNullable<WakeListenerState['deviceBinding']>) {
+            if (!current()) return;
+            if (binding.state !== 'pinned' && binding.state !== 'default') {
+              deps.notify(`[Wake] ${binding.message}`);
+              diagnostic(binding.usable, 'wake-input-device', undefined, binding.message);
+            } else if (binding.state === 'pinned') deps.notify(`[Wake] ${binding.message}`);
+            deps.render();
+          },
           onFailure(error, restarting, failureDetail) {
             if (!current()) return;
-            detail = failureDetail;
             diagnostic(false, 'wake-capture', error.message, failureDetail);
             deps.notify(
               restarting
@@ -313,6 +296,7 @@ export function createTerminalWakeRuntime<Kind extends WakeKind>(policy: {
         ...(deps.clearTimeout !== undefined ? { clearTimeout: deps.clearTimeout } : {}),
       });
       listener = active;
+      releaseEngine = engines.release;
       let outcome: Awaited<ReturnType<WakeListener['start']>>;
       try {
         outcome = await active.start();
@@ -325,12 +309,11 @@ export function createTerminalWakeRuntime<Kind extends WakeKind>(policy: {
           controller.abort();
           lifetime = null;
           listener = null;
-          phase = 'idle';
-          deviceLabel = null;
-          detail = undefined;
+          releaseEngine = null;
           refusal = null;
         }
         await active.stop().catch(() => undefined);
+        await engines.release();
         if (stillOurs) {
           diagnostic(false, 'wake-capture-start', message, 'the wake detector failed while starting');
           deps.notify(`[Wake] The wake-word detector failed while starting: ${message}`);
@@ -341,15 +324,17 @@ export function createTerminalWakeRuntime<Kind extends WakeKind>(policy: {
       // A delayed opener cannot regain ownership after stop or a replacement start.
       if (!current()) {
         await active.stop();
+        await engines.release();
         return;
       }
       if (!outcome.started) {
         controller.abort();
         lifetime = null;
         listener = null;
-        phase = 'idle';
-        const kind = policy.refusalKind(outcome.refusal);
-        refusal = kind ? { kind, message: outcome.detail } : null;
+        // A start() that was refused arms no timer, so nothing will reopen it.
+        releaseEngine = null;
+        void engines.release();
+        refusal = { kind: refusalKind(outcome.refusal), message: outcome.detail };
         diagnostic(false, 'wake-capture-start', outcome.detail, `the wake detector did not start (${outcome.refusal})`);
         deps.notify(`[Wake] The wake-word detector did not start (${outcome.refusal}): ${outcome.detail}`);
       } else {
@@ -362,6 +347,8 @@ export function createTerminalWakeRuntime<Kind extends WakeKind>(policy: {
     };
     const stop = async (): Promise<void> => {
       const active = listener;
+      const release = releaseEngine;
+      releaseEngine = null;
       epoch++;
       // Retired model loads may ignore cancellation. They keep their own cleanup,
       // but must not block a replacement listener from starting.
@@ -369,13 +356,14 @@ export function createTerminalWakeRuntime<Kind extends WakeKind>(policy: {
       lifetime?.abort();
       lifetime = null;
       listener = null;
-      phase = 'idle';
-      deviceLabel = null;
-      detail = undefined;
       // A refusal belongs to the start that was refused; once wake is stopped
       // there is nothing left for the status chip to explain.
       refusal = null;
-      if (active) await active.stop();
+      try {
+        if (active) await active.stop();
+      } finally {
+        await release?.();
+      }
     };
     const refreshNow = async (): Promise<void> => {
       const provision = readProvision();
@@ -412,7 +400,7 @@ export function createTerminalWakeRuntime<Kind extends WakeKind>(policy: {
       deps.notify(`[Wake] Could not apply the wake settings: ${message}`);
       deps.render();
     };
-    const runtime: TerminalWakeRuntime<Kind> = {
+    const runtime: TerminalWakeRuntime = {
       async refresh() {
         try {
           await refreshNow();
@@ -424,13 +412,13 @@ export function createTerminalWakeRuntime<Kind extends WakeKind>(policy: {
         if (!listener)
           return refusal ? { kind: refusal.kind, deviceLabel: null, indicator: resolve().indicator, detail: refusal.message } : null;
         const state = listener.state();
-        const kind = policy.indicator(state, phase);
+        const kind = liveWakeIndicator(state);
         if (!kind) return null;
         return {
           kind,
-          deviceLabel,
+          deviceLabel: state.deviceLabel,
           indicator: resolveWakeRuntimeSettings(deps.readConfig, policy.surface).indicator,
-          ...(policy.liveStatus ? { detail: describeWakeListening(state).message } : detail !== undefined ? { detail } : {}),
+          detail: describeWakeListening(state).message,
         };
       },
       settings: resolve,
@@ -439,18 +427,25 @@ export function createTerminalWakeRuntime<Kind extends WakeKind>(policy: {
     return runtime;
   }
   function startWakeRuntime(
-    runtime: TerminalWakeRuntime<Kind>,
+    runtime: TerminalWakeRuntime,
     deps: Pick<TerminalWakeRuntimeDeps, 'subscribeConfig'>,
   ): readonly (() => void)[] {
     const apply = (): void => {
       void runtime.refresh();
     };
     // The listener captures its rows at start, so a change to one of them restarts it. autoSubmit and retainAudio are read per utterance and indicator per status read, so they need no restart.
+    // A write that changes several rows notifies once per row in the same tick; they share one restart, so the models load once.
+    let restartPending = false;
     const restart = (): void => {
-      void runtime
-        .stop()
-        .catch(() => undefined)
-        .then(() => runtime.refresh());
+      if (restartPending) return;
+      restartPending = true;
+      queueMicrotask(() => {
+        restartPending = false;
+        void runtime
+          .stop()
+          .catch(() => undefined)
+          .then(() => runtime.refresh());
+      });
     };
     const appliedLive = new Set(['voice.wake.enabled', 'voice.wake.autoSubmit', 'voice.wake.retainAudio', 'voice.wake.indicator']);
     const restartKeys = WAKE_SETTING_KEYS.filter((key) => !appliedLive.has(key) && !key.startsWith('voice.wake.surfaces.'));

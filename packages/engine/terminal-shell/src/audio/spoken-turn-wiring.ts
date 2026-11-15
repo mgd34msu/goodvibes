@@ -3,7 +3,7 @@ import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/conf
 import type { UiRuntimeEvents } from '@goodvibes-jev/engine/platform/platform/runtime/ui';
 import type { VoiceService } from '@goodvibes-jev/engine/platform/platform/voice';
 import type { StreamingAudioPlayer } from './player.js';
-import { LocalStreamingAudioPlayer } from './player.js';
+import { sharedStreamingAudioPlayer } from './player.js';
 import { SpokenTurnController } from '@goodvibes-jev/engine/platform/platform/voice';
 export interface SpokenTurnRuntime {
     readonly unsubs: readonly (() => void)[];
@@ -27,7 +27,8 @@ export interface WireSpokenTurnRuntimeOptions {
     readonly notify: (message: string) => void;
     /**
      * Optional player factory, injected in tests to avoid spawning real
-     * subprocesses. Defaults to LocalStreamingAudioPlayer.
+     * subprocesses. Defaults to the process's one terminal player, the same
+     * one the wake chime uses, so a stop or quit cuts both.
      */
     readonly playerFactory?: (() => StreamingAudioPlayer) | undefined;
     /** Injectable timers for the synthesis retry backoff, so tests do not wait in real time. */
@@ -44,7 +45,7 @@ export interface WireSpokenTurnRuntimeOptions {
  * inside SpokenTurnController still gates gracefully when no player is found.
  */
 export function wireSpokenTurnRuntime(options: WireSpokenTurnRuntimeOptions, source: string): SpokenTurnRuntime {
-    const player = options.playerFactory ? options.playerFactory() : new LocalStreamingAudioPlayer();
+    const player = options.playerFactory ? options.playerFactory() : sharedStreamingAudioPlayer();
     // The terminal platform's subprocess-based player already satisfies the platform's AudioSink
     // interface unchanged (see docs/decisions/2026-07-06-spoken-turn-tts-policy-platform-hoist.md
     // in the platform repo), only the option name (`sink` not `player`) and the

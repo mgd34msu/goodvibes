@@ -154,9 +154,8 @@ export function registerShellCoreCommands(registry: CommandRegistry): void {
     },
   });
 
-  registry.register(coreActions.clear);
-
-  registry.register(basicCommands.reset);
+  // /reset is the same fresh start as /clear, so it is one of its names rather than a second implementation.
+  registry.register({ ...coreActions.clear, aliases: [...coreActions.clear.aliases, 'reset'] });
 
   registry.register({
     name: 'compact',

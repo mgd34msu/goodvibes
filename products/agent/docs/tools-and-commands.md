@@ -403,7 +403,7 @@ Routine promotion is an explicit scheduling route. Local routines stay local unt
 | `/channel-profiles` | List, set, or delete per-channel session profile bindings (model, provider, permission mode) on the connected host; mutations require `--yes`. |
 | `/channels` | Inspect channel readiness, delivery receipts, or send one explicitly confirmed delivery message. |
 | `/ci` | Check a repo or PR's CI with per-job conclusions and manage standing CI watches with channel delivery; mutations require `--yes`. |
-| `/clear` | Clear the conversation display while keeping LLM context. |
+| `/clear` | Start a fresh conversation; the current one is saved as its own session first. Also `/cls` and `/reset`. |
 | `/collapse` | Collapse rendered blocks by type. |
 | `/commands` | Browse all commands in a scrollable list. |
 | `/compact` | Summarize the conversation to free context window. |
@@ -445,7 +445,6 @@ Routine promotion is an explicit scheduling route. Local routines stay local unt
 | `/quit` | Exit the application. |
 | `/redo` | Redo the last undone conversation turn. |
 | `/refresh-models` | Refresh model catalog, metadata, and token limits. |
-| `/reset` | Clear display and conversation context. |
 | `/retry` | Re-send the last user message, optionally with modified text. |
 | `/routines` | Manage Agent-local routines and explicit routine schedule promotion. |
 | `/save` | Save the current session. |

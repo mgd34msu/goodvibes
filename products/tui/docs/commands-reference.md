@@ -5,7 +5,7 @@
 
 # Command Reference
 
-GoodVibes ships **164** built-in slash commands across **75** categories. Every command below is generated directly from the command registry, so this list is always complete and current. Type a command in the composer prefixed with `/`, or press `Ctrl+K` (or run `/palette`) to search them all in the command palette.
+GoodVibes ships **163** built-in slash commands across **75** categories. Every command below is generated directly from the command registry, so this list is always complete and current. Type a command in the composer prefixed with `/`, or press `Ctrl+K` (or run `/palette`) to search them all in the command palette.
 
 ## Categories
 
@@ -73,7 +73,7 @@ GoodVibes ships **164** built-in slash commands across **75** categories. Every 
 - [Sessions & Replay](#sessions-replay): 4
 - [Settings Sync](#settings-sync): 1
 - [Sharing](#sharing): 1
-- [Shell & Session](#shell-session): 20
+- [Shell & Session](#shell-session): 19
 - [Skills](#skills): 1
 - [Subscriptions](#subscriptions): 1
 - [Tasks](#tasks): 1
@@ -543,7 +543,7 @@ GoodVibes ships **164** built-in slash commands across **75** categories. Every 
 
 | Command | Aliases | Usage | Description |
 | --- | --- | --- | --- |
-| `/clear` | `/cls` | None | Start a fresh conversation (the current one is saved as its own session) |
+| `/clear` | `/cls`, `/reset` | None | Start a fresh conversation (the current one is saved as its own session) |
 | `/commands` | `/cmds` | None | Browse all commands in a scrollable list |
 | `/compact` | None | None | Summarize conversation to free context window |
 | `/compact-history` | `/compaction-history` | None | Show compaction history for this session |
@@ -560,7 +560,6 @@ GoodVibes ships **164** built-in slash commands across **75** categories. Every 
 | `/power` | None | `[status \| on \| off \| toggle]` | Host sleep ownership: show status and toggle keep-awake |
 | `/queue` | `/q` | `[list \| edit <n> <text> \| delete <n>]` | Mid-turn message queue: list, edit, or delete still-undelivered messages |
 | `/quit` | `/:q`, `/exit` | None | Exit the application |
-| `/reset` | None | None | Full reset: clear display and conversation context |
 | `/shortcuts` | `/keys`, `/keybinds` | None | Show keyboard shortcuts reference |
 | `/wq` | `/:wq` | None | Commit all git changes and then exit |
 

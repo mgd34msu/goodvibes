@@ -3,7 +3,6 @@ import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { captureJudgmentPort, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
 import { decisionOrClassic, isClassicOperation, withDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime';
 import { captureOwnedJson } from '@goodvibes-jev/engine/platform/platform/gate';
@@ -144,46 +143,24 @@ export function createSupportBundleCommand<
       const configManager = runtime.configManager;
       const retainedConfig = retainCliConfig(configManager);
       const rawConfig = policy.detachConfig ? captureOwnedJson(retainedConfig.raw) : retainedConfig.raw;
-      const workingDirectory = runtime.workingDirectory,
-        homeDirectory = runtime.homeDirectory;
-      const signal = options.signal,
-        callerCurrent = options.assertCurrent;
-      const sourceCurrent = () => {
-        signal?.throwIfAborted();
-        if (
-          options.signal !== signal ||
-          options.assertCurrent !== callerCurrent ||
-          runtime.configManager !== configManager ||
-          runtime.workingDirectory !== workingDirectory ||
-          runtime.homeDirectory !== homeDirectory
-        )
-          throw new Error('Support bundle input changed before export.');
+      // The settings are captured once above. The one check that they still match
+      // runs immediately before the file is written, the step that publishes them.
+      const assertCurrent = () => {
+        options.signal?.throwIfAborted();
         try {
           retainedConfig.assertCurrent();
         } catch {
           throw new Error('Support bundle input changed before export.');
         }
+        options.assertCurrent?.();
       };
-      const assertCurrent = () => {
-        sourceCurrent();
-        const result: unknown = callerCurrent?.();
-        if (result !== undefined) {
-          drainOwned(result);
-          throw new Error('Support bundle ownership must be synchronous.');
-        }
-        sourceCurrent();
-      };
-      assertCurrent();
       return await bindings.withServices(
         runtime,
         async (services) => {
-          assertCurrent();
           const owner = await decisionOrClassic(() => Promise.resolve(captureJudgmentPort(policy.site, { ...options, assertCurrent })),
-            () => undefined, () => { assertCurrent(); return true; });
-          const current = () => { assertCurrent(); if (!isClassicOperation()) owner?.assertCurrent(); assertCurrent(); };
-          current();
+            () => undefined, () => true);
+          const current = () => { assertCurrent(); if (!isClassicOperation()) owner?.assertCurrent(); };
           const providers = await providerReadiness(services);
-          current();
           const reading = { ...options, signal: owner?.signal ?? options.signal, assertCurrent: current };
           const redactedConfig = await prepareConfigRedaction(rawConfig, reading);
           const service = await bindings.servicePosture(runtime, { ...reading, logTailBytes: 8192 });
@@ -227,10 +204,7 @@ export function createSupportBundleCommand<
               version: bundle.version, type: bundle.type,
               operationProvenance: 'classic', semanticAssessment: 'not-evaluated' }, null, 2);
           }
-          redactedConfig.assertCurrent();
-          current();
           mkdirSync(dirname(targetPath), { recursive: true });
-          redactedConfig.assertCurrent();
           current();
           writeFileSync(targetPath, serialized + '\n', 'utf-8');
           return {

@@ -416,10 +416,31 @@ describe('unknown flags', () => {
     expect(result.commandArgs).toEqual([]);
   });
 
-  test('an unknown flag typed after the command word rides that command\'s leniency', () => {
-    const result = parse(['status', '--typo-flag']);
+  test('an unknown flag after a command that reads its own options reaches its handler', () => {
+    const result = parse(['secrets', 'set', 'KEY', '--stdin']);
     expect(result.errors).toEqual([]);
-    expect(result.commandArgs).toEqual(['--typo-flag']);
+    expect(result.commandArgs).toEqual(['set', 'KEY', '--stdin']);
+  });
+
+  test('a mistyped run flag is refused, not dropped with its value joined into the prompt', () => {
+    const result = parse(['run', '--max-turn', '3', 'fix the bug']);
+    expect(result.errors[0]).toContain('Unknown option: --max-turn');
+    expect(parse(['run', '--timout=5m', 'hi']).errors[0]).toContain('Unknown option: --timout');
+  });
+});
+
+describe('an unmatched first word', () => {
+  test('a lone word one edit from a command is refused as a typo', () => {
+    const result = parse(['staus']);
+    expect(result.errors[0]).toContain('Unknown command: staus');
+    expect(result.errors[0]).toContain('status');
+  });
+
+  test('a prompt, or a word after --, still opens the app with it', () => {
+    expect(parse(['fix', 'the', 'bug']).errors).toEqual([]);
+    const kept = parse(['--', 'staus']);
+    expect(kept.errors).toEqual([]);
+    expect(kept.positionals).toEqual(['staus']);
   });
 });
 

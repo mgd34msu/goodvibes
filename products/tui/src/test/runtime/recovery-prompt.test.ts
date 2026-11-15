@@ -7,7 +7,7 @@
  * a modal is not an answer and must leave the snapshot exactly where it is.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, rmSync } from 'node:fs';
 import { writeRecoveryFile } from '@/runtime/index.ts';
 import type { SessionSurface } from '@/runtime/index.ts';
 import {
@@ -30,7 +30,6 @@ import {
 } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 import { ageRecoverySnapshot, makeTestSurface } from '../helpers/session-surface.ts';
-import { recoveryDecisionsPathFor } from '../../runtime/recovery-decisions.ts';
 
 let tmpDir: string;
 let surface: SessionSurface;
@@ -125,7 +124,7 @@ describe('nothing to offer', () => {
 
   test('a snapshot whose session has a live pid marker is not offered; another terminal owns it', async () => {
     writeCrash('sess-live');
-    writeLivenessMarker(surface, 'sess-live', process.pid); // this process's pid always resolves alive
+    writeLivenessMarker(surface, 'sess-live', process.ppid); // the parent process: alive, and not this one
     const op = scriptedOperator(['resume']);
     const sink = makeSink();
 
@@ -391,116 +390,22 @@ describe('one answer per run', () => {
 });
 
 
-describe('a removal decision outlives the process', () => {
-  // The shipped defect: "Remove" deleted the file, and the deletion WAS the
-  // memory of the answer. A session still running on an older build rewrites
-  // its snapshot every 60s into the directory this build reads, so the file
-  // came back and the same question came back with it, three times, each
-  // time answered "remove". The decision now lives in a ledger under the
-  // surface, and a recorded snapshot found again is discarded, not re-asked.
+describe('Remove is about one snapshot, not the session', () => {
+  // A snapshot is written only while a session holds something its store does
+  // not, so a later snapshot of a session whose earlier one was removed is a
+  // new crash, and the unsaved turn it holds must be offered.
+  test('a later snapshot of the same session is offered after a relaunch', async () => {
+    writeCrash('sess-again');
+    expect(await offerRecoverySnapshot(makeDeps(scriptedOperator(['not-now', 'remove']).open, makeSink()))).toBe('removed');
+    expect(existsSync(surface.recoveryFile('sess-again'))).toBe(false);
 
-  /** What a relaunch actually is: fresh in-process memory, a surface rebuilt over the same directories. */
-  function relaunch(): SessionSurface {
     resetAnsweredRecoveryOffersForTest();
     surface = makeTestSurface(tmpDir);
-    return surface;
-  }
-
-  test('Remove records the decision on disk, naming the session and the workspace', async () => {
-    writeCrash('sess-durable');
-    await offerRecoverySnapshot(makeDeps(scriptedOperator(['not-now', 'remove']).open, makeSink()));
-
-    const ledger = recoveryDecisionsPathFor(surface);
-    expect(existsSync(ledger)).toBe(true);
-    const records = JSON.parse(readFileSync(ledger, 'utf-8')) as Array<Record<string, unknown>>;
-    expect(records).toHaveLength(1);
-    expect(records[0]?.sessionId).toBe('sess-durable');
-    expect(records[0]?.workspace).toBe(surface.workingDirectory);
-    expect(typeof records[0]?.removedAt).toBe('number');
-  });
-
-  test('the same snapshot rewritten byte-for-byte after a relaunch is deleted, not re-offered', async () => {
-    writeCrash('sess-comes-back', 'Interrupted work');
-    const removedBytes = readFileSync(surface.recoveryFile('sess-comes-back'));
-    expect(await offerRecoverySnapshot(makeDeps(scriptedOperator(['not-now', 'remove']).open, makeSink()))).toBe('removed');
-    expect(existsSync(surface.recoveryFile('sess-comes-back'))).toBe(false);
-
-    // Exactly what the still-running older build does a minute later.
-    relaunch();
-    writeFileSync(surface.recoveryFile('sess-comes-back'), removedBytes);
-    ageRecoverySnapshot(surface.recoveryFile('sess-comes-back'));
-
-    const second = scriptedOperator(['not-now', 'remove']);
-    const sink = makeSink();
-    expect(await offerRecoverySnapshot(makeDeps(second.open, sink))).toBe('none');
-    expect(second.asked).toBe(0); // not one modal, not one keystroke asked of the user
-    expect(sink.receipts).toHaveLength(0); // and no chatter about a decision already made
-    // Discarded on sight, because the user already said remove.
-    expect(existsSync(surface.recoveryFile('sess-comes-back'))).toBe(false);
-  });
-
-  test('Keep is NOT recorded: it means "ask me next launch", and next launch still asks', async () => {
-    writeCrash('sess-kept-durable');
-    expect(await offerRecoverySnapshot(makeDeps(scriptedOperator(['not-now', 'keep']).open, makeSink()))).toBe('kept');
-    expect(existsSync(recoveryDecisionsPathFor(surface))).toBe(false);
-
-    relaunch();
+    writeCrash('sess-again', 'Crashed again', 3);
     const second = scriptedOperator(['not-now', 'keep']);
     expect(await offerRecoverySnapshot(makeDeps(second.open, makeSink()))).toBe('kept');
     expect(second.asked).toBe(2);
-    expect(existsSync(surface.recoveryFile('sess-kept-durable'))).toBe(true);
-  });
-
-  test('a recorded-removed snapshot that reappears does not mask an older genuinely-orphaned one', async () => {
-    // Discarding rather than merely skipping is what makes this work: a
-    // skipped newer file would sit on top of a real crash snapshot forever.
-    writeCrash('sess-reappearing');
-    expect(await offerRecoverySnapshot(makeDeps(scriptedOperator(['not-now', 'remove']).open, makeSink()))).toBe('removed');
-
-    relaunch();
-    writeCrash('sess-real-crash', 'Real crash', 2, 60_000); // older
-    writeCrash('sess-reappearing'); // newer, and already answered
-
-    const second = scriptedOperator(['not-now', 'keep']);
-    expect(await offerRecoverySnapshot(makeDeps(second.open, makeSink()))).toBe('kept');
-    expect(second.details[0]).toContain('sess-real-crash');
-    expect(existsSync(surface.recoveryFile('sess-reappearing'))).toBe(false);
-    expect(existsSync(surface.recoveryFile('sess-real-crash'))).toBe(true);
-  });
-
-  test('the targeted --continue offer honours a recorded removal too', async () => {
-    writeCrash('sess-targeted');
-    const deps = { ...makeDeps(scriptedOperator(['not-now', 'remove']).open, makeSink()), targetSessionId: 'sess-targeted' };
-    expect(await offerRecoverySnapshot(deps)).toBe('removed');
-
-    relaunch();
-    writeCrash('sess-targeted');
-    const second = scriptedOperator(['resume']);
-    const outcome = await offerRecoverySnapshot({ ...makeDeps(second.open, makeSink()), targetSessionId: 'sess-targeted' });
-    expect(outcome).toBe('none');
-    expect(second.asked).toBe(0);
-    expect(existsSync(surface.recoveryFile('sess-targeted'))).toBe(false);
-  });
-
-  test('Remove is recorded even when the file already vanished before the answer landed', async () => {
-    writeCrash('sess-raced');
-    const op: SelectionOpener = (title, items, opts, cb) => {
-      // The offer is up; whatever wrote the snapshot retires it underneath us.
-      if (title === RECOVERY_RETIRE_TITLE) rmSync(surface.recoveryFile('sess-raced'), { force: true });
-      cb({ item: { id: title === RECOVERY_RETIRE_TITLE ? 'remove' : 'not-now', label: 'x' }, action: 'select' });
-    };
-    const sink = makeSink();
-    expect(await offerRecoverySnapshot(makeDeps(op, sink))).toBe('removed');
-    // The receipt says plainly that nothing was there, and does not claim a deletion.
-    expect(sink.receipts[0]).toContain('No recovery point was found to remove');
-
-    // The answer still binds: the same snapshot written again is discarded.
-    relaunch();
-    writeCrash('sess-raced');
-    const second = scriptedOperator(['resume']);
-    expect(await offerRecoverySnapshot(makeDeps(second.open, makeSink()))).toBe('none');
-    expect(second.asked).toBe(0);
-    expect(existsSync(surface.recoveryFile('sess-raced'))).toBe(false);
+    expect(existsSync(surface.recoveryFile('sess-again'))).toBe(true);
   });
 });
 

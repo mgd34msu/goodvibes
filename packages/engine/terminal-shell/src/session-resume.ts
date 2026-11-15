@@ -162,6 +162,7 @@ export async function resumeSessionCore(sessionId: string, deps: SessionResumeDe
             // 'user' at their own call sites (session-workflow.ts).
             saveSource: 'auto',
           }, undefined, undefined, deps.conversation.branchState());
+          markConversationDurable(deps.conversation, sessionId, 'store');
         },
       }),
     (failed): ReplayIntoConversationResult => ({ replayed: 0, hadCorruptTail: false, failed }),
@@ -178,7 +179,7 @@ export async function resumeSessionCore(sessionId: string, deps: SessionResumeDe
     notices: describeLeftOutBranches(leftOut),
   };
 }
-import { rmSync } from 'node:fs';
+import { rmSync, utimesSync } from 'node:fs';
 import { join } from 'node:path';
 import { clearTurnAnchors, getTurnAnchors, persistTurnAnchors, recordTurnAnchor } from '@goodvibes-jev/engine/platform/platform/rewind';
 import { saveWorkTreeFolds } from './work-tree-fold-store.js';
@@ -278,8 +279,80 @@ function restoreSessionConversation(
   });
   if (surface) restoreWorkTreeFolds(conversation, surface.sessionsDir, sessionId);
   conversation.rebuildHistory();
+  const previousSessionId = runtime.sessionId;
   runtime.sessionId = sessionId;
+  // What is in memory now is what the store holds, so no crash snapshot is due.
+  markConversationDurable(conversation, sessionId, 'store');
+  if (surface) moveLiveSessionArtifacts(surface, previousSessionId, sessionId);
   return saved?.leftOut ?? [];
+}
+
+// ─── The live session's crash snapshot and identity ─────────────────────────
+//
+// A crash snapshot is written only while the conversation holds something its
+// session's store does not; the conversation's revision counter is how a writer
+// tells (one integer compare). Every write of the conversation, a store save or
+// a snapshot, records the revision it wrote here, keyed by the conversation
+// object, so the turn wiring, the minute timer and the exit path of one terminal
+// share one answer without being wired to each other.
+
+/** A conversation that counts its own changes. */
+export interface RevisionedConversation {
+  readonly revisionSource: { revision(): number };
+}
+
+/** Where the conversation was last written: its session's store, or a crash snapshot. */
+export type DurableCopy = 'store' | 'snapshot';
+
+const durableCopies = new WeakMap<object, { readonly revision: number; readonly sessionId: string; readonly copy: DurableCopy }>();
+
+/** Record that `conversation`, as it is now, is on disk for `sessionId` (`copy` says where). */
+export function markConversationDurable(conversation: RevisionedConversation, sessionId: string, copy: DurableCopy): void {
+  durableCopies.set(conversation, { revision: conversation.revisionSource.revision(), sessionId, copy });
+}
+
+/** True when `conversation` changed since it was last written for `sessionId`, or was never written. */
+export function conversationChangedSinceDurable(conversation: RevisionedConversation, sessionId: string): boolean {
+  const last = durableCopies.get(conversation);
+  return last === undefined || last.sessionId !== sessionId || last.revision !== conversation.revisionSource.revision();
+}
+
+/**
+ * Keep an unchanged crash snapshot looking live without rewriting it: one
+ * `utimes` on the snapshot when it is the newest copy of the conversation. A
+ * reader that judges liveness by the file's time (an older build) then does not
+ * take this terminal's working state for a crash. Never touches a snapshot the
+ * store has already superseded, which a newer time would bring back to life.
+ */
+export function keepCrashSnapshotFresh(surface: SessionSurface, conversation: RevisionedConversation, sessionId: string): void {
+  const last = durableCopies.get(conversation);
+  if (last?.copy !== 'snapshot' || conversationChangedSinceDurable(conversation, sessionId)) return;
+  try {
+    const now = new Date();
+    utimesSync(surface.recoveryFile(sessionId), now, now);
+  } catch {
+    // No snapshot on disk: nothing to keep fresh.
+  }
+}
+
+/**
+ * The session-keyed liveness marker follows a change of the live session id (a
+ * resume, a fork, `/session save <name>`, a recovery restore, `--continue`):
+ * `to` is marked open here and `from`'s marker goes, so a second terminal
+ * neither takes `from` for open nor `to` for closed. When another terminal has
+ * taken `from` over, its marker is that terminal's and is left alone.
+ *
+ * `from`'s crash snapshot is not touched: the writers delete it at every
+ * successful save, so one still on disk holds something `from`'s store does
+ * not (a save that failed, a change made outside a turn) and is offered at the
+ * next launch like any other unsaved work.
+ */
+export function moveLiveSessionArtifacts(surface: SessionSurface, from: string, to: string): void {
+  if (from === to) return;
+  writeLivenessMarker(surface, to);
+  const holder = checkSessionLiveness(surface, from);
+  if (holder.live && holder.pid !== process.pid) return;
+  removeLivenessMarker(surface, from);
 }
 
 /** What `loadSavedSessionIntoLive` needs from the shell that runs it. */
@@ -317,8 +390,8 @@ export interface LoadSavedSessionOptions {
  * session identity the same way a resume does, so later autosaves go to the loaded session
  * instead of overwriting the one that was open. A session another running terminal has marked
  * open is refused (`/session resume <name> --force` is the explicit way to take it over), and
- * the liveness marker moves with the identity so a second terminal sees the new session as open
- * right away. Throws with the reason when the load does not happen; the live conversation is
+ * the liveness marker moves with the identity (moveLiveSessionArtifacts) so a second terminal
+ * sees the new session as open right away. Throws with the reason when the load does not happen; the live conversation is
  * untouched then.
  */
 export function loadSavedSessionIntoLive(
@@ -343,16 +416,11 @@ export function loadSavedSessionIntoLive(
   }
   const { meta, messages, agentRecords, branches } = sessionManager.load(name);
   readConversationMessageSnapshots(messages);
-  const previousSessionId = deps.runtime.sessionId;
   const { restoredAnchorCount, leftOutBranches } = restoreLoadedSession(
     name,
     { meta, messages, ...(branches ? { branches } : {}) },
     { conversation: deps.conversation, runtime: deps.runtime, surface, restoreTurnAnchors: deps.restoreTurnAnchors },
   );
-  if (surface && previousSessionId !== name) {
-    removeLivenessMarker(surface, previousSessionId);
-    writeLivenessMarker(surface, name);
-  }
   deps.afterSwitch?.(name);
   return { name, meta, messageCount: messages.length, agentRecords, restoredAnchorCount, notices: describeLeftOutBranches(leftOutBranches) };
 }

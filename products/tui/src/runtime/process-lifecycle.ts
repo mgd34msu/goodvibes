@@ -24,7 +24,8 @@ import { flushActivityLogSync, logger, summarizeError } from '@goodvibes-jev/eng
 import { createTerminalLifecycle, TERMINAL_ESCAPES } from '@goodvibes-jev/engine/terminal-shell';
 import { createErrorNoticeOwner, unavailableErrorLine, userErrorLine } from '../core/format-user-error.ts';
 import { allowTerminalWrite } from '@goodvibes-jev/engine/terminal-shell/terminal-output-guard';
-import { buildPersistedSessionContext, deleteRecoveryFile, writeRecoveryFile } from '@/runtime/index.ts';
+import { buildPersistedSessionContext, deleteRecoveryFile } from '@/runtime/index.ts';
+import { writeCrashSnapshotIfChanged } from './recovery-autosave.ts';
 import type { SessionSurface } from '@/runtime/index.ts';
 import {
   appendCrashRecord,
@@ -48,11 +49,11 @@ const SAVE_NOTICE_AFTER_MS = 300;
 const SHUTDOWN_HARD_TIMEOUT_MS = 3000;
 
 /**
- * Whether a recovery snapshot actually exists on disk for this session. The
- * periodic autosave (see recovery-autosave.ts) only writes on a 60s tick and
- * skips empty conversations entirely, so a session that dies sooner than that
- * (or never had anything in it) has no snapshot at all, the exit receipt
- * must not claim otherwise. Never throws: a stat failure just means "absent".
+ * Whether a recovery snapshot actually exists on disk for this session. A
+ * snapshot is written only while the conversation holds something the store
+ * does not, and never for an empty conversation, so a session with nothing
+ * unsaved has no snapshot at all; the exit receipt must not claim otherwise.
+ * Never throws: a stat failure just means "absent".
  */
 function defaultRecoverySnapshotExists(surface: SessionSurface, sessionId: string): boolean {
   try {
@@ -306,12 +307,16 @@ export function installProcessLifecycle(deps: ProcessLifecycleDeps): ProcessLife
 
   // Signals and crashes never reach ctx.shutdown, and a graceful shutdown can
   // lose its deadline: write the recovery snapshot first, synchronously, so the
-  // next launch can restore the in-flight turn. writeRecoveryFile never throws
-  // and skips an empty conversation.
+  // next launch can restore the in-flight turn. Only when the conversation
+  // changed since its last write (a store save or a snapshot): otherwise what
+  // is on disk already holds it, and exit costs no extra copy.
   const writeExitRecoverySnapshot = (): void => bestEffort('exit recovery snapshot', () => {
-    const snapshot = ctx.conversation.toJSON() as { messages: Array<ConversationMessageSnapshot> };
-    const persisted = buildPersistedSessionContextFromFacts(snapshot.messages, ctx.conversation.getTitleSource(), buildSessionContinuityHints());
-    writeRecoveryFile({ ...snapshot, ...persisted }, ctx.runtime.sessionId, ctx.conversation.title ?? '', { surface: ctx.services.surface });
+    writeCrashSnapshotIfChanged({
+      conversation: ctx.conversation,
+      sessionId: ctx.runtime.sessionId,
+      surface: ctx.services.surface,
+      buildSessionContinuityHints,
+    });
   });
 
   const uncaughtExceptionHandler = (err: Error): void => {

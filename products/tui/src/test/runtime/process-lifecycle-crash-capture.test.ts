@@ -31,7 +31,7 @@ function harness(shutdown?: () => Promise<void>) {
   const stderr: string[] = [];
   const crashLogPath = join(tmpHome, '.goodvibes', 'tui', CRASH_LOG_FILENAME);
   const ctx = {
-    conversation: { toJSON: () => ({ messages: [{ role: 'user', content: 'a question' }] }), getTitleSource: () => 'auto', title: 'Crash test' },
+    conversation: { toJSON: () => ({ messages: [{ role: 'user', content: 'a question' }] }), getTitleSource: () => 'auto', title: 'Crash test', revisionSource: { revision: () => 0 } },
     runtime: { sessionId },
     services: { homeDirectory: tmpHome, surface },
     ...(shutdown ? { shutdown } : {}),

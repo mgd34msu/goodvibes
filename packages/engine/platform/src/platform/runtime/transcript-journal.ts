@@ -3,14 +3,15 @@
  *
  * Purpose
  * ───────
- * What it holds today: the terminal app (TUI) appends one record when a prompt
- * is submitted, and one at turn end only when the session save failed; it is
- * deleted after each successful save. Each record is the whole conversation.
- * It is not a log of tool results or compaction, and nothing in the Agent
- * appends to it. The crash snapshot written at turn moments
- * (session-persistence.ts writeCrashSnapshotAtTurnMoments: prompt accepted,
- * each tool batch done) is the copy that keeps a turn's work through a kill;
- * this journal and its replay are left only until the TUI wiring moves to it.
+ * What it holds today: nothing new. No product appends to it any more; the
+ * crash snapshot written at turn moments (session-persistence.ts
+ * writeCrashSnapshotAtTurnMoments: prompt accepted, each tool batch done, and
+ * deleted by the turn-end save) is the one copy that keeps a turn's work
+ * through a kill. Earlier terminal-app versions appended the whole
+ * conversation here when a prompt was submitted, so a journal such a version
+ * left behind after a crash is still read once on resume and recovery
+ * (transcript-journal-replay.ts), then deleted. `appendRecord` remains only as
+ * the writer of that old format.
  *
  * File format (NDJSON)
  * ────────────────────
@@ -20,17 +21,7 @@
  * The header carries the schemaVersion so that a reader from a future process
  * can gate on it (readVersioned convention: unknown version → quarantine).
  *
- * Durability / performance tradeoff
- * ──────────────────────────────────
  * appendRecord() performs one appendFileSync + one fsyncSync per call.
- * This means one fsync per durable conversation event (user message,
- * assistant turn, tool result batch, compaction). It does NOT fsync per
- * streaming token, the streaming path never calls appendRecord().
- *
- * At typical usage (a few events per user turn), this is 2–6 fsyncs/min,
- * well within the durability/throughput envelope of any modern filesystem.
- * The tradeoff is explicit: we accept per-event write amplification in
- * exchange for at-most-one-record loss on SIGKILL.
  *
  * Recovery semantics
  * ──────────────────

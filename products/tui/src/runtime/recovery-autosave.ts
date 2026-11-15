@@ -1,25 +1,35 @@
 import { buildPersistedSessionContextFromFacts } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 /**
- * recovery-autosave.ts, the liveness-marker refresh and the out-of-turn crash
- * snapshot, extracted out of main.ts to keep it under the architecture
- * line-count gate.
+ * recovery-autosave.ts, the minute timer behind crash recovery, extracted out
+ * of main.ts to keep it under the architecture line-count gate.
  *
- * Two writes:
- *   1. The liveness marker (see session-liveness-marker.ts), written at once
- *      and refreshed on the interval (default 60s), that lets a second instance
- *      tell "this session is open in another terminal right now" from "this is
- *      an orphaned crash snapshot".
- *   2. The crash-recovery snapshot (writeRecoveryFile) for a change made outside
- *      a turn (/undo, /title, a branch switch). Turns write it themselves, when
- *      a prompt is accepted and after each tool batch (core/turn-event-wiring.ts);
- *      the interval writes it only when the conversation's revision moved since
- *      the last write here, so an idle session writes nothing.
+ * Each tick:
+ *   1. Refreshes the liveness marker (see session-liveness-marker.ts), written
+ *      at once and then on the interval (default 60s), that lets a second
+ *      instance tell "this session is open in another terminal right now" from
+ *      "this is an orphaned crash snapshot".
+ *   2. Writes the crash-recovery snapshot (writeRecoveryFile) for a change made
+ *      outside a turn (/undo, /title, a branch switch), only when the
+ *      conversation's revision moved since it was last written (core/turn-event-wiring.ts
+ *      writes it at turn moments and the store save at turn end deletes it), so
+ *      an idle session writes nothing. An unchanged snapshot only has its file
+ *      time moved, so a reader that judges by file time still sees it as live.
+ *   3. Follows a change of the live session id that did not go through a
+ *      resume (a fork, `/session save <name>`, a recovery restore): the marker
+ *      moves to the new id, and the conversation counts as saved under the new
+ *      id, which every one of those paths has just done.
  */
 import { writeRecoveryFile } from '@/runtime/index.ts';
 import type { SessionSurface } from '@/runtime/index.ts';
 import { writeLivenessMarker } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { ConversationManager, ConversationMessageSnapshot } from '../core/conversation.ts';
+import {
+  conversationChangedSinceDurable,
+  keepCrashSnapshotFresh,
+  markConversationDurable,
+  moveLiveSessionArtifacts,
+} from '../core/session-resume-core.ts';
 
 export interface StartRecoveryAutosaveOptions {
   readonly conversation: ConversationManager;
@@ -35,36 +45,63 @@ export interface StartRecoveryAutosaveOptions {
   readonly intervalMs?: number;
 }
 
+/**
+ * Write this terminal's crash snapshot when the conversation changed since it
+ * was last written (a store save or a snapshot); otherwise do nothing. Shared
+ * by the turn moments, the minute timer and the exit path, which all ask the
+ * same integer question first. True when a snapshot was written.
+ */
+export function writeCrashSnapshotIfChanged(input: {
+  readonly conversation: ConversationManager;
+  readonly sessionId: string;
+  readonly surface: SessionSurface;
+  readonly buildSessionContinuityHints: () => Parameters<typeof buildPersistedSessionContextFromFacts>[2];
+}): boolean {
+  const { conversation, sessionId, surface } = input;
+  if (!conversationChangedSinceDurable(conversation, sessionId)) return false;
+  const snapshot = conversation.toJSON() as { messages: Array<ConversationMessageSnapshot> };
+  const persisted = buildPersistedSessionContextFromFacts(
+    snapshot.messages,
+    conversation.getTitleSource(),
+    input.buildSessionContinuityHints(),
+  );
+  const written = writeRecoveryFile({ ...snapshot, ...persisted }, sessionId, conversation.title ?? '', { surface });
+  // A failed write is not recorded, so the next moment, tick or exit tries
+  // again; an empty conversation has nothing to keep.
+  if (written) markConversationDurable(conversation, sessionId, 'snapshot');
+  else if (snapshot.messages.length === 0) markConversationDurable(conversation, sessionId, 'store');
+  return written;
+}
+
 export function startRecoveryAutosave(options: StartRecoveryAutosaveOptions): ReturnType<typeof setInterval> {
   const { conversation, runtime, surface, buildSessionContinuityHints, intervalMs = 60_000 } = options;
   writeLivenessMarker(surface, runtime.sessionId);
-  // The revision written last; the boot conversation needs no snapshot.
-  let writtenRevision = conversation.revisionSource.revision();
-  let writtenSessionId = runtime.sessionId;
-  const writeSnapshot = (): void => {
-    const snapshot = conversation.toJSON() as { messages: Array<ConversationMessageSnapshot> };
-    const persisted = buildPersistedSessionContextFromFacts(
-      snapshot.messages,
-      conversation.getTitleSource(),
-      buildSessionContinuityHints(),
-    );
-    writeRecoveryFile({ ...snapshot, ...persisted }, runtime.sessionId, conversation.title ?? '', { surface });
-  };
+  let liveSessionId = runtime.sessionId;
+  // The boot conversation needs no snapshot: it is either empty or what the
+  // resume that produced it just read from the store (which recorded it).
+  if (conversationChangedSinceDurable(conversation, liveSessionId)) markConversationDurable(conversation, liveSessionId, 'store');
   return setInterval(() => {
     // A timer callback that throws becomes an uncaught exception and ends the
-    // TUI; a failed tick only costs this snapshot, and the next tick retries.
-    const revision = conversation.revisionSource.revision();
-    if (revision !== writtenRevision || runtime.sessionId !== writtenSessionId) {
+    // TUI; a failed tick only costs this tick's work, and the next tick retries.
+    const sessionId = runtime.sessionId;
+    if (sessionId !== liveSessionId) {
       try {
-        writeSnapshot();
-        writtenRevision = revision;
-        writtenSessionId = runtime.sessionId;
+        moveLiveSessionArtifacts(surface, liveSessionId, sessionId);
       } catch (error) {
-        logger.warn('[Recovery] Autosave snapshot failed', { error: summarizeError(error) });
+        logger.warn('[Recovery] Moving the session files to the new session id failed', { error: summarizeError(error) });
       }
+      liveSessionId = sessionId;
+      if (conversationChangedSinceDurable(conversation, sessionId)) markConversationDurable(conversation, sessionId, 'store');
     }
     try {
-      writeLivenessMarker(surface, runtime.sessionId);
+      if (!writeCrashSnapshotIfChanged({ conversation, sessionId, surface, buildSessionContinuityHints })) {
+        keepCrashSnapshotFresh(surface, conversation, sessionId);
+      }
+    } catch (error) {
+      logger.warn('[Recovery] Autosave snapshot failed', { error: summarizeError(error) });
+    }
+    try {
+      writeLivenessMarker(surface, sessionId);
     } catch (error) {
       logger.warn('[Recovery] Liveness marker refresh failed', { error: summarizeError(error) });
     }

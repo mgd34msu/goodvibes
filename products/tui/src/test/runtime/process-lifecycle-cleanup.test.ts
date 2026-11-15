@@ -91,6 +91,7 @@ function makeHarness(options: {
     conversation: {
       toJSON: () => { phase('snapshot'); return snapshot; },
       getTitleSource: () => { phase('title'); return 'user'; },
+      revisionSource: { revision: () => 0 },
     },
     runtime: { sessionId },
     services: { get surface() {

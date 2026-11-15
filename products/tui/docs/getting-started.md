@@ -155,7 +155,7 @@ the command that reaches each one.
 
 ### The startup recovery modal
 
-If a session crashed before saving, its periodic snapshot survives on disk. At
+If a session crashed before saving, its crash snapshot survives on disk. At
 the next launch, right after the first frame is drawn, the TUI asks about it
 instead of leaving a sentence for you to act on. Nothing loads unless you choose
 Resume.
@@ -170,14 +170,14 @@ The ask is two steps:
 2. **Remove recovery point?** Asked only after you decline. `Keep it` is first
    and preselected, so the snapshot stays on disk and is offered again the next
    time the workspace opens. `Remove it` deletes it, and the conversation it
-   holds cannot be recovered afterwards.
+   holds cannot be recovered afterwards. Remove applies to that snapshot only:
+   if the same session crashes again later, that new snapshot is offered.
 
 Escape is not an answer. Dismissing either modal leaves the snapshot exactly
 where it is. Only `Remove it` deletes anything, and a failed load leaves the
-file in place to be offered again next launch. A snapshot whose session still
-has a live process marker is never offered at all, because another terminal is
-refreshing it, so it is that instance's live state rather than an orphaned
-crash. Keeping (or dismissing) stays quiet for the rest of the run.
+file in place to be offered again next launch. A snapshot whose session another
+running terminal has open is never offered at all, because it is that
+instance's live state rather than an orphaned crash. Keeping (or dismissing) stays quiet for the rest of the run.
 
 ## Common paths
 

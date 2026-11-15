@@ -1,7 +1,7 @@
 # Session durability
 
-GoodVibes TUI keeps two copies of a conversation on disk: the saved session and, while a turn
-runs, a crash snapshot.
+GoodVibes TUI keeps two copies of a conversation on disk: the saved session and, only while the
+conversation holds something the saved session does not, a crash snapshot.
 
 ## Saved session
 
@@ -12,21 +12,30 @@ the session's title, model and message count, so listing sessions reads one line
 
 ## Crash snapshot
 
-The crash snapshot (`writeRecoveryFile`) is written:
+The crash snapshot (`writeRecoveryFile`) is written, each time only when the conversation changed
+since its last write:
 
 - when a prompt is accepted (`TURN_SUBMITTED`), so the message survives a kill during the stream;
 - after each batch of tool calls (`TOOLS_DONE`), so a kill mid-turn keeps the tool work done so far;
 - when the save at the end of a turn fails, so that turn is not lost;
-- for a change made outside a turn (`/undo`, `/title`, a branch switch), at most once a minute and
-  only when the conversation changed since the last write (`src/runtime/recovery-autosave.ts`).
+- for a change made outside a turn (`/undo`, `/title`, a branch switch), at most once a minute
+  (`src/runtime/recovery-autosave.ts`);
+- on a signal, a crash or a quit, before the save at exit runs, so a quit that misses its deadline
+  keeps what was not yet saved.
 
 The turn-time writes live in `src/core/turn-event-wiring.ts` and follow the rule both terminal apps
-share (`writeCrashSnapshotAtTurnMoments`). An idle session writes nothing; the one-minute tick
-then only refreshes the liveness marker that records this session as open in this terminal.
+share (`writeCrashSnapshotAtTurnMoments`). It is deleted when the save at the end of a turn
+succeeds and when a quit's save succeeds, so a snapshot on disk always holds something the saved
+session does not. When the session id moves on (a resume, a fork, `/session save <name>`, a
+recovery restore), the liveness marker moves with it. An idle
+session writes nothing; the one-minute tick then only refreshes the liveness marker that records
+this session as open in this terminal, and moves an unchanged snapshot's file time so an older
+version reading the same directory does not take it for a crash.
 
 On the next start the TUI offers the newest snapshot that is not older than its session's own
 saved file, unless the liveness marker shows that session is still open in another terminal, in
-which case the snapshot is that terminal's live state and is not offered.
+which case the snapshot is that terminal's live state and the next one is considered instead.
+Choosing Remove deletes that one snapshot; a later crash of the same session is offered again.
 
 A kill at any moment loses at most the streaming text of the turn in flight and any tool calls of
 that turn that had not finished. A completed turn is never lost.

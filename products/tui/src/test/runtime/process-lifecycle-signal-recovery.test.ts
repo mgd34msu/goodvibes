@@ -32,6 +32,7 @@ function harness() {
       toJSON: () => ({ messages: [{ role: 'user', content: 'unsaved question' }] }),
       getTitleSource: () => 'auto',
       title: 'Signal test',
+      revisionSource: { revision: () => 0 },
     },
     runtime: { sessionId },
     services: { homeDirectory: tmpHome, surface },

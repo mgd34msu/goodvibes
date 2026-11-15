@@ -3,12 +3,14 @@ import type { HookDispatcher, HookEventPath, HookPhase, HookCategory } from '@go
 import {
   checkRecoveryFile,
   createShellPathService,
+  deleteRecoveryFile,
   formatReturnContextForDisplay,
   persistConversation,
   writeRecoveryFile,
 } from '@/runtime/index.ts';
 import type { SessionSnapshot, SessionSurface } from '@/runtime/index.ts';
-import { checkSessionLiveness, removeLivenessMarker, writeCrashSnapshotAtTurnMoments, writeLivenessMarker } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { removeLivenessMarker, writeCrashSnapshotAtTurnMoments, writeLivenessMarker } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { moveLiveSessionArtifacts } from '../core/session-resume-core.ts';
 import {
   readOnboardingCheckMarker,
   readOnboardingCompletionMarker,
@@ -75,7 +77,7 @@ export interface SessionPersistenceAndRecoveryDeps {
 }
 
 export interface SessionPersistenceAndRecoveryResult {
-  /** Interval handle for the liveness-marker refresh; clear it on exit. The crash snapshot itself is written at turn moments. */
+  /** Interval handle for the liveness-marker refresh; clear it on exit. The crash snapshot itself is written at turn moments and deleted by the turn-end save. */
   recoveryInterval: ReturnType<typeof setInterval>;
   /**
    * The sessionId of the offered recovery snapshot when an unsaved session
@@ -130,7 +132,8 @@ export function wireSessionPersistenceAndRecovery(
 
   // The crash snapshot: written when a prompt is accepted and after each tool
   // batch (shared rule, runtime/session-persistence.ts), so a crash mid-turn
-  // keeps the turn's work; the session save below is the copy after that.
+  // keeps the turn's work; the session save below is the copy after that and
+  // deletes it, so a snapshot on disk always holds something the store does not.
   const writeCrashSnapshot = (): void => {
     writeRecoveryFile(buildCurrentSessionSnapshot(), runtime.sessionId, conversation.title ?? '', { surface });
   };
@@ -161,6 +164,7 @@ export function wireSessionPersistenceAndRecovery(
         // in input/commands/session-content.ts).
         'auto',
       );
+      deleteRecoveryFile({ surface }, runtime.sessionId);
       autosaveFailing = false;
       hookDispatcher.fire({ path: 'Lifecycle:session:save' as HookEventPath, phase: 'Lifecycle' as HookPhase, category: 'session' as HookCategory, specific: 'save', sessionId: runtime.sessionId, timestamp: Date.now(), payload: { sessionId: runtime.sessionId } }).catch((err: unknown) => logger.debug('hook fire error', { error: summarizeError(err) }));
     } catch (e) {
@@ -190,13 +194,12 @@ export function wireSessionPersistenceAndRecovery(
 
   // Recovery file check: display prompt if an unsaved session exists.
   // Runs after the first render so the message lands as ambient context.
+  // A snapshot whose session another terminal has open is that terminal's live
+  // state; checkRecoveryFile does not report it, so Ctrl+R can never take and
+  // delete a file another terminal is still writing.
   let recoveryPending: string | null = null;
   const recoveryInfo = checkRecoveryFile({ surface });
-  // Another agent terminal refreshing this snapshot right now means it is that
-  // terminal's live state, not an orphaned crash: offering it here would let
-  // Ctrl+R take and delete the file the other terminal is still writing.
-  const recoveryOwner = recoveryInfo ? checkSessionLiveness(surface, recoveryInfo.sessionId) : null;
-  if (recoveryInfo && !(recoveryOwner?.live && recoveryOwner.pid !== process.pid)) {
+  if (recoveryInfo) {
     systemMessageRouter.high(`[Recovery] Found unsaved session from ${new Date(recoveryInfo.timestamp).toLocaleString()}. Title: "${recoveryInfo.title}". Press Ctrl+R to restore it or Esc to discard it. Typing leaves it saved for the next launch.`);
     for (const line of formatReturnContextForDisplay(recoveryInfo.returnContext)) {
       systemMessageRouter.low(`[Recovery] ${line}`);
@@ -211,9 +214,18 @@ export function wireSessionPersistenceAndRecovery(
   // The marker tells a second terminal this session is open here, so it neither
   // offers this terminal's live recovery snapshot nor forks the session. Written
   // now rather than on the first tick so a terminal started within the minute sees it.
+  // A session id that moved without a resume (a fork, `/session save <name>`, a
+  // recovery restore) takes its marker along (moveLiveSessionArtifacts).
+  let liveSessionId = runtime.sessionId;
   const refreshLivenessMarker = (): void => {
     try {
-      writeLivenessMarker(surface, runtime.sessionId);
+      const sessionId = runtime.sessionId;
+      if (sessionId !== liveSessionId) {
+        moveLiveSessionArtifacts(surface, liveSessionId, sessionId);
+        liveSessionId = sessionId;
+      } else {
+        writeLivenessMarker(surface, sessionId);
+      }
     } catch (error) {
       logger.warn('[Recovery] Liveness marker refresh failed', { error: summarizeError(error) });
     }

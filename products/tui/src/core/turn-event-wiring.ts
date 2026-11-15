@@ -1,6 +1,8 @@
 import { buildPersistedSessionContextFromFacts } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import type { UiRuntimeEvents, RuntimeEventBus } from '@/runtime/index.ts';
-import { persistConversation, writeRecoveryFile } from '@/runtime/index.ts';
+import { deleteRecoveryFile, persistConversation } from '@/runtime/index.ts';
+import { writeCrashSnapshotIfChanged } from '../runtime/recovery-autosave.ts';
+import { markConversationDurable } from './session-resume-core.ts';
 import { buildCompactionReceiptBlock } from './compaction-receipt.ts';
 import { workstreamFailureNotification } from './workstream-notification.ts';
 import { persistTurnAnchors, recordTurnAnchor, summarizeTurnLabel } from '@goodvibes-jev/engine/platform/platform/rewind';
@@ -230,12 +232,12 @@ export function wireTurnEventHandlers(options: WireTurnEventHandlersOptions): Wi
 
   // The crash snapshot: one copy of the conversation, written when a prompt is
   // accepted and after each tool batch (the rule both terminal apps share,
-  // runtime/session-persistence.ts) and when the turn-end save fails. The
-  // session save at turn end is the durable copy after that.
+  // runtime/session-persistence.ts) and when the turn-end save fails, each time
+  // only if the conversation changed since its last write. A successful
+  // turn-end save deletes it, so a snapshot on disk always holds something the
+  // session store does not.
   const writeCrashSnapshot = (): void => {
-    const snapshot = conversation.toJSON() as { messages: Array<import('./conversation.ts').ConversationMessageSnapshot> };
-    const persisted = buildPersistedSessionContextFromFacts(snapshot.messages, conversation.getTitleSource(), buildSessionContinuityHints());
-    writeRecoveryFile({ ...snapshot, ...persisted }, runtime.sessionId, conversation.title ?? '', { surface });
+    writeCrashSnapshotIfChanged({ conversation, sessionId: runtime.sessionId, surface, buildSessionContinuityHints });
   };
   unsubs.push(writeCrashSnapshotAtTurnMoments({
     subscribe: (moment, handler) => events.turns.on(moment, handler),
@@ -396,6 +398,9 @@ export function wireTurnEventHandlers(options: WireTurnEventHandlersOptions): Wi
           // the user asked to keep via /session save.
           'auto',
         );
+        // The store now holds everything the crash snapshot did.
+        markConversationDurable(conversation, runtime.sessionId, 'store');
+        deleteRecoveryFile({ surface }, runtime.sessionId);
         hookDispatcher
           .fire({
             path: 'Lifecycle:session:save' as HookEventPath,

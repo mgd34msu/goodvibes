@@ -31,10 +31,10 @@
  *     needs with no cap, so detail is the only place long copy is guaranteed
  *     to be shown in full. Titles here stay short enough to survive a narrow
  *     terminal intact.
- *   - A snapshot whose session still has a live pid marker is not offered at
- *     all: another terminal is refreshing it right now, so it is not an
- *     orphaned crash and resuming it here would fork that instance's live
- *     state.
+ *   - A snapshot whose session another running terminal has open is not
+ *     offered at all (the platform's recovery checks skip it): it is that
+ *     instance's live state, not an orphaned crash, and resuming it here would
+ *     fork it.
  *   - Escape is not an answer. Dismissing either modal leaves the snapshot
  *     exactly where it is; only "Remove" deletes anything.
  *   - The destructive row is never the one Enter is already sitting on. Both
@@ -42,23 +42,16 @@
  *     without reading keeps the snapshot.
  *   - Keep (or a dismissal) stays quiet for the rest of the run. The snapshot
  *     is offered again on the next launch, not again in this one.
- *   - Remove is permanent, not just for this file. The decision is written to
- *     the durable ledger in recovery-decisions.ts, so a snapshot that comes
- *     back byte-for-byte, because a session still running on an older build
- *     is rewriting it every minute, is deleted on sight instead of asked
- *     about again. Deleting the file used to be the entire memory of the
- *     answer, which is how the same question survived being answered three
- *     times.
- *   - The offer is also where that ledger gets swept. Every run prunes it to
- *     its age and count bounds and logs what it dropped, so the record of past
- *     decisions cannot quietly grow forever and nothing is deleted in silence.
+ *   - Remove deletes this snapshot, and that is the whole decision. A snapshot
+ *     exists only while a session holds something its store does not (written
+ *     at turn moments, deleted by the next successful save and by a clean
+ *     exit), so a later snapshot of the same session is a new crash and is
+ *     offered like any other.
  */
 import { statSync } from 'node:fs';
 import { checkRecoveryFile, checkRecoveryForSession, removeRecoveryPoint } from '@/runtime/index.ts';
 import type { ApplyRecoverySnapshotResult } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import type { RecoveryFileInfo, SessionSurface } from '@/runtime/index.ts';
-import { isRecoveryRemovalRecorded, pruneRecoveryDecisions, recordRecoveryRemoval } from './recovery-decisions.ts';
-import { checkSessionLiveness } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import type { SelectionItem, SelectionResult } from '../input/selection-modal.ts';
 
 /** How the offer ended. Returned so startup wiring (and tests) can assert the real outcome. */
@@ -247,48 +240,16 @@ function defaultSnapshotBytes(surface: SessionSurface, sessionId: string): numbe
  */
 const answeredThisRun = new Set<string>();
 
-/**
- * Test seam: a fresh process has no answered offers. Only clears the
- * in-process Keep memory, removal decisions are durable on purpose and live
- * in the surface's own directory, so a test gets a clean ledger by using a
- * fresh temp surface, the same way a real user gets one by using a different
- * machine.
- */
+/** Test seam: a fresh process has no answered offers. */
 export function resetAnsweredRecoveryOffersForTest(): void {
   answeredThisRun.clear();
 }
 
-/**
- * How many times one offer pass will delete a recorded-removed snapshot and
- * look again. A bound rather than a `while (true)`: the same session can have
- * a snapshot in both the canonical and the legacy shared directory, so one
- * removal can legitimately need a second pass, but nothing here should be able
- * to spin if a delete ever fails to take.
- */
-const MAX_RECORDED_REMOVAL_PASSES = 8;
-
-/**
- * The snapshot to actually ask about, after honouring decisions already made.
- *
- * A snapshot whose session is in the removal ledger is deleted here and NOT
- * offered: the user answered that question already, and re-asking because the
- * file came back is the defect. Deleting rather than merely skipping matters,
- * skipping would leave the file to mask an older, genuinely-orphaned snapshot
- * underneath it forever.
- */
+/** The snapshot to ask about: the targeted session's, or the newest one no running terminal holds. */
 function findOfferableSnapshot(deps: RecoveryPromptDeps): RecoveryFileInfo | null {
-  for (let pass = 0; pass < MAX_RECORDED_REMOVAL_PASSES; pass += 1) {
-    const info = deps.targetSessionId !== undefined
-      ? checkRecoveryForSession(deps.surface, deps.targetSessionId)
-      : checkRecoveryFile({ surface: deps.surface });
-    if (!info) return null;
-    if (!isRecoveryRemovalRecorded(deps.surface, info.sessionId)) return info;
-    // Silently, because the user already said remove. A receipt here would be
-    // a notification about a decision they made and do not need re-confirmed.
-    const { removed } = removeRecoveryPoint(deps.surface, info.sessionId);
-    if (!removed) return null;
-  }
-  return null;
+  return deps.targetSessionId !== undefined
+    ? checkRecoveryForSession(deps.surface, deps.targetSessionId)
+    : checkRecoveryFile({ surface: deps.surface });
 }
 
 /**
@@ -299,22 +260,12 @@ function findOfferableSnapshot(deps: RecoveryPromptDeps): RecoveryFileInfo | nul
 export async function offerRecoverySnapshot(deps: RecoveryPromptDeps): Promise<RecoveryPromptOutcome> {
   let shown = false;
   try {
-    // Housekeeping first: recovery time is when the removal ledger gets its
-    // bounds actually applied to disk and says what it discarded. Without this
-    // the expired records were filtered on read but never removed, so on a
-    // machine where the user never answers "Remove" again the file only ever
-    // grew. Idempotent, so the second call in a run (targeted --continue offer
-    // plus the general startup offer) drops nothing and writes nothing.
-    pruneRecoveryDecisions(deps.surface, deps.now?.() ?? Date.now());
     const info = findOfferableSnapshot(deps);
     if (!info) return 'none';
     // Already answered about this snapshot earlier in this same run (the
     // targeted --continue offer and the general startup offer can both find
     // it). The earlier answer stands; don't ask twice.
     if (answeredThisRun.has(info.sessionId)) return 'kept';
-    // Another terminal is actively refreshing this snapshot, it is that
-    // instance's live state, not an orphaned crash.
-    if (checkSessionLiveness(deps.surface, info.sessionId).live) return 'none';
     const open = deps.openSelection;
     if (!open) return 'none';
 
@@ -360,14 +311,9 @@ export async function offerRecoverySnapshot(deps: RecoveryPromptDeps): Promise<R
     const retire = await ask(open, RECOVERY_RETIRE_TITLE, buildRecoveryRetireItems(facts));
     if (retire === 'remove') {
       const { removed } = removeRecoveryPoint(deps.surface, info.sessionId);
-      // Recorded whether or not a file was there to delete: the answer is
-      // about this snapshot, and a snapshot that vanished between the question
-      // and the answer can still be rewritten a minute later by whatever wrote
-      // it in the first place.
-      recordRecoveryRemoval(deps.surface, info.sessionId);
       deps.receipt(removed
-        ? `Recovery point removed (session ${info.sessionId}): it will not be offered again, even if the file reappears.`
-        : `No recovery point was found to remove (session ${info.sessionId}): if one reappears for that session it will be discarded, not offered.`);
+        ? `Recovery point removed (session ${info.sessionId}). Any earlier save of that session is unchanged.`
+        : `No recovery point was found to remove (session ${info.sessionId}); it was already gone. Nothing else was changed.`);
       deps.render();
       return 'removed';
     }

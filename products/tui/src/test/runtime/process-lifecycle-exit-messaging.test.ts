@@ -69,6 +69,7 @@ function makeHarness(opts: {
     conversation: {
       toJSON: () => ({ messages: opts.messages ?? [] }),
       getTitleSource: () => 'auto',
+      revisionSource: { revision: () => 0 },
     },
     runtime: { sessionId },
     services: { homeDirectory: tmpHome, surface },

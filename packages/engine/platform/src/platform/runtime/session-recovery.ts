@@ -1,10 +1,10 @@
 /**
  * Crash-recovery snapshots: write, offer, load, retire.
  *
- * A recovery snapshot (`<scope>/recovery/recovery-<sessionId>.jsonl`) is a
- * periodic autosave of a live conversation. It exists so that a process that
- * dies between clean saves does not take the conversation with it. Split out
- * of session-persistence.ts, which keeps the durable-store half (save / load /
+ * A recovery snapshot (`<scope>/recovery/recovery-<sessionId>.jsonl`) is the
+ * copy of a live conversation taken between clean saves. It exists so that a
+ * process that dies before its next save does not take the conversation with
+ * it. Split out of session-persistence.ts, which keeps the durable-store half (save / load /
  * last-session pointer); both halves resolve every path through the shared
  * scope layer in session-persistence-scope.ts.
  *
@@ -21,15 +21,17 @@
  * own session both writes the store AND deletes the snapshot, so the surviving
  * snapshot of a session whose store is older is a crash by definition.
  *
- * LIVENESS, is anything still writing it?
- * The unsolicited boot offer additionally skips any snapshot whose file was
- * touched within LIVE_REFRESH_WINDOW_MS: a file being rewritten right now
- * belongs to a process that is still running, not to a crash. The signal is
- * the file's own mtime rather than a marker file, because a marker only
- * exists in versions that write one, see LIVE_REFRESH_WINDOW_MS. The
- * explicit per-session probe (`checkRecoveryForSession`) does NOT apply this
- * rule: it answers a direct question about a named session, and the honest
- * answer there is what the caller asked for.
+ * A terminal writes a snapshot only while it holds something the store does
+ * not: when a prompt is accepted, after each tool batch, and after a change made
+ * outside a turn. A successful turn-end save deletes it, and so does a clean
+ * exit, so on disk a snapshot means "not cleanly closed".
+ *
+ * LIVENESS, is anything still holding it?
+ * A snapshot whose session another running process has marked open
+ * (session-liveness-marker.ts) is that process's working state, not a crash, and
+ * neither check here reports it. The unsolicited boot offer additionally skips
+ * any snapshot whose file was touched within LIVE_REFRESH_WINDOW_MS, because a
+ * marker only exists in versions that write one, see LIVE_REFRESH_WINDOW_MS.
  */
 
 import {
@@ -42,6 +44,7 @@ import { join } from 'path';
 import { writeFileAtomic } from '../utils/atomic-json-store.js';
 import { fileObservationIdentity, readFileObservation } from '../utils/file-observation.js';
 import { publishRecoveryPath, readRecoveryHeaderObservation, recoveryPathResolver, RECOVERY_HEADER_LIMIT } from './recovery-path.js';
+import { checkSessionLiveness } from './session-liveness-marker.js';
 
 import { logger } from '../utils/logger.js';
 import { loadedReturnContext, type SessionReturnContextSummary } from './session-return-context.js';
@@ -148,14 +151,19 @@ function deleteRecoverySnapshotAt(path: string, expected?: string): boolean {
   } catch { return false; }
 }
 
+/**
+ * Write `sessionId`'s crash snapshot (one temp file, one rename). Never throws:
+ * returns true when the snapshot is on disk, false when the conversation was
+ * empty (nothing to keep) or the write failed (logged).
+ */
 export function writeRecoveryFile(
   snapshot: SessionSnapshot,
   sessionId: string,
   title = '',
   options?: SessionPersistenceOptions,
-): void {
+): boolean {
   try {
-    if (!snapshot.messages.length) return;
+    if (!snapshot.messages.length) return false;
     const lines: string[] = [];
     lines.push(JSON.stringify({ type: 'meta', sessionId, title, timestamp: Date.now() }));
     if (snapshot.titleSource || snapshot.returnContext) {
@@ -177,8 +185,10 @@ export function writeRecoveryFile(
     publishRecoveryPath(directory, sessionId, resolve, (path, assertCurrent) => {
       writeFileAtomic(path, `${lines.join('\n')}\n`, { assertCurrent, cleanupStaleTemps: false });
     });
+    return true;
   } catch (error) {
     logger.warn('[Recovery] Write failed', { error: summarizeError(error) });
+    return false;
   }
 }
 
@@ -267,9 +277,10 @@ function sessionStoreMtimeNs(sessionsDir: string, sessionId: string): bigint | n
  * REFRESHED, i.e. a live process is still maintaining it, so it is that
  * process's working state and not an orphaned crash.
  *
- * Surfaces rewrite a live session's snapshot on a fixed cadence (60s in the
- * shipping terminal app), so a file touched within a cadence and a half is
- * being kept alive by something running right now. This is deliberately
+ * A running terminal moves its snapshot's modification time once a minute
+ * and rewrites it only when the conversation changed, so a file touched
+ * within a cadence and a half is being kept alive by something running right
+ * now. This is deliberately
  * evidence-on-disk rather than a marker file a writer has to opt into:
  * markers only exist in versions that know to write them, so a session
  * running an older build, or any other product sharing this directory,
@@ -298,6 +309,17 @@ const LIVE_REFRESH_WINDOW_MS = 90_000;
  */
 function isActivelyRefreshed(snapshotMtimeNs: bigint, nowMs: number, windowMs: number): boolean {
   return BigInt(nowMs) * 1_000_000n - snapshotMtimeNs < BigInt(windowMs) * 1_000_000n;
+}
+
+/**
+ * True when another running process has this session open, so its snapshot is
+ * that process's working state. This process's own marker does not count: a
+ * process asking about its own session is asking about its own crash residue.
+ */
+function isOpenInAnotherProcess(surface: SessionSurface | undefined, sessionId: string): boolean {
+  if (!surface || !sessionId.trim()) return false;
+  const liveness = checkSessionLiveness(surface, sessionId);
+  return liveness.live && liveness.pid !== process.pid;
 }
 
 /**
@@ -337,11 +359,11 @@ function isSupersededByOwnStore(sessionsDir: string, sessionId: string, snapshot
  * snapshot once is judged better than silently losing a genuinely-relevant
  * one forever.
  *
- * A snapshot a live process is still refreshing is NOT offered: this is an
- * unsolicited boot-time question, and asking about state nobody lost is the
- * defect this rule exists to prevent (see LIVE_REFRESH_WINDOW_MS for why
- * freshness rather than a marker file is the signal). An explicit request
- * about a named session still answers honestly, see checkRecoveryForSession.
+ * A snapshot whose session another process has open, or that a live process
+ * is still refreshing, is NOT offered: this is an unsolicited boot-time
+ * question, and asking about state nobody lost is the defect these rules exist
+ * to prevent. The next candidate is considered instead, so a live session's
+ * snapshot never hides an older orphaned one.
  */
 export function checkRecoveryFile(options?: SessionPersistenceOptions): RecoveryFileInfo | null {
   return findLiveRecoveryCandidate(options)?.info ?? null;
@@ -351,7 +373,9 @@ export function checkRecoveryFile(options?: SessionPersistenceOptions): Recovery
  * Whether ONE specific session has a live crash snapshot, a snapshot strictly
  * newer than that session's own durable store file, under exactly the rule
  * `checkRecoveryFile` uses. Returns its meta, or null when that session has no
- * snapshot or its snapshot was already superseded.
+ * snapshot, its snapshot was already superseded, or another running process
+ * has the session open (its snapshot is that process's working state). The
+ * freshness window does not apply: this answers a direct question.
  *
  * This is the probe for a consumer's resume-a-named-session flow (`--continue`
  * and friends): loading the store copy directly would silently drop the tail of
@@ -367,8 +391,9 @@ export function checkRecoveryForSession(surface: SessionSurface, sessionId: stri
     const path = pickRecoverySnapshotPath(options, sessionId);
     if (!path) return null;
     const { info, mtimeNs } = readRecoveryMetaObservation(path);
+    if (info.sessionId !== sessionId) return null;
     if (isSupersededByOwnStore(resolveSessionsDirPath(options), sessionId, mtimeNs)) return null;
-    return info.sessionId === sessionId ? info : null;
+    return isOpenInAnotherProcess(surface, sessionId) ? null : info;
   } catch (error) {
     logger.warn('[Recovery] Per-session check failed', { error: summarizeError(error) });
     return null;
@@ -391,6 +416,7 @@ function findLiveRecoveryCandidate(
 ): { path: string; info: RecoveryFileInfo; physical: string } | null {
   try {
     const sessionsDir = resolveSessionsDirPath(options);
+    const surface = isSurfaceOptions(options) ? requireSurface(options) : undefined;
     // One clock read for the whole scan, so two candidates a millisecond apart
     // are not judged against two different "now"s.
     const nowMs = Date.now();
@@ -408,6 +434,7 @@ function findLiveRecoveryCandidate(
       const { info, physical, mtimeNs } = selected;
       if (isActivelyRefreshed(mtimeNs, nowMs, LIVE_REFRESH_WINDOW_MS)) continue;
       if (isSupersededByOwnStore(sessionsDir, info.sessionId, mtimeNs)) continue;
+      if (isOpenInAnotherProcess(surface, info.sessionId)) continue;
       return { path: entry.path, info, physical };
     }
     return null;

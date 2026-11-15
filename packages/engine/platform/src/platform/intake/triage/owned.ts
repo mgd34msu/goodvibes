@@ -54,13 +54,29 @@ export interface OwnedInboxTriageResult {
   readonly hasMore: boolean;
   readonly nextCursor?: string;
 }
+/** Whether new rows of this account are being labelled, and if not, why and what turns it on. */
+export type InboxTriageState =
+  | { readonly state: 'on' }
+  | { readonly state: 'off'; readonly reason: string; readonly next: readonly string[] };
 export interface OwnedTriagedInboxSource extends OwnedInboxSource {
   /** Score a selected page now, at most 100 rows; `dryRun` returns the reading without storing it. */
   runInboxTriage(query?: InboxListInput, operation?: { readonly signal?: AbortSignal; readonly dryRun?: boolean }): Promise<OwnedInboxTriageResult>;
+  /** In memory, no I/O: the same facts that decide whether a pass runs. */
+  triageState(): InboxTriageState;
 }
-function unavailable(): HandlerError {
-  return new HandlerError('Inbox triage is not enabled for this account: it has no privacy-screening model route to ask, or that route was revoked',
-    'INBOX_TRIAGE_AUTHORITY_UNAVAILABLE', 503);
+type TriageOff = Extract<InboxTriageState, { readonly state: 'off' }>;
+const OFF: Readonly<Record<'closed' | 'ungranted' | 'revoked' | 'classic', TriageOff>> = Object.freeze({
+  closed: { state: 'off', reason: 'This inbox account is closing', next: ['List the inbox again once the account has reconnected'] },
+  ungranted: { state: 'off', reason: 'This inbox account has no privacy-screening model route, so its messages are not sent to a model to be labelled',
+    next: ['Set up privacy screening for this inbox account; labels then come with new messages'] },
+  revoked: { state: 'off', reason: 'The privacy-screening route this account labels mail through was revoked',
+    next: ['Reconnect the inbox account to restore its screening route'] },
+  classic: { state: 'off', reason: 'Decision models are off (judgment.policy is Classic), so no model labels mail',
+    next: ['Set judgment.policy to a decision-model policy to label new mail'] },
+});
+function unavailable(state: InboxTriageState): HandlerError {
+  const off = state.state === 'off' ? state : OFF.closed;
+  return new HandlerError(`Inbox triage is off: ${off.reason}. ${off.next[0]}`, 'INBOX_TRIAGE_AUTHORITY_UNAVAILABLE', 503);
 }
 
 const DEFAULT_BATCH = 50;
@@ -99,7 +115,7 @@ async function createTriagedSource(
   const active = new Set<Promise<unknown>>();
   const defaults = options.storeFileName ? undefined
     : await acquireOwnedTriageIdentity({ workingDirectory: ctx.workingDirectory, assertCurrent: () => {
-      if (closed || owner.signal.aborted) throw unavailable();
+      if (closed || owner.signal.aborted) throw unavailable(OFF.closed);
     }, beforeWrite: options.beforeIdentityWrite }, providerId, accountScopeId);
   const mirrorFileName = options.storeFileName ?? defaults!.mirrorFileName;
   // Native roots already own their mirror lock; a default mirror takes its own.
@@ -118,12 +134,16 @@ async function createTriagedSource(
     for (const name of lockNames) releases.push(await acquireCrossProcessLock(join(ctx.workingDirectory, '.goodvibes', 'tui', 'operator', name),
       { strictOwnership: true, totalTimeoutMs: 100 }));
   } catch (error) { releaseLock(); throw error; }
-  /** Usable grant right now, or undefined: triage is skipped, never an error for a read. */
-  const grant = (): InboxTriageAuthority | undefined => {
+  const state = (): InboxTriageState => {
+    if (closed || owner.signal.aborted) return OFF.closed;
+    if (!bound) return OFF.ungranted;
+    if (authority.signal.aborted) return OFF.revoked;
     // Decision models off (Classic) means no model request, triage included.
-    if (closed || owner.signal.aborted || !bound || authority.signal.aborted || isClassicOperation()) return undefined;
-    try { authority.assertCurrent(); return authority; } catch { return undefined; }
+    if (isClassicOperation()) return OFF.classic;
+    try { authority.assertCurrent(); return { state: 'on' }; } catch { return OFF.revoked; }
   };
+  /** Usable grant right now, or undefined: triage is skipped, never an error for a read. */
+  const grant = (): InboxTriageAuthority | undefined => state().state === 'on' ? authority : undefined;
   const report = (message: string): void => { try { ctx.logger.warn(message); } catch { /* fixed diagnostic only */ } };
   let declared = false;
   const declare = (): void => { if (!declared) { options.beforeReceiptWrite?.(4); declared = true; } };
@@ -178,12 +198,15 @@ async function createTriagedSource(
   // Rows stored before triage was granted, or before a restart, are scored once the mirror is open.
   void source.ready.then(() => schedule(), () => {});
   const score: OwnedTriagedInboxSource['runInboxTriage'] = async (query = {}, operation = {}) => {
-    if (closed) throw unavailable();
+    if (closed) throw unavailable(OFF.closed);
     const selected = normalizeInboxQuery(query);
     if (selected.limit > 100) throw new HandlerError('Inbox triage scores at most 100 rows at a time; pass limit 100 or less', 'INVALID_ARGUMENT', 400);
-    if (selected.providers?.some(provider => provider !== providerId)) throw unavailable();
+    if (selected.providers?.some(provider => provider !== providerId)) {
+      throw new HandlerError(`This inbox account labels ${providerId} messages only; pass provider ${providerId}`, 'INVALID_ARGUMENT', 400);
+    }
+    const now = state();
     const live = grant();
-    if (!live) throw unavailable();
+    if (!live) throw unavailable(now);
     const signal = AbortSignal.any([owner.signal, live.signal, ...(operation.signal ? [operation.signal] : [])]);
     const read = await source.acquireRead(true);
     try {
@@ -218,7 +241,7 @@ async function createTriagedSource(
     })().then(resolve, reject);
     return closing;
   };
-  return { ...source, runInboxTriage: score, close, unregister() { void close(); } };
+  return { ...source, runInboxTriage: score, triageState: state, close, unregister() { void close(); } };
 }
 
 /** Owned source plus the canonical `channels.inbox.list` binding over it. */

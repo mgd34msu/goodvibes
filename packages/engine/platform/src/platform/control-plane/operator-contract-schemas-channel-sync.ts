@@ -33,10 +33,13 @@ export const CHANNEL_INBOX_ITEM_SCHEMA = objectSchema({
   routeId: STRING_SCHEMA,
   threadId: STRING_SCHEMA,
   attachmentCount: NUMBER_SCHEMA,
-  // Triage overlay. A host that runs an inbound triage pass (the daemon does)
-  // scores each item as it is persisted and returns the score alongside it.
-  // Declared here because it is SERVED, an item field a client receives and
-  // the schema does not name is the contract lying by omission.
+  // Triage label. The daemon scores new items after each poll that stored them,
+  // on the account's privacy-screening model route, and returns the label with
+  // the item while its content is what was scored. Absent when the item has not
+  // been scored yet, or when triage is off for the account (no screening route,
+  // or decision models off). Declared here because it is SERVED, an item field
+  // a client receives and the schema does not name is the contract lying by
+  // omission.
   triageScore: NUMBER_SCHEMA,
   triageLabel: STRING_SCHEMA,
   triageTags: arraySchema(STRING_SCHEMA),

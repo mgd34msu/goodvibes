@@ -23,9 +23,10 @@ function inputOf(row: Omit<TriageRow, 'revision'>): TriageInput {
 }
 
 function receiptRow(receipt: TriageReceipt, revision: string): InboxTriageReceiptRow {
+  const battery = `${receipt.battery}@${receipt.batteryVersion}`;
   return receipt.status === 'settled'
-    ? { id: receipt.id, revision, status: 'settled', label: receipt.label, score: receipt.score, tags: receipt.tags, receipt: JSON.stringify(receipt) }
-    : { id: receipt.id, revision, status: receipt.status, receipt: JSON.stringify(receipt) };
+    ? { id: receipt.id, revision, status: 'settled', label: receipt.label, score: receipt.score, tags: receipt.tags, receipt: JSON.stringify(receipt), battery }
+    : { id: receipt.id, revision, status: receipt.status, receipt: JSON.stringify(receipt), battery };
 }
 
 /**
@@ -42,7 +43,7 @@ export async function triageMirrorRows(store: InboxCursorStore, provider: string
   const input = captureTriageInputs(rows.map(inputOf));
   const revisions = new Map(rows.map(row => [row.id, row.revision]));
   const scope = store.triageScope;
-  const receipts = await scoreCapturedTriage(input, port, options.signal, scope, false,
+  const receipts = await scoreCapturedTriage(input, port, options.signal, false,
     scope ? new Map(rows.map(row => [row.id, { ...scope, sourceRevision: row.revision }])) : undefined);
   if (options.signal?.aborted || receipts.length === 0) return { receipts, stored: 0 };
   const written = await store.commitTriageReceipts(receipts.map(receipt => receiptRow(receipt, revisions.get(receipt.id)!)));
@@ -54,5 +55,5 @@ export async function previewInboxTriage(items: readonly { readonly id: string; 
   readonly subject?: string | undefined; readonly bodyPreview: string; readonly unread: boolean }[], port?: JudgmentPort, signal?: AbortSignal): Promise<readonly TriagePreview[]> {
   const input = captureTriageInputs(items.map(item => inputOf({ id: item.id, provider: item.provider, kind: item.kind,
     subject: item.subject ?? '', snippet: item.bodyPreview, unread: item.unread })));
-  return scoreCapturedTriage(input, port, signal, undefined, true);
+  return scoreCapturedTriage(input, port, signal, true);
 }

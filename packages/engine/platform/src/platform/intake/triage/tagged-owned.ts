@@ -8,7 +8,7 @@
  */
 import type { OwnedInboxSource } from '../registration.js';
 import { captureTagNames } from './tagger/meaning.js';
-import type { TriageTagger } from './tagger/index.js';
+import type { TriageEffectResult, TriageTagger } from './tagger/index.js';
 
 export interface OwnedInboxTaggingOptions {
   readonly source: OwnedInboxSource;
@@ -27,9 +27,12 @@ export interface OwnedInboxTagOperation {
 /** What happened to one message. */
 export interface OwnedInboxTagResult {
   readonly itemId: string;
+  /** `applied` when every label is on the message; `failed` when any is not (see `effects`). */
   readonly state: 'applied' | 'refused' | 'failed';
-  /** Labels written at the provider (all of them when `applied`, none otherwise). */
+  /** Labels that are on the message at the provider now (written, or already there). */
   readonly applied: readonly string[];
+  /** Each mark the write added or took off, with its outcome; absent when nothing reached the provider. */
+  readonly effects?: readonly TriageEffectResult[];
   /** Why it was refused or failed, and what to do. */
   readonly reason?: string;
   /** Set when the message changed while its label was being written. */
@@ -69,16 +72,21 @@ export function createOwnedInboxTagging(input: OwnedInboxTaggingOptions): OwnedI
         const revision = revisionOf();
         if (revision === undefined) return refused(`Message ${itemId} is not in this account's inbox; list the inbox and use an id from it`);
         const guard = { signal, assertCurrent() { signal.throwIfAborted(); options.assertCurrent(); } };
+        let effects: readonly TriageEffectResult[];
         try {
           const prepared = await options.tagger.prepareTags(itemId, tags, guard);
           if (revisionOf() !== revision) return refused(`Message ${itemId} changed before its label was written; nothing was written, try again`);
-          await prepared.applyTags(guard);
+          effects = (await prepared.applyTags(guard)).effects;
         } catch (error) {
           if (signal.aborted) return stopped;
           return { itemId, state: 'failed', applied: [], reason: message(error, 'The provider did not accept the label; nothing is known to be written') };
         }
         const changed = revisionOf() !== revision;
-        return { itemId, state: 'applied', applied: tags, ...(changed ? { changedDuringWrite: true } : {}) };
+        const added = effects.filter(effect => effect.action === 'add');
+        const on = added.filter(effect => effect.outcome === 'applied' || effect.outcome === 'already').map(effect => effect.tag);
+        const problem = effects.find(effect => effect.outcome === 'failed') ?? added.find(effect => effect.outcome === 'skipped');
+        return { itemId, state: on.length === added.length && !problem ? 'applied' : 'failed', applied: on, effects,
+          ...(problem?.reason ? { reason: `${problem.tag}: ${problem.reason}` } : {}), ...(changed ? { changedDuringWrite: true } : {}) };
       }).finally(unsubscribe);
       active.add(work); void work.then(() => active.delete(work), () => active.delete(work)); return work;
     },

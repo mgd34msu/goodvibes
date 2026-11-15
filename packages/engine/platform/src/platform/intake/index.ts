@@ -59,13 +59,13 @@ export { composeInboxReads } from './composite.js';
 export type { InboxReadSource } from './composite.js';
 
 export { createOwnedTriagedInboxSource, registerTriagedInbox } from './triage/owned.js';
-export type { InboxTriageAuthority, OwnedTriagedInboxOptions, OwnedInboxTriageResult, OwnedTriagedInboxSource } from './triage/owned.js';
+export type { InboxTriageAuthority, InboxTriageState, OwnedTriagedInboxOptions, OwnedInboxTriageResult, OwnedTriagedInboxSource } from './triage/owned.js';
 
 // Explicit host-owned provider mutation handles. No default registration or polling.
 export { createTriageTagger } from './triage/tagger/index.js';
-export type { TriageTagger, TriageTaggerOptions, PreparedTriageTags, TriageTagEffect, TriageProviderTag, TaggerGuard, ImapStoreArgs, ImapStoreFlag, ImapRetryOptions } from './triage/tagger/index.js';
+export type { TriageTagger, TriageTaggerOptions, PreparedTriageTags, TriageTagEffect, TriageProviderTag, TaggerGuard, TriageEffectResult, TriageTagWrite, ImapStoreArgs, ImapStoreFlag, ImapStoreResult, ImapRetryOptions } from './triage/tagger/index.js';
 export { createOwnedInboxTagging } from './triage/tagged-owned.js';
-export type { OwnedInboxTagging, OwnedInboxTaggingOptions, OwnedInboxTagOperation } from './triage/tagged-owned.js';
+export type { OwnedInboxTagging, OwnedInboxTaggingOptions, OwnedInboxTagOperation, OwnedInboxTagResult } from './triage/tagged-owned.js';
 
 // Explicit account-bound Discord channels; no implicit catalog or external polling.
 export { createDiscordInboxOwner } from './providers/discord-owner.js';

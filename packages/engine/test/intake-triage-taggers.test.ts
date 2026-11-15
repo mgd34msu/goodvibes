@@ -2,9 +2,8 @@ import { expect, test } from 'bun:test';
 import type { Socket } from 'node:net';
 import { connectSocket, makeFakeImapServer, serverWrite } from './_helpers/fake-imap-server.ts';
 import { createTriageTagger } from '../platform/src/platform/intake/triage/tagger/index.ts';
-import { captureTags } from '../platform/src/platform/intake/triage/tagger/shared.ts';
-import { applySlackTags } from '../platform/src/platform/intake/triage/tagger/slack.ts';
-import { applyDiscordTags } from '../platform/src/platform/intake/triage/tagger/discord.ts';
+import { applySlackReactions } from '../platform/src/platform/intake/triage/tagger/slack.ts';
+import { applyDiscordTagEffects } from '../platform/src/platform/intake/triage/tagger/discord.ts';
 import { imapStoreFlagWithMailClient, makeRetryingImapStoreFlag, ImapStoreError, type ImapStoreArgs } from '../platform/src/platform/intake/triage/tagger/imap.ts';
 const guard = () => ({ signal: new AbortController().signal, assertCurrent() {} });
 function http(responses: Array<Response | (() => Response)>) {
@@ -13,44 +12,54 @@ function http(responses: Array<Response | (() => Response)>) {
   return { calls, fetcher };
 }
 const response = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
-test('fixed canonical labels refuse heuristic substrings and arbitrary flags', () => {
-  expect(captureTags(['GoodVibes/Spam', 'GoodVibes/Spam'])).toEqual(['GoodVibes/Spam']);
-  for (const tag of ['spam', 'NotSpam', 'GoodVibes/spam', '\\Seen', 'GoodVibes/Priority ']) expect(() => captureTags([tag])).toThrow();
+const slack = { channel: 'C123', timestamp: '123.456' };
+const outcomes = (write: { effects: readonly { tag: string; action: string; outcome: string }[] }) => write.effects.map(effect => `${effect.action} ${effect.tag} ${effect.outcome}`);
+
+test('Slack: a new label takes the other built-in reactions off, after it is on', async () => {
+  const f = http([response({ ok: true }), response({ ok: true }), response({ ok: false, error: 'no_reaction' })]);
+  const write = await applySlackReactions(slack, [{ tag: 'GoodVibes/Spam', reaction: 'no_entry_sign' }],
+    [{ tag: 'GoodVibes/Priority', reaction: 'rotating_light' }, { tag: 'GoodVibes/Normal', reaction: 'inbox_tray' }], 'synthetic', guard(), f.fetcher);
+  expect(f.calls.map(call => call.url.replace('https://slack.com/api/', ''))).toEqual(['reactions.add', 'reactions.remove', 'reactions.remove']);
+  expect(f.calls.every(call => call.init.redirect === 'error')).toBe(true);
+  expect(JSON.parse(String(f.calls[0]!.init.body))).toEqual({ ...slack, name: 'no_entry_sign' });
+  expect(outcomes(write)).toEqual(['add GoodVibes/Spam applied', 'remove GoodVibes/Priority applied', 'remove GoodVibes/Normal already']);
 });
-test('Slack reactions.add exact target, idempotence and no redirects', async () => {
-  const f = http([response({ ok: false, error: 'already_reacted' })]);
-  await applySlackTags({ channel: 'C123', timestamp: '123.456' }, ['GoodVibes/Priority'], 'synthetic', guard(), f.fetcher);
-  expect(f.calls).toHaveLength(1); expect(f.calls[0]!.init.redirect).toBe('error');
-  expect(JSON.parse(String(f.calls[0]!.init.body))).toEqual({ channel: 'C123', timestamp: '123.456', name: 'rotating_light' });
-});
-test.each([response({ ok: false, error: 'missing_scope' }), response({ ok: true }, 403)])('Slack hard refusals do not continue', async failed => {
+test.each([response({ ok: false, error: 'missing_scope' }), response({ ok: true }, 403)])('Slack: a refused label stops the write and keeps the old marks', async failed => {
   const f = http([failed]);
-  await expect(applySlackTags({ channel: 'C123', timestamp: '123.456' }, ['GoodVibes/Spam', 'GoodVibes/Normal'], 'synthetic', guard(), f.fetcher)).rejects.toThrow();
+  const write = await applySlackReactions(slack, [{ tag: 'GoodVibes/Spam', reaction: 'no_entry_sign' }, { tag: 'GoodVibes/Normal', reaction: 'inbox_tray' }],
+    [{ tag: 'GoodVibes/Priority', reaction: 'rotating_light' }], 'synthetic', guard(), f.fetcher);
   expect(f.calls).toHaveLength(1);
+  expect(write.effects.map(effect => effect.outcome)).toEqual(['failed', 'skipped', 'skipped']);
 });
-test('Discord real observed forum tags merge, preserving unrelated applied_tags', async () => {
-  const f = http([response({ id: '123', type: 11, parent_id: '456', applied_tags: ['789'] }), response({ id: '456', type: 15 }), response({})]);
-  await applyDiscordTags({ channel: '123', message: '234' }, ['GoodVibes/Spam'], 'synthetic', guard(), { 'GoodVibes/Spam': '890' }, f.fetcher);
+test('Discord forum: one PATCH keeps unrelated tags, takes stale label tags off and reports an unmapped label', async () => {
+  const f = http([response({ id: '123', type: 11, parent_id: '456', applied_tags: ['789', '555'] }), response({ id: '456', type: 15 }), response({})]);
+  const write = await applyDiscordTagEffects({ channel: '123', message: '234' }, [{ name: 'GoodVibes/Spam', reaction: '🚫' }, { name: 'Custom', reaction: '🚨' }],
+    [{ name: 'GoodVibes/Normal', reaction: '📥' }], 'synthetic', guard(), { 'GoodVibes/Spam': '890', 'GoodVibes/Normal': '555' }, f.fetcher);
   expect(f.calls.map(call => call.init.method ?? 'GET')).toEqual(['GET', 'GET', 'PATCH']);
   expect(JSON.parse(String(f.calls[2]!.init.body))).toEqual({ applied_tags: ['789', '890'] });
+  expect(outcomes(write)).toEqual(['add GoodVibes/Spam applied', 'add Custom skipped', 'remove GoodVibes/Normal applied']);
 });
-test.each([response({}, 403), response({ id: '123', type: 11, parent_id: '456' }), response({ id: 'wrong', type: 11 })])('Discord failed or malformed observations never PATCH', async first => {
+test.each([response({}, 403), response({ id: '123', type: 11, parent_id: '456' }), response({ id: 'wrong', type: 11 })])('Discord: a failed or malformed forum observation never PATCHes', async first => {
   const f = http([first, response({ id: '456', type: 15 })]);
-  await expect(applyDiscordTags({ channel: '123', message: '234' }, ['GoodVibes/Spam'], 'synthetic', guard(), { 'GoodVibes/Spam': '890' }, f.fetcher)).rejects.toThrow();
+  const write = await applyDiscordTagEffects({ channel: '123', message: '234' }, [{ name: 'GoodVibes/Spam', reaction: '🚫' }], [], 'synthetic', guard(), { 'GoodVibes/Spam': '890' }, f.fetcher);
   expect(f.calls.some(call => call.init.method === 'PATCH')).toBe(false);
+  expect(write.effects.map(effect => effect.outcome)).toEqual(['failed']);
 });
-test('Discord DM with a forum mapping remains a reaction', async () => {
-  const f = http([response({ id: '123', type: 1 }), new Response(null, { status: 204 })]);
-  await applyDiscordTags({ channel: '123', message: '234' }, ['GoodVibes/Normal'], 'synthetic', guard(), { 'GoodVibes/Normal': '890' }, f.fetcher);
-  expect(f.calls[1]!.init.method).toBe('PUT'); expect(f.calls[1]!.url).toContain('/messages/234/reactions/');
-});
-test('Discord revocation after GET prevents PATCH', async () => {
+test('Discord: revocation after the observation stops the write before PATCH', async () => {
   const abort = new AbortController(); const f = http([response({ id: '123', type: 11, parent_id: '456', applied_tags: [] }), () => { abort.abort(); return response({ id: '456', type: 15 }); }]);
-  await expect(applyDiscordTags({ channel: '123', message: '234' }, ['GoodVibes/Spam'], 'synthetic', { signal: abort.signal, assertCurrent() {} }, { 'GoodVibes/Spam': '890' }, f.fetcher)).rejects.toThrow();
+  await expect(applyDiscordTagEffects({ channel: '123', message: '234' }, [{ name: 'GoodVibes/Spam', reaction: '🚫' }], [], 'synthetic', { signal: abort.signal, assertCurrent() {} }, { 'GoodVibes/Spam': '890' }, f.fetcher)).rejects.toThrow();
   expect(f.calls).toHaveLength(2);
 });
+test('Discord reactions: the message is read once, a present mark is not re-added and only present stale marks are removed', async () => {
+  const f = http([response({ id: '234', reactions: [{ me: true, emoji: { name: '📥' } }, { me: false, emoji: { name: '🚨' } }] }), new Response(null, { status: 204 }), new Response(null, { status: 204 })]);
+  const write = await applyDiscordTagEffects({ channel: '123', message: '234' }, [{ name: 'GoodVibes/Spam', reaction: '🚫' }],
+    [{ name: 'GoodVibes/Priority', reaction: '🚨' }, { name: 'GoodVibes/Normal', reaction: '📥' }], 'synthetic', guard(), {}, f.fetcher);
+  expect(f.calls.map(call => call.init.method ?? 'GET')).toEqual(['GET', 'PUT', 'DELETE']);
+  expect(f.calls[2]!.url).toContain(`/reactions/${encodeURIComponent('📥')}/@me`);
+  expect(outcomes(write)).toEqual(['add GoodVibes/Spam applied', 'remove GoodVibes/Priority already', 'remove GoodVibes/Normal applied']);
+});
 /** A mail server that answers the label write: EXAMINE and SELECT report `validity`, STORE reports `storeReply`. */
-async function imapServer(options: { validity?: number; selectValidity?: number; storeReply?: readonly string[]; storeStatus?: 'OK' | 'NO' } = {}) {
+async function imapServer(options: { validity?: number; selectValidity?: number; storeReply?: readonly string[]; storeStatus?: 'OK' | 'NO'; removeReply?: readonly string[] } = {}) {
   const commands: string[] = [];
   const server = await makeFakeImapServer((socket) => {
     serverWrite(socket, '* OK ready');
@@ -64,6 +73,7 @@ async function imapServer(options: { validity?: number; selectValidity?: number;
         const [tag = '', verb = '', sub = ''] = line.split(' ');
         if (verb === 'EXAMINE') { serverWrite(socket, '* 3 EXISTS'); serverWrite(socket, `* OK [UIDVALIDITY ${options.validity ?? 7}] ok`); serverWrite(socket, `${tag} OK [READ-ONLY] done`); }
         else if (verb === 'SELECT') { serverWrite(socket, `* OK [UIDVALIDITY ${options.selectValidity ?? options.validity ?? 7}] ok`); serverWrite(socket, `${tag} OK [READ-WRITE] done`); }
+        else if (verb === 'UID' && sub === 'STORE' && line.includes('-FLAGS')) { for (const reply of options.removeReply ?? []) serverWrite(socket, reply); serverWrite(socket, `${tag} OK done`); }
         else if (verb === 'UID' && sub === 'STORE') { for (const reply of options.storeReply ?? ['* 3 FETCH (UID 42 FLAGS (\\Seen GoodVibes_Spam))']) serverWrite(socket, reply); serverWrite(socket, `${tag} ${options.storeStatus ?? 'OK'} done`); }
         else if (verb === 'LOGOUT') { serverWrite(socket, '* BYE'); serverWrite(socket, `${tag} OK done`); }
         else serverWrite(socket, `${tag} OK done`);
@@ -85,6 +95,19 @@ test('IMAP label: one connection, quoted login, EXAMINE, SELECT, every keyword i
     expect(f.connects()).toBe(1);
     expect(sent(f.commands)).toEqual(['LOGIN "a\\"b" "c\\\\d"', 'EXAMINE Inbox', 'SELECT Inbox', 'UID STORE 42 +FLAGS (GoodVibes_Spam GoodVibes_Priority)', 'LOGOUT']);
   } finally { f.close(); }
+});
+test('IMAP label: superseded keywords the message carries come off in one more STORE; absent ones cost nothing', async () => {
+  const f = await imapServer({ storeReply: ['* 3 FETCH (UID 42 FLAGS (GoodVibes_Spam GoodVibes_Normal))'], removeReply: ['* 3 FETCH (UID 42 FLAGS (GoodVibes_Spam))'] });
+  try {
+    const result = await imapStoreFlagWithMailClient(f.connect)({ ...args(), supersedes: ['GoodVibes_Priority', 'GoodVibes_Normal'] });
+    expect(result).toEqual({ removed: ['GoodVibes_Normal'], kept: [] });
+    expect(sent(f.commands).filter(line => line.startsWith('UID STORE'))).toEqual(['UID STORE 42 +FLAGS (GoodVibes_Spam)', 'UID STORE 42 -FLAGS (GoodVibes_Normal)']);
+  } finally { f.close(); }
+  const clean = await imapServer();
+  try {
+    expect(await imapStoreFlagWithMailClient(clean.connect)({ ...args(), supersedes: ['GoodVibes_Priority', 'GoodVibes_Normal'] })).toEqual({ removed: [], kept: [] });
+    expect(clean.commands.filter(line => line.includes('-FLAGS'))).toEqual([]);
+  } finally { clean.close(); }
 });
 test('IMAP label: a mailbox reset between listing and writing prevents STORE', async () => {
   for (const options of [{ validity: 8 }, { selectValidity: 8 }]) {
@@ -132,10 +155,4 @@ test('unsupported provider never falls through to an email writer or resolves cr
   let reads = 0;
   expect(() => createTriageTagger({ provider: 'unsupported' as never, accountScopeId: 'account', credentialKey: 'synthetic', credentials: { resolveRef: async () => null, resolveConfigSecret: async () => { reads++; return 'synthetic'; } }, captureCredential() { throw new Error('No credential capture'); }, ...guard() })).toThrow('supported provider');
   expect(reads).toBe(0);
-});
-
-test('Discord without a forum mapping uses exactly one reaction request and no channel PATCH', async () => {
-  const f = http([new Response(null, { status: 204 })]);
-  await applyDiscordTags({ channel: '123', message: '234' }, ['GoodVibes/Spam'], 'synthetic', guard(), {}, f.fetcher);
-  expect(f.calls).toHaveLength(1); expect(f.calls[0]!.init.method).toBe('PUT'); expect(f.calls[0]!.url).toContain('/reactions/');
 });

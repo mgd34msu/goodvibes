@@ -10,8 +10,10 @@
 //   cursors(provider PK, nextSince INT)        one row per provider, or per
 //                                              conversation as `provider:conversation`
 //   imap_checkpoints(provider PK, checkpoint TEXT)
-//   triage_receipts(id PK, revision, status, label, score, tags, receipt)
-//                                              triage labels beside their rows
+//   triage_receipts(id PK, revision, status, label, score, tags, receipt, battery)
+//                                              triage labels beside their rows;
+//                                              a label shows only for the current
+//                                              battery (`name@version`)
 //   inbox_source_revision_policy, inbox_retention_policy  format and policy versions
 //
 // One write path: the poller commits rows and their progress together through
@@ -42,6 +44,7 @@ import { HandlerSqliteStore, type HandlerSqliteTransaction } from '../state/daem
 import type { ImapUidCheckpoint, ImapUidCheckpointAdvance, InboundChannelItem } from './provider-adapter.js';
 import { captureTriageReceiptScope } from './triage/evidence.js';
 import type { TriageLabel, TriageReceiptScope } from './triage/types.js';
+import { INBOX_TRIAGE_BATTERY } from './triage/battery.js';
 import { retainActiveInboxStore } from './active-stores.js';
 import { captureImapAdvance, captureImapCheckpoint, captureImapItems, sameImapCheckpoint } from './imap-checkpoint.js';
 
@@ -148,7 +151,8 @@ const SCHEMA: string[] = [
      label TEXT,
      score REAL,
      tags TEXT,
-     receipt TEXT NOT NULL
+     receipt TEXT NOT NULL,
+     battery TEXT
    )`,
 ];
 
@@ -199,6 +203,8 @@ export interface InboxTriageReceiptRow {
   readonly tags?: readonly string[];
   /** The full receipt (attribution and readings), stored as written. */
   readonly receipt: string;
+  /** `name@version` of the battery that scored it; another version's label is history. */
+  readonly battery: string;
 }
 
 /** A row waiting for triage, with the revision its receipt must name. */
@@ -302,6 +308,10 @@ export class InboxCursorStore {
         this.store.run('UPDATE items SET seq = rowid');
       }
       this.store.run('CREATE INDEX IF NOT EXISTS idx_items_seq ON items(seq)');
+      // Receipts stored before the battery was recorded name none, so they lend
+      // no label and their rows are scored once more.
+      const receiptColumns = this.store.all<{ name: string }>('PRAGMA table_info(triage_receipts)');
+      if (!receiptColumns.some(column => column.name === 'battery')) this.store.run('ALTER TABLE triage_receipts ADD COLUMN battery TEXT');
       const unversioned = this.store.get<{ count: number }>('SELECT COUNT(*) AS count FROM items WHERE triage_revision IS NULL');
       if (unversioned && unversioned.count > 0) {
         this.store.run("UPDATE items SET triage_revision = 'ir-' || lower(hex(randomblob(16))) WHERE triage_revision IS NULL");
@@ -529,16 +539,17 @@ export class InboxCursorStore {
     const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
     const limit = Math.max(0, Math.floor(query.limit));
     params.push(limit);
-    // A label shows only while the receipt names the row's current content revision.
+    // A label shows only while the receipt names the row's current content
+    // revision and was decided by the current battery version.
     const rows = this.store.all<ItemRow>(
       `SELECT items.id AS id, provider, kind, fromDigest, subjectPreview, bodyPreview,
               routeId, receivedAt, unread, r.label AS triageLabel, r.score AS triageScore, r.tags AS triageTags
          FROM items LEFT JOIN triage_receipts r
-           ON r.id = items.id AND r.revision = items.triage_revision AND r.status = 'settled'
+           ON r.id = items.id AND r.revision = items.triage_revision AND r.status = 'settled' AND r.battery = ?
          ${where}
          ORDER BY receivedAt DESC, items.id ASC
          LIMIT ?`,
-      params,
+      [INBOX_TRIAGE_BATTERY, ...params],
     );
     return rows.map(rowToItem);
   }
@@ -552,15 +563,16 @@ export class InboxCursorStore {
     return new Map(rows.map(row => [row.id, row.triage_revision]));
   }
 
-  /** Rows of this provider whose content has no settled label yet, newest first. */
+  /** Rows of this provider whose content has no settled label from the current battery yet, newest first. */
   untriagedItems(provider: string, limit: number): InboxTriageCandidate[] {
     this.assertOpen();
     const rows = this.store.all<ItemRow & { revision: string }>(
       `SELECT items.id AS id, provider, kind, fromDigest, subjectPreview, bodyPreview, routeId, receivedAt, unread,
               items.triage_revision AS revision
          FROM items LEFT JOIN triage_receipts r ON r.id = items.id AND r.revision = items.triage_revision
-        WHERE provider = ? AND items.triage_revision IS NOT NULL AND (r.id IS NULL OR r.status <> 'settled')
-        ORDER BY receivedAt DESC, items.id ASC LIMIT ?`, [provider, Math.max(0, Math.floor(limit))]);
+        WHERE provider = ? AND items.triage_revision IS NOT NULL
+          AND (r.id IS NULL OR r.status <> 'settled' OR r.battery IS NOT ?)
+        ORDER BY receivedAt DESC, items.id ASC LIMIT ?`, [provider, INBOX_TRIAGE_BATTERY, Math.max(0, Math.floor(limit))]);
     return rows.map(row => ({ item: rowToItem(row), revision: row.revision }));
   }
 
@@ -568,7 +580,9 @@ export class InboxCursorStore {
    * Store triage receipts beside their rows. Each row's revision is compared
    * once, inside the transaction: a row whose content changed or went away since
    * it was read is left for the next pass, the others are written. A failed
-   * attempt never replaces a settled label for the same content. Returns the ids written.
+   * attempt never replaces a settled label the same battery gave the same
+   * content; another battery version's receipt is history and is replaced.
+   * Returns the ids written.
    */
   commitTriageReceipts(receipts: readonly InboxTriageReceiptRow[], assertCurrent: () => void = () => {}): Promise<readonly string[]> {
     this.assertOpen();
@@ -580,11 +594,11 @@ export class InboxCursorStore {
         const current = transaction.get<{ triage_revision: string | null }>('SELECT triage_revision FROM items WHERE id = ?', [row.id]);
         if (!current || current.triage_revision !== row.revision) continue;
         if (row.status !== 'settled') {
-          const kept = transaction.get<{ status: string }>('SELECT status FROM triage_receipts WHERE id = ? AND revision = ?', [row.id, row.revision]);
-          if (kept?.status === 'settled') continue;
+          const kept = transaction.get<{ status: string; battery: string | null }>('SELECT status, battery FROM triage_receipts WHERE id = ? AND revision = ?', [row.id, row.revision]);
+          if (kept?.status === 'settled' && kept.battery === row.battery) continue;
         }
-        transaction.run(`INSERT OR REPLACE INTO triage_receipts (id, revision, status, label, score, tags, receipt)
-          VALUES (?, ?, ?, ?, ?, ?, ?)`, [row.id, row.revision, row.status, row.label ?? null, row.score ?? null, row.tags, row.receipt]);
+        transaction.run(`INSERT OR REPLACE INTO triage_receipts (id, revision, status, label, score, tags, receipt, battery)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, [row.id, row.revision, row.status, row.label ?? null, row.score ?? null, row.tags, row.receipt, row.battery]);
         written.push(row.id);
       }
       return written;

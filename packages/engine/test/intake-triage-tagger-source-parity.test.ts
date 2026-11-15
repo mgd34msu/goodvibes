@@ -23,7 +23,7 @@ function fixture(provider: TriageTaggerOptions['provider'], options: {
     credentials: credentials.credentials, captureCredential: () => credentials.capture(credentialKey), ...guard(),
     imap: { host: 'imap.example.test', port: 993, user: 'mailbot', mailbox: 'INBOX' },
     ...(options.forumTagIds ? { forumTagIds: options.forumTagIds } : {}),
-    imapStoreFlag: options.imapStoreFlag ?? (async args => { stores.push(args); }),
+    imapStoreFlag: options.imapStoreFlag ?? (async args => { stores.push(args); return { removed: [], kept: [] }; }),
     http: Object.assign(async (url: string | URL | Request, init?: RequestInit) => {
       calls.push({ url: String(url), init: init! });
       const response = responses.shift();
@@ -41,7 +41,7 @@ test('email facade applies exact normalized keyword, resolved password and one c
   await f.tagger.applyTags('email:account:0000000007:0000000042', ['GoodVibes/Spam'], guard());
   expect(f.stores).toHaveLength(1);
   expect(f.stores[0]).toMatchObject({ host: 'imap.example.test', port: 993, user: 'mailbot', mailbox: 'INBOX',
-    uid: '42', uidValidity: 7, flag: 'GoodVibes_Spam', password: token });
+    uid: '42', uidValidity: 7, flag: 'GoodVibes_Spam', password: token, supersedes: ['GoodVibes_Priority', 'GoodVibes_Normal'] });
 });
 
 test.each(['email:account:7:', 'email:account:7:0', 'email:account:7:1:*', 'email:other:7:42'])('email missing or foreign target %s never calls STORE', async id => {
@@ -62,32 +62,36 @@ test('email facade retries two transient socket resets and stops at first succes
   const f = fixture('email', { imapStoreFlag: async () => {
     attempts++;
     if (attempts < 3) throw Object.assign(new Error('synthetic reset'), { code: 'ECONNRESET' });
+    return { removed: [], kept: [] };
   } });
   await f.tagger.applyTags('email:account:7:9', ['GoodVibes/Priority'], guard());
   expect(attempts).toBe(3);
 });
 
 test('Slack facade resolves bearer token and preserves already_reacted idempotence', async () => {
-  const f = fixture('slack', { responses: [Response.json({ ok: false, error: 'already_reacted' })] });
-  await f.tagger.applyTags('slack:C123:111.222', ['GoodVibes/Spam'], guard());
-  expect(f.calls).toHaveLength(1);
+  const f = fixture('slack', { responses: [Response.json({ ok: false, error: 'already_reacted' }),
+    Response.json({ ok: false, error: 'no_reaction' }), Response.json({ ok: false, error: 'no_reaction' })] });
+  const write = await f.tagger.applyTags('slack:C123:111.222', ['GoodVibes/Spam'], guard());
+  expect(write.effects.map(effect => effect.outcome)).toEqual(['already', 'already', 'already']);
+  expect(f.calls).toHaveLength(3);
   expect(f.calls[0]!.url).toBe('https://slack.com/api/reactions.add');
   expect(f.calls[0]!.init.headers).toMatchObject({ Authorization: `Bearer ${token}` });
   expect(JSON.parse(String(f.calls[0]!.init.body))).toEqual({ channel: 'C123', timestamp: '111.222', name: 'no_entry_sign' });
 });
 
-test('Slack facade retains a hard provider refusal', async () => {
+test('Slack facade reports a hard provider refusal and removes nothing', async () => {
   const f = fixture('slack', { responses: [Response.json({ ok: false, error: 'channel_not_found' })] });
-  await expect(f.tagger.applyTags('slack:C123:111.222', ['GoodVibes/Spam'], guard())).rejects.toThrow('rejected');
+  const write = await f.tagger.applyTags('slack:C123:111.222', ['GoodVibes/Spam'], guard());
+  expect(write.effects.map(effect => `${effect.action} ${effect.outcome}`)).toEqual(['add failed', 'remove skipped', 'remove skipped']);
   expect(f.calls).toHaveLength(1);
 });
 
 test('Discord facade without a forum mapping uses the exact priority reaction', async () => {
-  const f = fixture('discord', { responses: [new Response(null, { status: 204 })] });
+  const f = fixture('discord', { responses: [Response.json({ id: '234', reactions: [] }), new Response(null, { status: 204 })] });
   await f.tagger.applyTags('discord:123:234', ['GoodVibes/Priority'], guard());
-  expect(f.calls).toHaveLength(1);
-  expect(f.calls[0]!.init).toMatchObject({ method: 'PUT', headers: { Authorization: `Bot ${token}` } });
-  expect(f.calls[0]!.url).toBe(`https://discord.com/api/v10/channels/123/messages/234/reactions/${encodeURIComponent('🚨')}/@me`);
+  expect(f.calls).toHaveLength(2);
+  expect(f.calls[1]!.init).toMatchObject({ method: 'PUT', headers: { Authorization: `Bot ${token}` } });
+  expect(f.calls[1]!.url).toBe(`https://discord.com/api/v10/channels/123/messages/234/reactions/${encodeURIComponent('🚨')}/@me`);
 });
 
 test('Discord facade merges the observed forum set and deduplicates existing target tags', async () => {
@@ -104,6 +108,7 @@ test.each(['status', 'network'] as const)('Discord facade cannot PATCH after a f
   const f = fixture('discord', { forumTagIds: { 'GoodVibes/Spam': '890' }, responses: [
     failure === 'status' ? new Response('synthetic unavailable', { status: 500 }) : new Error('synthetic network failure'),
   ] });
-  await expect(f.tagger.applyTags('discord:123:234', ['GoodVibes/Spam'], guard())).rejects.toThrow();
+  const write = await f.tagger.applyTags('discord:123:234', ['GoodVibes/Spam'], guard());
+  expect(write.effects.filter(effect => effect.action === 'add').map(effect => effect.outcome)).toEqual(['failed']);
   expect(f.calls).toHaveLength(1); expect(f.calls[0]!.init.method).toBeUndefined();
 });

@@ -2,19 +2,18 @@ import { fanOut, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { logger } from '../../utils/logger.js';
 import { inboxTriage } from './battery.js';
-import { captureTriageData, captureTriageInputs, captureTriageReceiptScope, triageConclusion, triageBinding, type CapturedTriageInput } from './evidence.js';
+import { captureTriageInputs, triageConclusion, triageBinding, type CapturedTriageInput } from './evidence.js';
 import { captureTriageJudgment, triageConfiguredModel } from './model-result.js';
-import type { TriageInput, TriagePreview, TriageReceipt, TriageReceiptScope, TriageSourceBinding } from './types.js';
+import type { TriageInput, TriagePreview, TriageReceipt, TriageSourceBinding } from './types.js';
 
 /** Row revision each label names, by item id; absent for items that are not stored rows. */
 type SourceBindings = ReadonlyMap<string, TriageSourceBinding>;
 
-export function scoreCapturedTriage(items: readonly CapturedTriageInput[], port?: JudgmentPort, signal?: AbortSignal, receiptScope?: TriageReceiptScope, preview?: false, source?: SourceBindings): Promise<readonly TriageReceipt[]>;
+export function scoreCapturedTriage(items: readonly CapturedTriageInput[], port?: JudgmentPort, signal?: AbortSignal, preview?: false, source?: SourceBindings): Promise<readonly TriageReceipt[]>;
 export function scoreCapturedTriage(items: readonly CapturedTriageInput[], port: JudgmentPort | undefined, signal: AbortSignal | undefined,
-  receiptScope: TriageReceiptScope | undefined, preview: true, source?: SourceBindings): Promise<readonly TriagePreview[]>;
+  preview: true, source?: SourceBindings): Promise<readonly TriagePreview[]>;
 export async function scoreCapturedTriage(items: readonly CapturedTriageInput[], port?: JudgmentPort, signal?: AbortSignal,
-  receiptScope?: TriageReceiptScope, preview = false, source?: SourceBindings): Promise<readonly (TriageReceipt | TriagePreview)[]> {
-  captureTriageReceiptScope(receiptScope);
+  preview = false, source?: SourceBindings): Promise<readonly (TriageReceipt | TriagePreview)[]> {
   // Only settled evidence has a later exact-input matching consumer. A failed
   // attempt needs enough metadata to withdraw an old label, never a hash of the
   // discarded private preview. Missing ports and cancellation perform no hashing.
@@ -46,7 +45,9 @@ export async function scoreCapturedTriage(items: readonly CapturedTriageInput[],
       // Internal fan-out grouping only: this marker is never sent to the port.
       model: 'configured',
       async ask(request) {
-        const questions = captureTriageData(request.questions) as typeof request.questions;
+        // The questions are this battery's own frozen definitions; only the
+        // model's answer is outside data and is checked (captureTriageJudgment).
+        const questions = request.questions;
         const captureResult: NonNullable<typeof request.captureResult> = original => captureTriageJudgment(original, questions, configured).result;
         const capturedRequest = Object.freeze({ ...request, questions, captureResult,
           context: Object.freeze({ ...request.context, batteryVersion: inboxTriage.version }) });

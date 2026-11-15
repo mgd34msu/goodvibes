@@ -1,7 +1,8 @@
 /**
  * Triage labels live beside their rows: one model request scores a batch, the
  * label shows on the row it scored, and a row whose content changed is scored
- * again rather than shown with a stale label.
+ * again rather than shown with a stale label, as is a row whose label came
+ * from another version of the triage questions.
  */
 import { afterEach, expect, test } from 'bun:test';
 import { createSystemOnePort, type Questions } from '@goodvibes-jev/judgment';
@@ -60,4 +61,20 @@ test('a row whose content changed loses its label and is scored again', async ()
   expect(stored).toBe(0);
   expect(store.listItems({ limit: 1 })[0]?.triageLabel).toBeUndefined();
   expect(store.untriagedItems('email', 50).map(candidate => candidate.item.id)).toEqual(['email:one']);
+});
+
+test('a label from another battery version is history: not shown, scored again, replaced', async () => {
+  const store = await mirror();
+  await store.commitTimestampPoll('email', [row('one', 'Routine note')], () => {});
+  const [candidate] = store.untriagedItems('email', 50);
+  // A receipt stored by an earlier version of the triage questions.
+  await store.commitTriageReceipts([{ id: candidate!.item.id, revision: candidate!.revision, status: 'settled', label: 'priority',
+    score: 0.9, tags: ['GoodVibes/Priority'], receipt: '{}', battery: 'engine.intake.inbox-triage@1' }]);
+  expect(store.listItems({ limit: 1 })[0]?.triageLabel).toBeUndefined();
+  const again = store.untriagedItems('email', 50).map(({ item, revision }) => ({ id: item.id, provider: item.provider, kind: item.kind,
+    subject: item.subjectPreview, snippet: item.bodyPreview, unread: item.unread, revision }));
+  expect(again.map(entry => entry.id)).toEqual(['email:one']);
+  const { stored } = await triageMirrorRows(store, 'email', yesPort().port, { candidates: again });
+  expect(stored).toBe(1);
+  expect(store.listItems({ limit: 1 })[0]?.triageLabel).toBe('spam');
 });

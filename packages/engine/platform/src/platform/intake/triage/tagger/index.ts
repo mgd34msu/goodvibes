@@ -3,12 +3,13 @@ import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import type { IntakeCredentialStore } from '../../context.js';
 import { applySlackReactions } from './slack.js';
 import { applyDiscordTagEffects, observeDiscordForumTags } from './discord.js';
-import { makeRetryingImapStoreFlag, imapStoreFlagWithMailClient, type ImapStoreFlag } from './imap.js';
-import { TAGS, current, type TaggerGuard, type TaggerHttp, type TriageProviderTag } from './shared.js';
+import { makeRetryingImapStoreFlag, imapStoreFlagWithMailClient, type ImapStoreFlag, type ImapStoreResult } from './imap.js';
+import { TAGS, current, notTried, supersededLabels, type TaggerGuard, type TaggerHttp, type TriageEffectResult,
+  type TriageProviderTag, type TriageTagWrite } from './shared.js';
 import { captureTriageData } from '../evidence.js';
 import { captureTagNames, readCustomTagMeaning, TriageTagMeaningHeld } from './meaning.js';
-export type { TriageProviderTag, TaggerGuard } from './shared.js';
-export type { ImapStoreArgs, ImapStoreFlag, ImapRetryOptions } from './imap.js';
+export type { TriageProviderTag, TaggerGuard, TriageEffectResult, TriageTagWrite } from './shared.js';
+export type { ImapStoreArgs, ImapStoreFlag, ImapStoreResult, ImapRetryOptions } from './imap.js';
 export interface TriageTaggerOptions {
   readonly provider: 'slack' | 'discord' | 'email';
   readonly accountScopeId: string;
@@ -36,13 +37,16 @@ export interface TriageTagEffect {
 export interface PreparedTriageTags {
   readonly effects: readonly TriageTagEffect[];
   readonly judgmentDecisionIds: readonly string[];
-  assertCurrent(): void; applyTags(guard: TaggerGuard): Promise<void>;
+  /** Other built-in labels whose marks the write takes off (they exclude the written ones). */
+  readonly supersedes: readonly TriageProviderTag[];
+  assertCurrent(): void; applyTags(guard: TaggerGuard): Promise<TriageTagWrite>;
 }
 export interface TriageTagger {
   readonly provider: TriageTaggerOptions['provider'];
   readonly accountScopeId: string;
   prepareTags(itemId: string, tags: readonly string[], guard: TaggerGuard): Promise<PreparedTriageTags>;
-  applyTags(itemId: string, tags: readonly string[], guard: TaggerGuard): Promise<void>;
+  /** Every mark's outcome; a provider refusal is an effect's `failed`, a stop or an invalid target throws. */
+  applyTags(itemId: string, tags: readonly string[], guard: TaggerGuard): Promise<TriageTagWrite>;
   close(): Promise<void>;
 }
 /** Constructor-only capability: the owned caller supplies authentic admission guards. */
@@ -126,32 +130,58 @@ export function createTriageTagger(input: TriageTaggerOptions): TriageTagger {
           : { tag, mode: discordReactionOnly ? 'discord-reaction' as const : 'discord-forum-or-reaction' as const, reaction: TAGS[meanings.get(tag)!].discord,
             ...(!discordReactionOnly && Object.hasOwn(options.forumTagIds, tag) ? { forumTagRef: randomUUID().replaceAll('-', ':') } : {}) })));
         const judgmentDecisionIds = Object.freeze(decisions);
+        // Spam, Priority and Normal exclude each other: writing one takes the
+        // others' marks off. Custom names count by the meaning read for them.
+        const supersedes = Object.freeze(supersededLabels(tags.flatMap(tag => {
+          const meaning = meanings.get(tag) ?? (Object.hasOwn(TAGS, tag) ? tag as TriageProviderTag : undefined);
+          return meaning ? [meaning] : [];
+        })));
         let used = false;
-        return Object.freeze({ effects, judgmentDecisionIds, assertCurrent: guarded.assertCurrent, applyTags(admission: TaggerGuard) {
+        return Object.freeze({ effects, judgmentDecisionIds, supersedes, assertCurrent: guarded.assertCurrent, applyTags(admission: TaggerGuard): Promise<TriageTagWrite> {
           if (used) return Promise.reject(new Error('Triage preparation already consumed'));
           used = true;
           const admissionCurrent = admission.assertCurrent.bind(admission);
           const finalGuard = { signal: AbortSignal.any([signal, admission.signal, AbortSignal.timeout(20_000)]), assertCurrent() { current(guarded); admissionCurrent(); } };
-          const work = Promise.resolve().then(async () => {
+          const work = Promise.resolve().then(async (): Promise<TriageTagWrite> => {
         current(finalGuard);
+        // No currentness check after a provider write: a mark that was written
+        // is reported as written, whatever changed while it was being written.
         if (options.provider === 'slack') {
           const match = /^slack:([A-Z0-9]+):([0-9]+\.[0-9]+)$/.exec(itemId);
           if (!match) throw new Error('Slack triage target unavailable');
-          await applySlackReactions({ channel: match[1]!, timestamp: match[2]! }, effects.map(effect => effect.reaction!), token, finalGuard, options.http);
-        } else if (options.provider === 'discord') {
+          return applySlackReactions({ channel: match[1]!, timestamp: match[2]! }, effects.map(effect => ({ tag: effect.tag, reaction: effect.reaction! })),
+            supersedes.map(tag => ({ tag, reaction: TAGS[tag].slack })), token, finalGuard, options.http);
+        }
+        if (options.provider === 'discord') {
           const match = /^discord:([0-9]+):([0-9]+)$/.exec(itemId);
           if (!match) throw new Error('Discord triage target unavailable');
-          await applyDiscordTagEffects({ channel: match[1]!, message: match[2]! }, effects.map(effect => ({ name: effect.tag, ...(effect.reaction === undefined ? {} : { reaction: effect.reaction }) })), token, finalGuard, discordReactionOnly ? {} : options.forumTagIds, options.http, discordForumOnly);
-        } else {
-          const parts = itemId.split(':');
-          if (parts.length !== 4 || parts[0] !== 'email' || parts[1] !== options.accountScopeId || !/^\d+$/.test(parts[2]!) || !/^\d+$/.test(parts[3]!) || !options.imap) throw new Error('Email triage target unavailable');
-          const uidValidity = Number(parts[2]), uid = Number(parts[3]);
-          if (!Number.isSafeInteger(uid) || uid < 1) throw new Error('Email triage UID unavailable');
-          // Every keyword in one STORE on one connection.
-          const flags = effects.map(effect => effect.keyword!);
-          await store({ ...options.imap, password: token, uid: String(uid), uidValidity, flag: flags[0]!, flags, ...finalGuard });
+          return applyDiscordTagEffects({ channel: match[1]!, message: match[2]! }, effects.map(effect => ({ name: effect.tag, ...(effect.reaction === undefined ? {} : { reaction: effect.reaction }) })),
+            supersedes.map(tag => ({ name: tag, reaction: TAGS[tag].discord })), token, finalGuard, discordReactionOnly ? {} : options.forumTagIds, options.http, discordForumOnly);
         }
-        current(finalGuard);
+        const parts = itemId.split(':');
+        if (parts.length !== 4 || parts[0] !== 'email' || parts[1] !== options.accountScopeId || !/^\d+$/.test(parts[2]!) || !/^\d+$/.test(parts[3]!) || !options.imap) throw new Error('Email triage target unavailable');
+        const uidValidity = Number(parts[2]), uid = Number(parts[3]);
+        if (!Number.isSafeInteger(uid) || uid < 1) throw new Error('Email triage UID unavailable');
+        // Every keyword in one STORE on one connection.
+        const flags = effects.map(effect => effect.keyword!);
+        const replaced = new Map(supersedes.map(tag => [TAGS[tag].imap, tag]));
+        let written: ImapStoreResult;
+        try {
+          written = await store({ ...options.imap, password: token, uid: String(uid), uidValidity, flag: flags[0]!, flags, supersedes: [...replaced.keys()], ...finalGuard });
+        } catch (error) {
+          if (finalGuard.signal.aborted) throw error;
+          const reason = error instanceof Error && error.message ? error.message : 'The mail server did not take the label';
+          return { effects: [...effects.map(effect => ({ tag: effect.tag, action: 'add' as const, outcome: 'failed' as const, reason })),
+            ...notTried(supersedes.map(tag => ({ tag, action: 'remove' as const })))] };
+        }
+        const removed = new Set(written.removed), kept = new Set(written.kept);
+        const results: TriageEffectResult[] = effects.map((effect): TriageEffectResult => ({ tag: effect.tag, action: 'add', outcome: 'applied' }));
+        for (const [keyword, tag] of replaced) {
+          results.push(removed.has(keyword) ? { tag, action: 'remove', outcome: 'applied' }
+            : kept.has(keyword) ? { tag, action: 'remove', outcome: 'failed', reason: 'The mail server did not confirm the old label was taken off; label the message again to retry' }
+            : { tag, action: 'remove', outcome: 'already' });
+        }
+        return { effects: results };
       });
       active.add(work); void work.then(() => active.delete(work), () => active.delete(work)); return work;
         } });

@@ -22,12 +22,16 @@ export interface TriageAttribution {
   /** Resolved response model, present when the request was answered. */
   readonly actualModel?: string;
 }
-/** Ordinary mutation-issued native mirror generation and account comparison domain. */
+/** The mirror row a settled label was scored from: the account and the row's content revision. */
 export interface TriageSourceBinding extends TriageReceiptScope { readonly sourceRevision: string }
-export type TriageBinding = TriageAttribution & (
-  | { readonly receiptVersion: 4; readonly source?: TriageSourceBinding; readonly inputHash?: never }
-  | { readonly receiptVersion?: 2; readonly inputHash: string; readonly source?: never }
-);
+/**
+ * A stored receipt is one of two generations: 4, a settled label, and 3, an
+ * attempt that settled nothing (the row is scored again on a later pass). The
+ * label is what was decided under `battery`@`batteryVersion`; a receipt of
+ * another battery version is history: it lends no label and the row is scored
+ * again.
+ */
+export type TriageBinding = TriageAttribution & { readonly receiptVersion: 4; readonly source?: TriageSourceBinding };
 export type TriageEvidence = TriageBinding & {
   readonly status: 'settled';
   readonly spam: YesNoReading;
@@ -37,22 +41,13 @@ export type TriageEvidence = TriageBinding & {
   readonly tags: readonly string[];
   readonly signals: Readonly<{ spam: number; urgency: number }>;
 };
-/** Failed attempts withdraw a previous label, but have no input-matching
- * consumer. Fresh v3 failures carry no decorative message commitment. Actual
- * saved v1/v2 failures retain their original binding for read compatibility. */
 export type TriageFailureReceipt = TriageAttribution & {
-  readonly inputHash?: never;
   readonly receiptVersion: 3;
   readonly status: 'held' | 'unavailable';
 };
-export type TriageReceipt = TriageEvidence | TriageFailureReceipt | (Extract<TriageBinding, { readonly inputHash: string }> & {
-  readonly status: 'held' | 'unavailable';
-});
-/** Nonpersisted explicit preview. No input commitment or persisted receipt
- * version is issued merely to display a model conclusion. */
-export type TriagePreview = (Omit<TriageEvidence, 'inputHash' | 'receiptVersion' | 'source'>
-  | Omit<TriageFailureReceipt, 'inputHash' | 'receiptVersion'>) & {
-  readonly inputHash?: never;
+export type TriageReceipt = TriageEvidence | TriageFailureReceipt;
+/** A reading that is shown and never stored, so it has no receipt generation. */
+export type TriagePreview = (Omit<TriageEvidence, 'receiptVersion' | 'source'> | Omit<TriageFailureReceipt, 'receiptVersion'>) & {
   readonly receiptVersion?: never;
 };
 /** Private receipt comparison domain, never model input or execution authority. */

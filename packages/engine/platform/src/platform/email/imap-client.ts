@@ -32,8 +32,10 @@ import { DecisionModelsDisabledError } from '@goodvibes-jev/engine/errors';
  *   - `LIST "" "*"`, to find the folder the server flags `\Drafts` (RFC 6154)
  *     rather than appending to a hardcoded name
  *   - `APPEND <drafts> (\Draft) {n}`, see `appendDraft`
- *   - `SELECT <mailbox>` then `UID STORE <uid> +FLAGS (<keywords>)`, keyword
- *     flags only, one message, see `addKeywords`
+ *   - `SELECT <mailbox>` then `UID STORE <uid> +FLAGS (<keywords>)` and, for
+ *     keywords the new ones supersede that the message carries,
+ *     `UID STORE <uid> -FLAGS (<keywords>)`; keyword flags only, one message,
+ *     see `addKeywords`
  *   - `LOGOUT`
  *
  * Also true of the wire session underneath (`imap-session.ts`):
@@ -51,7 +53,8 @@ import { DecisionModelsDisabledError } from '@goodvibes-jev/engine/errors';
  *   - Attachment CONTENT. Metadata only, from BODYSTRUCTURE.
  *   - COPY, MOVE, EXPUNGE, system flags (`\Seen`, `\Deleted`, ...) and every
  *     other deletion command. The writes are APPEND, only to Drafts, and
- *     keyword flags added to one message by `addKeywords`.
+ *     keyword flags added to (or superseded keywords taken off) one message by
+ *     `addKeywords`.
  *   - Logging of any kind. This file contains no logger and no console call,
  *     so credentials cannot leak through it; callers must not log them either.
  *
@@ -667,12 +670,19 @@ export class ImapClient {
    * written. A server answers a STORE on a UID that no longer exists with a
    * plain OK, so success is the message's own FLAGS response carrying every
    * keyword, not the OK.
+   *
+   * `supersedes` names keywords the new ones replace (labels that exclude each
+   * other). The FLAGS response to the add says which of them the message
+   * carries; only those are taken off, in one more `UID STORE -FLAGS`, so a
+   * message without them costs no second command. Returns the keywords taken
+   * off and those still on the message (the removal was not confirmed).
    */
-  async addKeywords(uid: number, uidValidity: number, keywords: readonly string[]): Promise<void> {
+  async addKeywords(uid: number, uidValidity: number, keywords: readonly string[],
+    supersedes: readonly string[] = []): Promise<{ readonly removed: readonly string[]; readonly kept: readonly string[] }> {
     if (!Number.isSafeInteger(uid) || uid < 1 || !Number.isSafeInteger(uidValidity) || uidValidity < 1) {
       throw new Error('A mail label needs one message UID and its mailbox generation.');
     }
-    if (keywords.length === 0 || keywords.some(keyword => !IMAP_KEYWORD.test(keyword))) {
+    if (keywords.length === 0 || [...keywords, ...supersedes].some(keyword => !IMAP_KEYWORD.test(keyword))) {
       throw new Error('A mail label must be a keyword of letters, digits and _ - . characters; system flags are not written.');
     }
     const session = this.requireReadableMailbox();
@@ -680,15 +690,28 @@ export class ImapClient {
     if (selected.uidValidity !== uidValidity) {
       throw new Error(`The mailbox '${this.mailbox}' was reset since this message was listed, so the label was not written. It is labelled again after the next poll.`);
     }
-    const lines = await session.command(`UID STORE ${uid} +FLAGS (${keywords.join(' ')})`);
-    const present = new Set<string>();
-    for (const line of lines) {
-      const flags = /^\* \d+ FETCH .*?\bFLAGS \(([^)]*)\)/i.exec(line)?.[1];
-      if (flags !== undefined) for (const flag of flags.split(/\s+/)) present.add(flag.toLowerCase());
-    }
+    const flagsOf = (lines: readonly string[]): Set<string> | undefined => {
+      let present: Set<string> | undefined;
+      for (const line of lines) {
+        const flags = /^\* \d+ FETCH .*?\bFLAGS \(([^)]*)\)/i.exec(line)?.[1];
+        if (flags !== undefined) for (const flag of flags.split(/\s+/)) (present ??= new Set()).add(flag.toLowerCase());
+      }
+      return present;
+    };
+    const present = flagsOf(await session.command(`UID STORE ${uid} +FLAGS (${keywords.join(' ')})`)) ?? new Set<string>();
     if (!keywords.every(keyword => present.has(keyword.toLowerCase()))) {
       throw new Error(`The label was not written: message ${uid} is no longer in '${this.mailbox}', or the server does not accept keywords there.`);
     }
+    const adding = new Set(keywords.map(keyword => keyword.toLowerCase()));
+    const stale = supersedes.filter(keyword => !adding.has(keyword.toLowerCase()) && present.has(keyword.toLowerCase()));
+    if (stale.length === 0) return { removed: [], kept: [] };
+    // The new keywords are on the message whatever happens next, so a removal
+    // the server does not confirm is reported as kept, not thrown.
+    let after: Set<string> | undefined;
+    try { after = flagsOf(await session.command(`UID STORE ${uid} -FLAGS (${stale.join(' ')})`)); } catch { after = undefined; }
+    if (after === undefined) return { removed: [], kept: stale };
+    const confirmed = after;
+    return { removed: stale.filter(keyword => !confirmed.has(keyword.toLowerCase())), kept: stale.filter(keyword => confirmed.has(keyword.toLowerCase())) };
   }
 
   /** Cancel outstanding reads and release transport without waiting for LOGOUT. */

@@ -4,7 +4,9 @@
 // A label is an IMAP keyword. It is written through the mail module's client
 // (`ImapClient.addKeywords`): one connection, sign in, EXAMINE, SELECT with the
 // UIDVALIDITY the message was listed under, every keyword in one `UID STORE`,
-// LOGOUT. Credentials are resolved by the caller per write and are never logged
+// the superseded built-in keywords the message carries taken off in one more,
+// LOGOUT. Success is the message's own FLAGS answer to the STORE, which costs
+// no extra command: a server answers a STORE on a vanished UID with a plain OK. Credentials are resolved by the caller per write and are never logged
 // or returned. A connection that could not be made or opened is retried with a
 // bounded backoff; a refusal from the server is not.
 // ---------------------------------------------------------------------------
@@ -24,6 +26,8 @@ export interface ImapStoreArgs {
   flag: string;
   /** Every keyword for this message, set in one STORE on one connection; `flag` alone when absent. */
   flags?: readonly string[];
+  /** Keywords of labels the new ones replace; taken off when the message carries them. */
+  supersedes?: readonly string[];
   uidValidity: number;
   signal: AbortSignal;
   assertCurrent(): void;
@@ -40,7 +44,9 @@ export interface ImapRetryOptions {
   sleep?: (ms: number) => Promise<void>;
 }
 
-export type ImapStoreFlag = (args: ImapStoreArgs) => Promise<void>;
+/** Superseded keywords taken off, and those the server did not confirm taken off. */
+export interface ImapStoreResult { readonly removed: readonly string[]; readonly kept: readonly string[] }
+export type ImapStoreFlag = (args: ImapStoreArgs) => Promise<ImapStoreResult>;
 
 /** Opens the connected socket the mail client runs on; production is direct TLS. */
 export type ImapSocketConnect = (host: string, port: number) => Promise<Socket>;
@@ -90,11 +96,12 @@ export function imapStoreFlagWithMailClient(connect: ImapSocketConnect = createI
       catch (error) {
         throw new ImapStoreError(describe(error, 'The mailbox could not be opened.'), error instanceof ImapOpenError ? !error.terminal : true);
       }
-      try { await client.addKeywords(uid, args.uidValidity, flags); }
+      let result: ImapStoreResult;
+      try { result = await client.addKeywords(uid, args.uidValidity, flags, args.supersedes ?? []); }
       catch (error) { throw new ImapStoreError(describe(error, 'The label was not written.'), false); }
-      args.assertCurrent();
       // The keywords are on the message; a LOGOUT the server drops changes nothing.
       await client.logout().catch(() => {});
+      return result;
     } finally {
       client.close();
       socket.off('error', ignoreSocketError);
@@ -130,13 +137,12 @@ export function makeRetryingImapStoreFlag(
   const maxDelayMs = Number.isFinite(retry.maxDelayMs ?? 2_000) ? Math.min(2_000, Math.max(baseDelayMs, retry.maxDelayMs ?? 2_000)) : 2_000;
   const sleep = retry.sleep ?? defaultSleep;
 
-  return async (args: ImapStoreArgs): Promise<void> => {
+  return async (args: ImapStoreArgs): Promise<ImapStoreResult> => {
     let lastError: unknown;
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
       try {
         args.signal.throwIfAborted(); args.assertCurrent();
-        await inner(args);
-        return;
+        return await inner(args);
       } catch (error) {
         lastError = error;
         if (attempt >= maxAttempts || !isTransientImapError(error)) throw error;

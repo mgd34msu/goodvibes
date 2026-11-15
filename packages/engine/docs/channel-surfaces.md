@@ -312,9 +312,15 @@ spam, priority or normal, on the same model route and under the same retention
 promise as that account's screening. Turning decision models off (Classic) turns
 triage off too. The label is stored beside the message in the account's own
 inbox store and shows in `channels.inbox.list` (`triageLabel`, `triageScore`,
-`triageTags`) only while the message's content is the content that was scored;
-a changed message is scored again. Reading the inbox never asks a model.
-Spam wins over priority: a message that reads as both is labelled spam.
+`triageTags`) only while the message's content is the content that was scored
+and the questions that scored it are the current version; a changed message, or
+one labelled by an earlier version of the questions, is scored again. Reading
+the inbox never asks a model. Spam wins over priority: a message that reads as
+both is labelled spam.
 
 Labels are not written back to Slack, Discord or the mailbox unless the owner
-turns that on for the account.
+turns that on for the account. When they are, the three labels exclude each
+other: writing one takes the other two off the message (a Slack or Discord
+reaction, a Discord forum tag, an IMAP keyword) once the new one is on, and the
+answer says, label by label, what was added, already there, removed, skipped
+(no forum tag mapped) or refused and why.

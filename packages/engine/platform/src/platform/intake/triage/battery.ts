@@ -26,3 +26,9 @@ function freeze(value: object): void {
   Object.freeze(value);
 }
 freeze(inboxTriage);
+
+/**
+ * The battery a stored label names. A label stored under another name or
+ * version is history: it is not shown and its row is scored again.
+ */
+export const INBOX_TRIAGE_BATTERY = `${inboxTriage.name}@${inboxTriage.version}`;

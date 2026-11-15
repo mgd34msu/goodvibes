@@ -98,6 +98,12 @@ type SelectionModalCallback = (result: SelectionResult | null) => void;
  */
 export class InputHandler extends TerminalInputHandlerState {
   public setupPairing: { handleToken(token: InputToken): boolean; cancelForTakeover(): boolean } | null = null;
+  /**
+   * Sends a workspace form's prompt as a turn, as written. Set by the shell;
+   * without one (a context with no shell) the command context's submission
+   * is used.
+   */
+  public submitTurn: ((text: string) => void) | null = null;
   public prompt = '';
 
   /**
@@ -518,7 +524,10 @@ export class InputHandler extends TerminalInputHandlerState {
 
   private dispatchAgentWorkspacePrompt(prompt: string, context: CommandContext): void {
     this.closeAgentWorkspaceModal();
-    context.submitInput?.(prompt);
+    // The owner's field text (a document body, a URL) is not composer input:
+    // `@model:` or a leading `!` in it is sent, not acted on.
+    if (this.submitTurn) this.submitTurn(prompt);
+    else context.submitInput?.(prompt);
     this.requestRender();
   }
   public handleModelPickerCommit(): boolean {

@@ -257,11 +257,4 @@ describe('the host script and the driver it loads', () => {
       expect(existsSync(marker) && readFileSync(marker, 'utf8')).toBe('loaded');
     } finally { await manager.shutdown(); }
   }, 30_000);
-
-  test('attach refuses a driver whose version is not the one this build requires, and names both', async () => {
-    const { manager } = attachFixture('1.0.0');
-    try {
-      await expect(manager.attach({ cdpEndpoint: '9222' })).rejects.toThrow(new RegExp(`1\\.0\\.0.*${DRIVER_VERSION.replaceAll('.', '\\.')}`));
-    } finally { await manager.shutdown(); }
-  }, 30_000);
 });

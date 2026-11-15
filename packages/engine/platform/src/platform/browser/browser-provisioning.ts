@@ -82,10 +82,7 @@ async function verifyExecutable(io: BrowserProvisionIo, executablePath: string, 
   if (!io.isExecutableFile(executablePath)) {
     return { ok: false, failure: 'not-executable', detail: `${executablePath} is not an executable file` };
   }
-  let probe = await io.runCommand(executablePath, ['--version'], { timeoutMs: VERSION_PROBE_TIMEOUT_MS });
-  // A cold start on a slow disk is not a broken build: ask once more, and if it
-  // still does not answer, say so without treating the browser as corrupt.
-  if (probe.timedOut) probe = await io.runCommand(executablePath, ['--version'], { timeoutMs: VERSION_PROBE_TIMEOUT_MS });
+  const probe = await io.runCommand(executablePath, ['--version'], { timeoutMs: VERSION_PROBE_TIMEOUT_MS });
   if (probe.code === 0) {
     return { ok: true, failure: null, detail: probe.stdout.trim() || 'reported a version' };
   }
@@ -94,8 +91,10 @@ async function verifyExecutable(io: BrowserProvisionIo, executablePath: string, 
   if (library) {
     return { ok: false, failure: 'missing-system-libraries', detail: library };
   }
+  // A probe that did not answer in time is a slow machine, not a broken build:
+  // the build is left in place rather than deleted and downloaded again.
   if (probe.timedOut) {
-    return { ok: false, failure: 'probe-timed-out', detail: 'the version probe timed out twice; the browser was left in place' };
+    return { ok: false, failure: 'probe-timed-out', detail: `the version probe did not answer within ${String(VERSION_PROBE_TIMEOUT_MS / 1000)}s (timed out); the browser was left in place` };
   }
   const reason = probe.spawnError ?? (combined.trim().split('\n')[0] ?? 'unknown error');
   return { ok: false, failure: 'corrupt', detail: reason };
@@ -231,6 +230,13 @@ function failureGuidance(failure: BrowserProvisionFailure, detail: string, drive
       return {
         problem: `The browser download failed (${detail}).`,
         fix: 'Retry the call, provisioning deletes the partial download and reinstalls. If it keeps failing, install Chrome/Chromium with the system package manager.',
+      };
+    case 'browser-not-installed-yet':
+      return {
+        // A reporting call on a machine that has not made its first browser
+        // call: nothing is broken and nothing needs repairing.
+        problem: 'No browser is installed yet, and this call installs nothing.',
+        fix: 'Nothing to do, the first browser call downloads it automatically. To download it now, run the browser tool with action:"provision".',
       };
     case 'binary-missing-after-install':
       return {
@@ -503,8 +509,8 @@ async function provision(io: BrowserProvisionIo, options: EnsureBrowserOptions):
     assertProvisionCurrent(options);
     return report(recorder, browsersPath, resolvedDriver.version, driverFix, {
       ok: false,
-      failure: 'binary-missing-after-install',
-      detail: 'no managed browser is installed and downloading was not allowed for this call',
+      failure: 'browser-not-installed-yet',
+      detail: 'no managed browser is installed yet and this call downloads nothing',
     });
   }
 

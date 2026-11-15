@@ -402,6 +402,11 @@ async function downloadDriverPackage(targetRoot: string, lifetime: BrowserProvis
  *   2. `bun add`, when bun is present;
  *   3. `npm install`, when npm is present.
  *
+ * Every route ends at the same pinned checksum before the driver can run: the
+ * download checks the archive bytes, and a package manager's install is kept
+ * only when the integrity it recorded for the package is the pinned one (the
+ * manager has itself checked the bytes it fetched against that value).
+ *
  * The direct download goes first deliberately: it is the only route that works
  * on a machine holding nothing but the downloaded binary, and it writes only
  * inside the surface's own directory rather than through a package manager's
@@ -430,8 +435,11 @@ async function installDriverPackage(targetRoot: string, lifetime: BrowserProvisi
   }
   if (download.code === 0) return download;
   const reasons: string[] = [`registry download: ${download.stderr.trim() || 'failed'}`];
-  const attempts: readonly (readonly [string, readonly string[]])[] = [
-    ['bun', ['add', '--no-save', specifier]],
+  // bun records the integrity only in its lockfile, so its install saves one
+  // inside this surface's own driver directory; npm's hidden lockfile is
+  // written either way.
+  const attempts: readonly (readonly ['bun' | 'npm', readonly string[]])[] = [
+    ['bun', ['add', specifier]],
     ['npm', ['install', '--no-save', '--prefix', targetRoot, specifier]],
   ];
   for (const [command, args] of attempts) {
@@ -439,7 +447,13 @@ async function installDriverPackage(targetRoot: string, lifetime: BrowserProvisi
     const outcome = await runCommand(command, args, { timeoutMs: 300_000, cwd: targetRoot, signal: lifetime.signal });
     assertProvisionCurrent(lifetime);
     if (outcome.code === 0) {
-      return { ...outcome, stdout: outcome.stdout || `installed ${specifier} with ${command}` };
+      const recorded = recordedDriverIntegrity(targetRoot, command);
+      if (recorded === DRIVER_INTEGRITY) return { ...outcome, stdout: outcome.stdout || `installed ${specifier} with ${command}` };
+      rmSync(join(targetRoot, 'node_modules', DRIVER_PACKAGE), { recursive: true, force: true });
+      reasons.push(recorded === null
+        ? `${command}: installed ${specifier} but recorded no checksum to compare with the published one, so it was removed`
+        : `${command}: installed a ${specifier} whose checksum is not the published one, so it was removed`);
+      continue;
     }
     const missing = await programNotInstalled(command, outcome, lifetime);
     reasons.push(missing
@@ -447,6 +461,32 @@ async function installDriverPackage(targetRoot: string, lifetime: BrowserProvisi
       : `${command}: ${(outcome.spawnError ?? (outcome.stderr.trim() || `exited with code ${String(outcome.code)}`)).split('\n')[0] ?? 'failed'}`);
   }
   return { code: 1, stdout: '', stderr: reasons.join('; '), timedOut: false, spawnError: null };
+}
+
+/**
+ * The integrity a package manager recorded for the driver it just installed in
+ * `targetRoot`, or null when it recorded none that can be read. One file read,
+ * at install time only.
+ */
+function recordedDriverIntegrity(targetRoot: string, manager: 'bun' | 'npm'): string | null {
+  try {
+    if (manager === 'npm') {
+      const lock = JSON.parse(readFileSync(join(targetRoot, 'node_modules', '.package-lock.json'), 'utf8')) as {
+        readonly packages?: Record<string, { readonly version?: unknown; readonly integrity?: unknown }>;
+      };
+      const entry = lock.packages?.[`node_modules/${DRIVER_PACKAGE}`];
+      return entry?.version === DRIVER_VERSION && typeof entry.integrity === 'string' ? entry.integrity : null;
+    }
+    const lock = readFileSync(join(targetRoot, 'bun.lock'), 'utf8');
+    const key = `"${DRIVER_PACKAGE}@${DRIVER_VERSION}"`;
+    const at = lock.indexOf(key);
+    if (at < 0) return null;
+    const entryEnd = lock.indexOf('\n', at);
+    const entry = lock.slice(at, entryEnd < 0 ? undefined : entryEnd);
+    return /"(sha512-[A-Za-z0-9+/]+={0,2})"/.exec(entry)?.[1] ?? null;
+  } catch {
+    return null;
+  }
 }
 
 /**

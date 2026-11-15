@@ -248,7 +248,8 @@ describe('BrowserEngine identity effect boundaries', () => {
   });
   test('changed labels cannot send copied live payment material to judgment', async () => {
     const f = fixture(); await f.engine.snapshot({}); f.arm(); f.setName('Submit private-cvv-fixture'); const model = reading();
-    await expect(f.engine.click({}, { ref: 'e1' })).rejects.toThrow(/contains live payment material/); expect(model.requests).toHaveLength(0); expect(f.effects).toEqual([]);
+    await expect(f.engine.click({}, { ref: 'e1' })).rejects.toThrow(/different element/);
+    expect(JSON.stringify(model.requests)).not.toContain('private-cvv-fixture'); expect(f.effects).toEqual([]);
     const exact = fixture(); await exact.engine.snapshot({}); exact.arm(); reading();
     await exact.engine.type({}, { ref: 'e1', text: 'authorized local value' }); expect(exact.effects).toEqual(['fill']);
   });

@@ -20,7 +20,7 @@
  */
 import { createInterface } from 'node:readline';
 import { createRequire } from 'node:module';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 
 const require = createRequire(import.meta.url);
@@ -76,25 +76,34 @@ function compileFunction(source) {
 }
 
 /**
- * Loads the driver the parent resolved, checked against the version the parent
- * expects. The parent knows where the driver is (beside the executable, in the
- * managed directory, a vendored copy) and this script may sit nowhere near it,
- * so the directory is passed in rather than searched for. Without one, the
- * driver is looked up from this script's own location.
+ * Loads the driver the parent resolved. The parent knows where the driver is
+ * (beside the executable, in the managed directory, a vendored copy) and has
+ * already checked that directory's version before asking for an attach, so it
+ * is loaded as it is. Only a driver found from this script's own location, which
+ * the parent never saw, is checked against the version the parent expects.
  */
 function loadDriver(driverDirectory, expectedVersion) {
+  const manifest = typeof driverDirectory === 'string' ? join(driverDirectory, 'package.json') : null;
+  if (manifest !== null && existsSync(manifest)) return createRequire(manifest)(driverDirectory);
   if (typeof expectedVersion !== 'string' || expectedVersion.length === 0) {
     throw new Error('The browser host was not told which driver version this build requires.');
   }
-  const manifest = typeof driverDirectory === 'string' ? join(driverDirectory, 'package.json') : null;
-  const fromDirectory = manifest !== null && existsSync(manifest);
-  const version = fromDirectory
-    ? JSON.parse(readFileSync(manifest, 'utf8')).version
-    : require('playwright-core/package.json').version;
+  const version = require('playwright-core/package.json').version;
   if (version !== expectedVersion) {
     throw new Error(`This browser driver (${String(version)}) does not support the action cancellation required by this build, which needs ${expectedVersion}.`);
   }
-  return fromDirectory ? createRequire(manifest)(driverDirectory) : require('playwright-core');
+  return require('playwright-core');
+}
+
+/**
+ * The deadline the parent stated for this call. The parent owns the one
+ * deadline table and always sends one; a call without one is refused rather
+ * than left to wait forever (Playwright reads 0 as "never").
+ */
+function deadline(args) {
+  const timeout = args?.timeout;
+  if (typeof timeout === 'number' && Number.isFinite(timeout) && timeout > 0) return timeout;
+  throw new Error('The browser host was sent no deadline for this action.');
 }
 
 const handlers = {
@@ -163,30 +172,30 @@ const handlers = {
       case 'url': return { value: page.url() };
       case 'title': return { value: await page.title().catch(() => '') };
       case 'goto': {
-        const response = await page.goto(args.url, { waitUntil: args.waitUntil ?? 'domcontentloaded', timeout: args.timeout ?? 30_000 });
+        const response = await page.goto(args.url, { waitUntil: args.waitUntil ?? 'domcontentloaded', timeout: deadline(args) });
         return { value: response ? { status: response.status() } : null };
       }
       case 'goBack': {
-        const response = await page.goBack({ timeout: args.timeout ?? 30_000 });
+        const response = await page.goBack({ timeout: deadline(args) });
         return { value: response !== null };
       }
       case 'goForward': {
-        const response = await page.goForward({ timeout: args.timeout ?? 30_000 });
+        const response = await page.goForward({ timeout: deadline(args) });
         return { value: response !== null };
       }
       case 'waitForLoadState':
-        await page.waitForLoadState(args.state ?? 'domcontentloaded', { timeout: args.timeout ?? 15_000 }).catch(() => undefined);
+        await page.waitForLoadState(args.state ?? 'domcontentloaded', { timeout: deadline(args) }).catch(() => undefined);
         return { value: null };
       case 'waitForURL':
-        await page.waitForURL(args.url, { timeout: args.timeout ?? 30_000 });
+        await page.waitForURL(args.url, { timeout: deadline(args) });
         return { value: page.url() };
       case 'waitForText':
-        await page.getByText(args.text, { exact: false }).first().waitFor({ state: 'visible', timeout: args.timeout ?? 30_000 });
+        await page.getByText(args.text, { exact: false }).first().waitFor({ state: 'visible', timeout: deadline(args) });
         return { value: true };
       case 'screenshot': {
         // Return the image to its original owner. Only that owner may write
         // it after rechecking the page and live card-material protection.
-        const buffer = await page.screenshot({ fullPage: args.fullPage === true });
+        const buffer = await page.screenshot({ fullPage: args.fullPage === true, timeout: deadline(args) });
         return { value: { bytes: buffer.byteLength, base64: buffer.toString('base64') } };
       }
       case 'wheel':
@@ -255,7 +264,7 @@ const handlers = {
     // Index-addressed like every other operation here: the caller says which
     // match it means, so nothing depends on remote state between calls.
     const first = typeof args?.index === 'number' ? locator.nth(args.index) : locator.first();
-    const timeout = args?.timeout ?? 15_000;
+    const timeout = method === 'count' || method === 'describe' ? 0 : deadline(args);
     switch (method) {
       case 'count': return { value: await locator.count() };
       case 'describe': return { value: await first.evaluate(compileFunction(args.source), args.arg) };
@@ -344,7 +353,7 @@ function receiveMessage(message) {
   Promise.resolve()
     .then(() => { controller?.signal.throwIfAborted(); return handler(message.params ?? {}, controller?.signal); })
     .then((result) => { controller?.signal.throwIfAborted(); finish({ ok: true, result }); })
-    .catch((error) => finish({ ok: false, error: error?.message ?? String(error) }));
+    .catch((error) => finish({ ok: false, error: error?.message ?? String(error), ...(error?.name === 'TimeoutError' ? { timedOut: true } : {}) }));
 }
 
 createInterface({ input: process.stdin }).on('line', (line) => {

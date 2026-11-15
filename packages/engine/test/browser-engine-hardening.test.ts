@@ -98,7 +98,7 @@ const ELEMENTS: readonly RawElement[] = [
   { tag: 'button', role: 'button', name: 'Just a button', selector: '#safe', value: null, disabled: false, checked: null, depth: 2, submits: false },
 ];
 
-function fakePage(withFrame: boolean): Page {
+function fakePage(withFrame: boolean, urls: { readonly page?: string; readonly frame?: string } = {}): Page {
   const locatorFor = (selector: string) => {
     const element = ELEMENTS.find((entry) => entry.selector === selector);
     const locator = {
@@ -126,9 +126,9 @@ function fakePage(withFrame: boolean): Page {
       : arg && typeof arg === 'object' && 'identityOnly' in arg && arg.identityOnly === true
         ? { url: PAGE_URL, title: 'Quarterly Report', elements: ELEMENTS.map(row => ({ ...row, value: null, documentUrl: PAGE_URL, control: attributes })) } : ATTACK_TEXT),
   };
-  const childFrame = { url: () => FRAME_URL, parentFrame: () => mainFrame, evaluate: async () => 'Frame words' };
+  const childFrame = { url: () => urls.frame ?? FRAME_URL, parentFrame: () => mainFrame, evaluate: async () => 'Frame words' };
   return {
-    url: () => PAGE_URL,
+    url: () => urls.page ?? PAGE_URL,
     title: async () => 'Quarterly Report',
     frames: () => (withFrame ? [mainFrame, childFrame] : [mainFrame]),
     mainFrame: () => mainFrame,
@@ -136,6 +136,8 @@ function fakePage(withFrame: boolean): Page {
     close: async () => undefined,
     goto: async () => null,
     waitForLoadState: async () => undefined,
+    // A page whose text never appears: the wait settles only by deadline or cancellation.
+    getByText: () => ({ first: () => ({ waitFor: () => new Promise(() => undefined) }) }),
     screenshot: async () => Buffer.from([1, 2, 3]),
     locator: (selector: string) => locatorFor(selector),
     evaluate: async (_fn: unknown, arg?: unknown) => (typeof arg === 'number' ? ELEMENTS : ATTACK_TEXT),
@@ -161,10 +163,10 @@ let engine: BrowserEngine;
 let ledger: LedgerPort;
 let shots: string;
 
-async function buildEngine(withFrame: boolean): Promise<void> {
+async function buildEngine(withFrame: boolean, urls: { readonly page?: string; readonly frame?: string } = {}): Promise<void> {
   ledger = new LedgerPort();
   shots = mkdtempSync(join(tmpdir(), 'gv-shots-'));
-  const page = fakePage(withFrame);
+  const page = fakePage(withFrame, urls);
   const context = { pages: () => [page], on: () => undefined, newPage: async () => page, close: async () => undefined } as unknown as BrowserContext;
   const sessions = new BrowserSessionManager({
     profileRoot: join(shots, 'profiles'),
@@ -245,6 +247,19 @@ describe('what the form check is shown', () => {
   });
 });
 
+describe('waits end when the call is cancelled', () => {
+  test('a wait for text that never appears ends as soon as the caller cancels', async () => {
+    const controller = new AbortController();
+    const waiting = engine.waitFor({ signal: controller.signal }, { text: 'Order confirmed' });
+    const settled = waiting.catch((error: unknown) => error);
+    await new Promise<void>((resolve) => { setImmediate(resolve); });
+    controller.abort();
+    const error = await settled;
+    expect(error).toBeInstanceOf(BrowserSessionError);
+    expect((error as Error).message).toContain('wait_for');
+  });
+});
+
 describe('local files and private addresses', () => {
   test('are opened when nothing has been read, and refused once page content was read', async () => {
     await expect(engine.navigate({}, { url: 'file:///etc/hosts' })).resolves.toMatchObject({ pageId: expect.any(String) });
@@ -258,6 +273,24 @@ describe('local files and private addresses', () => {
   test('cloud metadata addresses are never opened', async () => {
     await expect(engine.navigate({}, { url: 'http://169.254.169.254/latest/meta-data' })).rejects.toBeInstanceOf(BrowserSessionError);
     await expect(engine.navigate({}, { url: 'http://2852039166/' })).rejects.toBeInstanceOf(BrowserSessionError);
+  });
+
+  test('the address a page ended on is held to the same rule as the one requested', async () => {
+    await engine.shutdown();
+    await buildEngine(false, { page: 'http://169.254.169.254/latest/meta-data/' });
+    await expect(engine.navigate({}, { url: 'https://example.org/' })).rejects.toBeInstanceOf(BrowserSessionError);
+    await expect(engine.readText({})).rejects.toBeInstanceOf(BrowserSessionError);
+    await expect(engine.snapshot({})).rejects.toBeInstanceOf(BrowserSessionError);
+    expect(ledger.ingests).toEqual([]);
+  });
+
+  test('an embedded frame on a cloud metadata address is left out of what is read', async () => {
+    await engine.shutdown();
+    await buildEngine(true, { frame: 'http://169.254.169.254/latest/' });
+    const read = await engine.readText({});
+    expect(JSON.stringify(read)).not.toContain('Frame words');
+    expect(read.withheldFrames).toEqual(['http://169.254.169.254']);
+    expect(ledger.ingests.some((entry) => entry.origin === 'http://169.254.169.254')).toBe(false);
   });
 
   test('classification sees through alternative spellings of a private address', () => {

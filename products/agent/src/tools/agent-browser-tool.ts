@@ -254,7 +254,7 @@ export function createAgentBrowserTool(options: AgentBrowserToolOptions = {}): T
           amount: { type: 'number', description: 'Scroll distance in pixels.' },
           limit: { type: 'number', description: 'Maximum elements to include in a snapshot.' },
           maxChars: { type: 'number', description: 'Maximum characters to return from action:"read_text".' },
-          timeoutMs: { type: 'number', description: 'How long this one call may take. Never affects the browser.' },
+          timeoutMs: { type: 'number', description: 'Deadline for this one call, in milliseconds (up to 600000). Defaults: navigate, back, forward, new_tab and wait_for 30000; click, type, select and press 15000. A call that passes its deadline fails and says what to do next. Never affects the browser.' },
           repair: { type: 'boolean', description: 'For provision: reinstall even if a browser is cached.' },
           button: { type: 'string', enum: ['left', 'right', 'middle'], description: 'Mouse button for action:"click".' },
         },
@@ -283,9 +283,12 @@ export function createAgentBrowserTool(options: AgentBrowserToolOptions = {}): T
       if (!action) {
         return failure(`browser needs an action. Use one of: ${BROWSER_ACTIONS.join(', ')}.`);
       }
+      // The call's signal travels with the target, so cancelling the turn ends
+      // every page wait this call started, not only the interactive ones.
       const target: BrowserTarget = {
         sessionId: readString(args.sessionId) || undefined,
         pageId: readString(args.pageId) || undefined,
+        ...(signal ? { signal } : {}),
       };
       const timeoutMs = readNumber(args.timeoutMs);
       // Launch arguments carried on an ordinary call, so the session opened

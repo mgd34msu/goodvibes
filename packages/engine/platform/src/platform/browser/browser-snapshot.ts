@@ -549,6 +549,9 @@ function describeElement(element: Element) {
       : input.labels?.[0]?.textContent?.trim() || input.getAttribute('name') || '';
   } else if (!name) name = ((element as HTMLElement).innerText ?? element.textContent ?? '').replace(/\s+/g, ' ').trim();
   return { tag, name, submits, type, documentUrl: element.ownerDocument.URL,
+    // Read in the same evaluate that re-identifies the control: a password
+    // step that appeared after the snapshot changes this and stops the action.
+    passwordInDocument: element.ownerDocument.querySelector('input[type="password" i]') !== null,
     role: element.getAttribute('role'),
     disabled: element.hasAttribute('disabled'),
     // Complete identity attributes, never the control's entered value.
@@ -560,8 +563,11 @@ function describeElement(element: Element) {
 /** Missing descriptor fields cannot silently bypass submit or credential guards. */
 function admitLiveDescriptor(value: unknown): ReturnType<typeof describeElement> {
   const descriptor = captureOwnedJson(value, nodeTypes.isProxy) as ReturnType<typeof describeElement> | null;
+  const keys = descriptor && typeof descriptor === 'object' ? Object.keys(descriptor) : [];
   if (!descriptor || typeof descriptor !== 'object'
-    || Object.keys(descriptor).length !== 8 || Object.keys(descriptor).some(key => !['tag', 'name', 'submits', 'type', 'documentUrl', 'role', 'disabled', 'attributes'].includes(key))
+    || keys.length !== (Object.hasOwn(descriptor, 'passwordInDocument') ? 9 : 8)
+    || keys.some(key => !['tag', 'name', 'submits', 'type', 'documentUrl', 'passwordInDocument', 'role', 'disabled', 'attributes'].includes(key))
+    || (Object.hasOwn(descriptor, 'passwordInDocument') && typeof descriptor.passwordInDocument !== 'boolean')
     || ['tag', 'name', 'type', 'documentUrl'].some(key => typeof (descriptor as unknown as Record<string, unknown>)[key] !== 'string')
     || typeof descriptor.submits !== 'boolean' || typeof descriptor.disabled !== 'boolean'
     || (descriptor.role !== null && typeof descriptor.role !== 'string')
@@ -581,6 +587,42 @@ const assertIdentityReadingAllowed = new WeakMap<BrowserElementRef, () => void>(
 const identityMetadata = new WeakMap<BrowserElementRef, { readonly name: string; readonly documentUrl?: string | undefined; readonly control?: RawElement['control'] | undefined }>();
 /** A JSON copy or a fabricated SnapshotStore entry cannot acquire native data. */
 const nativeSnapshots = new WeakSet<BrowserSnapshot>();
+/** Page facts read once, in the walk that built the snapshot. */
+const snapshotFacts = new WeakMap<BrowserSnapshot, { readonly password: boolean; readonly withheldFrames: readonly string[] }>();
+
+/** Whether the page showed a native password input in any frame when this snapshot was taken. */
+export function snapshotHasPasswordInput(snapshot: BrowserSnapshot): boolean {
+  return snapshotFacts.get(snapshot)?.password === true;
+}
+
+/** Origins of frames left out of this snapshot because their address may not be read. */
+export function snapshotWithheldFrames(snapshot: BrowserSnapshot): readonly string[] {
+  return snapshotFacts.get(snapshot)?.withheldFrames ?? [];
+}
+
+/**
+ * The page-purpose evidence for the credential-page reading, built from the
+ * snapshot the action's ref came from: no second walk of the page. The shape
+ * is the one the reading was calibrated on (one document per frame, its
+ * controls' identity fields, never an entered value). Names and control
+ * attributes were scrubbed of card material when the snapshot was taken.
+ */
+export function snapshotCredentialEvidence(snapshot: BrowserSnapshot): { readonly url: string; readonly documents: readonly object[] } {
+  const empty = { type: '', autocomplete: '', name: '', id: '', placeholder: '', ariaLabel: '', label: '' };
+  const documents = new Map<string, { frameChain: readonly string[]; url: string; title: string; controls: object[] }>();
+  documents.set('[]', { frameChain: [], url: snapshot.url, title: snapshot.title, controls: [] });
+  for (const element of snapshot.elements) {
+    const metadata = identityMetadata.get(element);
+    const documentUrl = metadata?.documentUrl ?? snapshot.url;
+    const key = JSON.stringify(element.frameChain);
+    let document = documents.get(key);
+    if (!document) { document = { frameChain: [...element.frameChain], url: documentUrl, title: '', controls: [] }; documents.set(key, document); }
+    document.controls.push({ documentUrl, tag: element.tag, role: element.role, name: element.name, selector: element.selector,
+      disabled: element.disabled === true, checked: element.checked ?? null, depth: element.depth, submits: element.submits,
+      control: metadata?.control ?? empty });
+  }
+  return { url: snapshot.url, documents: [...documents.values()] };
+}
 let snapshotCounter = 0;
 
 function nextSnapshotId(): string {
@@ -743,19 +785,32 @@ export async function takeSnapshot(
   sessionId: string,
   pageId: string,
   options: { readonly limit?: number | undefined; readonly guard?: CardFieldGuard | undefined; readonly controls?: BrowserControlAdmission | undefined;
-    readonly work?: BrowserControlIdentityWork | undefined } = {},
+    readonly work?: BrowserControlIdentityWork | undefined;
+    /** Whether a frame at this address may be read into the snapshot; a frame refused here is left out and named. */
+    readonly admitFrame?: ((url: string) => Promise<boolean>) | undefined } = {},
 ): Promise<BrowserSnapshot> {
-  const work = options.work ?? new BrowserControlIdentityWork({}, { drainReads: true });
+  const work = options.work ?? new BrowserControlIdentityWork({});
   work.assertCurrent();
   const limit = options.limit !== undefined && options.limit > 0 ? Math.floor(options.limit) : Number.MAX_SAFE_INTEGER;
   const raw: (RawElement & { readonly frameChain: readonly string[] })[] = [];
+  const withheldFrames: string[] = [];
+  let password = false;
   for (const frame of page.frames()) {
     if (!options.controls && raw.length >= limit) break;
     work.assertCurrent();
-    const chain = frame === page.mainFrame() ? [] : await frameChainFor(frame, work);
+    const main = frame === page.mainFrame();
+    if (!main && options.admitFrame && !(await options.admitFrame(frame.url()))) {
+      if (options.controls) throw new Error('Complete browser controls unavailable');
+      withheldFrames.push(frame.url());
+      continue;
+    }
+    const chain = main ? [] : await frameChainFor(frame, work);
     if (chain === null) { if (options.controls) throw new Error('Complete browser controls unavailable'); continue; }
     const collected = captureOwnedJson(await work.wait(() => frame.evaluate(collectElements, options.controls ? Number.MAX_SAFE_INTEGER : limit - raw.length)
       .catch(error => { if (options.controls) throw error; return [] as RawElement[]; })), nodeTypes.isProxy) as RawElement[];
+    // A hidden password step in the control's own document is caught when the
+    // action re-identifies its control (passwordInDocument).
+    password ||= collected.some(element => element.tag === 'input' && element.control?.type === 'password');
     raw.push(...collected.map((element) => ({ ...element, frameChain: chain })));
   }
   if (options.controls) {
@@ -829,6 +884,7 @@ export async function takeSnapshot(
     truncated: !options.controls && raw.length >= limit,
   });
   nativeSnapshots.add(snapshot);
+  snapshotFacts.set(snapshot, { password, withheldFrames });
   return snapshot;
 }
 
@@ -856,7 +912,9 @@ export async function resolveRef(
   assertSnapshotCurrent: () => void = () => {},
   assertReadingAllowed: () => void = () => {},
   observation: { readonly observationOnly?: boolean } = {},
-): Promise<{ readonly locator: Locator; readonly element: BrowserElementRef; readonly revalidate: () => Promise<void>; readonly assertCurrent: () => void }> {
+): Promise<{ readonly locator: Locator; readonly element: BrowserElementRef; readonly revalidate: () => Promise<void>; readonly assertCurrent: () => void;
+  /** Whether the control's own document holds a native password input right now. */
+  readonly passwordInDocument: boolean }> {
   work.assertCurrent();
   if (!snapshot) {
     throw new StaleElementError(
@@ -938,5 +996,5 @@ export async function resolveRef(
     if (JSON.stringify(latest) !== approved) throw new StaleElementError('The selected control changed after its identity reading.', 'Call action:"snapshot" again.');
   };
   await revalidate(); current();
-  return { locator, element: recorded, revalidate, assertCurrent: current };
+  return { locator, element: recorded, revalidate, assertCurrent: current, passwordInDocument: actual.passwordInDocument === true };
 }

@@ -42,17 +42,8 @@ function ioWithProbes(probes: readonly CommandOutcome[], systemBrowsers: readonl
 }
 
 describe('a browser that is slow to answer its version probe', () => {
-  test('is probed again, and kept when the second probe answers', async () => {
-    const { io, removed, commands } = ioWithProbes([outcome({ code: null, timedOut: true }), outcome({ stdout: 'Chromium 151.0' })]);
-    const report = await ensureBrowserBinary(io);
-    expect(report.ok).toBe(true);
-    expect(report.source).toBe('managed-cache');
-    expect(removed).toEqual([]);
-    expect(commands.filter((command) => command.includes('--version'))).toHaveLength(2);
-  });
-
-  test('is not deleted and reinstalled when it times out twice', async () => {
-    const { io, removed, commands } = ioWithProbes([outcome({ code: null, timedOut: true }), outcome({ code: null, timedOut: true })]);
+  test('is not deleted and reinstalled when the probe times out', async () => {
+    const { io, removed, commands } = ioWithProbes([outcome({ code: null, timedOut: true })]);
     const report = await ensureBrowserBinary(io);
     expect(report.ok).toBe(false);
     expect(report.failure).toBe('binary-not-executable');
@@ -61,11 +52,10 @@ describe('a browser that is slow to answer its version probe', () => {
   });
 });
 
-describe('a managed browser that times out twice while a system browser works', () => {
+describe('a managed browser whose probe times out while a system browser works', () => {
   test('the system browser is used and the managed build is kept', async () => {
     const system = '/usr/bin/google-chrome';
     const { io, removed, commands } = ioWithProbes([
-      outcome({ code: null, timedOut: true }),
       outcome({ code: null, timedOut: true }),
       outcome({ stdout: 'Google Chrome 151.0' }),
     ], [system]);

@@ -14,7 +14,8 @@ import type { BrowserPageConnection } from './browser-page-connection-data.js';
 import { captureBrowserCheckoutRecovery, type BrowserCheckoutRecovery } from './browser-checkout-recovery-data.js';
 import { BrowserControlSnapshotError } from './browser-control-snapshot-data.js';
 import { describeProvisionWork } from './browser-provisioning.js';
-import { captureCredentialPage, captureNativeSnapshotControls, restoreControlSnapshot, retainBrowserMethods, resolveRef, SnapshotStore, StaleElementError, takeSnapshot, type BrowserControlAdmission } from './browser-snapshot.js';
+import { captureCredentialPage, captureNativeSnapshotControls, restoreControlSnapshot, retainBrowserMethods, resolveRef, snapshotCredentialEvidence, snapshotHasPasswordInput, snapshotWithheldFrames, SnapshotStore, StaleElementError, takeSnapshot, type BrowserControlAdmission } from './browser-snapshot.js';
+import { containsIssuerCredential } from '../utils/redaction.js';
 import { assertCaptureAllowed, fillSecretsIntoPage, type SecretFillKind } from './browser-secret-fill.js';
 import type {
   BrowserProvisionReport,
@@ -33,7 +34,10 @@ import {
   DEFAULT_ACTION_TIMEOUT_MS,
   DEFAULT_NAVIGATION_TIMEOUT_MS,
   DEFAULT_TEXT_LIMIT,
+  DEFAULT_WAIT_TIMEOUT_MS,
+  boundedBrowserCall,
   classifyNavigationTarget,
+  deadlineFor,
   launchNote,
   normalizeUrl,
   readElementData,
@@ -60,6 +64,15 @@ function keyCanSubmit(key: string, controlSubmits: boolean): boolean {
   return controlSubmits && (final === 'space' || final === ' ');
 }
 export type { BrowserActionLifetime, BrowserEngineOptions, BrowserExtractField, BrowserTarget };
+
+/** Names the embedded frames a read left out because of where they point. */
+function withheldNote(origins: readonly string[]): { readonly withheldFrames?: readonly string[]; readonly withheldNote?: string } {
+  if (origins.length === 0) return {};
+  return {
+    withheldFrames: [...new Set(origins)],
+    withheldNote: 'Embedded frames on local, private or cloud-metadata addresses were left out. Ask the owner if their content is needed.',
+  };
+}
 
 /** Host-owned attachment. The driver must bind snapshotId to every control
  * operation; assertCurrent retains the page/owner even after its submit clears
@@ -93,6 +106,10 @@ export class BrowserEngine {
   private approval: OwnerApproval | null;
   /** The provision report whose setup receipt was last handed to a caller. */
   private receiptDelivered: BrowserProvisionReport | null = null;
+  /** Local or private origins a page was allowed to open, per session:page, so reading that page again is not a new reach. */
+  private readonly localReach = new Map<string, Set<string>>();
+  /** Credential-page verdicts, one per snapshot: the page is read for its purpose at most once per snapshot. */
+  private readonly credentialVerdicts = new WeakMap<BrowserSnapshot, 'yes' | 'no'>();
 
   constructor(
     private readonly sessions: BrowserSessionManager,
@@ -327,6 +344,7 @@ export class BrowserEngine {
   private forgetSessionState(sessionId: string): void {
     this.snapshots.clearSession(sessionId);
     this.cardGuard?.disarmSession?.(sessionId);
+    for (const key of [...this.localReach.keys()]) if (key.startsWith(`${sessionId}:`)) this.localReach.delete(key);
   }
 
   /**
@@ -335,17 +353,49 @@ export class BrowserEngine {
    * submit: refused when this turn has read page content, unless the owner
    * approved it. Cloud metadata addresses are never opened.
    */
-  private async requireNavigationAllowed(url: string): Promise<void> {
+  private async requireNavigationAllowed(url: string, page?: { readonly sessionId: string; readonly pageId: string }): Promise<string | null> {
     const reach = classifyNavigationTarget(url);
-    if (reach === 'public') return;
+    if (reach === 'public') return null;
     const origin = this.untrusted.originOf(url);
     if (reach === 'link-local') {
       throw new BrowserSessionError(
-        `${origin} is a link-local or cloud-metadata address, which the browser tool does not open.`,
+        `${origin} is a link-local or cloud-metadata address, which the browser tool does not open or read.`,
         'Use a public address, or ask the owner to open it in their own browser.',
       );
     }
+    if (page && this.localReach.get(`${page.sessionId}:${page.pageId}`)?.has(origin)) return origin;
     await this.requireOutwardEffectAllowed('browser.navigate-local', `open ${origin} (a local file or private-network address) in the browser`);
+    if (page) this.rememberLocalReach(page.sessionId, page.pageId, origin);
+    return origin;
+  }
+
+  private rememberLocalReach(sessionId: string, pageId: string, origin: string | null): void {
+    if (origin === null) return;
+    const key = `${sessionId}:${pageId}`;
+    const origins = this.localReach.get(key) ?? new Set<string>();
+    origins.add(origin);
+    this.localReach.set(key, origins);
+  }
+
+  /**
+   * The same rule, applied to where the page actually is: after a redirect,
+   * and before anything from the page is handed back. A pure string check for
+   * a public address; the outward-effect decision only for a local one not
+   * already allowed on this page.
+   */
+  private async requireReadableAddress(sessionId: string, pageId: string, url: string): Promise<void> {
+    await this.requireNavigationAllowed(url, { sessionId, pageId });
+  }
+
+  /** Whether an embedded frame's content may be returned; a refused frame is left out, not fatal. */
+  private async frameReadable(sessionId: string, pageId: string, url: string): Promise<boolean> {
+    try {
+      await this.requireReadableAddress(sessionId, pageId, url);
+      return true;
+    } catch (error) {
+      if (error instanceof BrowserSessionError || error instanceof UntrustedEffectError) return false;
+      throw error;
+    }
   }
 
   private resolveSessionId(target: BrowserTarget): string {
@@ -370,13 +420,16 @@ export class BrowserEngine {
    * browser, so a late native result cannot outlive successful shutdown. */
   private async withTarget<T>(target: BrowserTarget, perform: (selected: {
     readonly sessionId: string; readonly pageId: string; readonly page: Page; readonly current: () => void;
+    /** Aborts when the caller cancels or the page goes away. */
+    readonly signal: AbortSignal;
   }) => Promise<T>, work?: BrowserControlIdentityWork): Promise<T> {
     target = { ...target };
     const selected = work ? await work.wait(() => this.target(target)) : await this.target(target);
-    return this.sessions.withPage(selected.sessionId, selected.pageId, async (page, current, signal) => {
+    return this.sessions.withPage(selected.sessionId, selected.pageId, async (page, current, pageSignal) => {
       if (page !== selected.page) throw new BrowserSessionError('The original browser page was replaced.', 'Select a live page before retrying.');
+      const signal = target.signal ? AbortSignal.any([pageSignal, target.signal]) : pageSignal;
       current(); work?.bindPage(current, signal);
-      const result = await perform({ ...selected, current });
+      const result = await perform({ ...selected, current, signal });
       current(); work?.assertCurrent(); return result;
     });
   }
@@ -407,15 +460,21 @@ export class BrowserEngine {
   ): Promise<Record<string, unknown>> {
     target = { ...target }; args = { ...args };
     const url = normalizeUrl(args.url);
-    await this.requireNavigationAllowed(url);
+    const deadlineMs = deadlineFor(args.timeoutMs, DEFAULT_NAVIGATION_TIMEOUT_MS);
+    const approvedOrigin = await this.requireNavigationAllowed(url);
     const sessionId = await this.ensureSession(target, args.launch ?? {});
-    return this.withTarget({ sessionId, pageId: target.pageId }, async ({ pageId, page, current }) => {
-      const response = await page.goto(url, {
-        waitUntil: args.waitUntil ?? 'domcontentloaded',
-        timeout: args.timeoutMs ?? DEFAULT_NAVIGATION_TIMEOUT_MS,
-      });
+    return this.withTarget({ sessionId, pageId: target.pageId, signal: target.signal }, async ({ pageId, page, current, signal }) => {
+      this.rememberLocalReach(sessionId, pageId, approvedOrigin);
+      const response = await boundedBrowserCall({
+        action: 'navigate', deadlineMs, signal,
+        next: 'Call action:"snapshot" to see what has loaded so far, or navigate again.',
+      }, () => page.goto(url, { waitUntil: args.waitUntil ?? 'domcontentloaded', timeout: deadlineMs }));
       current();
       this.snapshots.clear(sessionId, pageId);
+      // A redirect can land somewhere the requested address was not: the
+      // address the page ended on is held to the same rule before its title
+      // or anything else from it is returned.
+      await this.requireReadableAddress(sessionId, pageId, page.url()); current();
       // goto can be a same-document fragment change. A new document can also
       // restore filled history or merchant state. A URL/load result does not
       // establish that this page has forgotten its material; keep protection
@@ -435,16 +494,18 @@ export class BrowserEngine {
 
   async snapshot(target: BrowserTarget, args: { readonly limit?: number | undefined } = {}, controls?: BrowserControlAdmission): Promise<Record<string, unknown>> {
     target = { ...target }; args = { ...args };
-    const work = new BrowserControlIdentityWork({}, { drainReads: true });
+    const work = new BrowserControlIdentityWork({});
     return this.withTarget(target, async ({ sessionId, pageId, page, current }) => {
       const prior = this.currentSnapshot(sessionId, pageId);
       if (controls?.verifySnapshotId !== undefined && prior?.snapshotId !== controls.verifySnapshotId) throw new StaleElementError('The offered browser snapshot was replaced.', 'Read the page again.');
+      await this.requireReadableAddress(sessionId, pageId, page.url()); current();
       // The guard goes IN rather than being applied to the result: the snapshot
       // is also stored for ref resolution, and a stored copy holding the card
       // would be the same leak one indirection further away.
       const snapshot = await takeSnapshot(page, sessionId, pageId, {
         ...args,
         work,
+        admitFrame: (frameUrl) => this.frameReadable(sessionId, pageId, frameUrl),
         ...(controls ? { controls } : {}),
         ...(this.cardGuard === null ? {} : { guard: this.cardGuard }),
       });
@@ -469,6 +530,7 @@ export class BrowserEngine {
         snapshotId: controls?.verifySnapshotId ?? snapshot.snapshotId,
         elementCount: snapshot.elements.length,
         truncated: snapshot.truncated,
+        ...withheldNote(snapshotWithheldFrames(snapshot).map(frameUrl => this.untrusted.originOf(frameUrl))),
         elements: snapshot.elements.map((element) => ({
           ref: element.ref,
           role: element.role,
@@ -494,7 +556,7 @@ export class BrowserEngine {
   }> {
     const sessionId = target.sessionId, pageId = target.pageId;
     if (!sessionId || !pageId) throw new BrowserSessionError('Checkout terms require an explicit session and page.');
-    const work = new BrowserControlIdentityWork({ ...ownership }, { drainReads: true });
+    const work = new BrowserControlIdentityWork({ ...ownership });
     const guard = this.cardGuard;
     if (!guard) throw new BrowserSessionError('Checkout evidence requires the payment redactor.');
     const methods = retainBrowserMethods(guard, ['redact']);
@@ -628,39 +690,65 @@ export class BrowserEngine {
     return pageId ? retainAdmittedBrowserAction(this, args, options, current, sessionId, pageId) : undefined;
   }
 
-  /** The original action owns one complete page reading and all fresh checks. */
-  private async credentialInteraction(page: Page, sessionId: string, pageId: string, work: BrowserControlIdentityWork, current: () => void, action: string,
-    ownership: BrowserActionLifetime | undefined, args: Readonly<Record<string, unknown>>) {
-    try {
-      const guard = this.cardGuard;
-      const guardMethods = guard ? retainBrowserMethods(guard, ['redact', 'hasLiveMaterial']) : undefined;
-      const redact = guardMethods?.value('redact');
-      if (guard && typeof redact !== 'function') throw new Error('Browser payment containment is unavailable.');
-      const assertMetadata = (text: string) => {
-        current(); guardMethods?.assertCurrent();
-        if (guard !== this.cardGuard || (guard && typeof redact === 'function' && Reflect.apply(redact, guard, [sessionId, pageId, text]) !== text)) throw new BrowserSessionError('Browser page evidence contains live payment material.', 'Finish the authorized payment flow without copying its material into page labels.');
-        guardMethods?.assertCurrent(); current();
+  /**
+   * Whether this action may proceed on a page that could be asking for
+   * credentials. Decided from the snapshot the ref came from and the control's
+   * own live document, both already read: no further walk of the page.
+   *
+   *   - an action the gate admitted (or yolo) goes ahead;
+   *   - a native password input is refused as a fact;
+   *   - anything else is one credential-page reading per snapshot, kept for
+   *     every later action on the same snapshot.
+   *
+   * Returns the check to run once the control is re-identified and again
+   * immediately before dispatch; it is given whether the control's own
+   * document now holds a password input.
+   */
+  private async credentialInteraction(snapshot: BrowserSnapshot | null, sessionId: string, pageId: string,
+    work: BrowserControlIdentityWork, current: () => void, action: string,
+    ownership: BrowserActionLifetime | undefined, args: Readonly<Record<string, unknown>>): Promise<(passwordInDocument: boolean) => void> {
+    if (isYoloExecution() || isAdmittedBrowserAction(this, ownership, sessionId, pageId, action, args)) {
+      return () => {
+        current();
+        if (!isYoloExecution() && !isAdmittedBrowserAction(this, ownership, sessionId, pageId, action, args)) {
+          throw new BrowserSessionError('The browser action is no longer admitted.', 'Obtain a current decision for this action.');
+        }
       };
-      const observation = await captureCredentialPage(page, work, current, assertMetadata); current();
-      if (isYoloExecution() || isAdmittedBrowserAction(this, ownership, sessionId, pageId, action, args)) {
-        return async () => {
-          current();
-          if (!isYoloExecution() && !isAdmittedBrowserAction(this, ownership, sessionId, pageId, action, args)) {
-            throw new BrowserSessionError('The browser action is no longer admitted.', 'Obtain a current decision for this action.');
-          }
-          await observation.assertCurrent(); current();
-        };
-      }
-      if (observation.password) throw new BrowserSessionError('This page contains a native password input, so automated credential interaction is refused.', 'Only the account owner can complete authentication.');
-      const verdict = await work.credentialPage(observation.state, observation.assertCurrent); current();
-      if (verdict === 'yes') throw new BrowserSessionError(`This page looks like a sign-in page (${observation.url}), so the browser layer will not ${action} on it.`, `Give the owner this URL to open in their own browser and sign in there: ${observation.url}`);
-      if (verdict !== 'no') throw new BrowserSessionError('The current browser page purpose could not be established.', 'Read the current page before trying an interactive action.');
-      return observation.assertCurrent;
-    } catch (error) {
-      if (error instanceof BrowserSessionError || error instanceof StaleElementError) throw error;
-      work.assertCurrent();
-      throw new BrowserSessionError('The current browser page could not be safely established.', 'Read the current page before trying an interactive action.');
     }
+    const passwordRefusal = (): BrowserSessionError => new BrowserSessionError(
+      'This page contains a native password input, so automated credential interaction is refused.', 'Only the account owner can complete authentication.');
+    if (!snapshot) throw new StaleElementError('No snapshot has been taken for this page.', 'Call action:"snapshot" first, then use a ref from that snapshot.');
+    if (snapshotHasPasswordInput(snapshot)) throw passwordRefusal();
+    const signInPage = (): BrowserSessionError => new BrowserSessionError(
+      `This page looks like a sign-in page (${snapshot.url}), so the browser layer will not ${action} on it.`,
+      `Give the owner this URL to open in their own browser and sign in there: ${snapshot.url}`,
+    );
+    let verdict: 'yes' | 'no' | 'unresolved' | undefined = this.credentialVerdicts.get(snapshot);
+    if (verdict === undefined) {
+      const evidence = snapshotCredentialEvidence(snapshot);
+      const encoded = JSON.stringify(evidence);
+      // Page labels carrying live card material or an issuer credential are
+      // never sent to a reader; the action then waits for an owner decision.
+      const guard = this.cardGuard;
+      const unsafe = containsIssuerCredential(encoded) || (guard !== null && guard.redact(sessionId, pageId, encoded) !== encoded);
+      try { verdict = unsafe ? 'unresolved' : await work.credentialPage(evidence); }
+      catch (error) {
+        // A reading that failed is no answer; cancellation and a retired owner still end the call.
+        work.assertCurrent();
+        if (error instanceof BrowserSessionError || error instanceof StaleElementError) throw error;
+        verdict = 'unresolved';
+      }
+      current();
+      if (verdict !== 'unresolved') this.credentialVerdicts.set(snapshot, verdict);
+    }
+    if (verdict === 'yes') throw signInPage();
+    if (verdict !== 'no') {
+      throw new BrowserSessionError(
+        `Whether ${snapshot.url} is a sign-in page could not be read, so the browser layer will not ${action} on it without a decision.`,
+        'Approve this browser action when asked, or turn decision models on so the page purpose can be read. Reading the page again does not change this.',
+      );
+    }
+    return (passwordInDocument) => { current(); if (passwordInDocument) throw passwordRefusal(); };
   }
 
   /** Bind every ref consumer to one stored snapshot and one original source. */
@@ -688,15 +776,16 @@ export class BrowserEngine {
     ownership?: BrowserActionLifetime,
   ): Promise<Record<string, unknown>> {
     args = { ...args }; target = { ...target }; ownership = ownership && { ...ownership };
-    const work = new BrowserControlIdentityWork(ownership, { drainReads: true });
+    const work = new BrowserControlIdentityWork(ownership);
     let attempted = false;
+    const deadlineMs = deadlineFor(args.timeoutMs, DEFAULT_ACTION_TIMEOUT_MS);
     try { return await this.withTarget(target, async ({ sessionId, pageId, page }) => {
       const scope = this.refScope(sessionId, pageId, page, work, ownership, 'click', args);
       const current = scope.current;
       current();
-      const credentialCurrent = await this.credentialInteraction(page, sessionId, pageId, work, current, 'click', ownership, args); current();
-      const { locator, element, revalidate } = await scope.resolve(args.ref);
-      current();
+      const credentialCurrent = await this.credentialInteraction(scope.snapshot, sessionId, pageId, work, current, 'click', ownership, args); current();
+      const { locator, element, revalidate, passwordInDocument } = await scope.resolve(args.ref);
+      credentialCurrent(passwordInDocument); current();
       if (element.submits) {
         // Submitting sends data to whoever runs the site. Whether this element
         // submits was recorded when the page was snapshotted, so this is a fact
@@ -716,16 +805,15 @@ export class BrowserEngine {
       }
       current();
       await revalidate(); current();
-      await credentialCurrent(); current();
+      credentialCurrent(passwordInDocument); current();
       const urlBefore = page.url();
       try {
         await work.action(async signal => {
           if (ownership?.beforeDispatch) { await ownership.beforeDispatch(); current(); }
           attempted = true;
-          return locator.click({ signal, button: args.button ?? 'left', clickCount: args.clickCount ?? 1,
-            timeout: args.timeoutMs ?? DEFAULT_ACTION_TIMEOUT_MS });
+          return locator.click({ signal, button: args.button ?? 'left', clickCount: args.clickCount ?? 1, timeout: deadlineMs });
         });
-        await work.wait(() => page.waitForLoadState('domcontentloaded', { timeout: DEFAULT_ACTION_TIMEOUT_MS }).catch(() => undefined));
+        await work.wait(() => page.waitForLoadState('domcontentloaded', { timeout: DEFAULT_NAVIGATION_TIMEOUT_MS }).catch(() => undefined));
         this.snapshots.clear(sessionId, pageId);
         const navigated = page.url() !== urlBefore;
         // URL changes also include pushState and fragments with the same filled
@@ -766,15 +854,18 @@ export class BrowserEngine {
     ownership?: BrowserActionLifetime,
   ): Promise<Record<string, unknown>> {
     args = { ...args }; target = { ...target }; ownership = ownership && { ...ownership };
-    const work = new BrowserControlIdentityWork(ownership, { drainReads: true });
+    const work = new BrowserControlIdentityWork(ownership);
     return this.withTarget(target, async ({ sessionId, pageId, page }) => {
       const scope = this.refScope(sessionId, pageId, page, work, ownership, 'type', args);
       const current = scope.current;
       current();
-      const credentialCurrent = await this.credentialInteraction(page, sessionId, pageId, work, current, 'type', ownership, args); current();
-      const { locator, element, revalidate } = await scope.resolve(args.ref);
-      current();
-      const timeout = args.timeoutMs ?? DEFAULT_ACTION_TIMEOUT_MS;
+      const credentialCurrent = await this.credentialInteraction(scope.snapshot, sessionId, pageId, work, current, 'type', ownership, args); current();
+      const { locator, element, revalidate, passwordInDocument } = await scope.resolve(args.ref);
+      credentialCurrent(passwordInDocument); current();
+      const timeout = deadlineFor(args.timeoutMs, DEFAULT_ACTION_TIMEOUT_MS);
+      const act = (run: (signal: AbortSignal) => Promise<unknown>) => boundedBrowserCall({
+        action: 'type', deadlineMs: timeout, next: 'Call action:"snapshot" to check the field is present and enabled.',
+      }, () => work.action(run));
       // Typing a line break key by key presses Enter in the field, which
       // submits a form just as `submit` does, so it is checked the same way.
       const typesLineBreak = args.replace === false && /[\r\n]/.test(args.text);
@@ -794,23 +885,23 @@ export class BrowserEngine {
       }
       current();
       await revalidate(); current();
-      await credentialCurrent(); current();
+      credentialCurrent(passwordInDocument); current();
       if (args.replace === false) {
-        await work.action(signal => locator.click({ timeout, signal }));
+        await act(signal => locator.click({ timeout, signal }));
         current();
         await revalidate(); current();
-        await credentialCurrent(); current();
-        await work.action(signal => locator.pressSequentially(args.text, { timeout, signal }));
+        credentialCurrent(passwordInDocument); current();
+        await act(signal => locator.pressSequentially(args.text, { timeout, signal }));
       } else {
-        await work.action(signal => locator.fill(args.text, { timeout, signal }));
+        await act(signal => locator.fill(args.text, { timeout, signal }));
       }
       let submitted = false;
       if (args.submit === true) {
         current();
         await revalidate(); current();
-        await credentialCurrent(); current();
-        await work.action(signal => locator.press('Enter', { timeout, signal }));
-        await work.wait(() => page.waitForLoadState('domcontentloaded', { timeout }).catch(() => undefined));
+        credentialCurrent(passwordInDocument); current();
+        await act(signal => locator.press('Enter', { timeout, signal }));
+        await work.wait(() => page.waitForLoadState('domcontentloaded', { timeout: DEFAULT_NAVIGATION_TIMEOUT_MS }).catch(() => undefined));
         submitted = true;
       }
       if (submitted) this.snapshots.clear(sessionId, pageId);
@@ -845,7 +936,7 @@ export class BrowserEngine {
     ownership?: BrowserActionLifetime,
   ): Promise<Record<string, unknown>> {
     args = { ...args, fills: args.fills.map(fill => ({ ...fill })) }; target = { ...target }; ownership = ownership && { ...ownership };
-    const work = new BrowserControlIdentityWork(ownership, { drainReads: true });
+    const work = new BrowserControlIdentityWork(ownership);
     return this.withTarget(target, async ({ sessionId, pageId, page }) => {
       const scope = this.refScope(sessionId, pageId, page, work, ownership);
       const outcome = await fillSecretsIntoPage({
@@ -855,7 +946,7 @@ export class BrowserEngine {
         assertSnapshotCurrent: scope.current,
         fills: args.fills,
         guard: this.cardGuard,
-        timeoutMs: args.timeoutMs ?? DEFAULT_ACTION_TIMEOUT_MS,
+        timeoutMs: deadlineFor(args.timeoutMs, DEFAULT_ACTION_TIMEOUT_MS),
       });
       if (!outcome.ok) this.snapshots.clear(sessionId, pageId);
       return {
@@ -874,14 +965,17 @@ export class BrowserEngine {
     ownership?: BrowserActionLifetime,
   ): Promise<Record<string, unknown>> {
     args = { ...args, values: [...args.values] }; target = { ...target }; ownership = ownership && { ...ownership };
-    const work = new BrowserControlIdentityWork(ownership, { drainReads: true });
+    const work = new BrowserControlIdentityWork(ownership);
     return this.withTarget(target, async ({ sessionId, pageId, page }) => {
       const scope = this.refScope(sessionId, pageId, page, work, ownership, 'select', args);
-      const credentialCurrent = await this.credentialInteraction(page, sessionId, pageId, work, scope.current, 'select', ownership, args); scope.current();
-      const { locator, element, revalidate, assertCurrent } = await scope.resolve(args.ref);
+      const credentialCurrent = await this.credentialInteraction(scope.snapshot, sessionId, pageId, work, scope.current, 'select', ownership, args); scope.current();
+      const { locator, element, revalidate, assertCurrent, passwordInDocument } = await scope.resolve(args.ref);
+      credentialCurrent(passwordInDocument);
       await revalidate(); assertCurrent();
-      await credentialCurrent(); assertCurrent();
-      const selected = await work.action(signal => locator.selectOption([...args.values], { timeout: args.timeoutMs ?? DEFAULT_ACTION_TIMEOUT_MS, signal }));
+      credentialCurrent(passwordInDocument); assertCurrent();
+      const deadlineMs = deadlineFor(args.timeoutMs, DEFAULT_ACTION_TIMEOUT_MS);
+      const selected = await boundedBrowserCall({ action: 'select', deadlineMs, next: 'Call action:"snapshot" to check the list and its options.' },
+        () => work.action(signal => locator.selectOption([...args.values], { timeout: deadlineMs, signal })));
       return { sessionId, pageId, selectedIn: { ref: args.ref, role: element.role, name: element.name }, selected };
     }, work);
   }
@@ -892,11 +986,12 @@ export class BrowserEngine {
     ownership?: BrowserActionLifetime,
   ): Promise<Record<string, unknown>> {
     args = { ...args }; target = { ...target }; ownership = ownership && { ...ownership };
-    const work = new BrowserControlIdentityWork(ownership, { drainReads: true });
+    const work = new BrowserControlIdentityWork(ownership);
     return this.withTarget(target, async ({ sessionId, pageId, page }) => {
       const scope = this.refScope(sessionId, pageId, page, work, ownership, 'press', args);
-      const credentialCurrent = await this.credentialInteraction(page, sessionId, pageId, work, scope.current, 'press', ownership, args); scope.current();
-      const { locator, element, revalidate, assertCurrent } = await scope.resolve(args.ref);
+      const credentialCurrent = await this.credentialInteraction(scope.snapshot, sessionId, pageId, work, scope.current, 'press', ownership, args); scope.current();
+      const { locator, element, revalidate, assertCurrent, passwordInDocument } = await scope.resolve(args.ref);
+      credentialCurrent(passwordInDocument);
       if (keyCanSubmit(args.key, element.submits)) {
         const formFields = await work.wait(() => BrowserEngine.enclosingFormFields(locator));
         await revalidate(); scope.current();
@@ -907,8 +1002,10 @@ export class BrowserEngine {
         ));
       }
       await revalidate(); assertCurrent();
-      await credentialCurrent(); assertCurrent();
-      await work.action(signal => locator.press(args.key, { timeout: args.timeoutMs ?? DEFAULT_ACTION_TIMEOUT_MS, signal }));
+      credentialCurrent(passwordInDocument); assertCurrent();
+      const deadlineMs = deadlineFor(args.timeoutMs, DEFAULT_ACTION_TIMEOUT_MS);
+      await boundedBrowserCall({ action: 'press', deadlineMs, next: 'Call action:"snapshot" to check the control is present and enabled.' },
+        () => work.action(signal => locator.press(args.key, { timeout: deadlineMs, signal })));
       this.snapshots.clear(sessionId, pageId);
       return { sessionId, pageId, pressed: args.key, on: { ref: args.ref, role: element.role, name: element.name }, url: page.url() };
     }, work);
@@ -920,13 +1017,14 @@ export class BrowserEngine {
     ownership?: BrowserActionLifetime,
   ): Promise<Record<string, unknown>> {
     args = { ...args }; target = { ...target }; ownership = ownership && { ...ownership };
-    const work = new BrowserControlIdentityWork(ownership, { drainReads: true });
+    const work = new BrowserControlIdentityWork(ownership);
     return this.withTarget(target, async ({ sessionId, pageId, page }) => {
       const scope = this.refScope(sessionId, pageId, page, work, ownership);
       if (args.ref) {
         const { locator, element, revalidate, assertCurrent } = await scope.resolve(args.ref);
         await revalidate(); assertCurrent();
-        await work.wait(() => locator.scrollIntoViewIfNeeded({ timeout: DEFAULT_ACTION_TIMEOUT_MS }));
+        await boundedBrowserCall({ action: 'scroll', deadlineMs: DEFAULT_ACTION_TIMEOUT_MS, next: 'Call action:"snapshot" to check the element is still on the page.' },
+          () => work.wait(() => locator.scrollIntoViewIfNeeded({ timeout: DEFAULT_ACTION_TIMEOUT_MS })));
         return { sessionId, pageId, scrolledTo: { ref: args.ref, role: element.role, name: element.name } };
       }
       const amount = args.amount ?? 600;
@@ -942,32 +1040,40 @@ export class BrowserEngine {
     args: { readonly text?: string | undefined; readonly url?: string | undefined; readonly timeoutMs?: number | undefined },
   ): Promise<Record<string, unknown>> {
     target = { ...target }; args = { ...args };
-    return this.withTarget(target, async ({ sessionId, pageId, page, current }) => {
-      const timeout = args.timeoutMs ?? DEFAULT_NAVIGATION_TIMEOUT_MS;
+    return this.withTarget(target, async ({ sessionId, pageId, page, current, signal }) => {
+      const timeout = deadlineFor(args.timeoutMs, DEFAULT_WAIT_TIMEOUT_MS);
+      const wait = (next: string, run: () => Promise<unknown>) => boundedBrowserCall({ action: 'wait_for', deadlineMs: timeout, signal, next }, run);
       if (args.text) {
-        await page.getByText(args.text, { exact: false }).first().waitFor({ state: 'visible', timeout });
+        const text = args.text;
+        await wait('The text did not appear. Call action:"read_text" or action:"snapshot" to see what the page shows instead.',
+          () => page.getByText(text, { exact: false }).first().waitFor({ state: 'visible', timeout }));
         current();
         this.snapshots.clear(sessionId, pageId);
         return { sessionId, pageId, waitedFor: { text: args.text }, url: page.url(), found: true };
       }
       if (args.url) {
-        await page.waitForURL(args.url, { timeout });
+        const expected = args.url;
+        await wait('The page did not reach that address. Call action:"snapshot" to see where it is.', () => page.waitForURL(expected, { timeout }));
         current();
         this.snapshots.clear(sessionId, pageId);
         return { sessionId, pageId, waitedFor: { url: args.url }, url: page.url(), found: true };
       }
-      await page.waitForLoadState('networkidle', { timeout }); current();
+      await wait('The page kept loading. Call action:"snapshot" to work with what is there.', () => page.waitForLoadState('networkidle', { timeout })); current();
       return { sessionId, pageId, waitedFor: { state: 'networkidle' }, url: page.url(), found: true };
     });
   }
 
   async readText(target: BrowserTarget, args: { readonly maxChars?: number | undefined } = {}): Promise<Record<string, unknown>> {
     target = { ...target }; args = { ...args };
-    return this.withTarget(target, async ({ sessionId, pageId, page, current }) => {
+    return this.withTarget(target, async ({ sessionId, pageId, page, current, signal }) => {
       const limit = Math.max(200, Math.min(200_000, args.maxChars ?? DEFAULT_TEXT_LIMIT));
+      await this.requireReadableAddress(sessionId, pageId, page.url()); current();
+      const read = <T>(run: () => Promise<T>) => boundedBrowserCall({
+        action: 'read_text', deadlineMs: DEFAULT_ACTION_TIMEOUT_MS, signal, next: 'The page is not answering; call action:"screenshot" or navigate again.',
+      }, run);
       // innerText ignores shadow DOM, so a page that renders its content inside a
       // component would read as empty. Open shadow roots are walked and appended.
-      const text = await page.evaluate(() => {
+      const text = await read(() => page.evaluate(() => {
         const collectShadowText = (root: Document | ShadowRoot): string[] => {
           const parts: string[] = [];
           for (const element of Array.from(root.querySelectorAll('*'))) {
@@ -982,20 +1088,25 @@ export class BrowserEngine {
         const body = document.body?.innerText ?? '';
         const shadow = collectShadowText(document);
         return shadow.length > 0 ? `${body}\n${shadow.join('\n')}` : body;
-      });
+      }));
       current();
       // Embedded frames carry their own content from their own origin. Leaving
       // them out means reading a page and missing the part that mattered, and
       // each frame's origin is recorded separately because a frame is a
       // different author with the same access to this page.
       const frameTexts: string[] = [];
+      const withheld: string[] = [];
       for (const frame of page.frames()) {
         // The main frame is already read above. Identity comparison is not enough
         // for a host-backed page, whose frame objects are created per call, so the
         // main frame is the one with no parent.
         if (frame === page.mainFrame() || frame.parentFrame() === null) continue;
         current();
-        const frameText = await frame.evaluate(() => document.body?.innerText ?? '').catch(() => ''); current();
+        // A frame is judged on its own address: a public page may embed a
+        // private or metadata address, and that content is not returned.
+        if (!(await this.frameReadable(sessionId, pageId, frame.url()))) { withheld.push(this.untrusted.originOf(frame.url())); current(); continue; }
+        current();
+        const frameText = await read(() => frame.evaluate(() => document.body?.innerText ?? '')).catch(() => { signal.throwIfAborted(); return ''; }); current();
         if (!frameText.trim()) continue;
         // With its text, so the ledger can check content instead of treating
         // the turn as holding text it could not see.
@@ -1025,6 +1136,7 @@ export class BrowserEngine {
           truncated: normalized.length > limit,
         }),
         truncated: normalized.length > limit,
+        ...withheldNote(withheld),
       };
     });
   }
@@ -1034,8 +1146,12 @@ export class BrowserEngine {
     args: { readonly fullPage?: boolean | undefined; readonly path?: string | undefined } = {},
   ): Promise<Record<string, unknown>> {
     target = { ...target }; args = { ...args };
-    return this.withTarget(target, async ({ sessionId, pageId, page, current }) => {
+    return this.withTarget(target, async ({ sessionId, pageId, page, current, signal }) => {
       assertCaptureAllowed(this.cardGuard, sessionId, pageId);
+      // An image cannot leave a frame out, so every frame's address must be readable.
+      for (const address of new Set([page.url(), ...page.frames().map(frame => frame.url())])) {
+        await this.requireReadableAddress(sessionId, pageId, address); current();
+      }
       const fileName = `${sessionId}-${pageId}-${String(Date.now())}.png`;
       mkdirSync(this.options.screenshotDirectory, { recursive: true });
       // Resolved once, so the path written, the path recorded, and the path
@@ -1056,8 +1172,14 @@ export class BrowserEngine {
         );
       }
       let buffer: Awaited<ReturnType<Page['screenshot']>>;
-      try { buffer = await page.screenshot({ fullPage: args.fullPage === true }); }
-      catch { current(); throw new BrowserSessionError('The page could not be captured.', 'Read the current page before trying another capture.'); }
+      try {
+        buffer = await boundedBrowserCall({ action: 'screenshot', deadlineMs: DEFAULT_NAVIGATION_TIMEOUT_MS, signal, next: 'Try again with fullPage off, or call action:"read_text".' },
+          () => page.screenshot({ fullPage: args.fullPage === true, timeout: DEFAULT_NAVIGATION_TIMEOUT_MS }));
+      } catch (error) {
+        current();
+        if (error instanceof BrowserSessionError) throw error;
+        throw new BrowserSessionError('The page could not be captured.', 'Read the current page before trying another capture.');
+      }
       current(); assertCaptureAllowed(this.cardGuard, sessionId, pageId); current();
       mkdirSync(dirname(path), { recursive: true });
       try { writeFileSync(path, buffer, { flag: 'wx' }); } catch (error) {
@@ -1091,6 +1213,7 @@ export class BrowserEngine {
     // held for them goes with them.
     for (const pageId of this.snapshots.retainPages(sessionId, new Set(pages.map((page) => page.pageId)))) {
       this.cardGuard?.disarm(sessionId, pageId);
+      this.localReach.delete(`${sessionId}:${pageId}`);
     }
     return { sessionId, pages };
   }
@@ -1101,14 +1224,19 @@ export class BrowserEngine {
   ): Promise<Record<string, unknown>> {
     target = { ...target }; args = { ...args };
     const startUrl = args.url ? normalizeUrl(args.url) : undefined;
-    if (startUrl) await this.requireNavigationAllowed(startUrl);
+    const approvedOrigin = startUrl ? await this.requireNavigationAllowed(startUrl) : null;
     const sessionId = await this.ensureSession(target, args.launch ?? {});
     const { pageId, page } = await this.sessions.newPage(sessionId);
-    return this.sessions.withPage(sessionId, pageId, async (original, current) => {
+    return this.sessions.withPage(sessionId, pageId, async (original, current, pageSignal) => {
       if (original !== page) throw new BrowserSessionError('The original new browser tab was replaced.', 'Select a live tab before retrying.');
       current();
+      this.rememberLocalReach(sessionId, pageId, approvedOrigin);
       if (startUrl) {
-        await page.goto(startUrl, { waitUntil: 'domcontentloaded', timeout: DEFAULT_NAVIGATION_TIMEOUT_MS });
+        const signal = target.signal ? AbortSignal.any([pageSignal, target.signal]) : pageSignal;
+        await boundedBrowserCall({ action: 'new_tab', deadlineMs: DEFAULT_NAVIGATION_TIMEOUT_MS, signal, next: `The tab is open as ${pageId}; call action:"snapshot" on it to see what loaded.` },
+          () => page.goto(startUrl, { waitUntil: 'domcontentloaded', timeout: DEFAULT_NAVIGATION_TIMEOUT_MS }));
+        current();
+        await this.requireReadableAddress(sessionId, pageId, page.url());
       }
       current();
       const pages = await this.sessions.pageList(sessionId); current();
@@ -1127,13 +1255,15 @@ export class BrowserEngine {
     await this.sessions.closePage(sessionId, args.pageId);
     this.snapshots.clear(sessionId, args.pageId);
     this.cardGuard?.disarm(sessionId, args.pageId);
+    this.localReach.delete(`${sessionId}:${args.pageId}`);
     return { sessionId, closedPageId: args.pageId, pages: await this.sessions.pageList(sessionId) };
   }
 
   async goBack(target: BrowserTarget): Promise<Record<string, unknown>> {
     target = { ...target };
-    return this.withTarget(target, async ({ sessionId, pageId, page, current }) => {
-      const response = await page.goBack({ timeout: DEFAULT_NAVIGATION_TIMEOUT_MS });
+    return this.withTarget(target, async ({ sessionId, pageId, page, current, signal }) => {
+      const response = await boundedBrowserCall({ action: 'back', deadlineMs: DEFAULT_NAVIGATION_TIMEOUT_MS, signal, next: 'Call action:"snapshot" to see where the page is.' },
+        () => page.goBack({ timeout: DEFAULT_NAVIGATION_TIMEOUT_MS }));
       current();
       this.snapshots.clear(sessionId, pageId);
       return { sessionId, pageId, url: page.url(), moved: response !== null };
@@ -1142,8 +1272,9 @@ export class BrowserEngine {
 
   async goForward(target: BrowserTarget): Promise<Record<string, unknown>> {
     target = { ...target };
-    return this.withTarget(target, async ({ sessionId, pageId, page, current }) => {
-      const response = await page.goForward({ timeout: DEFAULT_NAVIGATION_TIMEOUT_MS });
+    return this.withTarget(target, async ({ sessionId, pageId, page, current, signal }) => {
+      const response = await boundedBrowserCall({ action: 'forward', deadlineMs: DEFAULT_NAVIGATION_TIMEOUT_MS, signal, next: 'Call action:"snapshot" to see where the page is.' },
+        () => page.goForward({ timeout: DEFAULT_NAVIGATION_TIMEOUT_MS }));
       current();
       this.snapshots.clear(sessionId, pageId);
       return { sessionId, pageId, url: page.url(), moved: response !== null };
@@ -1184,8 +1315,9 @@ export class BrowserEngine {
     ownership?: BrowserActionLifetime,
   ): Promise<Record<string, unknown>> {
     args = { ...args, ...(args.fields ? { fields: [...args.fields] } : {}) }; target = { ...target }; ownership = ownership && { ...ownership };
-    const work = new BrowserControlIdentityWork(ownership, { drainReads: true });
+    const work = new BrowserControlIdentityWork(ownership);
     return this.withTarget(target, async ({ sessionId, pageId, page }) => {
+      await this.requireReadableAddress(sessionId, pageId, page.url());
       const scope = this.refScope(sessionId, pageId, page, work, ownership);
       const fields = args.fields && args.fields.length > 0 ? args.fields : (['text'] as const);
       const limit = Math.max(1, Math.min(200, args.limit ?? (args.all === true ? 50 : 1)));

@@ -2,6 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { StringDecoder } from 'node:string_decoder';
 import type { BrowserContext, Page } from 'playwright-core';
 import { types as nodeTypes } from 'node:util';
 import { captureOwnedJson } from '../gate/judgment-input.js';
@@ -35,7 +36,7 @@ interface HostLifetime {
 }
 
 export class BrowserHostError extends Error {
-  constructor(message: string, readonly fix: string | null = null) {
+  constructor(message: string, readonly fix: string | null = null, readonly timedOut = false) {
     super(message);
     this.name = 'BrowserHostError';
   }
@@ -225,11 +226,14 @@ export class BrowserHostClient {
     };
     this.#hosts.set(child, host);
     // One parser owns hello and every response; stderr must also be consumed
-    // so a noisy dependency cannot block the helper on a full pipe.
+    // so a noisy dependency cannot block the helper on a full pipe. One decoder
+    // for the whole stream: a character split across two pipe chunks is
+    // decoded once both halves have arrived.
     let buffer = '';
+    const decoder = new StringDecoder('utf8');
     const data = (chunk: Buffer): void => {
       if (host.closed) return;
-      buffer += chunk.toString();
+      buffer += decoder.write(chunk);
       let index = buffer.indexOf('\n');
       while (index >= 0) {
         const line = buffer.slice(0, index).trim();
@@ -306,7 +310,7 @@ export class BrowserHostClient {
   }
 
   private handleLine(line: string, child?: ChildProcessWithoutNullStreams): void {
-    let message: { id?: number; ok?: boolean; result?: unknown; error?: string };
+    let message: { id?: number; ok?: boolean; result?: unknown; error?: string; timedOut?: boolean };
     try {
       message = JSON.parse(line) as typeof message;
     } catch {
@@ -333,7 +337,7 @@ export class BrowserHostClient {
     if (!call || (child && call.child !== child)) return;
     this.pending.delete(message.id);
     if (message.ok === true) call.resolve(message.result);
-    else call.reject(new BrowserHostError(message.error ?? 'the browser host reported a failure'));
+    else call.reject(new BrowserHostError(message.error ?? 'the browser host reported a failure', null, message.timedOut === true));
   }
 
   call<T>(command: string, params: Record<string, unknown> = {}, options: { readonly signal?: AbortSignal | undefined } = {}): Promise<T> {
@@ -525,6 +529,7 @@ export function remotePage(client: BrowserHostClient, pageId: string, initialUrl
     if (options?.complete !== true) {
       const response = await client.call<{ frames: RemoteFrameDescriptor[] }>('frames', { pageId });
       frames = response.frames;
+      url = frames.find(frame => frame.main)?.url ?? url;
       return;
     }
     const response = captureOwnedJson(await client.call<unknown>('frames', { pageId, complete: true }), nodeTypes.isProxy);
@@ -546,13 +551,12 @@ export function remotePage(client: BrowserHostClient, pageId: string, initialUrl
     frames = currentFrames;
     url = response.url;
   };
-  // The action already happened; failing to re-read the page afterwards must
-  // not turn it into an error, the next read of the page says what is there.
+  // The page's address and frames are cached on this side, so an action that
+  // can navigate is followed by one frame listing, which carries the main
+  // frame's address too. The action already happened; failing to re-read the
+  // page afterwards must not turn it into an error, the next read says what is there.
   const refreshAfterAction = async (): Promise<void> => {
-    try {
-      url = await pageCall('url') as string;
-      await refreshFrames();
-    } catch { /* The cached address stays until the next successful read. */ }
+    try { await refreshFrames(); } catch { /* The cached address stays until the next successful read. */ }
   };
   const page: Record<string, unknown> = {
     url: () => url,
@@ -565,18 +569,17 @@ export function remotePage(client: BrowserHostClient, pageId: string, initialUrl
     },
     goto: async (target: string, options?: Record<string, unknown>) => {
       const value = await pageCall('goto', { url: target, ...options }) as { status: number } | null;
-      url = await pageCall('url') as string;
       await refreshFrames();
       return value ? { status: () => value.status } : null;
     },
     goBack: async (options?: Record<string, unknown>) => {
       const moved = await pageCall('goBack', options ?? {}) as boolean;
-      url = await pageCall('url') as string;
+      await refreshAfterAction();
       return moved ? {} : null;
     },
     goForward: async (options?: Record<string, unknown>) => {
       const moved = await pageCall('goForward', options ?? {}) as boolean;
-      url = await pageCall('url') as string;
+      await refreshAfterAction();
       return moved ? {} : null;
     },
     waitForLoadState: async (state?: string, options?: Record<string, unknown>) => {

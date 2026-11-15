@@ -16,9 +16,81 @@
 import { BrowserSessionError } from './browser-sessions.js';
 import type { CardFieldGuard, OwnerApproval, UntrustedContentPort } from './browser-types.js';
 
-export const DEFAULT_NAVIGATION_TIMEOUT_MS = 0;
-export const DEFAULT_ACTION_TIMEOUT_MS = 0;
+/**
+ * The one deadline table for every browser call, in-process and through the
+ * attach host alike. Playwright reads 0 as "never", so no default here is 0:
+ * a page that never finishes loading ends the call with a stated deadline
+ * instead of holding the turn until someone closes the window.
+ */
+export const DEFAULT_NAVIGATION_TIMEOUT_MS = 30_000;
+export const DEFAULT_ACTION_TIMEOUT_MS = 15_000;
+export const DEFAULT_WAIT_TIMEOUT_MS = 30_000;
+/** The longest deadline a caller may ask for on one call. */
+export const MAX_CALL_TIMEOUT_MS = 600_000;
 export const DEFAULT_TEXT_LIMIT = 20_000;
+
+/** A caller's timeoutMs when it is a usable deadline, otherwise the default. */
+export function deadlineFor(requested: number | undefined, fallback: number): number {
+  if (requested === undefined || !Number.isFinite(requested) || requested <= 0) return fallback;
+  return Math.min(Math.ceil(requested), MAX_CALL_TIMEOUT_MS);
+}
+
+function seconds(ms: number): string {
+  return ms % 1000 === 0 ? `${String(ms / 1000)} s` : `${(ms / 1000).toFixed(1)} s`;
+}
+
+/**
+ * Whether an error is the driver's own deadline. Playwright names it
+ * `TimeoutError`; the attach host forwards that name as `timedOut`.
+ */
+export function isDeadlineError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  return error.name === 'TimeoutError' || (error as { readonly timedOut?: unknown }).timedOut === true;
+}
+
+/**
+ * Runs one browser wait to a deadline, and ends it at once when the caller's
+ * signal aborts. The driver is given the same deadline, so its own work ends
+ * too; the race only stops the caller waiting on a driver that does not take a
+ * signal (navigation, load waits, page reads).
+ */
+export async function boundedBrowserCall<T>(
+  call: { readonly action: string; readonly deadlineMs: number; readonly next: string; readonly signal?: AbortSignal | undefined },
+  run: () => Promise<T>,
+): Promise<T> {
+  const { signal } = call;
+  if (signal?.aborted) throw cancelledError(call.action);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let onAbort: (() => void) | undefined;
+  const work = run();
+  // A late failure of the abandoned driver call is already answered by the race.
+  work.catch(() => undefined);
+  const stop = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(deadlineError(call)), call.deadlineMs + 1_000);
+    onAbort = () => reject(cancelledError(call.action));
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+  try {
+    return await Promise.race([work, stop]);
+  } catch (error) {
+    if (isDeadlineError(error)) throw deadlineError(call);
+    throw error;
+  } finally {
+    clearTimeout(timer);
+    if (onAbort) signal?.removeEventListener('abort', onAbort);
+  }
+}
+
+function deadlineError(call: { readonly action: string; readonly deadlineMs: number; readonly next: string }): BrowserSessionError {
+  return new BrowserSessionError(
+    `browser action:"${call.action}" did not finish within its ${seconds(call.deadlineMs)} deadline.`,
+    `${call.next} To allow longer, pass timeoutMs (up to ${String(MAX_CALL_TIMEOUT_MS)}).`,
+  );
+}
+
+function cancelledError(action: string): BrowserSessionError {
+  return new BrowserSessionError(`browser action:"${action}" was cancelled.`, 'Nothing more is waiting on the page.');
+}
 
 /**
  * Schemes a page may be sent to.
@@ -50,7 +122,9 @@ function reachOfIpv4(octets: readonly number[]): NavigationReach {
  * 'link-local' covers the cloud metadata addresses, which are never a page the
  * owner wants. The URL parser has already turned decimal, hex and octal IPv4
  * spellings into dotted form. A name that only resolves to a private address
- * through DNS, and redirects, are not detected here.
+ * through DNS is not detected here. Redirects and frames are: the engine
+ * classifies the address the page ended on and every frame it reads, not only
+ * the one requested.
  */
 export function classifyNavigationTarget(url: string): NavigationReach {
   let parsed: URL;
@@ -76,6 +150,8 @@ export function classifyNavigationTarget(url: string): NavigationReach {
 export interface BrowserTarget {
   readonly sessionId?: string | undefined;
   readonly pageId?: string | undefined;
+  /** The caller's cancellation, normally the tool call's: aborting it ends every wait of this call. */
+  readonly signal?: AbortSignal | undefined;
 }
 
 export interface BrowserEngineOptions {
@@ -171,8 +247,9 @@ const KNOWN_IDENTITY_PROVIDER_HOSTS: readonly RegExp[] = [
 const SIGN_IN_ROUTE_PATTERN = /(sign[\s_-]?in|log[\s_-]?in|authorize|oauth)/i;
 
 /**
- * Legacy synchronous URL helper. Runtime browser actions use the registered
- * credential-page reading, never this compatibility predicate.
+ * Legacy synchronous URL helper. Runtime browser actions use the snapshot's
+ * password fact and the credential-page reading, never this predicate: a
+ * sign-in route pattern also matches documentation about sign-in.
  * @deprecated Use the current native page observation in BrowserEngine.
  *
  * Two independent signals, either sufficient on its own:

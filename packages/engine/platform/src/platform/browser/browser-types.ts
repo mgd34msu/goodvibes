@@ -35,6 +35,8 @@ export type BrowserProvisionFailure =
    * provision with allowDownload:false) can produce this.
    */
   | 'driver-not-installed-yet'
+  /** No browser has been downloaded yet and this call downloads nothing; the reporting twin of a first-call download. */
+  | 'browser-not-installed-yet'
   | 'download-failed'
   | 'download-blocked-offline'
   | 'binary-missing-after-install'

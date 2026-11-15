@@ -68,32 +68,32 @@ describe('browser provisioning semantic decisions', () => {
     expect(requests).toHaveLength(0);
   });
   test('missing-library decision cannot invent a name', async () => {
-    await expect(missingLibrary('chrome', failed('A required dependency is absent.'), reading('missing-library', 'invented.so'))).rejects.toBeInstanceOf(BrowserProvisionReadingError);
+    expect(await missingLibrary('chrome', failed('A required dependency is absent.'), reading('missing-library', 'invented.so'))).toBeNull();
   });
-  test('malformed or weak results cannot launch an installer', async () => {
-    for (const answer of [null, { type: 'choice', choice: 'other', confidence: 0.99, probabilities: { other: 1 } }]) {
-      const { io, commands, removed } = fakeIo();
-      const { port } = canonical(fakePort(() => answer));
-      await expect(ensureBrowserBinary(io, { port })).rejects.toBeInstanceOf(BrowserProvisionReadingError);
-      expect(commands).toHaveLength(1); expect(removed).toEqual([]);
-    }
+  test('the loader\'s own missing-library report needs no reading', async () => {
+    const { port, requests } = reading('other');
+    expect(await missingLibrary('chrome', failed('chrome: error while loading shared libraries: libnss3.so: cannot open shared object file: No such file or directory'), { port })).toBe('libnss3.so');
+    expect(requests).toHaveLength(0);
   });
-  test('weak judgment is not other and cannot authorize self-healing', async () => {
-    const { io, commands, removed } = fakeIo();
-    const { port } = canonical(fakePort((_name, question) => choiceAnswer(question, 'other', 0.5)));
-    await expect(ensureBrowserBinary(io, { port })).rejects.toBeInstanceOf(BrowserProvisionReadingError);
-    expect(commands).toHaveLength(1); expect(removed).toEqual([]);
-  });
-  test('unavailable judgment preserves a recoverable failure without deletion', async () => {
+  test('with no reading to be had, an offline machine falls back to the browser already installed', async () => {
     const { io, removed } = fakeIo();
     const port: JudgmentPort = { model: 'jev-1.13.0', ask: async () => { throw new JudgmentError('unavailable', 'unavailable'); } };
     installJudgmentPort(port);
-    await expect(ensureBrowserBinary(io, { port })).rejects.toMatchObject({ recoverable: true });
-    expect(removed).toEqual([]);
+    const report = await ensureBrowserBinary({ ...io, systemBrowserCandidates: () => ['/usr/bin/chromium'],
+      runCommand: async (command) => command === '/usr/bin/chromium' ? { code: 0, stdout: 'Chromium 151', stderr: '', spawnError: null, timedOut: false } : failed('The binary image is corrupt.') }, { port });
+    expect(report).toMatchObject({ ok: true, source: 'system-browser', executablePath: '/usr/bin/chromium' });
+    expect(removed).toEqual(['/cache/chromium-1']);
+  });
+  test('with nothing working, the report is download-failed with the install log line', async () => {
+    const { io } = fakeIo();
+    installJudgmentPort(undefined);
+    const report = await ensureBrowserBinary(io);
+    expect(report).toMatchObject({ ok: false, failure: 'download-failed' });
+    expect(report.problem).toContain('The binary image is corrupt.');
   });
   test('complete raw failure privacy admission precedes port access', async () => {
     const { port, requests } = reading('network-blocked');
-    await expect(networkBlocked('bun', failed('x'.repeat(10_000) + '\nAuthorization: Bearer secret-browser-test-token'), { port })).rejects.toBeInstanceOf(BrowserProvisionReadingError);
+    expect(await networkBlocked('bun', failed('x'.repeat(10_000) + '\nAuthorization: Bearer secret-browser-test-token'), { port })).toBe(false);
     expect(requests).toHaveLength(0);
   });
   test('readonly request cannot join a downloading request on the same cache', async () => {

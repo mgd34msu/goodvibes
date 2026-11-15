@@ -4,7 +4,7 @@ import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { checkAnswers, defineBattery, STAKES_BANDS, yesNo, toJson, type EntryType, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { captureJudgmentPort, JudgmentPortMissingError, type JudgmentPortCapture, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
 import { snapshotJudgmentInput } from '../gate/judgment-input.js';
-import { awaitPermission } from '../permissions/cancellation.js';
+import { executePolicyCheck } from '../gate/execute-policy-check.js';
 import { currentExecutionMode } from '../gate/execution-context.js';
 import { activateClassicFallback, decisionOrClassic, isClassicOperation } from '../runtime/decision-policy.js';
 import { isCardFieldDescriptor, type FormControlDescriptor } from '../security/card-fields.js';
@@ -45,11 +45,9 @@ export class BrowserControlIdentityWork {
   private readonly owner: JudgmentPortCapture | undefined;
   private readonly signal: AbortSignal | undefined;
   private readonly callerCurrent: (() => void) | undefined;
-  private readonly drainReads: boolean;
   private pageCurrent: (() => void) | undefined;
   private pageSignal: AbortSignal | undefined;
-  constructor(options: JudgmentReadingOptions = {}, lifetime: { readonly drainReads?: boolean } = {}) {
-    this.drainReads = lifetime.drainReads === true;
+  constructor(options: JudgmentReadingOptions = {}) {
     this.signal = options.signal; this.callerCurrent = options.assertCurrent;
     this.assertCurrent();
     if (!isClassicOperation()) try { this.owner = captureJudgmentPort('browser.control.identity', { signal: this.signal, assertCurrent: this.callerCurrent }); }
@@ -84,16 +82,12 @@ export class BrowserControlIdentityWork {
   cardField(control: FormControlDescriptor): Promise<boolean> {
     return isCardFieldDescriptor(control, { port: this.owner?.port, signal: this.currentSignal(), assertCurrent: this.assertCurrent });
   }
+  /** Every page read ends when the call or its page is cancelled; the driver
+   * call is left to end at its own deadline and its late result is dropped. */
   async wait<T>(work: () => Promise<T>): Promise<T> {
     this.assertCurrent();
-    if (this.drainReads) {
-      // The caller owns this read in its shutdown barrier. Returning an abort
-      // race early would drop the underlying browser/model work from that drain.
-      try { const value = await work(); this.assertCurrent(); return value; }
-      catch (error) { this.assertCurrent(); throw error; }
-    }
-    const value = await awaitPermission(work, this.currentSignal());
-    this.assertCurrent(); return value;
+    try { const value = await executePolicyCheck(work, this.currentSignal()); this.assertCurrent(); return value; }
+    catch (error) { this.assertCurrent(); throw error; }
   }
 
   /** Native actions cooperate with cancellation; their actual completion is drained. */
@@ -113,14 +107,16 @@ export class BrowserControlIdentityWork {
     } finally { original?.removeEventListener('abort', cancel); }
   }
 
-  /** Uses this action's original reader; a later installation cannot be adopted. */
-  async credentialPage(state: object, currentPage: () => Promise<void>): Promise<'yes' | 'no' | 'unresolved'> {
-    return decisionOrClassic<'yes' | 'no' | 'unresolved'>(() => this.readCredentialPage(state, currentPage), async () => {
-      this.assertCurrent(); await currentPage(); this.assertCurrent();
+  /** Uses this action's original reader; a later installation cannot be adopted.
+   * The state is the snapshot the action's ref came from, so the page is not
+   * read again around the request. */
+  async credentialPage(state: object): Promise<'yes' | 'no' | 'unresolved'> {
+    return decisionOrClassic<'yes' | 'no' | 'unresolved'>(() => this.readCredentialPage(state), () => {
+      this.assertCurrent();
       return 'unresolved' as const;
     });
   }
-  private async readCredentialPage(state: object, currentPage: () => Promise<void>): Promise<'yes' | 'no' | 'unresolved'> {
+  private async readCredentialPage(state: object): Promise<'yes' | 'no' | 'unresolved'> {
     this.assertCurrent();
     const input = snapshotJudgmentInput(state);
     if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('Browser page evidence is unavailable.');
@@ -136,20 +132,19 @@ export class BrowserControlIdentityWork {
         recordAction(id, action) { current(); recorder.recordAction(id, action); current(); },
       } } : {}),
       async ask(request) {
-        await currentPage(); current();
+        current();
         const result = await base.ask({ ...request,
           beforeAttempt: () => { current(); assertSynchronousJudgmentGuard(() => request.beforeAttempt?.()); current(); },
-          beforeAsyncAttempt: async () => { await currentPage(); const checked = await request.beforeAsyncAttempt?.(); current(); return checked; },
           assertLogCurrent: () => { current(); assertSynchronousJudgmentGuard(() => request.assertLogCurrent?.(), 'retention'); current(); },
         });
-        await currentPage(); current(); checkAnswers(request.questions, result.answers); return result;
+        current(); checkAnswers(request.questions, result.answers); return result;
       },
     };
     const signal = this.currentSignal();
     const result = await this.wait(() => browserCredentialPage.run(port, stateJson, {
       site: 'browser.page.credential-entry', ...(signal === undefined ? {} : { signal }), beforeAttempt: current,
     }));
-    await currentPage(); current();
+    current();
     const reading = result.readings.credentialPage;
     if (reading.outcome !== 'act' || !Number.isFinite(reading.probability) || reading.probability < 0 || reading.probability > 1
       || (reading.verdict !== 'yes' && reading.verdict !== 'no')) return 'unresolved';

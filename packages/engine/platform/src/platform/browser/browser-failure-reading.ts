@@ -3,6 +3,7 @@ import { captureJudgmentPort, judgmentPort, JudgmentAuthorityRetiredError, Decis
 import { activateClassicFallback, decisionOrClassic, isClassicOperation } from '../runtime/decision-policy.js';
 import { assertPermissionActive, awaitPermission } from '../permissions/cancellation.js';
 import { captureJudgmentFailure } from '../gate/failure-input.js';
+import { JudgmentInputError } from '../gate/judgment-input.js';
 import type { CommandOutcome } from './browser-types.js';
 
 /** Request ownership is checked again after every reading and before an effect. */
@@ -86,11 +87,39 @@ function evidence(command: string, phase: string, outcome: CommandOutcome) {
     readonly command: string; readonly phase: string;
   } & CommandOutcome;
 }
+/**
+ * Advisory: the reading only chooses the wording of a report. When no reading
+ * can be made (no decision model reachable, none installed, Classic, an
+ * unsure answer) the cause is 'other', and provisioning goes on to the steps
+ * that need no reading: the reinstall and the browser already on the machine.
+ * Cancellation of the request still ends it.
+ */
 async function category(command: string, phase: string, outcome: CommandOutcome, lifetime: BrowserProvisionLifetime): Promise<Category> {
-  return decisionOrClassic(() => readDecisionCategory(command, phase, outcome, lifetime), () => {
-    assertProvisionCurrent(lifetime); return 'other';
-  });
+  try {
+    return await decisionOrClassic(() => readDecisionCategory(command, phase, outcome, lifetime), () => {
+      assertProvisionCurrent(lifetime); return 'other';
+    });
+  } catch (error) {
+    assertProvisionCurrent(lifetime);
+    if (error instanceof BrowserProvisionReadingError || error instanceof DecisionModelsDisabledError) return 'other';
+    throw error;
+  }
 }
+
+/**
+ * The dynamic loader's own report of an absent library, a fixed format on
+ * each platform. Read in code, so the common case needs no reading at all.
+ */
+function loaderMissingLibrary(text: string): string | null {
+  const linux = /error while loading shared libraries: ([^\s:]+): cannot open shared object file/.exec(text);
+  if (linux?.[1]) return linux[1];
+  const mac = /Library not loaded: (\S+)/.exec(text);
+  if (mac?.[1]) return mac[1].split('/').pop() ?? mac[1];
+  return null;
+}
+
+/** Network failure codes the runtime and its TLS layer report as codes, not prose. */
+const NETWORK_FAILURE_CODES = /\b(ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ECONNRESET|ETIMEDOUT|ENETUNREACH|EHOSTUNREACH|ECONNABORTED|EPROTO|UNABLE_TO_GET_ISSUER_CERT_LOCALLY|UNABLE_TO_VERIFY_LEAF_SIGNATURE|SELF_SIGNED_CERT_IN_CHAIN|DEPTH_ZERO_SELF_SIGNED_CERT|CERT_HAS_EXPIRED|ERR_TLS_CERT_ALTNAME_INVALID)\b/;
 async function readDecisionCategory(command: string, phase: string, outcome: CommandOutcome, lifetime: BrowserProvisionLifetime): Promise<Category> {
   assertProvisionCurrent(lifetime);
   try {
@@ -126,21 +155,43 @@ export async function programNotInstalled(command: string, outcome: CommandOutco
 }
 export async function networkBlocked(command: string, outcome: CommandOutcome, lifetime: BrowserProvisionLifetime): Promise<boolean> {
   lifetime = ownProvisionLifetime(lifetime);
-  const result = await category(command, 'install', outcome, lifetime);
+  let state: ReturnType<typeof evidence>;
+  try { state = evidence(command, 'install', outcome); }
+  catch (error) {
+    // Output that may not go to a reader (credential material) is still a
+    // failed download; it is reported as one rather than ending provisioning.
+    if (error instanceof JudgmentInputError && error.problem === 'credential-material') return false;
+    throw error;
+  }
+  if (NETWORK_FAILURE_CODES.test(`${state.stdout}\n${state.stderr}\n${state.spawnError ?? ''}`)) return true;
+  const result = await category(command, 'install', state, lifetime);
   assertProvisionCurrent(lifetime);
   return result === 'network-blocked';
 }
+/**
+ * The missing shared library a failed probe names, or null. The loader's own
+ * message decides first; a reading is asked only for other wording, and an
+ * unanswered reading is null (the build is then treated as corrupt and
+ * reinstalled), never a failure of the whole provision.
+ */
 export async function missingLibrary(command: string, outcome: CommandOutcome, lifetime: BrowserProvisionLifetime): Promise<string | null> {
   lifetime = ownProvisionLifetime(lifetime);
-  const state = evidence(command, 'probe', outcome);
+  let state: ReturnType<typeof evidence>;
+  try { state = evidence(command, 'probe', outcome); }
+  catch (error) {
+    if (error instanceof JudgmentInputError && error.problem === 'credential-material') return null;
+    throw error;
+  }
+  const source = `${state.stdout}\n${state.stderr}\n${state.spawnError ?? ''}`;
+  const reported = loaderMissingLibrary(source);
+  if (reported) return reported;
   const result = await category(command, 'probe', state, lifetime);
   assertProvisionCurrent(lifetime);
   if (result !== 'missing-library') return null;
   // Lexical candidates only. The grammar makes no diagnosis and each candidate
   // retains exact original spelling; no model-supplied filename is accepted.
-  const source = `${state.stdout}\n${state.stderr}\n${state.spawnError ?? ''}`;
   const candidates = [...new Set([...source.matchAll(/[A-Za-z0-9_+.-]+\.(?:so(?:\.[A-Za-z0-9_+-]+)*|dylib|dll)\b/g)].map(match => match[0]))];
-  if (candidates.length === 0 || candidates.length > 32) throw new BrowserProvisionReadingError();
+  if (candidates.length === 0 || candidates.length > 32) return null;
   for (const candidate of candidates) {
     assertProvisionCurrent(lifetime);
     try {
@@ -150,9 +201,9 @@ export async function missingLibrary(command: string, outcome: CommandOutcome, l
       }), owner.signal);
       assertProvisionCurrent(lifetime);
       const reading = run.readings.candidate_missing;
-      if (reading.outcome !== 'act' || !Number.isFinite(reading.probability) || reading.probability < 0 || reading.probability > 1) throw new BrowserProvisionReadingError();
+      if (reading.outcome !== 'act' || !Number.isFinite(reading.probability) || reading.probability < 0 || reading.probability > 1) return null;
       if (reading.verdict === 'yes') { run.recordAction('report exact missing library candidate'); return candidate; }
-    } catch { assertProvisionCurrent(lifetime); throw new BrowserProvisionReadingError(); }
+    } catch { assertProvisionCurrent(lifetime); return null; }
   }
-  throw new BrowserProvisionReadingError();
+  return null;
 }

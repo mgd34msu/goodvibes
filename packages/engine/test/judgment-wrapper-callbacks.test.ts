@@ -54,7 +54,7 @@ test('actual browser and captured-owner async admission wrappers retain malforme
     ask(request) { return port.ask({ ...request, beforeAsyncAttempt: malformed }); },
   }, state, options));
   try {
-    await expect(new BrowserControlIdentityWork().credentialPage({ url: 'https://fixture.test/', documents: [] }, async () => {})).rejects.toMatchObject({ kind: 'invalid-request' });
+    await expect(new BrowserControlIdentityWork().credentialPage({ url: 'https://fixture.test/', documents: [] })).rejects.toMatchObject({ kind: 'invalid-request' });
     expect(guards).toBe(1); expect(wires).toBe(0);
   } finally { run.mockRestore(); installJudgmentPort(previous); }
 });

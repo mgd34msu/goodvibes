@@ -120,14 +120,57 @@ describe('Discord gateway liveness', () => {
     client.stop();
   });
 
-  test('an invalid session or a reconnect request is reported at once', async () => {
-    for (const op of [7, 9]) {
-      const { client, closed } = make();
-      await client.start();
-      FakeSocket.last.receive({ op });
-      await waitFor(() => closed.length === 1, `the report for op ${op}`);
-      expect(client.isStarted).toBe(false);
-    }
+  test('a reconnect request resumes the session, so events sent meanwhile are replayed', async () => {
+    const { client, closed } = make();
+    await client.start();
+    const first = FakeSocket.last;
+    first.receive({ op: 10, d: { heartbeat_interval: 60_000 } });
+    expect(first.sent[0]!.op).toBe(2);
+    first.receive({ op: 0, s: 1, t: 'READY', d: { session_id: 'session-1', resume_gateway_url: 'wss://resume.test' } });
+    first.receive({ op: 0, s: 2, t: 'MESSAGE_CREATE', d: {} });
+    first.receive({ op: 7 });
+    await waitFor(() => FakeSocket.last !== first && client.isStarted, 'the resumed connection');
+    const second = FakeSocket.last;
+    expect(second.url.startsWith('wss://resume.test')).toBe(true);
+    second.receive({ op: 10, d: { heartbeat_interval: 60_000 } });
+    expect(second.sent[0]).toEqual({ op: 6, d: { token: 't', session_id: 'session-1', seq: 2 } });
+    expect(closed).toEqual([]);
+    expect(client.resumeState()).toEqual({ sessionId: 'session-1', resumeGatewayUrl: 'wss://resume.test', sequence: 2 });
+    client.stop();
+  });
+
+  test('a session Discord no longer knows is not resumed: the client identifies anew', async () => {
+    const { client, closed } = make();
+    await client.start();
+    const first = FakeSocket.last;
+    first.receive({ op: 0, s: 1, t: 'READY', d: { session_id: 'session-1', resume_gateway_url: 'wss://resume.test' } });
+    first.receive({ op: 9, d: false });
+    expect(client.resumeState()).toBeNull();
+    await waitFor(() => FakeSocket.last !== first && client.isStarted, 'the new connection');
+    const second = FakeSocket.last;
+    expect(second.url.startsWith('wss://gw.test')).toBe(true);
+    second.receive({ op: 10, d: { heartbeat_interval: 60_000 } });
+    expect(second.sent[0]!.op).toBe(2);
+    expect(closed).toEqual([]);
+    client.stop();
+  });
+
+  test('a refused Identify is reported, not retried in place', async () => {
+    const { client, closed } = make();
+    await client.start();
+    FakeSocket.last.receive({ op: 9, d: false });
+    await waitFor(() => closed.length === 1, 'the invalid-session report');
+    expect(client.isStarted).toBe(false);
+    expect(client.resumeState()).toBeNull();
+  });
+
+  test('a new client given an earlier session resumes it instead of identifying', async () => {
+    const { client } = make({ resume: { sessionId: 'session-9', resumeGatewayUrl: 'wss://resume.test', sequence: 41 } });
+    await client.start();
+    expect(FakeSocket.last.url.startsWith('wss://resume.test')).toBe(true);
+    FakeSocket.last.receive({ op: 10, d: { heartbeat_interval: 60_000 } });
+    expect(FakeSocket.last.sent[0]).toEqual({ op: 6, d: { token: 't', session_id: 'session-9', seq: 41 } });
+    client.stop();
   });
 
   test('the close code reaches the owner', async () => {

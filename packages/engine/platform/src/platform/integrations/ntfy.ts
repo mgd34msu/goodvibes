@@ -71,7 +71,18 @@ export interface NtfyPublishOptions extends DeliveryLifetime {
    * else is deduplicated, see `ntfyOutboundDedup`.
    */
   readonly allowDuplicate?: boolean | undefined;
+  /**
+   * The identity of what this notification announces, for example
+   * `agent:<id>:final:1` or `approval:<id>:pending`. Two publishes with the same
+   * identity to one topic within the window are one announcement, whatever
+   * their wording; two different identities are both sent even when their text
+   * is the same. Without it the body text is the identity.
+   */
+  readonly announces?: string | undefined;
 }
+
+/** What a publish did: sent to the server, or suppressed as a repeat of an announcement just sent. */
+export type NtfyPublishOutcome = 'sent' | 'suppressed';
 
 /** How long an identical body to the same topic counts as a duplicate. */
 const OUTBOUND_DEDUP_WINDOW_MS = 30_000;
@@ -94,9 +105,8 @@ const OUTBOUND_DEDUP_MAX_ENTRIES = 500;
 class NtfyOutboundDedup {
   private readonly seen = new Map<string, number>();
 
-  /** True when this exact body may be published now. */
-  claim(topic: string, title: string | undefined, body: string, now = Date.now()): boolean {
-    const key = `${topic}\u0000${title ?? ''}\u0000${body}`;
+  /** True when this announcement may be published now. */
+  claim(key: string, now = Date.now()): boolean {
     const last = this.seen.get(key);
     if (last !== undefined && now - last < OUTBOUND_DEDUP_WINDOW_MS) return false;
     this.seen.set(key, now);
@@ -118,8 +128,15 @@ class NtfyOutboundDedup {
   }
 
   /** Give a claim back after the send it covered failed, so a retry is not mistaken for a duplicate. */
-  release(topic: string, title: string | undefined, body: string): void {
-    this.seen.delete(`${topic}\u0000${title ?? ''}\u0000${body}`);
+  release(key: string): void {
+    this.seen.delete(key);
+  }
+
+  /** The suppression key: the announced identity when the publisher names one, else the text. */
+  static key(topic: string, title: string | undefined, body: string, announces: string | undefined): string {
+    return announces
+      ? `${topic}\u0000id\u0000${announces}`
+      : `${topic}\u0000text\u0000${title ?? ''}\u0000${body}`;
   }
 
   /** Test seam: forget everything. */
@@ -182,7 +199,13 @@ export interface NtfySubscribeOptions {
   readonly filters?: Record<string, string | number | boolean | readonly string[]> | undefined;
   readonly signal?: AbortSignal | undefined;
   readonly reconnect?: boolean | undefined;
+  /**
+   * Wait before the first reconnect (default 1 s). Each further reconnect with
+   * nothing received in between doubles it, up to `maxReconnectDelayMs`
+   * (default 60 s); anything received resets it.
+   */
   readonly reconnectDelayMs?: number | undefined;
+  readonly maxReconnectDelayMs?: number | undefined;
   /**
    * Told each time a stream failure is about to be retried by reconnecting.
    * Without it a stream that drops every second is indistinguishable, from
@@ -233,19 +256,26 @@ export class NtfyIntegration {
     private readonly token?: string,
   ) {}
 
-  async publish(topic: string, message: string, options: NtfyPublishOptions = {}): Promise<void> {
+  /**
+   * Publish one notification. Resolves `'sent'` when the server accepted it,
+   * `'suppressed'` when the same announcement (see `announces`) went to this
+   * topic within the last 30 seconds and nothing was sent.
+   */
+  async publish(topic: string, message: string, options: NtfyPublishOptions = {}): Promise<NtfyPublishOutcome> {
     assertDeliveryCurrent(options);
-    if (!options.allowDuplicate && !ntfyOutboundDedup.claim(topic, options.title, message)) {
-      logger.debug('Suppressed duplicate ntfy notification', { topic, bytes: message.length });
-      return;
+    const key = NtfyOutboundDedup.key(topic, options.title, message, options.announces);
+    if (!options.allowDuplicate && !ntfyOutboundDedup.claim(key)) {
+      logger.info('Suppressed a repeated ntfy notification', { topic, ...(options.announces ? { announces: options.announces } : { bytes: message.length }) });
+      return 'suppressed';
     }
     // The claim stands while the send is in flight (so a concurrent identical
     // publish is still suppressed) but is handed back when the send fails: a
     // body that never reached the server must not block its own retry.
     try {
       await this.send(topic, message, options);
+      return 'sent';
     } catch (error) {
-      if (!options.allowDuplicate) ntfyOutboundDedup.release(topic, options.title, message);
+      if (!options.allowDuplicate) ntfyOutboundDedup.release(key);
       throw error;
     }
   }
@@ -339,6 +369,12 @@ export class NtfyIntegration {
     const reconnect = options.reconnect ?? !options.poll;
     let resumeSince = options.since;
     const seenMessageIds = new NtfySeenMessageIds();
+    const baseDelayMs = Math.max(0, options.reconnectDelayMs ?? 1_000);
+    const maxDelayMs = Math.max(baseDelayMs, options.maxReconnectDelayMs ?? 60_000);
+    let delayMs = baseDelayMs;
+    // A server that refused HTTP/2 once is read over HTTP/1 from then on, so a
+    // reconnect is one connection attempt, not two.
+    const transport = { http1Only: false };
     while (!options.signal?.aborted) {
       const url = this.buildSubscribeUrl(topic, 'json', { ...options, since: resumeSince });
       try {
@@ -346,20 +382,24 @@ export class NtfyIntegration {
           const messageId = readNtfyMessageId(message);
           if (messageId && seenMessageIds.has(messageId)) return;
           await onMessage(message);
+          // A handled message or a keepalive shows the stream works. `open` alone
+          // does not: a server that accepts and drops at once keeps backing off.
+          if (message.event === 'message' || message.event === 'keepalive') delayMs = baseDelayMs;
           if (messageId) {
             seenMessageIds.add(messageId);
             resumeSince = messageId;
           } else if (message.event === 'message' && typeof message.time === 'number' && Number.isFinite(message.time)) {
             resumeSince = String(Math.floor(message.time));
           }
-        }, options.signal, options.idleTimeoutMs ?? NTFY_STREAM_IDLE_TIMEOUT_MS);
+        }, options.signal, options.idleTimeoutMs ?? NTFY_STREAM_IDLE_TIMEOUT_MS, transport);
       } catch (error) {
         if (options.signal?.aborted) return;
         if (!reconnect || isFatalNtfyStreamError(error)) throw error;
         try { options.onReconnect?.(error); } catch { /* an observer cannot end the subscription */ }
       }
       if (!reconnect || options.signal?.aborted) return;
-      await waitForNtfyReconnectDelay(options.signal, options.reconnectDelayMs ?? 1_000);
+      await waitForNtfyReconnectDelay(options.signal, delayMs);
+      delayMs = Math.min(maxDelayMs, Math.max(1, delayMs) * 2);
     }
   }
 
@@ -477,21 +517,41 @@ async function readNtfyJsonStreamWithNodeTransport(
   onMessage: (message: NtfyMessage) => void | Promise<void>,
   signal: AbortSignal | undefined,
   idleMs: number,
+  transport: { http1Only: boolean } = { http1Only: false },
 ): Promise<void> {
+  // The handler's own failure is not a transport failure: it must not switch
+  // protocols, and it reaches the caller as the handler threw it.
+  const handle = async (message: NtfyMessage): Promise<void> => {
+    try { await onMessage(message); }
+    catch (error) { throw new NtfyHandlerError(error); }
+  };
   const parsed = new URL(url);
-  if (parsed.protocol === 'http:') {
-    return readNtfyJsonStreamWithHttp1(url, headers, onMessage, signal, httpRequest, idleMs);
-  }
-  if (parsed.protocol === 'https:') {
-    try {
-      await readNtfyJsonStreamWithHttp2(url, headers, onMessage, signal, idleMs);
-      return;
-    } catch (error) {
-      if (signal?.aborted || error instanceof NtfyStreamHttpError || error instanceof NtfyStreamIdleError) throw error;
-      return readNtfyJsonStreamWithHttp1(url, headers, onMessage, signal, httpsRequest, idleMs);
+  try {
+    if (parsed.protocol === 'http:') {
+      return await readNtfyJsonStreamWithHttp1(url, headers, handle, signal, httpRequest, idleMs);
     }
+    if (parsed.protocol === 'https:') {
+      if (transport.http1Only) return await readNtfyJsonStreamWithHttp1(url, headers, handle, signal, httpsRequest, idleMs);
+      try {
+        await readNtfyJsonStreamWithHttp2(url, headers, handle, signal, idleMs);
+        return;
+      } catch (error) {
+        if (signal?.aborted || error instanceof NtfyStreamHttpError || error instanceof NtfyStreamIdleError || error instanceof NtfyHandlerError) throw error;
+        transport.http1Only = true;
+        return await readNtfyJsonStreamWithHttp1(url, headers, handle, signal, httpsRequest, idleMs);
+      }
+    }
+  } catch (error) {
+    throw error instanceof NtfyHandlerError ? error.handlerError : error;
   }
   throw new Error(`Unsupported ntfy stream protocol: ${parsed.protocol}`);
+}
+
+class NtfyHandlerError extends Error {
+  constructor(readonly handlerError: unknown) {
+    super('ntfy message handler failed');
+    this.name = 'NtfyHandlerError';
+  }
 }
 
 function readNtfyJsonStreamWithHttp1(

@@ -24,6 +24,7 @@ export type {
   DiscordGatewayClientOptions,
   DiscordGatewayDispatch,
   DiscordInteraction,
+  DiscordResumeState,
   DiscordOAuthAuthorizeOptions,
 } from './discord.js';
 export { DiscordInteractionType, DiscordInteractionResponseType } from './discord.js';
@@ -35,6 +36,10 @@ export type {
   HomeAssistantStateRecord,
 } from './homeassistant.js';
 export { Notifier } from './notifier.js';
+export type { NotifierChannel, NotifierChannelGap } from './notifier.js';
+export { attachRuntimeNotifications, RUNTIME_NOTIFICATION_EVENTS } from './notification-dispatcher.js';
+export type { RuntimeNotificationEvent, RuntimeNotificationOptions, RuntimeNotificationSink, RuntimeNotificationWork } from './notification-dispatcher.js';
+export type { NotificationDeadLetter, NotificationDeadLetterSource, NotificationReplayResult } from './notification-dead-letters.js';
 export { WebhookNotifier } from './webhooks.js';
 export type {
   WebhookNotifierDeliveryResult,
@@ -43,7 +48,7 @@ export type {
 } from './webhooks.js';
 export { GitHubIntegration } from './github.js';
 export type { GitHubWebhookEvent } from './github.js';
-export { DeliveryQueue, DeliveryError, classifyDeliveryError, snapshotQueueStatus } from './delivery.js';
+export { DeliveryQueue, DeliveryError, classifyDeliveryError, deliveryTransience, snapshotQueueStatus } from './delivery.js';
 export {
   GOODVIBES_NTFY_ORIGIN,
   GOODVIBES_NTFY_ORIGIN_HEADER,
@@ -59,6 +64,7 @@ export {
   resolveNtfyDefaultPriority,
 } from './ntfy.js';
 export type {
+  DeadLetterCodec,
   DeliveryOutcome,
   DeliveryFailureClass,
   DeadLetterEntry,
@@ -71,6 +77,7 @@ export type {
   GoodVibesNtfyTopics,
   NtfyMessage,
   NtfyPublishOptions,
+  NtfyPublishOutcome,
   NtfySubscribeOptions,
   NtfyWebSocketOptions,
 } from './ntfy.js';

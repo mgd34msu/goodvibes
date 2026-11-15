@@ -137,6 +137,8 @@ export type {
 export { QuestionStore } from './question-store.js';
 export type { StoredOwnerEntry, StoredOwnerItem, StoredOwnerItemKind } from './question-store.js';
 export { registerOwnerInboxGatewayMethods } from './routes/owner-inbox.js';
+export { registerNotificationDeadLetterGatewayMethods, listNotificationDeadLetters, replayNotificationDeadLetters } from './routes/notification-dead-letters.js';
+export type { NotificationDeadLetterSources } from './routes/notification-dead-letters.js';
 export type { OwnerInboxGatewayService } from './routes/owner-inbox.js';
 export { SHARED_APPROVAL_DISPOSITIONS } from './approval-disposition.js';
 export type { SharedApprovalDisposition, SharedApprovalDecision, ExplicitApprovalDisposition } from './approval-disposition.js';

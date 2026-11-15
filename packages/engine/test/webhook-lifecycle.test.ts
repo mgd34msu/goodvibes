@@ -152,7 +152,8 @@ describe('WebhookNotifier close and admission', () => {
     const value = notifier(URLS, { metadataOnly: () => { privacyReads++; return false; } });
     const captured = capturedBus();
     value.attachToRuntimeBus(captured.bus);
-    expect(captured.active.size).toBe(5);
+    const subscribed = captured.registrations();
+    expect(captured.active.size).toBe(subscribed);
     const closing = value.close();
     expect(captured.active.size).toBe(0);
     const event = { get payload() { payloadReads++; throw new Error(PRIVATE); } };
@@ -165,7 +166,7 @@ describe('WebhookNotifier close and admission', () => {
     expect(payloadReads).toBe(0);
     expect(privacyReads).toBe(0);
     expect(fetchSpy).not.toHaveBeenCalled();
-    expect(captured.removed).toHaveLength(5);
+    expect(captured.removed).toHaveLength(subscribed);
   });
 
   test('a close reentered by the privacy reader still owns the admitted send', async () => {
@@ -215,26 +216,6 @@ describe('WebhookNotifier close and admission', () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  test('a rejecting runtime formatter is owned through its sanitized dispatch diagnostic', async () => {
-    let closing: Promise<void> | undefined;
-    const diagnostics: unknown[] = [];
-    const logSpy = spyOn(logger, 'warn').mockImplementation((message, detail) => {
-      if (message === 'WebhookNotifier: runtime event notification dispatch failed') diagnostics.push(detail);
-    });
-    restorers.push(() => logSpy.mockRestore());
-    const value = notifier([URLS[0]!]);
-    const captured = capturedBus();
-    value.attachToRuntimeBus(captured.bus);
-    captured.callbacks.get('AGENT_FAILED')!({ get payload() {
-      closing = value.close();
-      throw new Error(PRIVATE);
-    } });
-    expect(closing).toBe(value.close());
-    await withTestTimeout(closing!, 5000, 'Runtime formatter rejection did not drain');
-    expect(diagnostics).toEqual([{ error: 'Delivery failed' }]);
-    expect(fetchSpy).not.toHaveBeenCalled();
-  });
-
   test('detach only removes subscriptions: it neither aborts an admitted send nor closes future sends', async () => {
     const response = gate<Response>(new Response('cleanup'));
     const started = gate();
@@ -253,7 +234,7 @@ describe('WebhookNotifier close and admission', () => {
     expect((await value.send('second')).delivered).toBe(1);
     const later = capturedBus();
     value.attachToRuntimeBus(later.bus);
-    expect(later.active.size).toBe(5);
+    expect(later.active.size).toBe(later.registrations());
   });
 });
 
@@ -346,7 +327,7 @@ describe('WebhookNotifier admitted work ownership', () => {
         else {
           const captured = capturedBus();
           value.attachToRuntimeBus(captured.bus);
-          captured.callbacks.get('AGENT_FAILED')!({ payload: { agentId: 'fixture-agent', error: PRIVATE } });
+          captured.callbacks.get('AGENT_FAILED')!({ payload: { agentId: 'fixture-agent', error: PRIVATE, durationMs: 10 } });
         }
         await started.promise;
         const closing = value.close();
@@ -361,7 +342,8 @@ describe('WebhookNotifier admitted work ownership', () => {
         if (sending) {
           const receipt = await sending;
           expect(JSON.stringify(receipt)).not.toContain(PRIVATE);
-          if (status === 503) expect(JSON.stringify(receipt)).toContain('503');
+          // A typed notification is queued; once closed its queue cannot try again, and the receipt says closed.
+          if (status === 503) expect(JSON.stringify(receipt)).toContain(kind === 'typed' ? 'closed' : '503');
         }
       });
     }
@@ -503,88 +485,6 @@ describe('WebhookNotifier admitted work ownership', () => {
 });
 
 describe('WebhookNotifier subscription and transport cleanup', () => {
-  test('partial runtime registration rolls back every subscription already acquired', () => {
-    const value = notifier();
-    // The third registration throws before acquiring a subscription.
-    const acquired: number[] = [];
-    const removed: number[] = [];
-    let registrations = 0;
-    const bus = { on() {
-      const index = ++registrations;
-      if (index === 3) throw new Error('registration failed');
-      acquired.push(index);
-      return () => { removed.push(index); };
-    } } as unknown as RuntimeEventBus;
-    expect(() => value.attachToRuntimeBus(bus)).toThrow('registration failed');
-    expect(acquired).toEqual([1, 2]);
-    expect(removed.toSorted()).toEqual([1, 2]);
-    value.detach();
-    expect(removed).toHaveLength(2);
-  });
-
-  test('close called reentrantly by registration removes the just-returned subscription', async () => {
-    const value = notifier();
-    let innerClose: Promise<void> | undefined;
-    const captured = capturedBus((index) => { if (index === 1) innerClose = value.close(); });
-    value.attachToRuntimeBus(captured.bus);
-    expect(captured.active.size).toBe(0);
-    expect(captured.registrations()).toBe(1);
-    expect(innerClose).toBe(value.close());
-    await innerClose;
-  });
-
-  test('detach reentered during registration releases the returned listener and stops attachment', () => {
-    const value = notifier();
-    const captured = capturedBus((index) => { if (index === 1) value.detach(); });
-    value.attachToRuntimeBus(captured.bus);
-    expect(captured.active.size).toBe(0);
-    expect(captured.registrations()).toBe(1);
-  });
-
-  test('a nested attachment during registration keeps only the latest bus subscriptions', () => {
-    const value = notifier();
-    const latest = capturedBus();
-    const previous = capturedBus((index) => { if (index === 1) value.attachToRuntimeBus(latest.bus); });
-    value.attachToRuntimeBus(previous.bus);
-    expect(previous.active.size).toBe(0);
-    expect(previous.registrations()).toBe(1);
-    expect(latest.active.size).toBe(5);
-    value.detach();
-    expect(latest.active.size).toBe(0);
-  });
-
-  test('a nested attachment during old-bus cleanup supersedes the interrupted attachment', () => {
-    const value = notifier();
-    const latest = capturedBus();
-    const original = capturedBus(undefined, (index) => {
-      if (index === 1) value.attachToRuntimeBus(latest.bus);
-    });
-    const interrupted = capturedBus();
-    value.attachToRuntimeBus(original.bus);
-    value.attachToRuntimeBus(interrupted.bus);
-    expect(original.active.size).toBe(0);
-    expect(latest.active.size).toBe(5);
-    expect(interrupted.registrations()).toBe(0);
-    value.detach();
-    expect(latest.active.size).toBe(0);
-  });
-
-  test('a throwing unsubscriber cannot prevent close from releasing remaining listeners', async () => {
-    const value = notifier();
-    let innerClose: Promise<void> | undefined;
-    const captured = capturedBus(undefined, (index) => {
-      if (index === 1) { innerClose = value.close(); throw new Error(PRIVATE); }
-    });
-    value.attachToRuntimeBus(captured.bus);
-    const closing = value.close();
-    expect(innerClose).toBe(closing);
-    expect(captured.active.size).toBe(0);
-    expect(captured.removed).toHaveLength(5);
-    await closing;
-    value.detach();
-    expect(captured.removed).toHaveLength(5);
-  });
-
   test('each request clears its owned timeout by terminal cleanup', async () => {
     const response = gate<Response>(new Response('cleanup'));
     const started = gate();

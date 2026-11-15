@@ -1,6 +1,4 @@
 import { describe, expect, spyOn, test } from 'bun:test';
-import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { forgetFailureReadings, installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { DeliveryError, DeliveryQueue } from '../platform/src/platform/integrations/delivery.ts';
 import { Notifier } from '../platform/src/platform/integrations/notifier.ts';
 import { SlackIntegration } from '../platform/src/platform/integrations/slack.ts';
@@ -82,21 +80,6 @@ describe('DeliveryQueue shutdown', () => {
     const retained = q.getDlq(); await q.close();
     await expect(q.replay(async () => { replayed++; })).rejects.toThrow('closed');
     expect(q.getDlq()).toEqual(retained); expect(replayed).toBe(0);
-  });
-
-  test('close also drains a held failure reading without scheduling a retry', async () => {
-    const q = queue(); const entered = deferred(); const held = deferred(); const timers = captureRetries();
-    const fixture = fakePort((name, question) => name === 'category' ? choiceAnswer(question, 'network') : noulAnswer(0.05));
-    const previous = installJudgmentPort({ ...fixture.port, async ask(request) { entered.resolve(); await held.promise; return fixture.port.ask(request); } });
-    forgetFailureReadings(); let closed = false;
-    const attempt = q.enqueue('fixture', 'reading', 'synthetic', async () => { throw new Error('synthetic unclassified fixture failure'); });
-    const rejected = attempt.catch((error: unknown) => error);
-    try {
-      await entered.promise; const closing = q.close(); void closing.then(() => { closed = true; });
-      await nextTurn(); expect(closed).toBe(false);
-      held.resolve(); expect(await rejected).toBeInstanceOf(DeliveryError); await closing;
-      expect(closed).toBe(true); expect(timers.callbacks).toHaveLength(0);
-    } finally { held.resolve(); await q.close(); installJudgmentPort(previous); forgetFailureReadings(); timers.restore(); }
   });
 });
 

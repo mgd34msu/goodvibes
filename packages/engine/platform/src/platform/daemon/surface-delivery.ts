@@ -354,16 +354,22 @@ export class DaemonSurfaceDeliveryHelper {
   async deliverStructuredNotice(
     binding: RouteBinding | undefined,
     notice: StructuredNotice,
+    announces?: string,
   ): Promise<SurfaceNoticeDelivery> {
     if (!binding) {
       // Refused for the same reason and by the same name as below; rendering
       // first would mean escaping text for a surface that does not exist.
       return this.deliverSurfaceNotice(binding, '');
     }
-    return this.deliverSurfaceNotice(binding, renderNoticeForSurface(notice, binding.surfaceKind));
+    return this.deliverSurfaceNotice(binding, renderNoticeForSurface(notice, binding.surfaceKind), announces);
   }
 
-  async deliverSurfaceNotice(binding: RouteBinding | undefined, text: string): Promise<SurfaceNoticeDelivery> {
+  /**
+   * `announces` names what the notice is about (for example `proposal:<id>`):
+   * a surface that suppresses repeats does so on that identity, so two notices
+   * about different things are both delivered even when their words match.
+   */
+  async deliverSurfaceNotice(binding: RouteBinding | undefined, text: string, announces?: string): Promise<SurfaceNoticeDelivery> {
     const refuse = (reason: SurfaceNoticeRefusal, error?: string): SurfaceNoticeDelivery => {
       // ERROR, not warn, and never a silent `return false`: a notice the owner
       // does not receive is the difference between a proposal they can answer
@@ -398,8 +404,8 @@ export class DaemonSurfaceDeliveryHelper {
         title: NOTICE_TITLE,
         text,
         events: [],
-        pending: { ...pending },
-        metadata: { notice: true },
+        pending: { ...pending, ...(announces ? { announces } : {}) },
+        metadata: { notice: true, ...(announces ? { announces } : {}) },
       });
       if (rendered?.delivered) return { delivered: true };
       if (rendered) {

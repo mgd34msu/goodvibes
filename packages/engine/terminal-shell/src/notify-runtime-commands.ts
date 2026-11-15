@@ -1,5 +1,5 @@
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import type { WebhookNotifier } from '@goodvibes-jev/engine/platform/platform/integrations';
+import type { NotificationDeadLetter, NotificationDeadLetterSource, WebhookNotifier } from '@goodvibes-jev/engine/platform/platform/integrations';
 import { classifyHostTrustTier, extractHostname } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { TerminalCommandRegistry } from './command-registry.js';
 import { requireYesFlag, stripYesFlag } from './command-confirmation.js';
@@ -7,9 +7,25 @@ interface NotifyContext {
   readonly platform: { readonly configManager: Pick<ConfigManager, 'getCategory' | 'mergeCategory'> };
   print(message: string): void;
 }
+
+/** The part of a dead-letter id a person types: the random tail after the last colon. */
+function shortDeadLetterId(id: string): string {
+  const tail = id.slice(id.lastIndexOf(':') + 1);
+  return tail || id;
+}
+
+function formatDeadLetter(entry: NotificationDeadLetter): string {
+  const when = new Date(entry.deadAt).toLocaleString();
+  const status = entry.status !== undefined ? ` (HTTP ${entry.status})` : '';
+  const summary = entry.summary.split('\n').map((line) => line.trim()).filter(Boolean).join(': ');
+  return `  ${shortDeadLetterId(entry.id)}  ${entry.channel}  ${when}  ${entry.attempts} attempt${entry.attempts === 1 ? '' : 's'}  ${entry.finalError}${status}\n      ${summary}`;
+}
+
 export function createNotifyRuntimeCommands<Context extends NotifyContext>(
-  requireWebhookNotifier: (context: Context) => Pick<WebhookNotifier, 'setUrls' | 'send' | 'test'>,
+  requireWebhookNotifier: (context: Context) => Pick<WebhookNotifier, 'setUrls' | 'send' | 'test' | 'listDeadLetters' | 'replayDeadLetters'>,
   policy: {
+    /** Other notifiers whose failed notifications `/notify failed` and `/notify resend` also cover (the Slack and Discord one). */
+    readonly deadLetterSources?: ((context: Context) => readonly NotificationDeadLetterSource[]) | undefined;
     readonly description: string;
     readonly usage: string;
     readonly argsHint: string;
@@ -191,7 +207,50 @@ export function createNotifyRuntimeCommands<Context extends NotifyContext>(
           return;
         }
 
-        ctx.print('Usage: /notify ' + policy.usage);
+        if (sub === 'failed' || sub === 'resend') {
+          const sources: readonly NotificationDeadLetterSource[] = [notifier, ...(policy.deadLetterSources?.(ctx) ?? [])];
+          const entries = sources.flatMap((source) => source.listDeadLetters()).sort((a, b) => a.deadAt - b.deadAt);
+          if (sub === 'failed') {
+            ctx.print(entries.length === 0
+              ? 'No failed notifications.'
+              : [`Failed notifications (${entries.length}), oldest first:`, ...entries.map(formatDeadLetter),
+                `Resend one with /notify resend <id>${suffix}, or all with /notify resend all${suffix}.`].join('\n'));
+            return;
+          }
+          const which = commandArgs[1];
+          if (!which) {
+            ctx.print(`Usage: /notify resend <id|all>${suffix}\nList them with /notify failed.`);
+            return;
+          }
+          const ids = which === 'all'
+            ? entries.map((entry) => entry.id)
+            : entries.filter((entry) => entry.id === which || shortDeadLetterId(entry.id) === which).map((entry) => entry.id);
+          if (ids.length === 0) {
+            ctx.print(which === 'all' ? 'No failed notifications.' : `No failed notification has the id ${which}. List them with /notify failed.`);
+            return;
+          }
+          if (!parsed.yes) {
+            requireYesFlag(ctx, `resend ${ids.length} failed notification${ids.length === 1 ? '' : 's'}`, `/notify resend ${which}${suffix}`);
+            return;
+          }
+          const results = new Map<string, string>();
+          for (const source of sources) {
+            for (const result of await source.replayDeadLetters(ids)) {
+              if (result.outcome !== 'not-found' || !results.has(result.id)) results.set(result.id, result.outcome);
+            }
+          }
+          const count = (outcome: string) => [...results.values()].filter((value) => value === outcome).length;
+          const delivered = count('delivered');
+          const retrying = count('retrying');
+          const failed = count('dead_letter');
+          ctx.print([
+            `Resent ${ids.length} notification${ids.length === 1 ? '' : 's'}: ${delivered} delivered, ${retrying} queued for another attempt, ${failed} failed again.`,
+            ...(failed > 0 ? ['The ones that failed again are back in /notify failed.'] : []),
+          ].join('\n'));
+          return;
+        }
+
+        ctx.print('Usage: /notify ' + policy.usage + ' | failed | resend <id|all>' + suffix);
       },
     });
   }

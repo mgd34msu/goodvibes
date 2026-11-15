@@ -169,18 +169,22 @@ describe('Agent host notification setting through actual settings surfaces', () 
       for (const value of [undefined, true, false, true]) {
         if (value !== undefined) config.getHostBooleanSetting(KEY).set(value);
         const next = new Promise<void>((resolve) => { delivered = resolve; });
+        const ctx = { sessionId: 'host-setting-test', traceId: 'test', source: 'test' };
+        bus.emit('contracts', createEventEnvelope('CONTRACT_CREATED', {
+          type: 'CONTRACT_CREATED', contractId: 'private-contract', sessionId: 'host-setting-test', origin: 'turn',
+          ask: 'private task', ownerAgentId: 'owner',
+        }, ctx));
         bus.emit('contracts', createEventEnvelope('CONTRACT_FAILED', {
           type: 'CONTRACT_FAILED', contractId: 'private-contract', reason: 'private failure reason',
           failureKind: 'other', membersSettled: true,
-        }, { sessionId: 'host-setting-test', traceId: 'test', source: 'test' }));
+        }, ctx));
         await next;
       }
-      expect(sent).toEqual([
-        'GoodVibes: notification available',
-        'GoodVibes: notification available',
-        'The workstream could not be finished: private failure reason',
-        'GoodVibes: notification available',
-      ]);
+      expect(sent).toHaveLength(4);
+      // Only the literal false admits content; unset and true keep it out.
+      for (const index of [0, 1, 3]) expect(sent[index]).not.toContain('private');
+      expect(sent[2]).toContain('private task');
+      expect(sent[2]).toContain('private failure reason');
     } finally {
       notifier.detach();
       await notifier.close();

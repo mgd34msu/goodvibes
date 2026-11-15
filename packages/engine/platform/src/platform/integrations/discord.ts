@@ -1,5 +1,6 @@
 import { assertDeliveryCurrent, runDeliveryPublication, type DeliveryLifetime } from '../utils/delivery-lifetime.js';
 import { retireDeliveryResponse } from './delivery-diagnostics.js';
+import { DeliveryError } from './delivery.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 import { instrumentedFetch } from '../utils/fetch-with-timeout.js';
@@ -106,6 +107,20 @@ export interface DiscordGatewayClientOptions {
   readonly openTimeoutMs?: number | undefined;
   /** Timer seam for the open deadline; returns its own cancel function. */
   readonly setTimer?: ((fn: () => void, ms: number) => () => void) | undefined;
+  /**
+   * A session an earlier client held (its {@link DiscordGatewayClient.resumeState}).
+   * The first connection resumes it, so Discord replays what was sent while
+   * no client was connected; a session Discord no longer knows falls back to
+   * a fresh Identify.
+   */
+  readonly resume?: DiscordResumeState | null | undefined;
+}
+
+/** What a gateway client needs to resume a session: Discord's session id, where to reconnect, and the last event seen. */
+export interface DiscordResumeState {
+  readonly sessionId: string;
+  readonly resumeGatewayUrl: string;
+  readonly sequence: number | null;
 }
 
 /** A socket that has not opened by now will not; 30 s is well past a slow handshake. */
@@ -121,6 +136,7 @@ export const DiscordGatewayOpcode = {
   Dispatch: 0,
   Heartbeat: 1,
   Identify: 2,
+  Resume: 6,
   Reconnect: 7,
   InvalidSession: 9,
   Hello: 10,
@@ -333,7 +349,7 @@ export class DiscordIntegration {
   async postWebhook(content: string, embeds?: unknown[], url?: string, lifetime: DeliveryLifetime = {}): Promise<void> {
     const target = url ?? this.webhookUrl;
     if (!target) {
-      throw new Error('DiscordIntegration: webhookUrl is required for postWebhook');
+      throw new DeliveryError('DiscordIntegration: webhookUrl is required for postWebhook', 'terminal');
     }
     const payload: Record<string, unknown> = {};
     if (content) payload.content = content;
@@ -359,7 +375,7 @@ export class DiscordIntegration {
    */
   async postMessage(channelId: string, content: string, embeds?: unknown[], lifetime: DeliveryLifetime = {}): Promise<void> {
     if (!this.botToken) {
-      throw new Error('DiscordIntegration: botToken is required for postMessage');
+      throw new DeliveryError('DiscordIntegration: botToken is required for postMessage', 'terminal');
     }
     this.validateSnowflake(channelId, 'channelId');
     const payload: Record<string, unknown> = {};
@@ -537,7 +553,7 @@ export class DiscordIntegration {
 
   private validateSnowflake(id: string, name: string): void {
     if (!/^\d{17,20}$/.test(id)) {
-      throw new Error(`DiscordIntegration: invalid ${name}: ${id}`);
+      throw new DeliveryError(`DiscordIntegration: invalid ${name}: ${id}`, 'terminal');
     }
   }
 }
@@ -551,6 +567,8 @@ export class DiscordGatewayClient {
   /** Dispatches run one at a time so an async handler cannot reorder events. */
   private dispatchQueue: Promise<void> = Promise.resolve();
   private sequence: number | null = null;
+  /** The session READY named; a reconnect resumes it instead of identifying anew. */
+  private session: { readonly id: string; readonly resumeUrl: string } | null = null;
   private started = false;
   /** The one start in progress, shared by every concurrent `start()` caller. */
   private startInFlight: Promise<DiscordGatewayBotResponse> | null = null;
@@ -560,6 +578,15 @@ export class DiscordGatewayClient {
 
   constructor(private readonly options: DiscordGatewayClientOptions) {
     this.WebSocketImpl = options.WebSocketImpl ?? WebSocket;
+    if (options.resume) {
+      this.session = { id: options.resume.sessionId, resumeUrl: options.resume.resumeGatewayUrl };
+      this.sequence = options.resume.sequence;
+    }
+  }
+
+  /** The session a later client can resume, or null when there is none to resume. */
+  resumeState(): DiscordResumeState | null {
+    return this.session ? { sessionId: this.session.id, resumeGatewayUrl: this.session.resumeUrl, sequence: this.sequence } : null;
   }
 
   start(): Promise<DiscordGatewayBotResponse> {
@@ -579,9 +606,12 @@ export class DiscordGatewayClient {
 
   private async openSocket(): Promise<DiscordGatewayBotResponse> {
     const epoch = this.epoch;
-    const gateway = this.options.gatewayUrl
-      ? { url: this.options.gatewayUrl, shards: 1 }
-      : await this.options.integration.getGatewayBot(this.options.token);
+    // A resumable session reconnects where Discord said to, with no lookup.
+    const gateway = this.session
+      ? { url: this.session.resumeUrl, shards: 1 }
+      : this.options.gatewayUrl
+        ? { url: this.options.gatewayUrl, shards: 1 }
+        : await this.options.integration.getGatewayBot(this.options.token);
     // stop() ran while the gateway URL was being fetched: do not open a socket nobody wants.
     if (epoch !== this.epoch) throw new Error('DiscordGatewayClient: stopped before the gateway connection opened');
     const url = `${gateway.url.replace(/\/+$/, '')}/?v=10&encoding=json`;
@@ -673,7 +703,8 @@ export class DiscordGatewayClient {
       const hello = dispatch.d ?? {};
       const interval = typeof hello.heartbeat_interval === 'number' ? hello.heartbeat_interval : 45_000;
       this.startHeartbeat(interval);
-      this.identify();
+      if (this.session) this.resume(this.session.id);
+      else this.identify();
       return;
     }
     if (dispatch.op === DiscordGatewayOpcode.HeartbeatAck) {
@@ -685,19 +716,70 @@ export class DiscordGatewayClient {
       return;
     }
     if (dispatch.op === DiscordGatewayOpcode.Reconnect) {
-      this.declareDead('the Discord gateway asked this client to reconnect');
+      // Routine: Discord moves sessions between servers. Resume at once, here,
+      // so nothing sent meanwhile is lost and the owner is not told of a drop.
+      this.reconnectInPlace('the Discord gateway asked this client to reconnect');
       return;
     }
     if (dispatch.op === DiscordGatewayOpcode.InvalidSession) {
-      // This client does not resume, so the session is unusable either way.
+      const hadSession = this.session !== null;
+      if ((dispatch as { readonly d?: unknown }).d !== true) {
+        // Discord no longer knows the session: the next connection identifies anew.
+        this.session = null;
+        this.sequence = null;
+      }
+      // A resume that was refused reconnects here (resuming when Discord said it
+      // may, identifying anew otherwise). A fresh Identify that was refused is
+      // not retried in place, so a refusal cannot loop; the owner reconnects.
+      if (hadSession) {
+        this.reconnectInPlace('the Discord gateway asked this client to reconnect its session');
+        return;
+      }
       this.declareDead('the Discord gateway rejected the session');
       return;
+    }
+    if (dispatch.op === DiscordGatewayOpcode.Dispatch && dispatch.t === 'READY') {
+      const sessionId = dispatch.d?.['session_id'];
+      const resumeUrl = dispatch.d?.['resume_gateway_url'];
+      this.session = typeof sessionId === 'string' && sessionId && typeof resumeUrl === 'string' && resumeUrl
+        ? { id: sessionId, resumeUrl }
+        : null;
     }
     if (dispatch.op === DiscordGatewayOpcode.Dispatch) {
       const run = this.dispatchQueue.then(() => this.options.onDispatch(dispatch, this));
       this.dispatchQueue = run.catch(() => undefined);
       await run;
     }
+  }
+
+  /**
+   * Close the live socket and open the next one on this client, resuming the
+   * session when there is one. Only a reconnect that cannot open is reported
+   * to the owner, as a close would be.
+   */
+  private reconnectInPlace(reason: string): void {
+    const socket = this.socket;
+    if (!socket) return;
+    this.socket = null;
+    this.cleanup();
+    socket.close();
+    const epoch = this.epoch;
+    const reopening = this.openSocket().finally(() => {
+      if (this.startInFlight === reopening) this.startInFlight = null;
+    });
+    this.startInFlight = reopening;
+    reopening.catch((error: unknown) => {
+      if (epoch !== this.epoch) return;
+      this.options.onClosed?.(`${reason}, and the new connection failed: ${summarizeError(error)}`);
+    });
+  }
+
+  private resume(sessionId: string): void {
+    this.send(DiscordGatewayOpcode.Resume, {
+      token: this.options.token,
+      session_id: sessionId,
+      seq: this.sequence,
+    });
   }
 
   /** Give up on the live socket and tell the owner, as a close would. */

@@ -1,4 +1,3 @@
-import type { FailureClass, FailureTransience, TransienceBasis } from '@goodvibes-jev/engine/errors';
 import { logger } from '../utils/logger.js';
 
 /** Await local response retirement without turning acknowledged acceptance into a retry. */
@@ -25,14 +24,4 @@ export function deliveryHttpStatus(error: unknown): number | undefined {
 export function describeStructuralDeliveryError(error: unknown): string {
   const status = deliveryHttpStatus(error);
   return status === undefined ? 'Delivery failed' : `HTTP ${status}`;
-}
-
-const BASES: readonly TransienceBasis[] = ['explicit', 'retry-after', 'status', 'errno', 'error-type', 'reading', 'no-wording'];
-
-/** Validate code-owned evidence before retaining it; free-form detail is omitted. */
-export function structuralDeliveryEvidence(value: FailureTransience): { readonly failureClass: FailureClass; readonly basis: TransienceBasis } | undefined {
-  const failureClass = value.failureClass;
-  const basis = value.basis;
-  if ((failureClass !== 'retryable' && failureClass !== 'terminal') || !BASES.includes(basis)) return undefined;
-  return { failureClass, basis };
 }

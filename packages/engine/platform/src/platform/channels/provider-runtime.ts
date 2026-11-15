@@ -10,6 +10,7 @@ import {
   SlackSocketModeClient,
   createNtfyLiveSubscriptionSince,
   type DiscordGatewayDispatch,
+  type DiscordResumeState,
   type NtfyMessage,
   type SlackSocketModeEnvelope,
   resolveGoodVibesNtfyTopics,
@@ -124,6 +125,8 @@ const SLACK_NOT_STARTED_TEXT = 'I could not start that request right now. Please
 export class ChannelProviderRuntimeManager {
   private slackClient: SlackSocketModeClient | null = null;
   private discordClient: DiscordGatewayClient | null = null;
+  /** The Discord session the last client held, resumed by the next one so events sent in between are replayed. */
+  private discordResume: DiscordResumeState | null = null;
   /**
    * The start in progress for each socket surface, shared by concurrent callers,
    * and a generation that `stop()` bumps so a start still resolving tokens or
@@ -182,6 +185,7 @@ export class ChannelProviderRuntimeManager {
     if (surface === 'discord') {
       this.discordGeneration += 1;
       this.discordStart = null;
+      this.discordResume = this.discordClient?.resumeState() ?? this.discordResume;
       this.discordClient?.stop();
       this.discordClient = null;
       this.markStopped('discord');
@@ -395,9 +399,12 @@ export class ChannelProviderRuntimeManager {
     const webhookUrl = await resolveSurfaceSecret(this.deps, 'discord', 'webhookUrl') ?? undefined;
     if (generation !== this.discordGeneration) return this.result('discord', false, 'Discord Gateway start was cancelled by stop().');
     const discord = new DiscordIntegration(webhookUrl, botToken);
+    const resume = this.discordResume;
+    this.discordResume = null;
     const client: DiscordGatewayClient = new DiscordGatewayClient({
       token: botToken,
       integration: discord,
+      resume,
       onDispatch: (dispatch) => this.handleDiscordDispatch(dispatch, discord),
       onClosed: (reason, code) => this.reportSocketLost('discord', reason, client, code !== undefined && DISCORD_PERMANENT_CLOSE_CODES.has(code)),
     });
@@ -446,27 +453,35 @@ export class ChannelProviderRuntimeManager {
       `ntfy started for ${started} of ${results.length} topics. Not reading: ${failed.map(({ topic, result }) => `${topic} (${result.message})`).join('; ')}`);
   }
 
+  /**
+   * Hand one Socket Mode envelope to the surface. It resolves once the surface
+   * has taken the request (or refused it and said so to the person), which is
+   * when the client acknowledges it to Slack; a failure is thrown so the
+   * envelope is not acknowledged and Slack delivers it again.
+   */
   private async handleSlackEnvelope(envelope: SlackSocketModeEnvelope, slack: SlackIntegration): Promise<void> {
     if (!envelope.payload || typeof envelope.payload !== 'object') return;
     const payload = envelope.payload;
-    await handleSlackSurfacePayload(payload, this.deps.buildSurfaceAdapterContext(), slack)
-      .then(async (response) => {
-        // Socket Mode acknowledged this envelope before it was handled, so the
-        // adapter's answer has nowhere to travel. A refusal such as a spawn
-        // failure (5xx) or a capacity refusal (429) is a failure of this surface;
-        // a policy block (other 4xx) is an expected outcome, not one.
-        if (response instanceof Response && isUnservedStatus(response.status)) {
-          this.deps.ingressAlarm?.recordFailure('slack', `Slack request was refused (HTTP ${response.status})`);
-        } else {
-          this.deps.ingressAlarm?.recordSuccess('slack');
-        }
-        if (response instanceof Response) await this.answerSlackEnvelope(payload, response, slack);
-      })
-      .catch((error: unknown) => {
-        const detail = summarizeError(error);
-        logger.error('ChannelProviderRuntimeManager: Slack Socket Mode payload failed', { error: detail });
-        this.deps.ingressAlarm?.recordFailure('slack', detail);
-      });
+    let response: unknown;
+    try {
+      response = await handleSlackSurfacePayload(payload, this.deps.buildSurfaceAdapterContext(), slack);
+    } catch (error) {
+      const detail = summarizeError(error);
+      logger.error('ChannelProviderRuntimeManager: Slack Socket Mode payload failed; Slack will deliver it again', { error: detail });
+      this.deps.ingressAlarm?.recordFailure('slack', detail);
+      throw error;
+    }
+    // A refusal such as a spawn failure (5xx) or a capacity refusal (429) is a
+    // failure of this surface; a policy block (other 4xx) is an expected
+    // outcome, not one. Either way the person is answered, so it is accepted.
+    if (response instanceof Response && isUnservedStatus(response.status)) {
+      this.deps.ingressAlarm?.recordFailure('slack', `Slack request was refused (HTTP ${response.status})`);
+    } else {
+      this.deps.ingressAlarm?.recordSuccess('slack');
+    }
+    // The answer travels separately (Socket Mode discards a response body), and
+    // must not hold the acknowledgement Slack waits three seconds for.
+    if (response instanceof Response) void this.answerSlackEnvelope(payload, response, slack);
   }
 
   /**
@@ -722,7 +737,11 @@ export class ChannelProviderRuntimeManager {
     const current = kind === 'slack' ? this.slackClient : this.discordClient;
     if (client && current !== client) return;
     if (kind === 'slack') this.slackClient = null;
-    else this.discordClient = null;
+    else {
+      this.discordClient = null;
+      // A rejected token or intent cannot resume; anything else can, on the next start.
+      this.discordResume = permanent ? null : (client instanceof DiscordGatewayClient ? client.resumeState() : null);
+    }
     // A permanent loss (a rejected token, a missing intent) keeps its reason in
     // the status, so /status says why this node is not reading the surface.
     this.markStopped(kind);

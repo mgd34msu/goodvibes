@@ -11,7 +11,6 @@ import { buildApprovalNotification, buildBudgetNotification, buildTurnNotificati
 import { NotificationEnvelope } from '../platform/src/platform/runtime/notification-envelope.ts';
 import { withTestTimeout, waitFor } from './_helpers/test-timeout.ts';
 import { logger } from '../platform/src/platform/utils/logger.ts';
-import { structuralDeliveryEvidence } from '../platform/src/platform/integrations/delivery-diagnostics.ts';
 
 const PRIVATE = 'synthetic-private-notification-marker';
 const URL_A = 'https://example.com/notification-a';
@@ -123,7 +122,7 @@ test('response echoes never enter webhook receipts, notifier DLQ state or notifi
     expect(receipt.results[0]).toMatchObject({ ok: false, error: 'HTTP 400', status: 400 });
     expect(JSON.stringify(receipt)).not.toContain(PRIVATE);
     restricted = false;
-    await expect(notifier.notifyNotification(turn())).rejects.toThrow('dead-letter');
+    await expect(notifier.notifyNotification(turn())).rejects.toThrow('failed-notification list');
     const queue = Reflect.get(notifier, '_queue') as DeliveryQueue<NotificationEnvelope>;
     expect(queue.getDlq()[0]).toMatchObject({ finalError: 'HTTP 400', status: 400, basis: 'status', failureClass: 'terminal' });
     expect(inspect(queue.getDlq(), { depth: 8 })).not.toContain(PRIVATE);
@@ -172,7 +171,7 @@ test('approval snapshots and direct builders capture each primitive once without
   } finally { await notifier.close(); fetchSpy.mockRestore(); }
 });
 
-test('an unavailable retry reading keeps the notification queued and exposes no original error', async () => {
+test('a failure with no status or code is retried within the budget without asking a model, and exposes no original error', async () => {
   const original = new Error(PRIVATE);
   const states: unknown[] = [];
   forgetFailureReadings();
@@ -184,13 +183,10 @@ test('an unavailable retry reading keeps the notification queued and exposes no 
   const notifier = new Notifier({ slack: new SlackIntegration(URL_A), metadataOnly: () => true });
   try {
     await notifier.notifyNotification(turn());
-    expect(states).toHaveLength(1);
-    expect(String(states[0])).toContain(PRIVATE);
+    expect(states).toHaveLength(0);
     const status = notifier.getQueueStatus();
     expect(inspect(status, { depth: 8 })).not.toContain(PRIVATE);
     expect(status[0]?.metrics).toMatchObject({ retrying: 1, deadLettered: 0 });
-    expect(structuralDeliveryEvidence({ failureClass: 'terminal', basis: 'reading', detail: PRIVATE })).toEqual({ failureClass: 'terminal', basis: 'reading' });
-    expect(structuralDeliveryEvidence({ failureClass: 'terminal', basis: PRIVATE as never, detail: PRIVATE })).toBeUndefined();
   } finally { await notifier.close(); fetchSpy.mockRestore(); installJudgmentPort(previous); forgetFailureReadings(); }
 });
 
@@ -228,7 +224,7 @@ test('DLQ replay reads live privacy and cannot restore rich facts after a restri
   });
   const notifier = new Notifier({ slack: new SlackIntegration(URL_A), metadataOnly: () => restricted });
   try {
-    await expect(notifier.notifyNotification(turn())).rejects.toThrow('dead-letter');
+    await expect(notifier.notifyNotification(turn())).rejects.toThrow('failed-notification list');
     expect(bodies[0]).toContain(PRIVATE);
     expect(JSON.stringify(notifier.getQueueStatus())).not.toContain(PRIVATE);
     const queue = Reflect.get(notifier, '_queue') as DeliveryQueue<NotificationEnvelope>;

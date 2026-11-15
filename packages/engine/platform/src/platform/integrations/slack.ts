@@ -1,5 +1,6 @@
 import { assertDeliveryCurrent, runDeliveryPublication, type DeliveryLifetime } from '../utils/delivery-lifetime.js';
 import { retireDeliveryResponse } from './delivery-diagnostics.js';
+import { DeliveryError } from './delivery.js';
 import { createHmac, timingSafeEqual } from 'crypto';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
@@ -147,7 +148,15 @@ export interface SlackSocketModeEnvelope {
 export interface SlackSocketModeClientOptions {
   readonly appToken: string;
   readonly integration: SlackIntegration;
+  /**
+   * Handles one envelope. The envelope is acknowledged to Slack once this
+   * settles, unless it throws: then Slack is not told it arrived and delivers
+   * it again. A handler still running at `ackDeadlineMs` is acknowledged then,
+   * since Slack redelivers anything not acknowledged within three seconds.
+   */
   readonly onEnvelope: (envelope: SlackSocketModeEnvelope, client: SlackSocketModeClient) => void | Promise<void>;
+  /** When an envelope still being handled is acknowledged anyway (default 2.5 s, inside Slack's three seconds). */
+  readonly ackDeadlineMs?: number | undefined;
   readonly WebSocketImpl?: typeof WebSocket | undefined;
   /**
    * The socket closed on its own, not because `stop()` was called.
@@ -167,6 +176,8 @@ export interface SlackSocketModeClientOptions {
 
 /** A socket that has not opened by now will not; 30 s is well past a slow handshake. */
 const SOCKET_OPEN_TIMEOUT_MS = 30_000;
+/** Slack redelivers an envelope not acknowledged within 3 s; acknowledge a slow handler before that. */
+const SLACK_ACK_DEADLINE_MS = 2_500;
 
 // ---------------------------------------------------------------------------
 // SlackIntegration
@@ -425,7 +436,7 @@ export class SlackIntegration {
    */
   async postMessage(channel: string, text: string, blocks?: unknown[], lifetime: DeliveryLifetime = {}): Promise<void> {
     if (!this.botToken) {
-      throw new Error('SlackIntegration: botToken is required for postMessage');
+      throw new DeliveryError('SlackIntegration: botToken is required for postMessage', 'terminal');
     }
     const payload: Record<string, unknown> = { channel, text };
     if (blocks && blocks.length > 0) {
@@ -447,7 +458,9 @@ export class SlackIntegration {
     }
     const data = (await res.json()) as { ok: boolean; error?: string };
     if (data?.ok !== true) {
-      throw new Error(`SlackIntegration.postMessage API error: ${data?.error ?? 'unknown'}`);
+      const code = data?.error ?? 'unknown';
+      // Slack names the failure by code; only these can clear on another attempt.
+      throw new DeliveryError(`SlackIntegration.postMessage API error: ${code}`, SLACK_TRANSIENT_API_ERRORS.has(code) ? 'retryable' : 'terminal');
     }
   }
 
@@ -458,7 +471,7 @@ export class SlackIntegration {
   async postWebhook(text: string, blocks?: unknown[], url?: string, lifetime: DeliveryLifetime = {}): Promise<void> {
     const target = url ?? this.webhookUrl;
     if (!target) {
-      throw new Error('SlackIntegration: webhookUrl is required for postWebhook');
+      throw new DeliveryError('SlackIntegration: webhookUrl is required for postWebhook', 'terminal');
     }
     const payload: Record<string, unknown> = { text };
     if (blocks && blocks.length > 0) {
@@ -531,6 +544,11 @@ export class SlackIntegration {
     ];
   }
 }
+
+/** chat.postMessage error codes a retry can clear; every other code (a missing channel, a revoked token) is permanent. */
+const SLACK_TRANSIENT_API_ERRORS: ReadonlySet<string> = new Set([
+  'ratelimited', 'rate_limited', 'service_unavailable', 'fatal_error', 'internal_error', 'request_timeout', 'unknown',
+]);
 
 function defaultSocketTimer(fn: () => void, ms: number): () => void {
   const handle = setTimeout(fn, ms);
@@ -652,9 +670,28 @@ export class SlackSocketModeClient {
       });
       return;
     }
-    if (envelope.envelope_id) {
-      this.ack(envelope.envelope_id);
+    const envelopeId = envelope.envelope_id;
+    if (!envelopeId) {
+      await this.options.onEnvelope(envelope, this);
+      return;
     }
-    await this.options.onEnvelope(envelope, this);
+    let acknowledged = false;
+    const acknowledge = (): void => {
+      if (acknowledged) return;
+      acknowledged = true;
+      this.ack(envelopeId);
+    };
+    const schedule = this.options.setTimer ?? defaultSocketTimer;
+    const cancelDeadline = schedule(acknowledge, this.options.ackDeadlineMs ?? SLACK_ACK_DEADLINE_MS);
+    try {
+      await this.options.onEnvelope(envelope, this);
+      acknowledge();
+    } catch (error) {
+      logger.warn(acknowledged
+        ? '[slack] envelope failed after its acknowledgement deadline; Slack will not deliver it again'
+        : '[slack] envelope was not accepted; Slack will deliver it again', { error: summarizeError(error) });
+    } finally {
+      cancelDeadline();
+    }
   }
 }

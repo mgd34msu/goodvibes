@@ -47,12 +47,13 @@ describe('Notifier.fromConfig', () => {
     rmSync(root, { recursive: true, force: true });
   });
 
-  test('builds active channels from service registry and env-backed secrets', async () => {
+  test('builds a channel where there is a webhook; a bot token alone is reported as a gap', async () => {
     const notifier = await Notifier.fromConfig(new ServiceRegistry(join(root, '.goodvibes', 'agent', 'services.json'), {
       secretsManager: new SecretsManager({ projectRoot: root, globalHome: root }),
       subscriptionManager: new SubscriptionManager(join(root, '.goodvibes', 'agent', 'subscriptions.json')),
     }));
     const channels = notifier.getQueueStatus().map((entry) => entry.channel).sort();
-    expect(channels).toEqual(['discord', 'slack']);
+    expect(channels).toEqual(['slack']);
+    expect(notifier.channelGaps().map((gap) => gap.channel)).toEqual(['discord']);
   });
 });

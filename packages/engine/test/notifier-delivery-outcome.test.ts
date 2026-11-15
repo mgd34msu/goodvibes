@@ -34,7 +34,7 @@ describe('Notifier outcome', () => {
     const discord = { postWebhook: async (text: string) => { discordSent.push(text); } } as unknown as DiscordIntegration;
     const notifier = new Notifier({ slack, discord });
     try {
-      await expect(notifier.notify('AGENT_COMPLETED', { summary: 'done' })).rejects.toThrow('dead-letter');
+      await expect(notifier.notify('AGENT_COMPLETED', { summary: 'done' })).rejects.toThrow('failed-notification list');
       expect(discordSent).toHaveLength(1);
       expect(notifier.getQueueStatus().find((queue) => queue.channel === 'slack')?.metrics.deadLettered).toBe(1);
     } finally {
@@ -76,7 +76,7 @@ describe('Notifier configuration', () => {
     }
   });
 
-  test('fromConfig builds a Slack channel from the bot token stored in config when no registry entry or environment value exists', async () => {
+  test('a bot token stored in config gives a Slack channel only with a default channel; alone it is reported as a gap', async () => {
     const saved = { slack: process.env.SLACK_BOT_TOKEN, hook: process.env.SLACK_WEBHOOK_URL };
     delete process.env.SLACK_BOT_TOKEN;
     delete process.env.SLACK_WEBHOOK_URL;
@@ -84,10 +84,15 @@ describe('Notifier configuration', () => {
       const registry = { resolveSecret: async () => null };
       const without = await Notifier.fromConfig(registry);
       expect(without.getQueueStatus()).toHaveLength(0);
-      const notifier = await Notifier.fromConfig(registry, {
+      const tokenOnly = await Notifier.fromConfig(registry, {
         configManager: { get: (key: string) => (key === 'surfaces.slack.botToken' ? 'xoxb-t' : undefined) } as never,
       });
+      expect(tokenOnly.getQueueStatus()).toHaveLength(0);
+      expect(tokenOnly.channelGaps().map((gap) => gap.channel)).toEqual(['slack']);
+      const settings: Record<string, string> = { 'surfaces.slack.botToken': 'xoxb-t', 'surfaces.slack.defaultChannel': '#ops' };
+      const notifier = await Notifier.fromConfig(registry, { configManager: { get: (key: string) => settings[key] } as never });
       expect(notifier.getQueueStatus().map((queue) => queue.channel)).toEqual(['slack']);
+      expect(notifier.channelGaps()).toHaveLength(0);
     } finally {
       if (saved.slack !== undefined) process.env.SLACK_BOT_TOKEN = saved.slack;
       if (saved.hook !== undefined) process.env.SLACK_WEBHOOK_URL = saved.hook;
@@ -100,9 +105,11 @@ describe('Notifier configuration', () => {
     delete process.env.SLACK_WEBHOOK_URL;
     try {
       const registry = { resolveSecret: async () => null };
-      const configManager = {
-        get: (key: string) => (key === 'surfaces.slack.botToken' ? 'goodvibes://secrets/goodvibes/SLACK_BOT_TOKEN' : undefined),
-      } as never;
+      const settings: Record<string, string> = {
+        'surfaces.slack.botToken': 'goodvibes://secrets/goodvibes/SLACK_BOT_TOKEN',
+        'surfaces.slack.defaultChannel': '#ops',
+      };
+      const configManager = { get: (key: string) => settings[key] } as never;
       const requested: string[] = [];
       const secretsManager = {
         get: async (key: string) => { requested.push(key); return key === 'SLACK_BOT_TOKEN' ? 'xoxb-stored' : null; },

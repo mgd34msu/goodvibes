@@ -9,7 +9,7 @@ import * as webhookHttp from '@goodvibes-jev/engine/platform/platform/utils';
 import { MemoryStore } from '@goodvibes-jev/engine/platform/platform/state';
 import { registerInboxSurface } from '@goodvibes-jev/engine/platform/platform/intake';
 import { NOTIFICATIONS_METADATA_ONLY_KEY, type NotificationDelivery } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
-import { emitContractPassed } from '@goodvibes-jev/engine/platform/platform/runtime/emitters';
+import { emitContractCreated, emitContractPassed } from '@goodvibes-jev/engine/platform/platform/runtime/emitters';
 import { startDaemonFixture, type DaemonFixture } from '../../testing/daemon-fixture.js';
 import { createDaemonBootOperations } from '../../runtime/boot-composition.js';
 import type { RuntimeServices } from '../../runtime/services.js';
@@ -240,7 +240,9 @@ test('zero-URL boot attaches the shared webhook and both real owners read live f
   mockFetch(async (_input, init) => { sent.push(String(init?.body)); return new Response('ok'); });
   Reflect.set(runtime.webhookNotifier, 'force', true);
   runtime.webhookNotifier.addUrl(URL);
-  emitContractPassed(runtime.runtimeBus, { sessionId: 'synthetic-session', traceId: 'synthetic-trace', source: 'boot-fixture' }, { contractId: 'synthetic-contract', criteriaMet: 1, criteriaJudged: 1, excluded: 0, nudges: 0 });
+  const ctx = { sessionId: 'synthetic-session', traceId: 'synthetic-trace', source: 'boot-fixture' };
+  emitContractCreated(runtime.runtimeBus, ctx, { contractId: 'synthetic-contract', sessionId: 'synthetic-session', origin: 'turn', ask: PRIVATE, ownerAgentId: 'synthetic-owner' });
+  emitContractPassed(runtime.runtimeBus, ctx, { contractId: 'synthetic-contract', criteriaMet: 1, criteriaJudged: 1, excluded: 0, nudges: 0 });
   await until(() => sent.length === 2, 'shared bus webhook and configured notifier delivery');
   await flush(); expect(sent).toHaveLength(2);
   for (const value of [false, true, undefined, 'unknown', 'throw', 'async', false]) {
@@ -255,7 +257,7 @@ test('zero-URL boot attaches the shared webhook and both real owners read live f
   }
 });
 
-test('boot reads a stored Slack bot token reference through the runtime secrets manager', async () => {
+test('a stored Slack bot token with no webhook or default channel gets no notification channel, and the row says what to add', async () => {
   const saved = { token: process.env.SLACK_BOT_TOKEN, hook: process.env.SLACK_WEBHOOK_URL };
   delete process.env.SLACK_BOT_TOKEN; delete process.env.SLACK_WEBHOOK_URL;
   try {
@@ -270,7 +272,11 @@ test('boot reads a stored Slack bot token reference through the runtime secrets 
     });
     expect((await fx.services.bootTasks!.start()).state).toBe('ready');
     expect(requested).toContain('SLACK_BOT_TOKEN');
-    expect(notifiers[0]!.getQueueStatus().map((queue) => queue.channel)).toEqual(['slack']);
+    expect(notifiers[0]!.channels).toEqual([]);
+    expect(notifiers[0]!.channelGaps().map((gap) => gap.channel)).toEqual(['slack']);
+    expect(fx.services.runtimeStore.getState().integrations.integrations.get('slack')).toMatchObject({
+      status: 'degraded', meta: { notifications: 'no-target' },
+    });
   } finally {
     if (saved.token !== undefined) process.env.SLACK_BOT_TOKEN = saved.token;
     if (saved.hook !== undefined) process.env.SLACK_WEBHOOK_URL = saved.hook;

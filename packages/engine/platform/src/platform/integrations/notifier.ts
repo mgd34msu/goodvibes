@@ -1,28 +1,53 @@
 import { NotificationEnvelope, type NotificationPrivacyReader } from '../runtime/notification-envelope.js';
 import type { NotificationDelivery } from '../runtime/turn-notification.js';
 import { logger } from '../utils/logger.js';
-import { summarizeError } from '../utils/error-display.js';
-import type { RuntimeEventBus, AgentEvent } from '../runtime/events/index.js';
-import type { ContractEvent } from '../../events/contract.js';
-import { workstreamLabel } from '../channels/workstream-labels.js';
+import type { RuntimeEventBus } from '../runtime/events/index.js';
 import { SlackIntegration } from './slack.js';
 import { DiscordIntegration } from './discord.js';
 import { DeliveryError, DeliveryQueue } from './delivery.js';
 import type { DeliveryQueueConfig, IntegrationQueueStatus } from './delivery.js';
+import {
+  describeDeadLetters, notificationDeadLetterCodec,
+  type NotificationDeadLetter, type NotificationDeadLetterSource, type NotificationReplayResult,
+} from './notification-dead-letters.js';
 import { snapshotQueueStatus } from './delivery.js';
+import { attachRuntimeNotifications, RUNTIME_NOTIFICATION_EVENTS, type RuntimeNotificationOptions } from './notification-dispatcher.js';
 import { ServiceRegistry } from '../config/service-registry.js';
 import type { ConfigManager } from '../config/manager.js';
 import type { SecretsManager } from '../config/secrets.js';
 import { resolveSecretInput } from '../config/secret-refs.js';
 import type { FeatureFlagManager } from '../runtime/feature-flags/index.js';
 
-const NOTIFICATION_EVENT_IDS: ReadonlySet<string> = new Set([
-  'AGENT_COMPLETED', 'CONTRACT_PASSED', 'CONTRACT_FAILED', 'CONTRACT_CANCELLED',
-]);
+const NOTIFICATION_EVENT_IDS: ReadonlySet<string> = new Set(RUNTIME_NOTIFICATION_EVENTS);
 function notificationTraceEvent(event: string): string {
   // Queue identifiers/diagnostics may outlive a privacy change. Preserve known
   // runtime event IDs, but do not retain arbitrary legacy event wording there.
   return NOTIFICATION_EVENT_IDS.has(event) ? event : 'notification';
+}
+
+/** A chat service the notifier can post to. */
+export type NotifierChannel = 'slack' | 'discord';
+
+/**
+ * Why a connected chat service gets no notifications: it has a bot token
+ * (chat works) but neither an incoming-webhook URL nor a default channel to
+ * post notifications into.
+ */
+export interface NotifierChannelGap {
+  readonly channel: NotifierChannel;
+  readonly reason: string;
+  readonly next: string;
+}
+
+interface ChannelTransport {
+  readonly channel: NotifierChannel;
+  readonly send: (text: string) => Promise<void>;
+}
+
+function transportFor(channel: NotifierChannel, integration: SlackIntegration | DiscordIntegration, target: string | undefined): ChannelTransport {
+  // A default channel means the bot posts it; otherwise the incoming webhook.
+  if (target) return { channel, send: (text) => integration.postMessage(target, text) };
+  return { channel, send: (text) => integration.postWebhook(text) };
 }
 
 // ---------------------------------------------------------------------------
@@ -30,18 +55,22 @@ function notificationTraceEvent(event: string): string {
 // ---------------------------------------------------------------------------
 
 /**
- * Notifier, unified notification dispatcher.
+ * Notifier: the Slack and Discord notification transport.
  *
- * Reads configuration from environment variables:
- *   SLACK_WEBHOOK_URL, SLACK_BOT_TOKEN
- *   DISCORD_WEBHOOK_URL, DISCORD_BOT_TOKEN
+ * A channel exists only when it has somewhere to post: an incoming-webhook URL
+ * (service registry `webhookUrl`, or SLACK_WEBHOOK_URL / DISCORD_WEBHOOK_URL),
+ * or a bot token together with a default channel (`surfaces.slack.defaultChannel`,
+ * `surfaces.discord.defaultChannelId`). A bot token alone is reported through
+ * {@link Notifier.channelGaps} and gets no channel.
  *
- * Attach to the RuntimeEventBus to automatically post notifications for key events.
+ * Which events are announced and how they are worded belongs to
+ * `notification-dispatcher.ts`; failures are retried by the delivery queue and
+ * end in a dead-letter list that {@link Notifier.persistDeadLetters} keeps on disk.
  */
-export class Notifier {
-  private slack?: SlackIntegration | undefined;
-  private discord?: DiscordIntegration | undefined;
-  private unsubscribers: Array<() => void> = [];
+export class Notifier implements NotificationDeadLetterSource {
+  private readonly transports: readonly ChannelTransport[];
+  private readonly gaps: readonly NotifierChannelGap[];
+  private unsubscribe: (() => void) | undefined;
   private readonly _queue: DeliveryQueue<NotificationEnvelope | string>;
   private readonly metadataOnly: NotificationPrivacyReader | undefined;
   private _closed = false;
@@ -51,6 +80,12 @@ export class Notifier {
   constructor(options?: {
     slack?: SlackIntegration | undefined;
     discord?: DiscordIntegration | undefined;
+    /** Post Slack notifications with the bot into this channel instead of through the webhook. */
+    slackChannel?: string | undefined;
+    /** Post Discord notifications with the bot into this channel instead of through the webhook. */
+    discordChannelId?: string | undefined;
+    /** Connected services that have no notification target, reported by {@link Notifier.channelGaps}. */
+    gaps?: readonly NotifierChannelGap[] | undefined;
     delivery?: Partial<DeliveryQueueConfig> | undefined;
     featureFlags?: Pick<FeatureFlagManager, 'isEnabled'> | null | undefined;
     metadataOnly?: NotificationPrivacyReader | undefined;
@@ -58,8 +93,11 @@ export class Notifier {
     configManager?: Pick<ConfigManager, 'get'> | null | undefined;
   }) {
     this.metadataOnly = options?.metadataOnly;
-    this.slack = options?.slack;
-    this.discord = options?.discord;
+    const transports: ChannelTransport[] = [];
+    if (options?.slack) transports.push(transportFor('slack', options.slack, options.slackChannel));
+    if (options?.discord) transports.push(transportFor('discord', options.discord, options.discordChannelId));
+    this.transports = transports;
+    this.gaps = options?.gaps ?? [];
     this._queue = new DeliveryQueue<NotificationEnvelope | string>({
       ...(options?.delivery ?? {}),
       featureFlags: options?.featureFlags,
@@ -69,7 +107,7 @@ export class Notifier {
   }
 
   /**
-   * Create a Notifier pre-wired from configured services and environment variables.
+   * Create a Notifier from configured services, settings and environment variables.
    */
   static async fromConfig(
     serviceRegistry: Pick<ServiceRegistry, 'resolveSecret'>,
@@ -78,8 +116,9 @@ export class Notifier {
       metadataOnly?: NotificationPrivacyReader;
       /**
        * Supplies `surfaces.slack.botToken`, `surfaces.discord.botToken` (the
-       * tokens an account setup flow stores) and the integrations.delivery.*
-       * settings. Without it only the service registry and the environment are read.
+       * tokens an account setup flow stores), the default channels and the
+       * integrations.delivery.* settings. Without it only the service registry
+       * and the environment are read.
        */
       configManager?: Pick<ConfigManager, 'get'> | null;
       /** Resolves a config value that is a secret reference; defaults to {@link resolveSecretInput}. */
@@ -110,42 +149,70 @@ export class Notifier {
       options.configManager ? resolveConfigSecret(options.configManager.get('surfaces.slack.botToken')) : null,
       options.configManager ? resolveConfigSecret(options.configManager.get('surfaces.discord.botToken')) : null,
     ]);
+    const setting = (key: 'surfaces.slack.defaultChannel' | 'surfaces.discord.defaultChannelId'): string | undefined => {
+      const value = options.configManager?.get(key);
+      return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+    };
 
     const slackWebhook = slackWebhookFromService ?? process.env.SLACK_WEBHOOK_URL;
     const slackToken = slackTokenFromService ?? slackTokenFromConfig ?? process.env.SLACK_BOT_TOKEN;
     const discordWebhook = discordWebhookFromService ?? process.env.DISCORD_WEBHOOK_URL;
     const discordToken = discordTokenFromService ?? discordTokenFromConfig ?? process.env.DISCORD_BOT_TOKEN;
+    // The webhook wins when both exist: it is the address the owner gave for notifications.
+    const slackChannel = slackWebhook ? undefined : slackToken ? setting('surfaces.slack.defaultChannel') : undefined;
+    const discordChannelId = discordWebhook ? undefined : discordToken ? setting('surfaces.discord.defaultChannelId') : undefined;
 
-    const slack =
-      slackWebhook || slackToken
-        ? new SlackIntegration(slackWebhook, slackToken)
-        : undefined;
+    const gaps: NotifierChannelGap[] = [];
+    if (!slackWebhook && slackToken && !slackChannel) {
+      gaps.push({
+        channel: 'slack',
+        reason: 'Slack is connected for chat but has nowhere to post notifications',
+        next: 'Add an incoming-webhook URL to the slack service, or set surfaces.slack.defaultChannel',
+      });
+    }
+    if (!discordWebhook && discordToken && !discordChannelId) {
+      gaps.push({
+        channel: 'discord',
+        reason: 'Discord is connected for chat but has nowhere to post notifications',
+        next: 'Add a webhook URL to the discord service, or set surfaces.discord.defaultChannelId',
+      });
+    }
 
-    const discord =
-      discordWebhook || discordToken
-        ? new DiscordIntegration(discordWebhook, discordToken)
-        : undefined;
+    const slack = slackWebhook || slackChannel ? new SlackIntegration(slackWebhook, slackToken) : undefined;
+    const discord = discordWebhook || discordChannelId ? new DiscordIntegration(discordWebhook, discordToken) : undefined;
 
-    return new Notifier({ slack, discord, featureFlags: options.featureFlags, metadataOnly: options.metadataOnly, configManager: options.configManager });
+    return new Notifier({
+      slack, discord, slackChannel, discordChannelId, gaps,
+      featureFlags: options.featureFlags, metadataOnly: options.metadataOnly, configManager: options.configManager,
+    });
   }
 
   // -------------------------------------------------------------------------
   // Public API
   // -------------------------------------------------------------------------
 
+  /** The channels this notifier posts to. */
+  get channels(): readonly NotifierChannel[] {
+    return this.transports.map((transport) => transport.channel);
+  }
+
+  /** Connected chat services that receive no notifications, and what to add. */
+  channelGaps(): readonly NotifierChannelGap[] {
+    return this.gaps;
+  }
+
   /**
-   * Send a notification to all configured channels.
-   *
-   * @param event  - Human-readable event name (used as message text)
-   * @param data   - Arbitrary key/value payload for formatting
+   * Send a plain notification to all configured channels: `event`, then the
+   * payload as key=value pairs. Runtime events are announced through
+   * {@link attachToRuntimeBus}, which owns their wording.
    */
   notify(event: string, data: Record<string, unknown>): Promise<void> {
     return this.ownNotification(notificationTraceEvent(event), () => NotificationEnvelope.legacy(() => this.formatText(event, data), this.metadataOnly));
   }
 
   /** Send owned typed facts, with live privacy checks on every delivery attempt. */
-  notifyNotification(delivery: NotificationDelivery): Promise<void> {
-    return this.ownNotification('notification', () => NotificationEnvelope.typed(delivery, this.metadataOnly));
+  notifyNotification(delivery: NotificationDelivery, event = 'notification'): Promise<void> {
+    return this.ownNotification(notificationTraceEvent(event), () => NotificationEnvelope.typed(delivery, this.metadataOnly));
   }
 
   private ownNotification(event: string, create: () => NotificationEnvelope): Promise<void> {
@@ -164,24 +231,16 @@ export class Notifier {
     // Every channel is attempted, in order: a Slack failure must not cost the
     // Discord copy. A failure still reaches the caller once all were tried.
     // A 'retrying' outcome is accepted: the queue still holds the message and
-    // will resend it. 'dead_letter' means the queue gave up, and the dead-letter
-    // list is in memory only, so the caller is told.
+    // will resend it. 'dead_letter' means the queue gave up; the entry stays in
+    // the dead-letter list until it is resent or cleared.
     const failures: unknown[] = [];
-    const attempt = async (channel: 'slack' | 'discord', send: (text: string) => Promise<void>): Promise<void> => {
+    for (const transport of this.transports) {
       try {
-        const outcome = await this._queue.enqueue(channel, event, envelope, () => this.postEnvelope(envelope, send));
+        const outcome = await this._queue.enqueue(transport.channel, event, envelope, () => this.postEnvelope(envelope, transport.send));
         if (outcome === 'dead_letter') {
-          failures.push(new DeliveryError(`The ${channel} notification could not be delivered and was moved to the dead-letter list; replayDeadLetters() resends it while this process runs.`, 'terminal'));
+          failures.push(new DeliveryError(`The ${transport.channel} notification could not be delivered and was moved to the failed-notification list; resend it with /notify resend or notifications.deadLetters.replay.`, 'terminal'));
         }
       } catch (error) { failures.push(error); }
-    };
-    if (this.slack) {
-      const slack = this.slack;
-      await attempt('slack', (text) => slack.postWebhook(text));
-    }
-    if (this.discord) {
-      const discord = this.discord;
-      await attempt('discord', (text) => discord.postWebhook(text));
     }
     if (failures.length === 1) throw failures[0];
     if (failures.length > 1) throw new AggregateError(failures, 'Notification delivery failed on more than one channel');
@@ -193,33 +252,47 @@ export class Notifier {
    */
   getQueueStatus(): IntegrationQueueStatus[] {
     const sloEnforced = this._queue.sloEnforced;
-    const statuses: IntegrationQueueStatus[] = [];
-    if (this.slack) {
-      statuses.push(snapshotQueueStatus('slack', this._queue, sloEnforced, (payload) => this.queuedEnvelope(payload).describe()));
-    }
-    if (this.discord) {
-      statuses.push(snapshotQueueStatus('discord', this._queue, sloEnforced, (payload) => this.queuedEnvelope(payload).describe()));
-    }
-    return statuses;
+    return this.transports.map((transport) =>
+      snapshotQueueStatus(transport.channel, this._queue, sloEnforced, (payload) => this.queuedEnvelope(payload).describe()));
+  }
+
+  /** Told each time a notification moves to the dead-letter list. Returns the unsubscribe function. */
+  onDeadLetter(listener: (channel: string) => void): () => void {
+    return this._queue.onDeadLetter((entry) => listener(entry.channel));
   }
 
   /**
-   * Replay all dead-letter entries to their respective channels.
-   * Re-attempts delivery for each DLQ entry; results are returned per-entry.
+   * Keep failed notifications in `path` so they survive a restart and can
+   * still be listed and resent. Entries already in the file are loaded now.
    */
-  async replayDeadLetters(): Promise<Array<{ id: string; outcome: import('./delivery.js').DeliveryOutcome }>> {
-    return this._queue.replay(async (dlqEntry) => {
+  persistDeadLetters(path: string): void {
+    this._queue.persistDeadLetters(path, notificationDeadLetterCodec(this.metadataOnly));
+  }
+
+  /** The failed notifications, oldest first, in their metadata-only form. */
+  listDeadLetters(): readonly NotificationDeadLetter[] {
+    return describeDeadLetters(this._queue.getDlq(), (payload) => this.queuedEnvelope(payload).describe());
+  }
+
+  /**
+   * Resend failed notifications: all of them, or those named in `ids`. Each is
+   * queued again with a fresh retry budget; an id that is not in the list is
+   * reported `not-found`.
+   */
+  async replayDeadLetters(ids?: readonly string[]): Promise<NotificationReplayResult[]> {
+    const results: NotificationReplayResult[] = await this._queue.replay(async (dlqEntry) => {
       const envelope = this.queuedEnvelope(dlqEntry.payload);
-      if (dlqEntry.channel === 'slack' && this.slack) {
-        const slack = this.slack;
-        await this.postEnvelope(envelope, (text) => slack.postWebhook(text));
-      } else if (dlqEntry.channel === 'discord' && this.discord) {
-        const discord = this.discord;
-        await this.postEnvelope(envelope, (text) => discord.postWebhook(text));
-      } else {
-        throw new Error(`No active integration for channel: ${dlqEntry.channel}`);
+      const transport = this.transports.find((candidate) => candidate.channel === dlqEntry.channel);
+      if (!transport) {
+        throw new DeliveryError(`${dlqEntry.channel} has no notification target configured any more.`, 'terminal');
       }
-    });
+      await this.postEnvelope(envelope, transport.send);
+    }, ids);
+    const found = new Set(results.map((result) => result.id));
+    for (const id of ids ?? []) {
+      if (!found.has(id)) results.push({ id, outcome: 'not-found' });
+    }
+    return results;
   }
 
   private async postEnvelope(envelope: NotificationEnvelope, send: (text: string) => Promise<void>): Promise<void> {
@@ -246,86 +319,22 @@ export class Notifier {
     ]).then(() => {});
   }
 
-  attachToRuntimeBus(bus: RuntimeEventBus): void {
+  /**
+   * Announce agent and workstream outcomes from `bus` (see
+   * notification-dispatcher.ts for the events and their wording).
+   */
+  attachToRuntimeBus(bus: RuntimeEventBus, options: RuntimeNotificationOptions = {}): void {
     if (this._closed) throw new DeliveryError('Notifier is closed.', 'terminal');
     this.detach();
-
-    // Runtime payload access belongs inside the same admission as formatting.
-    const notify = (event: string, readData: () => Record<string, unknown>): Promise<void> =>
-      this.ownNotification(notificationTraceEvent(event), () =>
-        NotificationEnvelope.legacy(() => this.formatText(event, readData()), this.metadataOnly));
-
-    this.unsubscribers.push(
-      bus.on<Extract<AgentEvent, { type: 'AGENT_COMPLETED' }>>('AGENT_COMPLETED', (event) => {
-        void notify('AGENT_COMPLETED', () => {
-          const { payload } = event;
-          return {
-            event: 'AGENT_COMPLETED',
-            agentId: payload.agentId,
-            task: payload.output?.slice(0, 100) ?? payload.agentId,
-            result: payload.output,
-          };
-        }).catch((error: unknown) => {
-          logger.warn('[notifier] AGENT_COMPLETED notification failed', { error: summarizeError(error) });
-        });
-      }),
-    );
-
-    this.unsubscribers.push(
-      bus.on<Extract<ContractEvent, { type: 'CONTRACT_PASSED' }>>('CONTRACT_PASSED', (event) => {
-        void notify('CONTRACT_PASSED', () => {
-          const { payload } = event;
-          return {
-            event: 'CONTRACT_PASSED',
-            contractId: payload.contractId,
-            criteriaMet: payload.criteriaMet,
-            criteriaJudged: payload.criteriaJudged,
-          };
-        }).catch((error: unknown) => {
-          logger.warn('[notifier] CONTRACT_PASSED notification failed', { error: summarizeError(error) });
-        });
-      }),
-    );
-
-    this.unsubscribers.push(
-      bus.on<Extract<ContractEvent, { type: 'CONTRACT_FAILED' }>>('CONTRACT_FAILED', (event) => {
-        void notify('CONTRACT_FAILED', () => {
-          const { payload } = event;
-          return {
-            event: 'CONTRACT_FAILED',
-            contractId: payload.contractId,
-            reason: payload.reason,
-          };
-        }).catch((error: unknown) => {
-          logger.warn('[notifier] CONTRACT_FAILED notification failed', { error: summarizeError(error) });
-        });
-      }),
-    );
-
-    this.unsubscribers.push(
-      bus.on<Extract<ContractEvent, { type: 'CONTRACT_CANCELLED' }>>('CONTRACT_CANCELLED', (event) => {
-        void notify('CONTRACT_CANCELLED', () => {
-          const { payload } = event;
-          return {
-            event: 'CONTRACT_CANCELLED',
-            contractId: payload.contractId,
-            reason: payload.reason,
-          };
-        }).catch((error: unknown) => {
-          logger.warn('[notifier] CONTRACT_CANCELLED notification failed', { error: summarizeError(error) });
-        });
-      }),
-    );
-
+    this.unsubscribe = attachRuntimeNotifications(bus, (delivery, event) => this.notifyNotification(delivery, event), options);
     logger.info('Notifier: attached to RuntimeEventBus');
   }
 
   /** Remove all notification subscriptions. */
   detach(): void {
-    for (const unsub of this.unsubscribers) {
-      unsub();
-    }
-    this.unsubscribers = [];
+    const unsubscribe = this.unsubscribe;
+    this.unsubscribe = undefined;
+    unsubscribe?.();
   }
 
   // -------------------------------------------------------------------------
@@ -333,34 +342,10 @@ export class Notifier {
   // -------------------------------------------------------------------------
 
   private formatText(event: string, data: Record<string, unknown>): string {
-    switch (event) {
-      case 'AGENT_COMPLETED': {
-        const task = typeof data.task === 'string' ? data.task : String(data.agentId ?? '');
-        return `Agent completed: ${task}`;
-      }
-      // Named in plain words, never by the contract id: a notification is outward-facing text.
-      case 'CONTRACT_PASSED': {
-        const label = workstreamLabel(String(data.contractId ?? ''));
-        const met = typeof data.criteriaMet === 'number' && typeof data.criteriaJudged === 'number'
-          ? `: ${data.criteriaMet} of ${data.criteriaJudged} requirements met`
-          : '';
-        return `${label} is done${met}`;
-      }
-      case 'CONTRACT_FAILED': {
-        const reason = typeof data.reason === 'string' ? data.reason : 'unknown reason';
-        return `${workstreamLabel(String(data.contractId ?? ''))} could not be finished: ${reason}`;
-      }
-      case 'CONTRACT_CANCELLED': {
-        const reason = typeof data.reason === 'string' ? data.reason : 'no reason given';
-        return `${workstreamLabel(String(data.contractId ?? ''))} was cancelled: ${reason}`;
-      }
-      default: {
-        const extras = Object.entries(data)
-          .filter(([k]) => k !== 'event')
-          .map(([k, v]) => `${k}=${String(v)}`)
-          .join(', ');
-        return extras ? `${event}: ${extras}` : event;
-      }
-    }
+    const extras = Object.entries(data)
+      .filter(([k]) => k !== 'event')
+      .map(([k, v]) => `${k}=${String(v)}`)
+      .join(', ');
+    return extras ? `${event}: ${extras}` : event;
   }
 }

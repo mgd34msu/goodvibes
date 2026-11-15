@@ -202,11 +202,35 @@ Operator methods:
 
 The `integrations.delivery.sloEnforced` setting (default `true`) controls how
 strictly a failure is tracked. On, a failure is classified retryable or
-terminal, retried with exponential backoff, and a dead letter is logged at
-error level and surfaced in integration diagnostics, replayable via
-`/notify replay`. Off, dead letters are logged at warn level only. An
+terminal from its own facts (a stated class, Retry-After, HTTP status,
+connection code; no model reads the error text), retried with exponential
+backoff, and a dead letter is logged at error level and surfaced in
+integration diagnostics. Off, dead letters are logged at warn level only. An
 explicit per-queue `sloEnforced` option, when a caller sets one, overrides
 this default for that queue alone.
+
+### Notifications
+
+Agent and workstream outcomes (an agent completed, failed or was cancelled; a
+workstream passed, failed or was cancelled) are announced with the same
+events and the same words to every notification transport: Slack, Discord
+and the generic webhook URLs (`/notify add`). Slack and Discord get a
+notification channel only when they have somewhere to post: an
+incoming-webhook URL (the service's `webhookUrl`, or `SLACK_WEBHOOK_URL` /
+`DISCORD_WEBHOOK_URL`), or a bot token together with
+`surfaces.slack.defaultChannel` / `surfaces.discord.defaultChannelId`. A bot
+token alone connects chat but not notifications; the integration row says so
+and names what to add.
+
+Every transport retries a failed notification with the same policy, then
+keeps it in a failed-notification list. The daemon stores its list on disk,
+so it survives a restart; list and resend it with the operator methods
+`notifications.deadLetters.list` and `notifications.deadLetters.replay`. A
+terminal app lists and resends the notifications it sent itself with
+`/notify failed` and `/notify resend <id|all>`. A
+resent notification is delivered, queued again for retry, or back in the
+list; a webhook notification is not sent to a URL that was removed since it
+failed.
 
 ## Watchers
 

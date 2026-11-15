@@ -203,18 +203,24 @@ test('terminal events without a public duration or an observed start do not inve
 });
 
 describe('the TUI Slack/Discord notifier', () => {
-  test('the configured Slack bot token reaches the notifier', async () => {
+  test('the configured Slack bot token reaches the notifier when it has a default channel to post in', async () => {
     const saved = { slack: process.env.SLACK_BOT_TOKEN, hook: process.env.SLACK_WEBHOOK_URL };
     delete process.env.SLACK_BOT_TOKEN;
     delete process.env.SLACK_WEBHOOK_URL;
     try {
       const registry = { resolveSecret: async () => null };
-      const config = { get: (key: string) => (key === 'surfaces.slack.botToken' ? 'xoxb-t' : undefined) } as never;
+      const tokenOnly = { get: (key: string) => (key === 'surfaces.slack.botToken' ? 'xoxb-t' : undefined) } as never;
+      const config = { get: (key: string) => (key === 'surfaces.slack.botToken' ? 'xoxb-t' : key === 'surfaces.slack.defaultChannel' ? 'C0FIXTURE' : undefined) } as never;
       const without = await createRuntimeNotifier(registry as never, () => false);
       expect(without.getQueueStatus()).toHaveLength(0);
+      // A token alone connects chat, not notifications: no channel, and a gap that says what to add.
+      const gap = await createRuntimeNotifier(registry as never, () => false, tokenOnly);
+      expect(gap.getQueueStatus()).toHaveLength(0);
+      expect(gap.channelGaps().map((entry) => entry.channel)).toEqual(['slack']);
       const notifier = await createRuntimeNotifier(registry as never, () => false, config);
       expect(notifier.getQueueStatus().map((queue) => queue.channel)).toEqual(['slack']);
       await without.close();
+      await gap.close();
       await notifier.close();
     } finally {
       if (saved.slack !== undefined) process.env.SLACK_BOT_TOKEN = saved.slack;

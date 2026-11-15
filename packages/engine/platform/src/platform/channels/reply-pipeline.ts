@@ -124,6 +124,12 @@ interface ReplyBufferState {
   readonly deliveredEventIds: Set<string>;
   lastDeliveredText?: string | undefined;
   lastDeliveredAt?: number | undefined;
+  /**
+   * Announcements dispatched for this reply, by phase: the sequence number in
+   * the identity a surface deduplicates on (`announces` on the pending copy),
+   * so two different messages are never taken for one because their words match.
+   */
+  announced?: { progress: number; final: number } | undefined;
 }
 
 function resolveEnvelopeAgentId(envelope: RuntimeEventEnvelope<AnyRuntimeEvent['type'], AnyRuntimeEvent>): string | null {
@@ -732,6 +738,9 @@ export class ChannelReplyPipeline {
     text: string,
     events: readonly ChannelRenderEvent[],
   ): Promise<ChannelRenderResult | null> {
+    const announced = state.announced ??= { progress: 0, final: 0 };
+    announced[phase === 'final' ? 'final' : 'progress'] += 1;
+    const announces = `agent:${state.pending.agentId}:${phase}:${announced[phase === 'final' ? 'final' : 'progress']}`;
     const request: ChannelRenderRequest = {
       surface: state.pending.surfaceKind,
       phase,
@@ -742,9 +751,10 @@ export class ChannelReplyPipeline {
       text,
       events,
       // Renderers read provider-specific fields by name, so they get a plain copy of the record.
-      pending: { ...state.pending },
+      pending: { ...state.pending, announces },
       metadata: {
         policy,
+        announces,
       },
     };
     const result = await this.channelPlugins.render(state.pending.surfaceKind, request);

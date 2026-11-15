@@ -1,9 +1,9 @@
-import { deliveryHttpStatus, describeStructuralDeliveryError, structuralDeliveryEvidence } from './delivery-diagnostics.js';
+import { deliveryHttpStatus, describeStructuralDeliveryError } from './delivery-diagnostics.js';
 import { logger } from '../utils/logger.js';
 import { randomInt, randomUUID } from 'node:crypto';
 import {
   GoodVibesError,
-  readFailureTransience,
+  structuredTransience,
   type FailureClass,
   type FailureTransience,
   type TransienceBasis,
@@ -11,6 +11,7 @@ import {
 } from '@goodvibes-jev/engine/errors';
 import type { FeatureFlagManager } from '../runtime/feature-flags/index.js';
 import type { ConfigManager } from '../config/manager.js';
+import { readDocument, writeDocument } from '../utils/atomic-json-store.js';
 
 import { summarizeError } from '../utils/error-display.js';
 
@@ -47,9 +48,20 @@ export type { FailureTransience, TransienceBasis, TransienceOptions };
 // `recoverable`, which the shared decision honours first.
 export { readFailureTransience, structuredTransience } from '@goodvibes-jev/engine/errors';
 
-/** Classifies a delivery error as retryable or terminal (see {@link readFailureTransience}). */
-export async function classifyDeliveryError(error: unknown, site = 'integrations.delivery.transience'): Promise<DeliveryFailureClass> {
-  return (await readFailureTransience(error, site)).failureClass;
+/**
+ * Whether a delivery failure is worth another attempt, decided from the
+ * failure's own facts (a stated class, Retry-After, HTTP status, connection
+ * code, timeout class), never by reading its wording. A failure that carries
+ * none of them is retried: the attempt budget bounds it.
+ */
+export function deliveryTransience(error: unknown): FailureTransience {
+  return structuredTransience(error)
+    ?? { failureClass: 'retryable', basis: 'classic', detail: 'no status, code or error class; retried within the attempt budget' };
+}
+
+/** Classifies a delivery error as retryable or terminal (see {@link deliveryTransience}). */
+export async function classifyDeliveryError(error: unknown, _site?: string): Promise<DeliveryFailureClass> {
+  return deliveryTransience(error).failureClass;
 }
 
 // ---------------------------------------------------------------------------
@@ -84,6 +96,12 @@ export interface DeadLetterEntry<TPayload = string> {
   readonly channel: string;
   /** Event name that triggered the delivery. */
   readonly event: string;
+  /**
+   * Where the transport sends it when one channel has several destinations
+   * (a webhook URL). Kept for replay; never shown in diagnostics, since a URL
+   * can carry a secret topic or token.
+   */
+  readonly target?: string | undefined;
   /** Owned payload that failed to deliver. Existing queues default to text. */
   readonly payload: TPayload;
   /** Epoch ms when the entry was created (first attempt). */
@@ -186,6 +204,7 @@ interface PendingEntry<TPayload> {
   id: string;
   channel: string;
   event: string;
+  target?: string | undefined;
   payload: TPayload;
   createdAt: number;
   attempts: number;
@@ -198,17 +217,70 @@ interface PendingEntry<TPayload> {
 // ---------------------------------------------------------------------------
 
 /**
+ * How a queue writes its payloads into the dead-letter file and reads them
+ * back. `encode` returns undefined for a payload that must not be written
+ * down; that entry stays in memory only.
+ */
+export interface DeadLetterCodec<TPayload> {
+  encode(payload: TPayload): unknown;
+  decode(value: unknown): TPayload | undefined;
+}
+
+interface StoredDeadLetter {
+  readonly id: string;
+  readonly channel: string;
+  readonly event: string;
+  readonly target?: string;
+  readonly payload: unknown;
+  readonly createdAt: number;
+  readonly deadAt: number;
+  readonly attempts: number;
+  readonly finalError: string;
+  readonly failureClass: DeliveryFailureClass;
+  readonly status?: number;
+  readonly basis?: TransienceBasis;
+}
+
+const BASES: ReadonlySet<string> = new Set<TransienceBasis>(['explicit', 'retry-after', 'status', 'errno', 'error-type', 'cancelled', 'reading', 'classic', 'no-wording']);
+
+function readStoredDeadLetters(parsed: unknown): StoredDeadLetter[] {
+  if (!parsed || typeof parsed !== 'object' || !Array.isArray((parsed as { entries?: unknown }).entries)) {
+    throw new Error('expected { entries: [...] }');
+  }
+  const out: StoredDeadLetter[] = [];
+  for (const raw of (parsed as { entries: unknown[] }).entries) {
+    if (!raw || typeof raw !== 'object') continue;
+    const r = raw as Record<string, unknown>;
+    if (typeof r.id !== 'string' || typeof r.channel !== 'string' || typeof r.event !== 'string') continue;
+    if (typeof r.createdAt !== 'number' || typeof r.deadAt !== 'number' || typeof r.attempts !== 'number') continue;
+    if (r.failureClass !== 'retryable' && r.failureClass !== 'terminal') continue;
+    out.push({
+      id: r.id, channel: r.channel, event: r.event, payload: r.payload,
+      createdAt: r.createdAt, deadAt: r.deadAt, attempts: r.attempts,
+      finalError: typeof r.finalError === 'string' ? r.finalError : 'Delivery failed',
+      failureClass: r.failureClass,
+      ...(typeof r.target === 'string' ? { target: r.target } : {}),
+      ...(typeof r.status === 'number' ? { status: r.status } : {}),
+      ...(typeof r.basis === 'string' && BASES.has(r.basis) ? { basis: r.basis as TransienceBasis } : {}),
+    });
+  }
+  return out;
+}
+
+/**
  * Delivery queue with retry/backoff and dead-letter storage.
  *
  * Wrap any integration send operation with `enqueue()`. The queue:
  *  1. Attempts delivery immediately.
- *  2. On failure, decides whether it is transient ({@link readFailureTransience}:
- *     structured facts first, then Jev's reading of the wording).
+ *  2. On failure, decides whether it is transient from the failure's own facts
+ *     ({@link deliveryTransience}); no model reads the wording.
  *  3. On retryable failure: schedules retry with exponential backoff + jitter.
  *  4. On terminal failure or exhausted retries: moves entry to DLQ.
  *  5. Emits `delivery:dead_letter` events to registered listeners.
  *
  * Dead-letter entries can be replayed via `replay()` or cleared with `clearDlq()`.
+ * After {@link DeliveryQueue.persistDeadLetters} they are kept in a file and
+ * survive a restart.
  *
  * Enable SLO enforcement via the integrations.delivery.sloEnforced setting to
  * surface dead-letter failures as error-level log entries and expose them in
@@ -218,6 +290,7 @@ export class DeliveryQueue<TPayload = string> {
   private readonly _config: DeliveryQueueConfig;
   private readonly _structuralDiagnostics: boolean;
   private readonly _dlq: DeadLetterEntry<TPayload>[] = [];
+  private _store: { readonly path: string; readonly codec: DeadLetterCodec<TPayload> } | undefined;
   private readonly _pending = new Map<string, PendingEntry<TPayload>>();
   private readonly _timers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly _listeners = new Set<(entry: DeadLetterEntry<TPayload>) => void>();
@@ -275,6 +348,7 @@ export class DeliveryQueue<TPayload = string> {
     event: string,
     payload: TPayload,
     deliver: () => Promise<void>,
+    options: { readonly target?: string | undefined } = {},
   ): Promise<DeliveryOutcome> {
     this._assertOpen();
     const id = `${channel}:${event}:${Date.now()}:${randomUUID().slice(0, 8)}`;
@@ -282,6 +356,7 @@ export class DeliveryQueue<TPayload = string> {
       id,
       channel,
       event,
+      ...(options.target !== undefined ? { target: options.target } : {}),
       payload,
       createdAt: Date.now(),
       attempts: 0,
@@ -293,28 +368,55 @@ export class DeliveryQueue<TPayload = string> {
   }
 
   /**
-   * Replay all dead-letter entries.
+   * Keep dead letters in `path` from now on: entries already there (from an
+   * earlier run) are loaded at once, and every change to the list is written
+   * through. One document write per dead letter, replay or clear; nothing on
+   * a delivery that succeeds.
+   */
+  persistDeadLetters(path: string, codec: DeadLetterCodec<TPayload>): void {
+    this._store = { path, codec };
+    const stored = readDocument(path, {
+      label: 'integrations/dead-letters',
+      validate: readStoredDeadLetters,
+      recovery: 'Notifications that had failed before this file became unreadable are no longer listed or replayable.',
+    }) ?? [];
+    const known = new Set(this._dlq.map((entry) => entry.id));
+    for (const row of stored) {
+      if (known.has(row.id)) continue;
+      const payload = codec.decode(row.payload);
+      if (payload === undefined) continue;
+      const { payload: _encoded, ...rest } = row;
+      this._retainDeadLetter({ ...rest, payload }, false);
+    }
+    this._writeDeadLetters();
+  }
+
+  /**
+   * Replay dead-letter entries: all of them, or only those whose id is in `ids`.
    *
    * Each entry is re-enqueued with a fresh retry budget. The DLQ is cleared
    * on a per-entry basis as each replayed entry resolves.
    *
    * @param deliver - The delivery function to replay with. The dead-letter
-   *   queue keeps payloads, not the original delivery closures (it lives in
-   *   memory and is lost on restart), so the caller supplies how to send.
+   *   queue keeps payloads, not the original delivery closures (they do not
+   *   survive a restart), so the caller supplies how to send.
    *
    * @returns Array of per-entry replay results.
    */
   replay(
     deliver: (entry: DeadLetterEntry<TPayload>) => Promise<void>,
+    ids?: readonly string[],
   ): Promise<Array<{ id: string; outcome: DeliveryOutcome }>> {
-    return this._own(() => this._replay(deliver));
+    return this._own(() => this._replay(deliver, ids));
   }
 
   private async _replay(
     deliver: (entry: DeadLetterEntry<TPayload>) => Promise<void>,
+    ids?: readonly string[],
   ): Promise<Array<{ id: string; outcome: DeliveryOutcome }>> {
     this._assertOpen();
-    const entries = [...this._dlq];
+    const wanted = ids === undefined ? undefined : new Set(ids);
+    const entries = this._dlq.filter((entry) => wanted === undefined || wanted.has(entry.id));
     const results: Array<{ id: string; outcome: DeliveryOutcome }> = [];
 
     for (const dlqEntry of entries) {
@@ -326,6 +428,7 @@ export class DeliveryQueue<TPayload = string> {
       this._dlq.splice(idx, 1);
       this._deadLettered = Math.max(0, this._deadLettered - 1);
       this._tally(dlqEntry.channel).deadLettered = Math.max(0, this._tally(dlqEntry.channel).deadLettered - 1);
+      this._writeDeadLetters();
 
       try {
         const outcome = await this.enqueue(
@@ -333,6 +436,7 @@ export class DeliveryQueue<TPayload = string> {
           dlqEntry.event,
           dlqEntry.payload,
           () => deliver(dlqEntry),
+          { target: dlqEntry.target },
         );
         results.push({ id: dlqEntry.id, outcome });
       } catch (error) {
@@ -368,6 +472,7 @@ export class DeliveryQueue<TPayload = string> {
     this._dlq.length = 0;
     this._deadLettered = 0;
     for (const tally of this._channelTallies.values()) tally.deadLettered = 0;
+    this._writeDeadLetters();
     return count;
   }
 
@@ -473,20 +578,9 @@ export class DeliveryQueue<TPayload = string> {
       this._assertOpen();
       const errorMsg = this._describeError(err);
       const status = this._structuralDiagnostics ? deliveryHttpStatus(err) : undefined;
-      // An unreadable failure comes back retryable; the attempt budget bounds it.
-      let transience: FailureTransience = await readFailureTransience(err, 'integrations.delivery.queue');
-      this._assertOpen();
-      if (this._structuralDiagnostics) {
-        const evidence = structuralDeliveryEvidence(transience);
-        if (!evidence) {
-          if (entry.attempts > 1) {
-            return this._moveToDlq(entry, errorMsg, { failureClass: 'retryable', basis: 'no-wording', detail: '' }, status);
-          }
-          this._pending.delete(entry.id);
-          throw new Error('Delivery failure classification unavailable');
-        }
-        transience = { ...evidence, detail: '' };
-      }
+      const decided = deliveryTransience(err);
+      // Structural queues retain no free-form detail.
+      const transience: FailureTransience = this._structuralDiagnostics ? { ...decided, detail: '' } : decided;
       const { failureClass } = transience;
 
       if (failureClass === 'terminal' || entry.attempts > this._config.maxRetries) {
@@ -543,6 +637,7 @@ export class DeliveryQueue<TPayload = string> {
       id: entry.id,
       channel: entry.channel,
       event: entry.event,
+      ...(entry.target !== undefined ? { target: entry.target } : {}),
       payload: entry.payload,
       createdAt: entry.createdAt,
       deadAt: Date.now(),
@@ -595,7 +690,7 @@ export class DeliveryQueue<TPayload = string> {
     return 'dead_letter';
   }
 
-  private _retainDeadLetter(entry: DeadLetterEntry<TPayload>): void {
+  private _retainDeadLetter(entry: DeadLetterEntry<TPayload>, write = true): void {
     // Bounded DLQ: evict oldest entry when limit exceeded.
     if (this._dlq.length >= this._config.maxDlqSize) {
       const evicted = this._dlq.shift();
@@ -605,6 +700,27 @@ export class DeliveryQueue<TPayload = string> {
     this._dlq.push(entry);
     this._deadLettered += 1;
     this._tally(entry.channel).deadLettered += 1;
+    if (write) this._writeDeadLetters();
+  }
+
+  /** Write the dead-letter list through to its file, when it has one. */
+  private _writeDeadLetters(): void {
+    const store = this._store;
+    if (!store) return;
+    const entries: StoredDeadLetter[] = [];
+    for (const { payload, ...entry } of this._dlq) {
+      let encoded: unknown;
+      try { encoded = store.codec.encode(payload); } catch { encoded = undefined; }
+      if (encoded !== undefined) entries.push({ ...entry, payload: encoded } as StoredDeadLetter);
+    }
+    try {
+      writeDocument(store.path, { version: 1, entries }, { indent: null });
+    } catch (error) {
+      // The list in memory is still right and still replayable; only a restart would lose it.
+      logger.warn('DeliveryQueue: the dead-letter file could not be written; failed notifications are kept in memory only until the next successful write', {
+        error: summarizeError(error),
+      });
+    }
   }
 
   private _computeDelay(attempt: number): number {
@@ -659,7 +775,8 @@ export function snapshotQueueStatus<TPayload>(
   return {
     channel,
     metrics: queue.getMetrics(channel),
-    dlqEntries: [...dlq].reverse().slice(0, 50).map(({ payload, ...entry }) => ({
+    // The target can be a URL that carries a secret topic or token; it is kept for replay only.
+    dlqEntries: [...dlq].reverse().slice(0, 50).map(({ payload, target: _target, ...entry }) => ({
       ...entry,
       payload: describePayload ? describePayload(payload)
         : typeof payload === 'string' ? payload : 'Delivery payload unavailable',

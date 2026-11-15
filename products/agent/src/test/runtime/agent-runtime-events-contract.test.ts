@@ -74,6 +74,17 @@ function lifecycle(ask: string): readonly ContractEvent[] {
   ];
 }
 
+/** Three workstreams with one task: one passes, one fails, one is cancelled. */
+function endings(ask: string): readonly ContractEvent[] {
+  const ids = [1, 2, 3].map(() => `ctr-agent-ending-${++sequence}`);
+  return [
+    ...ids.map((contractId): ContractEvent => ({ type: 'CONTRACT_CREATED', contractId, sessionId: 's1', origin: 'turn', ask, ownerAgentId: 'agent-owner' })),
+    { type: 'CONTRACT_PASSED', contractId: ids[0]!, criteriaMet: 1, criteriaJudged: 1, excluded: 0, nudges: 0 },
+    { type: 'CONTRACT_FAILED', contractId: ids[1]!, reason: 'fixture failure detail', failureKind: 'other', membersSettled: true },
+    { type: 'CONTRACT_CANCELLED', contractId: ids[2]!, reason: 'fixture cancellation detail', filesModified: 0 },
+  ];
+}
+
 const registry = {
   resolveSecret: async (service: string, key: string) => key === 'webhookUrl' ? `https://${service}.example/fixture` : null,
 };
@@ -91,12 +102,11 @@ describe('the Agent uses canonical contract lifecycle consumers', () => {
     try {
       const events = lifecycle('Name the Agent contract task');
       for (const event of events) emitContractEvent(h.runtimeBus, 's1', event);
-      await waitForNotices(() => slack.length === 3 && discord.length === 3, () => JSON.stringify({ slack, discord }));
-      expect(slack).toEqual([
-        '"Name the Agent contract task" is done: 1 of 1 requirements met',
-        '"Name the Agent contract task" could not be finished: fixture failure detail',
-        '"Name the Agent contract task" was cancelled: fixture cancellation detail',
-      ]);
+      // One workstream ends once: the first outcome is announced, later ones are not.
+      await waitForNotices(() => slack.length === 1 && discord.length === 1, () => JSON.stringify({ slack, discord }));
+      await delivered();
+      expect(slack).toHaveLength(1);
+      expect(slack[0]).toContain('Name the Agent contract task');
       expect(discord).toEqual(slack);
       expect(h.lines.map(line => line.channel)).toEqual(['contract', 'contract', 'contract', 'contract']);
       expect(h.lines[0]?.text).toBe(`[Contract] ${events[0]!.contractId} started: Name the Agent contract task`);
@@ -115,6 +125,26 @@ describe('the Agent uses canonical contract lifecycle consumers', () => {
     }
   });
 
+  test('each ending workstream is announced to Slack and Discord with its task and reason', async () => {
+    const h = harness();
+    const slack: string[] = [];
+    const discord: string[] = [];
+    const slackSpy = spyOn(SlackIntegration.prototype, 'postWebhook').mockImplementation(async text => { slack.push(text); });
+    const discordSpy = spyOn(DiscordIntegration.prototype, 'postWebhook').mockImplementation(async text => { discord.push(text); });
+    const notifier = await createRuntimeNotifier(registry, () => false);
+    notifier.attachToRuntimeBus(h.runtimeBus);
+    try {
+      for (const event of endings('Name the Agent contract task')) emitContractEvent(h.runtimeBus, 's1', event);
+      await waitForNotices(() => slack.length === 3 && discord.length === 3, () => JSON.stringify({ slack, discord }));
+      for (const text of slack) expect(text).toContain('Name the Agent contract task');
+      expect(slack[1]).toContain('fixture failure detail');
+      expect(slack[2]).toContain('fixture cancellation detail');
+      expect(discord).toEqual(slack);
+    } finally {
+      await notifier.close(); h.dispose(); slackSpy.mockRestore(); discordSpy.mockRestore();
+    }
+  });
+
   for (const setting of [true, undefined, 'false']) {
     test(`restricted delivery omits remembered task and event details for setting ${JSON.stringify(setting)}`, async () => {
       const h = harness();
@@ -124,10 +154,13 @@ describe('the Agent uses canonical contract lifecycle consumers', () => {
       const notifier = await createRuntimeNotifier(registry, () => setting);
       notifier.attachToRuntimeBus(h.runtimeBus);
       try {
-        const events = lifecycle(`Private contract task ${String(setting)}`);
+        const events = endings(`Private contract task ${String(setting)}`);
         for (const event of events) emitContractEvent(h.runtimeBus, 's1', event);
         await waitForNotices(() => sent.length === 3, () => JSON.stringify(sent));
-        expect(sent).toEqual(Array(3).fill('GoodVibes: notification available'));
+        for (const text of sent) {
+          expect(text).not.toContain('Private contract task');
+          expect(text).not.toContain('fixture');
+        }
         // Local lifecycle presentation still knows the canonical task.
         expect(h.followUps[0]?.summary).toContain(`"Private contract task ${String(setting)}"`);
       } finally {

@@ -27,6 +27,7 @@
 import { useMemo, useState } from 'react';
 import { Settings2 } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { queryKeys } from '../../lib/queries';
 import { invokeMethod, client as platformClient } from '../../lib/goodvibes';
 import { formatError, isMethodNotInvokableError, isMethodUnavailableError } from '../../lib/errors';
 import { asRecord, formatBytes } from '../../lib/object';
@@ -96,12 +97,12 @@ export function VoiceSettings() {
       return invokeMethod('config.set', { key, value });
     },
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['voice', 'config'] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.config });
     },
     // A refused write (or a refused second write after the voice was cleared) still
     // changes what the host holds: re-read it, and the alert below says why.
     onError: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['voice', 'config'] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.config });
     },
   });
 

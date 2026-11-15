@@ -18,7 +18,11 @@
  * the ONLY thing consulted for that decision; nothing here re-derives it.
  *
  * A module singleton, for the same reason the TTS engine is one: there is one
- * microphone and one tab. `createWakeHost` is exported beside it so a test drives
+ * microphone per page. Between pages the singleton holds the `goodvibes.wake` Web
+ * Lock while it listens, so of several open tabs (or a tab and an installed window)
+ * exactly one hears a wake phrase, sends it to speech-to-text and hands it to a
+ * composer; the others report that wake detection runs in another tab and start
+ * when the lock is released. `createWakeHost` is exported beside it so a test drives
  * the real engine and the real listener with a stubbed inference session, rather
  * than testing a second implementation of this logic.
  */
@@ -86,7 +90,10 @@ export interface WakeHostState {
   /** What opened the device, e.g. "getUserMedia (AudioWorklet)"; null when closed. */
   readonly deviceLabel: string | null;
   /** Why the detector is not running, written for a user to read. */
-  readonly refusal: { readonly kind: WakeStartRefusal | 'model-unavailable' | 'host-error'; readonly detail: string } | null;
+  readonly refusal: {
+    readonly kind: WakeStartRefusal | 'model-unavailable' | 'other-tab' | 'host-error';
+    readonly detail: string;
+  } | null;
   /** The most recent failure's message, or null. */
   readonly error: string | null;
   /** The inference backend actually in force, once a runtime has loaded. */
@@ -98,6 +105,8 @@ export interface WakeHostState {
   /** The last transcript this host handed onward, for a receipt in the UI. */
   readonly lastTranscript: string | null;
   readonly modelIds: readonly string[];
+  /** Configured rows this tab cannot honour while it listens, written for a user to read. */
+  readonly limitations: readonly string[];
 }
 
 const IDLE_STATE: WakeHostState = {
@@ -113,7 +122,24 @@ const IDLE_STATE: WakeHostState = {
   lastWakeAt: null,
   lastTranscript: null,
   modelIds: [],
+  limitations: [],
 };
+
+/** The cross-tab lock name: one listening wake host per browser profile. */
+export const WAKE_TAB_LOCK = 'goodvibes.wake';
+
+const OTHER_TAB_DETAIL = 'Wake detection is running in another tab. This tab starts listening when that one stops.';
+
+/**
+ * Exclusive hold on wake detection across the tabs of one browser.
+ *
+ * `request` answers with a release function once this tab holds it, or null when
+ * `signal` aborted first. `onQueued` is called when another tab holds it, before
+ * the wait begins.
+ */
+export interface WakeTabLock {
+  request(signal: AbortSignal, onQueued: () => void): Promise<(() => void) | null>;
+}
 
 /** Where a finished transcript goes. Registered by the view that owns a composer. */
 export type WakeTranscriptSink = (text: string, options: { readonly autoSubmit: boolean }) => void;
@@ -154,6 +180,8 @@ export interface WakeHostDeps {
   readonly chime: () => boolean;
   /** Registers this host so a push-to-talk press can stand it down. */
   readonly arbiter: Pick<MicArbiter, 'registerWake'> | null;
+  /** Cross-tab exclusivity. Absent: this host listens whenever it is configured to. */
+  readonly tabLock?: WakeTabLock | null | undefined;
   readonly warn: (message: string, meta?: Readonly<Record<string, unknown>>) => void;
   readonly now?: (() => number) | undefined;
 }
@@ -187,6 +215,10 @@ export class WakeHost {
   /** True while the arbiter holds the device for a push-to-talk press. */
   #suspended = false;
   #settings: WakeRuntimeSettings | null = null;
+  /** Releases the cross-tab lock while this host holds it. */
+  #lockRelease: (() => void) | null = null;
+  /** Aborts the wait while another tab holds the lock. */
+  #lockWait: AbortController | null = null;
 
   constructor(deps: WakeHostDeps) {
     this.#deps = deps;
@@ -224,6 +256,7 @@ export class WakeHost {
       this.#settings = settings;
       if (settings === null) {
         await this.#teardown();
+        this.#releaseTabLock();
         this.#patch({ ...IDLE_STATE });
         return;
       }
@@ -254,6 +287,7 @@ export class WakeHost {
       // The one place the "never open a device while disabled" rule is enforced:
       // nothing below this line runs, so no model is fetched and getUserMedia is
       // never called.
+      this.#releaseTabLock();
       const askedForHere = settings.enabled && settings.surfaceEnabled;
       this.#patch({
         ...IDLE_STATE,
@@ -304,11 +338,16 @@ export class WakeHost {
   }
 
   async #restartListener(listener: WakeListener): Promise<void> {
+    if (!(await this.#acquireTabLock())) {
+      this.#patch({ phase: 'refused', deviceLabel: null, refusal: { kind: 'other-tab', detail: OTHER_TAB_DETAIL } });
+      return;
+    }
     const outcome = await listener.start();
     if (outcome.started) {
       this.#registerWithArbiter();
       this.#patch({ phase: 'listening', deviceLabel: outcome.deviceLabel, refusal: null, error: null });
     } else {
+      this.#releaseTabLock();
       this.#patch({ phase: 'refused', refusal: { kind: outcome.refusal, detail: outcome.detail } });
     }
   }
@@ -317,6 +356,7 @@ export class WakeHost {
   stop(): Promise<void> {
     return this.#run(async () => {
       await this.#teardown();
+      this.#releaseTabLock();
       this.#signature = null;
       this.#patch({ ...IDLE_STATE, settings: this.#settings });
     });
@@ -387,6 +427,31 @@ export class WakeHost {
   }
 
   async #startListening(settings: WakeRuntimeSettings): Promise<void> {
+    if (!settings.modelIds.includes(PINNED_WAKE_MODEL_ID)) {
+      // Nothing this tab could score: no download, no device, no lock. Holding the
+      // microphone would show "listening" for a detector that cannot fire, and
+      // dictation opens its own stream when pressed.
+      this.#releaseTabLock();
+      const detail = noPinnedModelDetail(settings.modelIds);
+      this.#patch({
+        ...IDLE_STATE,
+        settings,
+        phase: 'refused',
+        indicator: settings.indicator,
+        refusal: { kind: 'model-unavailable', detail },
+      });
+      return;
+    }
+    if (!(await this.#acquireTabLock())) {
+      this.#patch({
+        ...IDLE_STATE,
+        settings,
+        phase: 'refused',
+        indicator: settings.indicator,
+        refusal: { kind: 'other-tab', detail: OTHER_TAB_DETAIL },
+      });
+      return;
+    }
     this.#patch({
       ...IDLE_STATE,
       settings,
@@ -401,6 +466,7 @@ export class WakeHost {
       const detail = error instanceof WakeModelError
         ? error.message
         : `The wake-word models could not be loaded: ${error instanceof Error ? error.message : String(error)}`;
+      this.#releaseTabLock();
       this.#patch({ phase: 'refused', refusal: { kind: 'model-unavailable', detail }, error: detail });
       return;
     }
@@ -442,6 +508,8 @@ export class WakeHost {
 
     const outcome = await listener.start();
     if (!outcome.started) {
+      // A tab that cannot open its device must not keep every other tab waiting.
+      this.#releaseTabLock();
       this.#patch({
         phase: outcome.refusal === 'blocked' ? 'latched' : 'refused',
         refusal: { kind: outcome.refusal, detail: outcome.detail },
@@ -458,9 +526,62 @@ export class WakeHost {
       backend: modelSet.backend,
       backendNote: modelSet.fallbackReason,
       modelIds: modelSet.models.map((model) => model.id),
+      limitations: modelSet.limitations,
       refusal: null,
       error: null,
     });
+  }
+
+  /**
+   * True once this tab holds the cross-tab lock (or has none to hold). When another
+   * tab holds it, answers false and keeps one wait queued: the grant starts this
+   * host with the settings current at that moment. Held, never polled.
+   */
+  #acquireTabLock(): Promise<boolean> {
+    const lock = this.#deps.tabLock;
+    if (!lock || this.#lockRelease !== null) return Promise.resolve(true);
+    if (this.#lockWait !== null) return Promise.resolve(false);
+    const wait = new AbortController();
+    this.#lockWait = wait;
+    return new Promise<boolean>((answer) => {
+      let queued = false;
+      void lock.request(wait.signal, () => {
+        queued = true;
+        answer(false);
+      }).then((release) => {
+        if (this.#lockWait !== wait || release === null) {
+          release?.();
+          if (this.#lockWait === wait) this.#lockWait = null;
+          answer(false);
+          return;
+        }
+        this.#lockWait = null;
+        this.#lockRelease = release;
+        if (!queued) {
+          answer(true);
+          return;
+        }
+        void this.#run(async () => {
+          const settings = this.#settings;
+          if (this.#lockRelease !== release || this.#suspended) return;
+          if (settings?.active !== true) {
+            this.#releaseTabLock();
+            return;
+          }
+          const listener = this.#listener;
+          if (listener === null) await this.#startListening(settings);
+          else await this.#restartListener(listener);
+        });
+      });
+    });
+  }
+
+  #releaseTabLock(): void {
+    this.#lockWait?.abort();
+    this.#lockWait = null;
+    const release = this.#lockRelease;
+    this.#lockRelease = null;
+    release?.();
   }
 
   /** Idempotent: a listener holding the device must always be one a press can stand down. */
@@ -524,6 +645,9 @@ export class WakeHost {
   }
 
   #onFailure(error: AudioCaptureError, restarting: boolean, detail: string): void {
+    // A latched detector no longer listens; another tab may take over until a
+    // deliberate retry here asks for the lock again.
+    if (!restarting) this.#releaseTabLock();
     this.#patch({
       phase: restarting ? 'restarting' : 'latched',
       error: detail || error.message,
@@ -569,9 +693,10 @@ function describeInactive(settings: WakeRuntimeSettings): WakeHostState['refusal
  * Only the PINNED classifier is servable to a tab: `voice.wake.model` reads the
  * managed artifacts, and a custom model in `voice.wake.customModelDir` lives on
  * the host's disk with no route to fetch it. Extra ids are therefore reported as a
- * limitation rather than silently relabelled onto the pinned model, a detector
- * that says it is running your model and is running a different one is worse than
- * one that says it cannot.
+ * limitation (shown in the settings panel) rather than silently relabelled onto the
+ * pinned model, a detector that says it is running your model and is running a
+ * different one is worse than one that says it cannot. A list without the pinned
+ * id never reaches this loader: the host refuses it without opening the device.
  */
 export function createBrowserModelSetLoader(deps: {
   readonly readChunk: Parameters<typeof loadWakeModel>[1]['readChunk'];
@@ -627,15 +752,8 @@ export function createBrowserModelSetLoader(deps: {
         + 'fetch it here. Only the pinned model is being scored in this tab.',
       );
     }
-    const models: WakeModelHandle[] = settings.modelIds.includes(PINNED_WAKE_MODEL_ID)
-      ? [{ id: PINNED_WAKE_MODEL_ID, session: classifier }]
-      : [];
-    if (models.length === 0) {
-      limitations.push(
-        `voice.wake.models does not include "${PINNED_WAKE_MODEL_ID}", so this tab scores nothing. Capture is still `
-        + 'available for dictation.',
-      );
-    }
+    // The host starts a loader only when the pinned id is configured.
+    const models: WakeModelHandle[] = [{ id: PINNED_WAKE_MODEL_ID, session: classifier }];
 
     return {
       embedding,
@@ -648,6 +766,44 @@ export function createBrowserModelSetLoader(deps: {
         await Promise.all([embedding.release?.(), classifier.release?.(), vadSession?.release?.()]);
       },
     };
+  };
+}
+
+function noPinnedModelDetail(modelIds: readonly string[]): string {
+  const named = modelIds.length === 0 ? 'is empty' : `names only ${modelIds.join(', ')}`;
+  return `voice.wake.models ${named}, and a browser tab can score only the pinned "${PINNED_WAKE_MODEL_ID}" `
+    + 'classifier (a custom model lives on the host\'s disk with no route to fetch it here). This tab does not open '
+    + 'the microphone for wake detection; dictation still works.';
+}
+
+/**
+ * The browser's cross-tab lock, over the Web Locks API. Null where the API is
+ * missing (an insecure origin or an old browser): the tab then listens on its own,
+ * as it would with one tab open.
+ */
+export function createBrowserWakeTabLock(): WakeTabLock | null {
+  const locks = typeof navigator === 'undefined' ? undefined : navigator.locks;
+  if (!locks) return null;
+  return {
+    request: (signal, onQueued) => new Promise((resolve) => {
+      // The lock is held for as long as the callback's promise is pending; the
+      // release handed to the host settles it.
+      const hold = (lock: Lock | null): Promise<void> | undefined => (lock === null
+        ? undefined
+        : new Promise<void>((release) => resolve(() => release())));
+      locks.request(WAKE_TAB_LOCK, { ifAvailable: true }, (lock) => {
+        if (lock !== null) return hold(lock);
+        if (signal.aborted) {
+          resolve(null);
+          return undefined;
+        }
+        onQueued();
+        // Aborted: this tab stopped waiting. Any other failure of the API: listen
+        // alone rather than wait for a grant that will never come.
+        locks.request(WAKE_TAB_LOCK, { signal }, hold).catch(() => resolve(signal.aborted ? null : () => undefined));
+        return undefined;
+      }).catch(() => resolve(() => undefined));
+    }),
   };
 }
 
@@ -695,6 +851,7 @@ export const wakeHost: WakeHost = createWakeHost({
   transcribe: (artifact) => mutableDeps.transcribe(artifact),
   chime: () => playWakeChime(),
   arbiter: micArbiter,
+  tabLock: createBrowserWakeTabLock(),
   warn: consoleWarn,
 });
 

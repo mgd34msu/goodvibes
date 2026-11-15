@@ -37,6 +37,7 @@ import { useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-q
 import { isStructuredCredentialReferenceConfigKey } from '@goodvibes-jev/engine/platform/platform/judgment-browser/catalogs';
 import { client as platformClient, type ConfigSetOutcome } from '../../../lib/goodvibes';
 import type { FeaturePendingRestart } from '../../../lib/feature-restart-status';
+import { queryKeys } from '../../../lib/queries';
 import { FEATURE_SETTINGS } from '../../../lib/generated/config-schema';
 import { formatError, isAdminRequiredError } from '../../../lib/errors';
 import { useToast } from '../../../lib/toast';
@@ -112,7 +113,7 @@ export function ConfigSettingsProvider({ enabled = true, children }: { enabled?:
   const [persistedByKey, setPersistedByKey] = useState<Readonly<Record<string, ConfigSetOutcome>>>({});
 
   const config = useQuery({
-    queryKey: ['config'],
+    queryKey: queryKeys.config,
     queryFn: () => platformClient.operator.config.get(),
     enabled,
     retry: false,
@@ -157,7 +158,7 @@ export function ConfigSettingsProvider({ enabled = true, children }: { enabled?:
           : await platformClient.operator.config.set(key, value);
         setPersistedByKey((prev) => ({ ...prev, [key]: outcome }));
         await Promise.all([
-          queryClient.invalidateQueries({ queryKey: ['config'] }),
+          queryClient.invalidateQueries({ queryKey: queryKeys.config }),
           RESTART_GATED_KEYS.has(key) ? queryClient.invalidateQueries({ queryKey: FEATURE_RESTART_STATUS_KEY }) : undefined,
         ]);
         toast({
@@ -179,7 +180,7 @@ export function ConfigSettingsProvider({ enabled = true, children }: { enabled?:
         const outcome = await platformClient.operator.config.reset(key);
         setPersistedByKey((prev) => ({ ...prev, [key]: outcome }));
         await Promise.all([
-          queryClient.invalidateQueries({ queryKey: ['config'] }),
+          queryClient.invalidateQueries({ queryKey: queryKeys.config }),
           RESTART_GATED_KEYS.has(key) ? queryClient.invalidateQueries({ queryKey: FEATURE_RESTART_STATUS_KEY }) : undefined,
         ]);
         toast({ title: 'Setting reset', description: `${key} is back to its default.`, tone: 'success' });

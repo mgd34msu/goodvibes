@@ -98,6 +98,10 @@ on the daemon (the setup button in the wake settings shows the download size),
 (`voice.wake.surfaces.webui`) is on. The settings surface renders the
 resolver's blockers verbatim, so read the stated reason there first; a missing
 speech gate artifact or a refused microphone permission each name themselves.
+`voice.wake.models` must include the pinned model; a list of custom ids or an
+empty list stops the tab before it asks for the microphone. "Wake detection is
+running in another tab" means another tab or window of this browser is the one
+listening: close it, or turn wake off there, and this tab starts.
 While the surface opt-in is off, the tab deliberately never asks for the
 microphone.
 

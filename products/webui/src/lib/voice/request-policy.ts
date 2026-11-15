@@ -27,6 +27,7 @@
  * scheduler (coalesce, cap, retry-then-skip over an injected `synth` function) is the
  * correct browser-side counterpart, not a stand-in awaiting removal.
  */
+import { classicSpeechEndOffsets } from '@goodvibes-jev/engine/platform/browser/decision-policy';
 
 /** One segment's outcome. `status:'ok'` carries decodable audio bytes; `status:'skipped'`
  * carries the last error that made it give up (transient exhausted, or non-transient). */
@@ -75,16 +76,16 @@ export function isTransientTtsError(error: unknown): boolean {
   return status === 429;
 }
 
-export type SpeechSeamReader = (paragraph: string, start: number, end: number, signal: AbortSignal) => Promise<readonly number[]>;
-
 /**
  * coalesceForSpeech, split a reply into the FEWEST synthesis segments each within
  * `maxChars`. A reply that already fits is a single segment (one request). Longer text
  * is split on paragraph, then sentence, then whitespace boundaries, never mid-word, so
- * the seams fall where a human would pause. Returns [] for empty/whitespace-only text.
+ * the seams fall where a human would pause. Sentence ends are found locally (closing
+ * punctuation followed by whitespace), the same rule the daemon's spoken-turn chunker
+ * uses, so speech starts at once with no request to place a cut. Returns [] for
+ * empty/whitespace-only text.
  */
-export async function coalesceForSpeech(text: string, maxChars = 1800, readSeams?: SpeechSeamReader, signal: AbortSignal = new AbortController().signal): Promise<string[]> {
-  signal.throwIfAborted();
+export function coalesceForSpeech(text: string, maxChars = 1800): string[] {
   if (!Number.isInteger(maxChars) || maxChars < 1) throw new RangeError('Invalid speech budget');
   const trimmed = text.trim();
   if (!trimmed) return [];
@@ -94,31 +95,16 @@ export async function coalesceForSpeech(text: string, maxChars = 1800, readSeams
   // then over-long sentences into hard word-boundary slices), then GREEDILY re-join
   // adjacent pieces up to maxChars so we emit as few segments as possible.
   const atoms: string[] = [];
-  let paragraphOffset = text.indexOf(trimmed);
-  for (const paragraph of trimmed.split(/(\n{2,})/)) {
-    const paragraphStart = paragraphOffset; paragraphOffset += paragraph.length;
+  for (const paragraph of trimmed.split(/\n{2,}/)) {
     const p = paragraph.trim();
     if (!p) continue;
     if (p.length <= maxChars) {
       atoms.push(p);
       continue;
     }
-    if (!readSeams) throw new Error('Sentence boundaries are unavailable.');
-    const start = paragraphStart + paragraph.indexOf(p);
-    const rawOffsets: unknown = await readSeams(p, start, start + p.length, signal);
-    signal.throwIfAborted();
-    if (!Array.isArray(rawOffsets)) throw new Error('Invalid sentence boundaries.');
-    const entries: readonly unknown[] = rawOffsets;
-    const offsets: number[] = [];
-    for (const offset of entries) {
-      if (typeof offset !== 'number' || !Number.isInteger(offset) || offset <= (offsets.at(-1) ?? 0) || offset > p.length
-        || (offset < p.length && !/\s/.test(p[offset] ?? ''))) throw new Error('Invalid sentence boundaries.');
-      offsets.push(offset);
-    }
     let previous = 0;
-    for (const offset of [...offsets, ...(offsets.at(-1) === p.length ? [] : [p.length])]) {
-      const sentence = p.slice(previous, offset); previous = offset;
-      const s = sentence.trim();
+    for (const offset of classicSpeechEndOffsets(p)) {
+      const s = p.slice(previous, offset).trim(); previous = offset;
       if (!s) continue;
       if (s.length <= maxChars) {
         atoms.push(s);

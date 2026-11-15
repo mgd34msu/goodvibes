@@ -2,7 +2,9 @@
  * useVoice.ts, React glue for the voice surface.
  *
  *   useVoiceStatus()      the honest availability posture (voice.status), cached/shared.
- *   useSharedVoiceConfig() the shared tts.provider/tts.voice defaults (config.get).
+ *   useSharedVoiceConfig() the shared tts.provider/tts.voice defaults (config.get, read
+ *                         from the one `queryKeys.config` cache entry every settings
+ *                         screen writes through).
  *   useTts()              speak/stop a reply through the singleton engine, with live state.
  *   useVoiceInput()       mic capture -> voice.stt -> transcript, as an honest state machine.
  *
@@ -32,8 +34,8 @@ import {
   type UtteranceAudioArtifact,
 } from '@goodvibes-jev/engine/platform/platform/voice/capture';
 import { client as platformClient } from '../goodvibes';
+import { queryKeys } from '../queries';
 import { asRecord } from '../object';
-import { readSpeechSeams, type SpeechSource } from './speech-seams';
 import { getClientLifetime, isClientLifetimeCurrent, subscribeClientLifetime } from '../client-lifetime';
 import { coalesceForSpeech } from './request-policy';
 import { ttsEngine, canPlayAudio, type TtsPlaybackState } from './tts-player';
@@ -69,7 +71,7 @@ export function useVoiceStatus(): { availability: VoiceAvailability; isLoading: 
  * then applies its own defaults). */
 export function useSharedVoiceConfig(): { config: SharedVoiceConfig; isLoading: boolean } {
   const query = useQuery({
-    queryKey: ['voice', 'config'],
+    queryKey: queryKeys.config,
     queryFn: () => platformClient.operator.config.get(),
     staleTime: 30_000,
     retry: false,
@@ -90,6 +92,14 @@ export interface UseTtsResult {
   readonly isActive: (id: string) => boolean;
   readonly speak: (id: string, text: string) => void;
   readonly stop: () => void;
+}
+
+/** The message a Speak control reads. Speech stops when it changes under the control. */
+export interface SpeechSource {
+  readonly sessionId: string;
+  readonly messageId: string;
+  readonly contentRevision: string;
+  readonly content: string;
 }
 
 export function useTts(source?: SpeechSource): UseTtsResult {
@@ -136,12 +146,9 @@ export function useTts(source?: SpeechSource): UseTtsResult {
         if (controller.signal.aborted || !isClientLifetimeCurrent(lifetime)) return Promise.reject(new Error('Speech owner is no longer current.'));
         return synth(segment, signal);
       };
-      void ttsEngine.speak({ id, synth: ownedSynth, signal: controller.signal, prepareSegments: signal => coalesceForSpeech(text, 1800, async (_paragraph, start, end, currentSignal) => {
-        if (source?.content !== text) throw new Error('Canonical message unavailable.');
-        return readSpeechSeams(source, start, end, currentSignal);
-      }, signal) });
+      void ttsEngine.speak({ id, synth: ownedSynth, signal: controller.signal, segments: coalesceForSpeech(text, 1800) });
     },
-    [synth, source],
+    [synth],
   );
 
   const stop = useCallback(() => ttsEngine.stop(), []);
@@ -168,7 +175,7 @@ export const WAKE_STATUS_QUERY_KEY = ['voice', 'wake', 'status'] as const;
 
 export function useWakeSettings(): { settings: WakeRuntimeSettings; isLoading: boolean } {
   const query = useQuery({
-    queryKey: ['voice', 'config'],
+    queryKey: queryKeys.config,
     queryFn: () => platformClient.operator.config.get(),
     staleTime: 30_000,
     retry: false,

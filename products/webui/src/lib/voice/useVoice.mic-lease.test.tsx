@@ -9,6 +9,7 @@ import { act } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useVoiceInput, type UseVoiceInputResult } from './useVoice';
 import { micArbiter, type MicLease } from './mic-arbiter';
+import { queryKeys } from '../queries';
 
 const originalAcquire = micArbiter.acquireExclusive;
 const originalOpen = micArbiter.openCapture;
@@ -49,7 +50,7 @@ function mount(): { voice: () => UseVoiceInputResult; unmount: () => void } {
   }
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
   client.setQueryData(['voice', 'status'], {});
-  client.setQueryData(['voice', 'config'], {});
+  client.setQueryData(queryKeys.config, {});
   const root = createRoot(document.createElement('div'));
   act(() => root.render(<QueryClientProvider client={client}><Harness /></QueryClientProvider>));
   return { voice: () => voice, unmount: () => { act(() => root.unmount()); client.clear(); } };

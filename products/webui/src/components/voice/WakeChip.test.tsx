@@ -23,6 +23,7 @@ const IDLE: WakeHostState = {
   lastWakeAt: null,
   lastTranscript: null,
   modelIds: [],
+  limitations: [],
 };
 
 let mockState: WakeHostState = IDLE;

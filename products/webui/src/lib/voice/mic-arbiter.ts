@@ -166,8 +166,10 @@ export class MicArbiter {
 }
 
 /**
- * The tab's single arbiter. A module singleton for the same reason the TTS engine
- * is one: there is exactly one microphone and exactly one tab, so a per-component
- * instance would recreate the very race this arbitrates.
+ * The page's single arbiter. A module singleton for the same reason the TTS engine
+ * is one: there is exactly one microphone per page, so a per-component instance
+ * would recreate the very race this arbitrates. Between pages, the wake host's
+ * `goodvibes.wake` Web Lock keeps wake detection to one tab; dictation in any tab
+ * opens its own stream when pressed.
  */
 export const micArbiter = new MicArbiter(createBrowserCaptureOpener());

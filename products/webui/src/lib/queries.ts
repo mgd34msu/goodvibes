@@ -4,11 +4,10 @@ export const queryKeys = {
   control: ['control', 'snapshot'] as const,
   accounts: ['accounts'] as const,
   providers: ['providers'] as const,
-  // The daemon's full config tree (config.get), shared cache key with
-  // SettingsModal/ModelWorkspaceModal/useSharedVoiceConfig, all of which already
-  // used the literal ['config'] array. Centralized here so the session-view
-  // permission-mode reader (the engine gate preset contract) invalidates/dedupes against
-  // the SAME cache entry rather than a second, silently-diverging one.
+  // The daemon's full config tree (config.get): the ONE cache entry for it. The
+  // generic settings rows, the model and price dialogs, the voice and wake hooks and
+  // the session-view permission-mode reader all read and invalidate this key, so a
+  // write from any screen is seen by every reader.
   config: ['config'] as const,
   // Revision is local, contains no credentials, and changes on token/relay identity
   // replacement and expiry. The prefix lets contract events refresh every view.

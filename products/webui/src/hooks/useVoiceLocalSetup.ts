@@ -63,7 +63,7 @@ export function useVoiceLocalInstall() {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.voiceLocalStatus }),
         queryClient.invalidateQueries({ queryKey: ['voice', 'status'] }),
-        queryClient.invalidateQueries({ queryKey: ['voice', 'config'] }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.config }),
       ]);
     },
   });

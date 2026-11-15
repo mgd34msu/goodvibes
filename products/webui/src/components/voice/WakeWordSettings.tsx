@@ -27,6 +27,7 @@
 import { Button } from '../ui/Button';
 import { Checkbox } from '../ui/Checkbox';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { queryKeys } from '../../lib/queries';
 import { client as platformClient } from '../../lib/goodvibes';
 import { formatError, isMethodNotInvokableError, isMethodUnavailableError } from '../../lib/errors';
 import { formatBytes } from '../../lib/object';
@@ -55,7 +56,7 @@ export function WakeWordSettings({ open }: WakeWordSettingsProps) {
   const setKey = useMutation({
     mutationFn: ({ key, value }: { key: string; value: unknown }) => platformClient.operator.config.set(key, value),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['voice', 'config'] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.config });
     },
   });
 
@@ -190,13 +191,17 @@ export function WakeWordSettings({ open }: WakeWordSettingsProps) {
         </ul>
       )}
 
-      {/* Rows not in force while the detector still runs, verbatim. */}
-      {settings.limitations.length > 0 && (
+      {/* Rows not in force while the detector still runs, verbatim: the resolver's,
+          then what this tab found it cannot load. */}
+      {(settings.limitations.length > 0 || hostState.limitations.length > 0) && (
         <ul className="voice-settings-wake-reasons" data-testid="wake-limitations">
           {settings.limitations.map((limitation) => (
             <li key={limitation.key}>
               <code>{limitation.key}</code> {limitation.detail}
             </li>
+          ))}
+          {hostState.limitations.map((limitation) => (
+            <li key={limitation}>{limitation}</li>
           ))}
         </ul>
       )}

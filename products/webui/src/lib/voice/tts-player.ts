@@ -145,9 +145,7 @@ export interface TtsSpeakRequest {
   /** The message id, used so the UI knows which message is speaking. */
   readonly id: string;
   /** The coalesced segments (from coalesceForSpeech). */
-  readonly segments?: readonly string[];
-  /** Resolve sentence seams before any synthesis. Owned by this engine's cancellation token. */
-  readonly prepareSegments?: (signal: AbortSignal) => Promise<readonly string[]>;
+  readonly segments: readonly string[];
   readonly signal?: AbortSignal;
   /** Synthesise one segment to decodable audio bytes (the voice.tts.stream call). */
   readonly synth: (text: string, signal: AbortSignal) => Promise<ArrayBuffer>;
@@ -166,8 +164,6 @@ export class TtsEngine {
   private readonly listeners = new Set<(state: TtsPlaybackState) => void>();
   private current: { run: TtsRun; sink: AudioSink; token: number } | null = null;
   private token = 0;
-  private preparation: AbortController | null = null;
-  private preparingSink: AudioSink | null = null;
 
   getState(): TtsPlaybackState {
     return this.state;
@@ -196,9 +192,6 @@ export class TtsEngine {
   }
 
   private teardown(): void {
-    this.preparation?.abort(); this.preparation = null;
-    const preparing = this.preparingSink; this.preparingSink = null;
-    if (preparing) { preparing.stop(); void preparing.close(); }
     const active = this.current;
     this.current = null;
     if (!active) return;
@@ -218,49 +211,22 @@ export class TtsEngine {
     const token = (this.token += 1);
     const schedule = request.schedule ?? scheduleTtsRequests;
 
-    const preparation = new AbortController(); this.preparation = preparation;
     const stop = () => { if (this.token === token) this.stop(); };
     request.signal?.addEventListener('abort', stop, { once: true });
     if (request.signal?.aborted) { stop(); request.signal.removeEventListener('abort', stop); return; }
-    if (!request.prepareSegments && !request.segments?.length) {
-      request.signal?.removeEventListener('abort', stop); this.preparation = null;
+    const segments = request.segments;
+    if (segments.length === 0) {
+      request.signal?.removeEventListener('abort', stop);
       this.set({ id: null, phase: null, skipped: 0, error: 'There is nothing to read aloud.' }); return;
     }
-    // Construct the audio context in the click, before asynchronous semantic work.
+    // Construct the audio context inside the click, before the first await.
     let sink: AudioSink;
-    try { sink = (request.createSink ?? (() => new WebAudioSink()))(); this.preparingSink = sink; }
+    try { sink = (request.createSink ?? (() => new WebAudioSink()))(); }
     catch {
-      request.signal?.removeEventListener('abort', stop); this.preparation = null;
+      request.signal?.removeEventListener('abort', stop);
       this.set({ id: null, phase: null, skipped: 0, error: 'Audio playback is not available in this browser.' }); return;
     }
-    this.set({ id: request.id, phase: 'loading', skipped: 0, error: null });
-    let segments: readonly string[];
-    const prepareSegments = request.prepareSegments;
-    try {
-      segments = prepareSegments ? await new Promise<readonly string[]>((resolve, reject) => {
-        const abort = () => reject(new Error('Speech preparation cancelled.'));
-        preparation.signal.addEventListener('abort', abort, { once: true });
-        Promise.resolve().then(() => {
-          preparation.signal.throwIfAborted();
-          return prepareSegments(preparation.signal);
-        }).then(resolve, reject).finally(() => preparation.signal.removeEventListener('abort', abort)).catch(reject);
-      }) : request.segments ?? [];
-    }
-    catch {
-      request.signal?.removeEventListener('abort', stop);
-      if (this.token === token) { this.teardown(); this.set({ id: null, phase: null, skipped: 0, error: 'Sentence boundaries are unavailable. Please try reading this reply again.' }); }
-      return;
-    }
-    if (this.token !== token || preparation.signal.aborted) { request.signal?.removeEventListener('abort', stop); return; }
 
-    if (segments.length === 0) {
-      this.teardown();
-      request.signal?.removeEventListener('abort', stop);
-      this.set({ id: null, phase: null, skipped: 0, error: 'There is nothing to read aloud.' });
-      return;
-    }
-
-    this.preparingSink = null; // Transfer the single sink from preparation to playback.
     const run = schedule(segments, request.synth, request.scheduleOptions);
     this.current = { run, sink, token };
     this.set({ id: request.id, phase: 'loading', skipped: 0, error: null });
@@ -294,7 +260,6 @@ export class TtsEngine {
     } finally {
       request.signal?.removeEventListener('abort', stop);
       if (this.token === token) {
-        this.preparation = null;
         void sink.close();
         this.current = null;
       }

@@ -185,7 +185,12 @@ model and never asks for the microphone.
 While listening, an indicator is always visible, either a persistent banner or
 a chip in the header depending on the configured indicator style. Settings a
 tab cannot honor (retaining audio clips, playing a local activation-sound
-file) are reported verbatim as limitations rather than silently ignored.
+file, a custom model id) are reported verbatim as limitations rather than
+silently ignored. A tab can score only the pinned model: when
+`voice.wake.models` does not name it, the tab says so and does not open the
+microphone. With several tabs or an installed window open, one of them listens
+and the others show "Wake detection is running in another tab"; when that one
+closes or stops, the next takes over, so one wake phrase is heard and sent once.
 
 ## Work
 

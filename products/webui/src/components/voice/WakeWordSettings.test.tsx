@@ -27,6 +27,7 @@ const IDLE_HOST: WakeHostState = {
   lastWakeAt: null,
   lastTranscript: null,
   modelIds: [],
+  limitations: [],
 };
 
 interface QueryLike {

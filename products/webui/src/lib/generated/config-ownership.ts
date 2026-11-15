@@ -24,7 +24,6 @@ export const DAEMON_OWNED_CONFIG_PREFIXES: readonly string[] = [
   "integrations.",
   "atRest.",
   "payments.",
-  "voice.local.",
   "conversationGate.",
   "hostedSessions.",
   "cluster.",
@@ -32,7 +31,11 @@ export const DAEMON_OWNED_CONFIG_PREFIXES: readonly string[] = [
   "occasions.",
   "email.",
   "calendar.",
-  "google."
+  "google.",
+  "judgment.",
+  "push.",
+  "cloudflare.",
+  "voice.local."
 ] as const;
 
 export const DAEMON_OWNED_CONFIG_KEYS: readonly string[] = [

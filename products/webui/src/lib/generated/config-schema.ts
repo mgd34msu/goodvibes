@@ -1071,10 +1071,16 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "description": "Master switch for the payment capability. Default OFF. While false the daemon will not price, reserve, or charge anything, and the payments operator methods refuse. Turning it on does not by itself allow a purchase, the daily budgets below start at 0, so nothing goes through until you set an amount."
   },
   {
+    "key": "payments.confirmEveryPurchase",
+    "type": "boolean",
+    "default": false,
+    "description": "When true, every purchase needs your approval first, given with /payments approve (or payments.checkout.approve) naming the merchant, the item and the most it may cost, before the agent may start it; the approval lasts five minutes and is used once. Default FALSE: the agent buys on your behalf inside your budgets without asking first, and that standing answer is kept here until you change it. Either way, a purchase over a budget or at a shop nobody vouches for still asks you before it is bought, and an approval you give in advance answers that question for a total up to the amount you named."
+  },
+  {
     "key": "payments.defaultCardId",
     "type": "string",
     "default": "",
-    "description": "A card id from payments.cards.list, shown as your preferred card. For now every purchase must still name its card: nothing falls back to this setting, and deleting that card does not clear it. The card NUMBER, expiry and CVV live in the daemon secret store and never in config."
+    "description": "A card id from payments.cards.list. A purchase that names no card is paid with this one; with this empty, every purchase must name its card. Deleting that card does not clear this setting, and a purchase that would use a deleted card is refused saying so. The card NUMBER, expiry and CVV live in the daemon secret store and never in config."
   },
   {
     "key": "payments.currency",
@@ -1087,7 +1093,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "payments.cvvHandling",
     "type": "enum",
     "default": "stored",
-    "description": "How the card verification value is handled at checkout. 'stored' (DEFAULT) keeps it in the daemon secret store beside the card number, encrypted at rest, so a purchase within budget completes while you are away, which is what autonomous action requires. Choosing 'prompt' stores nothing, and there is not yet a place to type the code at purchase time, so while it is selected every purchase is refused as having no usable card; it is for owners who want purchasing off for the card, not a working stop-and-ask mode. Surfaces show CVV_PROMPT_TRADEOFF_WARNING at the moment you select it. Provisioning a virtual card with a hard issuer cap bounds what any leak of stored card material could cost; a real card number does not.",
+    "description": "How the card verification value is handled at checkout. 'stored' (DEFAULT) keeps it in the daemon secret store beside the card number, encrypted at rest, so a purchase within budget completes while you are away, which is what autonomous action requires. Choosing 'prompt' stores nothing: when a purchase is approved and reaches payment, it stops and asks you to type the code in the terminal app (/payments pending) or the local web UI, waiting as long as an approval window, and nothing is bought if the code is not typed in time. So nothing completes while you are away. Never send the code in a chat; a likely code typed on a remote channel while one is awaited is refused there. Surfaces show CVV_PROMPT_TRADEOFF_WARNING at the moment you select it. Provisioning a virtual card with a hard issuer cap bounds what any leak of stored card material could cost; a real card number does not.",
     "enumValues": [
       "stored",
       "prompt"
@@ -1113,13 +1119,13 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "payments.budget.perPurchaseCeilingEnabled",
     "type": "boolean",
     "default": true,
-    "description": "When true (DEFAULT), no single purchase may exceed payments.budget.perPurchaseCeiling no matter how much of the daily budget is left. A separate question from the daily budget: both must pass. Turn it off only if you want one purchase to be able to consume the whole day at once."
+    "description": "When true (DEFAULT), no single purchase may come to more than payments.budget.perPurchaseCeiling in total (items, tax, fees and delivery) without your explicit approval, no matter how much of the daily budget is left. A separate question from the daily budget: both must pass. Turn it off only if you want one purchase to be able to consume the whole day at once."
   },
   {
     "key": "payments.budget.perPurchaseCeiling",
     "type": "number",
     "default": 0,
-    "description": "The most any single purchase may come to, applied when perPurchaseCeilingEnabled is true. Written the way you would say it, 100 is a hundred, 19.99 is nineteen ninety-nine. Default 0, so with the ceiling on and this unset every purchase needs your explicit approval, the safe direction until you choose a number.",
+    "description": "The most any single purchase may come to in total, items plus tax, fees and delivery, applied when perPurchaseCeilingEnabled is true. A purchase over it asks you first and names the ceiling and by how much. Written the way you would say it, 100 is a hundred, 19.99 is nineteen ninety-nine. Default 0, so with the ceiling on and this unset every purchase needs your explicit approval, the safe direction until you choose a number.",
     "validationHint": "a plain number like 100 or 19.99, no greater than 1000000",
     "unit": "money"
   },
@@ -1176,7 +1182,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "payments.billingAddress.region",
     "type": "string",
     "default": "",
-    "description": "State, province or region. Part of the billing address the card issuer checks against (address verification). Stored in daemon-owned config rather than the secret store because surfaces must display and edit it, but note it sits beside stored card material, so anyone holding both has everything a card-not-present charge needs. A virtual card with a hard issuer cap is what bounds that. When left empty, the matching address field of the owner profile is used once it has been verified."
+    "description": "State, province or region; leave empty where the country has none (it is required only for countries whose addresses use one, such as US, CA, AU, IN). Part of the billing address the card issuer checks against (address verification). Stored in daemon-owned config rather than the secret store because surfaces must display and edit it, but note it sits beside stored card material, so anyone holding both has everything a card-not-present charge needs. A virtual card with a hard issuer cap is what bounds that. When left empty, the matching address field of the owner profile is used once it has been verified."
   },
   {
     "key": "payments.billingAddress.postalCode",
@@ -1218,7 +1224,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "payments.shippingAddress.region",
     "type": "string",
     "default": "",
-    "description": "State, province or region. Where purchases are delivered. A purchase is REFUSED while the shipping address is incomplete, there is nowhere to send it, and guessing an address is not a thing this should do. When left empty, the matching address field of the owner profile is used once it has been verified."
+    "description": "State, province or region; leave empty where the country has none (it is required only for countries whose addresses use one, such as US, CA, AU, IN). Where purchases are delivered. A purchase is REFUSED while the shipping address is incomplete, there is nowhere to send it, and guessing an address is not a thing this should do. When left empty, the matching address field of the owner profile is used once it has been verified."
   },
   {
     "key": "payments.shippingAddress.postalCode",
@@ -2371,6 +2377,12 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     ]
   },
   {
+    "key": "surfaces.whatsapp.bridgeUrl",
+    "type": "string",
+    "default": "",
+    "description": "WhatsApp bridge base URL used for delivery when the provider is bridge"
+  },
+  {
     "key": "surfaces.whatsapp.accessToken",
     "type": "string",
     "default": "",
@@ -2533,7 +2545,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "surfaces.msteams.webhookSecret",
     "type": "string",
     "default": "",
-    "description": "Microsoft Teams inbound webhook secret, kept apart from the account credential used for delivery. Unset: the account credential is the inbound secret."
+    "description": "Secret for a relay in front of the Microsoft Teams webhook that cannot forward the Bot Framework token. Activities straight from Azure Bot Service need none: their token is verified against surfaces.msteams.appId. The app password is never accepted as an inbound secret."
   },
   {
     "key": "surfaces.msteams.tenantId",
@@ -2954,6 +2966,111 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "validationHint": "a JSON object mapping calendar ids to collection paths"
   },
   {
+    "key": "surfaces.slack.setupVersion",
+    "type": "number",
+    "default": 0,
+    "description": "Setup version the slack surface last completed (written by setup and by a passing retest; 0 means never confirmed)",
+    "validationHint": "integer in [0, 1000]"
+  },
+  {
+    "key": "surfaces.discord.setupVersion",
+    "type": "number",
+    "default": 0,
+    "description": "Setup version the discord surface last completed (written by setup and by a passing retest; 0 means never confirmed)",
+    "validationHint": "integer in [0, 1000]"
+  },
+  {
+    "key": "surfaces.ntfy.setupVersion",
+    "type": "number",
+    "default": 0,
+    "description": "Setup version the ntfy surface last completed (written by setup and by a passing retest; 0 means never confirmed)",
+    "validationHint": "integer in [0, 1000]"
+  },
+  {
+    "key": "surfaces.webhook.setupVersion",
+    "type": "number",
+    "default": 0,
+    "description": "Setup version the webhook surface last completed (written by setup and by a passing retest; 0 means never confirmed)",
+    "validationHint": "integer in [0, 1000]"
+  },
+  {
+    "key": "surfaces.homeassistant.setupVersion",
+    "type": "number",
+    "default": 0,
+    "description": "Setup version the homeassistant surface last completed (written by setup and by a passing retest; 0 means never confirmed)",
+    "validationHint": "integer in [0, 1000]"
+  },
+  {
+    "key": "surfaces.telegram.setupVersion",
+    "type": "number",
+    "default": 0,
+    "description": "Setup version the telegram surface last completed (written by setup and by a passing retest; 0 means never confirmed)",
+    "validationHint": "integer in [0, 1000]"
+  },
+  {
+    "key": "surfaces.googleChat.setupVersion",
+    "type": "number",
+    "default": 0,
+    "description": "Setup version the googleChat surface last completed (written by setup and by a passing retest; 0 means never confirmed)",
+    "validationHint": "integer in [0, 1000]"
+  },
+  {
+    "key": "surfaces.signal.setupVersion",
+    "type": "number",
+    "default": 0,
+    "description": "Setup version the signal surface last completed (written by setup and by a passing retest; 0 means never confirmed)",
+    "validationHint": "integer in [0, 1000]"
+  },
+  {
+    "key": "surfaces.whatsapp.setupVersion",
+    "type": "number",
+    "default": 0,
+    "description": "Setup version the whatsapp surface last completed (written by setup and by a passing retest; 0 means never confirmed)",
+    "validationHint": "integer in [0, 1000]"
+  },
+  {
+    "key": "surfaces.telephony.setupVersion",
+    "type": "number",
+    "default": 0,
+    "description": "Setup version the telephony surface last completed (written by setup and by a passing retest; 0 means never confirmed)",
+    "validationHint": "integer in [0, 1000]"
+  },
+  {
+    "key": "surfaces.imessage.setupVersion",
+    "type": "number",
+    "default": 0,
+    "description": "Setup version the imessage surface last completed (written by setup and by a passing retest; 0 means never confirmed)",
+    "validationHint": "integer in [0, 1000]"
+  },
+  {
+    "key": "surfaces.msteams.setupVersion",
+    "type": "number",
+    "default": 0,
+    "description": "Setup version the msteams surface last completed (written by setup and by a passing retest; 0 means never confirmed)",
+    "validationHint": "integer in [0, 1000]"
+  },
+  {
+    "key": "surfaces.bluebubbles.setupVersion",
+    "type": "number",
+    "default": 0,
+    "description": "Setup version the bluebubbles surface last completed (written by setup and by a passing retest; 0 means never confirmed)",
+    "validationHint": "integer in [0, 1000]"
+  },
+  {
+    "key": "surfaces.mattermost.setupVersion",
+    "type": "number",
+    "default": 0,
+    "description": "Setup version the mattermost surface last completed (written by setup and by a passing retest; 0 means never confirmed)",
+    "validationHint": "integer in [0, 1000]"
+  },
+  {
+    "key": "surfaces.matrix.setupVersion",
+    "type": "number",
+    "default": 0,
+    "description": "Setup version the matrix surface last completed (written by setup and by a passing retest; 0 means never confirmed)",
+    "validationHint": "integer in [0, 1000]"
+  },
+  {
     "key": "watchers.enabled",
     "type": "boolean",
     "default": true,
@@ -3108,6 +3225,13 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "default": 100,
     "description": "Maximum number of listeners per event channel (per-type and per-domain) before a warning is emitted in production or a RangeError is thrown in development mode. Raise this only if you have verified there is no subscriber leak.",
     "validationHint": "integer in [1, 100000]"
+  },
+  {
+    "key": "runtime.maxParallelToolCalls",
+    "type": "number",
+    "default": 8,
+    "description": "Most tool calls of one model response that run at the same time. Reads run side by side, and so do writes to files that do not overlap; a command, an action the owner decides and a tool with undeclared effects always run alone, in the order the model asked. 1 runs every call one after another. Applies to the main session, sub-agents and companion chat; read once per response.",
+    "validationHint": "integer in [1, 64]"
   },
   {
     "key": "telemetry.includeRawPrompts",
@@ -3581,6 +3705,37 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "validationHint": "integer in [1, 100]"
   },
   {
+    "key": "checkpoints.preferGitRoot",
+    "type": "boolean",
+    "default": true,
+    "description": "Checkpoint the enclosing git repository (its top level) instead of only the working directory"
+  },
+  {
+    "key": "checkpoints.allowBroadRoot",
+    "type": "boolean",
+    "default": false,
+    "description": "Allow checkpoints of a broad directory: the filesystem root, your home directory or ~/.goodvibes. Off, such a directory is not checkpointed"
+  },
+  {
+    "key": "checkpoints.allowLargeFirstSnapshot",
+    "type": "boolean",
+    "default": false,
+    "description": "Allow the first checkpoint of a workspace to sweep more files than checkpoints.maxFirstSnapshotFiles. Off, that first checkpoint is refused with the file count"
+  },
+  {
+    "key": "checkpoints.maxFirstSnapshotFiles",
+    "type": "number",
+    "default": 50000,
+    "description": "Most files the first checkpoint of a workspace may sweep before it is refused (unless checkpoints.allowLargeFirstSnapshot is on)",
+    "validationHint": "integer in [1, 10000000]"
+  },
+  {
+    "key": "checkpoints.autoRetention",
+    "type": "boolean",
+    "default": true,
+    "description": "Prune old checkpoints automatically after each new one and once at start. Off, old checkpoints are pruned only when asked"
+  },
+  {
     "key": "daemon.enabled",
     "type": "boolean",
     "default": true,
@@ -3775,15 +3930,15 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   {
     "key": "contract.maxFixRounds",
     "type": "number",
-    "default": 0,
+    "default": 3,
     "description": "Planned-fix rounds plus fresh agents for one unit, group or deliverable before the owner decides; 0 disables this limit",
     "validationHint": "integer in [0, 9007199254740991]"
   },
   {
     "key": "contract.planRepairLimit",
     "type": "number",
-    "default": 0,
-    "description": "Times the planner is asked to repair a plan that fails its checks before the owner decides; 0 disables this limit",
+    "default": 3,
+    "description": "Times the planner is asked to repair a plan that fails its checks before the owner decides; 0 disables this limit (planning then stops only when the same problem comes back)",
     "validationHint": "integer in [0, 9007199254740991]"
   },
   {
@@ -3791,6 +3946,13 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "type": "number",
     "default": 0,
     "description": "The most units one contract plan may hold; 0 disables this limit",
+    "validationHint": "integer in [0, 9007199254740991]"
+  },
+  {
+    "key": "contract.judgmentCallBudget",
+    "type": "number",
+    "default": 400,
+    "description": "Decision-model calls one contract may spend on its checks, plans and corrections; once spent, the next correction goes to the owner with what was spent and what is still unmet instead of another fix round. 0 disables this budget",
     "validationHint": "integer in [0, 9007199254740991]"
   },
   {
@@ -3957,13 +4119,13 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "fetch.trustedHosts",
     "type": "string",
     "default": "",
-    "description": "Comma-separated default trusted hosts for fetch sanitization/trust-tier classification (e.g. docs.example.com, api.internal). Trusted hosts relax sanitization. Per-call trusted_hosts are added on top of this default; empty means no host is trusted by default."
+    "description": "Comma-separated trusted hosts for fetch sanitization/trust-tier classification (e.g. docs.example.com, *.internal.example.com). Trusted hosts relax sanitization. This list is the only source of trust: a fetch call cannot add to it. Empty means no host is trusted. In a pattern * matches one name label and ** matches across dots; an entry that is only * or ** matches every host. Hosts are compared lower-case, without a trailing dot, in their ASCII (punycode) form."
   },
   {
     "key": "fetch.blockedHosts",
     "type": "string",
     "default": "",
-    "description": "Comma-separated default blocked hosts for fetch trust-tier classification. Blocked hosts are always refused regardless of sanitize mode. Per-call blocked_hosts are added on top of this default. The built-in SSRF-risk block (private IPs, metadata endpoints, localhost variants) applies independently of this list."
+    "description": "Comma-separated default blocked hosts for fetch trust-tier classification. Blocked hosts are always refused regardless of sanitize mode or permission mode. Per-call blocked_hosts are added on top of this default. Patterns match as in fetch.trustedHosts (* one label, ** across dots, * or ** alone every host), and a.example.com. is the same host as a.example.com. The built-in SSRF-risk block (private, link-local, metadata and other non-public addresses, and encoded IP forms) applies independently of this list, in every mode."
   },
   {
     "key": "security.tokenAudit.enabled",
@@ -4224,13 +4386,13 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "runtime.toolBudget.enforced",
     "type": "boolean",
     "default": false,
-    "description": "Enforce per-call budgets on tool execution: wall-clock, token, and cost limits (runtime.toolBudget.maxMs/maxTokens/maxCostUsd). The check runs after the tool returns, so a call over its limit is reported to the model as failed with its output kept and a note that its action may have taken effect. Token and cost limits apply only to tools that report tokenCount or costUsd."
+    "description": "Enforce per-call budgets on tool execution: wall-clock, token, and cost limits (runtime.toolBudget.maxMs/maxTokens/maxCostUsd). The wall-clock limit stops a call when it is reached and tells the model what it was stopped by. Token and cost are known only when the tool returns, so a call over those is reported to the model as failed with its output kept and a note that its action may have taken effect; they apply only to tools that report tokenCount or costUsd."
   },
   {
     "key": "runtime.toolBudget.maxMs",
     "type": "number",
     "default": 0,
-    "description": "Wall-clock budget (ms) for one tool call when runtime.toolBudget.enforced is true, checked when the tool returns. 0 = unlimited.",
+    "description": "Wall-clock budget (ms) for one tool call when runtime.toolBudget.enforced is true: the call is stopped when it is reached. 0 = unlimited.",
     "validationHint": "integer in [0, 86400000]"
   },
   {
@@ -4462,6 +4624,86 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "type": "string",
     "default": "",
     "description": "Marker recording that a legacy on-disk Google credential (from before credentials lived in the encrypted secret store) was already migrated in, so migration is not repeated on every start. Names where it came from; holds no credential value itself."
+  },
+  {
+    "key": "cluster.peers",
+    "type": "object",
+    "default": [],
+    "description": "Static list of cluster peers (host or host:port) contacted directly as well as over multicast. Set it on a network that drops multicast, so the nodes still find each other",
+    "validationHint": "list of host or host:port strings, for example [\"10.0.0.2\", \"10.0.0.3:4000\"]"
+  },
+  {
+    "key": "conversationGate.gatedSurfaces",
+    "type": "object",
+    "default": [
+      "ntfy",
+      "telegram",
+      "slack",
+      "discord",
+      "homeassistant",
+      "google-chat",
+      "signal",
+      "whatsapp",
+      "telephony",
+      "imessage",
+      "msteams",
+      "bluebubbles",
+      "mattermost",
+      "matrix"
+    ],
+    "description": "Channel surfaces whose inbound messages pass the conversation gate before a session sees them",
+    "validationHint": "list of surface names, for example [\"slack\", \"telegram\"]"
+  },
+  {
+    "key": "contract.gates",
+    "type": "object",
+    "default": [
+      {
+        "name": "typecheck",
+        "command": "npx tsc --noEmit",
+        "enabled": false
+      },
+      {
+        "name": "lint",
+        "command": "npx eslint . --max-warnings 0",
+        "enabled": false
+      },
+      {
+        "name": "build",
+        "command": "npm run build",
+        "enabled": false
+      }
+    ],
+    "description": "Quality gates a contract runs before it reports work done: each is { name, command, enabled } with optional required and verification. A gate with a wrong option is skipped with a warning naming it",
+    "validationHint": "list of { name, command, enabled } objects"
+  },
+  {
+    "key": "sandbox.egressAllowlist",
+    "type": "object",
+    "default": [],
+    "description": "Commands the exec sandbox lets reach the network; every other sandboxed command runs with the network off. Applies from the next command",
+    "validationHint": "list of non-empty command names, for example [\"git\", \"npm\"]"
+  },
+  {
+    "key": "sandbox.workspaceWritable",
+    "type": "object",
+    "default": [],
+    "description": "Extra absolute paths the exec sandbox lets commands write besides the workspace. Applies from the next command",
+    "validationHint": "list of absolute paths"
+  },
+  {
+    "key": "worktree.setup.commands",
+    "type": "object",
+    "default": [],
+    "description": "Commands run in a new worktree before an isolated agent starts in it, for example installing dependencies",
+    "validationHint": "list of shell commands"
+  },
+  {
+    "key": "worktree.setup.carryOverGlobs",
+    "type": "object",
+    "default": [],
+    "description": "Untracked files copied from the main checkout into a new worktree (for example .env files), as glob patterns",
+    "validationHint": "list of glob patterns, for example [\".env\", \"config/*.local.json\"]"
   }
 ] as const;
 
@@ -4800,7 +5042,7 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
   {
     "id": "shell-ast-normalization",
     "name": "Shell AST Normalization",
-    "description": "Enables the Shell AST parser for compound command verdict evaluation. Produces per-segment verdicts (safe/unsafe) with user-facing denial explanations that are strictly more specific than the baseline. Default-on: the AST path is safe to default because a parser failure falls back automatically to the baseline flat segmentation matcher (never a hard error, never a blanket allow), and the permission gate reads the catastrophic case before the call in both modes. Disable at runtime to force the baseline flat segmentation mode for every command.",
+    "description": "Parses each exec command into segments just before it runs and refuses a command in which a segment (or the whole command) has nothing to run, naming that segment. It does not decide risk: the permission gate has already decided every command before this parse, with this flag on or off. When the parser cannot read the command (a parse error), the command is allowed through to run as the gate decided. Disable to skip the parse entirely.",
     "domain": "permissions",
     "enablement": {
       "key": "permissions.commandParser",
@@ -5238,6 +5480,7 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
     "settings": [
       "surfaces.whatsapp.enabled",
       "surfaces.whatsapp.provider",
+      "surfaces.whatsapp.bridgeUrl",
       "surfaces.whatsapp.accessToken",
       "surfaces.whatsapp.phoneNumberId",
       "surfaces.whatsapp.businessAccountId",

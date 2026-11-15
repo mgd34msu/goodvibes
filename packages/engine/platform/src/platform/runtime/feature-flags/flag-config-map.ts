@@ -308,6 +308,7 @@ export const FEATURE_FLAG_CONFIG: Readonly<Record<string, FeatureFlagConfigAssoc
     configKeys: [
       'surfaces.whatsapp.enabled',
       'surfaces.whatsapp.provider',
+      'surfaces.whatsapp.bridgeUrl',
       'surfaces.whatsapp.accessToken',
       'surfaces.whatsapp.phoneNumberId',
       'surfaces.whatsapp.businessAccountId',

@@ -7,6 +7,7 @@ export const CREDENTIAL_DESTINATION_KEYS: ReadonlySet<string> = new Set([
   'surfaces.ntfy.baseUrl',
   'surfaces.homeassistant.instanceUrl',
   'surfaces.signal.bridgeUrl',
+  'surfaces.whatsapp.bridgeUrl',
   'surfaces.telephony.bridgeUrl',
   'surfaces.imessage.bridgeUrl',
   'surfaces.bluebubbles.serverUrl',

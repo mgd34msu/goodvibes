@@ -73,11 +73,15 @@ The owning key determines where a persistent `set` writes:
 
 | Key group | Destination |
 | --- | --- |
-| Daemon-owned keys, including `controlPlane.*`, `surfaces.*`, `hostedSessions.*`, and `cluster.*` | Daemon settings file |
+| Daemon-owned keys, including `controlPlane.*`, `surfaces.*`, `hostedSessions.*`, `cluster.*`, `judgment.*`, `push.*` and `cloudflare.*` | Daemon settings file |
 | The five shared speech keys | Shared settings file |
 | Other builtin keys, including model and local presentation settings | Global surface settings file |
 
-The ownership source defines the complete set. The CLI has no project-write flag
+The ownership source defines the complete set: every settings domain states
+whether the daemon or each client acts on it. Because the terminal app and the
+agent read daemon-owned keys from the same daemon settings file, a decision-model,
+web-push or Cloudflare setting saved from any product configures the daemon. The
+CLI has no project-write flag
 and does not edit the project settings file. A project value can therefore
 override a global `set` when settings are next loaded. `unset` removes the global
 preference and applicable daemon or shared preference, and resets the command's

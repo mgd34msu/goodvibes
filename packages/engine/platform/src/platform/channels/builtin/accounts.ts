@@ -12,7 +12,7 @@ import { accountStateForHealth, authStateForCredentials, builtinHealthState } fr
 import { getBuiltinSetupSchema } from './setup-schema.js';
 import type { BuiltinChannelRuntimeDeps } from './shared.js';
 import { readSurfaceSecret } from './surface-secrets.js';
-import { resolveBuiltinConfigSecret } from './surfaces.js';
+import { asProviderRuntimeSurface, resolveBuiltinConfigSecret } from './surfaces.js';
 
 interface BuiltinAccountContext {
   readonly deps: BuiltinChannelRuntimeDeps;
@@ -206,6 +206,7 @@ export async function buildBuiltinAccount(
         secrets,
         metadata: {
           provider: surfaces.whatsapp.provider,
+          bridgeUrl: surfaces.whatsapp.bridgeUrl,
           phoneNumberId: surfaces.whatsapp.phoneNumberId,
           businessAccountId: surfaces.whatsapp.businessAccountId,
           defaultRecipient: surfaces.whatsapp.defaultRecipient,
@@ -345,10 +346,12 @@ export async function resolveBuiltinAccount(
  * send paths use (`readSurfaceSecret`), so the account cannot report a
  * credential the senders do not see or miss one they do.
  *
- * Resolution is cheap, a store read, no network, no send attempt, so there is
- * no excuse for inferring it from presence: a `goodvibes://secrets/...`
- * reference to a key absent from the store this process reads is `unresolved`,
- * which is the one source that explains a silent channel.
+ * Resolution sends nothing and starts at most one password-manager command per
+ * reference per process (the credential holder in channels/credential-holder.ts
+ * keeps the value), so there is no excuse for inferring it from presence: a
+ * `goodvibes://secrets/...` reference to a key absent from the store this
+ * process reads is `unresolved`, which is the one source that explains a silent
+ * channel.
  */
 async function describeSchemaSecrets(
   deps: BuiltinChannelRuntimeDeps,
@@ -394,50 +397,29 @@ function hasConfiguredValue(value: unknown): boolean {
       : Boolean(value);
 }
 
-function buildBuiltinAccountActions(configured: boolean, linked: boolean): readonly ChannelAccountAction[] {
+/**
+ * The actions an account offers. Ids are stable (an action keeps its id whatever
+ * the account's state, and `available` says whether it can run now), so an
+ * authorization asked for `connect` on a linked account finds it. Connect,
+ * login, disconnect and logout exist only where a provider login does (Slack,
+ * Discord, ntfy); every other surface is set up from its settings, and none has
+ * a QR login to wait for.
+ */
+function buildBuiltinAccountActions(surface: ChannelSurface, configured: boolean, linked: boolean): readonly ChannelAccountAction[] {
+  const action = (id: ChannelAccountAction['kind'], label: string, available: boolean): ChannelAccountAction => ({ id, label, kind: id, available });
+  const providerLogin = asProviderRuntimeSurface(surface) !== null;
   return [
-    {
-      id: 'inspect',
-      label: 'Inspect account',
-      kind: 'inspect',
-      available: true,
-    },
-    {
-      id: configured ? 'retest' : 'setup',
-      label: configured ? 'Retest credentials' : 'Configure surface',
-      kind: configured ? 'retest' : 'setup',
-      available: true,
-    },
-    {
-      id: linked ? 'disconnect' : 'connect',
-      label: linked ? 'Disconnect surface' : 'Connect surface',
-      kind: linked ? 'disconnect' : 'connect',
-      available: configured,
-    },
-    {
-      id: 'start',
-      label: 'Start surface',
-      kind: 'start',
-      available: configured,
-    },
-    {
-      id: 'stop',
-      label: 'Stop surface',
-      kind: 'stop',
-      available: configured,
-    },
-    {
-      id: linked ? 'logout' : 'login',
-      label: linked ? 'Logout account' : 'Login account',
-      kind: linked ? 'logout' : 'login',
-      available: configured,
-    },
-    {
-      id: 'wait_login',
-      label: 'Wait for login',
-      kind: 'wait_login',
-      available: false,
-    },
+    action('inspect', 'Inspect account', true),
+    action('setup', 'Configure surface', true),
+    action('retest', 'Test credentials with the provider', configured),
+    action('start', 'Start surface', configured),
+    action('stop', 'Stop surface', configured),
+    ...(providerLogin ? [
+      action('connect', 'Connect surface', true),
+      action('login', 'Login account', true),
+      action('disconnect', 'Disconnect surface', linked),
+      action('logout', 'Logout account', linked),
+    ] : []),
   ];
 }
 
@@ -482,7 +464,7 @@ function finalizeBuiltinChannelAccount(context: BuiltinAccountContext, input: {
     ...(input.accountId ? { accountId: input.accountId } : {}),
     ...(input.workspaceId ? { workspaceId: input.workspaceId } : {}),
     secrets: input.secrets,
-    actions: buildBuiltinAccountActions(configured, linked),
+    actions: buildBuiltinAccountActions(input.surface, configured, linked),
     metadata: { ...input.metadata, health },
   };
 }

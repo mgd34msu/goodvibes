@@ -8,6 +8,7 @@ import {
   extractResponseId,
   firstNonEmpty,
   fitForSurface,
+  SURFACE_TEXT_LIMITS,
   normalizeBaseUrl,
   postBridgePayload,
   requireOkResponse,
@@ -51,7 +52,7 @@ export function createSignalDeliveryStrategy(
       );
       if (!bridgeUrl) throw new Error('Missing Signal bridge URL');
       if (!recipient) throw new Error('Missing Signal recipient');
-      const fitted = fitForSurface(request.body, attachments, 8_000);
+      const fitted = fitForSurface(request.body, attachments, SURFACE_TEXT_LIMITS.signal);
       const token = await resolveDeliveryCredential(configManager, serviceRegistry, secretsManager, {
         serviceName: 'signal',
         serviceField: 'primary',
@@ -102,14 +103,14 @@ export function createWhatsAppDeliveryStrategy(
         String(configManager.get('surfaces.whatsapp.defaultRecipient') ?? ''),
       );
       if (!recipient) throw new Error('Missing WhatsApp recipient');
-      const fitted = fitForSurface(request.body, attachments, 4_096);
+      const fitted = fitForSurface(request.body, attachments, SURFACE_TEXT_LIMITS.whatsapp);
       if (provider === 'bridge') {
         const bridgeUrl = resolveBridgeUrl({
           label: 'WhatsApp',
           address: request.target.address,
-          configured: [serviceRegistry.get('whatsapp')?.baseUrl, process.env.WHATSAPP_BRIDGE_URL],
+          configured: [String(configManager.get('surfaces.whatsapp.bridgeUrl') ?? ''), serviceRegistry.get('whatsapp')?.baseUrl, process.env.WHATSAPP_BRIDGE_URL],
         });
-        if (!bridgeUrl) throw new Error('Missing WhatsApp bridge URL');
+        if (!bridgeUrl) throw new Error('Missing WhatsApp bridge URL: set surfaces.whatsapp.bridgeUrl');
         const token = await resolveDeliveryCredential(configManager, serviceRegistry, secretsManager, {
           serviceName: 'whatsapp',
           serviceField: 'primary',
@@ -309,7 +310,7 @@ export function createIMessageDeliveryStrategy(
       );
       if (!bridgeUrl) throw new Error('Missing iMessage bridge URL');
       if (!chatId) throw new Error('Missing iMessage chat id');
-      const fitted = fitForSurface(request.body, attachments, 8_000);
+      const fitted = fitForSurface(request.body, attachments, SURFACE_TEXT_LIMITS.imessage);
       const token = await resolveDeliveryCredential(configManager, serviceRegistry, secretsManager, {
         serviceName: 'imessage',
         serviceField: 'primary',
@@ -373,7 +374,7 @@ export function createBlueBubblesDeliveryStrategy(
       if (!serverUrl) throw new Error('Missing BlueBubbles server URL');
       if (!password) throw new Error('Missing BlueBubbles password');
       if (!chatGuid) throw new Error('Missing BlueBubbles chat guid');
-      const fitted = fitForSurface(request.body, attachments, 8_000);
+      const fitted = fitForSurface(request.body, attachments, SURFACE_TEXT_LIMITS.bluebubbles);
       const response = await deliveryFetch(request, `${normalizeBaseUrl(serverUrl)}/api/v1/message/text?password=${encodeURIComponent(password)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

@@ -91,6 +91,7 @@ export const surfaceConfigDefaults = {
   whatsapp: {
     enabled: false,
     provider: 'meta-cloud',
+    bridgeUrl: '',
     accessToken: '',
     verifyToken: '',
     signingSecret: '',
@@ -527,6 +528,12 @@ export const surfaceConfigSettings: ConfigSettingDefinition[] = [
     enumValues: ['meta-cloud', 'bridge'],
   },
   {
+    key: 'surfaces.whatsapp.bridgeUrl',
+    type: 'string',
+    default: '',
+    description: 'WhatsApp bridge base URL used for delivery when the provider is bridge',
+  },
+  {
     key: 'surfaces.whatsapp.accessToken',
     type: 'string',
     default: '',
@@ -820,4 +827,15 @@ export const surfaceConfigSettings: ConfigSettingDefinition[] = [
   // The daemon's own mail account and calendar; see
   // schema-domain-daemon-mailbox.ts for why both key spellings are declared.
   ...daemonMailboxConfigSettings,
+  // The setup version each surface last completed: written by a setup that
+  // stored working credentials and by a retest the provider accepted, read by
+  // the channel doctor to tell a confirmed surface from one never checked.
+  ...(['slack', 'discord', 'ntfy', 'webhook', 'homeassistant', 'telegram', 'googleChat', 'signal', 'whatsapp',
+    'telephony', 'imessage', 'msteams', 'bluebubbles', 'mattermost', 'matrix'] as const).map((section): ConfigSettingDefinition => ({
+    key: `surfaces.${section}.setupVersion`,
+    type: 'number',
+    default: 0,
+    description: `Setup version the ${section} surface last completed (written by setup and by a passing retest; 0 means never confirmed)`,
+    ...intRange(0, 1_000),
+  })),
 ];

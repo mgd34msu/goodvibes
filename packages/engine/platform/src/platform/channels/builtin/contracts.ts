@@ -83,7 +83,8 @@ export async function listBuiltinRepairActions(
     id: action.kind,
     label: action.label,
     description: `Run the ${action.kind} lifecycle action for ${surfaceLabelForBuiltin(surface)}.`,
-    dangerous: action.kind === 'disconnect' || action.kind === 'logout',
+    // Stop switches the surface off, so the owner's messages on it go unread.
+    dangerous: action.kind === 'disconnect' || action.kind === 'logout' || action.kind === 'stop',
     inputSchema: action.kind === 'disconnect' || action.kind === 'logout'
       ? {
           type: 'object',
@@ -174,14 +175,27 @@ export async function getBuiltinDoctorReport(
       : 'Surface delivery is disabled until it is enabled in config or env.',
     effectiveAccount.enabled ? undefined : 'start',
   );
-  pushCheck(
-    'lifecycle',
-    'Lifecycle version',
-    lifecycle.currentVersion >= lifecycle.targetVersion ? 'pass' : 'warn',
-    lifecycle.currentVersion >= lifecycle.targetVersion
-      ? `Setup metadata is at version ${lifecycle.currentVersion}.`
-      : `Setup metadata is at version ${lifecycle.currentVersion}; target is ${lifecycle.targetVersion}.`,
-  );
+  // Setup and a passing retest record the setup version they completed. A
+  // surface configured directly in its settings has recorded none, which is not
+  // a fault; one set up for an older version is told to review the new fields.
+  if (effectiveAccount.configured) {
+    const stale = lifecycle.currentVersion > 0 && lifecycle.currentVersion < lifecycle.targetVersion;
+    pushCheck(
+      'lifecycle',
+      'Setup version',
+      stale ? 'warn' : 'pass',
+      stale
+        ? `Setup was completed for version ${lifecycle.currentVersion}; version ${lifecycle.targetVersion} has settings to review. Run setup again.`
+        : lifecycle.currentVersion >= lifecycle.targetVersion
+          ? `Setup completed for version ${lifecycle.currentVersion}.`
+          : 'Configured directly in settings; retest confirms the credentials with the provider.',
+      stale ? 'setup' : undefined,
+    );
+  }
+  const secretResolves = (field: string): boolean => {
+    const secret = effectiveAccount.secrets.find((entry) => entry.field === field);
+    return secret !== undefined && (secret.resolved ?? secret.configured);
+  };
 
   const surfaces = context.deps.configManager.getCategory('surfaces');
   if (surface === 'telegram' && !surfaces.telegram.defaultChatId) {
@@ -193,6 +207,10 @@ export async function getBuiltinDoctorReport(
   if (surface === 'signal' && !surfaces.signal.bridgeUrl) {
     pushCheck('bridge-url', 'Bridge URL', 'fail', 'Signal requires a bridge URL.', 'setup');
   }
+  if (surface === 'whatsapp' && surfaces.whatsapp.provider === 'bridge' && !surfaces.whatsapp.bridgeUrl
+    && !context.deps.serviceRegistry.get('whatsapp')?.baseUrl && !process.env.WHATSAPP_BRIDGE_URL) {
+    pushCheck('bridge-url', 'Bridge URL', 'fail', 'WhatsApp bridge mode requires a bridge URL (surfaces.whatsapp.bridgeUrl).', 'setup');
+  }
   if (surface === 'whatsapp' && !surfaces.whatsapp.phoneNumberId && surfaces.whatsapp.provider === 'meta-cloud') {
     pushCheck('provider-shape', 'Provider metadata', 'warn', 'Meta Cloud mode works best with a phone number id configured.', 'setup');
   }
@@ -201,7 +219,8 @@ export async function getBuiltinDoctorReport(
   if (surface === 'telephony' && telephonyUsesBridge && !surfaces.telephony.bridgeUrl) {
     pushCheck('bridge-url', 'Bridge URL', 'fail', 'Bridge mode requires a telephony bridge URL.', 'setup');
   }
-  if (surface === 'telephony' && !telephonyUsesBridge && surfaces.telephony.provider === 'twilio' && (!surfaces.telephony.accountSid || !surfaces.telephony.authToken || !surfaces.telephony.fromNumber)) {
+  if (surface === 'telephony' && !telephonyUsesBridge && surfaces.telephony.provider === 'twilio'
+    && (!secretResolves('accountSid') || !secretResolves('authToken') || !(surfaces.telephony.fromNumber || process.env.TWILIO_FROM_NUMBER || process.env.TELEPHONY_FROM_NUMBER))) {
     pushCheck('twilio-credentials', 'Twilio credentials', 'fail', 'Direct provider mode requires account SID, auth token, and a sender/caller number.', 'setup');
   }
   if (surface === 'telephony' && !surfaces.telephony.defaultRecipient) {
@@ -228,13 +247,15 @@ export async function getBuiltinDoctorReport(
   if (surface === 'matrix' && !surfaces.matrix.homeserverUrl) {
     pushCheck('homeserver-url', 'Homeserver URL', 'fail', 'Matrix requires a homeserver URL.', 'setup');
   }
-  if (surface === 'homeassistant' && !surfaces.homeassistant.webhookSecret) {
+  // The Home Assistant credentials are read from the account, which resolves the
+  // setting, the services file and the environment the same way ingress does.
+  if (surface === 'homeassistant' && !secretResolves('signingSecret')) {
     pushCheck('webhook-secret', 'Webhook secret', 'fail', 'Home Assistant ingress requires a webhook secret because webhook routes are evaluated before daemon bearer auth.', 'setup');
   }
   if (surface === 'homeassistant' && !surfaces.homeassistant.instanceUrl) {
     pushCheck('instance-url', 'Instance URL', 'warn', 'Home Assistant REST-backed tools require an instance URL; daemon-only prompt ingress can work without one.', 'setup');
   }
-  if (surface === 'homeassistant' && !surfaces.homeassistant.accessToken) {
+  if (surface === 'homeassistant' && !secretResolves('primary')) {
     pushCheck('access-token', 'Long-lived access token', 'warn', 'Home Assistant state, service, template, and event-delivery tools require an access token.', 'setup');
   }
 

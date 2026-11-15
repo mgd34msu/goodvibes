@@ -155,6 +155,12 @@ export const NODE_LOCAL_CONFIG_DOMAINS: readonly string[] = [
   'cluster.',
   // Local voice provisioning: model files on this machine's disk.
   'voice.local.',
+  // This machine's tunnel, edge worker and their tokens.
+  'cloudflare.',
+  // Web-push subscriptions are bound to the keypair of the daemon that signs them.
+  'push.',
+  // Which decision model this machine calls and the key it calls it with.
+  'judgment.',
 ];
 
 /** Individual daemon-owned keys that are machine-specific despite their domain. */

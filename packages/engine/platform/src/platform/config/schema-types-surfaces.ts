@@ -94,6 +94,7 @@ export interface SignalSurfaceConfig {
 export interface WhatsAppSurfaceConfig {
   enabled: boolean;
   provider: 'meta-cloud' | 'bridge';
+  bridgeUrl: string;
   accessToken: string;
   verifyToken: string;
   signingSecret: string;

@@ -9,7 +9,8 @@ import type {
   ChannelActorAuthorizationResult,
   ChannelSurface,
 } from '../types.js';
-import type { BuiltinChannelRuntimeDeps } from './shared.js';
+import { CHANNEL_SETUP_VERSION, configSectionForSurface, type BuiltinChannelRuntimeDeps } from './shared.js';
+import { probeBuiltinCredentials } from './credential-probe.js';
 import {
   readSecretScope,
   readString,
@@ -74,18 +75,20 @@ export async function runBuiltinAccountAction(
         message: 'Account posture inspected.',
         metadata: {},
       };
-    case 'retest':
+    case 'retest': {
+      const probe = await probeBuiltinCredentials(context.deps, surface);
+      // A credential the provider accepted completes this surface's setup.
+      if (probe.ok && probe.probed) recordCompletedSetup(context.deps, surface);
       return {
         ...base,
-        ok: account.configured,
-        message: account.configured
-          ? 'Account configuration is present; secret values remain hidden.'
-          : 'Account is not configured.',
-        metadata: { configured: account.configured, linked: account.linked },
+        ok: probe.ok,
+        message: probe.reason,
+        metadata: { probed: probe.probed, ...(probe.identity ? { identity: probe.identity } : {}), configured: account.configured },
       };
+    }
     case 'setup':
       if (providerSurface) {
-        return runProviderSetupAction(context, providerSurface, action, base, account, input);
+        return completedSetup(context.deps, surface, await runProviderSetupAction(context, providerSurface, action, base, account, input));
       }
       return {
         ...base,
@@ -104,7 +107,7 @@ export async function runBuiltinAccountAction(
     case 'connect':
     case 'login':
       if (providerSurface) {
-        return runProviderSetupAction(context, providerSurface, action, base, account, input);
+        return completedSetup(context.deps, surface, await runProviderSetupAction(context, providerSurface, action, base, account, input));
       }
       return {
         ...base,
@@ -121,14 +124,35 @@ export async function runBuiltinAccountAction(
         metadata: { configBacked: true },
       };
     case 'wait_login':
+      // Built-in surfaces log in with stored credentials or a browser install
+      // link, never a QR scan, so there is nothing to wait for.
       return {
         ...base,
         ok: false,
         login: { kind: 'none' },
-        message: 'No interactive login is pending for this built-in surface.',
+        message: 'Built-in surfaces have no QR login to wait for. Run setup or login to store credentials, then retest.',
         metadata: { pending: false },
       };
     case 'start':
+      if (!account.enabled && surface !== 'tui' && surface !== 'web') {
+        // Starting a switched-off surface switches it on, the same owner-level
+        // write setup performs; the surface's own settings watcher then starts
+        // its receiving path.
+        setSurfaceEnabled(context.deps, surface, true);
+        if (providerSurface && context.deps.providerRuntime) await context.deps.providerRuntime.start(providerSurface);
+        const refreshed = await context.buildAccount(surface);
+        return {
+          ...base,
+          ok: refreshed.enabled,
+          account: refreshed,
+          state: refreshed.state,
+          authState: refreshed.authState,
+          message: refreshed.enabled
+            ? `${refreshed.label} is switched on (surfaces.${configSectionForSurface(surface)}.enabled); it starts receiving and sending now.`
+            : `${refreshed.label} stays off: its switch was set, but an environment setting turns it off. Remove that setting and start again.`,
+          metadata: { enabled: refreshed.enabled, switchedOn: true },
+        };
+      }
       if (surface === 'telegram' && account.enabled && context.restartTelegramIngress) {
         const status = await context.restartTelegramIngress();
         const refreshed = await context.buildAccount(surface);
@@ -162,12 +186,12 @@ export async function runBuiltinAccountAction(
         ...base,
         ok: account.enabled,
         message: account.enabled
-          ? 'Surface is enabled in the current daemon runtime.'
-          : 'Surface is disabled; enable it in config before starting delivery.',
+          ? 'Surface is switched on; it receives through its webhook and sends on demand, so there is nothing to restart.'
+          : 'The web control plane is switched on by web.enabled in the daemon settings; start does not change it.',
         metadata: { enabled: account.enabled },
       };
-    case 'stop':
-      if (providerSurface && context.deps.providerRuntime) {
+    case 'stop': {
+      if (providerSurface && context.deps.providerRuntime && account.enabled) {
         const runtimeResult = context.deps.providerRuntime.stop(providerSurface);
         const refreshed = await context.buildAccount(surface);
         return {
@@ -180,14 +204,28 @@ export async function runBuiltinAccountAction(
           metadata: { providerRuntime: runtimeResult.status },
         };
       }
+      if (!account.enabled || surface === 'tui' || surface === 'web') {
+        return {
+          ...base,
+          ok: !account.enabled,
+          message: account.enabled ? 'This surface is served by the daemon itself and cannot be stopped on its own.' : 'Surface is already switched off.',
+          metadata: { enabled: account.enabled },
+        };
+      }
+      setSurfaceEnabled(context.deps, surface, false);
+      const refreshed = await context.buildAccount(surface);
       return {
         ...base,
-        ok: !account.enabled,
-        message: account.enabled
-          ? 'Stopping this built-in surface is daemon/config owned; disable it in config or stop the daemon.'
-          : 'Surface is already disabled.',
-        metadata: { enabled: account.enabled, configBacked: true },
+        ok: !refreshed.enabled,
+        account: refreshed,
+        state: refreshed.state,
+        authState: refreshed.authState,
+        message: refreshed.enabled
+          ? `${refreshed.label} stays on: its switch was cleared, but an environment setting turns it on. Remove that setting and stop again.`
+          : `${refreshed.label} is switched off (surfaces.${configSectionForSurface(surface)}.enabled); it no longer receives or sends.`,
+        metadata: { enabled: refreshed.enabled, switchedOff: true },
       };
+    }
     case 'disconnect':
     case 'logout':
       if (providerSurface) {
@@ -497,6 +535,33 @@ async function runProviderLogoutAction(
     message: `${surface} GoodVibes-managed credentials removed. Environment variables, if present, still take precedence.`,
     metadata: { action, envBacked: providerEnvBacked(surface) },
   };
+}
+
+/** Switch a surface on or off: the same `surfaces.<section>.enabled` setting setup writes. */
+function setSurfaceEnabled(deps: BuiltinChannelRuntimeDeps, surface: Exclude<ChannelSurface, 'tui' | 'web'>, enabled: boolean): void {
+  deps.configManager.set(`surfaces.${configSectionForSurface(surface)}.enabled` as const, enabled);
+}
+
+/**
+ * Record that this surface completed setup at the current setup version, so the
+ * doctor can tell a confirmed surface from one never checked. Written once per
+ * version; a surface already at it is not written again.
+ */
+function recordCompletedSetup(deps: BuiltinChannelRuntimeDeps, surface: ChannelSurface): void {
+  if (surface === 'tui' || surface === 'web') return;
+  const key = `surfaces.${configSectionForSurface(surface)}.setupVersion` as const;
+  if (Number(deps.configManager.get(key) ?? 0) >= CHANNEL_SETUP_VERSION) return;
+  deps.configManager.set(key, CHANNEL_SETUP_VERSION);
+}
+
+/** A provider setup that stored working credentials completes the surface's setup. */
+function completedSetup(
+  deps: BuiltinChannelRuntimeDeps,
+  surface: ChannelSurface,
+  result: ChannelAccountLifecycleResult,
+): ChannelAccountLifecycleResult {
+  if (result.ok && result.account?.linked) recordCompletedSetup(deps, surface);
+  return result;
 }
 
 /**

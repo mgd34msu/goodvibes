@@ -19,9 +19,10 @@
  *   genuinely different between the TUI, the agent and the web UI: rendering,
  *   theme, transcript display, keybindings, and the "do I run/embed a daemon at
  *   all" switches (`daemon.*`, `service.*`) which are a property of THIS
- *   installation, not of the daemon's behavior. This is the DEFAULT scope, a
- *   key is client-owned unless it is listed below, so adding a schema key never
- *   silently relocates a user's existing value.
+ *   installation, not of the daemon's behavior.
+ *
+ * Each schema domain states its owner in CONFIG_DOMAIN_OWNERS below, which the
+ * type checker holds complete; a key outside every schema domain is `client`.
  *
  * - `user`, cross-client defaults that ride the surface-root-independent
  *   shared tier (`~/.goodvibes/shared/settings.json`).
@@ -36,94 +37,126 @@
  */
 
 import type { ConfigKey } from './schema.js';
+import type { ListConfigKey } from './schema-types-lists.js';
 import { CONFIG_SCHEMA } from './schema.js';
 
 /** Which runtime owns, and therefore writes, a config key. */
 export type ConfigScope = 'daemon' | 'client' | 'user';
 
+/** The first segment of a key: `surfaces` for `surfaces.telegram.enabled`. */
+type DomainOf<K> = K extends `${infer D}.${string}` ? D : never;
+
+/** Every settings domain the schema declares, the list-valued settings included. */
+export type ConfigDomain = DomainOf<ConfigKey | ListConfigKey>;
+
 /**
- * Whole config domains the daemon executes unattended. A key is daemon-owned
- * when it starts with one of these prefixes.
+ * Which runtime acts on each settings domain: the one place a domain's owner
+ * is declared. The type is a record over every domain the schema has, so a new
+ * domain does not compile until it is answered here, and the answer is made
+ * when the setting is added rather than discovered when it configures nothing.
  *
- * Deliberately NOT here, and why:
- *   - `daemon.*`  , "does THIS installation run/embed a daemon"; the agent
- *                    answers no and the TUI answers yes, and neither answer is
- *                    the daemon's to give. Making it daemon-owned would make
- *                    the agent start a daemon because the TUI runs one.
- *   - `service.*` , same shape: per-installation platform-service lifecycle.
- *   - `voice.wake.*`, the wake word listens inside each client process.
+ * `daemon` means the daemon executes it unattended (chat surfaces, the control
+ * plane, watchers, delivery, payments, the decision layer, web push, the
+ * Cloudflare tunnel and worker), so its one home is the daemon tier and every
+ * product on the machine reads that one value. `client` means presentation or
+ * per-installation lifecycle that genuinely differs between the terminal app,
+ * the agent and the web UI.
+ *
+ * Deliberately `client`, and why:
+ *   - `daemon` : "does THIS installation run or embed a daemon"; the agent
+ *                answers no and the terminal app yes, and neither answer is
+ *                the daemon's to give (`daemon.timezone` is the exception below).
+ *   - `service`: per-installation platform-service lifecycle, same shape.
+ *   - `voice`  : the wake word listens inside each client process; only the
+ *                local speech engines (`voice.local.`) are the daemon's.
+ */
+export const CONFIG_DOMAIN_OWNERS: Readonly<Record<ConfigDomain, 'daemon' | 'client'>> = {
+  // Chat surfaces, the control plane and how it is reached.
+  surfaces: 'daemon',
+  controlPlane: 'daemon',
+  httpListener: 'daemon',
+  web: 'daemon',
+  relay: 'daemon',
+  // Scheduled and triggered work, devices, delivery, retention.
+  watchers: 'daemon',
+  device: 'daemon',
+  automation: 'daemon',
+  checkin: 'daemon',
+  integrations: 'daemon',
+  atRest: 'daemon',
+  // The daemon holds the card and charges it with every surface closed (docs/payments.md).
+  payments: 'daemon',
+  // The daemon receives inbound channel messages and decides whether one becomes work.
+  conversationGate: 'daemon',
+  // Hosted sessions run in the daemon, which enforces their cap and detach policy.
+  hostedSessions: 'daemon',
+  // Leader election decides which node consumes inbound channel messages.
+  cluster: 'daemon',
+  // The owner profile has the daemon as its single writer.
+  profile: 'daemon',
+  // The occasions sweep runs in the daemon on a timer.
+  occasions: 'daemon',
+  // The mail and calendar connector the daemon reads and sends through unattended.
+  email: 'daemon',
+  calendar: 'daemon',
+  google: 'daemon',
+  // The daemon asks the decision layer for every engine judgment, and the
+  // terminal apps read the same value back, so one setting configures them all.
+  judgment: 'daemon',
+  // The daemon signs web-push notifications and sweeps the subscriptions.
+  push: 'daemon',
+  // The daemon provisions and runs its own tunnel and edge worker.
+  cloudflare: 'daemon',
+
+  agents: 'client',
+  batch: 'client',
+  behavior: 'client',
+  cache: 'client',
+  checkpoints: 'client',
+  contract: 'client',
+  daemon: 'client',
+  danger: 'client',
+  diagnostics: 'client',
+  display: 'client',
+  fetch: 'client',
+  fleet: 'client',
+  helper: 'client',
+  learning: 'client',
+  memory: 'client',
+  network: 'client',
+  notifications: 'client',
+  orchestration: 'client',
+  permissions: 'client',
+  planner: 'client',
+  policy: 'client',
+  power: 'client',
+  pricing: 'client',
+  provider: 'client',
+  runtime: 'client',
+  sandbox: 'client',
+  security: 'client',
+  service: 'client',
+  storage: 'client',
+  telemetry: 'client',
+  tools: 'client',
+  tts: 'client',
+  ui: 'client',
+  update: 'client',
+  voice: 'client',
+  worktree: 'client',
+};
+
+/** Subtrees the daemon owns inside a client domain: local voice provisioning is model files on the daemon's disk. */
+const DAEMON_OWNED_SUBTREES: readonly string[] = ['voice.local.'];
+
+/**
+ * The daemon-owned prefixes, derived from {@link CONFIG_DOMAIN_OWNERS}: every
+ * daemon domain plus the daemon subtrees. Read by the web UI's generated
+ * ownership table; never edited by hand.
  */
 export const DAEMON_OWNED_CONFIG_PREFIXES: readonly string[] = [
-  'surfaces.',
-  'controlPlane.',
-  'httpListener.',
-  'web.',
-  'relay.',
-  'watchers.',
-  'device.',
-  'automation.',
-  'checkin.',
-  'integrations.',
-  'atRest.',
-  // The daemon is the process that holds the card and charges it, with every
-  // surface closed and across restarts. Card material and budgets left
-  // client-owned would live in whichever surface happened to enter them and the
-  // daemon would charge against defaults, the failure mode the budget exists to
-  // prevent. See docs/payments.md §3.
-  'payments.',
-  'voice.local.',
-  // The daemon is the process that receives inbound channel messages, so it is
-  // the process that decides whether one becomes a conversation or a
-  // workstream. Left client-owned, the setting lived in whichever client the
-  // operator happened to edit and the daemon never read it: a `mode` set from
-  // the TUI or the agent reported success, landed in that client's file, and
-  // changed nothing about what an inbound Telegram or ntfy message did.
-  'conversationGate.',
-  // Hosted sessions run IN the daemon, so the process that reads the detach
-  // policy, enforces the session cap and bounds the persisted transcript is the
-  // daemon. Left client-owned, a detach policy flipped to `survive` from the
-  // terminal would land in the terminal's silo while the daemon, the process
-  // that actually decides whether a session outlives its client, kept reading
-  // the default, and the setting would report success and change nothing.
-  'hostedSessions.',
-  // Leader election decides which node CONSUMES inbound channel messages, and
-  // the daemon is the process that does that consuming. Left client-owned, the
-  // group, port and shared phrase would live in whichever client the operator
-  // happened to edit, while the daemon kept coordinating on the defaults,
-  // producing the exact failure the election exists to prevent (two nodes each
-  // certain they are alone) with a settings file that reads as if it were
-  // configured.
-  'cluster.',
-  // The owner profile is one file at daemon scope with the daemon as its single
-  // writer, so the policy governing it has to resolve from the daemon store as
-  // well. Left client-owned, `profile.autonomousWrites` turned off from the TUI
-  // would land in the TUI's silo while the daemon, the process that loads the
-  // file, serves the profile.* verbs and decides whether a fact gets recorded,
-  // kept reading the default. That is the reported-success-configured-nothing
-  // failure the daemon tier exists for, and this instance would be a bad one:
-  // the operator would believe they had stopped autonomous recording.
-  'profile.',
-  // The occasions sweep runs IN the daemon, on a timer, with every surface
-  // closed. Its lead time, its quiet window, its cadence and its delivery
-  // channel are read there and nowhere else, so a value set from a surface and
-  // left in that surface's silo would configure nothing while reporting
-  // success, the same failure `profile.` is here for, one feature along.
-  'occasions.',
-  // The mail and calendar connector: the account the daemon composes, sends
-  // and lists mail through, and the calendar client it authenticates with,
-  // set up once from any surface and used by the daemon with every surface
-  // closed. There are no other `email.`, `calendar.` or `google.` schema
-  // keys, so the prefix is safe: it cannot silently pick up an unrelated key
-  // added under one of these names later without a schema row of its own
-  // making it visible here first. Left client-owned, a Gmail app password
-  // reference or an OAuth client id set from one surface would strand in
-  // that surface's silo and the daemon, the process that actually reads
-  // mail and refreshes the calendar unattended, would keep reporting "not
-  // connected", the exact failure this migration exists to end. See
-  // schema-domain-connectors.ts for what changed and why.
-  'email.',
-  'calendar.',
-  'google.',
+  ...Object.entries(CONFIG_DOMAIN_OWNERS).filter(([, owner]) => owner === 'daemon').map(([domain]) => `${domain}.`),
+  ...DAEMON_OWNED_SUBTREES,
 ];
 
 /** Individual daemon-owned keys that do not sit under a daemon-owned domain. */
@@ -261,7 +294,10 @@ const USER_LOCAL_OVERRIDE_SET = new Set<string>(USER_LOCAL_OVERRIDE_CONFIG_KEYS)
 export function isDaemonOwnedConfigKey(key: string): boolean {
   if (DAEMON_KEY_SET.has(key)) return true;
   if (DAEMON_NON_SCHEMA_PATH_SET.has(key)) return true;
-  return DAEMON_OWNED_CONFIG_PREFIXES.some((prefix) => key.startsWith(prefix));
+  if (DAEMON_OWNED_SUBTREES.some((prefix) => key.startsWith(prefix))) return true;
+  const dot = key.indexOf('.');
+  const domain = dot > 0 ? key.slice(0, dot) : '';
+  return Object.hasOwn(CONFIG_DOMAIN_OWNERS, domain) && CONFIG_DOMAIN_OWNERS[domain as ConfigDomain] === 'daemon';
 }
 
 /** True when `key` rides the cross-client user tier (either precedence). */

@@ -185,6 +185,21 @@ export type ConfigValue<K extends ConfigKey> =
   K extends 'web.publicBaseUrl' ? string :
   K extends 'web.staticAssetsDir' ? string :
   K extends 'surfaces.hostedInboxScreening' ? HostedInboxScreening :
+  K extends 'surfaces.slack.setupVersion' ? number :
+  K extends 'surfaces.discord.setupVersion' ? number :
+  K extends 'surfaces.ntfy.setupVersion' ? number :
+  K extends 'surfaces.webhook.setupVersion' ? number :
+  K extends 'surfaces.homeassistant.setupVersion' ? number :
+  K extends 'surfaces.telegram.setupVersion' ? number :
+  K extends 'surfaces.googleChat.setupVersion' ? number :
+  K extends 'surfaces.signal.setupVersion' ? number :
+  K extends 'surfaces.whatsapp.setupVersion' ? number :
+  K extends 'surfaces.telephony.setupVersion' ? number :
+  K extends 'surfaces.imessage.setupVersion' ? number :
+  K extends 'surfaces.msteams.setupVersion' ? number :
+  K extends 'surfaces.bluebubbles.setupVersion' ? number :
+  K extends 'surfaces.mattermost.setupVersion' ? number :
+  K extends 'surfaces.matrix.setupVersion' ? number :
   K extends 'surfaces.slack.enabled' ? boolean :
   K extends 'surfaces.slack.signingSecret' ? string :
   K extends 'surfaces.slack.botToken' ? string :
@@ -240,6 +255,7 @@ export type ConfigValue<K extends ConfigKey> =
   K extends 'surfaces.signal.defaultRecipient' ? string :
   K extends 'surfaces.whatsapp.enabled' ? boolean :
   K extends 'surfaces.whatsapp.provider' ? 'meta-cloud' | 'bridge' :
+  K extends 'surfaces.whatsapp.bridgeUrl' ? string :
   K extends 'surfaces.whatsapp.accessToken' ? string :
   K extends 'surfaces.whatsapp.verifyToken' ? string :
   K extends 'surfaces.whatsapp.signingSecret' ? string :

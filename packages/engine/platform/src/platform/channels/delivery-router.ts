@@ -31,7 +31,8 @@ import {
   AgentDeliveryRegistry,
   createAgentDeliveryStrategy,
 } from './delivery/strategies-agent.js';
-import { resolveChannelDeliverySurfaceKind } from './delivery/shared.js';
+import { resolveChannelDeliverySurfaceKind, splitForSurface, SURFACE_TEXT_LIMITS } from './delivery/shared.js';
+import { channelCredentials } from './credential-holder.js';
 import { logger } from '../utils/logger.js';
 import { describeStructuralDeliveryError } from '../integrations/delivery-diagnostics.js';
 import { CHANNEL_DELIVERY_SURFACE_KINDS } from './delivery/types.js';
@@ -53,6 +54,12 @@ export type {
   ChannelDeliveryTargetKind,
 } from './delivery/types.js';
 export { CHANNEL_DELIVERY_SURFACE_KINDS };
+
+/** The most messages one delivery is split into; past that the surface cuts the last part and says so. */
+const MAX_DELIVERY_PARTS = 10;
+/** Room left in each part for the attachment lines the first part carries. */
+const PART_RESERVE_CHARS = 64;
+const PART_RESERVE_PER_ATTACHMENT = 400;
 
 const DIAGNOSTIC_STRATEGIES = new Set<string>(CHANNEL_DELIVERY_SURFACE_KINDS.map((surface) => `channel-delivery:${surface}`));
 const DIAGNOSTIC_TARGET_KINDS = new Set(['none', 'webhook', 'surface', 'integration', 'link']);
@@ -254,16 +261,29 @@ export class ChannelDeliveryRouter {
         },
       } : request;
       assertDeliveryCurrent(deliveryRequest);
-      const result = await strategy.deliver(deliveryRequest);
+      const parts = this.partsFor(deliveryRequest, surfaceKind);
+      const result = await strategy.deliver(parts.length > 1 ? { ...deliveryRequest, body: parts[0]! } : deliveryRequest);
       const receipt = result.receipt;
+      const following = parts.length > 1
+        ? await this.deliverFollowingParts(strategy, deliveryRequest, parts, surfaceKind)
+        : { truncated: false, omittedChars: 0, sent: 1 };
+      const outcome = {
+        truncated: result.truncated === true || following.truncated,
+        omittedChars: (result.omittedChars ?? 0) + following.omittedChars,
+        sent: following.sent,
+      };
       return Object.freeze({
         ...(result.responseId === undefined ? {} : { responseId: result.responseId }),
         ...(receipt === undefined ? {} : { receipt: Object.freeze({ surfaceKind: receipt.surfaceKind,
           conversationId: receipt.conversationId, messageId: receipt.messageId,
           ...(receipt.accountId === undefined ? {} : { accountId: receipt.accountId }),
           ...(receipt.threadId === undefined ? {} : { threadId: receipt.threadId }) }) }),
+        ...(outcome.sent > 1 ? { parts: outcome.sent } : {}),
+        ...(outcome.truncated ? { truncated: true, ...(outcome.omittedChars > 0 ? { omittedChars: outcome.omittedChars } : {}) } : {}),
       });
     } catch (error) {
+      // A refused credential is not served again: the next send resolves it afresh.
+      channelCredentials.releaseOnRefusal(error);
       // The original failure remains private retry evidence. Published diagnostics
       // contain only closed routing facts and a validated HTTP status, if present.
       publishDiagnostic('Channel delivery failed, the reply did not reach its conversation', {
@@ -273,5 +293,55 @@ export class ChannelDeliveryRouter {
       });
       throw error;
     }
+  }
+
+  /**
+   * The messages a body goes out as. A body longer than one message on a
+   * surface with a known limit is split so the recipient gets all of it; a
+   * publication-wrapped delivery stays one message, because its publication
+   * runs once around one dispatch.
+   */
+  private partsFor(request: ChannelDeliveryRequest, surfaceKind: string | undefined): readonly string[] {
+    const limit = surfaceKind !== undefined && Object.hasOwn(SURFACE_TEXT_LIMITS, surfaceKind)
+      ? SURFACE_TEXT_LIMITS[surfaceKind as keyof typeof SURFACE_TEXT_LIMITS]
+      : undefined;
+    if (limit === undefined || request.withPublication !== undefined) return [request.body];
+    const budget = limit - PART_RESERVE_CHARS - PART_RESERVE_PER_ATTACHMENT * (request.attachments?.length ?? 0);
+    if (budget <= 0 || request.body.length <= budget) return [request.body];
+    return splitForSurface(request.body, budget, MAX_DELIVERY_PARTS);
+  }
+
+  /**
+   * Send parts after the first, which carried the attachments. A part that
+   * fails after the first went out does not fail the delivery (the recipient
+   * already has the start, and a retry would repeat it); the result says how
+   * much did not arrive instead.
+   */
+  private async deliverFollowingParts(
+    strategy: ChannelDeliveryStrategy,
+    request: ChannelDeliveryRequest,
+    parts: readonly string[],
+    surfaceKind: string | undefined,
+  ): Promise<{ readonly truncated: boolean; readonly omittedChars: number; readonly sent: number }> {
+    let sent = 1;
+    for (let index = 1; index < parts.length; index += 1) {
+      try {
+        const result = await strategy.deliver({ ...request, body: parts[index]!, attachments: undefined });
+        sent += 1;
+        if (result.truncated) return { truncated: true, omittedChars: result.omittedChars ?? 0, sent };
+      } catch (error) {
+        channelCredentials.releaseOnRefusal(error);
+        publishDiagnostic('Channel delivery sent only part of a long message', {
+          surface: diagnosticSurface(surfaceKind),
+          strategy: diagnosticStrategy(strategy),
+          reason: describeStructuralDeliveryError(error),
+          partsSent: sent,
+          partsTotal: parts.length,
+        });
+        const omittedChars = parts.slice(index).reduce((total, part) => total + part.length, 0);
+        return { truncated: true, omittedChars, sent };
+      }
+    }
+    return { truncated: false, omittedChars: 0, sent };
   }
 }

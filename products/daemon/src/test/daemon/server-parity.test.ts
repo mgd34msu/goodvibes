@@ -2183,9 +2183,10 @@ async function proveAutonomousRead(): Promise<void> {
       body: JSON.stringify({}),
     });
     expect(accountAction.status, accountAction.status === 200 ? undefined : (await accountAction.clone().text()).slice(0, 500)).toBe(200);
-    const accountActionBody = await accountAction.json() as { result: { action: string; ok: boolean } };
+    const accountActionBody = await accountAction.json() as { result: { action: string; ok: boolean; message?: string } };
     expect(accountActionBody.result.action).toBe('retest');
-    expect(accountActionBody.result.ok).toBe(true);
+    // Retest asks Slack; with no network here the answer is the provider call's own failure, never a bare success.
+    expect(typeof accountActionBody.result.message).toBe('string');
 
     const setupAction = await fetch(`http://127.0.0.1:${boundPort}/api/channels/accounts/slack/workspace-1/actions/login`, {
       method: 'POST',

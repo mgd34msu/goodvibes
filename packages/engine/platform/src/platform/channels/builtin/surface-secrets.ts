@@ -17,10 +17,15 @@ import type { SecretScope, SecretsManager } from '../../config/secrets.js';
 import type { ServiceSecretField } from '../../config/service-registry.js';
 import type { ChannelSecretSource, ChannelSecretTargetDescriptor, ChannelSurface } from '../types.js';
 import { getBuiltinSetupSchema } from './setup-schema.js';
+import { channelCredentials } from '../credential-holder.js';
 
 export interface SurfaceSecretReadDeps {
   readonly configManager: { get(key: string): unknown };
-  readonly serviceRegistry: { resolveSecret(serviceName: string, field: ServiceSecretField): Promise<string | null> };
+  readonly serviceRegistry: {
+    resolveSecret(serviceName: string, field: ServiceSecretField): Promise<string | null>;
+    /** The registry entry, when the registry can show it: a held credential is keyed by it. */
+    get?(serviceName: string): unknown;
+  };
   readonly secretsManager?: Pick<SecretsManager, 'get' | 'getGlobalHome'> | undefined;
 }
 
@@ -61,6 +66,10 @@ function present(value: unknown): boolean {
  * `goodvibes://secrets/...` reference is resolved), then each environment
  * variable. A config value that resolves to nothing is still `declared`, which
  * is what lets status name the setting that points at a missing secret.
+ *
+ * References are resolved through the process's credential holder
+ * (channels/credential-holder.ts), the same one delivery asks, so status, the
+ * doctor and every send share one resolution per reference.
  */
 export async function readSurfaceSecret(
   deps: SurfaceSecretReadDeps,
@@ -69,7 +78,10 @@ export async function readSurfaceSecret(
 ): Promise<SurfaceSecretReading> {
   const target = requireTarget(surface, targetId);
   if (target.serviceName && target.serviceField && SERVICE_FIELDS.has(target.serviceField)) {
-    const registered = await deps.serviceRegistry.resolveSecret(target.serviceName, target.serviceField as ServiceSecretField);
+    const serviceName = target.serviceName;
+    const field = target.serviceField as ServiceSecretField;
+    const registered = await channelCredentials.resolve(`service:${serviceName}:${field}`, deps.serviceRegistry.get?.(serviceName),
+      () => deps.serviceRegistry.resolveSecret(serviceName, field), deps.secretsManager);
     if (registered) return { value: registered, declared: true, source: 'service-registry' };
   }
   let configDeclared = false;
@@ -78,10 +90,10 @@ export async function readSurfaceSecret(
     if (!present(raw)) continue;
     configDeclared = true;
     const secrets = deps.secretsManager;
-    const resolved = await resolveSecretInput(raw, {
+    const resolved = await channelCredentials.resolve(`config:${key}`, raw, () => resolveSecretInput(raw, {
       ...(secrets ? { resolveLocalSecret: (name: string) => secrets.get(name) } : {}),
       homeDirectory: secrets?.getGlobalHome?.() ?? undefined,
-    });
+    }), secrets);
     if (resolved) return { value: resolved, declared: true, source: 'config' };
   }
   for (const name of target.envKeys ?? []) {

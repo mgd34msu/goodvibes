@@ -172,6 +172,19 @@ track status, attempts, errors, metadata, and dead-letter posture. The reply
 pipeline listens to turn, agent, and workflow events and renders progress,
 approval, and final messages according to the channel render policy.
 
+A direct delivery (an automation, a send tool, a notice) longer than one
+message on Telegram, WhatsApp, Google Chat, Teams, Mattermost, Matrix, Signal,
+iMessage or BlueBubbles is sent as up to ten messages in order. Past that, or
+when a following message fails after the first went out, the result says
+`truncated` with the number of characters that did not arrive, and the
+recipient sees the same count in the last message. WhatsApp in bridge mode
+sends through `surfaces.whatsapp.bridgeUrl`; the doctor fails the surface
+while it is unset.
+
+A channel credential kept in a password manager or behind a command is
+resolved once per daemon process and reused by status, the doctor and every
+send, until its setting or the secret store changes or the provider refuses it.
+
 Channel render policy controls:
 
 - reasoning visibility: suppress, private, public, or summary
@@ -184,8 +197,23 @@ Managed surfaces expose account records, secret status, setup schemas, repair
 actions, doctor reports, lifecycle state, allowlist resolution, allowlist edit,
 directory lookup, target resolution, and account actions.
 
-Account lifecycle actions include inspect, setup, retest, connect, disconnect,
-start, stop, login, logout, and wait-login. A secret's reported source is one
+Account lifecycle actions are inspect, setup, retest, start and stop on every
+managed surface, plus connect, login, disconnect and logout on Slack, Discord and
+ntfy, which have a provider login. An action keeps its id whatever the account's
+state; `available` says whether it can run now. `retest` makes one
+authenticated call to the provider (Slack `auth.test`, Discord `/users/@me`,
+Telegram `getMe`, Matrix `whoami`, Mattermost `users/me`, Twilio, Meta Cloud,
+Home Assistant, BlueBubbles, ntfy, a bridge URL, or a Bot Framework token for
+Teams) and answers with the provider's own reason; a surface that can only be
+checked by sending (an incoming webhook, Google Chat) says so and sends nothing.
+`start` on a switched-off surface switches it on and `stop` switches it off
+(`surfaces.<surface>.enabled`); on Slack, Discord and ntfy `stop` closes the live
+connection. A setup that stored working credentials and a retest the provider
+accepted record the setup version completed (`surfaces.<surface>.setupVersion`);
+the doctor asks for setup again only when that version is older than the
+current one. The doctor's credential checks read the account's resolved
+secrets, so a credential supplied through the services file or the environment
+passes. A secret's reported source is one
 of the service registry, config, environment variables, or a derived value;
 `unresolved` marks a value that is declared but resolves to nothing, distinct
 from `missing`, which marks a value that was never declared at all.

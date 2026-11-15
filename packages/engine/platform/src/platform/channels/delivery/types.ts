@@ -81,6 +81,10 @@ export interface ChannelDeliveryResult {
   readonly receipt?: ChannelDeliveryReceipt | undefined;
   /** True when the message was shortened to fit the surface; what went out is not the whole text. */
   readonly truncated?: boolean | undefined;
+  /** How many characters of the body did not go out, when `truncated`. */
+  readonly omittedChars?: number | undefined;
+  /** How many messages the body went out as, when it was longer than one message on the surface. */
+  readonly parts?: number | undefined;
 }
 
 export interface ChannelDeliveryStrategy {

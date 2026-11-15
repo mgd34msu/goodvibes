@@ -363,6 +363,7 @@ export function getBuiltinSetupSchema(surface: ChannelSurface): ChannelSetupSche
             configKey: 'surfaces.whatsapp.provider',
             options: [{ value: 'meta-cloud', label: 'Meta Cloud API' }, { value: 'bridge', label: 'Bridge' }],
           }),
+          setupField('bridgeUrl', 'Bridge URL', 'url', false, { configKey: 'surfaces.whatsapp.bridgeUrl', placeholder: 'https://whatsapp-bridge.example' }),
           setupField('phoneNumberId', 'Phone number id', 'string', false, { configKey: 'surfaces.whatsapp.phoneNumberId' }),
           setupField('businessAccountId', 'Business account id', 'string', false, { configKey: 'surfaces.whatsapp.businessAccountId' }),
           setupField('defaultRecipient', 'Default recipient', 'string', false, { configKey: 'surfaces.whatsapp.defaultRecipient' }),
@@ -385,7 +386,7 @@ export function getBuiltinSetupSchema(surface: ChannelSurface): ChannelSetupSche
           }),
         ],
         externalSteps: [
-          'Choose Meta Cloud API or a bridge-backed deployment.',
+          'Choose Meta Cloud API or a bridge-backed deployment; for a bridge, set its URL.',
           'Store the access token, verification token, and signing secret required by the provider.',
           'Set the phone number id, business account id, and default recipient if you want direct routing.',
         ],

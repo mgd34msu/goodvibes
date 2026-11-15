@@ -5,6 +5,7 @@ import type { ConfigKey } from '../../config/schema-types.js';
 import { ServiceRegistry, type ServiceSecretField } from '../../config/service-registry.js';
 import type { SecretsManager } from '../../config/secrets.js';
 import { resolveSecretInput } from '../../config/secret-refs.js';
+import { channelCredentials } from '../credential-holder.js';
 import type {
   ChannelDeliveryRequest,
   ChannelDeliveryResult,
@@ -43,11 +44,53 @@ export function titleFromBody(body: string): string {
 }
 
 /** `truncated` says the text sent was shortened to fit the surface; it is absent when everything went out. */
-export function success(responseId?: string, options: { readonly truncated?: boolean | undefined } = {}): ChannelDeliveryResult {
+export function success(
+  responseId?: string,
+  options: { readonly truncated?: boolean | undefined; readonly omittedChars?: number | undefined } = {},
+): ChannelDeliveryResult {
   return {
     ...(responseId === undefined ? {} : { responseId }),
-    ...(options.truncated ? { truncated: true } : {}),
+    ...(options.truncated ? { truncated: true, ...(options.omittedChars ? { omittedChars: options.omittedChars } : {}) } : {}),
   };
+}
+
+/**
+ * The most text one message carries on each surface whose strategy cuts a body
+ * to fit (`fitForSurface`). The router splits a longer body into following
+ * messages of at most this size, so the recipient gets all of it. Telephony is
+ * absent on purpose: a following SMS or call is not what a sender asked for.
+ */
+export const SURFACE_TEXT_LIMITS = {
+  telegram: 4_096,
+  whatsapp: 4_096,
+  'google-chat': 4_000,
+  msteams: 4_000,
+  mattermost: 12_000,
+  matrix: 8_000,
+  signal: 8_000,
+  imessage: 8_000,
+  bluebubbles: 8_000,
+} as const satisfies Partial<Record<ChannelDeliverySurfaceKind, number>>;
+
+/**
+ * Split a body into parts of at most `limit` characters, each cut at a paragraph,
+ * line or word boundary where one falls in the second half of the part. The
+ * last of `maxParts` parts carries whatever remains, which the surface then
+ * cuts and reports as shortened.
+ */
+export function splitForSurface(body: string, limit: number, maxParts: number): string[] {
+  let rest = body.replace(/\r\n/g, '\n').trim();
+  const parts: string[] = [];
+  while (rest.length > limit && parts.length < maxParts - 1) {
+    const window = rest.slice(0, limit);
+    const floor = Math.floor(limit / 2);
+    const boundary = [window.lastIndexOf('\n\n'), window.lastIndexOf('\n'), window.lastIndexOf(' ')].find((index) => index >= floor);
+    const cut = boundary ?? limit;
+    parts.push(rest.slice(0, cut).trimEnd());
+    rest = rest.slice(cut).trimStart();
+  }
+  if (rest.length > 0) parts.push(rest);
+  return parts;
 }
 
 function buildArtifactContentPath(artifactId: string): string {
@@ -107,23 +150,26 @@ export function trimForSurface(body: string, maxChars: number): string {
  * The text to send to a surface with a length limit. When it does not fit, the
  * body is cut, the cut says how much was left out, and the attachment lines
  * survive: they are the part of the message that cannot be recovered from the
- * body. `truncated` lets the caller report a shortened delivery as such.
+ * body. `truncated` and `omittedChars` let the caller report a shortened
+ * delivery as such. The router sends a long body as several parts first
+ * (`splitForSurface`), so this cut is reached only past the part limit.
  */
 export function fitForSurface(
   body: string,
   attachments: readonly ArtifactAttachment[],
   maxChars: number,
-): { readonly text: string; readonly truncated: boolean } {
+): { readonly text: string; readonly truncated: boolean; readonly omittedChars: number } {
   const full = trimForSurface(appendAttachmentSummary(body, attachments), Number.MAX_SAFE_INTEGER);
-  if (full.length <= maxChars) return { text: full, truncated: false };
+  if (full.length <= maxChars) return { text: full, truncated: false, omittedChars: 0 };
   const normalizedBody = body.replace(/\r\n/g, '\n').trim();
   const summary = attachments.length > 0 ? `\n\n${attachmentSummaryBlock(attachments)}` : '';
   const marker = (omitted: number): string => `\n[Message shortened: ${omitted} characters were not sent]`;
   const reserved = summary.length + marker(normalizedBody.length).length;
-  if (reserved >= maxChars) return { text: trimForSurface(full, maxChars), truncated: true };
+  if (reserved >= maxChars) return { text: trimForSurface(full, maxChars), truncated: true, omittedChars: Math.max(0, full.length - maxChars) };
   const room = maxChars - reserved;
   const kept = normalizedBody.slice(0, room).trimEnd();
-  return { text: `${kept}${marker(normalizedBody.length - kept.length)}${summary}`, truncated: true };
+  const omittedChars = normalizedBody.length - kept.length;
+  return { text: `${kept}${marker(omittedChars)}${summary}`, truncated: true, omittedChars };
 }
 
 /**
@@ -179,7 +225,11 @@ export function normalizeBaseUrl(value: string): string {
   return value.replace(/\/+$/, '');
 }
 
-/** Resolve only the selected credential; a broken configured reference cannot switch accounts. */
+/**
+ * Resolve only the selected credential; a broken configured reference cannot
+ * switch accounts. References go through the process's credential holder, so a
+ * send starts no password-manager command once the credential is held.
+ */
 export async function resolveDeliveryCredential(
   configManager: ConfigManager,
   serviceRegistry: ServiceRegistry,
@@ -192,19 +242,20 @@ export async function resolveDeliveryCredential(
     readonly environmentValue: string | undefined;
   },
 ): Promise<string | undefined> {
-  const registered = firstNonEmpty(await serviceRegistry.resolveSecret(options.serviceName, options.serviceField));
+  const registered = firstNonEmpty(await channelCredentials.resolve(`service:${options.serviceName}:${options.serviceField}`,
+    serviceRegistry.get?.(options.serviceName), () => serviceRegistry.resolveSecret(options.serviceName, options.serviceField), secretsManager));
   if (registered) return registered;
   const serviceDefault = firstNonEmpty(options.serviceDefault?.());
   if (serviceDefault) return serviceDefault;
   const configured = configManager.get(options.configKey);
   if (configured !== undefined && configured !== null
     && (typeof configured !== 'string' || configured.trim().length > 0)) {
-    const resolved = firstNonEmpty(await resolveSecretInput(configured, {
+    const resolved = firstNonEmpty(await channelCredentials.resolve(`config:${options.configKey}`, configured, () => resolveSecretInput(configured, {
       diagnosticMode: 'structural',
       resolveLocalSecret: (key) => secretsManager.get(key),
       homeDirectory: secretsManager.getGlobalHome?.() ?? undefined,
       configKey: options.configKey,
-    }));
+    }), secretsManager));
     if (!resolved) throw new Error(`Could not resolve channel delivery credential for ${options.configKey}`);
     return resolved;
   }

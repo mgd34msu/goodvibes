@@ -9,8 +9,7 @@
  * different ideas of what "stop the graph" means. What lives here is only the
  * mapping from this fork's assembled graph onto that list.
  *
- * It is a separate module because `runtime/services.ts` sits against the repo's
- * 800-line source cap (check-architecture.ts) with no room for the wiring.
+ * It is a separate module so `runtime/services.ts` stays a composition list.
  *
  * Ownership note, and the reason any of this exists: this surface builds the
  * graph and hands the SAME object to `DaemonServer`. The platform facade disposes

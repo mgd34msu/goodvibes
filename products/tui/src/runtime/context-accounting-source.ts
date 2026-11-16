@@ -8,9 +8,9 @@ import type { ContextAccountingSource } from '@goodvibes-jev/engine/platform/pla
 /**
  * Minimal runtime-bus surface this module needs: subscribe by event type.
  * A narrow structural type (not the full RuntimeEventBus) so this module
- * doesn't pull in `runtime/index.ts`, bootstrap.ts imports this module
- * directly, and index.ts re-exports bootstrap.ts, so a barrel import here
- * would be a 3-file cycle (see check-architecture.ts's cycle detector).
+ * doesn't pull in the `runtime/index.ts` barrel: bootstrap.ts imports this
+ * module directly, and a barrel import here could close an import cycle
+ * (`bun run architecture:check` reports runtime cycles).
  */
 export interface CompactionActivityBus {
   on(eventType: CompactionActivityEventType, callback: (envelope: CompactionActivityEnvelope) => void): () => void;

@@ -4,9 +4,8 @@
 // Constructs the three KnowledgeStores (regular wiki, agent, home-graph), their
 // semantic services, the ingest services, the home-graph service, and the
 // project-planning + work-plan stores. Extracted into its own module rather
-// than built inline in services.ts, which sits at the architecture check's
-// 800-line cap (scripts/check-architecture.ts), new/large construction blocks
-// get their own module and a single wiring call there (mirrors
+// than built inline in services.ts: new/large construction blocks get their
+// own module and a single wiring call there (mirrors
 // createWorkstreamServices / createDurabilityServices / createCodeIndexServices).
 //
 // The semantic services + ingest services receive the memory-governor

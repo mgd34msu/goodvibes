@@ -200,15 +200,15 @@ as well.
 | --- | --- |
 | `turn` | The contract intake reads a person's turn as work (see [Turn loop](#turn-loop)) |
 | `agent-tool` | The `agent` tool's `spawn` or `batch-spawn` without `outsideContract`; the tasks become proposed units and the result carries `contractStarted: true` and the contract id |
-| `proposal` | A launched plan proposal or workstream draft, through `runner.startFromPlan`; the drafted units are kept and the planner writes their criteria |
+| `proposal` | A launched plan proposal or workstream draft, through `runner.startFromPlan`; the drafted units are kept and the planner writes their criteria. A goal the planning agent could not split (it failed, was cancelled or is unavailable), or any goal while `planner.decomposition` is `heuristic`, drafts as one work item whose rationale and `fallbackReason` say why |
 | `cli` | The command line, `goodvibes-contract run` (`runContractCli` in `contract/cli.ts`); it follows the contract, asks the owner's questions at a terminal, and hosts the session a session-mode contract's turns run in |
 | `hosted` | `contracts.start` naming a live hosted session, and `contracts.dispatch`, served by the hosted external work adapter (`createHostedContractWorkAdapter`, composed by a daemon that hosts sessions and reached in process as `HostedSessionManager.contractWork()`); the contract runs on the session's workspace floor. A dispatch that names no session gets a new one in the daemon's working directory (or a `metadata.workspaceRoot` inside it); that session ends, and the dispatch's `metadata.idempotencyKey` is forgotten, when the contract passes, fails or is cancelled. A turn in a hosted session is read by the same turn intake and starts with origin `turn` |
 | `external` | `contracts.start` without a hosted session (under the `operator` session unless one is named), the operator external work adapter (`createOperatorContractWorkAdapter`), and an embedded session's spawn-mode submit |
 
 The daemon's operator methods `contracts.list`, `contracts.get`,
 `contracts.start`, `contracts.cancel` and `contracts.reply` (REST
-`/api/contracts...`) and `contracts.dispatch` and `contracts.remove` (invoke)
-act through one service across the daemon's runner and each hosted floor's
+`/api/contracts...`) and `contracts.summaries`, `contracts.status`,
+`contracts.dispatch` and `contracts.remove` (invoke) act through one service across the daemon's runner and each hosted floor's
 runner. All of them apply one session-ownership rule: a caller sees and acts
 on a contract only when its session is not owned by another principal; a
 contract of another principal's session reads as `CONTRACT_NOT_FOUND`
@@ -235,7 +235,17 @@ that names a hosted session that has ended is refused with `SESSION_NOT_LIVE`
 (409), not run in the daemon's directory. `contracts.list` leaves out each
 contract's input receipt (`inputSnapshot`: the captured git tree and commit),
 which `contracts.get` returns, and neither returns the earlier conversation or selected diff of the
-session that started the contract. `contracts.cancel` and `contracts.reply`
+session that started the contract. `contracts.get` also leaves out the per-file
+list an input receipt from before captures were a git tree keeps, unless
+`includeInputFiles` is true. `contracts.summaries` lists one small summary per
+contract (status, status line, unit and group counts, open questions, usage,
+times) with a `revision`, and `contracts.status` returns one contract's
+summary; given the `ifRevision` it last read, an unchanged contract answers
+`{ id, revision, notModified: true }`. The revision moves whenever the summary
+or a unit's or group's progress (state, agent, checks, nudges, fix rounds,
+touched paths) does, so a client lists summaries, polls `contracts.status` and
+reads the tree with `contracts.get` only when the revision moved; the web UI's
+Work view and the operator external work adapter do. `contracts.cancel` and `contracts.reply`
 answer a stored contract this runner is not running with `CONTRACT_NOT_RUNNING`
 (409), and a native work contract's cancel with `CONTRACT_NATIVE` (409).
 
@@ -326,7 +336,13 @@ waits.
   Worktree mode runs the contract on branch `contract/<short>` in
   `.goodvibes/.worktrees/contract/<short>`; each unit works in its own item
   worktree and merges into the contract branch. Shared mode runs one unit at a
-  time per working tree.
+  time per working tree. Every process on the machine takes the same lock for a
+  shared working tree (`.goodvibes/contracts/.shared-tree.writer.sqlite`, freed
+  by the system when its holder exits): a shared-mode group and a session-mode
+  contract hold it while they work. A contract waiting for it records a
+  `queued` decision and a status line naming the contract that holds it. While
+  a unit or group waits on its owner's answer and no other unit of the group is
+  working, the lock is released; the answer takes it again.
 - **Worktree retention.** A worktree the product created under
   `.goodvibes/.worktrees` is judged when its contract or agent ends (passed,
   failed, cancelled) and again when the daemon starts. One that is clean and

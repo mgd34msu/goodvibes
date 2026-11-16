@@ -15,7 +15,6 @@ export const { handleSettingsModalToken } = createSettingsModalRoute<
   toggleFocusKey: 'toggleFocusPane',
   cancelInlineEditOnEscape: false,
   toggleFlagCategory: true,
-  extendedResetShortcuts: false,
   openSettingsAction(context, action, requestRender, changed, setExecutionMode) {
     if (action === 'decision-router') { openDecisionRouterSettings(context, changed); return; }
     if (action === 'judgment-provider' || action === 'judgment-model' || action === 'judgment-fallbacks' || action === 'decision-policy' || action === 'permission-mode') {
@@ -50,7 +49,7 @@ import { openDaemonTimezonePicker } from './daemon-settings-actions.ts';
 type SessionPickerRouteState = {
   sessionPickerModal: {
     active: boolean;
-    loadSelected: (context: CommandContext) => void;
+    loadSelected: (context: CommandContext) => Promise<unknown>;
     moveUp: () => void;
     moveDown: () => void;
     deleteSelected: () => void;
@@ -65,7 +64,8 @@ type SessionPickerRouteState = {
 export const handleSessionPickerToken = createSearchableModalTokenRoute<SessionPickerRouteState>({
   modal: (state) => state.sessionPickerModal,
   enter(state) {
-    if (state.commandContext) state.sessionPickerModal.loadSelected(state.commandContext);
+    // The load re-resolves the saved model, so its status line arrives after this key returns.
+    if (state.commandContext) void state.sessionPickerModal.loadSelected(state.commandContext).then(() => state.requestRender());
   },
 
   namedKey: sessionPickerDeleteNamedKey,

@@ -1,6 +1,6 @@
 import type { ConfigModalActionContext, ConfigModalSurface, ConfigModalView } from '../../input/config-modal-types.ts';
 import type { ServiceInspectionQuery, SubscriptionAccessQuery } from '@/runtime/index.ts';
-import type { ServiceConfig, ServiceInspection, ServiceConnectionTestResult } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ProviderSubscription, ServiceConfig, ServiceInspection, ServiceConnectionTestResult } from '@goodvibes-jev/engine/platform/platform/config';
 import { subscriptionState } from '@goodvibes-jev/engine/platform/platform/config';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { toneStyle, statusGlyph, pad, postureLine, kv, type Tone } from './modal-surface-helpers.ts';
@@ -34,16 +34,17 @@ function statusDotTone(e: Entry): Tone {
   return 'dim';
 }
 
-// Ported verbatim from the retired services view's authSummary derivation.
-function authSummary(config: ServiceConfig, manager: SubscriptionAccessQuery): string {
+/** `subscriptions` is the store read once for the whole view, keyed by provider. */
+function authSummary(config: ServiceConfig, subscriptions: ReadonlyMap<string, ProviderSubscription>): string {
   const provider = config.providerId ?? config.name;
-  const hasOverride = manager.getAccessToken(provider) != null;
+  const record = subscriptions.get(provider);
+  const hasOverride = record?.overrideAmbientApiKeys === true;
   switch (config.authType) {
     case 'bearer': return hasOverride ? 'bearer+subscription' : 'bearer';
     case 'basic': return 'basic';
     case 'api-key': return hasOverride ? 'oauth-override' : config.apiKeyHeader ? `api-key:${config.apiKeyHeader}` : 'api-key';
     case 'oauth': {
-      const subscription = manager.get(provider);
+      const subscription = subscriptions.get(provider);
       if (!subscription) return 'oauth';
       const state = subscriptionState(subscription);
       return state === 'expired' || state === 'revoked' ? `oauth(${state}, sign in again)` : `oauth(${state})`;
@@ -58,6 +59,11 @@ function authSummary(config: ServiceConfig, manager: SubscriptionAccessQuery): s
  * synchronously by buildView (mirrors the earlier view's own refresh contract).
  * Actions map onto their existing behaviours; `s` jumps to the subscription
  * surface, `t`/`T` run the same live connection tests, `r` re-inspects.
+ *
+ * One run at a time: `run` is the refresh or test in progress, with a token. A
+ * key that would start another while one runs is answered with its progress,
+ * a result is applied only while its token is current, and closing the modal
+ * drops the token so a pass still in flight stops and paints nothing.
  */
 class ServicesModalSurface implements ConfigModalSurface {
   readonly name = 'services-modal';
@@ -66,6 +72,9 @@ class ServicesModalSurface implements ConfigModalSurface {
   private loading = false;
   private error = '';
   private requestRender: () => void = () => {};
+  /** The refresh or test running now; null when idle. */
+  private run: { readonly token: number; readonly kind: 'refresh' | 'test'; done: number; readonly total: number } | null = null;
+  private nextToken = 0;
 
   constructor(
     private readonly registry: ServiceInspectionQuery,
@@ -84,7 +93,30 @@ class ServicesModalSurface implements ConfigModalSurface {
     // Every open re-inspects: a connection test from an earlier visit may predate a
     // credential or base-URL change, so it is dropped before the first paint.
     this.entries = this.entries.map((e) => ({ name: e.name, inspection: e.inspection }));
-    if (!this.loading) void this.refresh();
+    this.run = null;
+    void this.refresh();
+  }
+
+  onClose(): void {
+    this.run = null;
+    this.loading = false;
+  }
+
+  /** Claim the one run slot, or say what is running and refuse. */
+  private begin(kind: 'refresh' | 'test', total: number, ctx?: ConfigModalActionContext): number | null {
+    if (this.run) {
+      ctx?.setStatus(this.run.kind === 'refresh'
+        ? 'A refresh is in progress; wait for it to finish.'
+        : `A test is in progress (${this.run.done}/${this.run.total}); wait for it to finish.`);
+      return null;
+    }
+    const token = ++this.nextToken;
+    this.run = { token, kind, done: 0, total };
+    return token;
+  }
+
+  private current(token: number): boolean {
+    return this.run?.token === token;
   }
 
   buildView(): ConfigModalView {
@@ -102,8 +134,9 @@ class ServicesModalSurface implements ConfigModalSurface {
       kv('unconfigured', counts.unconfigured),
     ])];
 
+    const subscriptions = new Map(this.manager.list().map((record) => [record.provider, record] as const));
     const rows = this.entries.map((e) => {
-      const auth = e.inspection ? authSummary(e.inspection.config, this.manager) : 'n/a';
+      const auth = e.inspection ? authSummary(e.inspection.config, subscriptions) : 'n/a';
       const base = e.inspection ? (e.inspection.config.baseUrl ?? '(no baseUrl)') : '(inspection failed)';
       return {
         id: `svc:${e.name}`,
@@ -112,8 +145,9 @@ class ServicesModalSurface implements ConfigModalSurface {
       };
     });
 
+    const progress = this.run?.kind === 'test' ? ` (testing ${this.run.done}/${this.run.total}…)` : this.loading ? ' (refreshing…)' : '';
     return {
-      title: this.loading && this.entries.length === 0 ? 'Services (loading…)' : 'Services',
+      title: this.loading && this.entries.length === 0 ? 'Services (loading…)' : `Services${progress}`,
       degraded: this.error || undefined,
       tabs: [{
         id: 'services',
@@ -126,9 +160,9 @@ class ServicesModalSurface implements ConfigModalSurface {
   }
 
   onAction(id: string, ctx: ConfigModalActionContext): void {
-    if (id === 'refresh') void this.refresh();
+    if (id === 'refresh') void this.refresh(ctx);
     else if (id === 'test') void this.testOne(ctx);
-    else if (id === 'test-all') void this.testAll();
+    else if (id === 'test-all') void this.testAll(ctx);
     else if (id === 'subscription') ctx.openModal?.('subscription-modal');
   }
 
@@ -136,50 +170,80 @@ class ServicesModalSurface implements ConfigModalSurface {
     return rowId?.startsWith('svc:') ? rowId.slice('svc:'.length) : null;
   }
 
-  private async refresh(): Promise<void> {
+  private async refresh(ctx?: ConfigModalActionContext): Promise<void> {
+    const token = this.begin('refresh', 1, ctx);
+    if (token === null) return;
     this.loading = true;
     this.error = '';
     this.requestRender();
     try {
       const configs = this.registry.getAll();
       const unreadable = this.registry.unreadableReason?.() ?? null;
-      if (unreadable) this.error = `Service list unusable: ${unreadable}`;
       const names = Object.keys(configs).sort((a, b) => a.localeCompare(b));
       const inspections = await Promise.all(names.map(async (name) => ({ name, inspection: await this.registry.inspect(name) })));
+      if (!this.current(token)) return;
+      if (unreadable) this.error = `Service list unusable: ${unreadable}`;
       // A re-inspection drops earlier connection tests: the credential or base URL
       // may have changed since, and a stale HEALTHY must not read as current.
       this.entries = inspections;
     } catch (e) {
+      if (!this.current(token)) return;
       this.error = `Refresh failed: ${summarizeError(e)}`;
-    } finally {
-      this.loading = false;
-      this.requestRender();
     }
+    this.run = null;
+    this.loading = false;
+    this.requestRender();
   }
 
   private async testOne(ctx: ConfigModalActionContext): Promise<void> {
     const name = this.nameOf(ctx.row?.id);
     if (!name) return;
+    const token = this.begin('test', 1, ctx);
+    if (token === null) return;
+    ctx.setStatus(`Testing ${name}…`);
+    this.requestRender();
+    let status: string;
     try {
       const result = await this.registry.testConnection(name);
+      if (!this.current(token)) return;
       this.entries = this.entries.map((e) => (e.name === name ? { ...e, lastTest: result } : e));
-      ctx.setStatus(`${name}: ${result.ok ? 'ok' : `failed (${result.status ?? 'n/a'})`}`);
+      status = `${name}: ${result.ok ? 'ok' : `failed (${result.status ?? 'n/a'})`}`;
     } catch (e) {
-      ctx.setStatus(`Test failed: ${summarizeError(e)}`);
+      if (!this.current(token)) return;
+      status = `Test of ${name} failed: ${summarizeError(e)}`;
     }
+    this.run = null;
+    ctx.setStatus(status);
     this.requestRender();
   }
 
-  private async testAll(): Promise<void> {
-    for (const entry of this.entries) {
+  private async testAll(ctx: ConfigModalActionContext): Promise<void> {
+    const names = this.entries.map((entry) => entry.name);
+    const token = this.begin('test', names.length, ctx);
+    if (token === null) return;
+    const failures: string[] = [];
+    ctx.setStatus(`Testing ${names.length} service(s)…`);
+    this.requestRender();
+    for (const name of names) {
+      let failure: string | null = null;
       try {
-        const result = await this.registry.testConnection(entry.name);
-        this.entries = this.entries.map((e) => (e.name === entry.name ? { ...e, lastTest: result } : e));
+        const result = await this.registry.testConnection(name);
+        if (!this.current(token)) return;
+        this.entries = this.entries.map((e) => (e.name === name ? { ...e, lastTest: result } : e));
+        if (!result.ok) failure = `${name} (${result.status ?? 'n/a'})`;
       } catch (e) {
-        this.error = `Test failed for ${entry.name}: ${summarizeError(e)}`;
+        if (!this.current(token)) return;
+        failure = `${name}: ${summarizeError(e)}`;
       }
+      if (failure) failures.push(failure);
+      this.run!.done++;
       this.requestRender();
     }
+    this.run = null;
+    ctx.setStatus(failures.length === 0
+      ? `Tested ${names.length} service(s): all ok.`
+      : `Tested ${names.length} service(s): ${failures.length} failed: ${failures.join('; ')}`);
+    this.requestRender();
   }
 }
 

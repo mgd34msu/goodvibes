@@ -76,7 +76,7 @@ function fixture(linked?: WorkPlanLinkTargets, contractId = 'contract-1') {
   };
   const state = { configModal: modal, commandContext: ctx, requestRender: () => {}, handleEscape: () => modal.close() };
   const text = async (value: string) => {
-    expect(handleConfigModalToken(state, { type: 'text', value })).toBe(true);
+    expect(handleConfigModalToken(state, { type: 'key', name: value, logicalName: value, ctrl: true, shift: false, meta: false })).toBe(true);
     await Promise.all(pending.splice(0));
   };
   return { item, store, registry, surface, modal, agents, opened, dispatched, text, removeContract: () => { contracts = []; } };

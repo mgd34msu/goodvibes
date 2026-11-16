@@ -14,9 +14,12 @@ import { formatDeviceLine, shortTokenId } from '@goodvibes-jev/engine/platform/p
 // Lists every per-device pairing token (name · created · last-seen · id) and
 // mirrors the pairing.tokens.* gateway verbs: revoke a device, migrate off the
 // legacy shared token, revoke the shared token. Rename needs a name, which the
-// stable-layout modal cannot capture inline, so it routes to the /devices rename
-// command with the row's id pre-filled in the guidance. buildView reads list()
-// fresh every render, so a revoke/migrate reflects immediately.
+// stable-layout modal cannot capture inline, so its status line names the
+// /devices rename command with the row's id filled in. Every action answers in
+// the modal's status line; nothing is printed under the modal. A migration's
+// one-time token is always shown in this modal (masked until revealed, dropped
+// on close); copying it to the terminal clipboard is an extra, since a terminal
+// that ignores OSC 52 drops it without telling anyone.
 // ---------------------------------------------------------------------------
 
 /** The token-store capability this surface needs, satisfied by PairingTokenManager. */
@@ -33,10 +36,22 @@ export interface DevicesModalDeps {
   readonly pairingTokens: DevicesModalPairingTokens;
   /** Injectable clock so last-seen formatting is deterministic in tests. */
   readonly now?: () => number;
-  readonly copyToClipboard?: (text: string) => void;
+  /** Writes the terminal clipboard escape; true when it was written (the terminal never confirms it). */
+  readonly copyToClipboard?: (text: string) => boolean | void;
 }
 
 const DEVICE_ROW_PREFIX = 'device:';
+
+/** A token minted by `/devices migrate-shared`, waiting for the view to open and show it. */
+let pendingReveal: { readonly name: string; readonly token: string } | null = null;
+
+/**
+ * Hand a freshly minted token to the Paired Devices view, which shows it masked
+ * until revealed and forgets it when it closes. The token is never printed.
+ */
+export function holdMintedTokenForReveal(minted: Pick<MintedPairingToken, 'name' | 'token'>): void {
+  pendingReveal = { name: minted.name, token: minted.token };
+}
 // Fixed-width placeholder, not derived from the token's length.
 const SECRET_MASK = '••••••••••••';
 
@@ -48,7 +63,7 @@ class DevicesModalSurface implements ConfigModalSurface {
   readonly name = 'devices-modal';
   readonly title = 'Paired Devices';
   private requestRender: () => void = () => {};
-  /** The one-time token minted by 'm' when no clipboard is wired. Shown masked in a row, never printed to the transcript. */
+  /** The one-time token minted by 'm'. Shown masked in a row, never printed to the transcript. */
   private minted: { readonly name: string; readonly token: string } | null = null;
   private mintedRevealed = false;
 
@@ -59,10 +74,18 @@ class DevicesModalSurface implements ConfigModalSurface {
     { key: 'x', id: 'revoke', label: 'revoke', confirm: true, enabledFor: (row: ConfigModalRow | null) => deviceIdOf(row) !== null },
     { key: 'm', id: 'migrateShared', label: 'migrate off shared token', confirm: true, enabledFor: () => !this.deps.pairingTokens.isLegacyRevoked() },
     { key: 'v', id: 'toggleReveal', label: 'reveal minted token', enabledFor: () => this.minted !== null },
+    { key: 'c', id: 'copyMinted', label: 'copy minted token', enabledFor: () => this.minted !== null && Boolean(this.deps.copyToClipboard) },
     { key: 's', id: 'revokeShared', label: 'revoke shared token', confirm: true, enabledFor: () => !this.deps.pairingTokens.isLegacyRevoked() },
   ];
 
-  onOpen(requestRender: () => void): void { this.requestRender = requestRender; }
+  onOpen(requestRender: () => void): void {
+    this.requestRender = requestRender;
+    if (pendingReveal) {
+      this.minted = pendingReveal;
+      this.mintedRevealed = false;
+      pendingReveal = null;
+    }
+  }
 
   /** A one-time token held for display is dropped when the modal closes. */
   onClose(): void { this.minted = null; this.mintedRevealed = false; }
@@ -90,13 +113,13 @@ class DevicesModalSurface implements ConfigModalSurface {
       'legacy',
       legacyRevoked
         ? 'Legacy shared token: revoked.'
-        : 'Legacy shared token: active; migrate a device off it (m), then revoke it (s).',
+        : 'Legacy shared token: active. This machine\'s own tools (the daemon CLI, local clients) sign in with it, as do devices paired before per-device tokens. Move a device to its own token with Ctrl+G then m. Revoking it (Ctrl+S) cannot be undone and locks out everything still using it.',
       legacyRevoked ? { fg: MODAL_TONES.dim } : { fg: MODAL_TONES.reasoning },
     ));
 
     return {
       title: 'Paired Devices',
-      tabs: [{ id: 'devices', label: 'Devices', rows, hints: ['r rename', 'x revoke', 'm migrate off shared', 's revoke shared', ...(this.minted ? ['v reveal minted token'] : [])] }],
+      tabs: [{ id: 'devices', label: 'Devices', rows, hints: ['r rename', 'x revoke', 'm migrate off shared', 's revoke shared', ...(this.minted ? ['v reveal minted token', ...(this.deps.copyToClipboard ? ['c copy it'] : [])] : [])] }],
     };
   }
 
@@ -108,7 +131,7 @@ class DevicesModalSurface implements ConfigModalSurface {
       if (!deviceId) { ctx.setStatus('Select a device row first.'); return; }
       // The stable-layout modal cannot capture a name inline, route to the
       // command with the id pre-filled so the user only types the new name.
-      ctx.print(`To rename this device, run:  /devices rename ${shortTokenId(deviceId)} <new name>`);
+      ctx.setStatus(`To rename this device, close this view (Esc) and run: /devices rename ${shortTokenId(deviceId)} <new name>`);
       return;
     }
 
@@ -124,16 +147,19 @@ class DevicesModalSurface implements ConfigModalSurface {
 
     if (id === 'migrateShared') {
       const minted = tokens.mintForMigration({ name: 'migrated device' });
-      if (this.deps.copyToClipboard) {
-        this.deps.copyToClipboard(minted.token);
-        ctx.print(`Minted "${minted.name}" and copied its one-time token to the clipboard. Pair the device, then revoke the shared token (s).`);
-      } else {
-        // No clipboard: keep the secret out of the transcript and show it masked in this modal until the user reveals it.
-        this.minted = { name: minted.name, token: minted.token };
-        this.mintedRevealed = false;
-        ctx.setStatus(`Minted "${minted.name}". Press v to reveal its one-time token, pair the device with it, then revoke the shared token (s).`);
-      }
+      this.minted = { name: minted.name, token: minted.token };
+      this.mintedRevealed = false;
+      ctx.setStatus(`Minted "${minted.name}" (id ${shortTokenId(minted.id)}). Press Ctrl+V to reveal its one-time token${this.deps.copyToClipboard ? ' or Ctrl+G then c to copy it' : ''}, then pair the device with it.`);
       this.requestRender();
+      return;
+    }
+
+    if (id === 'copyMinted') {
+      if (!this.minted || !this.deps.copyToClipboard) return;
+      const written = this.deps.copyToClipboard(this.minted.token);
+      ctx.setStatus(written === false
+        ? 'Could not write to the terminal clipboard; press Ctrl+V to reveal the token instead.'
+        : 'Sent the token to the terminal clipboard, if your terminal supports it (OSC 52); press Ctrl+V to reveal it if the paste is empty.');
       return;
     }
 
@@ -147,7 +173,7 @@ class DevicesModalSurface implements ConfigModalSurface {
     if (id === 'revokeShared') {
       if (tokens.isLegacyRevoked()) { ctx.setStatus('The legacy shared token is already revoked.'); return; }
       tokens.revokeLegacyShared();
-      ctx.setStatus('Revoked the legacy shared token; devices on it must re-pair with their own token.');
+      ctx.setStatus('Revoked the legacy shared token. Anything still signing in with it, including this machine\'s daemon CLI and devices not yet moved, is refused; devices must pair again for their own token.');
       this.requestRender();
       return;
     }
@@ -156,29 +182,4 @@ class DevicesModalSurface implements ConfigModalSurface {
 
 export function createDevicesModalSurface(deps: DevicesModalDeps): ConfigModalSurface {
   return new DevicesModalSurface(deps);
-}
-
-/**
- * Deterministic golden/render fixture: frozen token list + clock so last-seen
- * formatting is stable.
- */
-export function devicesModalGoldenSurface(): ConfigModalSurface {
-  const now = Date.UTC(2026, 6, 13, 12, 0, 0);
-  const tokens: PublicPairingToken[] = [
-    { id: 'aaaa1111bbbb2222', name: 'my laptop', createdAt: Date.UTC(2026, 6, 10, 9, 0, 0), lastSeenAt: now - 3 * 60_000 },
-    { id: 'cccc3333dddd4444', name: 'kitchen tablet', createdAt: Date.UTC(2026, 6, 1, 9, 0, 0), lastSeenAt: now - 5 * 60 * 60_000 },
-    { id: 'eeee5555ffff6666', name: 'phone (never scanned)', createdAt: Date.UTC(2026, 6, 13, 8, 0, 0) },
-  ];
-  let legacyRevoked = false;
-  return createDevicesModalSurface({
-    now: () => now,
-    pairingTokens: {
-      list: () => tokens,
-      rename: () => true,
-      revoke: () => true,
-      mintForMigration: () => ({ id: 'new', name: 'migrated device', token: 'tok', createdAt: now }),
-      isLegacyRevoked: () => legacyRevoked,
-      revokeLegacyShared: () => { legacyRevoked = true; },
-    },
-  });
 }

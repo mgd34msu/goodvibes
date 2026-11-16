@@ -48,6 +48,14 @@ export interface AgentRecord extends ProgressBearingRecord {
     reasoningSummaryCount?: number | undefined;
   };
   error?: string | undefined;
+  /**
+   * Structured facts of the failure in `error`, set where the run failed: the
+   * HTTP status, the error code (an errno name or a provider code) and the
+   * provider's Retry-After. Absent when the failure carried none.
+   */
+  failureStatus?: number | undefined;
+  failureCode?: string | undefined;
+  failureRetryAfterMs?: number | undefined;
   /** Per-spawn turn-budget override; replaces the agents.maxTurns default for this run, capped by agents.maxTurnsCap. */
   maxTurns?: number | undefined;
   /** The applied turn budget + its source, stamped on a turn-budget-exhaustion failure so the outcome can report it. */

@@ -816,6 +816,9 @@ export class AgentManager {
       const priorSummary = this.summarizeTranscriptTailForWake(agentId);
       record.resumeSteer = { steer, ...(priorSummary ? { priorSummary } : {}), ...(referenceOnly ? { referenceOnly: true as const } : {}) };
       record.error = undefined;
+      record.failureStatus = undefined;
+      record.failureCode = undefined;
+      record.failureRetryAfterMs = undefined;
       record.failureReason = undefined;
       record.turnBudget = undefined;
       record.completedAt = undefined;

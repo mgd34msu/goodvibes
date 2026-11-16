@@ -1,3 +1,4 @@
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { ConfigModalAction, ConfigModalActionContext, ConfigModalRow, ConfigModalSurface, ConfigModalView } from '../../input/config-modal-types.ts';
 import { getSettingsControlPlaneSnapshot } from '@/runtime/index.ts';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
@@ -55,10 +56,11 @@ class SettingsSyncModalSurface implements ConfigModalSurface {
   }
 
   buildView(): ConfigModalView {
-    const s = this.configManager ? this.trySnapshot() : null;
-    if (!s) {
-      return { title: 'Settings Sync', degraded: 'settings control plane unavailable', tabs: [{ id: 'keys', label: 'Keys', rows: [] }] };
+    const read = this.configManager ? this.trySnapshot() : { error: 'no settings manager in this session' };
+    if ('error' in read) {
+      return { title: 'Settings Sync', degraded: `settings control plane unavailable: ${read.error}`, tabs: [{ id: 'keys', label: 'Keys', rows: [] }] };
     }
+    const s = read.snapshot;
     this.conflictedKeys = new Set(s.conflicts.map((c) => c.key));
     this.hasStaged = Boolean(s.stagedManagedBundle);
 
@@ -126,11 +128,11 @@ class SettingsSyncModalSurface implements ConfigModalSurface {
     this.requestRender();
   }
 
-  private trySnapshot(): Snapshot | null {
+  private trySnapshot(): { readonly snapshot: Snapshot } | { readonly error: string } {
     try {
-      return getSettingsControlPlaneSnapshot(this.configManager);
-    } catch {
-      return null;
+      return { snapshot: getSettingsControlPlaneSnapshot(this.configManager) };
+    } catch (error) {
+      return { error: summarizeError(error) };
     }
   }
 }

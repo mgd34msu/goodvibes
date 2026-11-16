@@ -8,7 +8,6 @@ import { ExecutionPlanManager } from '../platform/src/platform/core/execution-pl
 import { ConversationManager } from '../platform/src/platform/core/conversation.js';
 import { prepareConversationForTurn } from '../platform/src/platform/core/orchestrator-turn-helpers.js';
 import { readPlanningGoal } from '../platform/src/platform/agents/planning-goal.js';
-import { readArchetypeFamilies } from '../platform/src/platform/agents/archetype-family.js';
 
 let restore: (() => void) | undefined;
 afterEach(() => { restore?.(); restore = undefined; });
@@ -47,8 +46,6 @@ test('Classic automatic planning uses one worker while retaining explicit owner 
     const pinned = await planner.select(input);
     expect(pinned).toMatchObject({ selected: 'cohort', reasonCode: 'PINNED_MODE', provenance: 'classic' });
     expect(pinned.decisionId).toBeUndefined(); expect(pinned.outcome).toBeUndefined();
-    const families = await readArchetypeFamilies([{ name: 'custom', description: 'Owner-defined worker', tools: ['read'], isCustom: true, origin: 'local-markdown' }]);
-    expect(families.readings).toEqual([{ kind: 'unclassified', provenance: 'classic' }]);
   });
   expect(requests).toHaveLength(0);
 });

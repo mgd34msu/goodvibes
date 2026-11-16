@@ -115,7 +115,13 @@ export function parseNativeReaderCapabilities(value: unknown): NativeReaderCapab
     return Object.freeze({ schema: 1, version: readerVersion, formats: Object.freeze(formats) });
   } catch { throw new NativeDataCompatibilityError('unavailable'); }
 }
-interface ReaderRequirements { readonly schema: 1; readonly minimumReader: string; readonly formats: readonly NativeDataFormat[] }
+interface ReaderRequirements {
+  readonly schema: 1; readonly minimumReader: string;
+  /** The listed formats this build knows. */
+  readonly formats: readonly NativeDataFormat[];
+  /** Listed formats this build does not know: written by a newer member of the suite. */
+  readonly unknown: readonly string[];
+}
 export interface NativeDataWriteOwner { declare(format: NativeDataFormat): void }
 export interface AdmittedNativeDataPublisher {
   readonly execPath: string; readonly version: string; readonly assertCurrent: () => void;
@@ -144,25 +150,37 @@ function pathFor(execPath: string): string {
   if (!isAbsolute(execPath) || resolve(execPath) !== execPath) throw new NativeDataCompatibilityError('unavailable');
   return join(dirname(execPath), NATIVE_READER_REQUIREMENT_FILE);
 }
-function parse(bytes: Uint8Array): ReaderRequirements {
+/** The floor is read before the format names: a file written by a newer build
+ * lists formats this build has never heard of, and the reader it needs is the
+ * one fact that tells the owner what to do (update, or update the suite together). */
+function parse(bytes: Uint8Array, readerVersion: string): ReaderRequirements {
+  let row: Record<string, unknown>;
+  let minimum: ReturnType<typeof version>;
+  let listed: readonly string[];
   try {
     const raw: unknown = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error();
-    const row = raw as Record<string, unknown>;
+    row = raw as Record<string, unknown>;
     if (Object.keys(row).length !== 3 || row['schema'] !== 1 || typeof row['minimumReader'] !== 'string'
-      || !Array.isArray(row['formats']) || row['formats'].length < 1 || row['formats'].length > Object.keys(requirements).length
+      || !Array.isArray(row['formats']) || row['formats'].length < 1 || row['formats'].length > 256
       || new Set(row['formats']).size !== row['formats'].length
-      || row['formats'].some(item => typeof item !== 'string' || !Object.hasOwn(requirements, item))) throw new Error();
-    const minimum = version(row['minimumReader']);
-    for (const item of row['formats'] as NativeDataFormat[]) {
-      if (compareSemanticVersions(minimum, version(requirements[item])) < 0) throw new Error();
-    }
-    return Object.freeze({ schema: 1, minimumReader: row['minimumReader'], formats: Object.freeze([...row['formats']]) as readonly NativeDataFormat[] });
+      || row['formats'].some(item => typeof item !== 'string')) throw new Error();
+    minimum = version(row['minimumReader']);
+    listed = row['formats'] as string[];
   } catch { throw new NativeDataCompatibilityError('unavailable'); }
+  if (compareSemanticVersions(version(readerVersion), minimum) < 0) throw new NativeDataCompatibilityError('incompatible', row['minimumReader'] as string);
+  const unknown = listed.filter(item => !Object.hasOwn(requirements, item));
+  try {
+    for (const item of listed) {
+      if (Object.hasOwn(requirements, item) && compareSemanticVersions(minimum, version(requirements[item as NativeDataFormat])) < 0) throw new Error();
+    }
+  } catch { throw new NativeDataCompatibilityError('unavailable'); }
+  return Object.freeze({ schema: 1, minimumReader: row['minimumReader'] as string, formats: Object.freeze(listed.filter((item): item is NativeDataFormat => Object.hasOwn(requirements, item))), unknown: Object.freeze(unknown) });
 }
-function read(path: string): { readonly value: ReaderRequirements | null; readonly observed: FileObservation | null } {
-  try { const observed = readFileObservation(path); return { value: parse(observed.bytes), observed }; }
+function read(path: string, readerVersion: string): { readonly value: ReaderRequirements | null; readonly observed: FileObservation | null } {
+  try { const observed = readFileObservation(path); return { value: parse(observed.bytes, readerVersion), observed }; }
   catch (error) {
+    if (error instanceof NativeDataCompatibilityError) throw error;
     if (missing(error)) {
       try { lstatSync(path); } catch (absent) { if (missing(absent)) return { value: null, observed: null }; }
     }
@@ -227,16 +245,20 @@ export function createNativeDataWriteOwner(publisher: AdmittedNativeDataPublishe
         const now = readFileObservation(`${path}.lock`);
         if (now.physical !== lease.physical || !now.bytes.equals(lease.bytes)) throw new Error();
       };
-      const previous = read(path);
+      const previous = read(path, runningVersion);
       if (observedFile && previous.value === null) throw new Error();
+      // This build is new enough for the floor, but a newer member of the suite wrote formats it cannot name.
+      if (previous.value !== null && previous.value.unknown.length > 0) throw new NativeDataCompatibilityError('mixed-readers');
       if (previous.value !== null) observedFile = true;
+      // Every format already listed is settled for this process too: a later declaration of it is a set lookup.
+      if (previous.value !== null) for (const listed of previous.value.formats) declared.add(listed);
       const required = requirements[format];
       const minimumReader = previous.value !== null && compareSemanticVersions(version(previous.value.minimumReader), version(required)) >= 0
         ? previous.value.minimumReader : required;
       if (compareSemanticVersions(version(runningVersion), version(minimumReader)) < 0) throw new NativeDataCompatibilityError('incompatible', minimumReader);
       if (!previous.value?.formats.includes(format) || previous.value.minimumReader !== minimumReader) {
         current();
-        const next: ReaderRequirements = { schema: 1, minimumReader, formats: [...(previous.value?.formats ?? []), format].filter((value, index, all) => all.indexOf(value) === index) };
+        const next: Omit<ReaderRequirements, 'unknown'> = { schema: 1, minimumReader, formats: [...(previous.value?.formats ?? []), format].filter((value, index, all) => all.indexOf(value) === index) };
         const contents = `${JSON.stringify(next)}\n`;
         const cohort: unknown = captureCohort?.call(publisher, Object.freeze([...next.formats]));
         if (cohort !== undefined && typeof cohort !== 'function') { drainOwned(cohort); throw new NativeDataCompatibilityError('unconfirmed-reader'); }
@@ -248,7 +270,7 @@ export function createNativeDataWriteOwner(publisher: AdmittedNativeDataPublishe
         assertCohort();
         atomicWriteFileSync(path, contents, { mode: 0o600, assertCurrent: () => {
           physicalCurrent(); current(); physicalCurrent(); assertCohort(); assertLease();
-          const now = read(path);
+          const now = read(path, runningVersion);
           if (now.observed?.physical !== previous.observed?.physical || (now.observed !== null && !now.observed.bytes.equals(previous.observed?.bytes ?? Buffer.alloc(0)))) throw new Error();
         } });
         if (!readFileObservation(path).bytes.equals(Buffer.from(contents))) throw new Error();
@@ -281,16 +303,16 @@ export function createNativeDataWriteOwner(publisher: AdmittedNativeDataPublishe
 export function assertNativeReaderCompatible(execPath: string, proposedVersion: string, io: Pick<UpdateFileIo, 'observe' | 'readFile'>,
   capabilities?: NativeReaderCapabilities): void {
   try {
-    const proposed = version(proposedVersion);
+    version(proposedVersion);
     const readers = capabilities === undefined ? undefined : parseNativeReaderCapabilities(capabilities);
     const path = pathFor(execPath);
     if (!io.observe || !io.readFile) throw new Error();
     const observed = io.observe(path); if (observed === null) return;
-    const bytes = io.readFile(path), required = parse(bytes), after = io.observe(path);
+    const bytes = io.readFile(path), required = parse(bytes, proposedVersion), after = io.observe(path);
     if (after === null || observed.identity !== after.identity || observed.ownerIdentity !== after.ownerIdentity) throw new Error();
-    if (compareSemanticVersions(proposed, version(required.minimumReader)) < 0) throw new NativeDataCompatibilityError('incompatible', required.minimumReader);
     if (!readers) throw new NativeDataCompatibilityError('unconfirmed-reader');
+    // Formats this updater does not know are judged by the candidate's own capabilities, like every other format.
     if (readers.version.replace(/^v/i, '') !== proposedVersion.replace(/^v/i, '')
-      || required.formats.some(format => !readers.formats.includes(format))) throw new NativeDataCompatibilityError('unconfirmed-reader');
+      || [...required.formats, ...required.unknown].some(format => !readers.formats.includes(format))) throw new NativeDataCompatibilityError('unconfirmed-reader');
   } catch (error) { throw error instanceof NativeDataCompatibilityError ? error : new NativeDataCompatibilityError('unavailable'); }
 }

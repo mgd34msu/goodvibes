@@ -1,11 +1,12 @@
 /**
  * Resolve a shared memory-store path and merge stores by record ID without loss.
  * Access must be sequential: sql.js rewrites the complete file on each save.
- * Folding preserves existing records and source stores, and reports what moved.
+ * Folding preserves existing records, retires each source it fully folded, and
+ * reports what moved.
  */
 
-import { existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, renameSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import { MemoryStore } from './memory-store.js';
 import type { MemoryEmbeddingProviderRegistry } from './memory-embeddings.js';
 import { logger } from '../utils/logger.js';
@@ -40,6 +41,8 @@ export interface MemoryFoldSourceReport {
   readonly importedLinks: number;
   /** Present only when the source could not be opened/read; the source is skipped, not fatal. */
   readonly error?: string;
+  /** Where the fully folded source was moved, so no later boot folds it again. */
+  readonly retiredTo?: string;
 }
 
 export interface MemoryFoldReport {
@@ -57,18 +60,34 @@ export interface MemoryFoldReport {
 export interface FoldMemoryStoresOptions {
   /** Embedding registry used to open each source store read-only (vector index disabled). */
   readonly embeddingRegistry: MemoryEmbeddingProviderRegistry;
+  /**
+   * Leave each source where it is after folding it. Only for reconciling a store
+   * that keeps being written; a migration source is retired (the default).
+   */
+  readonly keepSources?: boolean;
+}
+
+/** The name a fully folded source is moved to: kept on disk, no longer a source. */
+export function retiredMemorySourcePath(dbPath: string): string {
+  return `${dbPath}.folded`;
 }
 
 /**
  * Fold every legacy/per-surface store into the canonical store via the bundle
  * seam. Id-keyed union: an id already in the canonical store is left as-is
- * (counted as skipped), a new id is imported. Never overwrites, never deletes a
- * source, never aborts on one bad source. Idempotent, re-running folds nothing
- * new (all ids already present). Returns a full report.
+ * (counted as skipped), a new id is imported. Never overwrites, never aborts on
+ * one bad source. Returns a full report.
  *
- * This is the migration path (fold the old per-surface stores in at boot) AND
- * the reconciliation primitive for an offline/embedded surface that cannot share
- * the canonical file live (fold its bundle in when it reconnects).
+ * "Folded" is a fact about the source file: a source that folded with no error
+ * is renamed to `<path>.folded`, so the next boot finds no source and does
+ * nothing. Without that, a memory the owner deleted from the canonical store
+ * (an absent id) would be imported again from the old file on every start. A
+ * source that failed stays in place and is tried again next boot.
+ *
+ * This is the migration path (fold the old per-surface stores in at boot) AND,
+ * with `keepSources`, the reconciliation primitive for an offline/embedded
+ * surface that cannot share the canonical file live (fold its bundle in when it
+ * reconnects).
  */
 export async function foldMemoryStores(
   canonical: MemoryStore,
@@ -110,6 +129,20 @@ export async function foldMemoryStores(
       totalImported += result.importedRecords;
       totalSkipped += result.skippedRecords;
       totalLinks += result.importedLinks;
+      sourceStore.close();
+      sourceStore = null;
+      let retiredTo: string | undefined;
+      // A source that is the canonical file itself is never moved away.
+      if (!options.keepSources && resolve(source.dbPath) !== resolve(canonical.dbPath ?? '')) {
+        const target = retiredMemorySourcePath(source.dbPath);
+        try {
+          renameSync(source.dbPath, target);
+          retiredTo = target;
+        } catch (err) {
+          // Folded but still in place: the next boot folds it again (id-keyed, so nothing is duplicated).
+          logger.warn('foldMemoryStores: folded source could not be retired', { label: source.label, error: summarizeError(err) });
+        }
+      }
       sourceReports.push({
         label: source.label,
         dbPath: source.dbPath,
@@ -117,6 +150,7 @@ export async function foldMemoryStores(
         importedRecords: result.importedRecords,
         skippedRecords: result.skippedRecords,
         importedLinks: result.importedLinks,
+        ...(retiredTo ? { retiredTo } : {}),
       });
     } catch (err) {
       const error = summarizeError(err);
@@ -168,7 +202,7 @@ export function formatMemoryFoldReport(report: MemoryFoldReport): string {
     } else if (source.error) {
       lines.push(`  - ${source.label}: SKIPPED, ${source.error}`);
     } else {
-      lines.push(`  - ${source.label}: +${source.importedRecords} imported, ${source.skippedRecords} already present, +${source.importedLinks} links`);
+      lines.push(`  - ${source.label}: +${source.importedRecords} imported, ${source.skippedRecords} already present, +${source.importedLinks} links${source.retiredTo ? `, moved to ${source.retiredTo}` : ''}`);
     }
   }
   return lines.join('\n');

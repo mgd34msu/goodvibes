@@ -126,7 +126,7 @@ export class ChangesModal implements SurfaceModal {
     this.loading = false;
     this.error = diff.error;
     this.label = diff.label;
-    this.files = diff.error ? [] : parseChanges(diff.raw);
+    this.files = parseChanges(diff.raw);
     this.summary = summary;
     this.commits = commits;
     this.semantic.clear();
@@ -588,7 +588,7 @@ export class ChangesModal implements SurfaceModal {
     }
     if (this.notRepo) return 'Not a git repository here, so there are no changes to show.\nPress i to initialize one (it asks first).';
     if (this.loading && this.files.length === 0 && this.commits.length === 0) return 'Loading changes…';
-    if (this.error) return `git could not produce the diff: ${this.error}`;
+    if (this.error && this.files.length === 0) return `git could not produce the diff: ${this.error}\nPress v to switch between this session, not staged, staged and everything vs HEAD.`;
     const commit = this.currentCommit();
     if (commit) {
       const loaded = this.commitFiles.get(commit.hash);
@@ -604,6 +604,7 @@ export class ChangesModal implements SurfaceModal {
   private foot(): ChangesFootLine[] {
     const lines: ChangesFootLine[] = [];
     if (this.previewNote && this.files.length > 0) lines.push({ text: this.previewNote, tone: 'muted' });
+    if (this.error && this.files.length > 0) lines.push({ text: `Only untracked files are shown; git could not diff the tracked ones: ${this.error.split('\n')[0]}`, tone: 'error' });
     const current = this.currentHunk();
     if (this.composing !== null) lines.push({ text: `comment: ${this.composing}`, tone: 'text', cursor: true });
     else if (this.commitDraft !== null) lines.push({ text: `commit message: ${this.commitDraft}`, tone: 'text', cursor: true });

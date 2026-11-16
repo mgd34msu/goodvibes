@@ -12,7 +12,7 @@ import { daemonSecretKeyFor } from './daemon-secret-keys.js';
 import { isSecretBearingConfigKey } from './secret-bearing-config-keys.js';
 import { configKeyScope, describeConfigOwnership } from './config-ownership.js';
 import { deriveControlPlaneBaseUrl } from './control-plane-base-url.js';
-import { detachedDaemonProcessAlive, detachedDaemonRuntimePath, type DetachedDaemonRuntimeHint } from '../runtime/detached-daemon-runtime.js';
+import { daemonRecordBaseUrl, detachedDaemonProcessAlive, detachedDaemonRuntimePath, type DetachedDaemonRuntimeHint } from '../runtime/detached-daemon-runtime.js';
 import type { ConfigWriteRoute, DaemonConfigEndpoint, DaemonConfigRouterDeps } from './daemon-config-route.js';
 import { snapshotJudgmentInput } from '../gate/judgment-input.js';
 import { SettingsRefusalError, refusalText } from './settings-refusal.js';
@@ -84,7 +84,8 @@ function readRecord(dir: string): RuntimeObservation {
     const parsed: unknown = JSON.parse(raw);
     if (!record(parsed) || typeof parsed.host !== 'string' || !Number.isInteger(parsed.port) || Number(parsed.port) < 1 || Number(parsed.port) > 65535
       || (parsed.pid !== undefined && (!Number.isInteger(parsed.pid) || Number(parsed.pid) < 1))) throw runtimeRecordUnreadable(path);
-    return { value: { host: parsed.host, port: Number(parsed.port), ...(parsed.pid === undefined ? {} : { pid: Number(parsed.pid) }) }, stamp };
+    const scheme = parsed.scheme === 'https' ? 'https' as const : undefined;
+    return { value: { host: parsed.host, port: Number(parsed.port), ...(scheme ? { scheme } : {}), ...(parsed.pid === undefined ? {} : { pid: Number(parsed.pid) }) }, stamp };
   } catch { throw runtimeRecordUnreadable(path); }
 }
 const routeChecks = new WeakMap<ConfigWriteRoute, () => void>();
@@ -138,10 +139,8 @@ export async function resolvePreparedConfigWriteRoute(key: string, deps: DaemonC
   if (configured?.baseUrl.trim()) return finish({ mode: 'daemon', scope, reason, endpoint: Object.freeze({ ...configured, baseUrl: baseUrl(configured), certain: true }) });
   if (!directory) return finish({ mode: 'local', scope, reason });
   const runtime = runtimeObservation.value;
-  const runtimeHost = runtime?.host === '0.0.0.0' ? '127.0.0.1' : runtime?.host;
-  const host = runtimeHost?.includes(':') && !runtimeHost.startsWith('[') ? `[${runtimeHost}]` : runtimeHost;
   const runtimeEndpoint: DaemonConfigEndpoint | null = runtime && detachedDaemonProcessAlive(runtime, isProcessAlive)
-    ? Object.freeze({ baseUrl: baseUrl({ baseUrl: `http://${host}:${runtime.port}`, source: 'runtime' }), token, source: 'running-daemon record', certain: true }) : null;
+    ? Object.freeze({ baseUrl: baseUrl({ baseUrl: daemonRecordBaseUrl(runtime), source: 'runtime' }), token, source: 'running-daemon record', certain: true }) : null;
   const bindingEndpoint: DaemonConfigEndpoint | null = bindingSnapshot
     ? Object.freeze({ baseUrl: deriveControlPlaneBaseUrl(bindingSnapshot, 'loopback'), token, source: 'control-plane binding in the daemon config', certain: true }) : null;
   for (const endpoint of [runtimeEndpoint, bindingEndpoint]) {

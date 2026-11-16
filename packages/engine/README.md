@@ -205,7 +205,6 @@ restore it instead of rebuilding.
 | Job | Runs |
 | --- | --- |
 | `validate` | `bun run validate` |
-| `eval-gate` | The standing eval suite, scored against a checked-in baseline |
 | `security-audit` | Dependency audit and secret scan |
 | `build` | The single workspace build |
 | `platform-matrix` | Nine engine test partitions, plus the companion-bundle (`rn-bundle`), Workers and Wrangler legs |

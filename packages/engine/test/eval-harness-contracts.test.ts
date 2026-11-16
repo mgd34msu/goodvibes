@@ -33,6 +33,11 @@ describe('baseline loading', () => {
     await expect(loadBaseline('../escape.json', root)).rejects.toThrow('within project directory');
   });
 
+  test('a sibling directory that shares the root name as a prefix is refused', async () => {
+    const root = tempRoot();
+    await expect(loadBaseline(`${root}-other/baseline.json`, root)).rejects.toThrow('within project directory');
+  });
+
   test('suites must be an object', () => {
     for (const suites of ['null', '[]']) {
       expect(() => deserialiseBaseline(`{"label":"l","capturedAt":1,"suites":${suites}}`)).toThrow('Invalid baseline format');
@@ -40,14 +45,14 @@ describe('baseline loading', () => {
   });
 });
 
-function suiteResult(ids: string[]): EvalSuiteResult {
+function suiteResult(ids: string[], score = 90): EvalSuiteResult {
   return {
     suite: 's',
     startedAt: 0,
-    meanScore: 90,
+    meanScore: score,
     results: ids.map((id) => ({
       scenario: { id, name: id },
-      scorecard: { compositeScore: 90, passed: true },
+      scorecard: { compositeScore: score, passed: true },
     })),
   } as unknown as EvalSuiteResult;
 }
@@ -59,6 +64,12 @@ describe('evaluateGate missing scenarios', () => {
     const gate = new EvalRunner().evaluateGate(suiteResult(['kept']), baseline);
     expect(gate.missingFromRun).toEqual(['gone']);
     expect(formatGateResult(gate)).toContain('gone');
+  });
+
+  test('flags a scenario that dropped below its baseline score', () => {
+    const gate = new EvalRunner({ regressionThreshold: 5 }).evaluateGate(suiteResult(['kept', 'gone'], 60), baseline);
+    expect(gate.regressions.map((r) => r.scenarioId).sort()).toEqual(['gone', 'kept']);
+    expect(gate.passed).toBe(false);
   });
 
   test('does not claim a regression check when the baseline lacks the whole suite or no baseline exists', () => {

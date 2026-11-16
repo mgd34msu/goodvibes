@@ -21,6 +21,7 @@ import { GatewayVerbError } from '../control-plane/routes/gateway-verb-error.js'
 import { EngineErrorCodes, formatRefusal, refusal, type Refusal } from '@goodvibes-jev/engine/errors';
 import { createOwnedPluginCapabilities } from './owned-capabilities.js';
 import { PluginClosedError, PluginQuiescingError, type PluginInFlightTracker } from './in-flight.js';
+import { enforceBundleCapability, type BundleCapabilityGuard } from '../runtime/ecosystem/bundle-manifest.js';
 
 /**
  * PluginProviderConfig, minimal config for registering a custom LLM provider
@@ -194,6 +195,12 @@ export interface PluginAPIContext {
   inFlight?: PluginInFlightTracker | undefined;
   /** Per-instance registration lifetime, closed before unloading this instance. */
   registrations?: PluginInFlightTracker | undefined;
+  /**
+   * Present when the plugin was installed from a pinned bundle: every
+   * registration is checked against the grant in its install receipt, and one
+   * the bundle did not declare (or its trust tier withheld) fails the start.
+   */
+  bundleGuard?: BundleCapabilityGuard | undefined;
 }
 
 /** The refusal shown when a plugin command was refused or threw. */
@@ -247,6 +254,20 @@ export function createPluginAPI(ctx: PluginAPIContext): PluginAPI {
     return ctx.registrations ? ctx.registrations.track(ctx.pluginName, action) : action();
   };
   const owned = createOwnedPluginCapabilities(track);
+  const guard = ctx.bundleGuard;
+  /**
+   * Refuse a registration the bundle's grant does not cover (throws
+   * BundleCapabilityViolation, which fails the plugin's start with its reason).
+   * A plugin not installed from a bundle has no guard. `names` lists every
+   * spelling the declaration may use, the first being the one reported.
+   */
+  const permit = (runtime: 'register.tool' | 'register.provider' | 'register.hook', surface?: { kind: 'tool' | 'hook'; names: readonly [string, ...string[]] }): void => {
+    if (!guard) return;
+    enforceBundleCapability(guard, 'runtime', runtime);
+    if (!surface) return;
+    const declared = surface.kind === 'tool' ? guard.mayRegisterTool : guard.maySubscribeHook;
+    if (!surface.names.some((name) => declared(name))) enforceBundleCapability(guard, surface.kind, surface.names[0]);
+  };
   return {
     registerCommand(name, description, handler) {
       return register(() => {
@@ -277,6 +298,7 @@ export function createPluginAPI(ctx: PluginAPIContext): PluginAPI {
 
     registerProvider(name, config) {
       try { return register(async () => {
+        permit('register.provider');
         // Dynamically import to avoid circular dependency at module load time.
         const { OpenAICompatProvider } = await import('../providers/openai-compat.js');
         assertRegistrationOpen();
@@ -333,6 +355,7 @@ export function createPluginAPI(ctx: PluginAPIContext): PluginAPI {
 
     registerProviderInstance(registration) {
       return register(() => {
+        permit('register.provider');
         const registered = owned.provider(registration.provider);
         const unregister = ctx.providerRegistry.registerRuntimeProvider({
           provider: registered,
@@ -367,6 +390,7 @@ export function createPluginAPI(ctx: PluginAPIContext): PluginAPI {
     registerTool(name, schema, handler) {
       return register(() => {
         const toolName = `plugin_${ctx.pluginName}_${name}`;
+        permit('register.tool', { kind: 'tool', names: [name, toolName] });
         const definition: ToolDefinition = {
           name: toolName,
           description: (schema.description as string) ?? `Plugin tool: ${name}`,
@@ -420,6 +444,7 @@ export function createPluginAPI(ctx: PluginAPIContext): PluginAPI {
 
     registerChannelPlugin(plugin) {
       return register(() => {
+        if (guard) enforceBundleCapability(guard, 'channel', plugin.id);
         const registry = ctx.channelRegistry;
         const registered = owned.channel(plugin);
         registry.register(registered);
@@ -432,6 +457,7 @@ export function createPluginAPI(ctx: PluginAPIContext): PluginAPI {
 
     registerDeliveryStrategy(strategy, options = {}) {
       return register(() => {
+        if (guard) enforceBundleCapability(guard, 'channel', strategy.id);
         const router = ctx.channelDeliveryRouter;
         const registered = owned.delivery(strategy);
         router.registerStrategy(registered, options);
@@ -444,6 +470,7 @@ export function createPluginAPI(ctx: PluginAPIContext): PluginAPI {
 
     registerMemoryEmbeddingProvider(provider, options = {}) {
       return register(() => {
+        permit('register.provider');
         const unregister = ctx.memoryEmbeddingRegistry.register(owned.memory(provider), options);
         ctx.cleanup.push(unregister);
         logger.info(`[plugin:${ctx.pluginName}] Registered memory embedding provider '${provider.id}'`);
@@ -452,6 +479,7 @@ export function createPluginAPI(ctx: PluginAPIContext): PluginAPI {
 
     registerVoiceProvider(provider, options = {}) {
       return register(() => {
+        permit('register.provider');
         const unregister = ctx.voiceProviderRegistry.register(owned.voice(provider), options);
         ctx.cleanup.push(unregister);
         logger.info(`[plugin:${ctx.pluginName}] Registered voice provider '${provider.id}'`);
@@ -460,6 +488,7 @@ export function createPluginAPI(ctx: PluginAPIContext): PluginAPI {
 
     registerMediaProvider(provider, options = {}) {
       return register(() => {
+        permit('register.provider');
         const unregister = ctx.mediaProviderRegistry.register(owned.media(provider), options);
         ctx.cleanup.push(unregister);
         logger.info(`[plugin:${ctx.pluginName}] Registered media provider '${provider.id}'`);
@@ -468,6 +497,7 @@ export function createPluginAPI(ctx: PluginAPIContext): PluginAPI {
 
     registerWebSearchProvider(provider, options = {}) {
       return register(() => {
+        permit('register.provider');
         const unregister = ctx.webSearchProviderRegistry.register(owned.search(provider), options);
         ctx.cleanup.push(unregister);
         logger.info(`[plugin:${ctx.pluginName}] Registered web search provider '${provider.id}'`);
@@ -476,6 +506,7 @@ export function createPluginAPI(ctx: PluginAPIContext): PluginAPI {
 
     onEvent(eventName, handler) {
       return register(() => {
+        permit('register.hook', { kind: 'hook', names: [eventName] });
         const unsub = ctx.runtimeBus.on(
           eventName,
           (envelope) => {

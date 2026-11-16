@@ -56,7 +56,6 @@ export {
   judgmentQualityScore,
   DIMENSION_FLOOR,
   BUILTIN_SUITES,
-  GATE_SUITES,
   ALL_SCENARIOS,
   captureBaseline,
   serialiseBaseline,
@@ -66,7 +65,11 @@ export {
   formatBaselineComparison,
   formatSuiteResult,
   formatGateResult,
+  runTaskSuite,
+  formatTaskSuiteResult,
+  createHeadlessRunExecutor,
 } from './eval/index.js';
+export type { TaskSuiteResult, HeadlessRunExecutorOptions } from './eval/index.js';
 
 // ── Forensics ─────────────────────────────────────────────────────────────────
 export type {

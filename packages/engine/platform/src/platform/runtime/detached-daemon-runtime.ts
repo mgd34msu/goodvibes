@@ -25,9 +25,20 @@ export interface DetachedDaemonRuntimeRecord {
   readonly pid: number | undefined;
   readonly host: string;
   readonly port: number;
+  /** Protocol of the listener; a record without one is plain http. */
+  readonly scheme?: DaemonRecordScheme | undefined;
   readonly command: string;
   readonly startedAt: string;
   readonly logFilePath?: string | undefined;
+}
+
+export type DaemonRecordScheme = 'http' | 'https';
+
+/** The base URL a record points at: `0.0.0.0` and `::` mean "reach me on loopback"; an IPv6 host is bracketed. */
+export function daemonRecordBaseUrl(record: DetachedDaemonRuntimeHint): string {
+  const host = record.host === '0.0.0.0' ? '127.0.0.1' : record.host === '::' ? '::1' : record.host;
+  const dialed = host.includes(':') && !host.startsWith('[') ? `[${host}]` : host;
+  return `${record.scheme ?? 'http'}://${dialed}:${record.port}`;
 }
 
 /** Absolute path of the runtime record file for a given daemon runtime dir. */
@@ -44,6 +55,7 @@ export function detachedDaemonRuntimePath(runtimeDir: string): string {
 export interface DetachedDaemonRuntimeHint {
   readonly host: string;
   readonly port: number;
+  readonly scheme?: DaemonRecordScheme | undefined;
   readonly pid?: number | undefined;
   /** When the daemon recorded itself; with the pid it tells one daemon's record from the next. */
   readonly startedAt?: string | undefined;
@@ -131,6 +143,7 @@ export function reapDetachedDaemonRuntime(
 /** Whether two records describe the same daemon launch: same address, pid and (when both say) start time. */
 function sameDaemonRecord(current: DetachedDaemonRuntimeHint, stale: DetachedDaemonRuntimeHint): boolean {
   if (current.host !== stale.host || current.port !== stale.port || current.pid !== stale.pid) return false;
+  if ((current.scheme ?? 'http') !== (stale.scheme ?? 'http')) return false;
   if (current.startedAt && stale.startedAt) return current.startedAt === stale.startedAt;
   return true;
 }
@@ -169,6 +182,7 @@ export function readDetachedDaemonRuntime(runtimeDir: string): DetachedDaemonRun
           pid: typeof parsed.pid === 'number' ? parsed.pid : undefined,
           host: parsed.host,
           port: parsed.port,
+          ...(parsed.scheme === 'https' || parsed.scheme === 'http' ? { scheme: parsed.scheme } : {}),
           command: typeof parsed.command === 'string' ? parsed.command : '',
           startedAt: typeof parsed.startedAt === 'string' ? parsed.startedAt : '',
           logFilePath: typeof parsed.logFilePath === 'string' ? parsed.logFilePath : undefined,
@@ -197,13 +211,20 @@ export interface PublishedDaemonRuntimeRecord {
  */
 export function publishDaemonRuntimeRecord(
   runtimeDir: string,
-  bound: { readonly host: string; readonly port: number; readonly command: string; readonly logFilePath?: string | undefined },
+  bound: {
+    readonly host: string;
+    readonly port: number;
+    readonly scheme: DaemonRecordScheme;
+    readonly command: string;
+    readonly logFilePath?: string | undefined;
+  },
   now: () => Date = () => new Date(),
 ): PublishedDaemonRuntimeRecord | null {
   const record: DetachedDaemonRuntimeRecord = {
     pid: process.pid,
     host: bound.host,
     port: bound.port,
+    scheme: bound.scheme,
     command: bound.command,
     startedAt: now().toISOString(),
     ...(bound.logFilePath === undefined ? {} : { logFilePath: bound.logFilePath }),

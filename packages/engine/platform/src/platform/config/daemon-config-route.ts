@@ -27,10 +27,11 @@ import { postalConfigKey } from './postal-address.js';
  * and a network-mode switch.
  *
  * "EXPECTED" IS PROVEN, NOT ASSUMED. A running-daemon record used to count as a
- * daemon being there. It does not: a record is written when a daemon is spawned
- * and nothing removes it when that daemon dies, so a stale one made every
- * daemon-owned READ answer "unavailable" against a dead port for days while a
- * live daemon sat elsewhere. The record is now a hint, pid checked here, port
+ * daemon being there. It does not: the daemon writes the record when its
+ * listener is bound and removes it when it stops, but a daemon that dies leaves
+ * it behind, and a stale one would make every daemon-owned READ answer
+ * "unavailable" against a dead port while a live daemon sat elsewhere. The
+ * record is therefore a hint, pid checked here, port
  * checked by the probe, reaped with a receipt when it fails either, and only a
  * configured address or an address that answered makes failure loud. See
  * {@link discoverDaemonEndpoint}.
@@ -38,6 +39,7 @@ import { postalConfigKey } from './postal-address.js';
 
 import { configKeyScope, describeConfigOwnership, type ConfigScope } from './config-ownership.js';
 import {
+  daemonRecordBaseUrl,
   detachedDaemonProcessAlive,
   readDetachedDaemonRuntime,
   reapDetachedDaemonRuntime,
@@ -246,11 +248,6 @@ export function discoverDaemonEndpoint(deps: DaemonConfigRouterDeps): DaemonConf
   };
 }
 
-/** The base URL a runtime record points at (`0.0.0.0` means "reach me on loopback"). */
-function recordBaseUrl(record: DetachedDaemonRuntimeHint): string {
-  const host = record.host === '0.0.0.0' ? '127.0.0.1' : record.host;
-  return `http://${host}:${record.port}`;
-}
 
 /**
  * Turn a runtime record into an endpoint, or reap it and return null.
@@ -272,7 +269,7 @@ function validatedRecordEndpoint(
     return null;
   }
   return {
-    baseUrl: recordBaseUrl(record),
+    baseUrl: daemonRecordBaseUrl(record),
     token: deps.token,
     source: 'running-daemon record',
     certain: false,
@@ -297,7 +294,7 @@ function reapRecord(record: DetachedDaemonRuntimeHint, deps: DaemonConfigRouterD
     // the next one re-checks it. Failing to reap must not fail the read.
   }
   if (kept) return;
-  deps.onRuntimeRecordReaped?.({ baseUrl: recordBaseUrl(record), reason });
+  deps.onRuntimeRecordReaped?.({ baseUrl: daemonRecordBaseUrl(record), reason });
 }
 
 /**
@@ -315,13 +312,13 @@ export function reapUnansweringRuntimeRecord(
 ): void {
   if (!deps.daemonHomeDir) return;
   if (probedRecord) {
-    if (recordBaseUrl(probedRecord) !== baseUrl) return;
+    if (daemonRecordBaseUrl(probedRecord) !== baseUrl) return;
     reapRecord(probedRecord, deps, `nothing answered at ${baseUrl}, so the record no longer describes a reachable daemon`);
     return;
   }
   const read = deps.readRuntimeRecord ?? ((dir: string) => readDetachedDaemonRuntime(dir));
   const record = read(deps.daemonHomeDir);
-  if (!record || recordBaseUrl(record) !== baseUrl) return;
+  if (!record || daemonRecordBaseUrl(record) !== baseUrl) return;
   reapRecord(record, deps, `nothing answered at ${baseUrl}, so the record no longer describes a reachable daemon`);
 }
 

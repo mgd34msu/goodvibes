@@ -59,13 +59,13 @@ test('a record that could not be written is reported in the log, not silently dr
 
 test('a daemon publishes its bound address and removes only its own record at stop', () => {
   const runtimeDir = dir();
-  const published = publishDaemonRuntimeRecord(runtimeDir, { host: '127.0.0.1', port: 4567, command: 'goodvibes-daemon serve' });
+  const published = publishDaemonRuntimeRecord(runtimeDir, { host: '127.0.0.1', port: 4567, scheme: 'http', command: 'goodvibes-daemon serve' });
   expect(readDetachedDaemonRuntime(runtimeDir)).toMatchObject({ pid: process.pid, host: '127.0.0.1', port: 4567 });
   published!.remove();
   expect(existsSync(detachedDaemonRuntimePath(runtimeDir))).toBe(false);
 
-  const first = publishDaemonRuntimeRecord(runtimeDir, { host: '127.0.0.1', port: 4567, command: 'goodvibes-daemon serve' }, () => new Date('2026-01-01T00:00:00.000Z'));
-  publishDaemonRuntimeRecord(runtimeDir, { host: '127.0.0.1', port: 4568, command: 'goodvibes-daemon serve' }, () => new Date('2026-01-01T00:05:00.000Z'));
+  const first = publishDaemonRuntimeRecord(runtimeDir, { host: '127.0.0.1', port: 4567, scheme: 'http', command: 'goodvibes-daemon serve' }, () => new Date('2026-01-01T00:00:00.000Z'));
+  publishDaemonRuntimeRecord(runtimeDir, { host: '127.0.0.1', port: 4568, scheme: 'http', command: 'goodvibes-daemon serve' }, () => new Date('2026-01-01T00:05:00.000Z'));
   first!.remove();
   expect(readDetachedDaemonRuntime(runtimeDir)?.port).toBe(4568);
 });

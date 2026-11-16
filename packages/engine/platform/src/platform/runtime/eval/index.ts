@@ -39,8 +39,6 @@ export { scoreScenario, formatScorecard, judgmentQualityScore, DIMENSION_FLOOR }
 
 export { BUILTIN_SUITES, ALL_SCENARIOS } from './suites.js';
 
-export { GATE_SUITES } from './gate-suites.js';
-
 export {
   captureBaseline,
   serialiseBaseline,

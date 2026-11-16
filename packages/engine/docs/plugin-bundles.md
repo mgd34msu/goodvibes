@@ -59,10 +59,23 @@ not a silent drop. A typo cannot slip past review.
 
 ## Enforcement: declaration is the grant
 
-`createBundleCapabilityGuard(manifest)` returns a deny-by-default guard. Every
-runtime registration path calls `enforceBundleCapability(guard, surface, name)`
-before honoring a bundle's request; anything the manifest did not declare throws
-`BundleCapabilityViolation`.
+`createBundleCapabilityGuard(manifest)` returns a deny-by-default guard, and
+`enforceBundleCapability(guard, surface, name)` throws `BundleCapabilityViolation`
+for anything the manifest did not declare.
+
+An installed bundle's receipt carries its grant: the security capabilities its
+trust tier granted and the tools, hooks, config domains and channels it
+declared. When the plugin loader starts a plugin installed from a bundle, it
+builds the guard from that receipt, and every registration is checked before it
+takes effect: a tool needs `register.tool` and the tool's id (as the plugin names
+it, or as registered, `plugin_<plugin>_<name>`) in `tools`; an event
+subscription needs `register.hook` and the event name in `hooks`; a provider of
+any kind needs `register.provider`; a channel plugin or delivery strategy needs
+its id in `channels`. A registration outside the grant stops the plugin's start
+and names what was not declared. A plugin whose install receipt exists but
+cannot be read is not loaded; reinstalling it writes the receipt again. Plugins
+copied into `.goodvibes/plugins` by hand, or installed from the catalog without a
+bundle, have no grant to check.
 
 ```ts
 const guard = createBundleCapabilityGuard(manifest);

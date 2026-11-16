@@ -142,18 +142,40 @@ export async function loadDiff(cwd: string, source: ChangesSource, sessionFiles:
     args = ['diff', '--no-color', ...DIFF_PREFIX_ARGS, 'HEAD'];
     label = source === 'session' ? 'no files tracked this session · all changes vs HEAD' : 'all changes vs HEAD';
   }
-  const [result, untracked] = await Promise.all([
+  let [result, untracked] = await Promise.all([
     run(args, cwd),
     source === 'staged' ? Promise.resolve({ raw: '', count: 0, skipped: 0 }) : loadUntrackedDiff(cwd, untrackedOnly),
   ]);
-  if (!result.ok) return { raw: '', label, error: result.err || 'git diff failed' };
+  const headAt = args.indexOf('HEAD');
+  if (!result.ok && headAt >= 0) {
+    // Before the first commit there is no HEAD: compare with the empty tree,
+    // so every file the index holds shows as added.
+    const empty = await emptyTreeIfUnborn(cwd);
+    if (empty) {
+      const retry = [...args];
+      retry[headAt] = empty;
+      result = await run(retry, cwd);
+      label = label.replace('vs HEAD', 'as added (no commit yet)');
+    }
+  }
   const total = untracked.count + untracked.skipped;
   if (total > 0) {
     label += ` · ${total} untracked`;
     if (untracked.skipped > 0) label += ` (${untracked.skipped} not shown)`;
   }
+  // The untracked files were read independently: a failed tracked diff does not hide them.
+  if (!result.ok) return { raw: untracked.raw, label, error: result.err || 'git diff failed' };
   const tracked = result.out && !result.out.endsWith('\n') ? `${result.out}\n` : result.out;
   return { raw: tracked + untracked.raw, label, error: null };
+}
+
+/** The empty tree's id when the repository has no commit yet; null when HEAD exists or git cannot say. */
+async function emptyTreeIfUnborn(cwd: string): Promise<string | null> {
+  const head = await run(['rev-parse', '--verify', '--quiet', 'HEAD'], cwd);
+  if (head.ok) return null;
+  // Asked of git rather than hard-coded: the id differs between SHA-1 and SHA-256 repositories.
+  const tree = await run(['hash-object', '-t', 'tree', '/dev/null'], cwd);
+  return tree.ok && tree.out.trim() ? tree.out.trim() : null;
 }
 
 export interface CommitEntry {

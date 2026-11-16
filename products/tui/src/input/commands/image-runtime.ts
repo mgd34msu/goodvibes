@@ -1,8 +1,55 @@
+import { spawn } from 'node:child_process';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { dirname, extname, join, relative } from 'node:path';
 import type { CommandRegistry } from '../command-registry.ts';
 import type { MediaGenerationResult, MediaProviderTask } from '@goodvibes-jev/engine/platform/platform/media';
-import { redactSensitiveDataAsync, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { externalUrlLaunchers, redactSensitiveDataAsync, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { requireShellPaths } from './runtime-services.ts';
 
-const USAGE = 'Usage: /imagine <prompt>  |  /imagine --collect <provider> <task-id> [key=value ...]';
+const USAGE = 'Usage: /imagine [--out <path>] <prompt>  |  /imagine [--out <path>] --collect <provider> <task-id> [key=value ...]';
+
+const EXTENSION_BY_MIME: Readonly<Record<string, string>> = {
+  'image/png': '.png', 'image/jpeg': '.jpg', 'image/webp': '.webp', 'image/gif': '.gif', 'image/svg+xml': '.svg',
+};
+
+/** `--out <path>` or `--out=<path>` at the front of the line, and the rest. */
+export function readImagineOut(args: readonly string[]): { readonly out?: string; readonly rest: readonly string[] } | null {
+  const first = args[0];
+  if (first === '--out') return args[1] && !args[1].startsWith('--') ? { out: args[1], rest: args.slice(2) } : null;
+  if (first?.startsWith('--out=')) return first.length > 6 ? { out: first.slice(6), rest: args.slice(1) } : null;
+  return { rest: args };
+}
+
+/** The file for artifact `index` of `count`: the given path (numbered after the first), or generated/<words>-<time>.<ext>. */
+export function imageFilePath(workingDirectory: string, prompt: string, mimeType: string, index: number, count: number, out: string | undefined, now = new Date()): string {
+  const extension = EXTENSION_BY_MIME[mimeType] ?? '.bin';
+  const suffix = count > 1 && index > 0 ? `-${index + 1}` : '';
+  if (out) {
+    const given = extname(out);
+    return `${given ? out.slice(0, -given.length) : out}${suffix}${given || extension}`;
+  }
+  const words = prompt.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40).replace(/-+$/, '') || 'image';
+  const stamp = now.toISOString().slice(0, 19).replace(/[-:]/g, '').replace('T', '-');
+  return join(workingDirectory, 'generated', `${words}-${stamp}${count > 1 ? `-${index + 1}` : ''}${extension}`);
+}
+
+/** Ask the system viewer to open a file; false where there is no desktop to show it on. */
+function openInViewer(path: string): Promise<boolean> {
+  if (process.platform === 'linux' && !process.env['DISPLAY'] && !process.env['WAYLAND_DISPLAY'] && !process.env['WSL_DISTRO_NAME']) {
+    return Promise.resolve(false);
+  }
+  const [launcher] = externalUrlLaunchers(path, process.platform, Boolean(process.env['WSL_DISTRO_NAME']));
+  if (!launcher) return Promise.resolve(false);
+  return new Promise((resolve) => {
+    try {
+      const child = spawn(launcher.command, [...launcher.args], { stdio: 'ignore', detached: true, windowsHide: true });
+      child.once('error', () => resolve(false));
+      child.once('spawn', () => { child.unref(); resolve(true); });
+    } catch {
+      resolve(false);
+    }
+  });
+}
 
 function collectCommand(task: MediaProviderTask): string {
   const resume = Object.entries(task.resume ?? {}).map(([key, value]) => ` ${key}=${value}`).join('');
@@ -10,7 +57,12 @@ function collectCommand(task: MediaProviderTask): string {
 }
 
 /**
- * registerImageRuntimeCommands - `/imagine <prompt>`.
+ * registerImageRuntimeCommands - `/imagine [--out <path>] <prompt>`.
+ *
+ * The picture is written to a file (the given path, or
+ * `generated/<prompt words>-<time>.<ext>` under the working directory; an
+ * existing file is never replaced), the path is printed, and the system viewer
+ * opens it where there is a desktop. The artifact store keeps a second copy.
  *
  * Named 'imagine', not 'image': `/image <path> [prompt]` (local-runtime.ts)
  * attaches a local image file to the next message.
@@ -21,11 +73,15 @@ function collectCommand(task: MediaProviderTask): string {
  * provider's key, so this command never names one itself. A job still running
  * when the wait ends is reported with the command that collects it later.
  */
-export function registerImageRuntimeCommands(registry: CommandRegistry): void {
+export function registerImageRuntimeCommands(
+  registry: CommandRegistry,
+  options: { readonly openFile?: (path: string) => Promise<boolean> } = {},
+): void {
+  const openFile = options.openFile ?? openInViewer;
   registry.register({
     name: 'imagine',
     description: 'Generate an image from a prompt via a configured media provider',
-    usage: '<prompt> | --collect <provider> <task-id> [key=value ...]',
+    usage: '[--out <path>] <prompt> | [--out <path>] --collect <provider> <task-id> [key=value ...]',
     argsHint: '<prompt>',
     async handler(args, ctx) {
       const mediaProviders = ctx.platform.mediaProviders;
@@ -35,10 +91,17 @@ export function registerImageRuntimeCommands(registry: CommandRegistry): void {
         return;
       }
 
+      const line = readImagineOut(args);
+      if (!line) {
+        ctx.print(`--out needs a file path. ${USAGE}`);
+        return;
+      }
+      const shellPaths = requireShellPaths(ctx);
       let result: MediaGenerationResult;
       let label: string;
-      if (args[0] === '--collect') {
-        const [, providerId, taskId, ...pairs] = args;
+      let prompt = 'image';
+      if (line.rest[0] === '--collect') {
+        const [, providerId, taskId, ...pairs] = line.rest;
         if (!providerId || !taskId) {
           ctx.print(USAGE);
           return;
@@ -55,7 +118,7 @@ export function registerImageRuntimeCommands(registry: CommandRegistry): void {
           return;
         }
       } else {
-        const prompt = args.join(' ').trim();
+        prompt = line.rest.join(' ').trim();
         if (!prompt) {
           ctx.print(USAGE);
           return;
@@ -93,7 +156,7 @@ export function registerImageRuntimeCommands(registry: CommandRegistry): void {
       if (result.pending) {
         ctx.print([
           `${label} accepted the job (task ${result.pending.taskId}) and is still generating it; it is paid for and keeps running.`,
-          `Collect it with: ${collectCommand(result.pending)}`,
+          `Collect it with: ${line.out ? collectCommand(result.pending).replace('/imagine ', `/imagine --out ${line.out} `) : collectCommand(result.pending)}`,
         ].join('\n'));
         return;
       }
@@ -103,17 +166,21 @@ export function registerImageRuntimeCommands(registry: CommandRegistry): void {
       }
 
       // The provider has produced (and may have charged for) every artifact by now, so a
-      // failure to keep one must not hide the others: each is stored on its own and reported.
+      // failure to keep one must not hide the others: each is stored and written on its own and reported.
       const lines = [`Generated ${result.artifacts.length} artifact(s) via ${label} (${result.providerId}).`];
+      const count = result.artifacts.length;
       let storeFailures = 0;
+      const written: string[] = [];
       for (const [index, artifact] of result.artifacts.entries()) {
         if (!artifact.mimeType.startsWith('image/')) {
           lines.push(`  Note: ${label} produced ${artifact.mimeType}, not an image.`);
         }
+        let artifactId: string | undefined;
+        let bytes: Buffer | undefined;
         try {
           if (artifact.artifactId && typeof artifact.sizeBytes === 'number') {
             // Built-in providers stream their outputs into the artifact store themselves.
-            lines.push(`  artifact: ${artifact.artifactId} (${artifact.mimeType}, ${artifact.sizeBytes} bytes)`);
+            artifactId = artifact.artifactId;
           } else if (artifact.dataBase64) {
             const descriptor = await artifactStore.create({
               dataBase64: artifact.dataBase64,
@@ -121,7 +188,8 @@ export function registerImageRuntimeCommands(registry: CommandRegistry): void {
               filename: artifact.filename ?? 'generated-image',
               metadata: { ...artifact.metadata, generatedBy: result.providerId },
             });
-            lines.push(`  artifact: ${descriptor.id} (${descriptor.mimeType}, ${descriptor.sizeBytes} bytes)`);
+            artifactId = descriptor.id;
+            bytes = Buffer.from(artifact.dataBase64, 'base64');
           } else if (artifact.uri) {
             // A provider-hosted link expires, so the bytes are kept: the store fetches public addresses only.
             const descriptor = await artifactStore.create({
@@ -133,17 +201,45 @@ export function registerImageRuntimeCommands(registry: CommandRegistry): void {
               fetchMode: 'public-only',
               metadata: { ...artifact.metadata, generatedBy: result.providerId },
             });
-            lines.push(`  artifact: ${descriptor.id} (${descriptor.mimeType}, ${descriptor.sizeBytes} bytes)`);
+            artifactId = descriptor.id;
           } else {
             lines.push('  artifact: (no retrievable content returned)');
+            continue;
           }
         } catch (error) {
           storeFailures += 1;
           lines.push(`  artifact ${index + 1}: could not be stored (${await redactSensitiveDataAsync(summarizeError(error))})${artifact.uri ? `; provider url: ${artifact.uri}` : ''}`);
+          continue;
+        }
+        if (!bytes) {
+          try {
+            bytes = (await artifactStore.readContent(artifactId)).buffer;
+          } catch (error) {
+            lines.push(`  artifact ${artifactId} (${artifact.mimeType}) is stored, but could not be read back to save a file: ${summarizeError(error)}`);
+            continue;
+          }
+        }
+        const target = line.out
+          ? imageFilePath(shellPaths.workingDirectory, prompt, artifact.mimeType, index, count, shellPaths.resolveWorkspacePath(line.out))
+          : imageFilePath(shellPaths.workingDirectory, prompt, artifact.mimeType, index, count, undefined);
+        const shown = relative(shellPaths.workingDirectory, target).startsWith('..') ? target : relative(shellPaths.workingDirectory, target);
+        try {
+          await mkdir(dirname(target), { recursive: true });
+          // `wx`: an existing file is never replaced.
+          await writeFile(target, bytes, { flag: 'wx' });
+          written.push(target);
+          lines.push(`  saved: ${shown} (${artifact.mimeType}, ${bytes.byteLength} bytes; artifact ${artifactId})`);
+        } catch (error) {
+          const exists = (error as NodeJS.ErrnoException).code === 'EEXIST';
+          lines.push(`  not saved to ${shown}: ${exists ? 'a file is already there and was left as it is; pick another --out path' : summarizeError(error)}. The image is kept as artifact ${artifactId}.`);
         }
       }
       if (storeFailures > 0) {
-        lines.push(`${result.artifacts.length - storeFailures} of ${result.artifacts.length} artifact(s) were stored; the rest were generated but not kept.`);
+        lines.push(`${count - storeFailures} of ${count} artifact(s) were stored; the rest were generated but not kept.`);
+      }
+      if (written.length > 0) {
+        const opened = await openFile(written[0]!);
+        lines.push(opened ? `Opened ${written.length > 1 ? 'the first one ' : ''}in the system image viewer.` : 'No image viewer is available here; open the file from the path above.');
       }
       ctx.print(lines.join('\n'));
     },

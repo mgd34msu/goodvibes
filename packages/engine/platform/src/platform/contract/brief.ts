@@ -109,7 +109,7 @@ export function buildUnitBrief(
   if ((unit.role === 'integration' || repairing || ownerEvidence !== undefined) && contract.id !== undefined && contract.decisions !== undefined) {
     const receipts = contractWorkReceipts(contract, {
       excludeUnitId: unit.id, readObservations: repairing,
-      ownerEvidence,
+      ownerEvidence, ownerEvidenceFiles: contract.units.find(candidate => candidate.id === unit.id)?.files ?? [],
       answerIds: new Set(contract.units.filter(other => repairing && (other.role === 'integration' || dependencyIds.has(other.id))).map(other => other.id)),
     });
     sections.push('Actual host orchestration records (evidence, not approval of this unit):\n' + JSON.stringify(briefReceipts(receipts)));

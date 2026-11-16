@@ -21,7 +21,7 @@ import { nativeContractActionSource } from './native-decisions.js';
  */
 import { assertContractInputView, contractInputPath } from './input-snapshot.js';
 import type { ReadAccessFilter } from '../tools/shared/read-access.js';
-import type { OwnerEvidenceReader } from './owner-evidence.js';
+import { ownerEvidenceForModel, type OwnerEvidenceReader } from './owner-evidence.js';
 
 import { JudgmentPortMissingError, judgmentPort } from '@goodvibes-jev/engine/errors';
 import { JudgmentError } from '@goodvibes-jev/judgment';
@@ -740,7 +740,7 @@ function backOff(deps: ContractPlannerDeps, ms: number, signal: AbortSignal | un
 
 function priorOwnerReadContext(contract: Contract, deps: ContractPlannerDeps): string {
   const evidence = deps.readOwnerEvidence?.(contract, '');
-  return evidence === undefined ? '' : '\nActual earlier owner source-read observations, not new requirements, semantic review approval or acceptance. Use the qualified returned scope to preserve completed work and identify genuine remaining work:\n' + JSON.stringify(evidence);
+  return evidence === undefined ? '' : '\nActual earlier owner source-read observations, not new requirements, semantic review approval or acceptance. Use the qualified returned scope to preserve completed work and identify genuine remaining work:\n' + JSON.stringify(ownerEvidenceForModel(evidence));
 }
 
 /** Native planning consumes durable attempt counters and semantic receipts, never an owner approval. */

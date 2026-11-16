@@ -3,7 +3,7 @@ import type { SourceReadEvidence } from './evidence.js';
 import { findCardNumberShapes } from '../security/card-shapes.js';
 import { readPrivateReceiptArchives, verifyPrivateReceiptPreservation } from './private-read-receipts.js';
 import type { JsonValue } from '@goodvibes-jev/judgment';
-import { ownerEvidenceIdentity } from './owner-evidence.js';
+import { ownerEvidenceForModel } from './owner-evidence.js';
 import { commandObservation } from './command-observation.js';
 import { currentFileObservations } from './current-file-observations.js';
 import { compareJsonReadReferences, compareReadReferences } from './read-reference-comparison.js';
@@ -76,7 +76,9 @@ function commandReceipt(command: NonNullable<ContractView['units'][number]['comm
 /** Facts from the live host tree; these never approve the work receiving them. */
 export function contractWorkReceipts(
   contract: Pick<ContractView, 'units'> & Partial<Pick<ContractView, 'id' | 'decisions' | 'groups' | 'projectRoot' | 'worktreePath' | 'inputSnapshot' | 'criteria' | 'reviewInventory' | 'reviewExclusions'>>,
-  options: { readonly excludeUnitId?: string; readonly readObservations?: boolean; readonly answerIds?: ReadonlySet<string>; readonly ownerEvidence?: JsonValue | undefined } = {},
+  options: { readonly excludeUnitId?: string; readonly readObservations?: boolean; readonly answerIds?: ReadonlySet<string>; readonly ownerEvidence?: JsonValue | undefined;
+    /** The declared files of the unit this receipt is written for: the owner's reads are listed for these only. */
+    readonly ownerEvidenceFiles?: readonly string[] | undefined } = {},
 ) {
   const cwd = contract.worktreePath ?? contract.projectRoot;
   const researchIds = options.readObservations ? acceptedResearchIds(contract) : new Set<string>();
@@ -89,7 +91,8 @@ export function contractWorkReceipts(
     contractId: contract.id,
     ...(contract.reviewInventory && contract.projectRoot ? { reviewInventory: compactReviewInventory(reviewInventoryObservation({ ...contract, projectRoot: contract.projectRoot })!) } : {}),
     ...(options.readObservations && cwd ? { sourceScope: contractSourceScope(contract, cwd, options.ownerEvidence) } : {}),
-    ...(options.ownerEvidence === undefined ? {} : { ownerPriorReads: options.ownerEvidence }),
+    // The receipt is shown to models: the host record's call ids and journal paths stay behind (sourceScope above read the whole record).
+    ...(options.ownerEvidence === undefined ? {} : { ownerPriorReads: ownerEvidenceForModel(options.ownerEvidence, options.ownerEvidenceFiles) }),
     privateArtifacts: contract.id === undefined ? [] : readPrivateReceiptArchives({ ...contract, id: contract.id }),
     privateArchiveChecks,
     meaning: 'Host observations and prior check results, not approval of the current repair. Preserve completed work; missing primary text is not evidence that accepted work never happened.',
@@ -125,6 +128,5 @@ export function workReceiptIdentity(work: ReturnType<typeof contractWorkReceipts
   // correction planning. Never include it in a model-facing work receipt.
   return { ...work, exactAcceptedAnswers: answers,
     privateArchiveChecks: work.privateArchiveChecks.map(check => Object.fromEntries(Object.entries(check).filter(([key]) => key !== 'durationMs'))),
-    ...(work.ownerPriorReads === undefined ? {} : { ownerPriorReads: ownerEvidenceIdentity(work.ownerPriorReads) }),
   };
 }

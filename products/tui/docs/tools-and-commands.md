@@ -171,7 +171,7 @@ A project and frontend inspection tool.
 - `api` + `api_spec` + `api_validate` + `api_sync`: discover API routes across Next.js (App + Pages Router), Express, Fastify, and Hono; generate OpenAPI 3.0 specs; validate specs against code; detect frontend/backend drift by scanning `fetch()` calls
 - `database`: parse Prisma schemas into structured model/field/relation data
 - `components`: extract the React component tree with props, hooks, and child components
-- `scaffold`: generate a module skeleton (types, implementation, tests, barrel export) with dry-run
+- `scaffold`: generate a module skeleton (types, implementation, tests, barrel export); a plan by default, and with `dryRun: false` the files are created through the write tool (approved, undoable, refused for an agent without `write`)
 - Frontend analysis: `layout` (CSS/Tailwind layout hierarchy), `accessibility` (a11y issue detection), `component_state` (useState/useReducer/useContext tracing), `render_triggers` (what causes re-renders), `hooks` (dependency array auditing with missing-dep detection), `overflow`/`sizing`/`stacking` (CSS issue detection), `responsive` (Tailwind breakpoint analysis), `events` (handler analysis), `tailwind` (class conflict detection), `client_boundary` (Next.js directive analysis), `error_boundary` (coverage analysis)
 
 ### agent

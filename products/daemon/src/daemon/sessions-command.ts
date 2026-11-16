@@ -44,6 +44,7 @@ export interface HostedSessionRecord {
   readonly turnCount?: number;
   readonly restoredFromDisk?: boolean;
   readonly terminatedReason?: string;
+  readonly saveError?: string;
 }
 
 interface HostedListPayload {
@@ -110,6 +111,7 @@ function renderSession(session: HostedSessionRecord, now: number): string[] {
   if (session.restoredFromDisk === true) facts.push('restored from disk');
   if (session.terminatedReason) facts.push(`ended: ${session.terminatedReason}`);
   if (facts.length > 0) lines.push(`    ${facts.join('  ·  ')}`);
+  if (session.saveError) lines.push(`    not saved: ${session.saveError}. What it did since its last save is lost if the daemon restarts.`);
   return lines;
 }
 

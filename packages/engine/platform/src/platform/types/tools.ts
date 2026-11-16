@@ -111,6 +111,12 @@ export interface ToolDefinition {
   recoverable?: ToolRecoverability | undefined;
   /** The argument values with which a call only reads; see {@link ToolReadModes}. */
   readModes?: ToolReadModes | undefined;
+  /**
+   * A tool the model reaches for on nearly every task: every model request
+   * carries its full definition. Any other tool goes as a one-line entry whose
+   * full definition `tool_schema` loads on demand (ToolRegistry.getModelToolDefinitions).
+   */
+  core?: boolean | undefined;
   /** Whether multiple calls can safely run in parallel. */
   concurrency?: ToolConcurrencyMode | undefined;
   /** Whether the tool can emit meaningful progress before final completion. */

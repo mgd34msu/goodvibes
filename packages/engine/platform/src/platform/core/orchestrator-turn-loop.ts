@@ -325,7 +325,9 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
     context.conversation.addNotice(describeDecisionRoute(decisionRoute.info), { level: 'info', kind: 'operational' });
     context.requestRender();
   }
-  const toolDefinitions = context.toolRegistry.getToolDefinitions();
+  // Core tools in full, the rest as one-line entries loadable through tool_schema;
+  // read again before each request so a tool loaded in one round is sent in full in the next.
+  let toolDefinitions = context.toolRegistry.getModelToolDefinitions();
   const streamEnabled = context.configManager.get('display.stream') as boolean;
 
   let continueLoop = true;
@@ -678,6 +680,7 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
         .filter(Boolean).join('\n\n');
       if (evidence) hostInstructions.set('evidence', evidence, { once: true });
       else hostInstructions.clear('evidence');
+      toolDefinitions = context.toolRegistry.getModelToolDefinitions();
       response = await chat({
         model: model.id,
         messages: context.conversation.getMessagesForRequest(),

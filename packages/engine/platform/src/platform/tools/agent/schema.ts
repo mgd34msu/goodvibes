@@ -5,6 +5,8 @@ import { REASONING_EFFORT_SEVERITY } from '../../providers/reasoning-effort.js';
 /** The agent tool's definition as written; {@link AGENT_TOOL_SCHEMA} adds the per-field notes from the field rules. */
 const AGENT_TOOL_DEFINITION: ToolDefinition = {
   name: 'agent',
+  // Sent in full on every model request (see ToolDefinition.core).
+  core: true,
   description:
     'Manages in-process subagents. Modes: spawn (create a new agent task), ' +
     'batch-spawn (hand several tasks over at once: the tasks without outsideContract become the proposed units of one contract, and tasks with outsideContract run as separate agents), ' +

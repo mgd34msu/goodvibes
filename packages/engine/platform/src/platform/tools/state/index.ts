@@ -155,6 +155,8 @@ export function createStateTool(
   ]);
   const definition: ToolDefinition = {
     name: 'state',
+    // Sent in full on every model request (see ToolDefinition.core).
+    core: true,
     description:
       'Access and manipulate session state. Modes: get/set/list/clear operate on KVState;'
       + ' budget and context report the files this product has read or written in this workspace (count and estimated tokens), not the size of the project and not conversation token usage:'

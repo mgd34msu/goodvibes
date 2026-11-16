@@ -1149,7 +1149,6 @@ export class CompanionChatManager {
       session.activeTurn = scope.activeTurn;
       this.markTurn(session, userMessageId, 'started');
       publish({ type: 'turn.started', sessionId, messageId: userMessageId, turnId, envelope: startEnvelope });
-      const toolDefinitions = this.toolRegistry?.getToolDefinitions() ?? [];
       const conversation = await prepareConversation();
       const history = new TurnHistoryWriter(conversation);
       writer = history;
@@ -1167,7 +1166,8 @@ export class CompanionChatManager {
           model: route.model,
           provider: route.provider,
           reasoningEffort: route.reasoningEffort,
-          ...(tools ? { tools: toolDefinitions } : {}),
+          // Core tools in full, the rest one line each (tool_schema loads them), read per request.
+          ...(tools ? { tools: this.toolRegistry?.getModelToolDefinitions() ?? [] } : {}),
           abortSignal: signal,
         });
         let content = '';

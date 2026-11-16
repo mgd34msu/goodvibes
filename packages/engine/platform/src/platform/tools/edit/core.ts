@@ -826,6 +826,8 @@ export function createEditTool(fileCache: FileStateCache, options?: EditToolOpti
   const cwd = resolveEditCwd(options);
   const definition: ToolDefinition = {
     name: 'edit',
+    // Sent in full on every model request (see ToolDefinition.core).
+    core: true,
     description:
       'Edit files by finding and replacing text. Supports exact, fuzzy, and regex matching. ' +
       'Handles multiple edits in one call with atomic or partial transaction semantics. ' +

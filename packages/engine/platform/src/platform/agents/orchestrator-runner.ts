@@ -241,6 +241,11 @@ async function executeToolCalls(
       onToolSettled({ ...result });
     };
     try {
+      const nativePath = context.autonomousSource !== undefined || Boolean(context.permissionManager?.admitAutonomous && context.permissionManager.autonomousPreparation);
+      // A tool the request listed in one line and that is not loaded: its definition is the answer
+      // and the model sends the call again. The native path's executor answers it the same way.
+      const deferred = call.argumentError === undefined && !nativePath && typeof toolRegistry.deferredCallRefusal === 'function'
+        ? toolRegistry.deferredCallRefusal(call.id, call.name) : undefined;
       if (call.argumentError !== undefined) {
         // The provider could not read this call's arguments; running it with empty ones would act on a request the model never made.
         recordResult({ callId: call.id, success: false, error: call.argumentError }, requestedArguments);
@@ -274,6 +279,8 @@ async function executeToolCalls(
         }, `${record.id}:turn:${turn}`, [call]));
         if (result === undefined) throw new Error('Native tool runtime returned no result');
         recordResult(result, JSON.stringify(executedArgs), executedName);
+      } else if (deferred) {
+        recordResult(deferred, requestedArguments);
       } else {
       // Background permission gate: consult the session permission mode exactly
       // like the foreground turn loop (denials return a structured ToolDenial).
@@ -602,7 +609,9 @@ async function runAgentTaskWithPolicy(context: AgentOrchestratorRunContext, reco
     session.appendMessage({ type: 'session_config', template: record.template, task: record.task, ...(acceptanceDetails ?? {}), tools: record.tools, model: modelId, provider: record.provider ?? 'unknown', timestamp: new Date().toISOString() });
 
     const toolRegistry = context.buildScopedRegistry(record.tools, context.getFullRegistry(), record.captureAuthority);
-    const toolDefinitions = toolRegistry.getToolDefinitions();
+    // Core tools in full, the rest as one-line entries loadable through tool_schema;
+    // read again before each request so a tool loaded in one round is sent in full in the next.
+    let toolDefinitions = toolRegistry.getModelToolDefinitions();
     const toolTokens = toolDefinitions.length > 0
       ? estimateTokens(JSON.stringify(toolDefinitions))
       : 0;
@@ -1001,6 +1010,7 @@ async function runAgentTaskWithPolicy(context: AgentOrchestratorRunContext, reco
             const cancelSignal = context.getCancellationSignal?.(record.id);
             try { await codeAuthorityForAttempt?.(); } catch (error) { throw new ProviderAttemptDeniedError(error); }
             const chat = decisionRoute ? (request: ChatRequest) => chatWithDecisionRoute(decisionRoute, request) : (request: ChatRequest) => activeRoute.provider.chat(request);
+            toolDefinitions = toolRegistry.getModelToolDefinitions();
             response = await chat({
               model: activeRoute.modelId,
               messages: conversation.getMessagesForRequest(),

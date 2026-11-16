@@ -232,7 +232,8 @@ export function toAnthropicMessages(messages: ProviderMessage[]): AnthropicMessa
 export interface GeminiFunctionDeclaration {
   name: string;
   description: string;
-  parameters: Record<string, unknown>;
+  /** Absent for a tool with no declared properties (a one-line entry): Gemini refuses an empty object schema. */
+  parameters?: Record<string, unknown>;
 }
 
 export interface GeminiPart {
@@ -267,11 +268,15 @@ function stripUnsupportedProperties(obj: unknown): unknown {
 export function toGeminiFunctionDeclarations(
   tools: ToolDefinition[],
 ): GeminiFunctionDeclaration[] {
-  return tools.map((t) => ({
-    name: t.name,
-    description: t.description,
-    parameters: stripUnsupportedProperties(t.parameters) as Record<string, unknown>,
-  }));
+  return tools.map((t) => {
+    const properties = (t.parameters as { properties?: unknown }).properties;
+    const declared = properties !== null && typeof properties === 'object' && Object.keys(properties).length > 0;
+    return {
+      name: t.name,
+      description: t.description,
+      ...(declared ? { parameters: stripUnsupportedProperties(t.parameters) as Record<string, unknown> } : {}),
+    };
+  });
 }
 
 /** Parse Gemini response parts into text + ToolCall[]. */

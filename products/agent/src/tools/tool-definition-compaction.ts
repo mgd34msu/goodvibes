@@ -12,9 +12,9 @@ export function captureAgentToolDefinition(definition: ToolDefinition): ToolDefi
 
 const DEFAULT_TOOL_DESCRIPTION_LIMIT = 56;
 
-// Summaries for tools that are not in CORE_TOOL_NAMES (a core tool keeps its own
-// description). A tool the Agent policy guard narrows to read-only modes is
-// summarised as read-only here, so the model is not told it can mutate it.
+// Summaries for tools that are not core (a core tool keeps its own
+// description). A tool with read modes (agent-tool-policy-guard.ts) is summarised
+// by what it mostly does; its other modes are decided by the permission gate.
 const TOOL_DESCRIPTION_OVERRIDES: Readonly<Record<string, string>> = {
   audit: 'Inspect release readiness and evidence.',
   analyze: 'Analyze code impact, symbols, and project risk.',
@@ -109,16 +109,14 @@ function compactSentences(value: string, limit: number): string {
 }
 
 /**
- * The tools a model reaches for on nearly every task. They keep their full
- * description and every parameter description (each cut to whole sentences),
- * because a wrong first call on these costs a turn each time. Every other
- * tool is advertised as a short summary with bare parameters; its full
- * definition is returned by `agent_harness mode:"tool"` (see
+ * Core tools (`core: true` on the definition: the ones a model reaches for on
+ * nearly every task) keep their full description and every parameter
+ * description (each cut to whole sentences), because a wrong first call on
+ * these costs a turn each time. Every other tool goes to the model as a
+ * one-line entry (its short summary); its full, uncompacted definition is
+ * returned by `tool_schema` and by `agent_harness mode:"tool"` (see
  * {@link fullToolDefinition}), so nothing is lost, only deferred.
  */
-export const CORE_TOOL_NAMES: ReadonlySet<string> = new Set([
-  'read', 'find', 'edit', 'write', 'exec', 'fetch', 'agent', 'task', 'state', 'repl', 'web_search',
-]);
 const CORE_TOOL_DESCRIPTION_LIMIT = 240;
 // Long enough to keep exec's background-process protocol (bg_list, bg_status,
 // bg_output, bg_stop), which sits in the second sentence of two parameters.
@@ -174,8 +172,9 @@ function mapSchemaDescriptions(value: unknown, path: readonly string[], limitFor
   return result;
 }
 
-function compactParameters(name: string, parameters: ToolDefinition['parameters']): ToolDefinition['parameters'] {
-  const core = CORE_TOOL_NAMES.has(name);
+function compactParameters(definition: ToolDefinition): ToolDefinition['parameters'] {
+  const core = definition.core === true;
+  const parameters = definition.parameters;
   return mapSchemaDescriptions(parameters, [], (path) => {
     if (core) return CORE_PARAMETER_DESCRIPTION_LIMIT;
     // The top-level `mode` description is where a tool says which modes exist here.
@@ -186,7 +185,7 @@ function compactParameters(name: string, parameters: ToolDefinition['parameters'
 }
 
 function compactDescription(definition: ToolDefinition): string {
-  if (CORE_TOOL_NAMES.has(definition.name)) return compactSentences(definition.description, CORE_TOOL_DESCRIPTION_LIMIT);
+  if (definition.core === true) return compactSentences(definition.description, CORE_TOOL_DESCRIPTION_LIMIT);
   return compactText(TOOL_DESCRIPTION_OVERRIDES[definition.name] ?? definition.description, DEFAULT_TOOL_DESCRIPTION_LIMIT);
 }
 
@@ -194,16 +193,17 @@ export function compactRegisteredToolDefinitions(toolRegistry: ToolRegistry): vo
   for (const tool of toolRegistry.list()) {
     const definition = tool.definition;
     if (!ownedDefinitions.has(definition)) {
-      const compacted = { ...definition, description: compactDescription(definition), parameters: compactParameters(definition.name, definition.parameters) };
+      const compacted = { ...definition, description: compactDescription(definition), parameters: compactParameters(definition) };
       rememberFullDefinition(toolRegistry, definition, compacted);
       tool.definition = compacted;
       continue;
     }
     const descriptors = Object.getOwnPropertyDescriptors(definition);
     descriptors.description = { ...descriptors.description, value: compactDescription(definition) };
-    descriptors.parameters = { ...descriptors.parameters, value: compactParameters(definition.name, definition.parameters) };
+    descriptors.parameters = { ...descriptors.parameters, value: compactParameters(definition) };
     const compacted: ToolDefinition = Object.create(null, descriptors);
     rememberFullDefinition(toolRegistry, definition, compacted);
     tool.definition = captureAgentToolDefinition(compacted);
   }
+  toolRegistry.setFullDefinitionSource((name) => fullToolDefinition(toolRegistry, name));
 }

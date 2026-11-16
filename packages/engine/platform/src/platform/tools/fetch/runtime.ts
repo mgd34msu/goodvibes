@@ -929,6 +929,8 @@ export function createFetchTool(
   return {
     definition: {
       name: 'fetch',
+      // Sent in full on every model request (see ToolDefinition.core).
+      core: true,
       description:
         'Fetch one or more URLs via HTTP. Supports batch parallel/sequential requests,'
         + ' per-URL method/headers/body/params, extraction modes (raw, text, json, markdown,'

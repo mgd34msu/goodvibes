@@ -35,6 +35,8 @@ const SLOW_READ_MS = 2_000;
 export class ReadTool implements Tool {
   readonly definition: ToolDefinition = {
     name: 'read',
+    // Sent in full on every model request (see ToolDefinition.core).
+    core: true,
     description:
       'Read one or more files from disk. Supports extract modes (content, outline, symbols, lines, ast)'
       + ' for token-efficient reading, per-file caching, pagination via token_budget, and batch processing.',

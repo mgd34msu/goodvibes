@@ -9,6 +9,12 @@ Accessible via `@goodvibes-jev/engine/platform/platform/tools` (daemon embedders
 
 For how tool-call arguments are parsed, validated, and dropped when malformed, see [Tool Safety](./tool-safety.md).
 
+## What a model request carries
+
+Every model request (the TUI, the Agent, worker agents, contract units, daemon hosted sessions and companion chat) carries the core tools in full: those whose definition says `core: true` (`read`, `find`, `edit`, `write`, `exec`, `fetch`, `agent`, `task`, `state`, `repl`, `web_search`). Every other registered tool is one line: its name, the first sentence of its description and `[parameters: tool_schema]`. The `tool_schema` tool returns the full definitions of the tools it names, and from the next request on those tools are sent in full. A call to a one-line tool that was not loaded is not run: its result is a refusal (`decision.state: refused`) that carries the tool's full definition and says to send the call again; the tool is sent in full from then on. Every call is checked against the tool's full schema either way.
+
+A tool can name the modes with which it only reads (`readModes` on its definition). A call in one of those modes is classed as a read; any other mode is decided by the permission gate as a change. The Agent sets these for `remote`, `channel`, `mcp`, `control`, `task`, `team`, `worklist`, `packet` and `query`.
+
 ## Built-in tools
 
 | Tool | Purpose | Main modes or operations |

@@ -1203,6 +1203,8 @@ export function createExecTool(
   const tool: Tool = {
     definition: {
       name: 'exec',
+      // Sent in full on every model request (see ToolDefinition.core).
+      core: true,
       description:
         'Execute shell commands. Supports batch, parallel, background, retry, timeout,'
         + ' expectation-checking, until-pattern, and pre-command file operations.',

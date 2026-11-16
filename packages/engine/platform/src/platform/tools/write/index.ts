@@ -456,6 +456,8 @@ export function createWriteTool(options?: {
   const projectRoot = options.projectRoot;
   const definition: ToolDefinition = {
     name: 'write',
+    // Sent in full on every model request (see ToolDefinition.core).
+    core: true,
     description:
       'Write one or more files to disk. Supports batch writes, automatic parent directory creation, ' +
       'and three overwrite modes: fail_if_exists (default), overwrite, backup. ' +

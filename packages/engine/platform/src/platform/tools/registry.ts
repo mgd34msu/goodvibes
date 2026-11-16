@@ -33,6 +33,7 @@ import { assertRemoteSettingsImportPrecondition, applyRemoteSettingsImportPrecon
 import { firstJsonSchemaFailureAsync } from '@goodvibes-jev/engine/transport-http';
 import { PERMISSION_CATEGORIES, type Tool, type ToolDefinition, type ToolExecuteOptions, type ToolResult } from '../types/tools.js';
 import { UnknownPreparedToolError } from './preparation-error.js';
+import { createToolSchemaTool, deferredToolRefusal, oneLineDefinition, TOOL_SCHEMA_TOOL_NAME } from './tool-schema.js';
 import { ToolError } from '../types/errors.js';
 import { repairToolCall } from './auto-repair.js';
 import { checkToolSchema, ToolContractVerifier } from '../runtime/tools/contract-verifier.js';
@@ -415,10 +416,65 @@ export class ToolRegistry {
   private readonly definitionRevisions = new WeakMap<ProjectionRegistration, CapturedDefinition>();
   /** One isolated pattern tester for the untrusted patterns of this registry's tool schemas, started on first use. */
   private patternTester: SharedRegexTester | undefined;
+  /** Tools sent one line at a time that `tool_schema` (or a refused call) has since loaded; they go in full from then on. */
+  private readonly loadedTools = new Set<string>();
+  private fullDefinitionOf: ((name: string) => ToolDefinition | undefined) | undefined;
 
   /** Strict compositions bind their exact authority owner once; raw platform registries remain unbound. */
   constructor(expectedPermissionManager?: PermissionManager) {
     if (expectedPermissionManager !== undefined) registryPermissionOwners.set(this, expectedPermissionManager);
+    // Every registry answers `tool_schema` for the tools it lists in one line. It
+    // is not part of list(), so a registry built from this one registers its own.
+    this.register(createToolSchemaTool({
+      definitionOf: (name) => this.definitionOf(name),
+      fullDefinition: (name) => this.fullDefinitionOf?.(name),
+      loaded: (names) => { for (const name of names) this.loadedTools.add(name); },
+    }));
+  }
+
+  /**
+   * Where `tool_schema` finds a tool's uncompacted definition when a product
+   * shortened the registered one (the Agent compacts descriptions).
+   */
+  setFullDefinitionSource(fullDefinition: (name: string) => ToolDefinition | undefined): void {
+    this.fullDefinitionOf = fullDefinition;
+  }
+
+  /** Whether a model request carries this tool's full definition: it is core, or it was loaded. */
+  private sentInFull(definition: ToolDefinition): boolean {
+    return definition.core === true || this.loadedTools.has(definition.name);
+  }
+
+  /**
+   * The tool definitions a model request carries: core tools (`core: true` on
+   * the definition) and tools loaded this session in full, every other tool as
+   * a one-line entry, plus `tool_schema` to load one. When every tool goes in
+   * full, `tool_schema` is left out. Read once per request, so a tool loaded in
+   * one round is sent in full in the next round of the same turn. Calls are
+   * always validated against the full registered schema.
+   */
+  getModelToolDefinitions(): ToolDefinition[] {
+    const definitions = this.getToolDefinitions();
+    if (definitions.every((definition) => this.sentInFull(definition))) return definitions;
+    const schemaTool = this.tools.get(TOOL_SCHEMA_TOOL_NAME);
+    return [
+      ...definitions.map((definition) => this.sentInFull(definition) ? definition : oneLineDefinition(definition)),
+      ...(schemaTool ? [schemaTool.definition] : []),
+    ];
+  }
+
+  /**
+   * The answer to a call of a tool the request listed in one line and that is
+   * not loaded yet: not run, refused with the tool's full definition so the
+   * model can send the call again with real parameters, and loaded from now
+   * on. Undefined for any call that runs as usual. A lookup; no model request.
+   */
+  deferredCallRefusal(callId: string, name: string): ToolResult | undefined {
+    const definition = this.tools.get(name)?.definition;
+    if (!definition || name === TOOL_SCHEMA_TOOL_NAME || this.sentInFull(definition)) return undefined;
+    this.loadedTools.add(name);
+    const full = this.fullDefinitionOf?.(name) ?? definition;
+    return deferredToolRefusal(callId, full);
   }
 
   /** Every registration and removal as a revision source. */
@@ -495,9 +551,9 @@ export class ToolRegistry {
     return verifier.verifyAll(this.list());
   }
 
-  /** Returns the ToolDefinition array formatted for LLM function calling. */
+  /** Every registered tool's full definition (the registry's own `tool_schema` aside). A model request uses {@link getModelToolDefinitions}. */
   getToolDefinitions(): ToolDefinition[] {
-    return Array.from(this.tools.values()).map((t) => t.definition);
+    return this.list().map((t) => t.definition);
   }
 
   /** Capture/project before conversation storage, repair, or any ordinary judgment. */
@@ -1423,9 +1479,9 @@ export class ToolRegistry {
     return { inputProjection: registration.projector };
   }
 
-  /** Returns all registered tools. */
+  /** Returns all registered tools, except the registry's own `tool_schema`. */
   list(): Tool[] {
-    return Array.from(this.tools.values());
+    return Array.from(this.tools.values()).filter((tool) => tool.definition.name !== TOOL_SCHEMA_TOOL_NAME);
   }
 }
 

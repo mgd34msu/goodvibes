@@ -8,6 +8,8 @@ export function createWebSearchTool(service: WebSearchService): Tool {
   return {
     definition: {
       name: 'web_search',
+      // Sent in full on every model request (see ToolDefinition.core).
+      core: true,
       description:
         'Search the web through a provider-backed search layer.'
         + ' Returns normalized ranked results, optional instant-answer data, and optional fetched evidence.',

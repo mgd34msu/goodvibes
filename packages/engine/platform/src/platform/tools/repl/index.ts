@@ -40,6 +40,8 @@ export function createReplTool(runner: ValidatorRunner, options: ReplToolOptions
   return {
     definition: {
       name: 'repl',
+      // Sent in full on every model request (see ToolDefinition.core).
+      core: true,
       description: REPL_TOOL_SCHEMA.description,
       parameters: REPL_TOOL_SCHEMA.parameters,
       sideEffects: ['exec', 'read_fs', 'write_fs'],

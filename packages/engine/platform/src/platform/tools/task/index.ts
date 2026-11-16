@@ -79,6 +79,8 @@ export function createTaskTool(registry: CrossSessionTaskRegistry, options: Task
   return {
     definition: {
       name: 'task',
+      // Sent in full on every model request (see ToolDefinition.core).
+      core: true,
       description: 'Manage durable cross-session task refs, dependencies, cancellations, and handoffs shared by every session of this project.'
         + ' A handoff blocks the task until its destination session accepts it with mode=acknowledge handoffId=<id>;'
         + ' the source session can take it back with mode=withdraw handoffId=<id>.'

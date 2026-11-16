@@ -6,6 +6,8 @@ import type { ToolDefinition } from '../../types/tools.js';
  */
 export const findSchema: ToolDefinition = {
   name: 'find',
+  // Sent in full on every model request (see ToolDefinition.core).
+  core: true,
   description:
     'Search the codebase using glob patterns, regex content search, or symbol extraction. ' +
     'Supports multiple queries in one call. Modes: files (glob), content (grep), symbols (regex).',

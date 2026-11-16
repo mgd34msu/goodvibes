@@ -116,6 +116,12 @@ export interface HostedSessionRecord {
    * contract store; a record persisted before contracts existed loads with none.
    */
   readonly contractIds: readonly string[];
+  /**
+   * Why the latest save of this session to disk failed. While it is set, what
+   * the session did since its last good save is lost if the daemon restarts.
+   * Unset again by the next save that succeeds; never written to disk.
+   */
+  readonly saveError?: string | undefined;
 }
 
 /** One message of a hosted session's history, as a client renders it. */

@@ -69,6 +69,7 @@ export const HOSTED_SESSION_RECORD_SCHEMA = objectSchema({
   originSurface: STRING_SCHEMA,
   permissionMode: { type: 'string', enum: SESSION_GATE_PRESET_NAMES },
   contractIds: arraySchema(STRING_SCHEMA),
+  saveError: STRING_SCHEMA,
 }, [
   'id', 'workspaceRoot', 'title', 'status', 'detachPolicy', 'effectiveDetachPolicy',
   'attachedClients', 'createdAt', 'updatedAt', 'turnCount', 'messageCount', 'restoredFromDisk', 'contractIds',

@@ -265,7 +265,9 @@ export class HostedSessionStore {
       throw new Error(`Refusing to persist hosted session '${record.id}': the id is not a safe file name.`);
     }
     const bounded = this.boundConversation(conversation);
-    const payload: PersistedHostedSession = { version: CURRENT_HOSTED_SESSION_VERSION, record, conversation: bounded };
+    // `saveError` describes this process's last write, so it is never part of one.
+    const stored: HostedSessionRecord = record.saveError === undefined ? record : { ...record, saveError: undefined };
+    const payload: PersistedHostedSession = { version: CURRENT_HOSTED_SESSION_VERSION, record: stored, conversation: bounded };
     const file = this.fileFor(record.id);
     await this.writes.run(async () => {
       // One synchronous atomic publication avoids a best-effort older save

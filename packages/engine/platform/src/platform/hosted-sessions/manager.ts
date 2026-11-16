@@ -448,7 +448,7 @@ export class HostedSessionManager {
     live.record = { ...live.record, permissionMode, updatedAt: this.now() };
     // An acknowledged mode change must survive restart. Unlike routine history
     // snapshots, failure is returned to the operator rather than logged away.
-    await this.options.store.save(live.record, live.runtime?.conversation.toJSON() ?? live.restoredConversation, { durable: true });
+    await this.saveDurably(live, live.runtime?.conversation.toJSON() ?? live.restoredConversation);
     this.assertSessionUsable(live);
   }
 
@@ -554,7 +554,7 @@ export class HostedSessionManager {
         this.assertSessionUsable(live);
         if (ownership?.nativeConversation) {
           try {
-            await this.options.store.save(live.record, live.runtime?.conversation.toJSON() ?? null, { durable: true });
+            await this.saveDurably(live, live.runtime?.conversation.toJSON() ?? null);
           } catch (error) {
             nativeSaveFailed = true;
             throw error;
@@ -825,7 +825,7 @@ export class HostedSessionManager {
   private async saveNativeTranscript(live: LiveSession, context: NativeConversationContinuation | null = null): Promise<void> {
     const runtime = live.runtime;
     const revision = runtime?.conversation.revisionSource.revision();
-    await this.options.store.save(live.record, runtime?.conversation.toJSON() ?? null, { durable: true });
+    await this.saveDurably(live, runtime?.conversation.toJSON() ?? null);
     if (revision !== undefined) this.nativeDurable.set(live.record.id, { revision, context });
   }
 
@@ -868,7 +868,7 @@ export class HostedSessionManager {
     // toJSON copies the messages, so a later append cannot change what is queued.
     const transcript: unknown = live.runtime.conversation.toJSON();
     let checkpoint!: NativeCheckpointWrite;
-    const write = this.options.store.save(live.record, transcript, { durable: true }).then(() => {
+    const write = this.saveDurably(live, transcript).then(() => {
       this.nativeDurable.set(sessionId, { revision, context });
       if (this.nativeCheckpointWrites.get(sessionId) === checkpoint) this.nativeCheckpoints.set(sessionId, context);
     }, error => {
@@ -1255,11 +1255,43 @@ export class HostedSessionManager {
     try {
       await this.options.store.save(record, conversation);
     } catch (error) {
+      const reason = summarizeError(error);
       logger.warn('[hosted-sessions] persisting a session failed; it will not survive a restart', {
         sessionId: record.id,
-        error: summarizeError(error),
+        error: reason,
       });
+      this.noteSaveOutcome(record.id, reason);
+      return;
     }
+    this.noteSaveOutcome(record.id);
+  }
+
+  /** A save whose failure the caller must see: it is thrown, and kept on the record like any other. */
+  private async saveDurably(live: LiveSession, conversation: unknown): Promise<void> {
+    try {
+      await this.options.store.save(live.record, conversation, { durable: true });
+    } catch (error) {
+      this.noteSaveOutcome(live.record.id, summarizeError(error));
+      throw error;
+    }
+    this.noteSaveOutcome(live.record.id);
+  }
+
+  /**
+   * Keeps why the latest save failed on the session's record, where its status
+   * and every listing show it, and removes it once a save succeeds. The store
+   * writes one session's saves in order, so the latest outcome is the true one.
+   */
+  private noteSaveOutcome(sessionId: string, failure?: string): void {
+    const live = this.sessions.get(sessionId);
+    if (!live || live.record.saveError === failure) return;
+    if (failure !== undefined) {
+      live.record = { ...live.record, saveError: failure };
+      return;
+    }
+    const cleared: { -readonly [K in keyof HostedSessionRecord]: HostedSessionRecord[K] } = { ...live.record };
+    delete cleared.saveError;
+    live.record = cleared;
   }
 
   private requireWorkspace(raw: string): string {

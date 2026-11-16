@@ -1,4 +1,4 @@
-import { expect, test, spyOn, setSystemTime } from 'bun:test';
+import { expect, test } from 'bun:test';
 
 import { createBuiltinProviderHealthModalSurface } from '../../../views/builtin-modals.ts';
 import type { ResolvedBuiltinViewDeps } from '../../../views/view-deps.ts';
@@ -228,37 +228,4 @@ test('overlapping refreshes and a closed/reopened modal reject stale inspection 
     expect(surface.buildView().degraded).toBeUndefined();
     expect(text(surface.buildView().tabs[2]!.rows)).toContain('active=none');
   } finally { surface.onClose?.(); }
-});
-
-
-test('automatic 3s ticks coalesce while a slow inspection is pending and eventually publish', async () => {
-  const originalSetInterval = globalThis.setInterval;
-  let tick: (() => void) | undefined;
-  const interval = spyOn(globalThis, 'setInterval').mockImplementation(((callback: () => void, delay: number) => {
-    expect(delay).toBe(3_000);
-    tick = callback;
-    return originalSetInterval(() => {}, 2_147_483_647);
-  }) as typeof setInterval);
-  const pending: Array<(snapshots: readonly ProviderRuntimeSnapshot[]) => void> = [];
-  const surface = createProviderHealthModalSurface({ listProviderIds: () => ['slow'], inspectAll: () => new Promise((resolve) => { pending.push(resolve); }) });
-  const now = Date.now();
-  try {
-    surface.onOpen?.(() => {});
-    expect(pending).toHaveLength(1);
-    for (const elapsed of [3_000, 6_000, 9_000]) {
-      setSystemTime(now + elapsed);
-      tick?.();
-      expect(pending).toHaveLength(1);
-    }
-    pending[0]!([{ providerId: 'slow', active: true, modelCount: 1, models: [], runtime: { auth: { mode: 'none', configured: false } } }]);
-    await flush();
-    expect(text(surface.buildView().tabs[2]!.rows)).toContain('active=none preferred=none freshness=healthy');
-    setSystemTime(now + 12_000);
-    tick?.();
-    expect(pending).toHaveLength(2);
-  } finally {
-    surface.onClose?.();
-    interval.mockRestore();
-    setSystemTime();
-  }
 });

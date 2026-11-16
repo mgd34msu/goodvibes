@@ -43,9 +43,9 @@ test('real builtin pairing builder produces a handoff and reaches the actual ren
   modal.close();
 });
 
-test('real builtin pairing builder still degrades when its actual token source fails', () => {
+test('a failing token source reaches the caller as its own error, with nothing minted', () => {
   const f = fixture(true);
-  expect(buildPairingConnectionInfo(f.deps)).toBeNull();
+  expect(() => buildPairingConnectionInfo(f.deps)).toThrow();
   expect(f.minted()).toBe(0);
 });
 

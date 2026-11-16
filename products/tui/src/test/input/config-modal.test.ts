@@ -10,8 +10,7 @@ import { renderConfigModal } from '../../renderer/config-modal.ts';
 import type { SurfaceLayer } from '../../renderer/surface-kit.ts';
 import { ModalSurfaceRegistry } from '../../views/modal-surface-registry.ts';
 import { handleConfigModalToken } from '../../input/handler-modal-routes.ts';
-import { memoryModalGoldenSurface } from '../../views/modals/memory-modal.ts';
-import { marketplaceModalGoldenSurface } from '../../views/modals/marketplace-modal.ts';
+import { marketplaceModalGoldenSurface, memoryModalGoldenSurface } from '../helpers/modal-golden-surfaces.ts';
 
 // A mutable fake surface so tests can drive live-value and structural changes.
 function makeSurface(opts: {
@@ -356,6 +355,7 @@ function ctxNoop() {
 
 const ESC = { type: 'key', name: '\x1b', logicalName: 'escape', ctrl: false, shift: false, meta: false } as never;
 const BACKSPACE = { type: 'key', name: '\x7f', logicalName: 'backspace', ctrl: false, shift: false, meta: false } as never;
+const chord = (key: string) => ({ type: 'key', name: key, logicalName: key, ctrl: true, shift: false, meta: false }) as never;
 
 describe('ConfigModal host: always-live search row', () => {
   test('typed text narrows rows on a real surface (memory-modal) with no arming key', async () => {
@@ -388,28 +388,24 @@ describe('ConfigModal host: always-live search row', () => {
     });
   }
 
-  test('printable keys go to the query; a claimed action key fires only while the query is empty', () => {
+  test('a typed letter always goes to the query; its Ctrl chord fires the action, and a destructive one asks twice', () => {
     const fired: string[] = [];
     const modal = new ConfigModal();
     modal.open(confirmSurface(fired));
     const state = { configModal: modal, requestRender: () => {}, handleEscape: () => modal.close() };
-    // 'u' is not an action: it is typed.
-    handleConfigModalToken(state, { type: 'text', value: 'u' } as never);
-    expect(modal.getFilterQuery()).toBe('u');
-    // 'r' and 'd' are actions, but with a query they are just characters.
-    handleConfigModalToken(state, { type: 'text', value: 'r' } as never);
+    // 'r' and 'd' are action keys, and still only characters of a search, even into an empty query.
     handleConfigModalToken(state, { type: 'text', value: 'd' } as never);
-    expect(modal.getFilterQuery()).toBe('urd');
+    handleConfigModalToken(state, { type: 'text', value: 'r' } as never);
+    expect(modal.getFilterQuery()).toBe('dr');
     expect(fired).toEqual([]);
     expect(modal.hasPendingConfirm()).toBe(false);
-    for (let k = 0; k < 3; k++) handleConfigModalToken(state, BACKSPACE);
-    expect(modal.getFilterQuery()).toBe('');
-    handleConfigModalToken(state, { type: 'text', value: 'r' } as never);
+    for (let k = 0; k < 2; k++) handleConfigModalToken(state, BACKSPACE);
+    handleConfigModalToken(state, chord('r'));
     expect(fired).toEqual(['refresh']);
-    handleConfigModalToken(state, { type: 'text', value: 'd' } as never);
-    expect(modal.getFilterQuery()).toBe('');
+    handleConfigModalToken(state, chord('d'));
     expect(modal.hasPendingConfirm()).toBe(true);
-    handleConfigModalToken(state, { type: 'text', value: 'd' } as never);
+    expect(fired).toEqual(['refresh']);
+    handleConfigModalToken(state, chord('d'));
     expect(fired).toEqual(['refresh', 'delete']);
   });
 
@@ -449,7 +445,7 @@ describe('ConfigModal host: always-live search row', () => {
     let closed = false;
     modal.open(confirmSurface([]));
     const state = { configModal: modal, requestRender: () => {}, handleEscape: () => { closed = true; modal.close(); } };
-    handleConfigModalToken(state, { type: 'text', value: 'd' } as never);
+    handleConfigModalToken(state, chord('d'));
     expect(modal.hasPendingConfirm()).toBe(true);
     handleConfigModalToken(state, ESC);
     expect(modal.hasPendingConfirm()).toBe(false);

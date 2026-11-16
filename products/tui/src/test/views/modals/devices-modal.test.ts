@@ -2,10 +2,11 @@ import { describe, test, expect } from 'bun:test';
 import { ConfigModal } from '../../../input/config-modal.ts';
 import { renderConfigModal } from '../../../renderer/config-modal.ts';
 import { frameFromLayer } from '../../helpers/surface-frame.ts';
-import { createDevicesModalSurface, devicesModalGoldenSurface } from '../../../views/modals/devices-modal.ts';
+import { createDevicesModalSurface } from '../../../views/modals/devices-modal.ts';
 import type { ConfigModalSurface } from '../../../input/config-modal-types.ts';
 import type { MintedPairingToken, PublicPairingToken } from '@goodvibes-jev/engine/platform/platform/pairing';
 import { actionCtx, open, tabText } from './modal-surface-test-helpers.ts';
+import { devicesModalGoldenSurface } from '../../helpers/modal-golden-surfaces.ts';
 
 /** Render a surface to plain text rows at the given terminal size. */
 function renderRows(surface: ConfigModalSurface, width: number, height: number, prepare?: (modal: ConfigModal) => void): string[] {
@@ -36,8 +37,6 @@ describe('devices modal render (full text, no clipping)', () => {
       expect(flowed).toContain('last seen 3m ago');
       expect(flowed).toContain('last seen 5h ago');
       expect(flowed).toContain('last seen never');
-      // The legacy-shared guidance renders in full.
-      expect(flowed).toContain('Legacy shared token: active; migrate a device off it (m), then revoke it (s).');
       // No rendered line exceeds the terminal width (full text wraps, never clips).
       for (const row of rows) expect(row.length).toBeLessThanOrEqual(width);
     });
@@ -45,7 +44,7 @@ describe('devices modal render (full text, no clipping)', () => {
 });
 
 // Deterministic action fixture with a live token store.
-function liveSurface(): { surface: ConfigModalSurface; state: { tokens: PublicPairingToken[]; legacyRevoked: boolean; migrated: MintedPairingToken | null } } {
+function liveSurface(extra: { copyToClipboard?: (text: string) => boolean } = {}): { surface: ConfigModalSurface; state: { tokens: PublicPairingToken[]; legacyRevoked: boolean; migrated: MintedPairingToken | null } } {
   const state = {
     tokens: [
       { id: 'aaaa1111', name: 'my laptop', createdAt: 0, lastSeenAt: 0 },
@@ -55,6 +54,7 @@ function liveSurface(): { surface: ConfigModalSurface; state: { tokens: PublicPa
     migrated: null as MintedPairingToken | null,
   };
   const surface = createDevicesModalSurface({
+    ...extra,
     now: () => 0,
     pairingTokens: {
       list: () => state.tokens,
@@ -79,16 +79,16 @@ describe('devices modal actions', () => {
     expect(tabText(surface.buildView(), 'devices')).not.toContain('my laptop');
   });
 
-  test('rename routes to the /devices command with the id pre-filled (no inline text capture)', () => {
+  test('rename answers in the modal status line with the /devices command and the id filled in', () => {
     const { surface } = liveSurface();
     open(surface);
-    const printed: string[] = [];
-    surface.onAction?.('rename', actionCtx({ id: 'device:aaaa1111', label: 'x' }, { print: (m: string) => printed.push(m) }));
-    expect(printed.join('\n')).toContain('/devices rename aaaa1111');
+    const statuses: string[] = [];
+    surface.onAction?.('rename', actionCtx({ id: 'device:aaaa1111', label: 'x' }, { setStatus: (m: string) => statuses.push(m) }));
+    expect(statuses.join('\n')).toContain('/devices rename aaaa1111');
   });
 
-  test('migrate off shared token mints a one-time token', () => {
-    const { surface, state } = liveSurface();
+  test('migrate off shared token mints a one-time token that stays in the modal even with a clipboard', () => {
+    const { surface, state } = liveSurface({ copyToClipboard: () => true });
     open(surface);
     const printed: string[] = [];
     surface.onAction?.('migrateShared', actionCtx(null, { print: (m: string) => printed.push(m) }));

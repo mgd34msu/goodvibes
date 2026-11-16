@@ -39,15 +39,8 @@ import {
   buildRecoveryRetireItems,
   describeRecoverySnapshot,
 } from '../../runtime/recovery-prompt.ts';
-import { marketplaceModalGoldenSurface } from '../../views/modals/marketplace-modal.ts';
-import { hooksModalGoldenSurface } from '../../views/modals/hooks-modal.ts';
-import { securityModalGoldenSurface } from '../../views/modals/security-modal.ts';
-import { keybindingsModalGoldenSurface } from '../../views/modals/keybindings-modal.ts';
-import { pairingModalGoldenSurface } from '../../views/modals/pairing-modal.ts';
-import { memoryModalGoldenSurface } from '../../views/modals/memory-modal.ts';
-import { workPlanModalGoldenSurface } from '../../views/modals/work-plan-modal.ts';
-import { devicesModalGoldenSurface } from '../../views/modals/devices-modal.ts';
 import { createTestManagers } from './test-managers.ts';
+import { devicesModalGoldenSurface, hooksModalGoldenSurface, keybindingsModalGoldenSurface, marketplaceModalGoldenSurface, memoryModalGoldenSurface, pairingModalGoldenSurface, securityModalGoldenSurface, workPlanModalGoldenSurface } from './modal-golden-surfaces.ts';
 
 export interface KitFrame {
   readonly name: string;

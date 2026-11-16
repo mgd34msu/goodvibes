@@ -1,17 +1,7 @@
 import { describe, test, expect } from 'bun:test';
 import type { ConfigModalSurface } from '../../../input/config-modal-types.ts';
-import { marketplaceModalGoldenSurface } from '../../../views/modals/marketplace-modal.ts';
-import { pluginsModalGoldenSurface } from '../../../views/modals/plugins-modal.ts';
-import { skillsModalGoldenSurface } from '../../../views/modals/skills-modal.ts';
-import { hooksModalGoldenSurface } from '../../../views/modals/hooks-modal.ts';
-import { securityModalGoldenSurface } from '../../../views/modals/security-modal.ts';
-import { policyModalGoldenSurface } from '../../../views/modals/policy-modal.ts';
-import { knowledgeModalGoldenSurface } from '../../../views/modals/knowledge-modal.ts';
-import { memoryModalGoldenSurface } from '../../../views/modals/memory-modal.ts';
-import { workPlanModalGoldenSurface } from '../../../views/modals/work-plan-modal.ts';
-import { keybindingsModalGoldenSurface } from '../../../views/modals/keybindings-modal.ts';
-import { pairingModalGoldenSurface } from '../../../views/modals/pairing-modal.ts';
 import { planningModalGoldenSurface } from '../../helpers/planning-modal-fixture.ts';
+import { hooksModalGoldenSurface, keybindingsModalGoldenSurface, knowledgeModalGoldenSurface, marketplaceModalGoldenSurface, memoryModalGoldenSurface, pairingModalGoldenSurface, pluginsModalGoldenSurface, policyModalGoldenSurface, securityModalGoldenSurface, skillsModalGoldenSurface, workPlanModalGoldenSurface } from '../../helpers/modal-golden-surfaces.ts';
 
 // ---------------------------------------------------------------------------
 // Config-modal-surface registration completeness.

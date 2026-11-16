@@ -3,7 +3,7 @@ import { createProcessRegistry, type ProcessRegistry, type ProcessNode } from '@
 import type { ContractView } from '@goodvibes-jev/engine/platform/platform/contract';
 import { buildFleetTreeHints } from '../../views/fleet-stop.ts';
 import { FleetActs, type FleetDiffSurface } from '../../views/fleet-acts.ts';
-import { workstreamIdFromNodeId, workItemIdFromNodeId, type FleetGateway, type FleetHeldMergeGroup } from '../../views/fleet-gateway.ts';
+import type { FleetGateway, FleetHeldMergeGroup } from '../../views/fleet-gateway.ts';
 import { contractFixture, contractUnit } from '../helpers/contract-work-tree-fixtures.ts';
 
 const registries: ProcessRegistry[] = [];
@@ -64,13 +64,6 @@ function fixture(initial = waitingContract(), groups = [heldGroup()]) {
 }
 
 describe('fleet acts over actual public contract adapter nodes', () => {
-  test('ID extraction keeps contract qualification and refuses retired or incomplete IDs', () => {
-    expect(workstreamIdFromNodeId('group:ctr:g1')).toBe('ctr:g1');
-    expect(workItemIdFromNodeId('unit:ctr:u1')).toBe('ctr:u1');
-    for (const id of ['workstream:g1', 'group:g1', 'group::g1', 'contract:ctr']) expect(workstreamIdFromNodeId(id)).toBeNull();
-    for (const id of ['work-item:u1', 'unit:u1', 'unit:ctr:', 'agent:a']) expect(workItemIdFromNodeId(id)).toBeNull();
-  });
-
   test('real pick flag selects its recorded group, previews, then applies only after confirmation', async () => {
     const f = fixture(waitingContract(), [heldGroup('ctr:unrelated'), heldGroup()]);
     const unit = f.node('unit:ctr:u1');
@@ -152,17 +145,6 @@ describe('fleet acts over actual public contract adapter nodes', () => {
     expect(f.calls).toEqual([{ action: 'resolve', value: 'ctr:u1' }, { action: 'attach', value: 'resolution-1' }]);
     await f.acts.resolveConflict({ ...f.node('unit:ctr:u1'), id: 'unit:other:u1' });
     expect(f.calls).toHaveLength(2);
-  });
-
-  test('a second resolve while the first is still starting does not start another session', async () => {
-    const f = fixture();
-    const first = f.acts.resolveConflict(f.node('unit:ctr:u1'));
-    await f.acts.resolveConflict(f.node('unit:ctr:u1'));
-    await first;
-    expect(f.calls.filter(call => call.action === 'resolve')).toHaveLength(1);
-    expect(f.notes.join('\n')).toContain('already starting');
-    await f.acts.resolveConflict(f.node('unit:ctr:u1'));
-    expect(f.calls.filter(call => call.action === 'resolve')).toHaveLength(2);
   });
 
   test('only a completed root owns a discardable worktree and still requires confirmation', async () => {

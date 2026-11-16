@@ -88,7 +88,7 @@ class SkillsModalSurface implements SkillsModalReadSurface {
     const rows: ConfigModalRow[] = [];
     if (this.loadError !== null) {
       rows.push(infoRow('error:0', `Could not read the skill directories: ${this.loadError}`, { fg: MODAL_TONES.warn }));
-      rows.push(infoRow('error:next', 'Press r to read them again.', { fg: MODAL_TONES.dim }));
+      rows.push(infoRow('error:next', 'Press Ctrl+R to read them again.', { fg: MODAL_TONES.dim }));
       return { title: 'Skills', tabs: [{ id: 'skills', label: 'Skills', rows, emptyText: '' }] };
     }
     if (this.cached === null) {
@@ -144,12 +144,4 @@ class SkillsModalSurface implements SkillsModalReadSurface {
 
 export function createSkillsModalSurface(deps: SkillsModalDeps): SkillsModalReadSurface {
   return new SkillsModalSurface(deps);
-}
-
-/** Deterministic golden fixture: a surface whose skill read finds nothing, so it renders the empty-state copy. */
-export function skillsModalGoldenSurface(): ConfigModalSurface {
-  return createSkillsModalSurface({
-    shellPaths: { workingDirectory: '/', homeDirectory: '/' },
-    discover: async () => [],
-  });
 }

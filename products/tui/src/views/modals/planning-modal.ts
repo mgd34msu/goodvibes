@@ -1,3 +1,4 @@
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { MODAL_TONES } from './modal-theme.ts';
 import { infoRow } from './modal-surface-helpers.ts';
 import type {
@@ -115,6 +116,8 @@ class PlanningModalSurface implements ConfigModalSurface {
   readonly title = HISTORICAL_TITLE;
   private snapshot: PlanningModalSnapshot | null = null;
   private loading = false;
+  /** Why the last read failed, shown beside "unavailable". */
+  private loadError: string | null = null;
   private generation = 0;
   private controller: AbortController | null = null;
   private requestRender: () => void = () => {};
@@ -142,6 +145,7 @@ class PlanningModalSurface implements ConfigModalSurface {
     const generation = ++this.generation;
     this.loading = true;
     this.snapshot = null;
+    this.loadError = null;
     void this.load(generation, controller.signal);
   }
 
@@ -166,9 +170,10 @@ class PlanningModalSurface implements ConfigModalSurface {
       this.snapshot = snapshot;
       this.loading = false;
       this.repaint();
-    } catch {
+    } catch (error) {
       if (!this.current(generation, signal)) return;
       this.snapshot = null;
+      this.loadError = summarizeError(error);
       this.loading = false;
       this.repaint();
     }
@@ -179,7 +184,7 @@ class PlanningModalSurface implements ConfigModalSurface {
     // host to the read phase so completed reads replace stale/frozen rows.
     const bindingIdentity = `planning-history:${this.generation}:${this.snapshot ? 'saved' : this.loading ? 'loading' : 'unavailable'}`;
     if (!this.snapshot) {
-      return { title: HISTORICAL_TITLE, bindingIdentity, tabs: [{ id: 'planning', label: 'History', header: [HISTORICAL_BOUNDARY], rows: [infoRow('load', this.loading ? 'Loading historical planning records...' : 'Historical planning records unavailable.', { fg: MODAL_TONES.dim })] }], hints: ['r refresh'] };
+      return { title: HISTORICAL_TITLE, bindingIdentity, tabs: [{ id: 'planning', label: 'History', header: [HISTORICAL_BOUNDARY], rows: [infoRow('load', this.loading ? 'Loading historical planning records...' : `Historical planning records unavailable: ${this.loadError ?? 'no reading yet'}.`, { fg: MODAL_TONES.dim })] }], hints: ['r refresh'] };
     }
 
     const { status, state, revision, decisions, language } = this.snapshot;

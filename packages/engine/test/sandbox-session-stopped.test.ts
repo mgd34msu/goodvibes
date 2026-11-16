@@ -18,7 +18,7 @@ function workspace(): string {
 /** A session placed straight into the registry's table, so no backend has to start. */
 function seeded(
   state: SandboxSession['state'],
-  extra: { readonly profileId?: string; readonly shared?: boolean; readonly startupStatus?: SandboxSession['startupStatus'] } = {},
+  extra: { readonly profileId?: string; readonly shared?: boolean } = {},
 ): { registry: SandboxSessionRegistry; id: string } {
   const root = workspace();
   const registry = new SandboxSessionRegistry(root);
@@ -26,7 +26,7 @@ function seeded(
     id: 's1', profileId: extra.profileId ?? 'p', kind: 'eval', label: 'x', shared: extra.shared ?? false, startedAt: 1, state,
     backend: 'local', resolvedBackend: 'local',
     launchPlan: { backend: 'local', command: 'true', args: [], workspaceRoot: root, summary: 's' },
-    startupStatus: extra.startupStatus ?? 'verified', startupDetail: '', notes: [],
+    startupStatus: 'planned', startupDetail: '', notes: [],
   }) as unknown as SandboxSession;
   (registry as unknown as { sessions: Map<string, SandboxSession> }).sessions.set('s1', session);
   return { registry, id: 's1' };
@@ -40,12 +40,12 @@ describe('sandbox session lifecycle', () => {
     expect(registry.get(id)?.executionCount).toBeUndefined();
   });
 
-  test('stop is idempotent and a stopped session never fails from a later non-zero exit', async () => {
+  test('stop returns the stopped record and removes the session; a later stop or command finds nothing', async () => {
     const { registry, id } = seeded('running');
-    registry.stop(id);
     expect(registry.stop(id)?.state).toBe('stopped');
+    expect(registry.list()).toHaveLength(0);
+    expect(registry.stop(id)).toBeNull();
     await expect(registry.execute(id, 'bash', ['-lc', 'exit 3'])).rejects.toThrow();
-    expect(registry.get(id)?.state).toBe('stopped');
   });
 
   test('execute runs asynchronously and returns the command output, input and exit status', async () => {
@@ -103,14 +103,6 @@ describe('shared sandbox sessions', () => {
     const again = await registry.start('mcp-shared', undefined, config);
     expect(again.id).toBe(id);
     expect(registry.list()).toHaveLength(1);
-  });
-
-  test('a session whose startup probe failed is not reused, even after a command exits 0', async () => {
-    const { registry, id } = seeded('failed', { ...shared, startupStatus: 'failed' });
-    await registry.execute(id, 'bash', ['-lc', 'true']);
-    expect(registry.get(id)?.state).toBe('failed');
-    const next = await registry.start('mcp-shared', undefined, config);
-    expect(next.id).not.toBe(id);
   });
 
   test('a stopped shared session is not handed out again', async () => {

@@ -1,6 +1,7 @@
 import { describe, test, expect } from 'bun:test';
-import { createPolicyModalSurface, policyModalGoldenSurface } from '../../../views/modals/policy-modal.ts';
+import { createPolicyModalSurface } from '../../../views/modals/policy-modal.ts';
 import { actionCtx, captureCommands, open, tabText } from './modal-surface-test-helpers.ts';
+import { policyModalGoldenSurface } from '../../helpers/modal-golden-surfaces.ts';
 
 describe('policy modal surface', () => {
   test('surface identity', () => {

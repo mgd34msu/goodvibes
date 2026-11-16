@@ -1,7 +1,8 @@
 import { describe, test, expect } from 'bun:test';
-import { createSecurityModalSurface, securityModalGoldenSurface } from '../../../views/modals/security-modal.ts';
+import { createSecurityModalSurface } from '../../../views/modals/security-modal.ts';
 import type { UiReadModel, UiSecuritySnapshot } from '../../../runtime/ui-read-models.ts';
 import { actionCtx, captureCommands, findAction, open, tabText } from './modal-surface-test-helpers.ts';
+import { securityModalGoldenSurface } from '../../helpers/modal-golden-surfaces.ts';
 
 function fixedReadModel(snapshot: UiSecuritySnapshot): UiReadModel<UiSecuritySnapshot> {
   return { getSnapshot: () => snapshot, subscribe: () => () => {} };

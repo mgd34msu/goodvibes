@@ -75,7 +75,7 @@ class PluginsModalSurface implements ConfigModalSurface {
     { key: 'e', id: 'enable', label: 'enable', enabledFor: (row: ConfigModalRow | null) => this.pluginFrom(row)?.active === false },
     { key: 'd', id: 'disable', label: 'disable', enabledFor: (row: ConfigModalRow | null) => this.pluginFrom(row)?.enabled === true },
     { key: 'v', id: 'verify', label: 'verify' },
-    { key: 'q', id: 'liftQuarantine', label: 'lift quarantine', enabledFor: (row: ConfigModalRow | null) => this.pluginFrom(row)?.quarantined === true },
+    { key: 'q', id: 'liftQuarantine', label: 'lift quarantine', confirm: true, enabledFor: (row: ConfigModalRow | null) => this.pluginFrom(row)?.quarantined === true },
     { key: 'm', id: 'captureToMemory', label: 'capture to memory', enabledFor: (row: ConfigModalRow | null) => this.pluginFrom(row)?.quarantined === true },
     { key: 'r', id: 'refresh', label: 'refresh' },
   ];
@@ -156,26 +156,4 @@ class PluginsModalSurface implements ConfigModalSurface {
 
 export function createPluginsModalSurface(deps: PluginsModalDeps): ConfigModalSurface {
   return new PluginsModalSurface(deps);
-}
-
-/**
- * Deterministic golden fixture: a fixed two-plugin roster (one active/trusted,
- * one quarantined/untrusted) so both the base list rendering and the quarantine
- * suffix are exercised without any disk I/O, wall-clock, or random ids.
- */
-export function pluginsModalGoldenSurface(): ConfigModalSurface {
-  const fixedPlugins: PluginStatus[] = [
-    { name: 'formatter', version: '1.0.0', description: 'Deterministic golden fixture plugin.', enabled: true, active: true, trustTier: 'trusted', quarantined: false },
-    { name: 'risky-tool', version: '0.2.0', description: 'Second golden fixture plugin, quarantined.', enabled: false, active: false, trustTier: 'untrusted', quarantined: true },
-  ];
-  const manager: PluginsModalManager = {
-    list: () => fixedPlugins,
-    capabilities: () => null,
-    getTrustRecord: () => undefined,
-    getQuarantineRecord: (name) => (name === 'risky-tool'
-      ? { pluginName: name, quarantinedAt: 0, reason: 'golden fixture quarantine', revokedCapabilities: [], lifted: false }
-      : undefined),
-    verify: () => ({ ok: true, valid: true, fingerprint: 'golden-fixture-fp' }),
-  };
-  return createPluginsModalSurface({ pluginManager: manager });
 }

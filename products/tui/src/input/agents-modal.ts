@@ -37,7 +37,7 @@ import { renderAgentsModal, type AgentsDetail, type AgentsModalView, type Agents
 import { formatUsd } from '../renderer/usage-modal.ts';
 import {
   fleetAttentionText, fleetNodeAttention, fleetStallMarker, isBlockedOnUserNode, isRunningProcessState, isTerminalProcessState,
-  type FleetReadModel, type FleetTreeRow,
+  type FleetReadModel, type FleetSnapshot, type FleetTreeRow,
 } from '../views/fleet-read-model.ts';
 import type { FleetActs } from '../views/fleet-acts.ts';
 import type { FleetSpawn } from '../views/fleet-spawn.ts';
@@ -123,9 +123,18 @@ export class AgentsModal implements SurfaceModal {
   private tickTimer: ReturnType<typeof setInterval> | null = null;
   private closed = false;
   private readonly hostedViewport = new HostedTranscriptViewport();
+  /**
+   * The fleet as last read, shared by every helper of a frame. Dropped when the
+   * registry reports a change, on the elapsed-time tick and around every key,
+   * so a repaint the rest of the app asks for reads nothing new.
+   */
+  private liveSnapshot: FleetSnapshot | null = null;
+  private archivedSnapshot: FleetSnapshot | null = null;
+  /** The selected agent's transcript tail, read once per fleet reading. */
+  private tailCache: { readonly nodeId: string; readonly texts: AgentsText[] } | null = null;
 
   constructor(private readonly deps: AgentsModalDeps) {
-    this.unsubs.push(deps.readModel.subscribe(() => { this.onFleetChange(); deps.requestRender(); }));
+    this.unsubs.push(deps.readModel.subscribe(() => { this.invalidate(); this.onFleetChange(); deps.requestRender(); }));
     this.unsubs.push(deps.readModel.subscribeConsumed((event) => {
       // Unsubscribe cannot retract delivery already queued by the event bus.
       if (this.closed) return;
@@ -143,7 +152,21 @@ export class AgentsModal implements SurfaceModal {
       this.synchronizeHostedView(); deps.requestRender();
     }));
     const tickMs = deps.tickMs ?? 1_000;
-    if (tickMs > 0) this.tickTimer = setInterval(() => { this.onFleetChange(); deps.requestRender(); }, tickMs);
+    if (tickMs > 0) this.tickTimer = setInterval(() => { this.invalidate(); this.onFleetChange(); deps.requestRender(); }, tickMs);
+  }
+
+  private invalidate(): void {
+    this.liveSnapshot = null;
+    this.archivedSnapshot = null;
+    this.tailCache = null;
+  }
+
+  private fleet(): FleetSnapshot {
+    return this.liveSnapshot ??= this.deps.readModel.getSnapshot();
+  }
+
+  private archivedFleet(): FleetSnapshot {
+    return this.archivedSnapshot ??= this.deps.readModel.getArchivedSnapshot();
   }
 
   onClose(): void {
@@ -151,6 +174,8 @@ export class AgentsModal implements SurfaceModal {
     this.hostedViewport.reset();
     this.deps.spawn?.cancel();
     this.deps.acts?.cancelPick();
+    this.deps.acts?.forgetGraphsExcept(new Set(this.deps.readModel.getSnapshot().rows.map((row) => row.node.id)));
+    this.invalidate();
     for (const unsub of this.unsubs) unsub();
     this.unsubs.length = 0;
     if (this.tickTimer !== null) clearInterval(this.tickTimer);
@@ -166,11 +191,11 @@ export class AgentsModal implements SurfaceModal {
   // ── Data ───────────────────────────────────────────────────────────────────
 
   private snapshotRows(): readonly FleetTreeRow[] {
-    return this.view === 'archived' ? this.deps.readModel.getArchivedSnapshot().rows : this.deps.readModel.getSnapshot().rows;
+    return this.view === 'archived' ? this.archivedFleet().rows : this.fleet().rows;
   }
 
   private findNode(id: string): ProcessNode | null {
-    return this.deps.readModel.getSnapshot().rows.find((row) => row.node.id === id)?.node ?? null;
+    return this.fleet().rows.find((row) => row.node.id === id)?.node ?? null;
   }
 
   private synchronizeHostedView(): void {
@@ -250,7 +275,7 @@ export class AgentsModal implements SurfaceModal {
   private applyFollow(): void {
     if (!this.follow) return;
     let best: FleetTreeRow | null = null;
-    for (const row of this.deps.readModel.getSnapshot().rows) {
+    for (const row of this.fleet().rows) {
       if (!isRunningProcessState(row.node.state)) continue;
       if (!best || (row.node.startedAt ?? 0) >= (best.node.startedAt ?? 0)) best = row;
     }
@@ -262,8 +287,9 @@ export class AgentsModal implements SurfaceModal {
 
   /** Select a specific process (a deep link from a notification, the work plan, /agents --target). */
   reveal(target: ViewTarget): boolean {
+    this.invalidate();
     this.deps.acts?.cancelPick();
-    const rows = this.deps.readModel.getSnapshot().rows;
+    const rows = this.fleet().rows;
     // A tool target (the keybindings modal's Tools tab) names a tool, not a
     // process: select the first process whose current step is that tool.
     const row = target.kind === 'tool'
@@ -387,7 +413,7 @@ export class AgentsModal implements SurfaceModal {
     if (this.closed || this.steer !== steer) return;
     if (!result.queued) {
       // The draft stays so nothing typed is lost.
-      const siblings = liveSteerableLabels(this.deps.readModel.getSnapshot().rows.map((row) => row.node), steer.id);
+      const siblings = liveSteerableLabels(this.fleet().rows.map((row) => row.node), steer.id);
       this.say(steerRefusalMessage(result.reason, siblings), 'error');
       return;
     }
@@ -422,7 +448,7 @@ export class AgentsModal implements SurfaceModal {
       tone: 'danger',
       confirmChord: { key: 'x', ctrl: true },
     }).then((ok) => {
-      if (ok) { args.onConfirm(); this.say(`Stopping ${node.label}…`, 'warning'); }
+      if (ok) { args.onConfirm(); this.say(`Stopping ${node.label}…`, 'warning'); this.invalidate(); }
       this.deps.requestRender();
     });
   }
@@ -437,7 +463,7 @@ export class AgentsModal implements SurfaceModal {
   }
 
   private jumpToBlocked(): void {
-    const blocked = this.deps.readModel.getSnapshot().blockedNodeIds;
+    const blocked = this.fleet().blockedNodeIds;
     if (blocked.length === 0) { this.say('Nothing is waiting on you right now.', 'faint'); return; }
     const at = this.selectedId ? blocked.indexOf(this.selectedId) : -1;
     this.view = 'active';
@@ -470,6 +496,11 @@ export class AgentsModal implements SurfaceModal {
   // ── Keys ───────────────────────────────────────────────────────────────────
 
   escape(): boolean {
+    this.invalidate();
+    try { return this.escapeLevel(); } finally { this.invalidate(); }
+  }
+
+  private escapeLevel(): boolean {
     // Discovery owns no visible picker yet; Escape must invalidate it even
     // when another sub-level (filter/query/tab) consumes this key.
     if (!this.deps.spawn?.spawnModeActive()) this.deps.spawn?.cancel();
@@ -486,6 +517,11 @@ export class AgentsModal implements SurfaceModal {
   }
 
   handleToken(token: InputToken, host: SurfaceModalHost): void {
+    this.invalidate();
+    try { this.handleKey(token, host); } finally { this.invalidate(); }
+  }
+
+  private handleKey(token: InputToken, host: SurfaceModalHost): void {
     if (this.steer) { this.handleSteerToken(token); return; }
     // F2 and ctrl+o open this modal; pressed again here, they close it.
     if (token.type === 'key' && ((token.logicalName === 'f2' && !token.ctrl) || (token.ctrl && token.logicalName === 'o'))) {
@@ -527,7 +563,7 @@ export class AgentsModal implements SurfaceModal {
       case 'x': case 'K': this.stopSelected(); break;
       case 'i': this.interruptSelected(); break;
       case 'p':
-        if (node) toggleFleetPause(node, { interrupt: (id) => this.deps.actions.interrupt(id), resume: (id) => this.deps.actions.resume(id), setError: (m) => this.say(m, 'faint'), markDirty: () => {}, tracker: this.stopTracker });
+        if (node) toggleFleetPause(node, { interrupt: (id) => this.deps.actions.interrupt(id), resume: (id) => this.deps.actions.resume(id), setError: (m) => this.say(m, 'error'), setStatus: (m) => this.say(m, 'warning'), tracker: this.stopTracker });
         break;
       case 'n':
         if (this.deps.spawn) void this.deps.spawn.begin();
@@ -683,7 +719,11 @@ export class AgentsModal implements SurfaceModal {
     const observedDraft = this.deps.acts?.observedSteerDraftFor(node.id) ?? null;
     const graph = this.deps.acts?.graphFor(node.id) ?? null;
     const meta = [node.kind === 'acp-agent' ? 'hosted over ACP' : node.kind, node.model, node.provider].filter(Boolean).join(' · ');
-    const tail = node.kind === 'agent' || node.kind === 'acp-agent' ? transcriptTail(this.deps.actions.getConversationSnapshot(node.id), 30) : [];
+    let tail: AgentsText[] = [];
+    if (node.kind === 'agent' || node.kind === 'acp-agent') {
+      if (this.tailCache?.nodeId !== node.id) this.tailCache = { nodeId: node.id, texts: transcriptTail(this.deps.actions.getConversationSnapshot(node.id), 30) };
+      tail = this.tailCache.texts;
+    }
     return { title: node.label, meta, blocks: [{ kind: 'lines', build: (width) => renderFleetDetailLines(node, width, stopping, blocked, undefined, observedDraft, graph) }], tail };
   }
 
@@ -694,7 +734,7 @@ export class AgentsModal implements SurfaceModal {
     const live = this.findNode(tab.nodeId);
     if (tab.kind === 'contract') {
       const descendants = new Set([tab.nodeId]);
-      const members = this.deps.readModel.getSnapshot().rows.filter((row) => {
+      const members = this.fleet().rows.filter((row) => {
         if (!row.node.parentId || !descendants.has(row.node.parentId)) return false;
         descendants.add(row.node.id);
         return true;
@@ -718,7 +758,7 @@ export class AgentsModal implements SurfaceModal {
   }
 
   private sub(): string {
-    const snapshot = this.deps.readModel.getSnapshot();
+    const snapshot = this.fleet();
     const failed = snapshot.rows.filter((row) => row.node.state === 'failed').length;
     const blocked = snapshot.blockedNodeIds.length;
     const parts = [`${snapshot.runningCount} running`];
@@ -754,7 +794,7 @@ export class AgentsModal implements SurfaceModal {
     const node = this.selectedNode();
     const attention = node ? fleetNodeAttention(node) : null;
     const enter = attention?.reason === 'pick' ? 'pick a winner' : attention?.reason === 'conflict' ? 'resolve conflict' : 'open full screen';
-    const blocked = this.deps.readModel.getSnapshot().blockedNodeIds.length;
+    const blocked = this.fleet().blockedNodeIds.length;
     const allowed = new Set(buildFleetTreeHints(node ?? undefined, this.follow, this.tabs.tabs.length > 0, this.view, blocked).map((hint) => hint.keys));
     const hints: KitHint[] = [['⏎', enter]];
     if (allowed.has('s')) hints.push(['s', 'steer']);
@@ -791,7 +831,9 @@ export class AgentsModal implements SurfaceModal {
           : this.view === 'archived' ? ['archive'] : [],
       sub: level === 'list' ? this.sub() : '',
       hints: this.hints(level),
-      status: this.renderedStatus(),
+      status: this.deps.acts?.observedSteerActive() && this.deps.acts.observedSteerFailure()
+        ? { text: this.deps.acts.observedSteerFailure()!, tone: 'error' }
+        : this.renderedStatus(),
       input,
       filter: { query: this.query, active: this.filtering, count: this.query ? `${shown} of ${total}` : `${total} shown` },
       rows: level === 'list' ? this.listRows() : [],

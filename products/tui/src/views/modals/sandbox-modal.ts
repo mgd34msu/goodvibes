@@ -36,9 +36,10 @@ function sessionIdOf(row: ConfigModalRow | null): string | null {
  * (buildSandboxReview, listSandboxProfiles, sessions.list) are synchronous, so
  * buildView reads them live each tick. The earlier view's single profile+session
  * selectable list becomes two real tabs. s/x/e call the SandboxSessionRegistry
- * directly (these were never slash commands). start's rejection and execute's
- * throw surface via ctx.setStatus, and execute reports the probe's exit status
- * and first output line. execute is async: the key handler returns at once
+ * directly (these were never slash commands). start reports the session it
+ * started (or why it could not start) and selects it on the Sessions tab;
+ * execute reports the probe's exit status and first output line. The header
+ * names the backend commands really run on and says when that is no isolation. execute is async: the key handler returns at once
  * and the probe's result lands in the status line when it finishes (5 s timeout).
  */
 class SandboxModalSurface implements ConfigModalSurface {
@@ -76,16 +77,22 @@ class SandboxModalSurface implements ConfigModalSurface {
       const profiles = listSandboxProfiles(this.config);
       const sessions = this.sessions.list();
 
-      const header = [postureLine([
-        kv('platform', review.host.platform),
-        kv('backend', review.config.vmBackend),
-        kv('sessions', sessions.length),
-        kv('ready', review.host.secureSandboxReady ? 'yes' : 'no'),
-      ])];
+      const resolved = review.backendProbe?.resolvedBackend ?? 'local';
+      const header = [
+        postureLine([
+          kv('platform', review.host.platform),
+          kv('runs on', resolved),
+          ...(review.config.vmBackend !== resolved ? [kv('configured', review.config.vmBackend)] : []),
+          kv('sessions', sessions.length),
+        ]),
+        postureLine([review.host.secureSandboxReady
+          ? 'isolated: commands run inside the sandbox backend'
+          : 'NO ISOLATION: commands run as host processes; profiles below describe what each asks for, not what it gets']),
+      ];
 
       const profileRows: ConfigModalRow[] = profiles.map((profile) => ({
         id: `profile:${profile.id}`,
-        label: `${pad(profile.id, 14)} ${pad(profile.kind, 6)} ${pad(profile.isolation, 10)} vm=${profile.requiresVm ? 'yes' : 'no'}`,
+        label: `${pad(profile.id, 14)} ${pad(profile.kind, 6)} asks for ${pad(profile.isolation, 10)}${profile.requiresVm ? ' in a VM' : ''}`,
       }));
 
       const sessionRows: ConfigModalRow[] = sessions.map((session) => ({
@@ -118,8 +125,14 @@ class SandboxModalSurface implements ConfigModalSurface {
       case 'start': {
         const profileId = profileIdOf(ctx.row);
         if (!profileId) return;
+        ctx.setStatus(`Starting a ${profileId} session…`);
+        // start() either returns a usable session or rejects; there is no failed start to read from its state.
         void this.sessions.start(profileId, undefined, this.config)
-          .catch((error: unknown) => ctx.setStatus(summarizeError(error)))
+          .then((session) => {
+            ctx.setStatus(`Started ${session.id} (${session.resolvedBackend ?? session.backend}).`);
+            ctx.jumpToRow?.('sessions', `session:${session.id}`);
+          })
+          .catch((error: unknown) => ctx.setStatus(`Start failed: ${summarizeError(error)}`))
           .finally(() => this.requestRender());
         return;
       }
@@ -128,7 +141,7 @@ class SandboxModalSurface implements ConfigModalSurface {
         if (!sessionId) return;
         const stopped = this.sessions.stop(sessionId);
         ctx.setStatus(!stopped ? `Session ${sessionId} no longer exists; nothing to stop.`
-          : stopped.state === 'stopped' ? `Stopped ${sessionId}.`
+          : stopped.state === 'stopped' ? `Stopped ${sessionId}; it has left the list.`
           : `Released one holder of ${sessionId}; it keeps running for the others.`);
         break;
       }
@@ -137,7 +150,8 @@ class SandboxModalSurface implements ConfigModalSurface {
         if (!sessionId) return;
         // The probe runs in the background (up to its 5 s timeout) so the screen stays live; the result is shown when it ends.
         ctx.setStatus(`Running probe in ${sessionId}...`);
-        void this.sessions.execute(sessionId, process.execPath, ['-e', "console.log('sandbox modal probe ok')"], { timeoutMs: 5_000 })
+        // The same shell probe the registry starts a session with; the app's own executable is not a script runner.
+        void this.sessions.execute(sessionId, 'bash', ['-lc', 'printf "sandbox probe ok"'], { timeoutMs: 5_000 })
           .then((result) => {
             const detail = firstLine(result.stdout) || firstLine(result.stderr);
             ctx.setStatus(`Probe ${result.status === 0 ? 'succeeded' : `failed (exit ${result.status ?? 'none'})`}${detail ? `: ${detail}` : ''}`);

@@ -76,9 +76,11 @@ describe('fleet-acts graph fetch/cache (7c wiring)', () => {
     expect(acts.graphFor('agent:1')).toBeUndefined();
   });
 
-  test('an unavailable daemon caches null (no per-frame nag)', () => {
-    const acts = makeActs(async () => graph as unknown as FleetGraphSnapshot, false);
+  test('an unavailable daemon is not remembered: nothing is fetched or stored', () => {
+    let calls = 0;
+    const acts = makeActs(async () => { calls += 1; return graph as unknown as FleetGraphSnapshot; }, false);
     acts.ensureGraphFor(wsNode);
-    expect(acts.graphFor(wsNode.id)).toBeNull();
+    expect(calls).toBe(0);
+    expect(acts.graphFor(wsNode.id)).toBeUndefined();
   });
 });

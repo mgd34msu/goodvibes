@@ -22,8 +22,6 @@ import {
   type FleetDiffSurface,
 } from '../../views/fleet-acts.ts';
 import {
-  workItemIdFromNodeId,
-  workstreamIdFromNodeId,
   type FleetAttemptCandidate,
   type FleetConflictResolution,
   type FleetGateway,
@@ -166,13 +164,6 @@ function makeActs(gateway: FleetGateway, surface: FleetDiffSurface) {
 // ── pure helpers ──────────────────────────────────────────────────────────
 
 describe('fleet-gateway id extraction (no id ever typed)', () => {
-  test('current group and unit IDs retain contract qualification', () => {
-    expect(workstreamIdFromNodeId('group:ctr:ws-42')).toBe('ctr:ws-42');
-    expect(workstreamIdFromNodeId('unit:ctr:it-1')).toBeNull();
-    expect(workItemIdFromNodeId('unit:ctr:it-1')).toBe('ctr:it-1');
-    expect(workItemIdFromNodeId('agent:a1')).toBeNull();
-  });
-
   test('heldCandidates keeps only held attempts, in attempt order', () => {
     const g = group({ groupId: 'g', candidates: [
       candidate({ itemId: 'c', attemptIndex: 2 }),

@@ -42,7 +42,7 @@ function makeDeps(overrides: Partial<FleetPauseDeps> = {}): FleetPauseDeps & {
     interrupt: (id) => { calls.interrupt.push(id); return true; },
     resume: (id) => { calls.resume.push(id); return true; },
     setError: (m) => { calls.errors.push(m); },
-    markDirty: () => { calls.dirty++; },
+    setStatus: () => { calls.dirty++; },
     tracker,
     ...overrides,
     calls,

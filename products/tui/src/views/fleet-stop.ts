@@ -78,33 +78,38 @@ export function fleetStateDisplay(state: ProcessState, stopping: boolean, blocke
 
 /** The narrow action + side-effect surface `toggleFleetPause` needs from the Agents modal. */
 export interface FleetPauseDeps {
+  /** Pause through the registry; false when the registry refused it. */
   readonly interrupt: (id: string) => boolean;
+  /** Resume through the registry; false when the registry refused it. */
   readonly resume: (id: string) => boolean;
+  /** A refusal, shown where the key was pressed. */
   readonly setError: (message: string) => void;
-  readonly markDirty: () => void;
+  /** What was done, shown where the key was pressed. */
+  readonly setStatus: (message: string) => void;
   readonly tracker: FleetStopTracker;
 }
 
 /**
- * d2: 'p' toggles pause<->resume by the node's state. A `paused`
- * resumable node is resumed (interrupt's inverse); a live pausable node is
- * paused via the registry's interrupt() (its disable path). Honest refusal for
- * non-resumable/non-pausable kinds. Returns true when the key is consumed,
- * false to fall through (terminal, non-paused node, nothing to toggle).
+ * 'p' toggles pause<->resume by the node's state. A `paused` resumable node is
+ * resumed (interrupt's inverse); a live pausable node is paused via the
+ * registry's interrupt() (its disable path). The registry's answer decides
+ * what is shown: a refused pause or resume says so and marks nothing. Returns
+ * true when the key is consumed, false to fall through (terminal, non-paused
+ * node, nothing to toggle).
  */
 export function toggleFleetPause(node: ProcessNode, deps: FleetPauseDeps): boolean {
   if (node.state === 'paused') {
     if (!node.capabilities.resumable) { deps.setError(`${node.kind} cannot be resumed.`); return true; }
-    deps.resume(node.id);
+    if (!deps.resume(node.id)) { deps.setError(`Resume refused: ${node.label} is still paused.`); return true; }
     deps.tracker.clear(node.id); // a resume is a start, not a stop
-    deps.markDirty();
+    deps.setStatus(`Resumed ${node.label}.`);
     return true;
   }
   if (isTerminalProcessState(node.state)) return false;
   if (!node.capabilities.pausable) { deps.setError(`${node.kind} does not support pause.`); return true; }
-  deps.interrupt(node.id);
+  if (!deps.interrupt(node.id)) { deps.setError(`Pause refused: ${node.label} is still ${node.state}.`); return true; }
   deps.tracker.mark(node.id);
-  deps.markDirty();
+  deps.setStatus(`Pausing ${node.label}…`);
   return true;
 }
 

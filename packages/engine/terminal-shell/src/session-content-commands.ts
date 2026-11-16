@@ -187,29 +187,6 @@ export function createSessionSaveCommand<Context extends ContentContext>(policy:
   };
 }
 
-/** Saved-content loading does not grant a new session or change its execution identity. */
-export function restoreConversationContent<Message>(
-  conversation: {
-    title: string;
-    resetAll(): void;
-    fromJSON(data: { messages: Message[]; branches?: Record<string, Message[]> | undefined; currentBranch?: string | undefined }): void;
-    rebuildHistory(): void;
-  },
-  messages: Message[],
-  title: string | undefined,
-  /** Side branches saved with the session, so /branch work survives loading it. */
-  branches?: { readonly branches: Readonly<Record<string, readonly object[]>>; readonly currentBranch: string } | undefined,
-): void {
-  conversation.resetAll();
-  conversation.fromJSON(branches === undefined ? { messages } : {
-    messages,
-    branches: Object.fromEntries(Object.entries(branches.branches).map(([name, saved]) => [name, [...saved] as Message[]])),
-    currentBranch: branches.currentBranch,
-  });
-  if (title) conversation.title = title;
-  conversation.rebuildHistory();
-}
-
 export function createSessionListCommand<
   Context extends ContentContext & {
     readonly openSelection?: import('./selection-modal.js').OpenSelection | undefined;

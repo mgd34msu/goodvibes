@@ -1,14 +1,15 @@
 /**
- * Notification dispatch, the production wiring that finally gives the
- * panel_only notification target a live producer.
+ * Notification dispatch: routes domain notifications into the shared feed.
  *
  * The platform's NotificationRouter decides where each domain notification goes
  * (conversation / status_bar / panel_only) and collapses bursts and batches.
- * Nothing in the running app routed real notifications before this: the
- * panel_only feed (views/notifications-feed.ts) and the notifications modal existed with no
- * upstream. This module builds the router, records every panel_only decision
- * (including burst-collapsed ones) into the shared feed, and bridges the
- * runtime event bus so real domain events become notifications.
+ * This module builds the router, records every routed notification (whatever
+ * its target, including burst-collapsed and held ones) into the shared feed, and
+ * bridges the runtime event bus so real domain events become notifications. The
+ * feed is the one consumer of every target: each decision is one history entry,
+ * and a warning or critical one also shows as a toast. The feed folds a
+ * notification and the conversation notice restating the same runtime event
+ * (same event key) into one entry.
  */
 
 import { randomUUID } from 'node:crypto';
@@ -22,8 +23,8 @@ import { runtimeEventKey } from '@goodvibes-jev/engine/platform/platform/runtime
 
 export interface NotificationDispatcher {
   /**
-   * Route a notification; a panel_only (or burst-collapsed) decision lands in
-   * the feed. `eventKey` names the runtime event it came from (the platform's
+   * Route a notification; every decision lands in the feed (warning and
+   * critical ones also toast). `eventKey` names the runtime event it came from (the platform's
    * runtimeEventKey), so the feed keeps one entry when the same event also
    * arrives as a conversation notice. Returns the decision.
    */
@@ -143,20 +144,16 @@ export function createNotificationDispatcher(
   /** Notifications already in the feed, so a periodic flush does not count a batch head twice. */
   const recorded = new WeakSet<Notification>();
   let typing: () => boolean = () => false;
-  const recordIfFeedTarget = (notification: Notification, decision: RoutingDecision, eventKey: string | undefined): void => {
+  const recordInFeed = (notification: Notification, decision: RoutingDecision, eventKey: string | undefined): void => {
     // A notification held back from the screen (quiet while typing, a quiet
     // mode) is still something that happened: it goes to the history, where it
     // can be read later, rather than being dropped. Nothing flushes the held
-    // ones, so this is the only place they would ever surface.
-    if (decision.suppressed) {
-      feed.record(notification, { ...decision, target: 'panel_only' }, eventKey);
-      recorded.add(notification);
-      return;
-    }
-    if (decision.target === 'panel_only') {
-      feed.record(notification, decision, eventKey);
-      recorded.add(notification);
-    }
+    // ones, so this is the only place they would ever surface. conversation
+    // and status_bar decisions have no other consumer in the terminal: the feed entry is what shows them (a toast at warning and
+    // critical) and keeps them. The feed keeps only panel-bound entries, so
+    // every decision is handed to it as one, with its reason and batch key.
+    feed.record(notification, decision.target === 'panel_only' ? decision : { ...decision, target: 'panel_only' }, eventKey);
+    recorded.add(notification);
   };
   return {
     router,
@@ -167,7 +164,7 @@ export function createNotificationDispatcher(
       router.setQuietWhileTyping(typing());
       const decision = router.route(notification);
       if (eventKey) heldEventKeys.set(notification, eventKey);
-      recordIfFeedTarget(notification, decision, eventKey);
+      recordInFeed(notification, decision, eventKey);
       return decision;
     },
     flush() {

@@ -88,7 +88,7 @@ class MemoryModalSurface implements ConfigModalSurface {
     { key: 's', id: 'markStale', label: 'stale', enabledFor: this.reviewGate },
     { key: 'c', id: 'markContradicted', label: 'contradicted', enabledFor: this.reviewGate },
     { key: 'f', id: 'markFresh', label: 'fresh', enabledFor: this.reviewGate },
-    { key: 'd', id: 'remove', label: 'delete', enabledFor: (row: ConfigModalRow | null) => row !== null },
+    { key: 'd', id: 'remove', label: 'delete', confirm: true, enabledFor: (row: ConfigModalRow | null) => row !== null },
     { key: 'r', id: 'refresh', label: 'refresh' },
     // Jump from a selected proposal to one of its affected records in the
     // Review Queue tab. A DISTINCT key from 'enter' (not shared with

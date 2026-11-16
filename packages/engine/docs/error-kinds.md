@@ -265,7 +265,7 @@ A contract that fails emits `CONTRACT_FAILED` on the `contracts` event domain wi
 
 | `failureKind` | Meaning |
 |---|---|
-| `transport` | A unit agent failed on a network error and its transport retries (`contract.transportRetryLimit`) were spent |
+| `transport` | A unit agent failed on a transient error (5xx, 408, 429, a connection error) and its retries (`contract.transportRetryLimit`) were spent |
 | `max_turns` | Declared on the wire with `turnLimit` and `turnLimitSource`. The runner does not end a contract with it: a unit agent that spends its turn budget is checked and woken with a nudge (the `agent-failed` check trigger) |
 | `planning` | The planner agent failed: spawn error, cancel, bound exceeded, or a plan still unparseable after its repairs |
 | `budget` | Declared on the wire. The runner does not end a contract with it: a unit held back by the contract's budget ceiling waits in `blocked` with the engine's reason |

@@ -1,4 +1,3 @@
-import { requireDecisionFeature } from '../runtime/decision-policy.js';
 /**
  * What a unit agent's terminal events mean to its contract
  * (docs/design/contract-runner.md sections 4.2, 4.9, 4.10 and 6.5).
@@ -7,12 +6,18 @@ import { requireDecisionFeature } from '../runtime/decision-policy.js';
  *   agent that completed without being held is checked now.
  * - Failed on its turn budget or the circuit breaker: checked with trigger
  *   `agent-failed`; a nudge wakes it.
- * - Failed otherwise: Jev reads the error (`readFailure`, site
- *   `contract.transport-retry`). A transient provider or network failure, or a
- *   failure before any response, is retried with a fresh agent, up to
- *   `contract.transportRetryLimit`, after `contract.transportRetryDelayMs`;
- *   anything else fails the unit and the contract (`transport` for a network
- *   fault past the limit, `other` otherwise).
+ * - Failed otherwise: the status and code the agent's record carries decide
+ *   first, with no model request (5xx, 408, 429 and connection codes retry;
+ *   401, 402, 403, 404 and other refusals of the request do not). Only a
+ *   failure those tables cannot place is read by the decision model
+ *   (`readFailure`, site `contract.transport-retry`); when that reading cannot
+ *   be made (no model, policy off, unreachable) the failure is treated as
+ *   transient, since an outage is exactly when agents fail. A transient failure
+ *   is retried with a fresh agent, up to `contract.transportRetryLimit`; the
+ *   wait is the provider's Retry-After when it gave one, otherwise
+ *   `contract.transportRetryDelayMs` doubled for each retry already spent
+ *   (at most a minute). Anything else fails the unit and the contract
+ *   (`transport` for a transient fault past the limit, `other` otherwise).
  * - Cancelled by anyone but the runner: an operator stopped a member, which
  *   stops the whole contract.
  * - Silent past `contract.heartbeatTimeoutMs`: the agent is killed and the unit
@@ -24,7 +29,7 @@ import { requireDecisionFeature } from '../runtime/decision-policy.js';
  * A retry is not a stall and not a fix round: the unit keeps its checks, and
  * the fresh agent's brief carries a "Previous checks" section.
  */
-import { judgmentPort, readFailure, transienceFromReading } from '@goodvibes-jev/engine/errors';
+import { classifyFailure, judgmentPort, readFailure, transienceFromReading, type FailureEvidence } from '@goodvibes-jev/engine/errors';
 import type { AgentEvent } from '../../events/agents.js';
 import type { CommunicationEvent } from '../../events/communication.js';
 import { TURN_BUDGET_EXHAUSTED } from '../agents/turn-budget.js';
@@ -33,13 +38,31 @@ import type { RuntimeEventBus } from '../runtime/events/index.js';
 import type { AgentRecord } from '../tools/agent/index.js';
 import { logger } from '../utils/logger.js';
 import type { UnitCheckLoop } from './agent-hooks.js';
-import { failureFromError, type ContractRun, type SpawnPurpose } from './run-context.js';
+import type { ContractRun, SpawnPurpose } from './run-context.js';
 import { isTerminalUnitStatus, type ContractFailureKind, type ContractUnit } from './types.js';
 import type { WatchedAgent } from './watchdog.js';
 import { nativeContractPort } from './native-decisions.js';
 
 /** The decision site the transport reading is logged under. */
 export const TRANSPORT_RETRY_SITE = 'contract.transport-retry';
+
+/** The longest a transport retry waits, whatever the backoff or the provider's Retry-After asks. */
+const MAX_TRANSPORT_RETRY_DELAY_MS = 60_000;
+
+/** A failure as the retry decision reads it: the agent's message plus whatever structure its record kept. */
+interface UnitFailureEvidence extends FailureEvidence {
+  readonly retryAfterMs?: number | undefined;
+}
+
+/** How the retry decision was reached, for the decision history. */
+type RetryBasis = 'status' | 'reading' | 'no-reading';
+
+interface RetryDecision {
+  readonly retryable: boolean;
+  readonly basis: RetryBasis;
+  readonly retryAfterMs?: number | undefined;
+  readonly decisionIds: readonly string[];
+}
 
 export interface UnitFailureDeps {
   readonly runs: () => Iterable<ContractRun>;
@@ -159,7 +182,13 @@ export function createUnitFailureHandling(deps: UnitFailureDeps): UnitFailureHan
       void deps.checks.runCheck(run, unit, 'agent-failed');
       return;
     }
-    void run.work.run(() => retryOrFail(run, unit, agentId, record?.error?.trim() || error.trim() || 'the agent failed without an error message'));
+    const evidence: UnitFailureEvidence = {
+      message: record?.error?.trim() || error.trim() || 'the agent failed without an error message',
+      ...(record?.failureStatus === undefined ? {} : { status: record.failureStatus }),
+      ...(record?.failureCode === undefined ? {} : { code: record.failureCode }),
+      ...(record?.failureRetryAfterMs === undefined ? {} : { retryAfterMs: record.failureRetryAfterMs }),
+    };
+    void run.work.run(() => retryOrFail(run, unit, agentId, evidence));
   }
 
   /** Whether the unit still waits on this failed agent: nothing released, replaced or ended it meanwhile. */
@@ -167,36 +196,58 @@ export function createUnitFailureHandling(deps: UnitFailureDeps): UnitFailureHan
     return !run.terminal && unit.activeAgentId === agentId && !isTerminalUnitStatus(unit.status) && unit.status !== 'held-merge' && !RELEASED.has(unit.status);
   }
 
-  async function retryOrFail(run: ContractRun, unit: ContractUnit, agentId: string, message: string): Promise<void> {
+  /**
+   * Whether a failure is worth a fresh agent. The status and code tables decide
+   * whatever they can place; the model reads only the rest; a reading that
+   * cannot be made counts as transient (bounded by the retry limit).
+   */
+  async function decideRetry(run: ContractRun, unit: ContractUnit, evidence: UnitFailureEvidence): Promise<RetryDecision> {
+    const known = classifyFailure({ status: evidence.status, code: evidence.code, retryAfterMs: evidence.retryAfterMs });
+    if (known !== undefined && known.category !== 'unknown') {
+      return { retryable: known.retryable && known.category !== 'billing', basis: 'status', retryAfterMs: known.retryAfterMs, decisionIds: [] };
+    }
     const runtime = run.runtime(unit);
-    let retryable: boolean;
-    let readingIds: readonly string[];
+    const signal = AbortSignal.any([run.abort.signal, runtime.abort.signal]);
     try {
-      const signal = AbortSignal.any([run.abort.signal, runtime.abort.signal]);
-      signal.throwIfAborted(); requireDecisionFeature('autonomous contract transport retries; retained work remains inspectable');
-      const reading = await readFailure({ message }, TRANSPORT_RETRY_SITE, run.contract.nativeSource === undefined ? undefined : {
+      const reading = await readFailure(evidence, TRANSPORT_RETRY_SITE, run.contract.nativeSource === undefined ? undefined : {
         port: nativeContractPort(run.contract, run.env.native, judgmentPort(TRANSPORT_RETRY_SITE), signal), signal,
       });
-      retryable = !reading.billing && (reading.transientNetwork || reading.beforeResponse
+      // Tables only: the decision model did not answer (off, unreachable, refused).
+      if (reading.source === 'classic' && reading.category === 'unknown') return { retryable: true, basis: 'no-reading', decisionIds: [] };
+      const retryable = !reading.billing && (reading.transientNetwork || reading.beforeResponse
         || (reading.category !== 'unknown' && transienceFromReading(reading).failureClass === 'retryable'));
-      readingIds = reading.decisionId === undefined ? [] : [reading.decisionId];
-    } catch (error) {
-      if (!stillAwaits(run, unit, agentId)) return;
-      const failure = failureFromError(error);
-      failUnit(run, unit, failure.kind, `unit ${unit.id} failed (${message}) and the failure could not be read: ${failure.reason}`);
+      return { retryable, basis: 'reading', decisionIds: reading.decisionId === undefined ? [] : [reading.decisionId] };
+    } catch {
+      signal.throwIfAborted();
+      return { retryable: true, basis: 'no-reading', decisionIds: [] };
+    }
+  }
+
+  async function retryOrFail(run: ContractRun, unit: ContractUnit, agentId: string, evidence: UnitFailureEvidence): Promise<void> {
+    const runtime = run.runtime(unit);
+    const message = evidence.status === undefined ? evidence.message : `HTTP ${evidence.status}: ${evidence.message}`;
+    let decision: RetryDecision;
+    try {
+      decision = await decideRetry(run, unit, evidence);
+    } catch {
+      // Only an abort reaches here: the contract or the unit was stopped meanwhile.
       return;
     }
     if (!stillAwaits(run, unit, agentId)) return;
     const config = run.env.config();
-    if (!retryable || unit.transportRetries >= config.transportRetryLimit) {
-      const kind: ContractFailureKind = retryable ? 'transport' : 'other';
-      const why = retryable ? `a transport failure after ${unit.transportRetries} retr${unit.transportRetries === 1 ? 'y' : 'ies'}` : 'a failure that is not transient';
-      failUnit(run, unit, kind, `unit ${unit.id} failed with ${why}: ${message}`, readingIds);
+    if (!decision.retryable || unit.transportRetries >= config.transportRetryLimit) {
+      const kind: ContractFailureKind = decision.retryable ? 'transport' : 'other';
+      const why = decision.retryable
+        ? `a transient failure after ${unit.transportRetries} retr${unit.transportRetries === 1 ? 'y' : 'ies'} (contract.transportRetryLimit is ${config.transportRetryLimit})`
+        : 'a failure a retry cannot clear';
+      failUnit(run, unit, kind, `unit ${unit.id} failed with ${why}: ${message}`, decision.decisionIds);
       return;
     }
+    const delayMs = Math.min(MAX_TRANSPORT_RETRY_DELAY_MS, decision.retryAfterMs ?? config.transportRetryDelayMs * 2 ** unit.transportRetries);
     unit.transportRetries += 1;
-    run.decide('transport-retry', unit.id, `retry ${unit.transportRetries} of ${config.transportRetryLimit}: ${message}`, readingIds);
-    await sleep(config.transportRetryDelayMs, runtime.abort.signal);
+    const basis = decision.basis === 'no-reading' ? ', cause unknown while the decision model is unavailable' : '';
+    run.decide('transport-retry', unit.id, `retry ${unit.transportRetries} of ${config.transportRetryLimit} in ${Math.round(delayMs / 1000)}s${basis}: ${message}`, decision.decisionIds);
+    await sleep(delayMs, runtime.abort.signal);
     if (!stillAwaits(run, unit, agentId)) return;
     deps.requeueUnit(run, unit, `transport retry ${unit.transportRetries}`, 'transport-retry');
   }

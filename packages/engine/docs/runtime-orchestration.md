@@ -421,8 +421,8 @@ The runner reads `contract.*` (`config/schema-domain-contract.ts`,
 | `contract.maxParallelUnits` | `64` | Units running at once in one group (worktree mode) |
 | `contract.isolation` | `auto` | `auto`, `worktree` or `shared` |
 | `contract.heartbeatTimeoutMs` | `600000` (10 minutes) | Silence before a running unit agent is restarted once; a second silence fails the unit. A model reply that is streaming is not silence, and neither is an `exec` command that is within its own `timeout_ms` or has none; a read, search or other tool call that runs past this is. `0` turns the watchdog off |
-| `contract.transportRetryLimit` | `1` | Fresh agents after a network failure |
-| `contract.transportRetryDelayMs` | `5000` | Wait before that retry |
+| `contract.transportRetryLimit` | `3` | Fresh agents after a transient failure (5xx, 408, 429, a connection error: decided from the status and code with no model request; a failure nothing can classify while the decision model is unavailable is retried too) |
+| `contract.transportRetryDelayMs` | `5000` | Wait before the first retry, doubled for each further one (at most a minute); a provider's Retry-After is used instead |
 | `contract.nudgeTtlMs` | `300000` | Lifetime of a mid-run nudge on the message bus |
 | `ui.contractMessages` | `both` | Where `[Contract]` system messages show: `panel`, `conversation` or `both` |
 

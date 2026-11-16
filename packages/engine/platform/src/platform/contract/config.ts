@@ -93,7 +93,8 @@ export const CONTRACT_CONFIG_DEFAULTS: ContractConfig = {
   maxParallelUnits: 64,
   isolation: 'auto',
   heartbeatTimeoutMs: 600_000,
-  transportRetryLimit: 1,
+  // Three fresh agents, waiting 5 s, 10 s and 20 s: a provider outage of half a minute does not end the contract.
+  transportRetryLimit: 3,
   transportRetryDelayMs: 5_000,
   nudgeTtlMs: 300_000,
 };

@@ -40,7 +40,7 @@ export const contractConfigDefaults: { contract: ContractSettings } = {
     maxParallelUnits: 64,
     isolation: 'auto',
     heartbeatTimeoutMs: 600_000,
-    transportRetryLimit: 1,
+    transportRetryLimit: 3,
     transportRetryDelayMs: 5000,
     nudgeTtlMs: 300_000,
   },
@@ -173,15 +173,15 @@ export const contractConfigSettings: ConfigSettingDefinition[] = [
   {
     key: 'contract.transportRetryLimit',
     type: 'number',
-    default: 1,
-    description: 'How many times a unit whose agent failed on a transient network or transport error is restarted before the contract fails. 0 disables the retry.',
+    default: 3,
+    description: 'How many times a unit whose agent failed on a transient error (a 5xx, 408 or 429 answer, a connection error, or a failure nothing could classify while the decision model is unavailable) is restarted with a fresh agent before the contract fails. 0 disables the retry.',
     ...numRange(0, 5),
   },
   {
     key: 'contract.transportRetryDelayMs',
     type: 'number',
     default: 5000,
-    description: 'Delay in ms before restarting a unit after a transport failure',
+    description: 'Wait in ms before the first restart of a unit after a transient failure; it doubles for each further restart (at most 60000). A Retry-After the provider sent is used instead.',
     ...numRange(0, 60000),
   },
   {

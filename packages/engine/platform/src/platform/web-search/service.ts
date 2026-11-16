@@ -75,7 +75,12 @@ export class WebSearchService {
     };
   }
 
-  async search(request: WebSearchRequest): Promise<WebSearchResponse> {
+  /**
+   * Runs one search. `signal` reaches the provider's request and every
+   * evidence fetch, so a cancelled search stops its network work too.
+   */
+  async search(request: WebSearchRequest, options: { readonly signal?: AbortSignal | undefined } = {}): Promise<WebSearchResponse> {
+    options.signal?.throwIfAborted();
     const provider = this.registry.find(request.providerId);
     if (!provider) {
       const ids = this.registry.list().map((entry) => entry.id).join(', ');
@@ -103,15 +108,19 @@ export class WebSearchService {
     }
 
     const verbosity = request.verbosity ?? 'snippets';
+    const signal = options.signal && this.fetchDeps.signal ? AbortSignal.any([options.signal, this.fetchDeps.signal]) : options.signal ?? this.fetchDeps.signal;
+    const fetchDeps: FetchRuntimeDeps = signal ? { ...this.fetchDeps, signal } : this.fetchDeps;
     // The provider's own requests go through the same fetch policy (service
     // credentials, host lists, localhost approval) as the evidence fetch.
     const baseResponse = await provider.search(request, {
-      fetcher: (input) => this.fetchRuntime.execute(input, this.fetchDeps),
+      fetcher: (input) => this.fetchRuntime.execute(input, fetchDeps),
     });
+    signal?.throwIfAborted();
     const evidenceEnabled = request.includeEvidence || verbosity === 'evidence' || verbosity === 'full';
     const evidenceRun = evidenceEnabled
-      ? await this.attachEvidence(baseResponse.results, request)
+      ? await this.attachEvidence(baseResponse.results, request, fetchDeps)
       : undefined;
+    signal?.throwIfAborted();
     const resultsWithEvidence = evidenceRun?.results ?? baseResponse.results;
     const shapedResults = resultsWithEvidence.map((result) => shapeResultForVerbosity(result, verbosity, request.includeEvidence === true));
 
@@ -131,6 +140,7 @@ export class WebSearchService {
   private async attachEvidence(
     results: readonly WebSearchResult[],
     request: WebSearchRequest,
+    fetchDeps: FetchRuntimeDeps,
   ): Promise<{ readonly results: readonly WebSearchResult[]; readonly summary: { readonly requested: number; readonly attached: number; readonly failed: number } }> {
     const evidenceTopN = Math.max(1, Math.min(10, request.evidenceTopN ?? 3));
     const extract = selectEvidenceExtract(request, request.verbosity ?? 'snippets');
@@ -150,7 +160,7 @@ export class WebSearchService {
       // No sanitize_mode: the owner's configured fetch.sanitizeMode (default safe-text) applies, as it does to the fetch tool.
       ...(request.trustedHosts ? { trusted_hosts: [...request.trustedHosts] } : {}),
       ...(request.blockedHosts ? { blocked_hosts: [...request.blockedHosts] } : {}),
-    }, this.fetchDeps);
+    }, fetchDeps);
 
     const evidenceByUrl = new Map<string, WebSearchEvidence>();
     const failureByUrl = new Map<string, string>();

@@ -785,5 +785,5 @@ export {
   type TransienceOptions,
 } from './failure-transience.js';
 
-export { admitRegex, compileLegacyRegex, RegexAdmissionError,
-  type AdmittedRegex, type RegexAdmissionOptions, type RegexReadingCapability, type ContractRegexReadingContext, type ContractRegexReadingFactory, type RegexMatch } from './regex-admission.js';
+export { admitRegex, compileLegacyRegex, createSharedRegexTester, RegexAdmissionError,
+  type AdmittedRegex, type SharedRegexTester, type RegexAdmissionOptions, type RegexReadingCapability, type ContractRegexReadingContext, type ContractRegexReadingFactory, type RegexMatch } from './regex-admission.js';

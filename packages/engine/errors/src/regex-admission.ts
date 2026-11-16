@@ -122,6 +122,8 @@ function receive(message, send) {
 interface WorkerPort {
   post(value: unknown): void;
   stop(): void;
+  /** Lets the process exit while this worker is idle; a no-op where the host has no such call. */
+  detach(): void;
 }
 interface NodeWorkerPort {
   postMessage(value: unknown): void;
@@ -143,7 +145,8 @@ async function createWorker(receive: (value: unknown) => void, failed: () => voi
       worker.onerror = failed;
       worker.onmessageerror = failed;
       let stopped = false;
-      return { post: value => worker.postMessage(value), stop: () => { if (stopped) return; stopped = true; URL.revokeObjectURL(url); worker.terminate(); } };
+      return { post: value => worker.postMessage(value), stop: () => { if (stopped) return; stopped = true; URL.revokeObjectURL(url); worker.terminate(); },
+        detach: () => { (worker as unknown as { unref?: () => void }).unref?.(); } };
     } catch (error) { URL.revokeObjectURL(url); throw error; }
   }
   if (typeof window !== 'undefined' || 'WorkerGlobalScope' in globalThis) throw new Error('Isolated regex workers are unavailable in this browser');
@@ -155,7 +158,70 @@ async function createWorker(receive: (value: unknown) => void, failed: () => voi
   });
   worker.on('message', receive); worker.on('error', failed); worker.on('messageerror', failed); worker.on('exit', failed);
   let stopped = false;
-  return { post: value => worker.postMessage(value), stop: () => { if (stopped) return; stopped = true; void worker.terminate(); } };
+  return { post: value => worker.postMessage(value), stop: () => { if (stopped) return; stopped = true; void worker.terminate(); },
+    detach: () => { (worker as unknown as { unref?: () => void }).unref?.(); } };
+}
+
+/** A long-lived isolated tester for many patterns, owned by one long-lived holder (a tool registry). */
+export interface SharedRegexTester extends AsyncDisposable {
+  test(source: string, input: string, signal?: AbortSignal): Promise<boolean>;
+}
+
+/**
+ * One isolated worker that tests any number of patterns, started on first use
+ * and kept for the holder's life. A pattern that runs past `timeoutMs` or a
+ * worker failure stops the worker and refuses every test in flight; the next
+ * test starts a fresh one. Each distinct source is
+ * compiled once on this thread (grammar only) before it is sent. A cancelled
+ * test is refused alone; the worker keeps serving the other tests. The idle
+ * worker never keeps the process alive: only a test in flight does, through
+ * its deadline timer.
+ */
+export function createSharedRegexTester(options: { readonly operation: string; readonly timeoutMs?: number | undefined }): SharedRegexTester {
+  const operation = options.operation;
+  const timeoutMs = limit(options.timeoutMs, 0, Number.MAX_SAFE_INTEGER);
+  const checked = new Set<string>();
+  let disposed = false, sequence = 0;
+  let worker: Promise<WorkerPort> | undefined;
+  const pending = new Map<number, { resolve(value: boolean): void; reject(error: Error): void; timer?: ReturnType<typeof setTimeout> | undefined }>();
+  const reset = (reason: string) => {
+    const current = worker;
+    worker = undefined;
+    void current?.then(port => port.stop(), () => {});
+    for (const item of pending.values()) { clearTimeout(item.timer); item.reject(new RegexAdmissionError(operation, reason)); }
+    pending.clear();
+  };
+  const receive = (value: unknown) => {
+    const response = value as { id?: number; result?: unknown; error?: boolean } | null;
+    const item = response && typeof response.id === 'number' ? pending.get(response.id) : undefined;
+    if (!item) return;
+    pending.delete(response!.id!); clearTimeout(item.timer);
+    if (response!.error) item.reject(new RegexAdmissionError(operation, 'the pattern could not run'));
+    else item.resolve(response!.result === true);
+  };
+  const port = () => worker ??= createWorker(receive, () => reset('isolated worker stopped')).then(started => { started.detach(); return started; });
+  return Object.freeze({
+    async test(source: string, input: string, signal?: AbortSignal): Promise<boolean> {
+      if (disposed) throw new RegexAdmissionError(operation, 'executor is closed');
+      signal?.throwIfAborted();
+      if (!checked.has(source)) { syntax(source, '', { operation }); checked.add(source); }
+      let started: WorkerPort;
+      try { started = await port(); } catch { worker = undefined; throw new RegexAdmissionError(operation, 'isolated worker startup is unavailable'); }
+      signal?.throwIfAborted();
+      const id = ++sequence;
+      return new Promise<boolean>((resolve, reject) => {
+        // A cancelled test is refused on its own; the worker keeps serving the others.
+        const onAbort = () => { const item = pending.get(id); if (!item) return; pending.delete(id); clearTimeout(item.timer); item.reject(new RegexAdmissionError(operation, 'cancelled')); };
+        const settle = { resolve: (value: boolean) => { signal?.removeEventListener('abort', onAbort); resolve(value); },
+          reject: (error: Error) => { signal?.removeEventListener('abort', onAbort); reject(error); },
+          timer: timeoutMs > 0 ? setTimeout(() => reset(`exceeded its ${timeoutMs} ms deadline`), timeoutMs) : undefined };
+        pending.set(id, settle);
+        signal?.addEventListener('abort', onAbort, { once: true });
+        started.post({ id, source, flags: '', operation: 'test', input, lastIndex: 0, replacement: '' });
+      });
+    },
+    async [Symbol.asyncDispose]() { disposed = true; reset('executor closed'); },
+  });
 }
 
 /** No cache: one exact pattern/configuration and one installed/request lifetime. */

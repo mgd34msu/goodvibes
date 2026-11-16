@@ -1,5 +1,5 @@
 import type { OmitNamed, RequiredNamedKeys } from '@goodvibes-jev/engine/contracts';
-import { ContractError, admitRegex } from '@goodvibes-jev/engine/errors';
+import { ContractError, admitRegex, type SharedRegexTester } from '@goodvibes-jev/engine/errors';
 
 const MAX_SCHEMA_PATTERN_CHARS = 512;
 
@@ -114,6 +114,12 @@ export interface JsonSchemaValidationOptions {
   readonly signal?: AbortSignal | undefined;
   /** Called after each isolated pattern test; throws to stop the validation. */
   readonly assertCurrent?: (() => void) | undefined;
+  /**
+   * The holder's long-lived isolated tester. When given, a pattern that does
+   * not run natively is tested there instead of in an executor started for
+   * this one validation.
+   */
+  readonly isolatedTester?: Pick<SharedRegexTester, 'test'> | undefined;
 }
 
 /**
@@ -143,14 +149,15 @@ export function firstJsonSchemaFailure(
  * Validate a value against a JSON Schema. A pattern that runs natively (see
  * `schemaPattern`) is tested in place; any other pattern, which only an
  * untrusted schema such as a third-party tool definition carries, runs in the
- * isolated regex executor, one per call. The schema and the value are the
- * caller's settled values, so neither is copied or re-scanned.
+ * caller's long-lived isolated tester, or without one in an isolated executor
+ * started for this call. The schema and the value are the caller's settled
+ * values, so neither is copied or re-scanned.
  */
 export async function firstJsonSchemaFailureAsync(
   schema: Record<string, unknown>, value: unknown,
   options: JsonSchemaValidationOptions = {},
 ): Promise<JsonSchemaValidationFailure | undefined> {
-  const signal = options.signal, assertOwnerCurrent = options.assertCurrent;
+  const signal = options.signal, assertOwnerCurrent = options.assertCurrent, shared = options.isolatedTester;
   signal?.throwIfAborted();
   const walk = walkJsonSchema(schema, value);
   let next = walk.next();
@@ -165,6 +172,12 @@ export async function firstJsonSchemaFailureAsync(
         continue;
       }
       const current = () => { signal?.throwIfAborted(); assertOwnerCurrent?.(); };
+      if (shared) {
+        const matches = await shared.test(source, input, signal);
+        current();
+        next = walk.next(matches);
+        continue;
+      }
       isolated ??= new Map();
       let handle = isolated.get(source);
       if (!handle) {

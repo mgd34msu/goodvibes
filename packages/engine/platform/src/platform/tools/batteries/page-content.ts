@@ -1,5 +1,5 @@
 import { validateContextBudget } from '@goodvibes-jev/judgment';
-import { assertJudgmentInput, JudgmentInputError } from '../../gate/judgment-input.js';
+import { assertJudgmentInput } from '../../gate/judgment-input.js';
 /**
  * `engine.tools.page-content`: which blocks of a fetched web page are part of
  * its main content? Read by Jev in place of the fetch tool's `readable` mode
@@ -51,9 +51,6 @@ const CONTENT_CRITERIA = {
   false: 'The block is site navigation, a menu or breadcrumb, a sidebar or list of other pages, a cookie, sign-up or advertising notice, a pager, share buttons, comments, or the site footer.',
 } as const;
 
-/** Most characters of one block a request carries; longer blocks are clipped with a note. */
-export const MAX_JUDGED_BLOCK_CHARS = Number.POSITIVE_INFINITY;
-
 /** Requests in flight at once when a page needs more than one. */
 const REQUEST_CONCURRENCY = 4;
 
@@ -80,7 +77,6 @@ export interface PageContent extends NamedDecision {
 
 function clipText(text: string): string {
   assertJudgmentInput(text);
-  if (text.length > MAX_JUDGED_BLOCK_CHARS) throw new JudgmentInputError('unsupported-input');
   return text;
 }
 

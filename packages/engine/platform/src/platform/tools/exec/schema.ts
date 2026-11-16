@@ -120,8 +120,9 @@ export const EXEC_TOOL_SCHEMA = {
             type: 'boolean',
             description:
               'Stream stdout lines to a pollable progress file at .goodvibes/.overflow/{id}-progress.txt.'
-              + ' Auto-enabled without a timeout or when timeout_ms > 30000; an automatic file is removed when the command finishes,'
-              + ' while progress: true keeps it. The result includes a progress_file path when one is kept.',
+              + ' true: the file is created when the command starts and kept. Unset (with no timeout or timeout_ms > 30000):'
+              + ' a file is created only once the command has run 30 s, and removed when it finishes; a stopped command keeps it.'
+              + ' false: no file. The result includes a progress_file path when one is kept.',
           },
           interactive: {
             type: 'boolean',
@@ -138,7 +139,7 @@ export const EXEC_TOOL_SCHEMA = {
     },
     parallel: {
       type: 'boolean',
-      description: 'Run all commands in parallel. Default: false (sequential).',
+      description: 'Run all commands in parallel. Default: false (sequential). A parallel run starts every command, so stop_on_error does not apply.',
     },
     working_dir: {
       type: 'string',
@@ -172,7 +173,7 @@ export const EXEC_TOOL_SCHEMA = {
     stop_on_error: {
       type: 'boolean',
       description:
-        'Stop sequential execution on first failed command (non-zero exit, timed_out, or expectation_error).'
+        'Sequential runs only (ignored with parallel: true): stop at the first failed command (non-zero exit, timed_out, or expectation_error).'
         + ' Unexecuted commands appear as {skipped: true} entries. Default: false.',
     },
     file_ops: {
@@ -282,7 +283,11 @@ export interface ExecCommandInput {
   background?: boolean | undefined;
   retry?: ExecRetry | undefined;
   until?: ExecUntil | undefined;
-  /** Stream stdout to a pollable progress file. Auto-enabled without a timeout or when timeout_ms > 30000. */
+  /**
+   * Stream stdout to a pollable progress file. true creates it at start and
+   * keeps it; unset (no timeout or timeout_ms > 30000) creates one only once
+   * the run passes 30 s and removes it at the end; false never creates one.
+   */
   progress?: boolean | undefined;
   /**
    * Run under a PTY with the prompt-answer path (see exec/interactive.ts).
@@ -303,8 +308,9 @@ export interface ExecInput {
   output_keep?: 'head_tail' | 'ranked' | undefined;
   file_ops?: ExecFileOp[] | undefined;
   /**
-   * Stop sequential execution on first failed command.
-   * Unexecuted commands appear as {skipped: true} entries. Default: false.
+   * Stop sequential execution on first failed command; a parallel run starts
+   * every command and ignores it. Unexecuted commands appear as
+   * {skipped: true} entries. Default: false.
    */
   fail_fast?: boolean | undefined;
   /** Alias for fail_fast. */
@@ -420,28 +426,5 @@ export interface ExecCommandResult {
 // BackgroundProcess is defined in shared/process-manager and re-exported here for consumers of this schema module.
 export type { BackgroundProcess } from '../shared/process-manager.js';
 
-/** Whether `value` is standard base64 (padding optional), so a malformed command is refused rather than half-decoded. */
-function isBase64(value: string): boolean {
-  const compact = value.replace(/\s+/g, '');
-  return /^[A-Za-z0-9+/]*={0,2}$/.test(compact) && compact.replace(/=+$/, '').length % 4 !== 1;
-}
-
-/**
- * The command text one exec entry runs: `cmd_base64` decoded when present, else
- * `cmd`. This is the one reading of an entry; the runtime executes it and a
- * permission or approval reader that judges the command must read the same
- * text. Throws when neither is given, when the base64 is malformed, or when
- * both are given and disagree, so no entry can run text other than the text it
- * shows.
- */
-export function execCommandText(entry: { readonly cmd?: string | undefined; readonly cmd_base64?: string | undefined }): string {
-  const { cmd, cmd_base64: encoded } = entry;
-  if (encoded) {
-    if (!isBase64(encoded)) throw new Error('cmd_base64 is not valid base64; nothing was run');
-    const decoded = Buffer.from(encoded, 'base64').toString('utf-8');
-    if (cmd && cmd !== decoded) throw new Error('A command entry gave both cmd and cmd_base64 with different text; give one of them. Nothing was run.');
-    return decoded;
-  }
-  if (cmd) return cmd;
-  throw new Error('Each command must have either cmd or cmd_base64');
-}
+// The one reading of an entry's command text, shared with the permission readers that judge it.
+export { execCommandText } from '../../runtime/permissions/exec-command-text.js';

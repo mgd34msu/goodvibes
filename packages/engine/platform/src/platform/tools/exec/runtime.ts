@@ -5,7 +5,8 @@ import { assertProjectionCurrent, captureProjectionStructure, projectionFunction
 import { SANDBOX_RUNTIME_BIN, withSandboxRuntimes } from './sandbox-runtimes.js';
 import { startCapturedBackground } from './captured-exec-background.js';
 import { capturedExecUnsupportedOptions, MAX_CAPTURE_CHARS, UNTIL_PATTERN_WINDOW_CHARS, runCapturedCommand, type CapturedExecAuthority } from './captured-exec.js';
-import { appendFileSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { appendFile, rm } from 'node:fs/promises';
 import { join, resolve, isAbsolute } from 'node:path';
 import { randomInt, randomUUID } from 'node:crypto';
 import type { Tool } from '../../types/tools.js';
@@ -269,28 +270,58 @@ function getProgressFilePath(workingDirectory: string, id: string): string {
   return join(getProgressDirectory(workingDirectory), `${id}-progress.txt`);
 }
 
+interface ProgressFile {
+  /** The file, once it exists; undefined before an automatic file is due or when it could not be created. */
+  readonly path: string | undefined;
+  append(chunk: string): void;
+  /** Writes the closing line, waits for queued appends, and removes an automatic file. */
+  finish(line: string, keep: boolean): Promise<void>;
+}
+
 /**
- * Creates the progress file. A directory that cannot be written costs the
- * caller the progress file, never the command: `path` is then undefined.
+ * The progress file of one command. One the caller asked for (`progress: true`)
+ * is created when the command starts; an automatic one only once the command
+ * has run past PROGRESS_AUTO_THRESHOLD_MS, seeded with the output captured so
+ * far, so a command that finishes sooner touches no file. Appends are queued
+ * asynchronously, never a synchronous write per output chunk. A directory that
+ * cannot be written costs the caller the progress file, never the command.
  */
-function initProgressFile(cmdStr: string, workingDirectory: string): { path: string | undefined; append: (line: string) => void; discard: () => void } {
-  const progressDirectory = getProgressDirectory(workingDirectory);
-  const id = `${Date.now()}-${randomUUID().slice(0, 8)}`;
-  const filePath = getProgressFilePath(workingDirectory, id);
-  try {
-    mkdirSync(progressDirectory, { recursive: true });
-    writeFileSync(filePath, `# Progress: ${cmdStr}\n# Started: ${new Date().toISOString()}\n`);
-  } catch (err) {
-    logger.warn('initProgressFile: could not create the progress file; running without one', { error: summarizeError(err) });
-    return { path: undefined, append: () => {}, discard: () => {} };
+function openProgressFile(cmdStr: string, workingDirectory: string, requested: boolean, outputSoFar: () => string): ProgressFile {
+  let path: string | undefined;
+  let queue: Promise<void> = Promise.resolve();
+  const startedAt = new Date().toISOString();
+  const create = (): void => {
+    const filePath = getProgressFilePath(workingDirectory, `${Date.now()}-${randomUUID().slice(0, 8)}`);
+    try {
+      mkdirSync(getProgressDirectory(workingDirectory), { recursive: true });
+      writeFileSync(filePath, `# Progress: ${cmdStr}\n# Started: ${startedAt}\n${outputSoFar()}`);
+      path = filePath;
+    } catch (err) {
+      logger.warn('exec progress file: could not create it; running without one', { error: summarizeError(err) });
+    }
+  };
+  const enqueue = (write: (filePath: string) => Promise<void>): void => {
+    const filePath = path;
+    if (filePath === undefined) return;
+    queue = queue.then(() => write(filePath)).catch((err: unknown) => {
+      logger.warn('exec progress file: write failed', { path: filePath, error: summarizeError(err) });
+    });
+  };
+  let autoTimer: ReturnType<typeof setTimeout> | undefined;
+  if (requested) create();
+  else {
+    autoTimer = setTimeout(create, PROGRESS_AUTO_THRESHOLD_MS);
+    autoTimer.unref?.();
   }
   return {
-    path: filePath,
-    append: (chunk: string) => {
-      try { appendFileSync(filePath, chunk); } catch (err) { logger.warn('initProgressFile: appendFileSync failed', { path: filePath, error: summarizeError(err) }); }
-    },
-    discard: () => {
-      try { rmSync(filePath, { force: true }); } catch (err) { logger.warn('initProgressFile: could not remove the progress file', { path: filePath, error: summarizeError(err) }); }
+    get path() { return path; },
+    append: (chunk) => enqueue((filePath) => appendFile(filePath, chunk)),
+    async finish(line, keep) {
+      clearTimeout(autoTimer);
+      enqueue((filePath) => appendFile(filePath, line));
+      if (!keep) enqueue((filePath) => rm(filePath, { force: true }));
+      await queue;
+      if (!keep) path = undefined;
     },
   };
 }
@@ -436,10 +467,10 @@ async function runAdmittedCommand(
 
   const useProgress = cmdInput.progress === true || (cmdInput.progress !== false && (timeoutMs === 0 || timeoutMs > PROGRESS_AUTO_THRESHOLD_MS));
   if (useProgress) {
-    // An automatic progress file only serves a caller polling a long run; a
-    // command that finishes on its own leaves nothing behind in the workspace.
-    // One the caller asked for with `progress: true` is kept.
-    return attachWithheld(await runCommandWithProgress(processManager, overflowHandler, cmdStr, cmdInput, workingDirectory, cwd, mergedEnv, timeoutMs, startTime, sandboxArgv, signal, beforeSpawn, policy.onProgress, cmdInput.progress !== true));
+    // An automatic progress file only serves a caller polling a long run: it
+    // is created once the run passes the threshold and removed when it ends.
+    // One the caller asked for with `progress: true` is created at once and kept.
+    return attachWithheld(await runCommandWithProgress(processManager, overflowHandler, cmdStr, cmdInput, workingDirectory, cwd, mergedEnv, timeoutMs, startTime, sandboxArgv, signal, beforeSpawn, policy.onProgress, cmdInput.progress === true));
   }
 
   beforeSpawn?.();
@@ -550,9 +581,11 @@ async function runCommandWithProgress(
   signal?: AbortSignal,
   beforeSpawn?: () => void,
   onProgress?: () => void,
-  discardWhenDone = false,
+  progressRequested = false,
 ): Promise<ExecCommandResult> {
-  const progressFile = initProgressFile(cmdStr, workingDirectory);
+  const stdoutSink: CaptureSink = { text: '', dropped: false };
+  const stderrSink: CaptureSink = { text: '', dropped: false };
+  const progressFile = openProgressFile(cmdStr, workingDirectory, progressRequested, () => stdoutSink.text);
   const withProgressFile = (path: string | undefined): { progress_file?: string } => (path ? { progress_file: path } : {});
   beforeSpawn?.();
   const proc = spawnForeground([...sandboxArgv, '/bin/sh', '-c', cmdStr], { ...(cwd !== undefined ? { cwd } : {}), env: mergedEnv, stdout: 'pipe', stderr: 'pipe' } as Parameters<typeof Bun.spawn>[1]);
@@ -569,7 +602,6 @@ async function runCommandWithProgress(
     } catch (err: unknown) {
       logger.debug('[ExecRuntime] kill on streamed timeout failed (process may have exited)', { error: String(err) });
     }
-    progressFile.append('# Timed out\n');
     stopResolve();
   }, timeoutMs);
   killTimer?.unref?.();
@@ -583,7 +615,6 @@ async function runCommandWithProgress(
       } catch (err: unknown) {
         logger.debug('[ExecRuntime] kill on cancellation failed (process may have exited)', { error: String(err) });
       }
-      progressFile.append('# Cancelled\n');
       stopResolve();
     })();
   };
@@ -592,8 +623,6 @@ async function runCommandWithProgress(
     else signal.addEventListener('abort', onAbort, { once: true });
   }
 
-  const stdoutSink: CaptureSink = { text: '', dropped: false };
-  const stderrSink: CaptureSink = { text: '', dropped: false };
   const warnings: string[] = [];
   const readStdout = async (): Promise<void> => {
     const decoder = new TextDecoder();
@@ -645,6 +674,8 @@ async function runCommandWithProgress(
     // grace window on streams an orphaned grandchild may keep open. stdoutBuf/
     // stderrBuf already hold whatever the background readers captured so far.
     await drainAfterStop(ioPromise, POST_STOP_DRAIN_GRACE_MS);
+    // A stopped run keeps its progress file (automatic or not) for the caller to read.
+    await progressFile.finish(timedOut ? '# Timed out\n' : '# Cancelled\n', true);
     // The same overflow cut a finished run gets: a stopped noisy command is the
     // case where the output is largest.
     const partialOut = await truncate(overflowHandler, stdoutSink.text, 'stdout', cmdStr);
@@ -672,8 +703,7 @@ async function runCommandWithProgress(
   const stdoutResult = await truncate(overflowHandler, stdoutSink.text, 'stdout', cmdStr);
   const stderrResult = await truncate(overflowHandler, stderrSink.text, 'stderr', cmdStr);
   const duration = Date.now() - startTime;
-  progressFile.append(`# Completed: exit=${actualExitCode} duration=${duration}ms\n`);
-  if (discardWhenDone) progressFile.discard();
+  await progressFile.finish(`# Completed: exit=${actualExitCode} duration=${duration}ms\n`, progressRequested);
 
   const result: ExecCommandResult = {
     cmd: cmdStr,
@@ -684,7 +714,7 @@ async function runCommandWithProgress(
     duration_ms: duration,
     cwd,
     env: cmdInput.env,
-    ...(discardWhenDone ? {} : withProgressFile(progressFile.path)),
+    ...withProgressFile(progressFile.path),
     ...(warnings.length > 0 && { warnings }),
     ...((stdoutResult.truncated || stdoutSink.dropped) && { stdout_truncated: true }),
     ...((stderrResult.truncated || stderrSink.dropped) && { stderr_truncated: true }),

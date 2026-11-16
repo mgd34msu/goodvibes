@@ -18,10 +18,6 @@
  */
 import { defineBattery, oneOf, STAKES_BANDS } from '@goodvibes-jev/judgment';
 
-/** Complete admitted strings are retained; the caller owns request budgets. */
-export const MAX_JUDGED_BOOLEAN_CHARS = Number.POSITIVE_INFINITY;
-
-
 export const BOOLEAN_VALUE_OPTIONS = {
   true: 'The value says yes, on, enabled or true for this parameter.',
   false: 'The value says no, off, disabled or false for this parameter.',

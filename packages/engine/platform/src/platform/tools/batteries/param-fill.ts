@@ -1,4 +1,4 @@
-import { assertJudgmentInput, JudgmentInputError } from '../../gate/judgment-input.js';
+import { assertJudgmentInput } from '../../gate/judgment-input.js';
 /**
  * `engine.tools.param-fill`: a tool call is missing a required string
  * parameter and carries spare string arguments the tool does not require.
@@ -19,12 +19,8 @@ import { assertJudgmentInput, JudgmentInputError } from '../../gate/judgment-inp
  */
 import { defineSelector, STAKES_BANDS, type Candidate, type JsonValue } from '@goodvibes-jev/judgment';
 
-/** Most characters of an argument value or description the reading carries. */
-export const MAX_JUDGED_ARGUMENT_CHARS = Number.POSITIVE_INFINITY;
-
 function clip(text: string): string {
   assertJudgmentInput(text);
-  if (text.length > MAX_JUDGED_ARGUMENT_CHARS) throw new JudgmentInputError('unsupported-input');
   return text;
 }
 

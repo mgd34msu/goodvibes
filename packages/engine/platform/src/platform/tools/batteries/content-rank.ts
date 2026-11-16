@@ -13,9 +13,6 @@ import { completeJudgmentView } from './complete-view.js';
 import { defineRerank, STAKES_BANDS } from '@goodvibes-jev/judgment';
 
 
-/** Most characters of one matched line the reading carries. */
-export const MAX_JUDGED_LINE_CHARS = Number.POSITIVE_INFINITY;
-
 /** What the rerank sees of a matched file: its path and its matching lines, each prefixed with its line number. */
 export function contentMatchView(path: string, matches: readonly { line: number; text: string }[]): { path: string; matching_lines: string } {
   return completeJudgmentView({ path, matching_lines: matches.map(({ line, text }) => `${line}: ${text}`).join('\n') });

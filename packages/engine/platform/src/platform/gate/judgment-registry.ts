@@ -46,14 +46,12 @@ import { paramFill } from '../tools/batteries/param-fill.js';
 import { execPrompt } from '../tools/batteries/exec-prompt.js';
 import { execRetry } from '../tools/batteries/exec-retry.js';
 import { childFailureReason } from '../tools/batteries/child-failure-reason.js';
-import { credentialEnv } from '../tools/batteries/credential-env.js';
 
 registry.register(semanticDiff);
 registry.register(paramFill);
 registry.register(execPrompt);
 registry.register(execRetry);
 registry.register(childFailureReason);
-registry.register(credentialEnv);
 
 import { secretFinding } from '../tools/batteries/secret-finding.js';
 import { dangerousCall } from '../tools/batteries/dangerous-call.js';

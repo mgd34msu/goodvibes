@@ -24,8 +24,6 @@ const LABELS: Readonly<Record<PermissionAnalysisTargetKind, string>> = {
   command: 'Command', path: 'Path', url: 'URL', task: 'Task', generic: 'Arguments',
 };
 
-const BASE64_TEXT = /^[A-Za-z0-9+/\s]*={0,2}$/;
-
 type Args = Record<string, unknown>;
 
 function strings(list: unknown, field: string): string[] {
@@ -41,15 +39,8 @@ function keys(args: Args, names: readonly string[]): string[] {
   return names.flatMap((name) => (typeof args[name] === 'string' ? [args[name] as string] : []));
 }
 
-/** One `commands` entry as the exec tool runs it; an entry it cannot decode is named, not shown as garbage. */
-function commandEntry(entry: unknown): string[] {
-  const encoded = entry && typeof entry === 'object' ? (entry as Args)['cmd_base64'] : undefined;
-  if (typeof encoded === 'string' && encoded.length > 0 && !BASE64_TEXT.test(encoded)) return ['(cmd_base64 is not valid base64)'];
-  return execEntryTexts(entry);
-}
-
 function commands(args: Args): string[] {
-  const listed = Array.isArray(args['commands']) ? args['commands'].flatMap(commandEntry) : [];
+  const listed = Array.isArray(args['commands']) ? args['commands'].flatMap(execEntryTexts) : [];
   return listed.length > 0 ? listed : execShellCommands(args);
 }
 

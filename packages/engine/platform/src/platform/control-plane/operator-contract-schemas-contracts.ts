@@ -41,7 +41,7 @@ import {
   YES_NO_VERDICTS,
 } from '../../events/contract.js';
 import type { Contract, ContractUnit, Criterion, CriterionReading, Escalation } from '../contract/types.js';
-import { BOOLEAN_SCHEMA, NUMBER_SCHEMA, STRING_SCHEMA, arraySchema, objectSchema } from './method-catalog-shared.js';
+import { BOOLEAN_SCHEMA, JSON_VALUE_SCHEMA, NUMBER_SCHEMA, STRING_SCHEMA, arraySchema, objectSchema } from './method-catalog-shared.js';
 import { STRING_LIST_SCHEMA, enumSchema, recordSchema } from './operator-contract-schemas-shared.js';
 import {
   CONTRACT_COMPLETION_REPORT_SCHEMA,
@@ -91,7 +91,7 @@ const ROUTE_SCHEMA = objectSchema({
 }, ['model', 'provider', 'reason']);
 
 const TREE_BASELINE_SCHEMA = objectSchema({
-  version: { type: 'number', enum: [2] },
+  version: { type: 'number', enum: [2, 3, 4] },
   head: { anyOf: [STRING_SCHEMA, { type: 'null' }] },
   dirty: recordSchema({ anyOf: [STRING_SCHEMA, { type: 'null' }] }),
 }, ['head', 'dirty']);
@@ -283,6 +283,8 @@ const DECISION_SCHEMA = objectSchema({
   reason: STRING_SCHEMA,
   decisionIds: STRING_LIST_SCHEMA,
   route: ROUTE_SCHEMA,
+  // What the runner reads back (ContractDecisionRecord); its receipts are internal and not described here.
+  record: { type: 'object', required: ['kind'], properties: { kind: enumSchema(['fix-scheduled', 'amended', 'receipt']) } },
 }, ['id', 'at', 'action', 'targetId', 'reason', 'decisionIds']);
 
 const SHAPE_READING_SCHEMA = objectSchema({
@@ -358,6 +360,7 @@ export const CONTRACT_VIEW_SCHEMA = objectSchema({
   usage: USAGE_SCHEMA,
   judgmentUsage: JUDGMENT_USAGE_SCHEMA,
   plannerAgentIds: STRING_LIST_SCHEMA,
+  agentUsage: recordSchema(objectSchema({ usage: USAGE_SCHEMA, agent: JSON_VALUE_SCHEMA, toolCallCount: NUMBER_SCHEMA }, ['usage', 'toolCallCount'])),
   answer: STRING_SCHEMA,
   statusLine: STRING_SCHEMA,
   commit: objectSchema({ status: enumSchema(CONTRACT_COMMIT_STATUSES), hash: STRING_SCHEMA, note: STRING_SCHEMA }, ['status', 'note']),
@@ -374,8 +377,43 @@ export const CONTRACT_VIEW_SCHEMA = objectSchema({
 export const CONTRACTS_LIST_INPUT_SCHEMA = objectSchema({ sessionId: STRING_SCHEMA, includeTerminal: BOOLEAN_SCHEMA }, []);
 export const CONTRACTS_LIST_OUTPUT_SCHEMA = objectSchema({ contracts: arraySchema(CONTRACT_VIEW_SCHEMA) }, ['contracts']);
 
-export const CONTRACTS_GET_INPUT_SCHEMA = objectSchema({ contractId: STRING_SCHEMA }, ['contractId']);
+export const CONTRACTS_GET_INPUT_SCHEMA = objectSchema({ contractId: STRING_SCHEMA, includeInputFiles: BOOLEAN_SCHEMA }, ['contractId']);
 export const CONTRACTS_GET_OUTPUT_SCHEMA = CONTRACT_VIEW_SCHEMA;
+
+/** What a list row or a status poll needs of a contract (operator-service.ts `ContractSummary`). */
+export const CONTRACT_SUMMARY_SCHEMA = objectSchema({
+  id: STRING_SCHEMA,
+  sessionId: STRING_SCHEMA,
+  ownerAgentId: STRING_SCHEMA,
+  origin: enumSchema(CONTRACT_ORIGINS),
+  ask: STRING_SCHEMA,
+  goal: STRING_SCHEMA,
+  status: enumSchema(CONTRACT_STATUSES),
+  statusLine: STRING_SCHEMA,
+  failureKind: enumSchema(CONTRACT_FAILURE_KINDS),
+  error: STRING_SCHEMA,
+  groupCount: NUMBER_SCHEMA,
+  unitCount: NUMBER_SCHEMA,
+  unitsPassed: NUMBER_SCHEMA,
+  unitsFailed: NUMBER_SCHEMA,
+  openEscalationIds: STRING_LIST_SCHEMA,
+  openEscalation: objectSchema({ id: STRING_SCHEMA, at: NUMBER_SCHEMA, question: STRING_SCHEMA }, ['id', 'at', 'question']),
+  usage: USAGE_SCHEMA,
+  createdAt: NUMBER_SCHEMA,
+  completedAt: NUMBER_SCHEMA,
+  updatedAt: NUMBER_SCHEMA,
+  revision: STRING_SCHEMA,
+}, ['id', 'sessionId', 'ownerAgentId', 'origin', 'ask', 'goal', 'status', 'groupCount', 'unitCount', 'unitsPassed', 'unitsFailed',
+  'openEscalationIds', 'usage', 'createdAt', 'updatedAt', 'revision']);
+
+export const CONTRACTS_SUMMARIES_INPUT_SCHEMA = CONTRACTS_LIST_INPUT_SCHEMA;
+export const CONTRACTS_SUMMARIES_OUTPUT_SCHEMA = objectSchema({ contracts: arraySchema(CONTRACT_SUMMARY_SCHEMA) }, ['contracts']);
+
+export const CONTRACTS_STATUS_INPUT_SCHEMA = objectSchema({ contractId: STRING_SCHEMA, ifRevision: STRING_SCHEMA }, ['contractId']);
+export const CONTRACTS_STATUS_OUTPUT_SCHEMA = { anyOf: [
+  CONTRACT_SUMMARY_SCHEMA,
+  objectSchema({ id: STRING_SCHEMA, revision: STRING_SCHEMA, notModified: { type: 'boolean', const: true } }, ['id', 'revision', 'notModified']),
+] };
 
 export const CONTRACTS_START_INPUT_SCHEMA = objectSchema({
   ask: STRING_SCHEMA,

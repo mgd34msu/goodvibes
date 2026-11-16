@@ -8,9 +8,9 @@
  * in that session; `metadata.idempotencyKey` is the call's `Idempotency-Key`,
  * so a replayed dispatch gets the contract the first one started, and without
  * one the client generates a key per call, which its own retries reuse),
- * `status` reads `contracts.get` into a snapshot, `cancel`
- * calls `contracts.cancel`, and `result` reads `contracts.get` into the
- * contract's answer and status line. The external task id is the contract
+ * `status` reads the contract's small summary (`contracts.status`) into a
+ * snapshot, `cancel` calls `contracts.cancel`, and `result` reads
+ * `contracts.get` into the contract's answer and status line. The external task id is the contract
  * id. The mapping is the contracts package's, shared with the in-process
  * hosted adapter, so both report a contract the same way.
  */
@@ -19,6 +19,7 @@ import {
   contractWorkResult,
   contractWorkSnapshot,
   type ContractExternalWorkAdapter,
+  type ContractWorkFields,
 } from '@goodvibes-jev/engine/contracts';
 import type { OperatorRemoteClient } from './client-core.js';
 
@@ -33,6 +34,26 @@ function metadataString(metadata: Record<string, unknown> | undefined, key: stri
 function metadataIsolation(metadata: Record<string, unknown> | undefined): 'auto' | 'worktree' | 'shared' | undefined {
   const value = metadata?.['isolation'];
   return value === 'auto' || value === 'worktree' || value === 'shared' ? value : undefined;
+}
+
+/** A contract summary as the fields the work mapping reads: its open question, and its last change as the one decision time. */
+function summaryWorkFields(summary: {
+  readonly id: string; readonly status: ContractWorkFields['status']; readonly sessionId: string; readonly ownerAgentId: string;
+  readonly createdAt: number; readonly completedAt?: number | undefined; readonly statusLine?: string | undefined; readonly error?: string | undefined;
+  readonly openEscalation?: { readonly id: string; readonly at: number; readonly question: string } | undefined; readonly updatedAt: number;
+}): ContractWorkFields {
+  return {
+    id: summary.id,
+    status: summary.status,
+    sessionId: summary.sessionId,
+    ownerAgentId: summary.ownerAgentId,
+    createdAt: summary.createdAt,
+    ...(summary.completedAt === undefined ? {} : { completedAt: summary.completedAt }),
+    ...(summary.statusLine === undefined ? {} : { statusLine: summary.statusLine }),
+    ...(summary.error === undefined ? {} : { error: summary.error }),
+    escalations: summary.openEscalation === undefined ? [] : [summary.openEscalation],
+    decisions: [{ at: summary.updatedAt }],
+  };
 }
 
 /** An adapter over an operator client; the client's own auth and transport carry every call. */
@@ -55,7 +76,10 @@ export function createOperatorContractWorkAdapter(client: Pick<OperatorRemoteCli
       });
     },
     async status(externalTaskId) {
-      return contractWorkSnapshot(await client.invoke('contracts.get', { contractId: externalTaskId }));
+      const summary = await client.invoke('contracts.status', { contractId: externalTaskId });
+      // Only an `ifRevision` that matched answers without the summary, and none is sent here.
+      if ('notModified' in summary) throw new Error(`Contract ${externalTaskId} answered without its status; read it again.`);
+      return contractWorkSnapshot(summaryWorkFields(summary));
     },
     async cancel(externalTaskId, reason) {
       await client.invoke('contracts.cancel', { contractId: externalTaskId, reason: reason ?? OPERATOR_WORK_CANCEL_REASON });

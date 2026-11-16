@@ -1,10 +1,10 @@
 /**
  * method-catalog-contracts.ts, the `contracts.*` operator methods: list,
- * read, start, dispatch, cancel, reply to and remove contracts, over every contract
+ * summarize, read, poll, start, dispatch, cancel, reply to and remove contracts, over every contract
  * runner this daemon holds (its own and each hosted-session workspace
- * floor's). Handlers are in routes/contracts.ts; each method except dispatch
- * and remove also has a REST path, served through the daemon-api REST route
- * table (gateway-rest-routes.ts) by the same handler; dispatch and remove are
+ * floor's). Handlers are in routes/contracts.ts; each method except summaries,
+ * status, dispatch and remove also has a REST path, served through the daemon-api REST route
+ * table (gateway-rest-routes.ts) by the same handler; those four are
  * reached by invoke.
  *
  * Scopes follow the fleet methods: reading is `read:fleet`, acting is
@@ -27,6 +27,10 @@ import {
   CONTRACTS_REMOVE_OUTPUT_SCHEMA,
   CONTRACTS_START_INPUT_SCHEMA,
   CONTRACTS_START_OUTPUT_SCHEMA,
+  CONTRACTS_STATUS_INPUT_SCHEMA,
+  CONTRACTS_STATUS_OUTPUT_SCHEMA,
+  CONTRACTS_SUMMARIES_INPUT_SCHEMA,
+  CONTRACTS_SUMMARIES_OUTPUT_SCHEMA,
 } from './operator-contract-schemas-contracts.js';
 
 const CONTRACT_NOT_FOUND: ContractErrorCode = { code: 'CONTRACT_NOT_FOUND', status: 404, meaning: 'No runner on this daemon holds that contract id.' };
@@ -37,7 +41,7 @@ export const builtinGatewayContractMethodDescriptors: readonly GatewayMethodDesc
   methodDescriptor({
     id: 'contracts.list',
     title: 'List Contracts',
-    description: 'Every contract this daemon holds, newest first, each with its whole tree: the ask, the goal, the acceptance criteria with every Jev reading, the groups and units with their checks and nudges, open and answered owner escalations, decisions, usage, and the answer or status line once it ends. `sessionId` narrows the list to one session\'s contracts (a hosted session\'s, or a shared session\'s); ended contracts are left out unless `includeTerminal` is set.',
+    description: 'Every contract this daemon holds, newest first, each with its whole tree: the ask, the goal, the acceptance criteria with every Jev reading, the groups and units with their checks and nudges, open and answered owner escalations, decisions, usage, and the answer or status line once it ends. `sessionId` narrows the list to one session\'s contracts (a hosted session\'s, or a shared session\'s); ended contracts are left out unless `includeTerminal` is set. For a list view, `contracts.summaries` returns the same contracts as small summaries.',
     category: 'contracts',
     scopes: ['read:fleet'],
     http: { method: 'GET', path: '/api/contracts' },
@@ -47,13 +51,32 @@ export const builtinGatewayContractMethodDescriptors: readonly GatewayMethodDesc
   methodDescriptor({
     id: 'contracts.get',
     title: 'Get a Contract',
-    description: 'One contract with its whole tree, running or ended. 404 with CONTRACT_NOT_FOUND when no runner on this daemon holds the id.',
+    description: 'One contract with its whole tree, running or ended. The captured input\'s per-file list, which only contracts captured before the input was recorded as a git tree carry, is left out unless `includeInputFiles` is true. To poll for progress, use `contracts.status`. 404 with CONTRACT_NOT_FOUND when no runner on this daemon holds the id.',
     category: 'contracts',
     scopes: ['read:fleet'],
     http: { method: 'GET', path: '/api/contracts/{contractId}' },
     errorCodes: [CONTRACT_NOT_FOUND],
     inputSchema: CONTRACTS_GET_INPUT_SCHEMA,
     outputSchema: CONTRACTS_GET_OUTPUT_SCHEMA,
+  }),
+  methodDescriptor({
+    id: 'contracts.summaries',
+    title: 'List Contract Summaries',
+    description: 'The contracts `contracts.list` returns (same `sessionId` and `includeTerminal`), newest first, each as a small summary: id, session, owner agent, origin, ask, goal, status and status line, failure, group and unit counts, open owner question ids and the newest open question, usage, created, ended and last-changed times, and a `revision` that changes whenever any of these does. Nothing of the evidence, readings or history is sent; read one contract\'s tree with `contracts.get`.',
+    category: 'contracts',
+    scopes: ['read:fleet'],
+    inputSchema: CONTRACTS_SUMMARIES_INPUT_SCHEMA,
+    outputSchema: CONTRACTS_SUMMARIES_OUTPUT_SCHEMA,
+  }),
+  methodDescriptor({
+    id: 'contracts.status',
+    title: 'Get a Contract\'s Status',
+    description: 'One contract\'s summary (as `contracts.summaries` gives it), for polling. Pass the `revision` of the last answer as `ifRevision`: when nothing changed the answer is only `{ id, revision, notModified: true }`. 404 with CONTRACT_NOT_FOUND when no runner on this daemon holds the id.',
+    category: 'contracts',
+    scopes: ['read:fleet'],
+    errorCodes: [CONTRACT_NOT_FOUND],
+    inputSchema: CONTRACTS_STATUS_INPUT_SCHEMA,
+    outputSchema: CONTRACTS_STATUS_OUTPUT_SCHEMA,
   }),
   methodDescriptor({
     id: 'contracts.start',

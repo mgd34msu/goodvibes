@@ -18,6 +18,7 @@
  *
  * Every choice here is code over ids and recorded statuses; nothing is judged.
  */
+import { createHash } from 'node:crypto';
 import { realpathSync } from 'node:fs';
 import { isAbsolute, relative, resolve } from 'node:path';
 import { OwnerReplyRefusedError, type OwnerReplyOutcome } from './escalation.js';
@@ -114,7 +115,16 @@ export interface OperatorCaller {
 
 export interface ContractOperatorService {
   list(filter?: { readonly sessionId?: string | undefined; readonly includeTerminal?: boolean | undefined }, caller?: OperatorCaller): ContractView[];
-  get(contractId: string, caller?: OperatorCaller): ContractView | null;
+  /** The same contracts as `list`, each as its small summary. */
+  summaries(filter?: { readonly sessionId?: string | undefined; readonly includeTerminal?: boolean | undefined }, caller?: OperatorCaller): ContractSummary[];
+  /**
+   * One contract's tree. The captured input's per-file list, which only
+   * receipts from before the input was a git tree carry, is left out unless
+   * `includeInputFiles` asks for it.
+   */
+  get(contractId: string, caller?: OperatorCaller, options?: { readonly includeInputFiles?: boolean | undefined }): ContractView | null;
+  /** One contract's summary; null when no runner holds it for this caller. */
+  status(contractId: string, caller?: OperatorCaller): ContractSummary | null;
   start(input: OperatorStartInput): Promise<OperatorStartedContract>;
   /** False when the contract is known but already ended. */
   cancel(contractId: string, reason: string, caller?: OperatorCaller): boolean;
@@ -189,6 +199,83 @@ export interface ContractOperatorServiceDeps {
   readonly runner: OperatorContractRunner;
   /** Where a contract started without a workspace or a hosted session works. */
   readonly workingDirectory: string;
+}
+
+/**
+ * What a list row or a status poll needs of a contract, computed by its owner
+ * from the record in one pass: no evidence, readings or history. `revision`
+ * changes whenever any field here does, so a poller compares one string.
+ */
+export interface ContractSummary {
+  readonly id: string;
+  readonly sessionId: string;
+  readonly ownerAgentId: string;
+  readonly origin: ContractOrigin;
+  readonly ask: string;
+  readonly goal: string;
+  readonly status: ContractView['status'];
+  readonly statusLine?: string | undefined;
+  readonly failureKind?: ContractView['failureKind'];
+  readonly error?: string | undefined;
+  readonly groupCount: number;
+  readonly unitCount: number;
+  readonly unitsPassed: number;
+  readonly unitsFailed: number;
+  /** Every owner question still open, newest first. */
+  readonly openEscalationIds: readonly string[];
+  /** The newest open owner question, which is what the contract waits on. */
+  readonly openEscalation?: { readonly id: string; readonly at: number; readonly question: string } | undefined;
+  readonly usage: ContractView['usage'];
+  readonly createdAt: number;
+  readonly completedAt?: number | undefined;
+  /** The latest time anything here moved: a decision, a question raised or answered, the end. */
+  readonly updatedAt: number;
+  readonly revision: string;
+}
+
+/** The summary of one contract (see `ContractSummary`). */
+export function summarizeContract(contract: ContractView): ContractSummary {
+  const open = contract.escalations.filter((escalation) => escalation.resolvedAt === undefined).sort((a, b) => b.at - a.at);
+  let updatedAt = Math.max(contract.createdAt, contract.completedAt ?? 0);
+  for (const decision of contract.decisions) if (decision.at > updatedAt) updatedAt = decision.at;
+  for (const escalation of contract.escalations) updatedAt = Math.max(updatedAt, escalation.at, escalation.resolvedAt ?? 0);
+  let unitsPassed = 0, unitsFailed = 0;
+  for (const unit of contract.units) {
+    if (unit.status === 'passed') unitsPassed += 1;
+    else if (unit.status === 'failed') unitsFailed += 1;
+  }
+  const fields = {
+    id: contract.id,
+    sessionId: contract.sessionId,
+    ownerAgentId: contract.ownerAgentId,
+    origin: contract.origin,
+    ask: contract.ask,
+    goal: contract.goal,
+    status: contract.status,
+    ...(contract.statusLine === undefined ? {} : { statusLine: contract.statusLine }),
+    ...(contract.failureKind === undefined ? {} : { failureKind: contract.failureKind }),
+    ...(contract.error === undefined ? {} : { error: contract.error }),
+    groupCount: contract.groups.length,
+    unitCount: contract.units.length,
+    unitsPassed,
+    unitsFailed,
+    openEscalationIds: open.map((escalation) => escalation.id),
+    ...(open[0] === undefined ? {} : { openEscalation: { id: open[0].id, at: open[0].at, question: open[0].question } }),
+    usage: contract.usage,
+    createdAt: contract.createdAt,
+    ...(contract.completedAt === undefined ? {} : { completedAt: contract.completedAt }),
+    updatedAt,
+  };
+  // Hashes the summary only (a few hundred bytes), never the tree.
+  return { ...fields, revision: createHash('sha256').update(JSON.stringify(fields)).digest('hex').slice(0, 16) };
+}
+
+/** The tree without the captured input's per-file list (only receipts from before the input was a git tree have one). */
+function withoutInputFiles(contract: ContractView): ContractView {
+  const snapshot = contract.inputSnapshot;
+  if (snapshot?.files === undefined) return contract;
+  const { files: _files, ...rest } = snapshot;
+  return { ...contract, inputSnapshot: rest };
 }
 
 /** Operator inspection does not grant access to an earlier hosted conversation. */
@@ -328,24 +415,42 @@ export function createContractOperatorService(deps: ContractOperatorServiceDeps)
     return { contract: projectContractOperatorView(started.contract), ownerAgentId: started.owner.id };
   }
 
+  /** Every contract the caller may see across the runners, newest first, without the captured input. */
+  function visibleContracts(filter: { readonly sessionId?: string | undefined; readonly includeTerminal?: boolean | undefined }, caller: OperatorCaller | undefined): ContractView[] {
+    const seen = new Set<string>();
+    const contracts: ContractView[] = [];
+    for (const runner of runners()) {
+      for (const contract of runner.list({ ...filter, includeInputSnapshot: false })) {
+        if (seen.has(contract.id)) continue;
+        seen.add(contract.id);
+        if (!visibleTo(contract.sessionId, caller)) continue;
+        contracts.push(contract);
+      }
+    }
+    return contracts.sort((a, b) => b.createdAt - a.createdAt);
+  }
+
   return {
     list(filter = {}, caller) {
-      const seen = new Set<string>();
-      const contracts: ContractView[] = [];
-      for (const runner of runners()) {
-        for (const contract of runner.list({ ...filter, includeInputSnapshot: false })) {
-          if (seen.has(contract.id)) continue;
-          seen.add(contract.id);
-          if (!visibleTo(contract.sessionId, caller)) continue;
-          contracts.push(summarized(projectContractOperatorView(contract)));
-        }
-      }
-      return contracts.sort((a, b) => b.createdAt - a.createdAt);
+      return visibleContracts(filter, caller).map((contract) => summarized(projectContractOperatorView(contract)));
     },
-    get(contractId, caller) {
+    summaries(filter = {}, caller) {
+      return visibleContracts(filter, caller).map(summarizeContract);
+    },
+    get(contractId, caller, options = {}) {
       for (const runner of runners()) {
         const contract = runner.get(contractId);
-        if (contract !== null) return visibleTo(contract.sessionId, caller) ? projectContractOperatorView(contract) : null;
+        if (contract === null) continue;
+        if (!visibleTo(contract.sessionId, caller)) return null;
+        const view = projectContractOperatorView(contract);
+        return options.includeInputFiles === true ? view : withoutInputFiles(view);
+      }
+      return null;
+    },
+    status(contractId, caller) {
+      for (const runner of runners()) {
+        const contract = runner.get(contractId);
+        if (contract !== null) return visibleTo(contract.sessionId, caller) ? summarizeContract(contract) : null;
       }
       return null;
     },

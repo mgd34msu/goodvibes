@@ -77,10 +77,38 @@ export function createContractsListHandler(service: ContractOperatorService): Ga
 
 export function createContractsGetHandler(service: ContractOperatorService): GatewayMethodHandler {
   return (invocation) => {
-    const contractId = requireString(readInvocationParams(invocation), 'contractId');
-    const contract = service.get(contractId, callerOf(invocation));
+    const params = readInvocationParams(invocation);
+    const contractId = requireString(params, 'contractId');
+    const includeInputFiles = optionalBoolean(params, 'includeInputFiles');
+    const contract = service.get(contractId, callerOf(invocation), includeInputFiles === undefined ? {} : { includeInputFiles });
     if (contract === null) throw new GatewayVerbError(`No contract ${contractId} on this daemon.`, 'CONTRACT_NOT_FOUND', 404);
     return projectContractOperatorView(contract);
+  };
+}
+
+export function createContractsSummariesHandler(service: ContractOperatorService): GatewayMethodHandler {
+  return (invocation) => {
+    const params = readInvocationParams(invocation);
+    const sessionId = optionalString(params, 'sessionId');
+    const includeTerminal = optionalBoolean(params, 'includeTerminal');
+    return {
+      contracts: service.summaries({
+        ...(sessionId === undefined ? {} : { sessionId }),
+        ...(includeTerminal === undefined ? {} : { includeTerminal }),
+      }, callerOf(invocation)),
+    };
+  };
+}
+
+export function createContractsStatusHandler(service: ContractOperatorService): GatewayMethodHandler {
+  return (invocation) => {
+    const params = readInvocationParams(invocation);
+    const contractId = requireString(params, 'contractId');
+    const ifRevision = optionalString(params, 'ifRevision');
+    const summary = service.status(contractId, callerOf(invocation));
+    if (summary === null) throw new GatewayVerbError(`No contract ${contractId} on this daemon.`, 'CONTRACT_NOT_FOUND', 404);
+    // An unchanged contract answers with its revision only.
+    return ifRevision === summary.revision ? { id: summary.id, revision: summary.revision, notModified: true } : summary;
   };
 }
 
@@ -176,7 +204,9 @@ export function createContractsRemoveHandler(service: ContractOperatorService): 
 /** Every method this module owns. */
 export const CONTRACT_METHOD_IDS: readonly string[] = [
   'contracts.list',
+  'contracts.summaries',
   'contracts.get',
+  'contracts.status',
   'contracts.start',
   'contracts.dispatch',
   'contracts.cancel',
@@ -194,7 +224,9 @@ export const CONTRACT_METHOD_IDS: readonly string[] = [
 export function registerContractGatewayMethods(catalog: GatewayMethodCatalog, service: ContractOperatorService): void {
   const attach = (id: string, handler: GatewayMethodHandler): void => { attachHandler(catalog, id, handler); };
   attach('contracts.list', createContractsListHandler(service));
+  attach('contracts.summaries', createContractsSummariesHandler(service));
   attach('contracts.get', createContractsGetHandler(service));
+  attach('contracts.status', createContractsStatusHandler(service));
   attach('contracts.start', createContractsStartHandler(service));
   attach('contracts.dispatch', createContractsDispatchHandler(service));
   attach('contracts.cancel', createContractsCancelHandler(service));

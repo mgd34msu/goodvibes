@@ -63,8 +63,11 @@ export interface PanelManagerLike {
   getTopPane(): PanelPaneLike;
   getBottomPane(): PanelPaneLike;
   getRegisteredTypes(): readonly PanelRegistrationLike[];
-  open(id: string, pane?: 'top' | 'bottom'): unknown;
-  show(): void;
+  /**
+   * Open a registered view on the host. `true` only when the host actually
+   * showed it; `false` when nothing holds the view or the host has no screen.
+   */
+  open(id: string, pane?: 'top' | 'bottom'): boolean;
 }
 
 const EMPTY_PANE: PanelPaneLike = Object.freeze({
@@ -76,8 +79,7 @@ const EMPTY_PANEL_MANAGER: PanelManagerLike = Object.freeze({
   getTopPane: () => EMPTY_PANE,
   getBottomPane: () => EMPTY_PANE,
   getRegisteredTypes: () => [],
-  open: () => null,
-  show: () => {},
+  open: () => false,
 });
 
 const EMPTY_KEYBINDINGS_MANAGER: KeybindingsManagerLike = Object.freeze({

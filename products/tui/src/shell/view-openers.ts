@@ -196,7 +196,20 @@ export function wireViewOpeners(options: WireViewOpenersOptions): void {
     return true;
   };
   commandContext.openView = openView;
-  viewPanelAdapter.setOpener((id) => openView(id));
+  // What panels.list and panels.open report: the listed views whose modal is on
+  // screen now, bottom of the stack first, so the last one is the view in front.
+  const openViewIds = (): readonly string[] => {
+    const open: string[] = [];
+    for (const modal of host.modals()) {
+      if (modal instanceof AgentsModal) open.push('agents');
+      else if (modal instanceof UsageModal) open.push('usage');
+      else if (modal === workspace) open.push('changes');
+      else if (modal instanceof NotificationsModal) open.push('notifications');
+    }
+    if (input.sessionPickerModal.active) open.push('sessions');
+    return open;
+  };
+  viewPanelAdapter.setOpener((id) => openView(id) && openViewIds().includes(id), openViewIds);
 
   // The older per-console callbacks commands still call, each onto its modal.
   commandContext.openForensicsView = () => { openView('forensics'); };

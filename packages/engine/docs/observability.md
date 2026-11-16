@@ -168,8 +168,9 @@ conversation text, or other people's sign-ins: `providers`, `tasks`,
 `automation`, `routes`, `deliveries`, `watchers`, `surfaces`, `knowledge`,
 `workspace` and `fleet`, plus the remote peer notices. The `ready` frame lists
 the domains the stream got and any it withheld; a stream that asks only for
-withheld domains is refused with `403 EVENT_ACCESS_DENIED`. `GET /api/events`,
-the unfiltered runtime bus, is admin only.
+withheld domains is refused with `403 EVENT_ACCESS_DENIED`. `GET /api/events`
+is the same stream under an older path, with the same ids, replay and
+per-credential domains.
 
 ### Subscribing via WebSocket
 

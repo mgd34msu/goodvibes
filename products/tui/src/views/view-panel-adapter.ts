@@ -13,9 +13,11 @@
  * Renaming them is a platform and wire change, so the TUI keeps one adapter that
  * satisfies the contract and translates it: panels.list lists the views a
  * remote client can open (Agents, Usage, Changes, Notifications, Sessions),
- * panels.open opens one as its modal, and both pane lists are always empty
- * because nothing is ever open in a pane. The opener is set by the shell once
- * the modal host exists. See docs/architecture.md ("The operator API bridge").
+ * panels.open opens one as its modal and says whether it appeared, and the top
+ * pane lists the views whose modals are open now (the bottom pane is always
+ * empty). The opener and the open-view reader are set by the shell once the
+ * modal host exists; before that nothing opens and nothing is listed as open.
+ * See docs/architecture.md ("The operator API bridge").
  */
 
 import type { IntegrationHelperService } from '@/runtime/index.ts';
@@ -41,18 +43,26 @@ export function listViewPanelIds(): readonly string[] {
 const NO_PANES: PanelPaneLike = { panels: [], activeIndex: 0 };
 
 export interface ViewPanelAdapter extends PanelManagerLike {
-  /** Set how a view name is opened (returns false when nothing holds it). */
-  setOpener(open: (id: string) => boolean): void;
+  /**
+   * Set how a view name is opened (returns false when it did not appear) and
+   * how to read which of the listed views are open now, front-most last.
+   */
+  setOpener(open: (id: string) => boolean, openViews?: () => readonly string[]): void;
 }
 
 export function createViewPanelAdapter(): ViewPanelAdapter {
   let opener: ((id: string) => boolean) | null = null;
+  let readOpen: (() => readonly string[]) | null = null;
   return {
-    getTopPane: () => NO_PANES,
+    getTopPane: () => {
+      // The reader's order is kept: the last entry is the view in front.
+      const panels = (readOpen?.() ?? []).filter((id) => VIEWS.some((view) => view.id === id)).map((id) => ({ id }));
+      if (panels.length === 0) return NO_PANES;
+      return { panels, activeIndex: panels.length - 1 };
+    },
     getBottomPane: () => NO_PANES,
     getRegisteredTypes: () => VIEWS,
     open: (id: string) => opener?.(id) ?? false,
-    show: () => {},
-    setOpener: (open) => { opener = open; },
+    setOpener: (open, openViews) => { opener = open; readOpen = openViews ?? null; },
   };
 }

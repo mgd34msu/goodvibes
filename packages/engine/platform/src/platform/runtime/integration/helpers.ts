@@ -10,9 +10,8 @@ import type { RemoteRunnerRegistry } from '../remote/runner-registry.js';
 import type { RemoteSupervisor } from '../remote/supervisor.js';
 import type { ProviderRegistry } from '../../providers/registry.js';
 import type { RuntimeStore } from '../store/index.js';
-import type { RuntimeEventBus, RuntimeEventDomain } from '../events/index.js';
-import { serializeEnvelope } from '../../control-plane/gateway-utils.js';
-import { RUNTIME_EVENT_DOMAINS } from '../../../events/domain-map.js';
+import type { RuntimeEventBus } from '../events/index.js';
+import { BUILTIN_GATEWAY_METHODS } from '../../control-plane/method-catalog.js';
 import { buildProviderAccountSnapshot } from '../provider-accounts/registry.js';
 import type { ProviderAccountSnapshot } from '../provider-accounts/registry.js';
 import type { UserAuthManager } from '../../security/user-auth.js';
@@ -29,6 +28,22 @@ import { inspectInboundTls, inspectOutboundTls } from '../network/index.js';
 import type { ManagedRollbackRecord, SettingsConflictRecord, StagedManagedBundle } from '../settings/control-plane-store.js';
 import type { FeatureFlagManager } from '../feature-flags/index.js';
 import { getSecuritySettingsReport, type SecuritySettingReport } from '../security-settings.js';
+
+/**
+ * The HTTP routes the daemon serves, read from the method catalog that serves
+ * them, and the families they fall in: one source, so a route added to the
+ * catalog is in the review the moment it is served. Built once per process.
+ */
+let catalogReviewCache: { readonly apiFamilies: readonly string[]; readonly routes: readonly string[] } | undefined;
+function catalogReview(): { readonly apiFamilies: readonly string[]; readonly routes: readonly string[] } {
+  if (catalogReviewCache) return catalogReviewCache;
+  const served = BUILTIN_GATEWAY_METHODS.filter((method) => method.http !== undefined);
+  catalogReviewCache = Object.freeze({
+    apiFamilies: Object.freeze([...new Set(served.map((method) => method.category))].sort()),
+    routes: Object.freeze([...new Set(served.map((method) => `${method.http!.method} ${method.http!.path}`))]),
+  });
+  return catalogReviewCache;
+}
 
 /**
  * Everything the service needs that is NOT about where files live. The storage
@@ -135,9 +150,6 @@ export interface WorktreeSnapshot {
   readonly records: readonly ManagedWorktreeMeta[];
 }
 
-/** Every event domain, from the one canonical list, so a new domain is streamed without a second edit here. */
-const EVENT_DOMAINS: readonly RuntimeEventDomain[] = RUNTIME_EVENT_DOMAINS;
-
 /** Approvals raised and not yet decided, cancelled or expired. */
 function countUndecidedApprovals(approvals: readonly { readonly status: string }[]): number {
   return approvals.filter((approval) => approval.status === 'pending' || approval.status === 'claimed').length;
@@ -192,79 +204,12 @@ export class IntegrationHelperService {
   } {
     const state = this.context.runtimeStore.getState();
     const panelSnapshots = this.listPanels();
+    const { apiFamilies, routes } = catalogReview();
     return {
-      apiFamilies: [
-        'session lifecycle',
-        'approvals',
-        'tasks and agents',
-        'remote state',
-        'health and diagnostics',
-        'panel targeting',
-        'event subscriptions',
-      ],
-      routes: [
-        'GET /api/review',
-        'GET /api/session',
-        'GET /api/tasks',
-        'GET /api/automation',
-        'GET /api/sessions',
-        'GET /api/deliveries',
-        'GET /api/control-plane',
-        'GET /api/control-plane/auth',
-        'GET /api/control-plane/clients',
-        'GET /api/control-plane/events?domains=session,tasks',
-        'GET /api/control-plane/web',
-        'GET /api/v1/telemetry',
-        'GET /api/v1/telemetry/events',
-        'GET /api/v1/telemetry/errors',
-        'GET /api/v1/telemetry/traces',
-        'GET /api/v1/telemetry/metrics',
-        'GET /api/v1/telemetry/stream',
-        'GET /api/v1/telemetry/otlp/v1/traces',
-        'GET /api/v1/telemetry/otlp/v1/logs',
-        'GET /api/v1/telemetry/otlp/v1/metrics',
-        'GET /api/routes',
-        'GET /api/routes/bindings',
-        'POST /api/routes/bindings',
-        'GET /api/surfaces',
-        'GET /api/channels/accounts',
-        'GET /api/channels/accounts/:surface',
-        'GET /api/channels/accounts/:surface/:accountId',
-        'POST /api/channels/accounts/:surface/actions/:action',
-        'POST /api/channels/accounts/:surface/:accountId/actions/:action',
-        'GET /api/channels/capabilities',
-        'GET /api/channels/capabilities/:surface',
-        'GET /api/channels/tools',
-        'GET /api/channels/tools/:surface',
-        'GET /api/channels/agent-tools',
-        'GET /api/channels/agent-tools/:surface',
-        'POST /api/channels/tools/:surface/:toolId',
-        'GET /api/channels/actions',
-        'GET /api/channels/actions/:surface',
-        'POST /api/channels/actions/:surface/:actionId',
-        'POST /api/channels/targets/:surface/resolve',
-        'POST /api/channels/authorize/:surface',
-        'GET /api/watchers',
-        'GET /api/service/status',
-        'POST /api/service/install',
-        'POST /api/service/uninstall',
-        'GET /api/approvals',
-        'GET /api/remote',
-        'GET /api/health',
-        'GET /api/accounts',
-        'GET /api/providers',
-        'GET /api/providers/:providerId',
-        'GET /api/providers/:providerId/usage',
-        'GET /api/settings',
-        'GET /api/local-auth',
-        'GET /api/continuity',
-        'GET /api/worktrees',
-        'GET /api/intelligence',
-        'GET /api/panels',
-        'POST /api/panels/open',
-        'GET /api/events?domains=session,tasks',
-      ],
-      sessions: state.session.id ? 1 : 0,
+      apiFamilies,
+      routes,
+      // Open shared sessions the session broker holds, not whether this process has one.
+      sessions: this.context.sessionBroker.listSessions(Number.MAX_SAFE_INTEGER, { includeClosed: false }).length,
       tasks: state.tasks.tasks.size,
       pendingApprovals: countUndecidedApprovals(this.context.approvalBroker.listApprovals(Number.MAX_SAFE_INTEGER)),
       remoteContracts: this.context.remoteRunnerRegistry.listContracts().length,
@@ -647,77 +592,7 @@ export class IntegrationHelperService {
     const manager = this.context.panelManager;
     const known = manager.getRegisteredTypes().some((registration) => registration.id === id);
     if (!known) return false;
-    manager.open(id, pane);
-    manager.show();
-    return true;
-  }
-
-  createEventStream(request: Request, domains: readonly RuntimeEventDomain[]): Response {
-    const selectedDomains = domains.length > 0 ? domains : EVENT_DOMAINS;
-    const encoder = new TextEncoder();
-    let teardown = (): void => {};
-
-    // raise ReadableStream HWM so startup `ready` + live events aren't
-    // dropped by the backpressure guard before a consumer has pulled the first chunk.
-    const stream = new ReadableStream<Uint8Array>({
-      start: (controller) => {
-        let closed = false;
-        let dropped = 0;
-        const send = (chunk: string): void => {
-          if (closed) return;
-          try {
-            controller.enqueue(encoder.encode(chunk));
-          } catch {
-            // The consumer went away between the check and the write.
-            teardown();
-          }
-        };
-        const unsubs = selectedDomains.map((domain) => this.context.runtimeBus.onDomain(domain, (envelope) => {
-          // Drop event if the stream buffer is full (backpressure guard), and
-          // count it so the client is told it missed some.
-          if ((controller.desiredSize ?? 1) <= 0) {
-            dropped += 1;
-            return;
-          }
-          if (dropped > 0) {
-            send(`event: dropped\ndata: ${JSON.stringify({ count: dropped })}\n\n`);
-            dropped = 0;
-          }
-          send(`event: ${domain}\ndata: ${JSON.stringify(serializeEnvelope(envelope))}\n\n`);
-        }));
-        const heartbeat = setInterval(() => send(': heartbeat\n\n'), 15_000);
-        // Don't block clean process exit.
-        (heartbeat as unknown as { unref?: () => void }).unref?.();
-        teardown = () => {
-          if (closed) return;
-          closed = true;
-          clearInterval(heartbeat);
-          for (const unsub of unsubs) unsub();
-        };
-        const onAbort = (): void => {
-          teardown();
-          // `cancel` may already have ended the stream; closing twice throws.
-          try { controller.close(); } catch { /* already closed */ }
-        };
-        // A request aborted before the stream started never fires `abort` again.
-        if (request.signal.aborted) {
-          onAbort();
-          return;
-        }
-        request.signal.addEventListener('abort', onAbort, { once: true });
-        send(`event: ready\ndata: ${JSON.stringify({ domains: selectedDomains })}\n\n`);
-      },
-      cancel: () => {
-        teardown();
-      },
-    }, new CountQueuingStrategy({ highWaterMark: 256 }));
-
-    return new Response(stream, {
-      headers: {
-        'content-type': 'text/event-stream',
-        'cache-control': 'no-cache',
-        connection: 'keep-alive',
-      },
-    });
+    // The host says whether the view appeared; a known id it could not show is not opened.
+    return manager.open(id, pane);
   }
 }

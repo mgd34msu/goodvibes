@@ -14,7 +14,7 @@
  * was reaped and why, so a deletion is never indistinguishable from data
  * loss.
  */
-import { PersistentStore, persistentStoreOrphansReclaimed } from '../../state/persistent-store.js';
+import { PersistentStore } from '../../state/persistent-store.js';
 import { StoreWriteQueue } from '../../state/store-write-queue.js';
 import { summarizeError } from '../../utils/error-display.js';
 import { logger } from '../../utils/logger.js';
@@ -291,17 +291,7 @@ function summarize(
     ? ''
     : ` ${String(failures.length)} store(s) could not be swept: `
       + `${failures.map((failure) => `${failure.store} (${failure.detail})`).join('; ')}.`;
-  // Deleting files with nothing anywhere saying so is the exact objection this
-  // round raised against silent write-time bounding. `PersistentStore` reclaims
-  // temp files left by a process killed mid-write, and this is where that gets
-  // said out loud. Process-wide and cumulative, so it is worded as such, it
-  // includes stores this housekeeper does not own.
-  const orphans = persistentStoreOrphansReclaimed();
-  const reclaimed = orphans === 0
-    ? ''
-    : ` ${String(orphans)} orphaned temporary file(s) left by an interrupted write `
-      + 'have been reclaimed by this daemon since it started.';
-  return `${head} Retained ${retained}.${corrupt}${unresolved}${failed}${reclaimed}`;
+  return `${head} Retained ${retained}.${corrupt}${unresolved}${failed}`;
 }
 
 /**

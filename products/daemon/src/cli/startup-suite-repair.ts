@@ -1,9 +1,8 @@
 /** Repair a daemon-only historical upgrade before configuration can publish a
  * newer data floor that its still-old sibling programs cannot read. */
 import { defaultDownloadBaseUrl } from '@goodvibes-jev/engine/platform/platform/daemon';
-import { applySuiteUpdate, assertSuiteUpdateCurrent, installedSuiteNeedsRepair, retainSuiteUpdateConfiguration, captureUpdateFileIo, realUpdateFileIo,
+import { applySuiteUpdate, assertSuiteUpdateCurrent, installedSuiteNeedsRepair, retainSuiteUpdateConfiguration,
   type UpdateFetchLike } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
-import { retainNativeUpdateSources } from '@goodvibes-jev/engine/platform/platform/runtime/compiled-native-startup';
 import { createNetworkFetch } from '@goodvibes-jev/engine/platform/platform/runtime/transport';
 import { restartOntoUpdatedBinaryAsync } from '@goodvibes-jev/engine/terminal-shell/service-io';
 import { resolveInstalledDaemonUpdateArtifact } from '../config/native-installation.js';
@@ -45,12 +44,12 @@ export async function repairDaemonSuiteBeforeStartup(options: StartupSuiteRepair
   const releasesUrl = String(config.get('update.releasesUrl') ?? '').trim();
   if (!releasesUrl) throw new Error('The installed suite requires repair but no release feed is configured. Reinstall the complete released suite.');
   const workspace = config.retainConfiguredWorkspace();
-  const io = captureUpdateFileIo(realUpdateFileIo);
-  const sources = retainNativeUpdateSources([config.getConfigPath(), config.getProjectConfigPath(), config.getSharedTierPath(), config.getDaemonTierPath()]
-    .filter((path): path is string => path !== null && path !== undefined), io);
+  // The repair depends on three settings, read above; they are compared at each
+  // step instead of watching the whole settings files, so a sibling program
+  // saving an unrelated setting does not stop the repair.
   const get = config.get;
   const current = () => {
-    signal.throwIfAborted(); workspace.assertCurrent(); sources(); selected.assertCurrent();
+    signal.throwIfAborted(); workspace.assertCurrent(); selected.assertCurrent();
     if (config.get !== get || config.get('update.auto') !== true || String(config.get('update.releasesUrl') ?? '').trim() !== releasesUrl) throw new Error('Startup update policy changed');
   };
   current();

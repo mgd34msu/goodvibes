@@ -656,6 +656,16 @@ export class DaemonSurfaceDeliveryHelper {
       if (!record || (record.status !== 'completed' && record.status !== 'failed' && record.status !== 'cancelled')) {
         continue;
       }
+      // The agent's terminal event owns the answer: the reply pipeline sends it
+      // and the session broker stores it, each once. This loop sends only when
+      // that event never took the answer up (an agent ended with no event).
+      const finalOwner = this.context.channelReplyPipeline.finalOwner(pending.agentId);
+      if (finalOwner === 'in-flight') continue;
+      if (finalOwner !== 'none') {
+        syncFinishedAgentTask(record);
+        completed.push(pending.agentId);
+        continue;
+      }
       // The surface that ran the turn may be reporting this same answer; whoever
       // removes the entry first delivers it.
       if (this.context.pendingSurfaceReplies.get(pending.agentId) !== pending) continue;

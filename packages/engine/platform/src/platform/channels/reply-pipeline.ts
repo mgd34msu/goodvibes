@@ -122,6 +122,8 @@ interface ReplyBufferState {
   readonly deliveredEventIds: Set<string>;
   lastDeliveredText?: string | undefined;
   lastDeliveredAt?: number | undefined;
+  /** A final answer for this agent has been taken up (in flight or done); see `finalOwner`. */
+  finalTaken?: boolean | undefined;
   /**
    * Announcements dispatched for this reply, by phase: the sequence number in
    * the identity a surface deduplicates on (`announces` on the pending copy),
@@ -376,7 +378,25 @@ export class ChannelReplyPipeline {
     explicitText: string,
     options: { readonly keepTracking?: boolean } = {},
   ): Promise<ChannelRenderResult | null> {
+    const state = this.buffers.get(agentId);
+    if (state) state.finalTaken = true;
     return await this.runExclusive(agentId, async () => await this.deliverFinalExclusive(agentId, explicitText, options));
+  }
+
+  /**
+   * Who has this agent's final answer. The agent's own terminal event delivers
+   * it through this pipeline; anything else that notices the agent ended (the
+   * daemon's reply poll) sends the answer only when nobody has taken it up.
+   * - `untracked`: no reply is tracked for the agent (delivered and closed, or never queued).
+   * - `in-flight`: a final is being sent now.
+   * - `taken`: a final was sent and the reply stays tracked for a contract's later reports.
+   * - `none`: the agent is tracked and no final has been started.
+   */
+  finalOwner(agentId: string): 'untracked' | 'in-flight' | 'taken' | 'none' {
+    const state = this.buffers.get(agentId);
+    if (!state) return 'untracked';
+    if (!state.finalTaken) return 'none';
+    return this.deliveryChains.has(agentId) ? 'in-flight' : 'taken';
   }
 
   private async deliverFinalExclusive(

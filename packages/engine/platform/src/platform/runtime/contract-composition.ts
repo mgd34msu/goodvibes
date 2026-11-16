@@ -1,4 +1,5 @@
 import { isOpaqueContractId } from '../contract/types.js';
+import { decisionReceipt } from '../contract/decision-records.js';
 /**
  * contract-composition.ts, the contract runner as every composition builds it
  * (docs/design/contract-runner.md 2.2 and 11.3): the daemon-grade
@@ -274,12 +275,10 @@ export function composeContractRunner(options: ContractRunnerCompositionOptions)
       if (contract && pending('optional-review-binding-v1')) {
         if (contract.decisions.some(decision => {
           if (![`${contract.id}.final-answer-review`, `${contract.id}.goal-obligations`, `${contract.id}.original-obligations`].includes(decision.targetId)) return false;
-          try {
-            const receipt: unknown = JSON.parse(decision.reason);
-            return receipt !== null && typeof receipt === 'object' && !Array.isArray(receipt)
-              && (!Object.hasOwn(receipt, 'stateHash')
-                || decision.targetId === `${contract.id}.final-answer-review` && !Object.hasOwn(receipt, 'evidenceDigest'));
-          } catch { return false; }
+          const receipt = decisionReceipt(decision);
+          return receipt !== null && typeof receipt === 'object' && !Array.isArray(receipt)
+            && (!Object.hasOwn(receipt, 'stateHash')
+              || decision.targetId === `${contract.id}.final-answer-review` && !Object.hasOwn(receipt, 'evidenceDigest'));
         })) formats.push('optional-review-binding-v1');
       }
       if (contract?.inputSnapshot?.indexFingerprint.startsWith('git-index-v2:')) formats.push('contract-input-index-observations-v1');

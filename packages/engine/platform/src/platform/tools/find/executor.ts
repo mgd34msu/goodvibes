@@ -11,6 +11,7 @@ import { executeStructuralQuery } from './structural.js';
 import { executeSymbolsQuery } from './symbols.js';
 import type { FeatureFlagManager } from '../../runtime/feature-flags/index.js';
 import { FindRuntimeService, withFindWarnings } from './shared.js';
+import { findPageChars } from './pagination.js';
 import { summarizeError } from '../../utils/error-display.js';
 import { mapWithConcurrency } from '../../utils/concurrency.js';
 import { isInsideProductWorktrees } from '../../utils/walk-dir.js';
@@ -63,7 +64,6 @@ export function createFindTool(
 
     async execute(args: Record<string, unknown>, opts?: ToolExecuteOptions): Promise<{ success: boolean; output?: string; error?: string }> {
       try {
-        const before = JSON.stringify(args);
         const outsideProjectAllowed = allowOutsideProject();
         // What the currentness check threw, so a stale call still ends the whole
         // call while one query's own failure stays that query's result.
@@ -71,7 +71,6 @@ export function createFindTool(
         const current = () => {
           try {
             opts?.signal?.throwIfAborted(); assertCurrentToolInvocation(args, opts);
-            if (JSON.stringify(args) !== before) throw new Error('Find invocation changed');
             if (allowOutsideProject() !== outsideProjectAllowed) throw new Error('Find permission mode changed');
           } catch (error) { staleError ??= error; throw error; }
         };
@@ -107,7 +106,9 @@ export function createFindTool(
 
         // Handed to the modes that read file text; they apply it as content mode does.
         const withReadAccess = <T extends object>(options: T): T => (readAccessFilter ? { ...options, readAccessFilter } : options);
-        const output: OutputOptions = input.output ?? {};
+        // Each query pages to its share of the call's ceiling, so the serialized
+        // call fits one tool result and every query keeps its continuation.
+        const output: OutputOptions = { ...(input.output ?? {}), page_chars: findPageChars(input.output ?? {}, input.queries.length) };
         const parallel = input.parallel !== false;
 
         const runQuery = async (query: FindQuery): Promise<[string, Record<string, unknown>]> => {
@@ -122,7 +123,7 @@ export function createFindTool(
                 result = await executeContentQuery(query, output, runtime, projectRoot, readAccessFilter, queryOptions, intelligence);
                 break;
               case 'symbols':
-                result = await executeSymbolsQuery(query, output, projectRoot, withReadAccess(queryOptions));
+                result = await executeSymbolsQuery(query, output, projectRoot, withReadAccess(queryOptions), runtime, intelligence);
                 break;
               case 'references':
                 result = await executeReferencesQuery(query, output, projectRoot, walkOptions, readAccessFilter, intelligence);

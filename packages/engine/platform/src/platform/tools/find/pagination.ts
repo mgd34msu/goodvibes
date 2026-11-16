@@ -8,6 +8,27 @@ import { DEFAULT_CEILING_TOKENS } from '../../runtime/tools/output-policy.js';
  */
 const CHARS_PER_TOKEN = 4;
 export const DEFAULT_FIND_PAGE_CHARS = DEFAULT_CEILING_TOKENS.find * CHARS_PER_TOKEN;
+/** Rows on a page when the caller sets neither max_results nor max_total_matches. */
+export const DEFAULT_PAGE_SIZE = 100;
+/** Room kept per query for its id, wrapper keys and the fields added after paging. */
+const PER_QUERY_WRAPPER_CHARS = 512;
+/** Room kept for the call's own wrapper. */
+const CALL_WRAPPER_CHARS = 512;
+
+/**
+ * Each query's page size in characters, so the whole call fits the ceiling the
+ * conversation applies to one tool result (the caller's `max_tokens`, or the
+ * default result ceiling): the ceiling is shared among the queries. Find owns
+ * the size of its result; nothing downstream has to cut it.
+ */
+export function findPageChars(output: OutputOptions, queryCount: number): number {
+  const explicit = output.max_tokens !== undefined && Number.isSafeInteger(output.max_tokens) && output.max_tokens > 0
+    ? output.max_tokens * CHARS_PER_TOKEN
+    : undefined;
+  const callChars = explicit ?? DEFAULT_CEILING_TOKENS.read * CHARS_PER_TOKEN;
+  const share = Math.floor((callChars - CALL_WRAPPER_CHARS) / Math.max(1, queryCount)) - PER_QUERY_WRAPPER_CHARS;
+  return Math.max(1, Math.min(explicit ?? DEFAULT_FIND_PAGE_CHARS, share));
+}
 
 /** Pagination limits output, never search coverage or the reported total. */
 export function paginateFindResult(result: Record<string, unknown>, output: OutputOptions): Record<string, unknown> {
@@ -20,15 +41,13 @@ export function paginateFindResult(result: Record<string, unknown>, output: Outp
   const rows: unknown[] = groups ? groups.flatMap(([, rows]) => rows) : value as unknown[];
   if (!Array.isArray(rows)) return result;
   const offset = output.offset ?? 0;
-  const limit = output.max_total_matches ?? output.max_results ?? 100;
+  const limit = output.max_total_matches ?? output.max_results ?? DEFAULT_PAGE_SIZE;
   if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(limit) || limit < 0) return { error: 'Pagination offset and page size must be nonnegative integers' };
   // A page of zero rows could never be continued: has_more would be true with no next_offset.
   if (limit === 0) return { error: "max_results and max_total_matches must be at least 1 (use output.format 'count_only' to get only the count)" };
   const perFile = output.max_per_item;
   if (perFile !== undefined && (!Number.isSafeInteger(perFile) || perFile < 0)) return { error: 'max_per_item must be a nonnegative integer' };
-  const budgetChars = output.max_tokens !== undefined && Number.isSafeInteger(output.max_tokens) && output.max_tokens > 0
-    ? output.max_tokens * CHARS_PER_TOKEN
-    : DEFAULT_FIND_PAGE_CHARS;
+  const budgetChars = output.page_chars ?? findPageChars(output, 1);
   const counts = new Map<string, number>();
   const eligible = perFile === undefined || key === 'files' ? rows : rows.filter(row => {
     const file = row && typeof row === 'object' ? (row as { file?: string }).file : undefined;

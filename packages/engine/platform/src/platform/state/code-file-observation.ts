@@ -8,7 +8,7 @@ import { basename, dirname, isAbsolute, join, relative } from 'node:path';
 import { captureExistingDirectory } from '../utils/atomic-json-store.js';
 import { fileObservationIdentity, readFileObservation } from '../utils/file-observation.js';
 import { assertCapturedToolReadAccess } from '../tools/shared/captured-input-tools.js';
-import { addFindWarning, type FindDiagnostics } from '../tools/find/shared.js';
+import { addFindWarning, hasBinaryPrefix, type FindDiagnostics } from '../tools/find/shared.js';
 import { summarizeError } from '../utils/error-display.js';
 
 /** The observed source (or its parent directory) is no longer the one that was read. */
@@ -31,6 +31,11 @@ export function codeContentRevision(bytes: Uint8Array): string {
 }
 
 export function captureCodeFileObservation(root: string, path: string, maxBytes = Infinity): CodeFileObservation {
+  return observeCodeFile(root, path, maxBytes, false) as CodeFileObservation;
+}
+
+/** One read; with `skipBinary`, bytes with a NUL in their first 8 KB answer 'binary' before any decode or hash. */
+function observeCodeFile(root: string, path: string, maxBytes: number, skipBinary: boolean): CodeFileObservation | 'binary' {
   const rootOwner = captureExistingDirectory(root), parent = captureExistingDirectory(dirname(path));
   const selected = join(parent.canonical, basename(path)), rel = relative(rootOwner.canonical, selected);
   if (!rel || rel === '..' || rel.startsWith('../') || rel.startsWith('..\\') || isAbsolute(rel)) throw new Error('Code source is outside its original root');
@@ -48,17 +53,19 @@ export function captureCodeFileObservation(root: string, path: string, maxBytes 
     }
   };
   assertCurrent();
+  if (skipBinary && hasBinaryPrefix(observation.bytes)) return 'binary';
   const content = new TextDecoder('utf-8').decode(observation.bytes);
   const revision = codeContentRevision(observation.bytes);
   return Object.freeze({ content, revision, size: observation.bytes.length, mtimeMs: observation.mtimeMs, assertCurrent });
 }
 
 /** The indexer's read: captured-read admission, then the text and its revision
- * from the same no-follow descriptor read. */
-export async function readCodeIndexFile(root: string, path: string, diagnostics: FindDiagnostics, maxBytes: number): Promise<CodeFileObservation | null> {
+ * from the same no-follow descriptor read. 'binary' for a file whose first 8 KB
+ * hold a NUL byte, decided from the bytes that one read returned; null when unreadable. */
+export async function readCodeIndexFile(root: string, path: string, diagnostics: FindDiagnostics, maxBytes: number): Promise<CodeFileObservation | 'binary' | null> {
   try {
     await assertCapturedToolReadAccess(path);
-    return captureCodeFileObservation(root, path, maxBytes);
+    return observeCodeFile(root, path, maxBytes, true);
   } catch (error) {
     addFindWarning(diagnostics, `Skipped unreadable file '${path}': ${summarizeError(error)}`);
     return null;

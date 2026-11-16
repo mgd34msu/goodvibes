@@ -1,3 +1,4 @@
+import { relative, isAbsolute, sep } from 'node:path';
 import { paginateFindResult } from './pagination.js';
 import type { FindSearchOptions } from './shared.js';
 import { assertCapturedToolReadAccess } from '../shared/captured-input-tools.js';
@@ -10,18 +11,50 @@ import {
   addBudgetStopWarning,
   addDiscoveryCutWarning,
   addFindWarning,
-  collectTextFiles,
+  addSearchSkipWarnings,
+  collectFilesForSearch,
   createFindDiagnostics,
+  createSearchSkips,
   makeCountResult,
   makeFilesResult,
   makeLocationsResult,
-  readTextFile,
+  readSearchFile,
   withFindWarnings,
   validateSearchPath,
 } from './shared.js';
 
-/** The part of the code-intelligence facade the find tool uses. */
-export type FindCodeIntelligence = Pick<CodeIntelligence, 'getReferences' | 'getEnclosingScope'>;
+/**
+ * The part of the code-intelligence facade the find tool uses. `lookupReferences`
+ * says whether the language server answered; `getSymbols` and `hasTreeSitter`
+ * serve symbols mode. An instance without them is asked only what it has.
+ */
+export type FindCodeIntelligence = Pick<CodeIntelligence, 'getEnclosingScope'>
+  & Partial<Pick<CodeIntelligence, 'getReferences' | 'lookupReferences' | 'getSymbols' | 'hasTreeSitter'>>;
+
+/** What the language server said about the references at a position. */
+type ServerReferences =
+  | { readonly state: 'answered'; readonly locations: readonly import('../../intelligence/lsp/protocol.js').Location[] }
+  | { readonly state: 'no-server' | 'failed'; readonly reason: string };
+
+async function askServer(ci: FindCodeIntelligence | undefined, file: string, line: number, column: number): Promise<ServerReferences> {
+  if (!ci) return { state: 'no-server', reason: 'no code intelligence is attached to this tool' };
+  if (ci.lookupReferences) {
+    const lookup = await ci.lookupReferences(file, line, column);
+    if (lookup.status === 'ok') return { state: 'answered', locations: lookup.items };
+    const reason = [lookup.reason, ...lookup.next].join(' ');
+    return { state: lookup.status === 'no-server' || lookup.status === 'unsupported' ? 'no-server' : 'failed', reason };
+  }
+  // An instance that reports no status: a non-empty list is an answer, an empty one cannot be told from no server.
+  const locations = ci.getReferences ? await ci.getReferences(file, line, column) : [];
+  return locations.length > 0
+    ? { state: 'answered', locations }
+    : { state: 'no-server', reason: 'no language server answered (the attached code intelligence reports no status, and returned no references)' };
+}
+
+function within(basePath: string, file: string): boolean {
+  const rel = relative(basePath, file);
+  return rel === '' || (!isAbsolute(rel) && rel !== '..' && !rel.startsWith(`..${sep}`));
+}
 
 function withFallbackReason<T extends Record<string, unknown>>(
   result: T,
@@ -54,7 +87,6 @@ async function scanReferencesQuery(
     line: number;
   }
   let locations: ReferenceLocation[] = [];
-  let lspFallbackReason = 'no language server answered (none is attached to this tool, or it returned no references); matched the symbol name as text';
   let skippedInvalidLspUris = 0;
   const diagnostics = createFindDiagnostics();
 
@@ -63,7 +95,7 @@ async function scanReferencesQuery(
   /** Drops locations in files the read gate holds back; names are not shown either. */
   const readable = async (found: ReferenceLocation[]): Promise<ReferenceLocation[]> => {
     const files = [...new Set(found.map((l) => l.file))];
-    const { allowed, restricted } = await partitionByReadAccess(files, (f) => f, readAccessFilter);
+    const { restricted } = await partitionByReadAccess(files, (f) => f, readAccessFilter);
     if (restricted.length === 0) return found;
     const denied = new Set(restricted);
     restrictedCount += found.filter((l) => denied.has(l.file)).length;
@@ -73,57 +105,43 @@ async function scanReferencesQuery(
     const note = accessRestrictedNote(restrictedCount);
     if (note) addFindWarning(diagnostics, note);
   };
+  let server: ServerReferences;
   try {
     const ci = typeof intelligence === 'function' ? await intelligence() : intelligence;
-    const lspLocations = ci ? await ci.getReferences(sourcePath, query.line - 1, query.column) : [];
-    if (lspLocations.length > 0) {
-      for (const loc of lspLocations) {
-
-        try {
-          const filePath = uriToPath(loc.uri);
-          locations.push({ file: filePath, line: loc.range.start.line + 1 });
-        } catch (err) {
-          skippedInvalidLspUris++;
-          addFindWarning(diagnostics, `Skipped invalid LSP reference URI '${loc.uri}': ${summarizeError(err)}`);
-        }
-      }
-
-      locations = await readable(locations);
-      noteRestricted();
-      const source = skippedInvalidLspUris > 0 ? 'lsp_with_invalid_uri_skips' : undefined;
-      if (output.format === 'count_only') {
-        return withFindWarnings(
-          skippedInvalidLspUris > 0
-            ? { ...makeCountResult(locations.length, source), invalid_lsp_uri_count: skippedInvalidLspUris }
-            : makeCountResult(locations.length),
-          diagnostics.warnings,
-        );
-      }
-      if (output.format === 'files_only') {
-        const uniqueFiles = [...new Set(locations.map((l) => l.file))];
-        return withFindWarnings(
-          skippedInvalidLspUris > 0
-            ? {
-                ...makeFilesResult(uniqueFiles, locations.length, source),
-                invalid_lsp_uri_count: skippedInvalidLspUris,
-              }
-            : makeFilesResult(uniqueFiles, locations.length),
-          diagnostics.warnings,
-        );
-      }
-      return withFindWarnings(
-        skippedInvalidLspUris > 0
-          ? {
-              ...makeLocationsResult(locations, locations.length, source),
-              invalid_lsp_uri_count: skippedInvalidLspUris,
-            }
-          : makeLocationsResult(locations, locations.length),
-        diagnostics.warnings,
-      );
-    }
+    server = await askServer(ci, sourcePath, query.line - 1, query.column);
   } catch (err) {
-    lspFallbackReason = `lsp unavailable: ${summarizeError(err)}`;
+    server = { state: 'failed', reason: `the language-server lookup failed: ${summarizeError(err)}` };
   }
+  if (server.state === 'answered') {
+    // The server's answer is the result, an empty one included: no text scan follows it.
+    let outside = 0;
+    for (const loc of server.locations) {
+      try {
+        const filePath = uriToPath(loc.uri);
+        // `path` scopes the answer the same way it scopes the text search.
+        if (!within(basePath, filePath)) { outside++; continue; }
+        locations.push({ file: filePath, line: loc.range.start.line + 1 });
+      } catch (err) {
+        skippedInvalidLspUris++;
+        addFindWarning(diagnostics, `Skipped invalid LSP reference URI '${loc.uri}': ${summarizeError(err)}`);
+      }
+    }
+    if (outside > 0) addFindWarning(diagnostics, `${outside} reference(s) outside path '${query.path ?? '.'}' were left out; widen path to include them.`);
+
+    locations = await readable(locations);
+    noteRestricted();
+    const source = skippedInvalidLspUris > 0 ? 'lsp_with_invalid_uri_skips' : 'lsp';
+    const extra = skippedInvalidLspUris > 0 ? { invalid_lsp_uri_count: skippedInvalidLspUris } : {};
+    if (output.format === 'count_only') {
+      return withFindWarnings({ ...makeCountResult(locations.length, source), ...extra }, diagnostics.warnings);
+    }
+    if (output.format === 'files_only') {
+      const uniqueFiles = [...new Set(locations.map((l) => l.file))];
+      return withFindWarnings({ ...makeFilesResult(uniqueFiles, locations.length, source), ...extra }, diagnostics.warnings);
+    }
+    return withFindWarnings({ ...makeLocationsResult(locations, locations.length, source), ...extra }, diagnostics.warnings);
+  }
+  const lspFallbackReason = `${server.reason}; matched the symbol name as text`;
 
   if (!query.symbol) {
     return withFindWarnings(
@@ -142,7 +160,8 @@ async function scanReferencesQuery(
     return { error: `Invalid symbol name: ${query.symbol}` };
   }
 
-  const files = await collectTextFiles(basePath, diagnostics, walkOptions);
+  const files = await collectFilesForSearch(basePath, undefined, diagnostics, walkOptions);
+  const skips = createSearchSkips();
   if (walkOptions.shouldContinue?.() === false) addDiscoveryCutWarning(diagnostics, files.length);
   for (const [fileIndex, file] of files.entries()) {
     walkOptions.signal?.throwIfAborted();
@@ -152,9 +171,10 @@ async function scanReferencesQuery(
       break;
     }
 
-    const content = await readTextFile(file, diagnostics);
-    if (content === null) continue;
-    const lines = content.split('\n');
+    const read = await readSearchFile(file, diagnostics, skips);
+    if (read === null) continue;
+    if (!read.text.includes(query.symbol)) continue;
+    const lines = read.text.split('\n');
     for (let i = 0; i < lines.length; i++) {
 
       regex.lastIndex = 0;
@@ -164,6 +184,7 @@ async function scanReferencesQuery(
     }
   }
 
+  addSearchSkipWarnings(diagnostics, skips);
   locations = await readable(locations);
   noteRestricted();
 

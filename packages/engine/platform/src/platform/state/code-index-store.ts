@@ -16,7 +16,8 @@ import { DirectoryWalk } from '../utils/walk-dir.js';
  *     itself lives in code-index-chunking.ts)
  *   - the file-walk helpers already shipped for the `find` tool
  *     (tools/find/shared.ts: createNestedIgnoreMatcher, collectGlobFiles,
- *     isBinary), no new ignore-file parsing or directory-walk logic. Ignore
+ *     hasBinaryPrefix on the bytes of the one read), no new ignore-file
+ *     parsing or directory-walk logic. Ignore
  *     rules: every .gitignore between the root and a file, each applied
  *     relative to its own directory and read where it lives, with no cap; an
  *     ignored file is never read or sent to an embedding provider.
@@ -96,7 +97,6 @@ import {
   collectGlobFiles,
   createFindDiagnostics,
   createNestedIgnoreMatcher,
-  isBinary,
 } from '../tools/find/shared.js';
 import { adoptSqliteDatabase } from './sqlite-file.js';
 import { CodeSourceChangedError, readCodeIndexFile, type CodeFileObservation } from './code-file-observation.js';
@@ -599,14 +599,14 @@ export class CodeIndexStore {
       deleteChunksForPath(this.db, rel);
       return { indexed: false, mode: 'empty' };
     }
-    const binary = await isBinary(absPath, diagnostics);
+
+    // One read: the binary verdict comes from the bytes it returned.
+    const source = await readCodeIndexFile(this.rootDir, absPath, diagnostics, maxFileBytes);
     if (this.epoch !== callEpoch || !this.db) return { indexed: false, mode: 'empty' };
-    if (binary) {
+    if (source === 'binary') {
       deleteChunksForPath(this.db, rel);
       return { indexed: false, mode: 'empty' };
     }
-
-    const source = await readCodeIndexFile(this.rootDir, absPath, diagnostics, maxFileBytes);
     if (source === null) return { indexed: false, mode: 'empty' };
 
     const outcome = await this.indexFileContent(rel, absPath, source, callEpoch, false);
@@ -696,15 +696,13 @@ export class CodeIndexStore {
         keepPaths.add(rel);
         continue;
       }
-      const binary = await isBinary(absPath, diagnostics);
+      // One read: the binary verdict comes from the bytes it returned.
+      const source = await readCodeIndexFile(this.rootDir, absPath, diagnostics, Math.min(maxFileBytes, maxTotalBytes - totalBytes));
       if (this.epoch !== buildEpoch) return abortedBuildStats(startedAt, candidateFiles.length, skip, this.abortReason());
-      if (binary) {
+      if (source === 'binary') {
         skip.binary++;
         continue;
       }
-
-      const source = await readCodeIndexFile(this.rootDir, absPath, diagnostics, Math.min(maxFileBytes, maxTotalBytes - totalBytes));
-      if (this.epoch !== buildEpoch) return abortedBuildStats(startedAt, candidateFiles.length, skip, this.abortReason());
       if (source === null) {
         skip.readErrors++;
         // An unreadable file still exists; keep what the index has until it reads again.

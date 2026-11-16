@@ -2,7 +2,6 @@ import type { FindSearchOptions } from './shared.js';
 import { paginateFindResult } from './pagination.js';
 import type { WalkDirOptions } from '../../utils/walk-dir.js';
 import { assertCapturedToolAccessCurrent } from '../shared/captured-input-tools.js';
-import { stat as statAsync } from 'node:fs/promises';
 import { isAbsolute, relative } from 'node:path';
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
 import { decisionOrClassic } from '../../runtime/decision-policy.js';
@@ -13,17 +12,20 @@ import { createSafeRegex } from '../../utils/safe-regex.js';
 import {
   collectFilesForSearch,
   createFindDiagnostics,
+  createSearchSkips,
   addDiscoveryCutWarning,
   addFindWarning,
-  isBinary,
+  addSearchSkipWarnings,
   makeCountResult,
   makeFilesResult,
   makeLocationsResult,
-  readTextFile,
+  readSearchFile,
+  statSearchFile,
   FindRuntimeService,
   validateSearchPath,
   withFindWarnings,
 } from './shared.js';
+import type { AdmittedRegex } from '@goodvibes-jev/engine/errors';
 import { partitionByReadAccess, accessRestrictedNote, type ReadAccessFilter } from '../shared/read-access.js';
 import type { FindCodeIntelligence } from './references.js';
 
@@ -86,11 +88,9 @@ async function scanContentQuery(
   options: FindSearchOptions = {},
   intelligence?: () => Promise<FindCodeIntelligence>,
 ): Promise<Record<string, unknown>> {
-  const before = JSON.stringify([query, output]);
   const current = () => {
     options.signal?.throwIfAborted(); options.beforeAttempt?.();
     if (options.assertCurrent !== options.beforeAttempt) options.assertCurrent?.();
-    if (JSON.stringify([query, output]) !== before) throw new Error('Find regex request changed');
   };
   current();
   const walkOptions: WalkDirOptions = { ...options, beforeAttempt: current };
@@ -156,24 +156,30 @@ async function scanContentQuery(
     if (restrictedNote) addFindWarning(diagnostics, restrictedNote);
   };
 
+  const skips = createSearchSkips();
+  const literal = requiredLiteral(searchedPattern, query.case_sensitive === false);
+
   if (query.negate) {
     const nonMatchingFiles: string[] = [];
     if (discoveryCut) addDiscoveryCutWarning(diagnostics, files.length);
+    const scan = new BatchedLineScan(regex);
+    const textFiles: string[] = [];
     for (const [fileIndex, file] of files.entries()) {
       if (options.shouldContinue?.() === false) {
         addFindWarning(diagnostics, `Stopped at the time budget: checked ${fileIndex} of ${files.length} files, so the list of non-matching files is incomplete. `
           + "Narrow 'path' or 'glob', or pass a larger timeout_ms.");
         break;
       }
-      const content = await readTextFile(file, diagnostics);
-      if (content === null) continue;
-      // A binary file is not "text without the pattern".
-      if (await isBinary(file, diagnostics)) continue;
-      if (!await regex.test(content)) {
-        nonMatchingFiles.push(file);
-
-      }
+      // A binary file is not "text without the pattern": readSearchFile skips it.
+      const read = await readSearchFile(file, diagnostics, skips);
+      if (read === null) continue;
+      textFiles.push(file);
+      if (literal !== undefined && !literal.test(read.text)) continue;
+      await scan.add(file, read.text);
     }
+    const matched = new Set((await scan.finish()).map((hit) => hit.file));
+    for (const file of textFiles) if (!matched.has(file)) nonMatchingFiles.push(file);
+    addSearchSkipWarnings(diagnostics, skips);
     const reported = await onlyReadable(nonMatchingFiles);
     noteRestricted();
     if (format === 'count_only') return withFindWarnings(makeCountResult(reported.length), diagnostics.warnings);
@@ -195,8 +201,6 @@ async function scanContentQuery(
   let matchedFiles: Map<string, { content: string; matches: ContentMatch[] }>;
   let totalMatches: number;
   let scanStoppedAt: number | undefined;
-  // Each file's mtime is taken BEFORE its text is read: a file that changes in between is cached as
-  // old text under the old mtime, so the next call sees the newer mtime and rereads it.
   const fileMtimesForCache = new Map<string, number>();
 
   if (cacheValid && cachedEntry) {
@@ -205,25 +209,28 @@ async function scanContentQuery(
   } else {
     matchedFiles = new Map<string, { content: string; matches: ContentMatch[] }>();
     totalMatches = 0;
-
+    // Each file is read once (stat, then one read; text or binary is decided
+    // from the bytes in hand) and its lines go to the isolated regex executor
+    // in batches of many files, one round trip per batch.
+    const scan = new BatchedLineScan(regex);
     for (const [fileIndex, file] of files.entries()) {
       // The call's time budget ran out: stop with what was found and say how far the search got.
       if (options.shouldContinue?.() === false) { scanStoppedAt = fileIndex; break; }
-
-      try { fileMtimesForCache.set(file, (await statAsync(file)).mtimeMs); } catch { fileMtimesForCache.set(file, 0); }
-      const content = await readTextFile(file, diagnostics);
-      if (content === null) continue;
-      if (await isBinary(file, diagnostics)) continue;
-
-      // Lines are matched without their CRLF terminator, so `foo$` matches a Windows file too.
-      const searchable = content.includes('\r\n') ? content.replace(/\r\n/g, '\n') : content;
-      const lines = searchable.split('\n');
+      // The mtime is taken by the stat before the read: a file that changes in between is cached as
+      // old text under the old mtime, so the next call sees the newer mtime and rereads it.
+      const info = await statSearchFile(file);
+      fileMtimesForCache.set(file, info?.mtimeMs ?? 0);
+      const read = await readSearchFile(file, diagnostics, skips, info);
+      if (read === null) continue;
+      // A pattern with a required literal cannot match a file without it.
+      if (literal !== undefined && !literal.test(read.text)) continue;
+      await scan.add(file, read.text);
+    }
+    for (const hit of await scan.finish()) {
+      const lines = hit.searchable.split('\n');
       const fileMatches: ContentMatch[] = [];
-
-      // Match in the isolated worker once per file, not once per source line.
-      // The worker resets lastIndex for each line, preserving search semantics.
-      for (const i of await regex.matchingLines(searchable)) {
-        const match: ContentMatch = { file, line: i + 1, text: lines[i]! };
+      for (const i of hit.lines) {
+        const match: ContentMatch = { file: hit.file, line: i + 1, text: lines[i]! };
         if (format === 'context') {
           match.context_before = lines.slice(Math.max(0, i - ctxBefore), i);
           match.context_after = lines.slice(i + 1, i + 1 + ctxAfter);
@@ -231,12 +238,10 @@ async function scanContentQuery(
         fileMatches.push(match);
         totalMatches++;
       }
-
-      if (fileMatches.length > 0) {
-        matchedFiles.set(file, { content, matches: fileMatches });
-      }
+      matchedFiles.set(hit.file, { content: hit.content, matches: fileMatches });
     }
   }
+  addSearchSkipWarnings(diagnostics, skips);
 
   if (scanStoppedAt === undefined && discoveryCut && !cacheValid) scanStoppedAt = files.length;
   if (scanStoppedAt !== undefined) {
@@ -287,7 +292,7 @@ async function scanContentQuery(
     for (const [file, entry] of matchedFiles) {
       if (!ci) break;
       // Cached entries keep no text; the file is unchanged since the cache entry was checked.
-      const content = entry.content !== '' ? entry.content : await readTextFile(file, diagnostics) ?? '';
+      const content = entry.content !== '' ? entry.content : (await readSearchFile(file, diagnostics, createSearchSkips()))?.text ?? '';
       for (const m of entry.matches) {
         try {
           const scope = await ci.getEnclosingScope(file, content, m.line);
@@ -395,6 +400,110 @@ async function scanContentQuery(
 
   regex.assertCurrent();
   return withFindWarnings(makeCountResult(totalMatches), diagnostics.warnings);
+}
+
+/** Characters of file text sent to the regex executor in one message. */
+const SCAN_BATCH_CHARS = 4 * 1024 * 1024;
+/** Files sent to the regex executor in one message. */
+const SCAN_BATCH_FILES = 1024;
+
+interface ScanHit {
+  readonly file: string;
+  /** The text as read. */
+  readonly content: string;
+  /** The text the lines were matched in (CRLF read as LF). */
+  readonly searchable: string;
+  /** Zero-based matching line numbers, ascending. */
+  readonly lines: readonly number[];
+}
+
+/**
+ * Line matching for many files in one executor round trip per batch. The
+ * files' texts are joined with a newline, so the joined lines are exactly each
+ * file's lines in order, and the executor's line numbers map back to a file and
+ * its own line by the line counts. The executor matches each line on its own,
+ * as before, so no match can span two files.
+ */
+class BatchedLineScan {
+  private batch: Array<{ file: string; content: string; searchable: string; lineCount: number }> = [];
+  private batchChars = 0;
+  private readonly hits: ScanHit[] = [];
+
+  constructor(private readonly regex: AdmittedRegex) {}
+
+  async add(file: string, content: string): Promise<void> {
+    // Lines are matched without their CRLF terminator, so `foo$` matches a Windows file too.
+    const searchable = content.includes('\r\n') ? content.replace(/\r\n/g, '\n') : content;
+    this.batch.push({ file, content, searchable, lineCount: countLines(searchable) });
+    this.batchChars += searchable.length + 1;
+    if (this.batchChars >= SCAN_BATCH_CHARS || this.batch.length >= SCAN_BATCH_FILES) await this.flush();
+  }
+
+  async finish(): Promise<readonly ScanHit[]> {
+    await this.flush();
+    return this.hits;
+  }
+
+  private async flush(): Promise<void> {
+    const batch = this.batch;
+    if (batch.length === 0) return;
+    this.batch = [];
+    this.batchChars = 0;
+    const matched = await this.regex.matchingLines(batch.length === 1 ? batch[0]!.searchable : batch.map((entry) => entry.searchable).join('\n'));
+    let entryIndex = 0;
+    let firstLine = 0;
+    let current: number[] = [];
+    const close = (): void => {
+      if (current.length === 0) return;
+      const entry = batch[entryIndex]!;
+      this.hits.push({ file: entry.file, content: entry.content, searchable: entry.searchable, lines: current });
+      current = [];
+    };
+    for (const line of matched) {
+      while (line >= firstLine + batch[entryIndex]!.lineCount) {
+        close();
+        firstLine += batch[entryIndex]!.lineCount;
+        entryIndex++;
+      }
+      current.push(line - firstLine);
+    }
+    close();
+  }
+}
+
+/** Lines in `text` as `split('\n')` counts them, without building the array. */
+function countLines(text: string): number {
+  let count = 1;
+  for (let at = text.indexOf('\n'); at !== -1; at = text.indexOf('\n', at + 1)) count++;
+  return count;
+}
+
+/**
+ * The text every match of `pattern` must contain, when the pattern is plain
+ * text (letters, digits, spaces and escaped punctuation, no operators). A file
+ * without it is not sent to the regex executor. Case-insensitive search uses
+ * it only when it is ASCII, where lowercasing both sides is exact.
+ */
+function requiredLiteral(pattern: string, caseInsensitive: boolean): { test(text: string): boolean } | undefined {
+  let literal = '';
+  for (let i = 0; i < pattern.length; i++) {
+    const ch = pattern[i]!;
+    if (ch === '\\') {
+      const next = pattern[i + 1];
+      if (next === undefined || /[A-Za-z0-9]/.test(next)) return undefined;
+      literal += next;
+      i++;
+      continue;
+    }
+    if ('^$.|?*+()[]{}'.includes(ch)) return undefined;
+    literal += ch;
+  }
+  if (literal.length === 0) return undefined;
+  if (!caseInsensitive) return { test: (text) => text.includes(literal) };
+  // eslint-disable-next-line no-control-regex
+  if (!/^[\x00-\x7F]*$/.test(literal)) return undefined;
+  const lower = literal.toLowerCase();
+  return { test: (text) => text.toLowerCase().includes(lower) };
 }
 
 export async function executeContentQuery(...args: Parameters<typeof scanContentQuery>): Promise<Record<string, unknown>> {

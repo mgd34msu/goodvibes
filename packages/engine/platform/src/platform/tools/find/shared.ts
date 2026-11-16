@@ -34,14 +34,6 @@ export interface QueryBase {
   path?: string | undefined;
 }
 
-async function statCachedSearchFile(filePath: string): Promise<Awaited<ReturnType<typeof statAsync>> | null> {
-  try {
-    return await statAsync(filePath);
-  } catch {
-    return null;
-  }
-}
-
 export interface FilesQuery extends QueryBase {
   mode: 'files';
   patterns?: string[] | undefined;
@@ -112,6 +104,11 @@ export interface OutputOptions {
   max_tokens?: number | undefined;
   preview_lines?: number | undefined;
   max_line_length?: number | undefined;
+  /**
+   * Set by the tool, not the caller: this query's share of the call's output
+   * ceiling in characters, so the serialized call always fits in one result.
+   */
+  page_chars?: number | undefined;
 }
 
 export interface FindInput {
@@ -215,21 +212,78 @@ export function makeLocationsResult<TLocation>(
 export const VALID_SYMBOL_KINDS = new Set(['function', 'class', 'interface', 'type', 'variable', 'constant', 'enum']);
 const BINARY_CHECK_BYTES = 8192;
 
-export async function isBinary(filePath: string, diagnostics?: FindDiagnostics): Promise<boolean> {
+/** A text search does not open a file larger than this; the result counts the files skipped. */
+export const SEARCH_MAX_FILE_BYTES = 8 * 1024 * 1024;
+
+/** What one search over many files skipped without reading, reported once per query. */
+export interface SearchSkips {
+  /** Files over {@link SEARCH_MAX_FILE_BYTES}. */
+  large: number;
+  /** Files with a NUL byte in their first 8 KB. */
+  binary: number;
+}
+
+export function createSearchSkips(): SearchSkips {
+  return { large: 0, binary: 0 };
+}
+
+/** One warning for the files a search skipped by size; binary files are not text and are not reported. */
+export function addSearchSkipWarnings(diagnostics: FindDiagnostics, skips: SearchSkips): void {
+  if (skips.large > 0) {
+    addFindWarning(diagnostics, `Skipped ${skips.large} file(s) larger than ${SEARCH_MAX_FILE_BYTES / (1024 * 1024)} MiB; they were not searched. `
+      + 'Search one with exec (for example rg), or read a range of it with the read tool.');
+  }
+}
+
+export interface SearchFile {
+  readonly text: string;
+  readonly mtimeMs: number;
+}
+
+const searchTextDecoder = new TextDecoder();
+
+/** Whether bytes already read are binary: a NUL byte in the first 8 KB. */
+export function hasBinaryPrefix(bytes: Uint8Array): boolean {
+  const probe = Math.min(bytes.length, BINARY_CHECK_BYTES);
+  for (let i = 0; i < probe; i++) {
+    if (bytes[i] === 0) return true;
+  }
+  return false;
+}
+
+/** The size and modification time of a file, or null when it cannot be read. */
+export async function statSearchFile(filePath: string): Promise<{ size: number; mtimeMs: number } | null> {
+  try {
+    const info = await statAsync(filePath);
+    return info.isFile() ? { size: info.size, mtimeMs: info.mtimeMs } : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A file's text for a search, read once: one stat for the size bound and the
+ * modification time, then one read, and the binary verdict from the first 8 KB
+ * of the bytes already in hand. Null for a binary, oversized or unreadable file
+ * (an unreadable one adds a warning). `known` is a stat the caller already made.
+ */
+export async function readSearchFile(
+  filePath: string,
+  diagnostics: FindDiagnostics | undefined,
+  skips: SearchSkips,
+  known?: { size: number; mtimeMs: number } | null,
+): Promise<SearchFile | null> {
   try {
     await assertCapturedToolReadAccess(filePath);
-    const file = Bun.file(filePath);
-    const size = file.size;
-    if (size === 0) return false;
-    const chunk = await file.slice(0, BINARY_CHECK_BYTES).arrayBuffer();
-    const bytes = new Uint8Array(chunk);
-    for (const byte of bytes) {
-      if (byte === 0) return true;
-    }
-    return false;
+    const info = known !== undefined ? known : await statSearchFile(filePath);
+    if (!info) throw new Error('not a readable file');
+    if (info.size > SEARCH_MAX_FILE_BYTES) { skips.large++; return null; }
+    const bytes = await Bun.file(filePath).bytes();
+    if (hasBinaryPrefix(bytes)) { skips.binary++; return null; }
+    return { text: searchTextDecoder.decode(bytes), mtimeMs: info.mtimeMs };
   } catch (err) {
-    addFindWarning(diagnostics, `Skipped '${filePath}' because binary detection failed: ${summarizeError(err)}`);
-    return true;
+    addFindWarning(diagnostics, `Skipped unreadable file '${filePath}': ${summarizeError(err)}`);
+    return null;
   }
 }
 
@@ -242,7 +296,11 @@ function reportSkippedWorktrees(diagnostics: FindDiagnostics | undefined, basePa
   };
 }
 
-export async function collectTextFiles(dirPath: string, diagnostics?: FindDiagnostics, walkOptions: WalkDirOptions = {}): Promise<string[]> {
+/**
+ * Every file under `dirPath` the walk selects, without opening any: whether a
+ * file is text is decided when it is read ({@link readSearchFile}).
+ */
+async function collectWalkFiles(dirPath: string, diagnostics?: FindDiagnostics, walkOptions: WalkDirOptions = {}): Promise<string[]> {
   const files: string[] = [];
   for await (const filePath of walkDir(dirPath, {
     onSkippedProductWorktrees: reportSkippedWorktrees(diagnostics, dirPath),
@@ -255,13 +313,7 @@ export async function collectTextFiles(dirPath: string, diagnostics?: FindDiagno
     }, assertPath: assertCapturedInputPathContext,
     site: 'tools.find.skip-directory',
   })) {
-    const binary = await isBinary(filePath, diagnostics);
-    assertCapturedToolInvocationCurrent();
-    walkOptions.signal?.throwIfAborted();
-    walkOptions.beforeAttempt?.();
-    if (!binary) {
-      files.push(filePath);
-    }
+    files.push(filePath);
   }
   return files;
 }
@@ -534,6 +586,7 @@ export async function findNestedGitignoreFiles(
   return nested;
 }
 
+/** The files a text search considers: the walk's files, or the glob's. None is opened here. */
 export async function collectFilesForSearch(
   basePath: string,
   queryGlob: string | undefined,
@@ -541,7 +594,7 @@ export async function collectFilesForSearch(
   walkOptions: WalkDirOptions = {},
 ): Promise<string[]> {
   if (!queryGlob) {
-    return collectTextFiles(basePath, diagnostics, walkOptions);
+    return collectWalkFiles(basePath, diagnostics, walkOptions);
   }
   return Array.from(await collectGlobFiles(basePath, [queryGlob], false, false, diagnostics, new DirectoryWalk(basePath), walkOptions));
 }
@@ -576,8 +629,33 @@ export interface ImportGraphLike {
   getWarnings?(): string[];
 }
 
+/** One file's symbols as parsed, before any query's filters, with what produced them. */
+export interface FileSymbols {
+  readonly source: 'tree_sitter' | 'regex_fallback';
+  readonly symbols: ReadonlyArray<{ readonly name: string; readonly kind: SymbolKind; readonly line: number; readonly exported: boolean }>;
+}
+
+/** Files whose parsed symbols one service keeps; the oldest entry is dropped first. */
+const SYMBOL_CACHE_MAX_FILES = 20_000;
+
 export class FindRuntimeService {
   private readonly searchCache = new Map<string, { value: CacheValue; accessedAt: number; chars: number }>();
+  private readonly symbolCache = new Map<string, { size: number; mtimeMs: number; value: FileSymbols }>();
+
+  /** The symbols parsed for `file` when it has the same size and modification time; a changed file parses again. */
+  symbolsGet(file: string, size: number, mtimeMs: number): FileSymbols | undefined {
+    const entry = this.symbolCache.get(file);
+    return entry && entry.size === size && entry.mtimeMs === mtimeMs ? entry.value : undefined;
+  }
+
+  symbolsSet(file: string, size: number, mtimeMs: number, value: FileSymbols): void {
+    this.symbolCache.delete(file);
+    if (this.symbolCache.size >= SYMBOL_CACHE_MAX_FILES) {
+      const oldest = this.symbolCache.keys().next().value;
+      if (oldest !== undefined) this.symbolCache.delete(oldest);
+    }
+    this.symbolCache.set(file, { size, mtimeMs, value });
+  }
 
   searchCacheGet(key: CacheKey): CacheValue | null {
     const cacheKey = makeSearchCacheKey(key);
@@ -614,7 +692,7 @@ export class FindRuntimeService {
 
   async searchCacheIsValid(cached: CacheValue): Promise<boolean> {
     const entries = Array.from(cached.fileMtimes.entries());
-    const stats = await Promise.all(entries.map(([filePath]) => statCachedSearchFile(filePath)));
+    const stats = await Promise.all(entries.map(([filePath]) => statSearchFile(filePath)));
     for (let i = 0; i < entries.length; i++) {
       const stat = stats[i]!;
       if (!stat || stat.mtimeMs !== entries[i]![1]) return false;

@@ -8,7 +8,8 @@
  * in that session; `metadata.idempotencyKey` is the call's `Idempotency-Key`,
  * so a replayed dispatch gets the contract the first one started, and without
  * one the client generates a key per call, which its own retries reuse),
- * `status` reads the contract's small summary (`contracts.status`) into a
+ * `status` reads the contract's small summary (`contracts.status`, sending the
+ * revision it last read, so an unchanged contract answers in a few bytes) into a
  * snapshot, `cancel` calls `contracts.cancel`, and `result` reads
  * `contracts.get` into the contract's answer and status line. The external task id is the contract
  * id. The mapping is the contracts package's, shared with the in-process
@@ -57,7 +58,12 @@ function summaryWorkFields(summary: {
 }
 
 /** An adapter over an operator client; the client's own auth and transport carry every call. */
+const ENDED_STATUSES: ReadonlySet<string> = new Set(['passed', 'failed', 'cancelled']);
+
 export function createOperatorContractWorkAdapter(client: Pick<OperatorRemoteClient, 'invoke'>): ContractExternalWorkAdapter {
+  // The last summary read of each running contract: a poll sends its revision,
+  // and an unchanged contract answers with the revision alone.
+  const seen = new Map<string, { readonly revision: string; readonly fields: ContractWorkFields }>();
   return {
     async dispatch(request) {
       const sessionId = metadataString(request.metadata, 'sessionId');
@@ -76,15 +82,25 @@ export function createOperatorContractWorkAdapter(client: Pick<OperatorRemoteCli
       });
     },
     async status(externalTaskId) {
-      const summary = await client.invoke('contracts.status', { contractId: externalTaskId });
-      // Only an `ifRevision` that matched answers without the summary, and none is sent here.
-      if ('notModified' in summary) throw new Error(`Contract ${externalTaskId} answered without its status; read it again.`);
-      return contractWorkSnapshot(summaryWorkFields(summary));
+      const last = seen.get(externalTaskId);
+      const summary = await client.invoke('contracts.status', last === undefined
+        ? { contractId: externalTaskId } : { contractId: externalTaskId, ifRevision: last.revision });
+      if ('notModified' in summary) {
+        if (last !== undefined && summary.revision === last.revision) return contractWorkSnapshot(last.fields);
+        seen.delete(externalTaskId);
+        throw new Error(`Contract ${externalTaskId} answered without its status; read it again.`);
+      }
+      const fields = summaryWorkFields(summary);
+      if (ENDED_STATUSES.has(summary.status)) seen.delete(externalTaskId);
+      else seen.set(externalTaskId, { revision: summary.revision, fields });
+      return contractWorkSnapshot(fields);
     },
     async cancel(externalTaskId, reason) {
+      seen.delete(externalTaskId);
       await client.invoke('contracts.cancel', { contractId: externalTaskId, reason: reason ?? OPERATOR_WORK_CANCEL_REASON });
     },
     async result(externalTaskId) {
+      seen.delete(externalTaskId);
       return contractWorkResult(await client.invoke('contracts.get', { contractId: externalTaskId }));
     },
   };

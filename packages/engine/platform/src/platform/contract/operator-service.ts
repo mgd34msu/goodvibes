@@ -204,7 +204,9 @@ export interface ContractOperatorServiceDeps {
 /**
  * What a list row or a status poll needs of a contract, computed by its owner
  * from the record in one pass: no evidence, readings or history. `revision`
- * changes whenever any field here does, so a poller compares one string.
+ * changes whenever any field here does, and whenever a unit or group moves (its
+ * state, agent, checks, nudges, fix rounds or touched paths), so a poller
+ * compares one string and fetches the tree only when it changed.
  */
 export interface ContractSummary {
   readonly id: string;
@@ -240,10 +242,15 @@ export function summarizeContract(contract: ContractView): ContractSummary {
   for (const decision of contract.decisions) if (decision.at > updatedAt) updatedAt = decision.at;
   for (const escalation of contract.escalations) updatedAt = Math.max(updatedAt, escalation.at, escalation.resolvedAt ?? 0);
   let unitsPassed = 0, unitsFailed = 0;
+  // Units and groups move without a decision (an agent starts, a check lands):
+  // their marks join the revision, not the summary.
+  const marks: (string | number)[] = [contract.checks.length, contract.fixRounds];
   for (const unit of contract.units) {
     if (unit.status === 'passed') unitsPassed += 1;
     else if (unit.status === 'failed') unitsFailed += 1;
+    marks.push(unit.status, unit.activeAgentId ?? '', unit.agentIds.length, unit.checks.length, unit.nudges.length, unit.fixRounds, unit.touchedPaths.length);
   }
+  for (const group of contract.groups) marks.push(group.status, group.checks.length, group.fixRounds);
   const fields = {
     id: contract.id,
     sessionId: contract.sessionId,
@@ -266,8 +273,8 @@ export function summarizeContract(contract: ContractView): ContractSummary {
     ...(contract.completedAt === undefined ? {} : { completedAt: contract.completedAt }),
     updatedAt,
   };
-  // Hashes the summary only (a few hundred bytes), never the tree.
-  return { ...fields, revision: createHash('sha256').update(JSON.stringify(fields)).digest('hex').slice(0, 16) };
+  // Hashes the summary and the marks (a few hundred bytes), never the tree.
+  return { ...fields, revision: createHash('sha256').update(JSON.stringify([fields, marks])).digest('hex').slice(0, 16) };
 }
 
 /** The tree without the captured input's per-file list (only receipts from before the input was a git tree have one). */

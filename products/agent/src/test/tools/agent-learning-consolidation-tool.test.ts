@@ -269,20 +269,13 @@ describe('agent_learning_consolidation tool', () => {
         readonly receipt: {
           readonly receiptId: string;
           readonly recreateRoute: string;
-          readonly deleteRecovery: {
-            readonly records: readonly {
-              readonly previousId: string;
-              readonly expectedId: string;
-              readonly exactId: { readonly possible: boolean };
-              readonly createArguments: Record<string, unknown>;
-            }[];
-          };
         };
         readonly recreateGuidance: {
           readonly records: readonly {
             readonly previousId: string;
             readonly expectedId: string;
             readonly exactId: { readonly possible: boolean };
+            readonly createArguments: Record<string, unknown>;
           }[];
         };
       };
@@ -292,7 +285,7 @@ describe('agent_learning_consolidation tool', () => {
         expectedId: ids.duplicateId,
         exactId: expect.objectContaining({ possible: true }),
       }));
-      expect(deletedJson.receipt.deleteRecovery.records[0]?.createArguments).toEqual(expect.objectContaining({
+      expect(deletedJson.recreateGuidance.records[0]?.createArguments).toEqual(expect.objectContaining({
         domain: 'skill',
         action: 'create',
         name: 'Release checklist!',
@@ -332,7 +325,10 @@ describe('agent_learning_consolidation tool', () => {
       expect(receipts.success).toBe(true);
       expect(receipts.output).toContain('lcon-delete');
       expect(receipts.output).toContain('lcon-recreate');
-      expect(receipts.output).toContain('deleteRecovery');
+      expect(receipts.output).toContain('recoveryRoute');
+      expect(receipts.output).not.toContain('createArguments');
+      const one = await fixture.tool.execute({ mode: 'receipts', receiptId: deletedJson.receipt.receiptId });
+      expect(one.output).toContain('deleteRecovery');
       expect(existsSync(fixture.paths.resolveUserPath(GOODVIBES_AGENT_SURFACE_ROOT, 'learning', 'consolidation-receipts.json'))).toBe(true);
     } finally {
       fixture.cleanup();

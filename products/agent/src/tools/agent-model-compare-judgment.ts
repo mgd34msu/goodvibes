@@ -6,7 +6,8 @@ import { MODEL_REASON_THEME_LABELS } from './agent-model-compare-types.ts';
 import { currentStoredThemes, parseStoredReasonThemes, readComparisonReasonThemes, type ComparisonThemeReading, type JudgmentWithThemes, type StoredReasonThemes } from './agent-model-compare-themes.ts';
 import type { ModelReadingOptions } from './agent-harness-model-reading-source.ts';
 import { isModelCompareJudgmentArtifact, listSelectableModels, toSavedComparisonArtifact } from './agent-model-compare-run.ts';
-import { listAllArtifacts, readBoolean, readComparisonTag, readRecord, readString, previewText } from './agent-model-compare-utils.ts';
+import { listAllArtifacts, readComparisonTag, readRecord, readString, previewText } from './agent-model-compare-utils.ts';
+import { readFlag } from './tool-args.ts';
 
 export function normalizeBlindId(value: string): string {
   return value
@@ -24,10 +25,10 @@ export function modelRouteHandoff(candidate: CompareCandidateResult, reveal: boo
   return {
     ...(reveal ? {
       routeInspection: `agent_harness mode:"model_route" target:"${candidate.model.registryKey}"`,
-      confirmedMainRouteUpdate: 'agent_model_compare mode:"apply" with this judgment\'s artifactId (admitted; writes a route-decision receipt)',
     } : {
-      routeInspection: 'call mode:"judge" again with reveal:true (this saves a new judgment) to learn the winning model before model-route inspection',
+      routeInspection: 'agent_model_compare mode:"reveal" with the comparison id names the winning model',
     }),
+    confirmedMainRouteUpdate: 'agent_model_compare mode:"apply" with this judgment\'s artifactId (admitted; reads the winner model from the judged comparison; writes a route-decision receipt)',
     policy: 'This judgment does not change the selected model. Route updates require a separately admitted action.',
   };
 }
@@ -134,7 +135,7 @@ export function formatJudgePreview(args: AgentModelCompareToolArgs): string {
     `  comparison ${readString(args.comparisonId) || readString(args.artifactId) || '(missing)'}`,
     `  winner ${readString(args.winnerBlindId ?? args.winner) || '(missing)'}`,
     `  reasons ${previewText(readString(args.reasons) || '(missing)')}`,
-    `  reveal ${readBoolean(args.reveal) ? 'include model identity in judgment' : 'keep judgment blind'}`,
+    `  reveal ${readFlag(args.reveal, 'reveal', false) ? 'include model identity in judgment' : 'keep judgment blind'}`,
     '  policy saves a local judgment artifact and never changes the selected model',
   ].join('\n');
 }
@@ -157,11 +158,7 @@ export function formatJudgmentResult(input: {
     'Route handoff',
     `  inspect ${routeHandoff.routeInspection}`,
   ];
-  if (input.reveal) {
-    lines.push(`  update agent_model_compare mode:"apply" artifactId:"${input.artifact.artifactId}" (admitted; writes a route-decision receipt)`);
-  } else {
-    lines.push('  update not available: this judgment hides the winner model. To apply or record a route decision, call mode:"judge" again with reveal:true; that saves a new judgment.');
-  }
+  lines.push(`  update agent_model_compare mode:"apply" artifactId:"${input.artifact.artifactId}" (admitted; reads the winner model from the judged comparison, so a blind judgment can be applied; writes a route-decision receipt)`);
   lines.push('No selected model was changed.');
   return lines.join('\n');
 }
@@ -224,7 +221,12 @@ export interface SavedJudgmentsLoad {
   readonly unreadable: number;
 }
 
-/** Newest first; scanning stops once `limit` judgments match the filters, so an older match is never hidden behind newer ones that do not. */
+/**
+ * Newest first; scanning stops once `limit` judgments match the filters, so an
+ * older match is never hidden behind newer ones that do not. A comparison
+ * judged more than once counts once, by its newest judgment, so win counts are
+ * not inflated by a re-judgment.
+ */
 export async function loadSavedJudgments(
   artifactStore: AgentModelCompareArtifactStore | undefined,
   limit: number,
@@ -233,6 +235,7 @@ export async function loadSavedJudgments(
   if (!artifactStore?.list || !artifactStore.readContent) return { judgments: [], unreadable: 0 };
   const artifacts = listAllArtifacts(artifactStore).filter(isModelCompareJudgmentArtifact);
   const matched: JudgmentWithThemes[] = [];
+  const counted = new Set<string>();
   let unreadable = 0;
   const BATCH = 25;
   for (let start = 0; start < artifacts.length && matched.length < limit; start += BATCH) {
@@ -245,7 +248,12 @@ export async function loadSavedJudgments(
     }));
     for (const judgment of loaded) {
       if (judgment === null) unreadable += 1;
-      else if (judgmentMatchesFilters(judgment, filters)) matched.push(judgment);
+      else if (judgmentMatchesFilters(judgment, filters)) {
+        const known = judgment.comparisonId !== 'unknown-comparison';
+        if (known && counted.has(judgment.comparisonId)) continue;
+        if (known) counted.add(judgment.comparisonId);
+        matched.push(judgment);
+      }
     }
   }
   return { judgments: matched.slice(0, limit), unreadable };

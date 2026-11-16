@@ -17,8 +17,8 @@ export function registerComparisonCandidate(registry: ToolRegistry, deps: AgentM
         registryKey: { type: 'string' }, modelId: { type: 'string' }, providerId: { type: 'string' }, blindId: { type: 'string' },
         prompt: { type: 'string' }, systemPrompt: { type: 'string' }, maxTokens: { type: 'integer', minimum: 0 },
         metered: { type: 'boolean', const: true },
-        comparisonRequest: { type: 'object', additionalProperties: true }, sourceArtifactId: { type: 'string' },
-      }, required: ['registryKey', 'modelId', 'providerId', 'blindId', 'prompt', 'systemPrompt', 'maxTokens', 'metered', 'comparisonRequest'], additionalProperties: false,
+        comparisonRequest: { type: 'object', additionalProperties: true }, screeningId: { type: 'string' },
+      }, required: ['registryKey', 'modelId', 'providerId', 'blindId', 'prompt', 'systemPrompt', 'maxTokens', 'metered', 'comparisonRequest', 'screeningId'], additionalProperties: false,
     } },
     async execute(args, options) {
       const assertSend = () => { options?.signal?.throwIfAborted(); assertComparisonCandidateSource(args); if (!assertCurrentToolEffect(args, options, 'send')) throw new Error('Metered comparison requires current recorded send admission.'); };
@@ -45,11 +45,11 @@ export function registerComparisonCandidate(registry: ToolRegistry, deps: AgentM
 
 export async function runAdmittedComparisonCandidate(registry: ToolRegistry | undefined, options: ToolExecuteOptions | undefined,
   model: ResolvedCompareModel, blindId: string, prompt: string, systemPrompt: string, maxTokens: number, assertCurrent: () => void,
-  comparisonRequest: Record<string, unknown>, sourceArtifactId?: string): Promise<CompareCandidateResult> {
+  comparisonRequest: Record<string, unknown>, screeningId: string): Promise<CompareCandidateResult> {
   if (!registry) throw new Error('Metered comparison requires its owning tool registry.');
   const result = await registry.executeNested(`comparison-candidate-${++sequence}`, NAME, {
     registryKey: model.registryKey, modelId: model.modelId, providerId: model.providerId, blindId, prompt, systemPrompt, maxTokens, metered: true,
-    comparisonRequest, ...(sourceArtifactId ? { sourceArtifactId } : {}),
+    comparisonRequest, screeningId,
   }, options, { assertCurrent, signal: options?.signal });
   if (!result.success || typeof result.output !== 'string') throw new Error(result.error || 'Comparison candidate was not admitted.');
   const parsed: unknown = JSON.parse(result.output);

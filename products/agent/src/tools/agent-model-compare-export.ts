@@ -3,10 +3,10 @@ import type { AgentModelCompareArtifactStore, LoadedComparisonJudgment, SavedCom
 import { DEFAULT_SIDE_BY_SIDE_PREVIEW_BYTES, MAX_HANDOFF_ARTIFACT_BYTES } from './agent-model-compare-types.ts';
 import { formatComparisonDimensionLines, formatUsage, toSavedComparisonArtifact } from './agent-model-compare-run.ts';
 import { isTextLike, readString, previewText } from './agent-model-compare-utils.ts';
+import { fencedBlock } from './markdown-fence.ts';
 
 export function markdownBlock(value: string): string {
-  const fence = value.includes('```') ? '~~~~' : '```';
-  return `${fence}\n${value || '(empty)'}\n${fence}`;
+  return fencedBlock(value || '(empty)');
 }
 
 export function comparisonExportMarkdown(comparison: StoredComparison, reveal: boolean): string {

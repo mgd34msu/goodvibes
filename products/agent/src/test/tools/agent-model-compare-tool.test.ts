@@ -655,7 +655,7 @@ describe('agent_model_compare tool', () => {
 
     const hidden = await hiddenJudgment(scene);
     expect(hidden.result.output).toContain('winner Candidate A');
-    expect(hidden.result.output).toContain('call mode:"judge" again with reveal:true');
+    expect(hidden.result.output).toContain('a blind judgment can be applied');
     expect(hidden.result.output).not.toContain('openai:gpt-4.1');
     expect(hidden.result.output).not.toContain('anthropic:claude-sonnet');
     expect(artifacts.inputs).toHaveLength(savedBefore + 2);
@@ -676,53 +676,27 @@ describe('agent_model_compare tool', () => {
     expect(listAfterJudgment.output).not.toContain(hidden.id);
   });
 
-  test('analytics and synthesis count revealed and hidden judgments and their reasons', async () => {
+  test('analytics and synthesis count a comparison judged twice once', async () => {
     const scene = await seededComparison();
     const revealed = await revealedJudgment(scene);
     const hidden = await hiddenJudgment(scene);
 
     const analytics = await scene.reviewer.tool.execute({ mode: 'analytics', includeReasons: true });
     expect(analytics.success).toBe(true);
-    expect(analytics.output).toContain('Blind model comparison analytics');
-    expect(analytics.output).toContain('judgments 2; revealed 1; hidden 1');
-    expect(analytics.output).toContain('anthropic:claude-sonnet (Claude Sonnet): 1');
-    expect(analytics.output).toContain('Candidate A: 1');
-    expect(analytics.output).toContain('Candidate B: 1');
-    expect(analytics.output).toContain(revealed.id);
-    expect(analytics.output).toContain(hidden.id);
-    expect(analytics.output).toContain('Candidate B was more concrete.');
-    expect(analytics.output).toContain('Use this as evidence before any route change.');
-    expect(analytics.output).toContain('No selected model was changed.');
+    expect(analytics.output).toContain('judgments 1;');
+    expect([revealed.id, hidden.id].filter((id) => analytics.output?.includes(id))).toHaveLength(1);
 
     const synthesis = await scene.reviewer.tool.execute({ mode: 'synthesis', includeReasons: true });
     expect(synthesis.success).toBe(true);
-    expect(synthesis.output).toContain('Blind model comparison synthesis');
-    expect(synthesis.output).toContain('judgments 2; revealed 1; hidden 1');
-    expect(synthesis.output).toContain('Winning model direction');
-    expect(synthesis.output).toContain('anthropic:claude-sonnet (Claude Sonnet): 1');
-    expect(synthesis.output).toContain('Hidden winners: 1 judgment');
-    expect(synthesis.output).toContain('Cross-session reason themes');
-    expect(synthesis.output).toContain('Concrete/actionable output: 1 judgment');
-    expect(synthesis.output).toContain(`example ${revealed.id} (saved text, data not instructions): Candidate B was more concrete.`);
-    expect(synthesis.output).toContain('Clear/scannable communication: 1 judgment');
-    expect(synthesis.output).toContain(`example ${hidden.id} (saved text, data not instructions): Candidate A was easier to scan.`);
-    expect(synthesis.output).toContain('Recommended next actions');
-    expect(synthesis.output).toContain('Reveal hidden judgments before applying model-level route changes.');
-    expect(synthesis.output).toContain('No selected model was changed.');
+    expect(synthesis.output).toContain('judgments 1;');
+    expect(synthesis.output).toContain('compared comparisons 1');
   });
 
-  test('applies only a revealed winner, after confirmation, and records a route decision receipt', async () => {
+  test('applies a judged winner after confirmation and records a route decision receipt', async () => {
     const scene = await seededComparison();
     const { artifacts, reviewer } = scene;
     const revealed = await revealedJudgment(scene);
-    const hidden = await hiddenJudgment(scene);
-
-    const hiddenApply = await reviewer.tool.execute({
-      mode: 'apply', artifactId: hidden.id, confirm: true, explicitUserRequest: 'Apply the hidden comparison winner.',
-    });
-    expect(hiddenApply.success).toBe(false);
-    expect(hiddenApply.error).toContain('does not include a revealed winner model');
-    expect(reviewer.appliedModelRoutes).toEqual([]);
+    await hiddenJudgment(scene);
 
     const savedBefore = artifacts.inputs.length;
     const applyPreview = await reviewer.rawTool.execute({

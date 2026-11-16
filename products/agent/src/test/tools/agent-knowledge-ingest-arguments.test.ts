@@ -99,14 +99,14 @@ describe('agent_knowledge_ingest argument and path handling', () => {
       () => tool.execute({ sourceKind: 'file', path: '/etc/hostname' }));
     expect(result.success).toBe(false);
     expect(result.error).toContain('invalid');
-    expect(result.error).toContain('The path must be inside the workspace.');
+    expect(result.error).toContain('the path is outside the workspace');
     expect(result.error).not.toContain('unavailable');
     expect(calls).toBe(0);
   });
 
   test.each([
     ['a missing path field', { sourceKind: 'file' }, 'path is required.'],
-    ['a file that does not exist', { sourceKind: 'file', path: 'absent.txt' }, 'The path does not name an existing file.'],
+    ['a file that does not exist', { sourceKind: 'file', path: 'absent.txt' }, 'The path does not name an existing file or directory'],
     ['an unknown source kind', { sourceKind: 'telepathy' }, 'sourceKind must be one of'],
     ['a url that is not http(s)', { sourceKind: 'url', url: 'ftp://example.com/file' }, 'requires an http(s) URL'],
     ['a url that does not parse', { sourceKind: 'url', url: 'not a url' }, 'url must be a valid http(s) URL.'],
@@ -178,6 +178,6 @@ describe('agent_knowledge_ingest argument and path handling', () => {
     const result = await tool.execute({ sourceKind: 'browser_history', homeOverride: '/etc' });
     expect(result.success).toBe(false);
     expect(result.error).toContain('invalid');
-    expect(result.error).toContain('homeOverride must be inside the workspace.');
+    expect(result.error).toContain('the homeOverride is outside the workspace');
   });
 });

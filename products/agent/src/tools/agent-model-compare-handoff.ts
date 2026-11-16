@@ -5,6 +5,7 @@ import type { AgentModelCompareArtifactStore, LoadedComparisonHandoff, SavedComp
 import { MAX_HANDOFF_ARCHIVE_BYTES, MAX_HANDOFF_ARTIFACT_BYTES, MAX_HANDOFF_DIFF_INPUT_LINES, MAX_HANDOFF_DIFF_ROWS, MAX_HANDOFF_DIFF_SECTION_PREVIEW_CHARS } from './agent-model-compare-types.ts';
 import { isModelCompareHandoffArtifact, isModelCompareRouteDecisionArtifact, toSavedComparisonArtifact } from './agent-model-compare-run.ts';
 import { isTextLike, listAllArtifacts, readString, readStringList, previewText } from './agent-model-compare-utils.ts';
+import { createFenceTracker } from './markdown-fence.ts';
 
 export interface LoadedHandoffArchiveArtifact {
   readonly role: 'handoff' | 'source' | 'related' | 'route-decision';
@@ -100,15 +101,14 @@ export function handoffSectionMap(text: string): Map<string, string> {
 export function handoffSectionLineMap(text: string): Map<string, string[]> {
   const sections = new Map<string, string[]>();
   let current = '(preamble)';
-  let inCodeFence = false;
+  const fences = createFenceTracker();
   sections.set(current, []);
   for (const line of text.split('\n')) {
-    if (line.trimStart().startsWith('```')) {
+    if (fences.step(line)) {
       sections.get(current)?.push(line);
-      inCodeFence = !inCodeFence;
       continue;
     }
-    const heading = inCodeFence ? null : /^(#{1,6})\s+(.+?)\s*$/.exec(line);
+    const heading = /^(#{1,6})\s+(.+?)\s*$/.exec(line);
     const headingText = heading?.[2] ?? '';
     const opensPacketSection = Boolean(heading) && (
       heading![1]!.length === 2

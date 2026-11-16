@@ -24,6 +24,7 @@ export interface AgentLocalStateWrite {
   readonly onEffect: (published?: boolean, stage?: 'profile' | 'state') => void;
 }
 const bindings = new WeakMap<object, AgentLocalStateWrite>();
+const SECRET_LIKE_WRITE = 'Nothing was saved: the arguments contain text that looks like a password, token or private key, and local records do not store secrets. Remove that text, or store the secret in the secret store and record only its key name.';
 
 function protectedText(value: unknown): boolean {
   if (typeof value === 'string') return containsSecretLikeText(value);
@@ -56,7 +57,9 @@ export function createAgentLocalStateInputProjector(capture: (args: Record<strin
   isRead: (args: Record<string, unknown>) => boolean): ToolInputProjector {
   return { async project(request) {
     request.assertCurrent(); request.signal?.throwIfAborted();
-    if (protectedText(request.args)) throw new ToolInputProjectionError('invalid'); // secret-like text in the arguments
+    // The stores behind these tools (profile, occasions, work plan) have no secret check of their own, so a write
+    // is screened here, once, with the rule named; a read is never screened.
+    if (!isRead(request.args) && protectedText(request.args)) throw new ToolInputProjectionError('invalid', SECRET_LIKE_WRITE);
     const captured = capture(request.args);
     const targets = captured.targets.map(target => ({ ...target, root: resolve(target.root), path: resolve(target.path) }));
     const roots = targets.map(target => realpathSync(target.root));

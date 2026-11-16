@@ -8,6 +8,7 @@
  */
 
 import type { AgentLocalRegistryAction, AgentLocalRegistryDomain } from './agent-local-registry-tool.ts';
+import { readFlag, readString } from './tool-args.ts';
 
 export interface AgentLocalRegistryToolArgs {
   readonly domain?: unknown;
@@ -44,24 +45,15 @@ export interface AgentLocalRegistryToolArgs {
 
 export const AGENT_TOOL_PROVENANCE = 'agent-local-registry-tool';
 
-export function readString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
-}
+export { readString };
 
-export function readAffirmative(value: unknown): boolean {
-  const normalized = readString(value).toLowerCase();
-  return value === true || (typeof value === 'string' && (normalized === '' || normalized === 'yes' || normalized === 'y' || normalized === 'true' || normalized === 'on'));
-}
-
-/** Activation is explicit: an empty string is not a yes. */
+/**
+ * Activation changes which persona steers every later turn, so it is never
+ * guessed: blank leaves the active persona as it is, and a word other than
+ * true or false is refused with the parameter's name.
+ */
 export function readActivation(value: unknown): boolean | undefined {
-  if (value === undefined) return undefined;
-  if (value === true) return true;
-  if (value === false) return false;
-  const normalized = readString(value).toLowerCase();
-  if (['yes', 'y', 'true', 'on'].includes(normalized)) return true;
-  if (['no', 'n', 'false', 'off'].includes(normalized)) return false;
-  throw new Error('activate must be true or false.');
+  return readFlag(value, 'activate');
 }
 
 /** `update` that carries nothing changeable must not read as a success. */

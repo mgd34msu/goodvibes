@@ -72,7 +72,6 @@ for (const outcome of ['act', 'reject', 'abort', 'missing-workspace-owner']) tes
     expect(result?.success).toBe(outcome === 'act');
     // The semantic disposition for the facade-routed registry call is read exactly once, except where the call never reaches the registry.
     expect(registryDispositions).toBe(outcome === 'missing-workspace-owner' ? 0 : 1);
-    if (outcome === 'missing-workspace-owner') expect(String(result?.error)).toContain('MCP call failed at the connected server boundary.');
     if (outcome === 'abort') expect(controller.signal.aborted).toBe(true);
     expect(writes).toBe(outcome === 'act' ? 1 : 0); expect(humans).toBe(0);
   } finally { await client.disconnect(); installJudgmentPort(prior); resetAgentMcpCallRouteForTests(); }

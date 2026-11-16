@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
-import { writeStoreJson } from '@/utils/store-file.ts';
+import { runStoreFileUpdateSync, writeStoreJson } from '@/utils/store-file.ts';
 import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { MemoryRecord } from '@goodvibes-jev/engine/platform/platform/state';
 import type { MemoryAccess } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
@@ -18,6 +18,7 @@ import {
 import type { CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { harnessCatalogInvocationAuthority } from './agent-harness-catalog-ingress.ts';
 import { clampReadLimit } from './agent-harness-read-helpers.ts';
+import { readString } from './tool-args.ts';
 
 export type AgentLearningConsolidationMode = 'preview' | 'stale' | 'delete' | 'rollback' | 'recreate' | 'receipts';
 export type AgentLearningConsolidationDomain = 'memory' | 'persona' | 'skill' | 'routine';
@@ -67,9 +68,7 @@ export const MEMORY_CLASSES = new Set(['decision', 'constraint', 'incident', 'pa
 export const MEMORY_SCOPES = new Set(['session', 'project', 'team']);
 export const MEMORY_REVIEW_STATES = new Set(['fresh', 'reviewed', 'stale', 'contradicted']);
 
-export function readString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
-}
+export { readString };
 
 export function readMode(value: unknown): AgentLearningConsolidationMode {
   return typeof value === 'string' && MODES.includes(value as AgentLearningConsolidationMode)
@@ -209,13 +208,20 @@ function retainReceipts(newestFirst: readonly LearningConsolidationReceipt[]): L
   ];
 }
 
+/**
+ * One locked read-modify-write, like the registries beside it: delete receipts
+ * hold the only copy of deleted records, so two Agent processes must not drop
+ * each other's receipt.
+ */
 export function writeReceipt(shellPaths: ShellPathService, receipt: LearningConsolidationReceipt): void {
   const path = receiptPath(shellPaths);
-  const current = readReceiptFile(shellPaths);
-  writeStoreJson(path, {
-    version: 1,
-    // Unrecognised entries stay in the same list, after the readable ones, so the next read finds them again.
-    receipts: [...retainReceipts([receipt, ...current.receipts.filter((entry) => entry.id !== receipt.id)]), ...(current.preserved ?? [])],
+  runStoreFileUpdateSync(path, () => {
+    const current = readReceiptFile(shellPaths);
+    writeStoreJson(path, {
+      version: 1,
+      // Unrecognised entries stay in the same list, after the readable ones, so the next read finds them again.
+      receipts: [...retainReceipts([receipt, ...current.receipts.filter((entry) => entry.id !== receipt.id)]), ...(current.preserved ?? [])],
+    });
   });
 }
 
@@ -305,6 +311,8 @@ export async function updateSurvivor(
   domain: AgentLearningConsolidationDomain,
   survivorId: string,
   fields: LearningConsolidationFields,
+  /** A rollback passes the provenance the record had before the merge; a merge stamps its own. */
+  provenance = 'learning-curator-consolidation',
 ): Promise<Record<string, unknown>> {
   if (domain === 'memory') {
     const record = await memory.update(survivorId, {
@@ -319,7 +327,7 @@ export async function updateSurvivor(
       ...(fields.description === undefined ? {} : { description: fields.description }),
       ...(fields.tags === undefined ? {} : { tags: [...fields.tags] }),
       ...(fields.triggers === undefined ? {} : { triggers: [...fields.triggers] }),
-      provenance: 'learning-curator-consolidation',
+      provenance,
     });
     return cloneRecord(record);
   }
@@ -328,7 +336,7 @@ export async function updateSurvivor(
       ...(fields.description === undefined ? {} : { description: fields.description }),
       ...(fields.tags === undefined ? {} : { tags: [...fields.tags] }),
       ...(fields.triggers === undefined ? {} : { triggers: [...fields.triggers] }),
-      provenance: 'learning-curator-consolidation',
+      provenance,
     });
     return cloneRecord(record);
   }
@@ -336,7 +344,7 @@ export async function updateSurvivor(
     ...(fields.description === undefined ? {} : { description: fields.description }),
     ...(fields.tags === undefined ? {} : { tags: [...fields.tags] }),
     ...(fields.triggers === undefined ? {} : { triggers: [...fields.triggers] }),
-    provenance: 'learning-curator-consolidation',
+    provenance,
   });
   return cloneRecord(record);
 }

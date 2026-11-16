@@ -3,7 +3,8 @@ import type { ArtifactDescriptor } from '@goodvibes-jev/engine/platform/platform
 import type { ChatRequest, ChatResponse } from '@goodvibes-jev/engine/platform/platform/providers';
 import type { AgentModelCompareArtifactStore, AgentModelCompareCatalogModel, AgentModelCompareModelCatalog, AgentModelCompareToolArgs, AgentModelCompareToolDeps, CompareCandidateResult, ComparisonArtifactStatus, ResolvedCompareModel, SavedComparisonArtifact, StoredComparison } from './agent-model-compare-types.ts';
 import { BLIND_LABELS, COMPARISON_STORE_LIMIT, DEFAULT_CANDIDATE_COUNT, DEFAULT_CANDIDATE_OUTPUT_CHARS, DEFAULT_MAX_TOKENS, DEFAULT_SIDE_BY_SIDE_PREVIEW_BYTES, MAX_SIDE_BY_SIDE_PREVIEW_BYTES, MIN_CANDIDATES, MODE_ANALYTICS, MODE_APPLY, MODE_EXPORT, MODE_HANDOFF, MODE_HANDOFF_ARCHIVE, MODE_HANDOFF_DIFF, MODE_JUDGE, MODE_REVEAL, MODE_REVIEW, MODE_ROUTE_DECISION, MODE_RUN, MODE_SIDE_BY_SIDE, MODE_SYNTHESIS } from './agent-model-compare-types.ts';
-import { clamp, isTextLike, listAllArtifacts, shuffled, readBenchmarkKind, readBoolean, readComparisonTag, readModelRefs, readNumber, readOptionalBoolean, readRecord, readString, readStringList, previewText } from './agent-model-compare-utils.ts';
+import { clamp, isTextLike, listAllArtifacts, shuffled, readBenchmarkKind, readComparisonTag, readModelRefs, readNumber, readRecord, readString, readStringList, previewText } from './agent-model-compare-utils.ts';
+import { readFlag } from './tool-args.ts';
 
 export function normalizeCatalogModel(model: AgentModelCompareCatalogModel): ResolvedCompareModel | null {
   const modelId = readString(model.modelId ?? model.id);
@@ -442,8 +443,8 @@ export function formatPreview(
     ...(benchmarkKind ? [`  benchmark ${benchmarkKind}`] : []),
     ...(taskType ? [`  task type ${taskType}`] : []),
     ...(documentId ? [`  document ${documentId}`] : []),
-    `  reveal ${readBoolean(args.reveal) ? 'immediate' : 'delayed'}`,
-    `  artifact ${readOptionalBoolean(args.saveArtifact, true) ? 'save local JSON review' : 'do not save'}`,
+    `  reveal ${readFlag(args.reveal, 'reveal', false) ? 'immediate' : 'delayed'}`,
+    `  artifact ${readFlag(args.saveArtifact, 'saveArtifact', true) ? 'save local JSON review' : 'do not save (reveal and judge then work only in this session)'}`,
     '  policy model comparison sends the same prompt to each candidate and requires current recorded send admission',
   ].join('\n');
 }
@@ -605,7 +606,7 @@ export async function saveComparisonArtifact(input: {
   readonly status: ComparisonArtifactStatus;
 }> {
   if (!input.enabled) {
-    return { status: { state: 'disabled', message: 'not saved (saveArtifact false)' } };
+    return { status: { state: 'disabled', message: 'not saved (saveArtifact false): reveal, judge and apply work only in this session, for this comparison id' } };
   }
   if (!input.artifactStore) {
     return { status: { state: 'unavailable', message: 'not saved (artifact store unavailable)' } };

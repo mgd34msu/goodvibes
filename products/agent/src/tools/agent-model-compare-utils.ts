@@ -1,23 +1,13 @@
 import type { ArtifactDescriptor } from '@goodvibes-jev/engine/platform/platform/artifacts';
 
-export function readString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
-}
+import { readString } from './tool-args.ts';
+
+export { readString };
 
 export function readRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>
     : null;
-}
-
-export function readBoolean(value: unknown): boolean {
-  return value === true || value === 'true' || value === 'yes';
-}
-
-export function readOptionalBoolean(value: unknown, fallback: boolean): boolean {
-  if (value === undefined || value === null) return fallback;
-  if (typeof value === 'string' && value.trim() === '') return fallback;
-  return readBoolean(value);
 }
 
 export function readNumber(value: unknown, fallback: number): number {

@@ -1,104 +1,24 @@
-import { lstatSync, realpathSync, statSync, type BigIntStats } from 'node:fs';
-import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
-import { captureOwnedJson } from '@goodvibes-jev/engine/platform/platform/gate';
 import { assertCurrentToolEffect, assertCurrentToolExecution } from '@goodvibes-jev/engine/platform/platform/tools';
-import { ArtifactStore, type ArtifactDescriptor } from '@goodvibes-jev/engine/platform/platform/artifacts';
+import type { ArtifactDescriptor } from '@goodvibes-jev/engine/platform/platform/artifacts';
 import type { ToolExecuteOptions } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { AgentModelCompareArtifactStore, AgentModelCompareToolDeps } from './agent-model-compare-types.ts';
 import { agentResearchSourceOwner } from '../agent/protected-research-report.ts';
 import { captureCatalogMethods } from './agent-harness-catalog-ranking.ts';
 
-type ArtifactPathBinding = Readonly<Pick<BigIntStats, 'dev' | 'ino' | 'mode'>> & { readonly path: string };
-
-function captureNativeArtifactRoot(store: ArtifactStore) {
-  const descriptor = Object.getOwnPropertyDescriptor(ArtifactStore.prototype, 'storagePath');
-  const getter = descriptor?.get;
-  if (!getter) throw new Error('Comparison artifact storage owner is unavailable.');
-  const readRoot = () => {
-    if (Object.getOwnPropertyDescriptor(ArtifactStore.prototype, 'storagePath')?.get !== getter) throw new Error('Comparison artifact storage owner changed.');
-    const value: unknown = Reflect.apply(getter, store, []);
-    if (typeof value !== 'string') throw new Error('Comparison artifact storage owner is unavailable.');
-    return resolve(value);
-  };
-  const root = readRoot(), physicalRoot = realpathSync(root);
-  const ancestry: ArtifactPathBinding[] = [];
-  for (let cursor = root; ; cursor = dirname(cursor)) {
-    const stat = lstatSync(cursor, { bigint: true });
-    ancestry.push({ path: cursor, dev: stat.dev, ino: stat.ino, mode: stat.mode });
-    if (dirname(cursor) === cursor) break;
-  }
-  const assertCurrent = () => {
-    if (readRoot() !== root || realpathSync(root) !== physicalRoot || !statSync(root).isDirectory()) throw new Error('Comparison artifact storage root changed.');
-    for (const binding of ancestry) {
-      const stat = lstatSync(binding.path, { bigint: true });
-      if (stat.dev !== binding.dev || stat.ino !== binding.ino || stat.mode !== binding.mode) throw new Error('Comparison artifact storage ancestry changed.');
-    }
-  };
-  assertCurrent();
-  return { root, physicalRoot, assertCurrent };
-}
-
-function captureNativeArtifactSource(store: ArtifactStore, id: string): () => void {
-  const record = store.getRecord(id);
-  if (!record) throw new Error('Comparison source artifact is unavailable in its owning store.');
-  const { physicalRoot, assertCurrent: assertRootCurrent } = captureNativeArtifactRoot(store);
-  const contentPath = record.contentPath, metadataPath = record.metadataPath;
-  const frames = [contentPath, metadataPath].map(path => {
-    const physicalPath = realpathSync(path), withinRoot = relative(physicalRoot, physicalPath);
-    if (isAbsolute(withinRoot) || withinRoot === '..' || withinRoot.startsWith(`..${sep}`)) throw new Error('Comparison source artifact escaped its physical store.');
-    const file = statSync(path, { bigint: true });
-    if (!file.isFile()) throw new Error('Comparison source artifact is not a regular file.');
-    const ancestry: ArtifactPathBinding[] = [];
-    for (let cursor = resolve(path); ; cursor = dirname(cursor)) {
-      const stat = lstatSync(cursor, { bigint: true });
-      ancestry.push({ path: cursor, dev: stat.dev, ino: stat.ino, mode: stat.mode });
-      if (dirname(cursor) === cursor) break;
-    }
-    return { path, physicalPath, file, ancestry };
-  });
-  return () => {
-    const current = store.getRecord(id);
-    if (!current || current !== record || current.contentPath !== contentPath || current.metadataPath !== metadataPath) throw new Error('Comparison source artifact physical owner changed.');
-    assertRootCurrent();
-    for (const frame of frames) {
-      if (realpathSync(frame.path) !== frame.physicalPath) throw new Error('Comparison source artifact path changed.');
-      for (const binding of frame.ancestry) {
-        const stat = lstatSync(binding.path, { bigint: true });
-        if (stat.dev !== binding.dev || stat.ino !== binding.ino || stat.mode !== binding.mode) throw new Error('Comparison source artifact path binding changed.');
-      }
-      const stat = statSync(frame.path, { bigint: true });
-      if (!stat.isFile() || stat.dev !== frame.file.dev || stat.ino !== frame.file.ino || stat.size !== frame.file.size
-        || stat.mtimeNs !== frame.file.mtimeNs || stat.ctimeNs !== frame.file.ctimeNs) throw new Error('Comparison source artifact file changed.');
-    }
-  };
-}
-
 /** Every asynchronous comparison dependency stays inside its original owner frame. */
 export function createComparisonOperation(source: AgentModelCompareToolDeps, args: Record<string, unknown>, options?: ToolExecuteOptions) {
   const assertSource = captureCatalogMethods(source, ['artifactStore', 'toolRegistry', 'modelCatalog', 'providerRegistry', 'applyModelRoute']);
-  const observed = new Map<string, { readonly descriptor: ArtifactDescriptor; readonly captured: string }>();
-  const descriptorBytes = (descriptor: ArtifactDescriptor) => {
-    const captured = captureOwnedJson(descriptor);
-    if (!captured || typeof captured !== 'object' || Array.isArray(captured)) throw new Error('Invalid comparison artifact descriptor.');
-    return JSON.stringify(Object.fromEntries(Object.entries(captured).filter(([key]) => key !== 'contentPath' && key !== 'metadataPath')));
-  };
-  // A list covers the whole store; only comparison artifacts are pinned, so an unrelated artifact expiring mid-call cannot fail the operation.
-  const isComparisonArtifact = (descriptor: ArtifactDescriptor) => {
-    const purpose = descriptor.metadata?.purpose;
-    return typeof purpose === 'string' ? purpose.startsWith('agent-model-compare') : descriptor.filename?.startsWith('blind-model-comparison-') === true;
-  };
-  const observeDescriptor = (descriptor: ArtifactDescriptor) => {
-    const captured = descriptorBytes(descriptor);
-    const prior = observed.get(descriptor.id);
-    if (prior && prior.captured !== captured) throw new Error('Comparison source artifact changed during this operation.');
-    observed.set(descriptor.id, { descriptor, captured });
+  // Only the artifacts this operation read are pinned, by id and size: a listing pins nothing, so the
+  // cost of a check does not grow with the store, and an unrelated artifact cannot fail the call.
+  const read = new Map<string, number>();
+  const pin = (descriptor: ArtifactDescriptor) => {
+    const prior = read.get(descriptor.id);
+    if (prior !== undefined && prior !== descriptor.sizeBytes) throw new Error(`Comparison artifact ${descriptor.id} changed during this operation; nothing was saved. Run the mode again.`);
+    read.set(descriptor.id, descriptor.sizeBytes);
   };
   const store = source.artifactStore;
-  const nativeStore = store instanceof ArtifactStore ? store : undefined;
-  const assertStore = store && captureCatalogMethods(store, ['get', 'list', 'readContent', 'create', ...(nativeStore ? ['getRecord'] : [])]);
-  const nativeRoot = nativeStore && captureNativeArtifactRoot(nativeStore);
-  const nativeGetRecord = nativeStore?.getRecord;
-  const physicalSources = new Map<string, () => void>();
+  const assertStore = store && captureCatalogMethods(store, ['get', 'list', 'readContent', 'create']);
+  const storeChecks = new Map<string, () => void>();
   const registry = source.toolRegistry;
   const sourceOwner = agentResearchSourceOwner(registry);
   const get = store?.get; const list = store?.list; const readContent = store?.readContent; const create = store?.create;
@@ -108,21 +28,20 @@ export function createComparisonOperation(source: AgentModelCompareToolDeps, arg
   const providers = source.providerRegistry;
   const assertProviders = captureCatalogMethods(providers, ['getForModel']);
   const getForModel = providers.getForModel; const applyModelRoute = source.applyModelRoute;
-  const readDescriptor = (id: string) => get ? get.call(store, id) : list ? list.call(store, Number.MAX_SAFE_INTEGER).find(item => item.id === id) : observed.get(id)?.descriptor;
   const assertCurrent = () => {
     options?.signal?.throwIfAborted();
     assertCurrentToolExecution(args, options);
     assertSource(); assertStore?.(); assertCatalog(); assertProviders();
     if (source.toolRegistry !== registry || agentResearchSourceOwner(registry) !== sourceOwner || source.artifactStore !== store || store?.get !== get || store?.list !== list || store?.readContent !== readContent || store?.create !== create
-      || nativeStore?.getRecord !== nativeGetRecord
       || source.modelCatalog !== catalog || catalog.listModels !== listModels || catalog.getCurrentModel !== getCurrentModel || catalog.recordModelUsage !== recordModelUsage
       || source.providerRegistry !== providers || providers.getForModel !== getForModel || source.applyModelRoute !== applyModelRoute) throw new Error('Comparison dependency owner changed.');
-    for (const [id, observation] of observed) {
-      const current = readDescriptor(id);
-      if (!current || descriptorBytes(current) !== observation.captured) throw new Error('Comparison source artifact changed during this operation.');
+    if (get) {
+      for (const [id, size] of read) {
+        const current = get.call(store, id);
+        if (!current || current.sizeBytes !== size) throw new Error(`Comparison artifact ${id} changed or expired during this operation; nothing was saved. Run the mode again.`);
+      }
     }
-    nativeRoot?.assertCurrent();
-    for (const assertPhysicalCurrent of physicalSources.values()) assertPhysicalCurrent();
+    for (const check of storeChecks.values()) check();
   };
   const assertEffect = (effect: 'write' | 'send') => {
     assertCurrent();
@@ -138,24 +57,18 @@ export function createComparisonOperation(source: AgentModelCompareToolDeps, arg
       assertCurrent();
       return result;
     },
-    ...(list ? { list(limit?: number) { assertCurrent(); const result = list.call(store, limit); for (const descriptor of result) if (isComparisonArtifact(descriptor)) observeDescriptor(descriptor); assertCurrent(); return result; } } : {}),
-    ...(get ? { get(id: string) { assertCurrent(); const result = get.call(store, id); if (result) observeDescriptor(result); assertCurrent(); return result; } } : {}),
+    ...(list ? { list(limit?: number) { assertCurrent(); return list.call(store, limit); } } : {}),
+    ...(get ? { get(id: string) { assertCurrent(); return get.call(store, id); } } : {}),
     ...(readContent ? { async readContent(id: string) {
       assertCurrent();
-      const before = readDescriptor(id);
-      const beforeBytes = before && descriptorBytes(before);
-      const assertPhysicalCurrent = nativeStore ? captureNativeArtifactSource(nativeStore, id) : undefined;
       const result = await readContent.call(store, id);
-      assertPhysicalCurrent?.();
-      assertCurrent();
       if (result.record.id !== id) throw new Error('Comparison source artifact does not match the requested owner record.');
       const readCurrent = result.assertCurrent?.bind(result); readCurrent?.();
-      if (result.buffer.byteLength !== result.record.sizeBytes) throw new Error('Comparison source artifact size does not match its owning record.');
-      if (beforeBytes && descriptorBytes(result.record) !== beforeBytes) throw new Error('Comparison source artifact changed during acquisition.');
-      observeDescriptor(result.record);
-      if (assertPhysicalCurrent || readCurrent) physicalSources.set(id, () => { assertPhysicalCurrent?.(); readCurrent?.(); });
+      if (result.buffer.byteLength !== result.record.sizeBytes) throw new Error(`Comparison artifact ${id} is not the size its record states; it was not used.`);
+      pin(result.record);
+      if (readCurrent) storeChecks.set(id, readCurrent);
       assertCurrent();
-      return { record: result.record, buffer: Buffer.from(result.buffer), assertCurrent: () => { assertCurrent(); assertPhysicalCurrent?.(); readCurrent?.(); } };
+      return { record: result.record, buffer: Buffer.from(result.buffer), assertCurrent: () => { assertCurrent(); readCurrent?.(); } };
     } } : {}),
   };
   const deps: AgentModelCompareToolDeps = {

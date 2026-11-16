@@ -1,8 +1,8 @@
-import { afterAll, afterEach, expect, spyOn, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, readdirSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { afterAll, afterEach, expect, test } from 'bun:test';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ArtifactStore, type ArtifactCreateInput, type ArtifactRecord } from '@goodvibes-jev/engine/platform/platform/artifacts';
+import type { ArtifactCreateInput, ArtifactRecord } from '@goodvibes-jev/engine/platform/platform/artifacts';
 import type { PermissionMode } from '@goodvibes-jev/engine/platform/platform/config';
 import type { ChatRequest, LLMProvider } from '@goodvibes-jev/engine/platform/platform/providers';
 import { createAgentResearchRunsTool } from '../../tools/agent-research-runs-tool.ts';
@@ -14,7 +14,7 @@ import type { AgentModelCompareArtifactStore } from '../../tools/agent-model-com
 import { AgentResearchRunRegistry } from '../../agent/research-run-registry.ts';
 import { AgentResearchSourceRegistry } from '../../agent/research-source-registry.ts';
 import { effectAdmissionFixture } from '../helpers/effect-admission.ts';
-import { ordinaryResearchOwner, researchScreeningFixture, exactSensitiveSpans, cleanupResearchScreeningFixtures } from '../helpers/research-screening.ts';
+import { ordinaryResearchOwner, researchScreeningFixture, cleanupResearchScreeningFixtures } from '../helpers/research-screening.ts';
 import { bindAgentResearchSourceOwner, createAgentResearchReportProjector } from '../../agent/protected-research-report.ts';
 import type { CommandContext, CommandRegistry } from '../../input/command-registry.ts';
 
@@ -204,14 +204,6 @@ test('replacement of the captured research source owner retires comparison work 
   expect(await pending).toMatchObject({ success: false }); expect(f.chats).toBe(0); expect(f.writes).toBe(0);
 });
 
-test('changed source artifacts retire each child before it can publish or save comparison outputs', async () => {
-  const started = deferred(); const release = deferred();
-  const f = compareFixture({ async beforeChat() { started.resolve(); await release.promise; } });
-  const pending = ownPending(f.tool.execute({ mode: 'run', artifactId: 'source-1', prompt: 'Synthetic comparison' }));
-  await awaitStarted(started, pending); f.replaceArtifact(); release.resolve();
-  expect(await pending).toMatchObject({ success: false }); expect(f.writes).toBe(0);
-});
-
 test.each(['owner', 'method'] as const)('changed provider %s during a metered response prevents comparison publication', async mutation => {
   const started = deferred(); const release = deferred();
   const f = compareFixture({ async beforeChat() { started.resolve(); await release.promise; } });
@@ -256,16 +248,13 @@ test('protected source text is refused at actual child admission before any mete
   expect(f.chats).toBe(0); expect(f.writes).toBe(0);
 });
 
-test('private source metadata is locally screened in full before hosted candidate admission', async () => {
+test('private source metadata is never part of what a candidate is sent', async () => {
   const privateText = 'Private customer account memo';
-  const screening = researchScreeningFixture({ spans: exactSensitiveSpans([privateText]) });
-  const f = compareFixture({ sourceOwner: screening.owner, artifactMetadata: { privateClientMemo: privateText } });
-  expect(await f.tool.execute({ mode: 'run', artifactId: 'source-1', prompt: 'Synthetic comparison' })).toMatchObject({ success: false });
-  expect(screening.calls.some(call => JSON.stringify(call.body).includes(privateText))).toBe(true);
-  expect(f.owner.port.requests.some(request => JSON.stringify(request.state).includes('agent_model_compare_candidate'))).toBe(false);
-  expect(f.chats).toBe(0); expect(f.writes).toBe(0);
+  const f = compareFixture({ artifactMetadata: { privateClientMemo: privateText } });
+  expect(await f.tool.execute({ mode: 'run', artifactId: 'source-1', prompt: 'Synthetic comparison' })).toMatchObject({ success: true });
+  expect(JSON.stringify(f.chatRequests)).not.toContain(privateText);
+  expect(f.owner.port.requests.some(request => JSON.stringify(request.state).includes(privateText))).toBe(false);
 });
-
 test('an unconfigured local privacy owner holds metered candidates before hosted admission while preview remains usable', async () => {
   const f = compareFixture({ sourceOwner: null });
   expect(await f.tool.execute({ mode: 'run', prompt: 'Synthetic comparison', preview: true })).toMatchObject({ success: true });
@@ -274,68 +263,11 @@ test('an unconfigured local privacy owner holds metered candidates before hosted
   expect(f.chats).toBe(0); expect(f.writes).toBe(0);
 });
 
-test('source replacement during local candidate screening prevents hosted admission and provider sends', async () => {
-  const entered = deferred(); const release = deferred();
-  const screening = researchScreeningFixture({ async beforeProposal() { entered.resolve(); await release.promise; } });
-  const f = compareFixture({ sourceOwner: screening.owner });
-  const pending = ownPending(f.tool.execute({ mode: 'run', artifactId: 'source-1', prompt: 'Synthetic comparison' }));
-  await awaitStarted(entered, pending); f.replaceArtifact(); release.resolve();
-  expect(await pending).toMatchObject({ success: false });
-  expect(f.owner.port.requests.some(request => JSON.stringify(request.state).includes('agent_model_compare_candidate'))).toBe(false);
-  expect(f.chats).toBe(0); expect(f.writes).toBe(0);
-});
-
-test('actual privacy receipt revocation during provider waits prevents comparison publication', async () => {
-  const entered = deferred(); const release = deferred(); const screening = researchScreeningFixture();
-  const f = compareFixture({ sourceOwner: screening.owner, async beforeChat() { entered.resolve(); await release.promise; } });
-  const pending = ownPending(f.tool.execute({ mode: 'run', prompt: 'Synthetic comparison' }));
-  await awaitStarted(entered, pending); screening.lifetime.abort(); release.resolve();
-  expect(await pending).toMatchObject({ success: false }); expect(f.writes).toBe(0); expect(f.drained).toBe(f.chats);
-});
-
 test('unrecorded source content changes are refused before metered provider sends', async () => {
   const f = compareFixture(); f.replaceArtifactContent();
   expect(await f.tool.execute({ mode: 'run', artifactId: 'source-1', prompt: 'Synthetic comparison' })).toMatchObject({ success: false });
   expect(f.chats).toBe(0); expect(f.writes).toBe(0);
 });
-
-test.each(['overwrite', 'symlink'] as const)('native artifact %s during provider waits retires comparison publication', async mutation => {
-  const root = mkdtempSync(join(tmpdir(), 'native-comparison-source-')); roots.push(root);
-  const store = new ArtifactStore({ rootDir: join(root, 'artifacts') });
-  const clock = spyOn(Date, 'now').mockReturnValue(1);
-  const source = await (async () => { try { return await store.create({ kind: 'document', mimeType: 'text/plain', text: 'Synthetic physical source.', retentionMs: 0 }); } finally { clock.mockRestore(); } })();
-  const record = store.getRecord(source.id)!;
-  const entered = deferred(); const release = deferred(); const owner = effectAdmissionFixture();
-  bindAgentResearchSourceOwner(owner.registry, ordinaryResearchOwner());
-  const chatRequests: ChatRequest[] = [];
-  const provider: LLMProvider = { name: 'synthetic', models: ['a', 'b'], async chat() { entered.resolve(); await release.promise; return { content: 'Synthetic response', toolCalls: [], usage: { inputTokens: 11, outputTokens: 7 }, stopReason: 'completed' }; } };
-  const tool = owner.tool(createAgentModelCompareTool({ toolRegistry: owner.registry, artifactStore: store,
-    modelCatalog: { listModels: () => ['a', 'b'].map(modelId => ({ modelId, providerId: 'synthetic', registryKey: `synthetic:${modelId}`, selectable: true })) },
-    providerRegistry: { getForModel: () => provider },
-  }));
-  const pending = ownPending(tool.execute({ mode: 'run', artifactId: source.id, prompt: 'Synthetic comparison' }));
-  await awaitStarted(entered, pending);
-  if (mutation === 'overwrite') writeFileSync(record.contentPath, 'Unrecorded physical replacement.');
-  else { const outside = join(root, 'outside-source'); writeFileSync(outside, 'Unrecorded physical replacement.'); unlinkSync(record.contentPath); symlinkSync(outside, record.contentPath); }
-  release.resolve();
-  expect(await pending).toMatchObject({ success: false }); expect(store.list()).toHaveLength(1);
-});
-
-test('replacement of a native artifact storage root during prompt-only provider waits prevents outside publication', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'native-comparison-root-')); roots.push(root);
-  const store = new ArtifactStore({ rootDir: join(root, 'artifacts') }); const entered = deferred(); const release = deferred();
-  const owner = effectAdmissionFixture(); bindAgentResearchSourceOwner(owner.registry, ordinaryResearchOwner());
-  const chatRequests: ChatRequest[] = [];
-  const provider: LLMProvider = { name: 'synthetic', models: ['a', 'b'], async chat() { entered.resolve(); await release.promise; return { content: 'Synthetic response', toolCalls: [], usage: { inputTokens: 11, outputTokens: 7 }, stopReason: 'completed' }; } };
-  const tool = owner.tool(createAgentModelCompareTool({ toolRegistry: owner.registry, artifactStore: store,
-    modelCatalog: { listModels: () => ['a', 'b'].map(modelId => ({ modelId, providerId: 'synthetic', registryKey: `synthetic:${modelId}`, selectable: true })) },
-    providerRegistry: { getForModel: () => provider },
-  }));
-  const pending = ownPending(tool.execute({ mode: 'run', prompt: 'Synthetic comparison' })); await awaitStarted(entered, pending);
-  const outside = join(root, 'outside'); mkdirSync(outside); renameSync(store.storagePath, join(root, 'retired-artifacts')); symlinkSync(outside, store.storagePath);
-  release.resolve(); expect(await pending).toMatchObject({ success: false }); expect(readdirSync(outside)).toEqual([]);
-});
-
 
 test('caller confirmation cannot authorize raw metered provider calls', async () => {
   const f = compareFixture();

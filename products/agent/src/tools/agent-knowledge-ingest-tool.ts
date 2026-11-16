@@ -14,6 +14,7 @@ import {
 } from '../cli/agent-knowledge-runtime.ts';
 import { AGENT_KNOWLEDGE_METHODS } from '../cli/agent-knowledge-methods.ts';
 import { formatBatchIngest, formatFailure, formatIngest } from '../cli/agent-knowledge-format.ts';
+import { readString } from './tool-args.ts';
 
 export type AgentKnowledgeIngestSourceKind =
   | 'url'
@@ -81,9 +82,6 @@ function isSourceKind(value: unknown): value is AgentKnowledgeIngestSourceKind {
     || value === 'bookmarks_file' || value === 'browser_history' || value === 'connector';
 }
 
-function readString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
-}
 
 function readOptionalString(value: unknown): string | undefined {
   const text = readString(value);
@@ -94,10 +92,6 @@ function readStringList(value: unknown): readonly string[] {
   if (typeof value === 'string') return value.split(',').map((entry) => entry.trim()).filter(Boolean);
   if (!Array.isArray(value)) return [];
   return value.filter((entry): entry is string => typeof entry === 'string').map((entry) => entry.trim()).filter(Boolean);
-}
-
-function readBoolean(value: unknown): boolean {
-  return value === true || value === 'true' || value === 'yes';
 }
 
 function readPositiveInt(value: unknown, fallback: number): number {
@@ -183,7 +177,8 @@ function requestForArgs(args: AgentKnowledgeIngestToolArgs): AgentKnowledgeInges
   if (sourceKind === null) throw new IngestArgumentError(`sourceKind must be one of ${SOURCE_KINDS.join(', ')}.`);
 
   // Private-host protection is the daemon's; a model cannot widen it for itself.
-  if (readBoolean(args.allowPrivateHosts)) {
+  // Anything but absent or false is refused, so no spelling of yes slips through.
+  if (![undefined, null, false, 'false', ''].includes(args.allowPrivateHosts as never)) {
     throw new IngestArgumentError('allowPrivateHosts cannot be set by the model. Private-host sources are ingested by the owner from the workspace.');
   }
   const title = readOptionalString(args.title);
@@ -330,13 +325,21 @@ function requestForArgs(args: AgentKnowledgeIngestToolArgs): AgentKnowledgeInges
   };
 }
 
-/** The model picks local paths, so they stay inside the workspace; a file elsewhere is the owner's to hand over. */
+/**
+ * The model picks local paths, so they stay inside the workspace: the bytes read
+ * here leave for the host, and a path outside (a key file, another project) is
+ * the owner's to hand over. One realpath per call.
+ */
 function workspacePath(shellPaths: ShellPathService, selected: string, field: string): string {
   const workspace = realpathSync(shellPaths.workingDirectory);
   let target: string;
-  try { target = realpathSync(shellPaths.resolveWorkspacePath(selected)); } catch { throw new IngestArgumentError(`The ${field} does not name an existing file.`); }
+  try { target = realpathSync(shellPaths.resolveWorkspacePath(selected)); } catch { throw new IngestArgumentError(`The ${field} does not name an existing file or directory; check the path relative to the workspace.`); }
   const rel = relative(workspace, target);
-  if (rel.startsWith('..') || isAbsolute(rel)) throw new IngestArgumentError(`The ${field} must be inside the workspace.`);
+  if (rel.startsWith('..') || isAbsolute(rel)) {
+    throw new IngestArgumentError(field === 'path'
+      ? 'Nothing was ingested: the path is outside the workspace, and this tool reads only workspace files. Copy the file into the workspace and call again, or ask the owner to run `goodvibes-agent knowledge ingest-file <path> --yes`.'
+      : `Nothing was ingested: the ${field} is outside the workspace, and this tool reads only workspace files. Point it at a profile copy inside the workspace, or omit it to import the owner's browsers.`);
+  }
   return target;
 }
 

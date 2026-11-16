@@ -143,10 +143,11 @@ describe('agent_local_registry updates and limits', () => {
     expect((result.output ?? '').split('\n').filter((line) => line.includes('alpha ')).length).toBe(2);
   });
 
-  test('an empty activate value is not read as yes', () => {
-    expect(() => readActivation('')).toThrow('activate must be true or false');
+  test('an empty activate value is not read as yes, and a word is never guessed at', () => {
+    expect(readActivation('')).toBeUndefined();
     expect(readActivation(undefined)).toBeUndefined();
-    expect(readActivation('yes')).toBe(true);
+    expect(() => readActivation('yes')).toThrow('activate must be true or false');
+    expect(readActivation('true')).toBe(true);
     expect(readActivation(false)).toBe(false);
   });
 

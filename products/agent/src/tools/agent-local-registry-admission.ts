@@ -27,8 +27,9 @@ function fileRevision(path: string) {
 export function createAgentLocalRegistryInputProjector(shellPaths: ShellPathService, memoryRegistry: MemoryRegistry, memorySpine: MemoryAccess): ToolInputProjector {
   return { async project(request) {
     request.assertCurrent(); request.signal?.throwIfAborted();
-    assertAgentMemoryInput(request.args);
     const domain = request.args.domain, action = request.args.action;
+    const reads = typeof action === 'string' && readActions.has(action);
+    assertAgentMemoryInput(request.args, { screenSecrets: !reads });
     const home = shellPaths.homeDirectory, resolveUserPath = shellPaths.resolveUserPath;
     const memoryStore = memoryRegistry.getStore();
     const memoryScope = memorySpine instanceof MemorySpineClient ? memorySpine.captureOperationScope() : undefined;
@@ -63,9 +64,9 @@ export function createAgentLocalRegistryInputProjector(shellPaths: ShellPathServ
       if (path !== null) { physical = captureAgentExportPath(home, domain === 'memory' ? dirname(path) : path); before = fileRevision(path); }
     } });
     return { status: 'projected', args: request.args, executionContext: context, assertCurrent,
-      ...(typeof action === 'string' && readActions.has(action) ? { resultPublication: 'read-only' } : {}),
+      ...(reads ? { resultPublication: 'read-only' } : {}),
       assertRepairedArgs(args) {
-        assertAgentMemoryInput(args);
+        assertAgentMemoryInput(args, { screenSecrets: !reads });
         if (args.domain !== domain || args.action !== action) throw new ToolInputProjectionError('binding-changed');
         assertCurrent();
       },

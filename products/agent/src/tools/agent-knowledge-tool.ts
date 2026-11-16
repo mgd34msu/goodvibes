@@ -25,6 +25,7 @@ import {
   formatSearch,
   formatStatus,
 } from '../cli/agent-knowledge-format.ts';
+import { readString } from './tool-args.ts';
 
 export type AgentKnowledgeToolAction =
   | 'status'
@@ -59,9 +60,6 @@ function isAction(value: unknown): value is AgentKnowledgeToolAction {
   return typeof value === 'string' && ACTIONS.some(action => action === value);
 }
 
-function readString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
-}
 
 function readLimit(value: unknown, fallback: number, max = 25): number {
   if (typeof value === 'number' && Number.isInteger(value) && value > 0) return Math.min(value, max);
@@ -76,7 +74,10 @@ function readMode(value: unknown): AgentKnowledgeAskMode {
   return value === 'concise' || value === 'standard' || value === 'detailed' ? value : 'standard';
 }
 
-/** The search formatter prints at most this many rows; the model must be told when more came back. */
+/**
+ * The search formatter prints at most this many rows, so a search asks the host
+ * for no more than it can show; a longer answer is still labelled as cut.
+ */
 const SEARCH_ROWS_PRINTED = 10;
 
 function labelSearchCut(text: string, data: unknown): string {
@@ -178,7 +179,7 @@ export function createAgentKnowledgeTool(
           },
           limit: {
             type: 'number',
-            description: 'Maximum result count. ask: default 8, at most 25. search: default 10, at most 25. sources, nodes, issues: default 25, at most 500. map: default 50, at most 500.',
+            description: 'Maximum result count. ask: default 8, at most 25. search: default 10, at most 10. sources, nodes, issues: default 25, at most 500. map: default 50, at most 500.',
           },
           mode: {
             type: 'string',
@@ -192,120 +193,115 @@ export function createAgentKnowledgeTool(
       sideEffects: ['network'],
     },
     execute: async (rawArgs, options) => {
-      try {
-        const optionsCurrent = options && captureCatalogMethods(options, ['signal', 'assertCurrent', 'inputProjectionContext']);
-        const input = captureCatalogSnapshot(rawArgs), args = input.captured;
-        const methodsCurrent = captureCatalogMethods(AGENT_KNOWLEDGE_METHODS, Object.keys(AGENT_KNOWLEDGE_METHODS));
-        const methods = captureCatalogSnapshot(AGENT_KNOWLEDGE_METHODS);
-        const context = options?.inputProjectionContext, captured = context && knowledgeCaptures.get(context);
-        const assertInvocation = () => {
-          optionsCurrent?.(); options?.signal?.throwIfAborted(); assertCurrentToolInvocation(rawArgs, options);
-          input.assertCurrent(rawArgs); methodsCurrent(); methods.assertCurrent(AGENT_KNOWLEDGE_METHODS);
-          if (context) {
-            if (!captured || captured.shellPaths !== shellPaths || captured.configManager !== configManager) throw new ToolInputProjectionError('held');
-            assertProjectionExecution(context, rawArgs); captured.assertCurrent();
+      const optionsCurrent = options && captureCatalogMethods(options, ['signal', 'assertCurrent', 'inputProjectionContext']);
+      const input = captureCatalogSnapshot(rawArgs), args = input.captured;
+      const methodsCurrent = captureCatalogMethods(AGENT_KNOWLEDGE_METHODS, Object.keys(AGENT_KNOWLEDGE_METHODS));
+      const methods = captureCatalogSnapshot(AGENT_KNOWLEDGE_METHODS);
+      const context = options?.inputProjectionContext, captured = context && knowledgeCaptures.get(context);
+      const assertInvocation = () => {
+        optionsCurrent?.(); options?.signal?.throwIfAborted(); assertCurrentToolInvocation(rawArgs, options);
+        input.assertCurrent(rawArgs); methodsCurrent(); methods.assertCurrent(AGENT_KNOWLEDGE_METHODS);
+        if (context) {
+          if (!captured || captured.shellPaths !== shellPaths || captured.configManager !== configManager) throw new ToolInputProjectionError('held');
+          assertProjectionExecution(context, rawArgs); captured.assertCurrent();
+        }
+        optionsCurrent?.();
+      };
+      assertInvocation();
+      const connection = captured ? captured.connection : captureOperatorConnection(shellPaths, configManager, assertInvocation);
+      const assertCurrent = () => { assertInvocation(); connection.assertCurrent(); assertInvocation(); };
+      const restrictions = { signal: options?.signal, assertCurrent };
+      assertCurrent();
+      const run = async () => {
+        if (!isAction(args.action)) return toolFailure(`Unknown Agent Knowledge action. Valid values ${ACTIONS.join(', ')}.`);
+        if (!connection.token) {
+          return toolFailure(formatKnowledgeFailure({ ok: false, kind: 'auth_required',
+            error: 'No connected-host operator token found.',
+            baseUrl: connection.baseUrl, route: '/api/goodvibes-agent/knowledge/*' }));
+        }
+        let method: ConnectedHostCallMethod = AGENT_KNOWLEDGE_METHODS.status;
+        try {
+          const platformClient = createAgentPlatform(connection, restrictions);
+          if (args.action === 'status') {
+            method = AGENT_KNOWLEDGE_METHODS.status;
+            const data = await platformClient.knowledge.status();
+            return formattedToolOutput(data, formatStatus);
           }
-          optionsCurrent?.();
-        };
-        assertInvocation();
-        const connection = captured ? captured.connection : captureOperatorConnection(shellPaths, configManager, assertInvocation);
-        const assertCurrent = () => { assertInvocation(); connection.assertCurrent(); assertInvocation(); };
-        const restrictions = { signal: options?.signal, assertCurrent };
-        assertCurrent();
-        const run = async () => {
-          if (!isAction(args.action)) return toolFailure(`Unknown Agent Knowledge action. Valid values ${ACTIONS.join(', ')}.`);
-          if (!connection.token) {
-            return toolFailure(formatKnowledgeFailure({ ok: false, kind: 'auth_required',
-              error: 'No connected-host operator token found.',
-              baseUrl: connection.baseUrl, route: '/api/goodvibes-agent/knowledge/*' }));
+          if (args.action === 'ask') {
+            method = AGENT_KNOWLEDGE_METHODS.ask;
+            const query = readString(args.query);
+            if (!query) return toolFailure('query is required for Agent Knowledge ask.');
+            const data = await platformClient.knowledge.ask({
+              query,
+              limit: readLimit(args.limit, 8),
+              mode: readMode(args.mode),
+              includeSources: true,
+              includeConfidence: true,
+              includeLinkedObjects: true,
+            });
+            return formattedToolOutput(data, (validatedData) => formatAsk(validatedData, query));
           }
-          let method: ConnectedHostCallMethod = AGENT_KNOWLEDGE_METHODS.status;
-          try {
-            const platformClient = createAgentPlatform(connection, restrictions);
-            if (args.action === 'status') {
-              method = AGENT_KNOWLEDGE_METHODS.status;
-              const data = await platformClient.knowledge.status();
-              return formattedToolOutput(data, formatStatus);
-            }
-            if (args.action === 'ask') {
-              method = AGENT_KNOWLEDGE_METHODS.ask;
-              const query = readString(args.query);
-              if (!query) return toolFailure('query is required for Agent Knowledge ask.');
-              const data = await platformClient.knowledge.ask({
-                query,
-                limit: readLimit(args.limit, 8),
-                mode: readMode(args.mode),
-                includeSources: true,
-                includeConfidence: true,
-                includeLinkedObjects: true,
-              });
-              return formattedToolOutput(data, (validatedData) => formatAsk(validatedData, query));
-            }
-            if (args.action === 'search') {
-              method = AGENT_KNOWLEDGE_METHODS.search;
-              const query = readString(args.query);
-              if (!query) return toolFailure('query is required for Agent Knowledge search.');
-              const data = await platformClient.knowledge.search({ query, limit: readLimit(args.limit, 10) });
-              return formattedToolOutput(data, (validatedData) => labelSearchCut(formatSearch(validatedData, query), validatedData));
-            }
-            if (args.action === 'sources' || args.action === 'nodes' || args.action === 'issues') {
-              const kind = args.action;
-              const limit = readLimit(args.limit, 25, 500);
-              method = kind === 'sources'
-                ? AGENT_KNOWLEDGE_METHODS.sourcesList
-                : kind === 'nodes'
-                  ? AGENT_KNOWLEDGE_METHODS.nodesList
-                  : AGENT_KNOWLEDGE_METHODS.issuesList;
-              const data = await getAgentKnowledgeJson(connection, method.route, { limit }, restrictions);
-              return formattedToolOutput(data, (validatedData) => formatEntityList(validatedData, kind, limit).replaceAll('--limit', 'limit'));
-            }
-            if (args.action === 'item') {
-              method = AGENT_KNOWLEDGE_METHODS.itemGet;
-              const id = readString(args.id);
-              if (!id) return toolFailure('id is required for Agent Knowledge item lookup.');
-              const route = `/api/goodvibes-agent/knowledge/items/${encodeURIComponent(id)}`;
-              const data = await getAgentKnowledgeJson(connection, route, {}, restrictions);
-              return formattedToolOutput(data, (validatedData) => formatItem(validatedData, id));
-            }
-            if (args.action === 'map') {
-              method = AGENT_KNOWLEDGE_METHODS.map;
-              const data = await getAgentKnowledgeJson(connection, method.route, {
-                limit: readLimit(args.limit, 50, 500),
-                query: readString(args.query),
-              }, restrictions);
-              return formattedToolOutput(data, formatMap);
-            }
-            if (args.action === 'connectors') {
-              method = AGENT_KNOWLEDGE_METHODS.connectorsList;
-              const data = await getAgentKnowledgeJson(connection, method.route, {}, restrictions);
-              return formattedToolOutput(data, formatConnectors);
-            }
-            if (args.action === 'connector' || args.action === 'connector_doctor') {
-              method = args.action === 'connector'
-                ? AGENT_KNOWLEDGE_METHODS.connectorGet
-                : AGENT_KNOWLEDGE_METHODS.connectorDoctor;
-              const connectorId = readString(args.connectorId) || readString(args.id);
-              if (!connectorId) return toolFailure('connectorId or id is required for Agent Knowledge connector lookup.');
-              const suffix = args.action === 'connector_doctor' ? '/doctor' : '';
-              const route = `/api/goodvibes-agent/knowledge/connectors/${encodeURIComponent(connectorId)}${suffix}`;
-              const data = await getAgentKnowledgeJson(connection, route, {}, restrictions);
-              return formattedToolOutput(data, (validatedData) => (
-                args.action === 'connector'
-                  ? formatConnector(validatedData, connectorId)
-                  : formatConnectorDoctor(validatedData, connectorId)
-              ));
-            }
-            return toolFailure(`Unknown Agent Knowledge action. Valid values ${ACTIONS.join(', ')}.`);
-          } catch (error) {
-            return classifyToolKnowledgeError(error, connection, method, restrictions);
+          if (args.action === 'search') {
+            method = AGENT_KNOWLEDGE_METHODS.search;
+            const query = readString(args.query);
+            if (!query) return toolFailure('query is required for Agent Knowledge search.');
+            const data = await platformClient.knowledge.search({ query, limit: readLimit(args.limit, SEARCH_ROWS_PRINTED, SEARCH_ROWS_PRINTED) });
+            return formattedToolOutput(data, (validatedData) => labelSearchCut(formatSearch(validatedData, query), validatedData));
           }
-        };
-        const result = await run();
-        assertCurrent();
-        return result;
-      } catch {
-        return toolFailure('Agent Knowledge operation held: original caller, source, or connection is unavailable.');
-      }
+          if (args.action === 'sources' || args.action === 'nodes' || args.action === 'issues') {
+            const kind = args.action;
+            const limit = readLimit(args.limit, 25, 500);
+            method = kind === 'sources'
+              ? AGENT_KNOWLEDGE_METHODS.sourcesList
+              : kind === 'nodes'
+                ? AGENT_KNOWLEDGE_METHODS.nodesList
+                : AGENT_KNOWLEDGE_METHODS.issuesList;
+            const data = await getAgentKnowledgeJson(connection, method.route, { limit }, restrictions);
+            return formattedToolOutput(data, (validatedData) => formatEntityList(validatedData, kind, limit).replaceAll('--limit', 'limit'));
+          }
+          if (args.action === 'item') {
+            method = AGENT_KNOWLEDGE_METHODS.itemGet;
+            const id = readString(args.id);
+            if (!id) return toolFailure('id is required for Agent Knowledge item lookup.');
+            const route = `/api/goodvibes-agent/knowledge/items/${encodeURIComponent(id)}`;
+            const data = await getAgentKnowledgeJson(connection, route, {}, restrictions);
+            return formattedToolOutput(data, (validatedData) => formatItem(validatedData, id));
+          }
+          if (args.action === 'map') {
+            method = AGENT_KNOWLEDGE_METHODS.map;
+            const data = await getAgentKnowledgeJson(connection, method.route, {
+              limit: readLimit(args.limit, 50, 500),
+              query: readString(args.query),
+            }, restrictions);
+            return formattedToolOutput(data, formatMap);
+          }
+          if (args.action === 'connectors') {
+            method = AGENT_KNOWLEDGE_METHODS.connectorsList;
+            const data = await getAgentKnowledgeJson(connection, method.route, {}, restrictions);
+            return formattedToolOutput(data, formatConnectors);
+          }
+          if (args.action === 'connector' || args.action === 'connector_doctor') {
+            method = args.action === 'connector'
+              ? AGENT_KNOWLEDGE_METHODS.connectorGet
+              : AGENT_KNOWLEDGE_METHODS.connectorDoctor;
+            const connectorId = readString(args.connectorId) || readString(args.id);
+            if (!connectorId) return toolFailure('connectorId or id is required for Agent Knowledge connector lookup.');
+            const suffix = args.action === 'connector_doctor' ? '/doctor' : '';
+            const route = `/api/goodvibes-agent/knowledge/connectors/${encodeURIComponent(connectorId)}${suffix}`;
+            const data = await getAgentKnowledgeJson(connection, route, {}, restrictions);
+            return formattedToolOutput(data, (validatedData) => (
+              args.action === 'connector'
+                ? formatConnector(validatedData, connectorId)
+                : formatConnectorDoctor(validatedData, connectorId)
+            ));
+          }
+          return toolFailure(`Unknown Agent Knowledge action. Valid values ${ACTIONS.join(', ')}.`);
+        } catch (error) {
+          return classifyToolKnowledgeError(error, connection, method, restrictions);
+        }
+      };
+      // A read has nothing to protect once the host answered: the answer is returned as received.
+      return await run();
     },
   };
 }

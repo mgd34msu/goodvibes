@@ -120,6 +120,11 @@ function renderMemorySearch(mode: string, query: string, lines: readonly string[
   return [`Agent-local memory search (${mode})`, `query ${query || '(all)'}`, ...lines].join('\n');
 }
 
+/** No such record is a failure, as in every other domain of the tool. */
+function unknownMemory(id: string): Error {
+  return new Error(`Unknown Agent-local memory ${id}. Nothing was changed; find ids with domain:"memory" action:"list" or action:"search".`);
+}
+
 const SEARCH_LIMIT_DEFAULT = 10;
 const SEARCH_LIMIT_MAX = 50;
 
@@ -193,7 +198,7 @@ export async function handleMemory(
   }
   if (action === 'get') {
     const record = await run(() => memorySpine.get(requireId(args), options));
-    if (!record) return `Unknown Agent-local memory ${readString(args.id)}`;
+    if (!record) throw unknownMemory(readString(args.id));
     return [
       formatMemory(record),
       `created ${new Date(record.createdAt).toISOString()}`,
@@ -242,7 +247,7 @@ export async function handleMemory(
       tags,
       scope: args.scope === undefined ? undefined : readMemoryScope(args),
     }, options));
-    if (!record) return `Unknown Agent-local memory ${readString(args.id)}`;
+    if (!record) throw unknownMemory(readString(args.id));
     return [
       'Updated Agent-local memory',
       `  id ${record.id}`,
@@ -255,7 +260,7 @@ export async function handleMemory(
       confidence: readOptionalConfidence(args.confidence),
       reviewedBy: 'agent',
     }, options));
-    if (!record) return `Unknown Agent-local memory ${readString(args.id)}`;
+    if (!record) throw unknownMemory(readString(args.id));
     return [
       'Reviewed Agent-local memory',
       `  id ${record.id}`,
@@ -266,7 +271,7 @@ export async function handleMemory(
       state: 'stale',
       staleReason: readString(args.reason) || 'Marked stale by Agent.',
     }, options));
-    if (!record) return `Unknown Agent-local memory ${readString(args.id)}`;
+    if (!record) throw unknownMemory(readString(args.id));
     return [
       'Marked Agent-local memory stale',
       `  id ${record.id}`,
@@ -274,7 +279,7 @@ export async function handleMemory(
   }
   if (action === 'delete') {
     const id = requireId(args);
-    if (!(await run(() => memorySpine.delete(id, options)))) return `Unknown Agent-local memory ${id}`;
+    if (!(await run(() => memorySpine.delete(id, options)))) throw unknownMemory(id);
     return [
       'Deleted Agent-local memory',
       `  id ${id}`,

@@ -139,7 +139,7 @@ export interface DaemonChannelRouteHandlers {
   getChannelDirectory(surface: string, url: URL): MaybeResponse;
 }
 
-/** Full integration route surface, overview, delivery, snapshot, remote, platform status, memory, local auth, panels, and event log. */
+/** Full integration route surface, overview, delivery, snapshot, remote, platform status, memory, local auth, and panels. */
 export interface DaemonIntegrationRouteHandlers
   extends DaemonIntegrationOverviewRouteHandlers,
     DaemonDeliveryRouteHandlers,
@@ -148,8 +148,7 @@ export interface DaemonIntegrationRouteHandlers
     DaemonPlatformStatusRouteHandlers,
     DaemonMemoryRouteHandlers,
     DaemonLocalAuthAdminRouteHandlers,
-    DaemonPanelRouteHandlers,
-    DaemonEventLogRouteHandlers {}
+    DaemonPanelRouteHandlers {}
 
 /** Route handlers for integration overview endpoints (review, session, tasks, automation, sessions). */
 export interface DaemonIntegrationOverviewRouteHandlers {
@@ -217,11 +216,6 @@ export interface DaemonLocalAuthAdminRouteHandlers {
 export interface DaemonPanelRouteHandlers {
   getPanels(): MaybeResponse;
   postPanelOpen(req: Request): MaybeResponse;
-}
-
-/** Route handler for the event log endpoint. */
-export interface DaemonEventLogRouteHandlers {
-  getEvents(req: Request): MaybeResponse;
 }
 
 /** Route handlers for system management: watchers, service control, route bindings, approvals, and config. */

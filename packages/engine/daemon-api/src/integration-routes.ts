@@ -1,8 +1,7 @@
 import { MEMORY_RECORD_NOT_FOUND_CODE } from '@goodvibes-jev/engine/errors';
-import { isRuntimeEventDomain } from '@goodvibes-jev/engine/contracts';
 import type { DaemonIntegrationRouteHandlers } from './context.js';
 import { jsonErrorResponse, readServiceErrorResponse } from './error-response.js';
-import type { DaemonIntegrationRouteContext, IntegrationHelperServiceLike, MemoryRecordReviewInput, RuntimeEventDomain } from './integration-route-types.js';
+import type { DaemonIntegrationRouteContext, IntegrationHelperServiceLike, MemoryRecordReviewInput } from './integration-route-types.js';
 import {
   createRouteBodySchema,
   createRouteBodySchemaRegistry,
@@ -413,19 +412,6 @@ export function createDaemonIntegrationRouteHandlers(
       return ok
         ? Response.json({ opened: true, id: input.panelId, pane: input.pane })
         : jsonErrorResponse({ error: `Unknown panel: ${input.panelId}` }, { status: 404 });
-    },
-    // The raw runtime bus, every domain unfiltered (settings values, approvals,
-    // transcripts): admin only. /api/control-plane/events serves every other
-    // principal the domains it may read.
-    getEvents: (req) => {
-      const admin = context.requireAdmin(req);
-      if (admin) return admin;
-      const url = new URL(req.url);
-      const rawDomains = url.searchParams.get('domains');
-      // Unknown domains are dropped here, as the control-plane stream does, instead of cast through.
-      const domains = (rawDomains ? rawDomains.split(',').map((value) => value.trim()).filter(Boolean) : [])
-        .filter(isRuntimeEventDomain);
-      return withHelpers(context.integrationHelpers, (helpers) => helpers.createEventStream(req, domains));
     },
   };
 }

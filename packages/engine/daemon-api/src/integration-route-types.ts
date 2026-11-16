@@ -30,7 +30,6 @@ export interface IntegrationHelperServiceLike {
   getLocalAuthSnapshot(): unknown;
   listPanels(): readonly unknown[];
   openPanel(panelId: string, pane: 'top' | 'bottom'): boolean;
-  createEventStream(req: Request, domains: readonly RuntimeEventDomain[]): Response | Promise<Response>;
   getRuntimeStore(): IntegrationRuntimeStoreLike | null;
 }
 

@@ -17,6 +17,7 @@
 import { readFileSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { summarizeError } from '../../utils/error-display.js';
+import { RefusalError, refusal } from '@goodvibes-jev/engine/errors';
 import { isAbortError } from '../../contract/run-context.js';
 import type { DeepReadonly } from '../../config/manager.js';
 import type { GoodVibesConfig } from '../../config/schema-types.js';
@@ -363,11 +364,19 @@ async function handlePromote(args: string[], context: PolicyCommandContext): Pro
   }
   const result = registry.promote(force);
   if (!result.ok) {
-    context.print(`[policy] Promotion blocked: ${result.error}`);
-    if (result.gate) {
-      context.print(`[policy] Gate: ${result.gate.status}; divergence rate ${result.gate.divergenceRate !== undefined ? fmtRate(result.gate.divergenceRate) : 'unknown'} (threshold ${fmtRate(result.gate.threshold)}, ${result.gate.totalEvaluations} evaluations).`);
-    }
-    return;
+    // Thrown, not printed: the caller (the transcript, or the Policy modal's
+    // status line) shows the refusal instead of reporting the command done.
+    const gate = result.gate
+      ? ` Gate ${result.gate.status}: divergence rate ${result.gate.divergenceRate !== undefined ? fmtRate(result.gate.divergenceRate) : 'unknown'} (threshold ${fmtRate(result.gate.threshold)}, ${result.gate.totalEvaluations} evaluations).`
+      : '';
+    throw new RefusalError(refusal({
+      code: 'POLICY_PROMOTION_BLOCKED',
+      state: 'the active enforcement policy is unchanged',
+      reason: `Promotion blocked: ${result.error}.${gate}`,
+      next: result.gate
+        ? ['Run /policy simulate to collect more evaluations, then promote again; /policy promote --force bypasses the gate.']
+        : ['Run /policy status to see the candidate bundle, then promote again.'],
+    }));
   }
   const current = registry.getCurrent();
   context.print(`[policy] Promoted: "${result.bundleId}" is now the active enforcement policy.`);
@@ -385,8 +394,12 @@ async function handleRollback(_args: string[], context: PolicyCommandContext): P
   const policyState = getPolicyState(context);
   const result = registry.rollback();
   if (!result.ok) {
-    context.print(`[policy] Rollback failed: ${result.error}`);
-    return;
+    throw new RefusalError(refusal({
+      code: 'POLICY_ROLLBACK_FAILED',
+      state: 'the active enforcement policy is unchanged',
+      reason: `Rollback failed: ${result.error}`,
+      next: ['Run /policy status to see the bundle history.'],
+    }));
   }
   const current = registry.getCurrent();
   context.print(`[policy] Rolled back to bundle "${result.restoredBundleId}".`);

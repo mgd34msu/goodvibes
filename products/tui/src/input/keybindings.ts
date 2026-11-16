@@ -32,7 +32,8 @@ export type KeyAction =
   | 'toggle-keep-awake'
   | 'toggle-memory-provenance'
   | 'voice-input'
-  | 'focus-work-tree';
+  | 'focus-work-tree'
+  | 'cycle-permission-mode';
 
 export const ACTION_DESCRIPTIONS: Record<KeyAction, string> = { ...COMMON_ACTION_DESCRIPTIONS,
   'command-palette':       'Open the command palette (search & run any command)',
@@ -53,6 +54,7 @@ export const ACTION_DESCRIPTIONS: Record<KeyAction, string> = { ...COMMON_ACTION
   // state, there is no release event to watch, so this is two discrete presses,
   // and the description says so instead of implying a hold that cannot exist.
   'voice-input':           'Voice input: press to start recording, press again to stop and transcribe into the composer',
+  'cycle-permission-mode': 'Cycle this session\'s permission mode (asks before the mode with no approvals; the saved default is set in /permissions)',
 };
 
 export const DEFAULT_KEYBINDINGS: Record<KeyAction, KeyCombo[]> = createKeybindingDefaults<KeyAction>([
@@ -63,7 +65,7 @@ export const DEFAULT_KEYBINDINGS: Record<KeyAction, KeyCombo[]> = createKeybindi
   'redo', 'paste', 'word-back', 'word-forward',
   'kill-to-start', 'kill-word-forward', 'yank', 'yank-pop',
   'cancel-tool-call', 'toggle-keep-awake', 'toggle-memory-provenance', 'voice-input',
-  'focus-work-tree',
+  'focus-work-tree', 'cycle-permission-mode',
 ], {
 // Ctrl+P opens the command palette, the one entry point for every command,
   // view and setting; Ctrl+K (the other common palette chord) opens it too. The
@@ -113,6 +115,9 @@ export const DEFAULT_KEYBINDINGS: Record<KeyAction, KeyCombo[]> = createKeybindi
   // is paste and stays paste). Two presses rather than a hold: see the action's
   // description, a terminal has no key-release event to hold against.
   'voice-input':           [{ key: 'v', alt: true }],
+// Shift+Tab: cycle this session's permission mode. The legacy backtab literal
+  // is read as this chord (handler-shortcuts.ts).
+  'cycle-permission-mode': [{ key: 'tab', shift: true }],
 });
 
 export class KeybindingsManager extends PlatformKeybindingsManager<KeyAction> {

@@ -333,7 +333,7 @@ Alias: `/sess`. Run `/session` with no arguments to see current session info.
 
 Most shortcuts are customizable via `~/.goodvibes/tui/keybindings.json`. Use `/keybindings` to view current bindings.
 
-Five keys are fixed and are not in the rebindable table: `F2` (open or close Agents), `Shift+Tab` (cycle the session permission mode), `Esc` (exit the current mode), `?` (help/command picker on an empty prompt), and `@` (file picker). Everything else below resolves through the keybindings table and can be reassigned.
+Four keys are fixed and are not in the rebindable table: `F2` (open or close Agents), `Esc` (exit the current mode), `?` (help/command picker on an empty prompt), and `@` (file picker). `Shift+Tab` is `cycle-permission-mode` in the table. Everything else below resolves through the keybindings table and can be reassigned.
 
 ### Input and editing
 
@@ -426,7 +426,7 @@ In a searchable modal, `/` focuses the filter, and any keystroke that no row hot
 |-----|--------|
 | `Ctrl+C` | Clear input / cancel generation / exit (double-press to quit) |
 | `Ctrl+K` | Open the command palette (search and run any command) |
-| `Shift+Tab` | Cycle the execution mode: safe-owner → safe-jev → yolo (plan is outside the cycle; `/plan` toggles it). While the session chips show (an agent or background process is running) and the composer is empty, it switches to the previous session instead, and `Tab` to the next |
+| `Shift+Tab` | Cycle this session's execution mode: safe-owner → safe-jev → yolo, asking before yolo; the saved default changes only in `/permissions` or Settings (plan is outside the cycle; `/plan` toggles it). While the session chips show (an agent or background process is running) and the composer is empty, it switches to the previous session instead, and `Tab` to the next |
 | `Ctrl+X` | Inside an agent or process view: stop what it shows (the first press asks, the second stops) |
 | `Alt+C` | Cancel the running tool call (the turn continues) |
 | `Alt+A` | Toggle keep-awake (the "sleep disabled" chip) |

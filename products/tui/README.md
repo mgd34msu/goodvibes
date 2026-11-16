@@ -175,7 +175,7 @@ Other modes are available when that is not what you want:
 
 An explicit `permissions.tools.<name>` set to `deny` blocks that tool in the safe modes. Older values still load: `prompt`, `accept-edits` and `custom` as `safe-owner`, `auto` as `safe-jev`, `allow-all` as `yolo`.
 
-`Shift+Tab` cycles `safe-owner`, `safe-jev` and `yolo`. `/plan` toggles plan mode directly.
+`Shift+Tab` cycles `safe-owner`, `safe-jev` and `yolo` for the current session only, and asks before switching to `yolo`; the saved default is set with `/permissions` or in Settings. `/plan` toggles plan mode directly.
 
 ### Models and providers
 
@@ -209,12 +209,12 @@ Press `?` for a searchable, categorized list of every slash command with its arg
 | `Ctrl+Y` / `Ctrl+S` | Copy / save the nearest block |
 | `Ctrl+P` / `Ctrl+K` | Command palette: search and run any command, view or setting |
 | `F2` / `Ctrl+O` | Open or close Agents |
-| `Shift+Tab` | Cycle the session permission mode. With the session chips showing and an empty composer, switch to the previous session |
+| `Shift+Tab` | Cycle this session's permission mode (asks before `yolo`; the saved default is unchanged). With the session chips showing and an empty composer, switch to the previous session |
 | `Esc` | Close the top modal (one level), clear the composer, leave an agent or process view (never stops it), or interrupt main's turn |
 | `Ctrl+X` | Inside an agent or process view: stop it (press twice to confirm) |
 | `Ctrl+C` | Clear input, cancel a running turn. Press twice to quit |
 
-Most bindings are customizable in `~/.goodvibes/tui/keybindings.json`, and `/keybindings` shows what is currently bound. Five keys are fixed and stay out of that file: `F2` (Fleet), `Shift+Tab` (permission-mode cycle), `Esc` (leave the current mode), `?` (help), and `@` (file picker). The full reference is in [docs/tools-and-commands.md](docs/tools-and-commands.md).
+Most bindings are customizable in `~/.goodvibes/tui/keybindings.json`, and `/keybindings` shows what is currently bound. Four keys are fixed and stay out of that file: `F2` (Fleet), `Esc` (leave the current mode), `?` (help), and `@` (file picker). The permission-mode cycle (`Shift+Tab`) is the rebindable `cycle-permission-mode`. The full reference is in [docs/tools-and-commands.md](docs/tools-and-commands.md).
 
 ---
 

@@ -25,14 +25,14 @@ export function handleGlobalShortcutToken(state: GlobalShortcutRouteState, token
         return true;
       }
 
-      // Shift+Tab cycles Safe owner → Safe Jev → YOLO → Safe owner. Handled here, hardcoded, like
-      // escape/f2, because it is not in the keybinding table and bare Tab is
-      // already heavily overloaded. Arrives as the legacy xterm backtab literal
-      // ('\x1b[Z') OR, under a kitty/CSI-u terminal, as tab-with-shift. Only when
-      // the composer owns focus; modal/picker routes run earlier and swallow the
-      // token before it reaches here, so overlays keep their reverse-tab too.
-      if (token.logicalName === '\x1b[Z' || (token.logicalName === 'tab' && token.shift)) {
-        cycleSessionPermissionMode(state);
+      // cycle-permission-mode (Shift+Tab by default) arrives as the legacy xterm
+      // backtab literal ('\x1b[Z') or, under a kitty/CSI-u terminal, as
+      // tab-with-shift; the literal is read as Shift+Tab so the table decides
+      // either way. Only when the composer owns focus: modal/picker routes run
+      // earlier and keep their reverse-tab.
+      const chord = token.logicalName === '\x1b[Z' ? { ...token, logicalName: 'tab', shift: true } : token;
+      if (state.keybindingsManager.lookup(chord) === 'cycle-permission-mode') {
+        void cycleSessionPermissionMode(state);
         return true;
       }
 
@@ -95,25 +95,40 @@ export function handleGlobalShortcutToken(state: GlobalShortcutRouteState, token
 }
 
 /**
- * Cycle the session permission mode (Shift+Tab). The change goes through the
- * platform config surface, configManager.set('permissions.mode', ...), which is
- * what the platform PermissionManager reads and what the orchestrator consults for
- * its standing plan-mode instruction, so every attached surface converges on
- * the same mode. The footer pill re-renders off the config-key subscription
- * wired in turn-event-wiring; the printed line narrates the change inline.
+ * Cycle this session's permission mode (Shift+Tab). The change is a runtime
+ * override: the PermissionManager, the orchestrator's plan-mode instruction
+ * and the footer pill (subscribed to the key in turn-event-wiring) read it at
+ * once, and it ends with the session. The saved default changes only in
+ * /permissions or Settings. Entering the mode with no approvals asks once
+ * (default No); the cycle then stays where it was.
  */
-function cycleSessionPermissionMode(state: GlobalShortcutRouteState): void {
-  const configManager = state.commandContext?.platform?.configManager;
-  if (!configManager) return;
+async function cycleSessionPermissionMode(state: GlobalShortcutRouteState): Promise<void> {
+  const context = state.commandContext;
+  const configManager = context?.platform?.configManager;
+  if (!context || !configManager) return;
   const current = configManager.get('permissions.mode') as PermissionModeValue | undefined;
   const next = nextPermissionMode(current);
-  // A project settings file that holds the mode stricter makes the write throw; report it, do not crash the input loop.
+  if (next === 'yolo') {
+    const confirmed = await context.confirm?.({
+      title: `Switch this session to ${permissionModeLabel(next)}?`,
+      body: 'Every tool call in this session runs without asking you, including commands, file changes and messages. The saved default is not changed; it ends with the session.',
+      confirmLabel: `Use ${permissionModeLabel(next)}`,
+      tone: 'danger',
+    }) ?? false;
+    if (!confirmed) {
+      context.print(`[Permissions] Mode stays ${permissionModeLabel(current ?? 'safe-owner')} for this session.`);
+      state.requestRender();
+      return;
+    }
+  }
+  // A managed lock on the setting makes the override throw; report it, do not crash the input loop.
   try {
-    configManager.set('permissions.mode', next);
+    configManager.setRuntimeOverride('permissions.mode', next);
   } catch (error) {
-    state.commandContext?.print(`[Permissions] Mode stays ${permissionModeLabel(current ?? 'safe-owner')}: ${error instanceof Error ? error.message : String(error)}`);
+    context.print(`[Permissions] Mode stays ${permissionModeLabel(current ?? 'safe-owner')}: ${error instanceof Error ? error.message : String(error)}`);
+    state.requestRender();
     return;
   }
-  state.commandContext?.print(`[Permissions] Mode: ${permissionModeLabel(next)}`);
+  context.print(`[Permissions] Mode for this session: ${permissionModeLabel(next)} (the saved default is set in /permissions or Settings)`);
   state.requestRender();
 }

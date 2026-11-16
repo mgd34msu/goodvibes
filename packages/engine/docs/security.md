@@ -387,7 +387,7 @@ The stakes become the analysis `riskLevel`; the family, the facts, the side effe
 | `yolo` | allow | allow | allow | allow | no general safety denial or prompt; host containment, secret storage and payment rules still apply |
 | `plan` | allow | allow | allow | ask | any call Jev reads as a change or outward is refused (`plan_mode`) |
 
-The mode cycle (Shift+Tab) is `safe-owner`, `safe-jev`, `yolo`; `plan` is outside it. Per-tool `permissions.tools.*` settings are separate from the mode: an explicit `deny` blocks that tool in the safe modes.
+The mode cycle (Shift+Tab in the TUI) is `safe-owner`, `safe-jev`, `yolo`; `plan` is outside it. The cycle changes the mode of that session only and asks before entering `yolo`; the saved `permissions.mode` changes only through `/permissions` or Settings. Per-tool `permissions.tools.*` settings are separate from the mode: an explicit `deny` blocks that tool in the safe modes.
 
 An allow reports `stakes_preset` / `preset_allow`, a plan refusal `runtime_mode` / `plan_mode`, and an ask goes to the owner's approval prompt (`user_prompt`), where the answer can be remembered at the tier the owner picks. `PRESET_CHANGED` on the `gate` domain announces a preset change.
 

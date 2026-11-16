@@ -91,6 +91,18 @@ export function registerPrincipalsRuntimeCommands(registry: CommandRegistry): vo
     description: 'Identity mappings: named principals and their channel identities',
     usage: '[list|get <id>|create <name> <kind> [channel:value...]|update <id> [--name x] [--kind x] [--identities c:v,c:v|none]|delete <id>|resolve <channel> <value>]',
     argsHint: '[list|get|create|update|delete|resolve]',
+    subcommands: {
+      list: '', get: '<id>', create: '<name> <kind> [channel:value...]',
+      update: '<id> [--name x] [--kind x] [--identities c:v,c:v|none]', delete: '<id>', resolve: '<channel> <value>',
+    },
+    confirm(args) {
+      if (args[0] !== 'delete' || !args[1]) return undefined;
+      return {
+        title: `Delete principal ${args[1]}?`,
+        detail: `The principal ${args[1]} and every channel identity bound to it are removed permanently; messages from those identities are no longer attributed to anyone.`,
+        confirmLabel: 'Delete',
+      };
+    },
     async handler(args, ctx) {
       const sub = args[0] ?? 'list';
       const knownSubcommands = ['list', 'get', 'create', 'update', 'delete', 'resolve'];

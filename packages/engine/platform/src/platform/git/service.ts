@@ -122,9 +122,24 @@ function assertGitRestriction(guard?: () => void): void {
   if (result !== undefined) { drainOwned(result); throw new Error('Native Git restriction must complete synchronously'); }
 }
 
+/** Each repository's canonical common directory, resolved once per working directory: it does not change while the repository exists. */
+const commonDirectories = new Map<string, string>();
+
+async function commonDirectory(git: SimpleGit, cwd: string): Promise<string> {
+  const known = commonDirectories.get(cwd);
+  if (known !== undefined) return known;
+  const resolved = realpathSync(resolve(cwd, (await git.raw(['rev-parse', '--git-common-dir'])).trim()));
+  commonDirectories.set(cwd, resolved);
+  return resolved;
+}
+
+/**
+ * Runs one worktree mutation in this repository's queue. The caller's
+ * restriction is checked once, inside the queued step, after the last await
+ * and immediately before the git process that mutates.
+ */
 async function mutateWorktree(git: SimpleGit, cwd: string, args: string[], beforeMutation?: () => void): Promise<void> {
-  assertGitRestriction(beforeMutation);
-  const commonDir = realpathSync(resolve(cwd, (await git.raw(['rev-parse', '--git-common-dir'])).trim()));
+  const commonDir = await commonDirectory(git, cwd);
   const previous = worktreeMutationTails.get(commonDir) ?? Promise.resolve();
   const operation = previous.then(async () => { assertGitRestriction(beforeMutation); await git.raw(args); });
   // A failed Git operation must not poison the next item's preparation.
@@ -436,9 +451,9 @@ export class GitService {
     branch: string,
     beforeMutation?: () => void,
   ): Promise<{ success: boolean; conflicts?: string[] }> {
-    assertGitRestriction(beforeMutation);
     await this.firePre('merge', { branch });
     try {
+      // The caller's restriction is checked once, after the last await and immediately before the merge.
       const git = await this.git(); assertGitRestriction(beforeMutation);
       await git.merge([branch]);
       await this.firePost('merge', { branch, success: true });
@@ -543,7 +558,6 @@ export class GitService {
   // ---------------------------------------------------------------------------
 
   async worktreeAdd(path: string, branch: string, startPoint?: string, checkout = true, beforeMutation?: () => void): Promise<void> {
-    assertGitRestriction(beforeMutation);
     worktreeCreations.delete(this);
     await this.firePre('worktreeAdd', { path, branch });
     try {
@@ -564,7 +578,6 @@ export class GitService {
   }
 
   async worktreeRemove(path: string, beforeMutation?: () => void): Promise<void> {
-    assertGitRestriction(beforeMutation);
     await this.firePre('worktreeRemove', { path });
     try {
       await mutateWorktree(await this.git(), this.cwd, ['worktree', 'remove', path], beforeMutation);

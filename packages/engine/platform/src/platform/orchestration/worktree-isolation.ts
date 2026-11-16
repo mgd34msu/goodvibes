@@ -311,7 +311,8 @@ export function createWorktreeIsolationManager(deps: WorktreeIsolationManagerDep
 
   async function removeWorktree(workstream: Workstream, item: WorkItem, instance: IsolatedWorktree, evicted: boolean): Promise<void> {
     const path = instance.path;
-    try { repositoryGuard?.(); resourceGuards.get(instance)?.(); }
+    // A resource guard begins with the repository guard, so it is the one check here.
+    try { (resourceGuards.get(instance) ?? repositoryGuard)?.(); }
     catch {
       if (!evicted) keepWorktree(workstream, item, instance, 'original worktree binding is unavailable');
       return;
@@ -384,7 +385,8 @@ export function createWorktreeIsolationManager(deps: WorktreeIsolationManagerDep
         resourceGuards.set(bound, () => { repositoryGuard?.(); binding(); });
       }
       if (item.worktreeInitialized === false) throw new Error('worktree initialization did not complete; retained resource requires recovery');
-      const outcome = await bound.integrate(() => { repositoryGuard?.(); resourceGuards.get(bound)?.(); });
+      // The resource guard already begins with the repository guard.
+      const outcome = await bound.integrate(() => { (resourceGuards.get(bound) ?? repositoryGuard)?.(); });
       if (outcome.status === 'merged') {
         item.mergeState = 'merged';
         item.mergeHash = outcome.hash;

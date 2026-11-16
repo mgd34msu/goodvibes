@@ -489,9 +489,8 @@ export class IsolatedWorktree {
    * Never auto-resolves a conflict.
    */
   async integrate(beforeMutation?: () => void): Promise<IntegrationOutcome> {
-    beforeMutation?.();
+    // The restriction is checked by the merge itself, on entry and after its last await; counting commits mutates nothing.
     const unique = await this.uniqueCommitCount();
-    beforeMutation?.();
     if (unique === null) {
       // git could not compare the branches (base ref moved, transient failure):
       // reporting "empty" would mark unmerged work as merged.
@@ -547,7 +546,6 @@ export class IsolatedWorktree {
 
   /** Remove the worktree directory and delete the item branch (post-merge, or a clean tree after fail/kill). */
   async remove(beforeRemove?: () => void, beforeRepositoryWrite?: () => void): Promise<void> {
-    beforeRepositoryWrite?.(); beforeRemove?.();
     logger.debug('IsolatedWorktree.remove', { path: this.path, branch: this.branch });
     await this.removeDirectory(beforeRemove);
     try {
@@ -625,7 +623,6 @@ export class IsolatedWorktree {
   /** Native plain removal protects work added after a cleanliness check.
    * Failure never escalates into destructive force removal. */
   private async removeDirectory(beforeRemove?: () => void): Promise<void> {
-    beforeRemove?.();
     if (!existsSync(this.path)) return;
     await this.rootGit.worktreeRemove(this.path, beforeRemove);
   }

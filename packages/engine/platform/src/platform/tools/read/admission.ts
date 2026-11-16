@@ -5,7 +5,7 @@ import type { ProjectIndex } from '../../state/project-index.js';
 import type { ToolExecuteOptions } from '../../types/tools.js';
 import { resolveAndValidatePath } from '../../utils/path-safety.js';
 import { assertProjectionExecution, ToolInputProjectionError, type ToolInputProjector } from '../input-projection.js';
-import { assertCurrentToolExecution } from '../registry.js';
+import { assertCurrentToolExecution, relaxCurrentToolReadFences } from '../registry.js';
 
 interface ReadSubject {
   readonly input: string;
@@ -134,15 +134,25 @@ export function hasAgentReadAdmission(options?: ToolExecuteOptions): boolean {
   return context !== undefined && captures.has(context);
 }
 
-/** The actual byte-reader's guard; legacy platform reads keep their existing owner contracts. */
+/**
+ * The actual byte-reader's guard; legacy platform reads keep their existing owner contracts.
+ * Every file of an admitted read was validated (path, link target, inode and
+ * parents) when the call was claimed, and the registry verifies the call
+ * completely again before its result is published. In between, the reader's
+ * checkpoints are liveness checks: the signal, the call not retired, the
+ * capture not released and still bound to this index. The reader's own path
+ * containment still runs as each file is opened.
+ */
 export function readExecutionGuard(args: Record<string, unknown>, options: ToolExecuteOptions | undefined, index: Pick<ProjectIndex, 'baseDir'>): () => void {
   const context = options?.inputProjectionContext;
   const capture = context && captures.get(context);
+  relaxCurrentToolReadFences(args, options);
   return () => {
     options?.signal?.throwIfAborted();
     assertCurrentToolExecution(args, options);
     if (capture) {
-      assertAdmittedAgentRead(args, options);
+      if (capture.released || capture.currentAllowsOutsideProject() !== capture.allowOutsideProject) throw new ToolInputProjectionError('stale');
+      assertProjectionExecution(context!, args);
       if (capture.index !== index) throw new ToolInputProjectionError('binding-changed');
     }
   };

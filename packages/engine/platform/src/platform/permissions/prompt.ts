@@ -149,11 +149,10 @@ export interface PermissionExecutionOptions {
   /** Trusted in-process turn owner; never included in a prompt payload. */
   readonly hookOwner?: TurnHookOwner | undefined;
   readonly signal?: AbortSignal | undefined;
-  /** The tool declares itself dangerous: it is never allowed without the owner's answer except in allow-all. */
-  readonly dangerous?: boolean | undefined;
   /**
    * The registered definition of the tool being checked: its category, declared
    * effects, subjects and `dangerous` flag are the facts the gate classifies by.
+   * A dangerous tool is an owner-only grant of access (gate/classify.ts).
    */
   readonly definition?: import('../types/tools.js').ToolDefinition | undefined;
 }

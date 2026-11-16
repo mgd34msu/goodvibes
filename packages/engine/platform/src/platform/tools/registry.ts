@@ -3,7 +3,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { currentExecutionMode, withInvocationExecutionMode } from '../gate/execution-context.js';
 import { isDeepStrictEqual, types as nodeTypes } from 'node:util';
 import { randomUUID } from 'node:crypto';
-import { judgmentPort, DecisionModelsDisabledError } from '@goodvibes-jev/engine/errors';
+import { judgmentPort, DecisionModelsDisabledError, createSharedRegexTester, type SharedRegexTester } from '@goodvibes-jev/engine/errors';
 import { isClassicOperation, requireDecisionFeature } from '../runtime/decision-policy.js';
 import {
   ToolInputProjectionError, assertProjectionCurrent, assertProjectionSignal, captureProjectionArgs, captureProjectionStructure,
@@ -23,6 +23,7 @@ import { type JudgmentPort } from '@goodvibes-jev/judgment';
 import { captureOwnedJson, snapshotJudgmentInput } from '../gate/judgment-input.js';
 import { assertAutonomousConfigTransition, completeAutonomousConfigTransition, bindAutonomousNestedAdmission, readAutonomousSettingsPresentation, readAutonomousWorkspaceConstraint, readAutonomousEffectConstraint, readAutonomousNestedOwner, consumeAutonomousAdmission, type AutonomousNestedOwner, type AutonomousPermissionAdmission, type PermissionManager } from '../permissions/manager.js';
 import type { AutonomousChoiceProjection } from '../permissions/autonomous-input-projection.js';
+import { buildDenialErrorMessage, toolDecisionOf } from '../permissions/denial.js';
 import type { PreparedConfigMutationReceipt } from '../config/manager.js';
 import type { PreparedSecretImportTransition } from '../config/secrets.js';
 import type { PreparedSubscriptionImportTransition } from '../config/subscriptions.js';
@@ -75,6 +76,17 @@ interface ProjectionRegistration {
   readonly signal: AbortSignal | undefined;
 }
 
+/** A tool's definition as calls are prepared against it: captured once per definition object. */
+interface CapturedDefinition {
+  readonly raw: unknown;
+  readonly executor: Tool['execute'];
+  readonly definition: ToolDefinition;
+  readonly revision: string;
+}
+
+/** A pattern in an untrusted tool schema gets this long to test one argument before the call is refused. */
+const TOOL_SCHEMA_PATTERN_DEADLINE_MS = 1_000;
+
 interface CapturedProjection {
   readonly call: ProjectedToolCall;
   readonly registration: ProjectionRegistration;
@@ -82,7 +94,6 @@ interface CapturedProjection {
   readonly executor: Tool['execute'];
   readonly definition: ToolDefinition;
   readonly rawDefinition: unknown;
-  readonly assertDefinitionCurrent: () => void;
   readonly definitionRevision: string;
   readonly captureCurrent: (() => void) | undefined;
   readonly preparationGuards: { readonly callbacks: Set<() => void>; revision: number };
@@ -135,7 +146,7 @@ interface CurrentToolExecution {
   /** The registered definition declares local reads as its only side effect. */
   readonly readOnlyDefinition: boolean;
   /** Set only by {@link relaxCurrentToolReadFences}; see there. */
-  readFence?: { validUntil: number } | undefined;
+  liveOnly?: boolean | undefined;
   /**
    * Untrusted content that nested calls brought in. Recording it while the
    * parent runs would change the exposure revision the parent's authority was
@@ -147,40 +158,19 @@ interface CurrentToolExecution {
 }
 
 /**
- * How long one complete currentness verification stands in for the following
- * intermediate checkpoints of a read-only body. A complete verification
- * re-captures and compares owner, admission and registration state; a search
- * reaches a checkpoint several times per file, so repeating the complete
- * verification at each one made the verification the whole cost of the search.
- */
-const READ_FENCE_WINDOW_MS = 50;
-/** The window grows with what a verification costs, so verification stays a
- * small share of a long read; it never grows past this. */
-const READ_FENCE_MAX_WINDOW_MS = 250;
-const readFenceDeadline = (startedAt: number): number => {
-  const finishedAt = performance.now();
-  return finishedAt + Math.min(READ_FENCE_MAX_WINDOW_MS, Math.max(READ_FENCE_WINDOW_MS, (finishedAt - startedAt) * 8));
-};
-
-function expireReadFence(options: ToolExecuteOptions | undefined): void {
-  const fence = options && currentToolExecutions.get(options)?.readFence;
-  if (fence) fence.validUntil = 0;
-}
-
-/**
  * Called by a tool body that only reads local files (and whose registered
- * definition says the same). Its intermediate checkpoints are liveness fences
- * that stop work early, not gates in front of an effect, so between complete
- * verifications they check cancellation and the proof's own retirement only.
- * A complete verification still runs at least every READ_FENCE_MAX_WINDOW_MS, on
- * every effect or nested-call check, and once more before the result leaves
- * the registry: nothing is published on a verdict older than the body's end.
+ * definition says the same). The call was verified completely when it was
+ * claimed and is verified completely again before its result leaves the
+ * registry; the body's own intermediate checkpoints only stop work early, so
+ * from here on they check the call's signal and that the call has not been
+ * retired, which costs a few property reads instead of a full verification
+ * per file. An effect or nested call still gets a complete verification.
  * A definition with any other side effect, or a legacy call, is unchanged.
  */
 export function relaxCurrentToolReadFences(args: Record<string, unknown>, options?: ToolExecuteOptions): void {
   if (!assertCurrentToolInvocation(args, options)) return;
   const proof = currentToolExecutions.get(options!);
-  if (proof?.readOnlyDefinition) proof.readFence ??= { validUntil: 0 };
+  if (proof?.readOnlyDefinition) proof.liveOnly = true;
 }
 
 // Exact options identity is the invocation capability. No caller-visible field
@@ -189,6 +179,8 @@ const currentToolExecutions = new WeakMap<ToolExecuteOptions, CurrentToolExecuti
 const settingsResultReceipts = new WeakMap<ToolResult, PreparedConfigMutationReceipt>();
 /** Options of a call made through `executeNested`; its parent records what it ingested. */
 const nestedCallOptions = new WeakSet<ToolExecuteOptions>();
+/** The registry running each call that has no admission proof, for {@link runRegisteredTool}. */
+const ordinaryCallRegistries = new WeakMap<ToolExecuteOptions, ToolRegistry>();
 
 function retainSettingsReceipt(proof: CurrentToolExecution, receipt: PreparedConfigMutationReceipt): void {
   const previous = proof.settingsReceipt;
@@ -225,17 +217,20 @@ export function isInvocationAdmitted(toolName: string, args: Record<string, unkn
 
 /** Effectful tools must not downgrade wrapped/copied options to legacy authority. */
 export function assertCurrentToolInvocation(args: Record<string, unknown>, options?: ToolExecuteOptions): boolean {
+  return assertInvocation(args, options, false);
+}
+
+function assertInvocation(args: Record<string, unknown>, options: ToolExecuteOptions | undefined, complete: boolean): boolean {
   const current = executingContext.getStore();
   if (current && (current.options !== options || currentToolExecutions.get(current.options) !== current.proof
     || current.proof.args !== args || !current.proof.active)) throw new ToolInputProjectionError('stale');
-  return assertCurrentToolExecution(args, options);
+  return verifyToolExecution(args, options, complete);
 }
 
 /** A code-owned effect cannot relax the captured owner's deterministic restrictions. */
 export function assertCurrentToolEffect(args: Record<string, unknown>, options?: ToolExecuteOptions,
   effect: ToolExecutionEffect = 'write'): boolean {
-  expireReadFence(options);
-  if (!assertCurrentToolInvocation(args, options)) return false;
+  if (!assertInvocation(args, options, true)) return false;
   const proof = options && currentToolExecutions.get(options);
   if (!proof) return false;
   try {
@@ -271,16 +266,22 @@ const registryPermissionOwners = new WeakMap<ToolRegistry, PermissionManager>();
 
 /** False for legacy/unadmitted calls; a known expired or mismatched proof throws. */
 export function assertCurrentToolExecution(args: Record<string, unknown>, options?: ToolExecuteOptions): boolean {
+  return verifyToolExecution(args, options, false);
+}
+
+/**
+ * `complete` forces the full verification even for a read-only body that
+ * relaxed its intermediate checkpoints (an effect, a nested call, a commit).
+ */
+function verifyToolExecution(args: Record<string, unknown>, options: ToolExecuteOptions | undefined, complete: boolean): boolean {
   // Restrictions apply even to ordinary/legacy invocations. They never mint an
   // authenticated admission: absent proof still returns false below.
   const proof = options && currentToolExecutions.get(options);
-  const fence = proof?.readFence;
-  if (proof && fence && proof.active && !proof.checking && proof.args === args && performance.now() < fence.validUntil) {
+  if (!complete && proof?.liveOnly && proof.active && !proof.checking && proof.args === args) {
     try { assertProjectionSignal(proof.signal); }
     catch (error) { proof.active = false; throw error; }
     return true;
   }
-  const startedAt = fence ? performance.now() : 0;
   try { assertProjectionCurrent(options === undefined ? undefined : projectionFunction<(args?: Record<string, unknown>) => void>(projectionProperty(options, 'assertCurrent')), args); }
   catch (error) { if (proof) proof.active = false; throw error; }
   if (!proof) return false;
@@ -289,7 +290,6 @@ export function assertCurrentToolExecution(args: Record<string, unknown>, option
   try {
     proof.assertCurrent();
     if (!proof.active) throw new ToolInputProjectionError('stale');
-    if (fence) fence.validUntil = readFenceDeadline(startedAt);
     return true;
   } catch (error) {
     proof.active = false;
@@ -297,11 +297,38 @@ export function assertCurrentToolExecution(args: Record<string, unknown>, option
   } finally { proof.checking = false; }
 }
 
+/**
+ * Runs another registered tool on behalf of the tool now executing, through
+ * the registry that is running it: inside an admitted call it is a nested call
+ * with its own admission (approval, recording and the tool's own checks). An
+ * ordinary call was gated by its caller as itself, never as the tool it runs,
+ * so the nested tool is checked by the registry's permission owner first and
+ * refused when the registry has none. Undefined when the registry running this
+ * call is not known or has no tool of that name.
+ */
+export async function runRegisteredTool(callId: string, name: string, args: Record<string, unknown>, options?: ToolExecuteOptions): Promise<ToolResult | undefined> {
+  const proof = options && currentToolExecutions.get(options);
+  if (proof) return proof.registry.has(name) ? proof.registry.executeNested(callId, name, args, options) : undefined;
+  const registry = options && ordinaryCallRegistries.get(options);
+  const definition = registry?.definitionOf(name);
+  if (!registry || !definition) return undefined;
+  const owner = registryPermissionOwners.get(registry);
+  if (!owner) {
+    return { callId, success: false, error: `${name} was not run: the call asking for it was not admitted through a permission owner, so ${name} cannot be approved on its behalf. Nothing was done; call ${name} directly.` };
+  }
+  const signal = options?.signal;
+  const verdict = await owner.checkDetailed(name, args, undefined, { definition, ...(signal ? { signal } : {}) });
+  if (!verdict.approved) {
+    const source = { reasonCode: verdict.reasonCode, sourceLayer: verdict.sourceLayer, userReason: verdict.userReason, detail: verdict.detail };
+    return { callId, success: false, error: buildDenialErrorMessage(name, source), decision: toolDecisionOf({ ...source, approved: false, decision: verdict.decision }, name) };
+  }
+  return registry.execute(callId, name, verdict.modifiedArgs ?? args, signal ? { signal } : undefined);
+}
+
 /** Consume the exact registered local effect. Neither options nor callbacks mint a grant. */
 export function commitCurrentToolSettings(args: Record<string, unknown>, options?: ToolExecuteOptions): PreparedConfigMutationReceipt {
   const proof = options && currentToolExecutions.get(options);
-  expireReadFence(options);
-  if (!proof?.commitSettings || !assertCurrentToolExecution(args, options)) throw new ToolInputProjectionError('held');
+  if (!proof?.commitSettings || !verifyToolExecution(args, options, true)) throw new ToolInputProjectionError('held');
   // Retire before begin: a callback can never reenter this invocation to write.
   proof.active = false;
   const receipt = proof.commitSettings(); proof.settingsReceipt = receipt; return receipt;
@@ -310,8 +337,7 @@ export function commitCurrentToolSettings(args: Record<string, unknown>, options
 /** Consume a complete config/credential plan once. Async acquisition stays under its original proof. */
 export async function commitCurrentToolSettingsPlan(args: Record<string, unknown>, options?: ToolExecuteOptions): Promise<PreparedConfigMutationReceipt> {
   const proof = options && currentToolExecutions.get(options);
-  expireReadFence(options);
-  if (!proof?.commitSettingsPlan || !assertCurrentToolExecution(args, options)) throw new ToolInputProjectionError('held');
+  if (!proof?.commitSettingsPlan || !verifyToolExecution(args, options, true)) throw new ToolInputProjectionError('held');
   proof.active = false;
   const receipt = await proof.commitSettingsPlan(); proof.settingsReceipt = receipt; return receipt;
 }
@@ -355,70 +381,6 @@ function plainMetadata(value: unknown, name: string, seen = new Set<object>()): 
   }
 }
 
-const metadataKeys = Reflect.ownKeys;
-const metadataDescriptors: (value: object) => Readonly<Record<PropertyKey, PropertyDescriptor>> = Object.getOwnPropertyDescriptors;
-const metadataPrototype = Object.getPrototypeOf;
-const metadataExtensible = Object.isExtensible;
-const metadataProxy = nodeTypes.isProxy;
-const sameMetadataValue = Object.is;
-
-interface MetadataSlot {
-  readonly key: string | symbol;
-  readonly value: unknown;
-  readonly writable: boolean | undefined;
-  readonly enumerable: boolean | undefined;
-  readonly configurable: boolean | undefined;
-}
-interface MetadataObject {
-  readonly value: object;
-  readonly prototype: unknown;
-  readonly slots: readonly MetadataSlot[];
-}
-
-/** Pin the complete original graph, including descendants omitted from JSON.
- * Permanently immutable own layouts need no repeated reads, but their mutable
- * descendants do. Every mismatch returns to the complete original capture.
- */
-function retainPlainMetadata(value: unknown, name: string): () => void {
-  const objects: MetadataObject[] = [];
-  const seen = new Set<object>();
-  const unsupported = (): never => { throw new ToolError('Changed autonomous metadata requires full capture', name); };
-  const capture = (entry: unknown): void => {
-    if (!entry || typeof entry !== 'object' || seen.has(entry)) return;
-    if (metadataProxy(entry)) return unsupported();
-    seen.add(entry);
-    const prototype: unknown = metadataPrototype(entry);
-    const descriptors = metadataDescriptors(entry);
-    const slots = metadataKeys(descriptors).map(key => {
-      const descriptor = descriptors[key];
-      if (!descriptor || !('value' in descriptor)) return unsupported();
-      return { key, value: descriptor.value, writable: descriptor.writable,
-        enumerable: descriptor.enumerable, configurable: descriptor.configurable };
-    });
-    if (metadataExtensible(entry) || slots.some(slot => slot.writable !== false || slot.configurable !== false)) {
-      objects.push({ value: entry, prototype, slots });
-    }
-    for (const slot of slots) capture(slot.value);
-  };
-  capture(value);
-  return () => {
-    for (const record of objects) {
-      if (metadataPrototype(record.value) !== record.prototype) return unsupported();
-      const descriptors = metadataDescriptors(record.value);
-      const keys = metadataKeys(descriptors);
-      if (keys.length !== record.slots.length) return unsupported();
-      for (let index = 0; index < keys.length; index++) {
-        const slot = record.slots[index];
-        if (!slot || keys[index] !== slot.key) return unsupported();
-        const descriptor = descriptors[slot.key];
-        if (!descriptor || !('value' in descriptor) || !sameMetadataValue(descriptor.value, slot.value)
-          || descriptor.writable !== slot.writable || descriptor.enumerable !== slot.enumerable
-          || descriptor.configurable !== slot.configurable) return unsupported();
-      }
-    }
-  };
-}
-
 function preparationData(tool: Tool, name: string, freshness = false): { executor: Tool['execute']; definition: ToolDefinition; rawDefinition: unknown } {
   const definition = dataProperty(tool, 'definition', name);
   const execute = dataProperty(tool, 'execute', name);
@@ -450,7 +412,9 @@ export class ToolRegistry {
   private registrationRevision = 0;
   readonly #revisionSource = revisionSource('tool registry', () => this.registrationRevision);
   private definitionSequence = 0;
-  private readonly definitionRevisions = new WeakMap<ProjectionRegistration, { readonly definition: ToolDefinition; readonly revision: string }>();
+  private readonly definitionRevisions = new WeakMap<ProjectionRegistration, CapturedDefinition>();
+  /** One isolated pattern tester for the untrusted patterns of this registry's tool schemas, started on first use. */
+  private patternTester: SharedRegexTester | undefined;
 
   /** Strict compositions bind their exact authority owner once; raw platform registries remain unbound. */
   constructor(expectedPermissionManager?: PermissionManager) {
@@ -556,14 +520,9 @@ export class ToolRegistry {
     }
     if (registration.projector === null) throw new ToolInputProjectionError('unconfigured');
     const captured = registration.captureNativeReferences ? captureProjectionStructure(args) : captureProjectionArgs(args, name);
-    const { executor, definition, rawDefinition } = preparationData(registration.tool, name);
-    const assertDefinitionCurrent = retainPlainMetadata(rawDefinition, name);
-    const previousDefinition = this.definitionRevisions.get(registration);
-    const definitionRevision = previousDefinition && isDeepStrictEqual(previousDefinition.definition, definition)
-      ? previousDefinition.revision : `tool-schema-${(++this.definitionSequence).toString(36)}`;
-    this.definitionRevisions.set(registration, { definition, revision: definitionRevision });
+    const { executor, definition, raw: rawDefinition, revision: definitionRevision } = this.capturedDefinition(registration, name);
     const combined = combineProjectionSignals(signal, registration.signal);
-    const skeleton = { registration, tool: registration.tool, executor, definition, rawDefinition, assertDefinitionCurrent, definitionRevision, captureCurrent, preparationGuards: { callbacks: new Set<() => void>(), revision: 0 }, executionStarted: false,
+    const skeleton = { registration, tool: registration.tool, executor, definition, rawDefinition, definitionRevision, captureCurrent, preparationGuards: { callbacks: new Set<() => void>(), revision: 0 }, executionStarted: false,
       signal: combined, assertCurrent: undefined, assertRepairedArgs: undefined, release: undefined,
       executionContext: undefined, admissionEvidence: undefined, settingsMutation: undefined, resultPublication: undefined, released: false, claimed: false };
     const provisional: CapturedProjection = { ...skeleton, call: Object.freeze({ callId, name, args: Object.freeze({}),
@@ -577,7 +536,6 @@ export class ToolRegistry {
       this.assertCaptured(provisional, true);
       if (capturedRecord) this.assertCapturedIdentity(capturedRecord);
     };
-    this.assertCaptured(provisional, true);
     let release: (() => Promise<void>) | undefined;
     try {
       let projected = captured;
@@ -597,7 +555,6 @@ export class ToolRegistry {
           projected = binding.args; nativeCurrent = binding.assertCurrent; nativeAssertArgs = binding.assertArgs;
           nativeSchemaArgs = binding.schemaArgs; nativeReferenceContext = binding.executionContext;
         } else projected = captureProjectionArgs(captured, name);
-        this.assertCaptured(provisional, true); assertProjectionCurrent(nativeCurrent);
       }
       let resultSignal: AbortSignal | undefined;
       let assertCurrent: (() => void) | undefined;
@@ -618,7 +575,6 @@ export class ToolRegistry {
           const results = await Promise.allSettled([Promise.resolve().then(nativeRelease), Promise.resolve().then(projectedRelease)]);
           if (results.some(result => result.status === 'rejected')) throw new ToolInputProjectionError('unavailable');
         } : projectedRelease ?? nativeRelease;
-        this.assertCaptured(provisional, true);
         const status = projectionProperty(result, 'status');
         if (status === 'held') throw new ToolInputProjectionError('held');
         if (status !== 'projected') throw new ToolInputProjectionError('invalid');
@@ -669,6 +625,23 @@ export class ToolRegistry {
       if (registration.projector) throw new ToolInputProjectionError('unavailable');
       throw error;
     }
+  }
+
+  /**
+   * The definition calls of this registration are prepared against. It is
+   * captured (screened and copied) once per definition object and reused while
+   * the tool keeps that object and executor; a tool that replaces its
+   * definition between calls (the Agent compacts descriptions after
+   * registration) is captured again, keeping its revision when unchanged.
+   */
+  private capturedDefinition(registration: ProjectionRegistration, name: string): CapturedDefinition {
+    const known = this.definitionRevisions.get(registration);
+    if (known && registration.tool.definition === known.raw && registration.tool.execute === known.executor) return known;
+    const { executor, definition, rawDefinition } = preparationData(registration.tool, name);
+    const revision = known && isDeepStrictEqual(known.definition, definition) ? known.revision : `tool-schema-${(++this.definitionSequence).toString(36)}`;
+    const captured: CapturedDefinition = Object.freeze({ raw: rawDefinition, executor, definition, revision });
+    this.definitionRevisions.set(registration, captured);
+    return captured;
   }
 
   /** Live owner callbacks run only before admission, never in the post-claim tail. */
@@ -724,22 +697,9 @@ export class ToolRegistry {
     if (this.registrations.get(call.name) !== registration || this.tools.get(call.name) !== record.tool) {
       throw new ToolInputProjectionError('stale');
     }
-    const rawDefinition = dataProperty(record.tool, 'definition', call.name);
-    const execute = dataProperty(record.tool, 'execute', call.name);
-    if (typeof execute !== 'function' || nodeTypes.isProxy(execute)) throw new ToolError('Autonomous executor must be a data-backed function', call.name);
-    let unchanged = rawDefinition === record.rawDefinition;
-    if (unchanged) {
-      try { record.assertDefinitionCurrent(); }
-      catch { unchanged = false; }
-    }
-    if (!unchanged) {
-      // A graph change can still preserve the prior canonical definition.
-      // Compare through the original full path; never adopt a new baseline.
-      const current = preparationData(record.tool, call.name, true);
-      if (current.executor !== record.executor || !isDeepStrictEqual(current.definition, record.definition)) throw new ToolInputProjectionError('stale');
-    } else if (execute !== record.executor) {
-      throw new ToolInputProjectionError('stale');
-    }
+    // The call runs on the definition captured when it was projected: a tool
+    // that replaced its definition or executor since then is a different tool.
+    if (record.tool.definition !== record.rawDefinition || record.tool.execute !== record.executor) throw new ToolInputProjectionError('stale');
     if (registration.projector && (projectionProperty(registration.projector, 'project') !== registration.project
       || projectionProperty(registration.projector, 'captureNativeReferences') !== registration.captureNativeReferences
       || projectionProperty(registration.projector, 'assertCurrent') !== registration.assertCurrent
@@ -758,7 +718,6 @@ export class ToolRegistry {
   }
 
   private repairPort(record: CapturedProjection, ids: string[], inner?: JudgmentPort): JudgmentPort {
-    const registry = this;
     // Native repairs do not borrow a supplied transport's metadata or recorder.
     // A handle created in Classic cannot become a semantic capability after its scope ends.
     if (isClassicOperation()) {
@@ -774,13 +733,13 @@ export class ToolRegistry {
       ...(captured?.recorder ? { recorder: captured.recorder } : {}),
       async ask(request) {
         const prior = request.beforeAttempt;
-        registry.assertPreparationCurrent(record);
+        assertProjectionSignal(record.preparationSignal);
         requireDecisionFeature('semantic tool argument repair; supply exact schema parameters');
+        // The call is verified once its preparation ends; here only its signal stops a request for a cancelled call.
         const result = await port().ask({ ...request, beforeAttempt() {
-          assertSynchronousJudgmentGuard(() => prior?.()); registry.assertPreparationCurrent(record);
+          assertSynchronousJudgmentGuard(() => prior?.()); assertProjectionSignal(record.preparationSignal);
           requireDecisionFeature('semantic tool argument repair; supply exact schema parameters');
         } });
-        registry.assertPreparationCurrent(record);
         if (inner && !result.decisionId) throw new JudgmentError('unrecorded', 'argument repair has no recorded provenance');
         if (result.decisionId) ids.push(result.decisionId);
         return result;
@@ -796,7 +755,15 @@ export class ToolRegistry {
         throw new ToolInputProjectionError('binding-changed');
       }
     }
-    this.assertPreparationCurrent(record);
+  }
+
+  /**
+   * Patterns in tool schemas the product did not write (MCP and plugin tools)
+   * run in one isolated worker kept for this registry, never on this thread
+   * and never in a worker started per call.
+   */
+  private schemaPatternTester(): SharedRegexTester {
+    return this.patternTester ??= createSharedRegexTester({ operation: 'tool schema pattern', timeoutMs: TOOL_SCHEMA_PATTERN_DEADLINE_MS });
   }
 
   /** Own and repair before permission; no repair is permitted after admission. */
@@ -811,7 +778,6 @@ export class ToolRegistry {
     const signal = combineProjectionSignals(record.signal, record.preparationSignal, opts === undefined ? undefined : projectionSignal(projectionProperty(opts, 'signal')));
     record.preparationSignal = signal;
     try {
-      this.assertPreparationCurrent(record);
       record.preparation ??= this.prepareProjection(record, signal, opts === undefined ? undefined : projectionProperty(opts, 'port') as JudgmentPort | undefined);
       const prepared = await record.preparation;
       assertProjectionSignal(signal);
@@ -828,13 +794,12 @@ export class ToolRegistry {
     const { callId, name } = projection;
     const ids: string[] = [];
     try {
-      this.assertPreparationCurrent(record);
       const repair = await repairToolCall(name, projection.args, record.definition, signal, this.repairPort(record, ids, port));
       assertProjectionSignal(signal);
       const effective = captureProjectionArgs(repair.repaired ? repair.fixed : projection.args, name);
       this.repairProjection(record, effective);
       const schemaArgs = record.nativeSchemaArgs ? record.nativeSchemaArgs(effective) : effective;
-      const schemaFailure = await firstJsonSchemaFailureAsync(record.definition.parameters, schemaArgs, { signal, assertCurrent: () => this.assertPreparationCurrent(record) });
+      const schemaFailure = await firstJsonSchemaFailureAsync(record.definition.parameters, schemaArgs, { signal, isolatedTester: this.schemaPatternTester() });
       // Path and expectation come from the schema, never from the argument values.
       if (schemaFailure) throw new ToolError(`Prepared tool arguments do not match the registered schema at ${schemaFailure.path || '(root)'}: expected ${schemaFailure.expected}. Nothing was executed; fix that argument and re-issue the call.`, name);
       const call = Object.freeze({ callId, name, args: effective, schemaRevision: record.definitionRevision, judgmentDecisionIds: Object.freeze(ids) });
@@ -878,21 +843,10 @@ export class ToolRegistry {
     return this.prepared.get(call)!.projection.resultPublication === 'read-only';
   }
 
-  /** Whether the captured registration declares the tool dangerous; the arguments never decide it. */
-  isPreparedDangerous(call: PreparedToolCall): boolean {
-    this.assertPrepared(call);
-    return this.prepared.get(call)!.tool.definition.dangerous === true;
-  }
-
   /** The captured registration's definition: the facts the gate classifies a call by. */
   readPreparedDefinition(call: PreparedToolCall): ToolDefinition {
     this.assertPrepared(call);
     return this.prepared.get(call)!.tool.definition;
-  }
-
-  /** Whether the registered tool of this name declares itself dangerous. */
-  isDangerous(name: string): boolean {
-    return this.tools.get(name)?.definition.dangerous === true;
   }
 
   /** The registered definition of a tool: the facts (category, effects, subjects) the gate decides its calls by. */
@@ -926,11 +880,8 @@ export class ToolRegistry {
     // The tool's own result, once it has run: a cleanup failure after that must not hide an effect that happened.
     let outcome: ToolResult | undefined;
     try {
-      assertProjectionCurrent(callerCurrent);
       const signal = combineProjectionSignals(record.projection.signal, record.projection.preparationSignal, opts === undefined ? undefined : projectionSignal(projectionProperty(opts, 'signal')));
       executionSignal = signal;
-      this.assertPreparationCurrent(record.projection);
-      this.assertPrepared(call);
       const onProgress = opts === undefined ? undefined : projectionFunction<(note?: string) => void>(projectionProperty(opts, 'onProgress'));
       const executionOptions = Object.freeze({ signal, ...(callerCurrent ? { assertCurrent: callerCurrent } : {}), ...(onProgress ? { onProgress } : {}), ...(record.projection.executionContext ? { inputProjectionContext: record.projection.executionContext } : {}) });
       // All callbacks and option capture precede claim. The tail below is synchronous
@@ -952,6 +903,9 @@ export class ToolRegistry {
           assertProjectionSignal(signal);
         };
       }
+      // The claim: the one complete verification immediately before the body.
+      assertProjectionCurrent(callerCurrent);
+      this.assertPreparationCurrent(record.projection);
       this.assertPrepared(call);
       if (record.projection.preparationGuards.revision !== guardRevision) throw new ToolInputProjectionError('stale');
       assertProjectionSignal(signal);
@@ -1126,14 +1080,14 @@ export class ToolRegistry {
           assertProjectionSignal(signal);
         } };
         currentToolExecutions.set(executionOptions, proof);
-      }
+      } else ordinaryCallRegistries.set(executionOptions, this);
       record.projection.executionCurrent = () => {
         this.assertExecuting(call, record); assertProjectionSignal(signal);
         assertProjectionCurrent(record.projection.registration.assertCurrent);
         assertProjectionCurrent(callerCurrent); assertAdmissionCurrent?.();
         this.assertExecuting(call, record); assertProjectionSignal(signal);
       };
-      const execute = () => { assertProjectionCurrent(callerCurrent); return applyIntrinsic(record.executor, record.tool, [call.args, executionOptions]); };
+      const execute = () => applyIntrinsic(record.executor, record.tool, [call.args, executionOptions]);
       const mode = currentExecutionMode() ?? registryPermissionOwners.get(this)?.getMode();
       const invoke = () => executingContext.run(proof ? { proof, options: executionOptions } : undefined, execute);
       const assertModeCurrent = proof ? () => {
@@ -1142,9 +1096,9 @@ export class ToolRegistry {
       } : undefined;
       const retainedMode = registryPermissionOwners.get(this)?.captureExecutionMode();
       const result = await (mode === undefined ? invoke() : withInvocationExecutionMode(mode, invoke, assertModeCurrent, retainedMode?.assertCurrent));
-      // A relaxed read body ends on a complete verification, never on a
-      // verdict carried over from an earlier checkpoint.
-      if (proof?.readFence) { proof.readFence.validUntil = 0; assertCurrentToolExecution(call.args, executionOptions); }
+      // Before the result is published: a read body that relaxed its
+      // checkpoints ends on a complete verification.
+      if (proof?.liveOnly) verifyToolExecution(call.args, executionOptions, true);
       assertProjectionCurrent(callerCurrent);
       if (proof?.settingsReceipt) { assertProjectionSignal(signal); assertAdmissionCurrent?.(); }
       if (proof?.settingsRetired) throw new ToolInputProjectionError('stale');
@@ -1210,9 +1164,8 @@ export class ToolRegistry {
     const restrictionSignal = restrictions === undefined ? undefined : projectionSignal(projectionProperty(restrictions, 'signal'));
     const restrictionCurrent = restrictions === undefined ? undefined : projectionFunction<() => void>(projectionProperty(restrictions, 'assertCurrent'));
     const assertParentProof = () => {
-      expireReadFence(opts);
       if (currentToolExecutions.get(opts) !== parent || !parent.active || parent.registry !== this
-        || !assertCurrentToolExecution(parent.args, opts)) throw new ToolInputProjectionError('stale');
+        || !verifyToolExecution(parent.args, opts, true)) throw new ToolInputProjectionError('stale');
     };
     const assertParent = () => {
       assertParentProof(); assertProjectionSignal(restrictionSignal);
@@ -1339,7 +1292,6 @@ export class ToolRegistry {
       record = selected;
       record.executionStarted = true;
       const signal = combineProjectionSignals(record.signal, opts === undefined ? undefined : projectionSignal(projectionProperty(opts, 'signal')));
-      this.assertCaptured(record, true);
       const repairResult = await repairToolCall(name, projected.args, record.definition, signal, this.repairPort(record, []));
       assertProjectionSignal(signal);
       const effectiveArgs = captureProjectionArgs(repairResult.repaired ? repairResult.fixed : projected.args, name);
@@ -1348,7 +1300,8 @@ export class ToolRegistry {
       const executionOptions = record.registration.projector
         ? Object.freeze({ signal, ...(callerCurrent ? { assertCurrent: callerCurrent } : {}), ...(onProgress ? { onProgress } : {}), ...(record.executionContext ? { inputProjectionContext: record.executionContext } : {}) })
         : opts === undefined || projectionProperty(opts, 'inputProjectionContext') === undefined ? opts : Object.freeze({ signal, ...(onProgress ? { onProgress } : {}) });
-      this.assertCaptured(record, false);
+      // The claim: the one complete verification immediately before the body.
+      this.assertPreparationCurrent(record);
       record.claimed = true;
       const capturedRecord = record;
       record.executionCurrent = () => {
@@ -1367,7 +1320,7 @@ export class ToolRegistry {
         };
       }
       retireExecution = activateProjectionExecution(record.executionContext, effectiveArgs, signal);
-      assertProjectionCurrent(callerCurrent, effectiveArgs);
+      if (executionOptions) ordinaryCallRegistries.set(executionOptions, this);
       // A separately dispatched call owns its own execution scope. Background
       // agents must not inherit the completed spawning tool's body proof.
       const result = await executingContext.run(undefined, () => applyIntrinsic(capturedRecord.executor, capturedRecord.tool, [effectiveArgs, executionOptions]));
@@ -1426,6 +1379,7 @@ export class ToolRegistry {
       const executionOptions = assertCurrent ? Object.freeze({ signal, assertCurrent, ...(onProgress ? { onProgress } : {}) })
         : opts === undefined || projectionProperty(opts, 'inputProjectionContext') === undefined ? opts : Object.freeze({ signal, ...(onProgress ? { onProgress } : {}) });
       assertProjectionCurrent(assertCurrent, effectiveArgs);
+      if (executionOptions) ordinaryCallRegistries.set(executionOptions, this);
       const result = await executingContext.run(undefined, () => tool.execute(effectiveArgs, executionOptions));
       assertProjectionCurrent(assertCurrent, effectiveArgs);
       const toolResult = { ...result, callId };

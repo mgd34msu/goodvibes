@@ -62,15 +62,14 @@ export async function permissionPhase(
 
   const resolvePermissionResult = async (): Promise<PermissionCheckResult> => {
     const manager = context.permissionManager as unknown as {
-      checkDetailed?: ((toolName: string, args: Record<string, unknown>, attribution?: undefined, options?: { readonly dangerous: true }) => Promise<PermissionCheckResult>) | undefined;
+      checkDetailed?: ((toolName: string, args: Record<string, unknown>, attribution?: undefined, options?: { readonly definition: Tool['definition'] }) => Promise<PermissionCheckResult>) | undefined;
       check?: ((toolName: string, args: Record<string, unknown>) => Promise<boolean>) | undefined;
       getCategory: (toolName: string) => string;
     };
 
     if (typeof manager.checkDetailed === 'function') {
-      return tool.definition.dangerous === true
-        ? manager.checkDetailed(call.name, effectiveArgs, undefined, { dangerous: true })
-        : manager.checkDetailed(call.name, effectiveArgs);
+      // The definition carries the facts the gate classifies by, a declared-dangerous tool among them.
+      return manager.checkDetailed(call.name, effectiveArgs, undefined, { definition: tool.definition });
     }
 
     if (typeof manager.check === 'function') {

@@ -850,7 +850,7 @@ export class PermissionManager {
     const effectSurface = capturedAuthority.surface;
     const effectWriteDenied = mode !== 'yolo' && permissions.tools?.write === 'deny';
     const owner = { frame: capturedAuthority, assertCurrent };
-    const ownerOnly = recognizeOwnerOnly(toolName, args, { dangerous: options.dangerous === true || definition?.dangerous === true });
+    const ownerOnly = recognizeOwnerOnly(toolName, args, definition);
     const subjects = callSubjects(args, definition);
     const durable = mode === 'yolo' ? null : await this.rememberedDecision(this.getApprovalKey(toolName, args, options.hookOwner?.sessionId), toolName, args, { signal, assertCurrent }, owner, ownerOnly, subjects);
     const policy = mode !== 'yolo' && capturedAuthority.policyEnabled
@@ -1282,8 +1282,7 @@ export class PermissionManager {
     const signal = options?.signal;
     const owner = options?.hookOwner;
     const definition = options?.definition;
-    const dangerous = options?.dangerous === true || definition?.dangerous === true;
-    const check = () => sessionOfCheck.run(owner?.sessionId, () => withExecutionMode(this.getMode(), () => this.checkActive(toolName, args, attribution, signal, owner, dangerous, definition)));
+    const check = () => sessionOfCheck.run(owner?.sessionId, () => withExecutionMode(this.getMode(), () => this.checkActive(toolName, args, attribution, signal, owner, definition)));
     // The cancellation race may release the permission caller, but the owning
     // turn still joins the actual check and any admitted hook/approval cleanup.
     return awaitPermission(() => owner ? owner.admit(check) : check(), signal);
@@ -1302,7 +1301,7 @@ export class PermissionManager {
     return tools?.[key] === 'deny' || (category === 'write' && tools?.write === 'deny');
   }
 
-  private async checkActive(toolName: string, borrowedArgs: Record<string, unknown>, attribution: PermissionAttribution | undefined, signal?: AbortSignal, hookOwner?: TurnHookOwner, dangerous = false, definition?: ToolDefinition): Promise<PermissionCheckResult> {
+  private async checkActive(toolName: string, borrowedArgs: Record<string, unknown>, attribution: PermissionAttribution | undefined, signal?: AbortSignal, hookOwner?: TurnHookOwner, definition?: ToolDefinition): Promise<PermissionCheckResult> {
     assertPermissionActive(signal);
     const duplicate = isInvocationAdmitted(toolName, borrowedArgs);
     const args = captureOwnedJson(borrowedArgs) as Record<string, unknown>;
@@ -1336,7 +1335,7 @@ export class PermissionManager {
     await this.fireHook('Pre:permission:request', 'Pre', 'permission', 'request', { callId, toolName, category, analysis }, hookOwner);
     assertCurrent();
     this.policyRuntimeState.recordPermissionRequest({ callId, tool: toolName, category, analysis });
-    const ownerOnly = recognizeOwnerOnly(toolName, args, { dangerous });
+    const ownerOnly = recognizeOwnerOnly(toolName, args, definition);
     let policy: PermissionCheckResult | null = null;
     let remembered: RememberedDecision | null = null;
     let landed: RememberedDecision | null = null;

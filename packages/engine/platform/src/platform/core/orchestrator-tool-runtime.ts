@@ -112,7 +112,7 @@ async function resolvePermissionCheck(
     checkDetailed?: PermissionManager['checkDetailed'];
     check: PermissionManager['check'];
   };
-  const options = { signal, hookOwner, ...(definition ? { definition, ...(definition.dangerous === true ? { dangerous: true } : {}) } : {}) };
+  const options = { signal, hookOwner, ...(definition ? { definition } : {}) };
   if (typeof manager.checkDetailed === 'function') {
     return manager.checkDetailed(toolName, args, undefined, options);
   }

@@ -2,6 +2,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { DELIVERABLE_JUDGES } from './batteries/deliverable-judge.js';
 import { FINAL_ANSWER_REVIEWS } from './batteries/final-answer-review.js';
 import type { ContractAcceptanceStakes } from './config.js';
+import { decisionReceipt } from './decision-records.js';
 import type { ContractView } from './types.js';
 
 /** A changed policy requests a fresh check; it never changes a saved verdict. */
@@ -10,8 +11,8 @@ export function changedFinalAcceptancePolicy(contract: ContractView, stakes: Con
   const check = contract.checks.at(-1);
   if (!review || !check || check.result === 'pass' || !review.decisionIds.every(id => check.decisionIds.includes(id))) return false;
   try {
-    const receipt = JSON.parse(review.reason), fulfillment = DELIVERABLE_JUDGES[stakes], content = FINAL_ANSWER_REVIEWS[stakes];
+    const receipt = decisionReceipt(review) as { schemaVersion?: unknown; policy?: unknown } | null | undefined, fulfillment = DELIVERABLE_JUDGES[stakes], content = FINAL_ANSWER_REVIEWS[stakes];
     const policy = { fulfillment: { name: fulfillment.name, version: fulfillment.version }, content: { name: content.name, version: content.version }, stakes };
-    return receipt.schemaVersion === 2 && !isDeepStrictEqual(receipt.policy ?? null, policy);
+    return receipt !== null && receipt !== undefined && receipt.schemaVersion === 2 && !isDeepStrictEqual(receipt.policy ?? null, policy);
   } catch { return false; }
 }

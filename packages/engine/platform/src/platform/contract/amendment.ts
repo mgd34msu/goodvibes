@@ -23,6 +23,7 @@ import { readPlannerBounds } from './planner.js';
 import type { ContractRun } from './run-context.js';
 import type { StepContext } from './steps.js';
 import type { Criterion, Escalation } from './types.js';
+import { decideRecorded } from './decision-records.js';
 
 /** One criterion as the planner returns it. */
 interface AmendedCriterion {
@@ -258,7 +259,7 @@ export async function amendTarget(run: ContractRun, escalation: Escalation, inst
       contract.fixRounds = 0;
     }
     const summary = notes.length === 0 ? 'criteria unchanged' : notes.join('; ');
-    run.decide('owner-replied', escalation.targetId, `amended as the owner instructed: ${summary}`, [], route);
+    decideRecorded(run, 'owner-replied', escalation.targetId, `amended as the owner instructed: ${summary}`, { kind: 'amended' }, [], route);
     return { kind: 'applied', summary };
   }
   return { kind: 'problems', problems };

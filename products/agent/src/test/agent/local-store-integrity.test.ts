@@ -3,7 +3,7 @@
  * follow a read that quietly left something out or treated a broken file as empty.
  */
 import { describe, expect, test } from 'bun:test';
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { AgentNoteRegistry } from '../../agent/note-registry.ts';
 import { AgentPersonaRegistry } from '../../agent/persona-registry.ts';
@@ -23,13 +23,25 @@ function seed(path: string, content: string): void {
 }
 
 describe('research run store', () => {
-  test('an unreadable runs.json is an error, and a create does not overwrite it', () => withRoot((root) => {
+  test('a runs.json that is not JSON is copied aside before a create replaces it', () => withRoot((root) => {
     const path = join(root, 'runs.json');
     seed(path, '{ this is not json');
     const registry = new AgentResearchRunRegistry(path);
-    expect(() => registry.create({ title: 'New run', question: 'Why?' })).toThrow(/Could not read Agent research run store/);
     expect(() => registry.list()).toThrow(/Could not read Agent research run store/);
-    expect(readFileSync(path, 'utf-8')).toBe('{ this is not json');
+    registry.create({ title: 'New run', question: 'Why?' });
+    expect(registry.list().map((run) => run.title)).toEqual(['New run']);
+    const copies = readdirSync(root).filter((name) => name.startsWith('runs.json.unreadable-'));
+    expect(copies).toHaveLength(1);
+    expect(readFileSync(join(root, copies[0]!), 'utf-8')).toBe('{ this is not json');
+  }));
+
+  test('a show and a delete by title reach the same run, and a shared title is refused', () => withRoot((root) => {
+    const registry = new AgentResearchRunRegistry(join(root, 'runs.json'));
+    registry.create({ title: 'Q', question: 'Why?' });
+    registry.create({ title: 'Q', question: 'Why again?' });
+    expect(() => registry.get('Q')).toThrow(/2 research runs are titled/);
+    expect(() => registry.delete('Q')).toThrow(/2 research runs are titled/);
+    expect(registry.list()).toHaveLength(2);
   }));
 
   test('a checkpoint cannot end a run, and says which call does', () => withRoot((root) => {

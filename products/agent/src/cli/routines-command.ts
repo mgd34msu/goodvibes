@@ -22,7 +22,7 @@ import {
   formatRoutineScheduleReceipts,
   formatRoutineScheduleSuccess,
 } from '../agent/routine-schedule-format.ts';
-import { fetchLiveSchedules, reconcileRoutineScheduleReceipts, RoutineScheduleReceiptStore } from '../agent/routine-schedule-receipts.ts';
+import { fetchLiveSchedules, formatReceiptsOnOtherHosts, reconcileRoutineScheduleReceipts, RoutineScheduleReceiptStore } from '../agent/routine-schedule-receipts.ts';
 import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { CliCommandOutput } from './types.ts';
 import type { CliCommandRuntime } from './management.ts';
@@ -700,7 +700,7 @@ export async function handleRoutinesCommand(runtime: CliCommandRuntime): Promise
       store.snapshot(),
     );
     return {
-      output: jsonOrText(runtime, result, formatRoutineScheduleCorrelation(result)),
+      output: jsonOrText(runtime, result, [formatRoutineScheduleCorrelation(result), ...formatReceiptsOnOtherHosts(result)].join('\n')),
       exitCode: result.ok ? 0 : 1,
     };
   }

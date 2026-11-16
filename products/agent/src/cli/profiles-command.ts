@@ -190,6 +190,7 @@ function renderProfilesResult(result: AgentRuntimeProfileCommandResult): string 
         `  starter: ${template.id} (${template.name})`,
         `  seeded: ${template.personaIds.length} persona, ${template.skillIds.length} skills, ${template.routineIds.length} routine`,
         template.vibePath ? `  vibe ${template.vibePath}` : '',
+        ...(template.reviewCommands?.length ? ['  review before they apply:', ...template.reviewCommands.map((command) => `    ${command}`)] : []),
       ] : []),
       `  use ${result.data?.nextCommand ?? `goodvibes-agent --agent-profile ${profile.id}`}`,
     ].filter(Boolean).join('\n');

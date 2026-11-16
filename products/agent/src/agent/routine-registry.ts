@@ -1,10 +1,9 @@
 import { freshReviewPatch, parseAgentReviewState, reviewedReviewPatch, staleReviewPatch } from './review-state.ts';
-import { existsSync, readFileSync } from 'node:fs';
 import type { ShellPathService } from '@/runtime/index.ts';
-import { writeStoreFile } from '@/utils/store-file.ts';
+import { readJsonStore, writeJsonStore, type JsonStoreContents, type JsonStoreSpec, type JsonStoreWriteReport, type writeStoreFile } from '@/utils/store-file.ts';
 import { storeFileChangeStamp } from './store-change-stamp.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
-import { assertNoSecretLikeText, assertStoreRewritable, runLockedStoreUpdate } from './persona-registry.ts';
+import { assertNoSecretLikeText, runLockedStoreUpdate } from './persona-registry.ts';
 import { formatAgentRecordReviewState } from './record-labels.ts';
 import {
   evaluateAgentSkillReadiness,
@@ -164,22 +163,12 @@ function parseRoutine(value: unknown): AgentRoutineRecord | null {
   };
 }
 
-function parseStore(raw: string, forWrite = false): RoutineStoreFile {
-  const parsed: unknown = JSON.parse(raw);
-  if (!isRecord(parsed)) {
-    if (forWrite) assertStoreRewritable(parsed, 'routines', 0, STORE_VERSION);
-    return { version: STORE_VERSION, routines: [] };
-  }
-  const routines = Array.isArray(parsed.routines)
-    ? parsed.routines.map(parseRoutine).filter((entry): entry is AgentRoutineRecord => entry !== null)
-    : [];
-  if (forWrite) assertStoreRewritable(parsed, 'routines', routines.length, STORE_VERSION);
-  return { version: STORE_VERSION, routines };
-}
-
-function formatStore(store: RoutineStoreFile): string {
-  return `${JSON.stringify(store, null, 2)}\n`;
-}
+const ROUTINE_STORE: JsonStoreSpec<AgentRoutineRecord> = {
+  label: 'routine store',
+  entriesKey: 'routines',
+  version: STORE_VERSION,
+  parseEntry: parseRoutine,
+};
 
 type AgentLocalStorePaths = Pick<ShellPathService, 'resolveUserPath'>;
 
@@ -188,6 +177,9 @@ export function routineStorePath(shellPaths: AgentLocalStorePaths): string {
 }
 
 export class AgentRoutineRegistry {
+  private held: JsonStoreContents<AgentRoutineRecord> | null = null;
+  private lastWrite: JsonStoreWriteReport | undefined;
+
   public constructor(private readonly storePath: string, private readonly effects?: Parameters<typeof writeStoreFile>[2]) {}
 
   public static fromShellPaths(shellPaths: AgentLocalStorePaths, effects?: Parameters<typeof writeStoreFile>[2]): AgentRoutineRegistry {
@@ -231,9 +223,13 @@ export class AgentRoutineRegistry {
     return this.list().find((routine) => routine.id.toLowerCase() === lookup || routine.name.toLowerCase() === lookup) ?? null;
   }
 
-  public create(input: AgentRoutineCreateInput): AgentRoutineRecord {
-    return runLockedStoreUpdate(this.storePath, this.effects, () => {
-      const store = this.readStore(true);
+  /**
+   * `reviewed`: trusted callers only, for text shipped in this build (a
+   * built-in profile starter); everything else starts fresh and waits for review.
+   */
+  public create(input: AgentRoutineCreateInput, options: { readonly reviewed?: boolean } = {}): AgentRoutineRecord {
+    return this.locked(() => {
+      const store = this.readStore();
       const name = normalizeName(input.name);
       const description = input.description.trim();
       const steps = input.steps.trim();
@@ -254,7 +250,7 @@ export class AgentRoutineRegistry {
         enabled: input.enabled === true,
         source: input.source ?? 'user',
         provenance: input.provenance?.trim() || input.source || 'user',
-        reviewState: 'fresh',
+        ...(options.reviewed ? reviewedReviewPatch() : { reviewState: 'fresh' as const }),
         createdAt: timestamp,
         updatedAt: timestamp,
         startCount: 0,
@@ -265,8 +261,8 @@ export class AgentRoutineRegistry {
   }
 
   public update(idOrName: string, input: AgentRoutineUpdateInput): AgentRoutineRecord {
-    return runLockedStoreUpdate(this.storePath, this.effects, () => {
-      const store = this.readStore(true);
+    return this.locked(() => {
+      const store = this.readStore();
       const existing = this.findInStore(store, idOrName);
       if (!existing) throw new Error(`Unknown routine ${idOrName}`);
       const name = input.name === undefined ? existing.name : normalizeName(input.name);
@@ -298,8 +294,8 @@ export class AgentRoutineRegistry {
   }
 
   public setEnabled(idOrName: string, enabled: boolean): AgentRoutineRecord {
-    return runLockedStoreUpdate(this.storePath, this.effects, () => {
-      const store = this.readStore(true);
+    return this.locked(() => {
+      const store = this.readStore();
       const existing = this.findInStore(store, idOrName);
       if (!existing) throw new Error(`Unknown routine ${idOrName}`);
       const updated: AgentRoutineRecord = { ...existing, enabled, updatedAt: nowIso() };
@@ -312,8 +308,8 @@ export class AgentRoutineRegistry {
   }
 
   public markStarted(idOrName: string): AgentRoutineRecord {
-    return runLockedStoreUpdate(this.storePath, this.effects, () => {
-      const store = this.readStore(true);
+    return this.locked(() => {
+      const store = this.readStore();
       const existing = this.findInStore(store, idOrName);
       if (!existing) throw new Error(`Unknown routine ${idOrName}`);
       const timestamp = nowIso();
@@ -332,8 +328,8 @@ export class AgentRoutineRegistry {
   }
 
   public markReviewed(idOrName: string): AgentRoutineRecord {
-    return runLockedStoreUpdate(this.storePath, this.effects, () => {
-      const store = this.readStore(true);
+    return this.locked(() => {
+      const store = this.readStore();
       const existing = this.findInStore(store, idOrName);
       if (!existing) throw new Error(`Unknown routine ${idOrName}`);
       const updated: AgentRoutineRecord = {
@@ -350,8 +346,8 @@ export class AgentRoutineRegistry {
   }
 
   public markStale(idOrName: string, reason: string): AgentRoutineRecord {
-    return runLockedStoreUpdate(this.storePath, this.effects, () => {
-      const store = this.readStore(true);
+    return this.locked(() => {
+      const store = this.readStore();
       const existing = this.findInStore(store, idOrName);
       if (!existing) throw new Error(`Unknown routine ${idOrName}`);
       const updated: AgentRoutineRecord = {
@@ -368,8 +364,8 @@ export class AgentRoutineRegistry {
   }
 
   public deleteRoutine(idOrName: string): AgentRoutineRecord {
-    return runLockedStoreUpdate(this.storePath, this.effects, () => {
-      const store = this.readStore(true);
+    return this.locked(() => {
+      const store = this.readStore();
       const existing = this.findInStore(store, idOrName);
       if (!existing) throw new Error(`Unknown routine ${idOrName}`);
       this.writeStore({
@@ -403,17 +399,35 @@ export class AgentRoutineRegistry {
     return store.routines.find((routine) => routine.id.toLowerCase() === lookup || routine.name.toLowerCase() === lookup) ?? null;
   }
 
-  private readStore(forWrite = false): RoutineStoreFile {
-    if (!existsSync(this.storePath)) return { version: STORE_VERSION, routines: [] };
-    try {
-      return parseStore(readFileSync(this.storePath, 'utf-8'), forWrite);
-    } catch (error) {
-      throw new Error(`Could not read Agent routine store ${error instanceof Error ? error.message : String(error)}`);
+  /** What the last write reported: routines this version cannot read that were kept, or a copy of an unreadable file. */
+  public lastWriteReport(): JsonStoreWriteReport | undefined {
+    return this.lastWrite;
+  }
+
+  /** A file that is not JSON is reported on a read, never shown as no routines; a save copies it aside first. */
+  private readStore(): RoutineStoreFile {
+    const contents = this.held ?? readJsonStore(this.storePath, ROUTINE_STORE);
+    if (!this.held && contents.unreadable !== undefined) {
+      throw new Error(`Could not read Agent routine store at ${this.storePath}: it is ${contents.unreadable}. Repair the file, or save a routine to copy it aside and start a fresh store.`);
     }
+    return { version: STORE_VERSION, routines: contents.entries };
+  }
+
+  /** One locked read-modify-write; the file is read once and entries this version cannot read are written back as found. */
+  private locked<T>(update: () => T): T {
+    return runLockedStoreUpdate(this.storePath, this.effects, () => {
+      this.held = readJsonStore(this.storePath, ROUTINE_STORE);
+      try {
+        return update();
+      } finally {
+        this.held = null;
+      }
+    });
   }
 
   private writeStore(store: RoutineStoreFile): void {
-    writeStoreFile(this.storePath, formatStore(store), this.effects);
+    const read = this.held ?? readJsonStore(this.storePath, ROUTINE_STORE);
+    this.lastWrite = writeJsonStore(read, ROUTINE_STORE, { entries: store.routines }, this.effects);
   }
 }
 

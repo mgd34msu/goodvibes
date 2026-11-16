@@ -1,9 +1,8 @@
-import { existsSync, readFileSync } from 'node:fs';
 import { defineLifecycle } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { ShellPathService } from '@/runtime/index.ts';
-import { runStoreFileUpdateSync, writeStoreFile } from '@/utils/store-file.ts';
+import { readJsonStore, updateJsonStore, type JsonStoreSpec } from '@/utils/store-file.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
-import { assertNoSecretLikeText, assertStoreRewritable } from './persona-registry.ts';
+import { assertNoSecretLikeText } from './persona-registry.ts';
 
 export type AgentResearchSourceStatus = 'candidate' | 'reviewed' | 'rejected' | 'used';
 /**
@@ -223,21 +222,28 @@ function parseSource(value: unknown): AgentResearchSourceRecord | null {
   };
 }
 
-function parseStore(raw: string, forWrite = false): ResearchSourceStoreFile {
-  const parsed: unknown = JSON.parse(raw);
-  if (!isRecord(parsed)) {
-    if (forWrite) assertStoreRewritable(parsed, 'sources', 0, STORE_VERSION);
-    return { version: STORE_VERSION, sources: [] };
-  }
-  const sources = Array.isArray(parsed.sources)
-    ? parsed.sources.map(parseSource).filter((entry): entry is AgentResearchSourceRecord => entry !== null)
-    : [];
-  if (forWrite) assertStoreRewritable(parsed, 'sources', sources.length, STORE_VERSION);
-  return { version: STORE_VERSION, sources };
-}
+const SOURCE_STORE: JsonStoreSpec<AgentResearchSourceRecord> = {
+  label: 'research source store',
+  entriesKey: 'sources',
+  version: STORE_VERSION,
+  parseEntry: parseSource,
+};
 
-function formatStore(store: ResearchSourceStoreFile): string {
-  return `${JSON.stringify(store, null, 2)}\n`;
+/**
+ * One lookup for reads and writes: an exact id first; a URL or a title only
+ * when exactly one source has it. Several matches is a refusal that lists
+ * their ids, so a show and a later reject always reach the same source.
+ */
+export function resolveResearchSource(sources: readonly AgentResearchSourceRecord[], idOrTitle: string): AgentResearchSourceRecord | null {
+  const lookup = idOrTitle.trim().toLowerCase();
+  if (!lookup) return null;
+  const byId = sources.find((source) => source.id.toLowerCase() === lookup);
+  if (byId) return byId;
+  const matches = sources.filter((source) => source.url?.toLowerCase() === lookup || source.title.toLowerCase() === lookup);
+  if (matches.length > 1) {
+    throw new Error(`${matches.length} research sources match "${idOrTitle.trim()}": ${matches.map((source) => source.id).join(', ')}. Name one by its id.`);
+  }
+  return matches[0] ?? null;
 }
 
 /**
@@ -315,18 +321,11 @@ export class AgentResearchSourceRegistry {
   }
 
   public get(idOrTitle: string): AgentResearchSourceRecord | null {
-    const lookup = idOrTitle.trim().toLowerCase();
-    if (!lookup) return null;
-    return this.list().find((source) => (
-      source.id.toLowerCase() === lookup
-      || source.title.toLowerCase() === lookup
-      || source.url?.toLowerCase() === lookup
-    )) ?? null;
+    return resolveResearchSource(this.list(), idOrTitle);
   }
 
   public create(input: AgentResearchSourceCreateInput): AgentResearchSourceRecord {
-    return runStoreFileUpdateSync(this.storePath, () => {
-      const store = this.readStore(true);
+    return this.mutate((store) => {
       const question = normalizeText(input.question);
       const title = normalizeText(input.title);
       const summary = input.summary.trim();
@@ -367,15 +366,13 @@ export class AgentResearchSourceRegistry {
         updatedAt: timestamp,
         ...(input.credibility && input.credibility !== 'unreviewed' ? { reviewedAt: timestamp } : {}),
       };
-      this.writeStore({ ...store, sources: [...store.sources, source] });
-      return source;
+      return { value: source, sources: [...store.sources, source] };
     });
   }
 
   public review(idOrTitle: string, input: AgentResearchSourceReviewInput): AgentResearchSourceRecord {
-    return runStoreFileUpdateSync(this.storePath, () => {
-      const store = this.readStore(true);
-      const existing = this.findInStore(store, idOrTitle);
+    return this.mutate((store) => {
+      const existing = resolveResearchSource(store.sources, idOrTitle);
       if (!existing) throw new Error(`Unknown research source ${idOrTitle}.`);
       assertSourceMove(existing, 'reviewed');
       const tags = input.tags === undefined ? existing.tags : normalizeList(input.tags);
@@ -399,18 +396,13 @@ export class AgentResearchSourceRegistry {
         reviewedAt: timestamp,
         updatedAt: timestamp,
       };
-      this.writeStore({
-        ...store,
-        sources: store.sources.map((source) => source.id === existing.id ? reviewed : source),
-      });
-      return reviewed;
+      return { value: reviewed, sources: store.sources.map((source) => source.id === existing.id ? reviewed : source) };
     });
   }
 
   public reject(idOrTitle: string, reason: string): AgentResearchSourceRecord {
-    return runStoreFileUpdateSync(this.storePath, () => {
-      const store = this.readStore(true);
-      const existing = this.findInStore(store, idOrTitle);
+    return this.mutate((store) => {
+      const existing = resolveResearchSource(store.sources, idOrTitle);
       if (!existing) throw new Error(`Unknown research source ${idOrTitle}.`);
       assertSourceMove(existing, 'rejected');
       const note = reason.trim() || 'Rejected during source review.';
@@ -423,18 +415,13 @@ export class AgentResearchSourceRegistry {
         rejectedAt: timestamp,
         updatedAt: timestamp,
       };
-      this.writeStore({
-        ...store,
-        sources: store.sources.map((source) => source.id === existing.id ? rejected : source),
-      });
-      return rejected;
+      return { value: rejected, sources: store.sources.map((source) => source.id === existing.id ? rejected : source) };
     });
   }
 
   public markUsed(idOrTitle: string, input: AgentResearchSourceUseInput = {}): AgentResearchSourceRecord {
-    return runStoreFileUpdateSync(this.storePath, () => {
-      const store = this.readStore(true);
-      const existing = this.findInStore(store, idOrTitle);
+    return this.mutate((store) => {
+      const existing = resolveResearchSource(store.sources, idOrTitle);
       if (!existing) throw new Error(`Unknown research source ${idOrTitle}.`);
       assertSourceMove(existing, 'used');
       const reportArtifactId = input.reportArtifactId?.trim() || existing.usedInReportArtifactId;
@@ -450,38 +437,33 @@ export class AgentResearchSourceRegistry {
         usedAt: timestamp,
         updatedAt: timestamp,
       };
-      this.writeStore({
-        ...store,
-        sources: store.sources.map((source) => source.id === existing.id ? used : source),
-      });
-      return used;
+      return { value: used, sources: store.sources.map((source) => source.id === existing.id ? used : source) };
     });
   }
 
   public delete(idOrTitle: string): AgentResearchSourceRecord {
-    return runStoreFileUpdateSync(this.storePath, () => {
-      const store = this.readStore(true);
-      const existing = this.findInStore(store, idOrTitle);
+    return this.mutate((store) => {
+      const existing = resolveResearchSource(store.sources, idOrTitle);
       if (!existing) throw new Error(`Unknown research source ${idOrTitle}.`);
-      this.writeStore({
-        ...store,
-        sources: store.sources.filter((source) => source.id !== existing.id),
-      });
-      return existing;
+      return { value: existing, sources: store.sources.filter((source) => source.id !== existing.id) };
     });
   }
 
-  private readStore(forWrite = false): ResearchSourceStoreFile {
-    if (!existsSync(this.storePath)) return { version: STORE_VERSION, sources: [] };
-    try {
-      return parseStore(readFileSync(this.storePath, 'utf-8'), forWrite);
-    } catch (error) {
-      throw new Error(`Could not read Agent research source store: ${error instanceof Error ? error.message : String(error)}`);
+  /** A file that is not JSON is reported, never read as an empty queue; the next save copies it aside first. */
+  private readStore(): ResearchSourceStoreFile {
+    const contents = readJsonStore(this.storePath, SOURCE_STORE);
+    if (contents.unreadable !== undefined) {
+      throw new Error(`Could not read Agent research source store at ${this.storePath}: it is ${contents.unreadable}. Repair the file, or save a source to copy it aside and start a fresh queue.`);
     }
+    return { version: STORE_VERSION, sources: contents.entries };
   }
 
-  private writeStore(store: ResearchSourceStoreFile): void {
-    writeStoreFile(this.storePath, formatStore(store));
+  /** One locked read-modify-write: one read, at most one write; entries this build cannot read are written back as found. */
+  private mutate<T>(change: (store: ResearchSourceStoreFile) => { readonly value: T; readonly sources: readonly AgentResearchSourceRecord[] }): T {
+    return updateJsonStore(this.storePath, SOURCE_STORE, (read) => {
+      const next = change({ version: STORE_VERSION, sources: read.entries });
+      return { value: next.value, entries: next.sources };
+    }).value;
   }
 
   private nextId(title: string, sources: readonly AgentResearchSourceRecord[]): string {
@@ -495,13 +477,4 @@ export class AgentResearchSourceRegistry {
     throw new Error('Unable to allocate a unique research source id.');
   }
 
-  private findInStore(store: ResearchSourceStoreFile, idOrTitle: string): AgentResearchSourceRecord | null {
-    const lookup = idOrTitle.trim().toLowerCase();
-    if (!lookup) return null;
-    return store.sources.find((source) => (
-      source.id.toLowerCase() === lookup
-      || source.title.toLowerCase() === lookup
-      || source.url?.toLowerCase() === lookup
-    )) ?? null;
-  }
 }

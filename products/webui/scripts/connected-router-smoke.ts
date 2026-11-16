@@ -54,11 +54,8 @@ type ModelDefinition = import('@goodvibes-jev/engine/platform/platform/providers
 type WireJudgment = { state: { context: { request: { text: string; omittedChars: number }; recent: unknown[] }; candidates: { id: string }[] }; questions: Record<string, { type: string; criteria?: Record<string, unknown> }> };
 type RefusalWireJudgment = { state: { methodId: string; status: number; message: string }; questions: WireJudgment['questions'] };
 type AncillaryWireJudgment = { state: { providerId?: string; key: string; description?: string }; questions: WireJudgment['questions'] };
-type SpeechWireJudgment = { state: { paragraph: string; candidates: number[]; boundary: { offset: number; precedingToken: string; followingToken: string } }; questions: WireJudgment['questions'] };
 const speechParagraph = `Owned synthetic sentence ${'a'.repeat(950)}. Another synthetic sentence ${'b'.repeat(950)}.`;
-const speechJudgments: SpeechWireJudgment[] = [];
 const synthesis: { text: string; model_id: string }[] = [];
-const speechResponses: { status: number; outcome?: string; code?: string; reason?: string }[] = [];
 type WireAnswer = { model: string; messages: { role: string; content: unknown }[]; reasoning_effort?: string };
 const judgments: WireJudgment[] = [], answers: WireAnswer[] = [], unexpectedJudgments: string[] = [];
 let browser: Browser | undefined, host: Awaited<ReturnType<typeof startDaemonFixture>> | undefined;
@@ -82,7 +79,7 @@ const interrupted = () => { void cleanup().then(() => { process.exitCode = 1; })
 process.once('SIGINT', interrupted); process.once('SIGTERM', interrupted);
 const decisionWire = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(request) {
   if (new URL(request.url).pathname !== '/v1/systemone') return new Response(null, { status: 404 });
-  const value = await request.json() as WireJudgment | SpeechWireJudgment | AncillaryWireJudgment | RefusalWireJudgment;
+  const value = await request.json() as WireJudgment | AncillaryWireJudgment | RefusalWireJudgment;
   const names = Object.keys(value.questions);
   const state = value.state;
   if ('key' in state) {
@@ -109,22 +106,6 @@ const decisionWire = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(req
       unexpectedJudgments.push('unknown-ancillary-recipe'); return Response.json({ error: 'Unknown synthetic ancillary recipe' }, { status: 422 });
     }
     return Response.json({ model: 'jev-1.13.0', answers: { [name]: { type: 'noul', noul: probability } }, usage: { input_tokens: 1, output_tokens: 1 } });
-  }
-  if ('paragraph' in state) {
-    // Only the actual registered speech battery's known source and singleton
-    // candidate question are answered. Native composition supplies all receipts.
-    const name = names[0];
-    const index = name && /^seam_(?:[0-9]|[1-5][0-9]|6[0-3])$/.test(name) ? Number(name.slice(5)) : -1;
-    const expectedCandidates = [...speechParagraph.matchAll(/\s+/g)].map(match => match.index); expectedCandidates.push(speechParagraph.length);
-    if (names.length !== 1 || !name || value.questions[name]?.type !== 'noul' || state.paragraph !== speechParagraph
-      || JSON.stringify(state.candidates) !== JSON.stringify(expectedCandidates) || !Number.isInteger(state.boundary?.offset) || state.boundary?.offset !== expectedCandidates[index]
-      || state.boundary.precedingToken !== speechParagraph.slice(0, state.boundary.offset).match(/\S+$/u)?.[0]
-      || state.boundary.followingToken !== (speechParagraph.slice(state.boundary.offset).match(/^\s*(\S+)/u)?.[1] ?? '')) {
-      unexpectedJudgments.push('unknown-speech-recipe'); return Response.json({ error: 'Unknown synthetic speech recipe' }, { status: 422 });
-    }
-    speechJudgments.push({ state, questions: value.questions });
-    return Response.json({ model: 'jev-1.13.0', answers: { [name]: { type: 'noul', noul: state.boundary.precedingToken.endsWith('.') ? 0.99 : 0.01 } },
-      usage: { input_tokens: 1, output_tokens: 1 } });
   }
   if ('methodId' in state) {
     const sourceDiagnostic = Object.keys(state).length === 3 && /^sessions\.[a-zA-Z.]+$/.test(state.methodId)
@@ -181,7 +162,7 @@ sockets.push(speechWire); allowedOrigins.add(speechWire.url.origin);
 // The parent runner removed external credentials before starting this child.
 process.env.ELEVENLABS_BASE_URL = speechWire.url.origin;
 process.env.ELEVENLABS_API_KEY = 'owned-synthetic-speech-key';
-const speechReceipts: { viewport: string; savedRevision: boolean; nativeRequests: number; synthesisRequests: number; stopped: boolean }[] = [];
+const speechReceipts: { viewport: string; savedRevision: boolean; judgmentRequests: number; synthesisRequests: number; stopped: boolean }[] = [];
 const receipts: { viewport: string; proof: string }[] = [];
 async function signIn(page: Page, token: string) {
   await page.goto(host!.baseUrl);
@@ -341,43 +322,27 @@ try {
       await send(page, `QUAL_CLASSIC_${viewport.name}: Continue the same authorized conversation.`, startAnswers + 5);
       assert.equal(judgments.length, beforeClassic); assert.equal(answers.at(-1)?.model, 'gpt-6.1-sol');
       assert.equal(host.services.configManager.get('judgment.policy'), 'Classic - Off');
-      // Reload the original persisted reply under DefaultOn. Browser requests
-      // carry identities only; daemon source ownership resolves its full text.
+      // Reload the original persisted reply under DefaultOn.
       await policy(page, 'Default - On');
       await page.goto(`${host.baseUrl}/?view=chat&session=${encodeURIComponent(sessionId)}`);
       const savedMessages = await host.fetch(`/api/companion/chat/sessions/${sessionId}/messages`).then(response => response.json()) as { messages: { id: string; role: string; content: string; contentRevision: string }[] };
       const saved = savedMessages.messages.filter(message => message.role === 'assistant').at(-1); assert.ok(saved?.contentRevision);
       assert.equal(saved.content, `Synthetic answer ${startAnswers + 5} from gpt-6.1-sol.\n\n${speechParagraph}`);
-      const requests: { sessionId: string; messageId: string; contentRevision: string }[] = [];
+      // Read aloud cuts sentences locally: Speak sends no judgment request at all.
+      const judgmentRequests: string[] = [];
       const observed = (request: import('@playwright/test').Request) => {
-        if (new URL(request.url()).pathname !== '/api/judgment/batteries/run') return;
-        const body = request.postDataJSON() as { battery: string; input: Record<string, unknown> };
-        if (body.battery !== 'webui.voice.speech-seams') return;
-        assert.deepEqual(Object.keys(body.input).sort(), ['contentRevision', 'cursor', 'end', 'messageId', 'sessionId', 'start']);
-        assert.equal(body.input.sessionId, sessionId); assert.equal(body.input.messageId, saved.id); assert.equal(body.input.contentRevision, saved.contentRevision);
-        requests.push({ sessionId, messageId: saved.id, contentRevision: saved.contentRevision });
+        if (new URL(request.url()).pathname === '/api/judgment/batteries/run') judgmentRequests.push((request.postDataJSON() as { battery?: string }).battery ?? '');
       };
       page.on('request', observed);
-      const responseTasks: Promise<void>[] = [];
-      const responseObserved = (response: import('@playwright/test').Response) => {
-        if (new URL(response.url()).pathname !== '/api/judgment/batteries/run') return;
-        const body = response.request().postDataJSON() as { battery?: string };
-        if (body.battery !== 'webui.voice.speech-seams') return;
-        responseTasks.push(response.json().then((raw: { status?: string; reason?: string; error?: { code?: string } }) => {
-          speechResponses.push({ status: response.status(), outcome: raw.status, code: raw.error?.code, reason: raw.reason });
-        }).catch(() => { speechResponses.push({ status: response.status(), code: 'undecodable' }); }));
-      };
-      page.on('response', responseObserved);
-      const beforeSpeech = speechJudgments.length, beforeSynthesis = synthesis.length;
+      const beforeSynthesis = synthesis.length;
       const speak = page.locator('.message.assistant').last().getByRole('button', { name: 'Read this reply aloud', exact: true });
       await expect(speak).toBeVisible(); await speak.click();
       const stop = page.locator('.message.assistant').last().getByRole('button', { name: 'Stop reading aloud', exact: true });
       await expect(stop).toBeVisible();
       await expect.poll(() => synthesis.slice(beforeSynthesis).map(value => value.text).join(' '), { timeout: 25_000 }).toBe(saved.content.replace(/\s+/g, ' '));
-      assert.ok(speechJudgments.length > beforeSpeech, 'DefaultOn must use the real registered native speech battery');
-      assert.ok(requests.length > 0); assert.equal(judgments.length, beforeClassic, 'Speech must not borrow Router classification');
-      await stop.click(); await expect(speak).toBeVisible(); page.off('request', observed); page.off('response', responseObserved); await Promise.all(responseTasks);
-      speechReceipts.push({ viewport: viewport.name, savedRevision: true, nativeRequests: speechJudgments.length - beforeSpeech,
+      assert.deepEqual(judgmentRequests, [], 'Read aloud must not ask for a judgment'); assert.equal(judgments.length, beforeClassic, 'Speech must not borrow Router classification');
+      await stop.click(); await expect(speak).toBeVisible(); page.off('request', observed);
+      speechReceipts.push({ viewport: viewport.name, savedRevision: true, judgmentRequests: judgmentRequests.length,
         synthesisRequests: synthesis.length - beforeSynthesis, stopped: true });
       await page.screenshot({ path: join(output, `${viewport.name}-default-on-speech.png`), fullPage: true });
       receipts.push({ viewport: viewport.name, proof: 'real config persistence, ordinary xhigh/max actual wire and zero categorization, same-chat Router/full history/category effort, General fallback, Classic no classifier' });
@@ -387,14 +352,14 @@ try {
     } catch (error) {
       await page.screenshot({ path: join(output, `${viewport.name}-failure.png`), fullPage: true }).catch(() => {});
       writeFileSync(join(output, `${viewport.name}-failure-dom.txt`), await page.locator('body').innerText().catch(() => 'Unavailable'));
-      writeFileSync(join(output, 'failure-wiring.json'), JSON.stringify({ answerModels: answers.map(value => value.model), categorizationRequests: judgments.length, speechRequests: speechJudgments.length, synthesisRequests: synthesis.length, speechResponses, ancillaryCounts, unexpectedNetwork, unexpectedJudgments }, null, 2));
+      writeFileSync(join(output, 'failure-wiring.json'), JSON.stringify({ answerModels: answers.map(value => value.model), categorizationRequests: judgments.length, synthesisRequests: synthesis.length, ancillaryCounts, unexpectedNetwork, unexpectedJudgments }, null, 2));
       throw error;
     } finally { await context.close(); }
   }
-  writeFileSync(join(output, 'attempt-receipts.json'), JSON.stringify({ speechReceipts, speechResponses, ancillaryCounts, unknownShapes: [...unknownShapes], unexpectedNetwork, unexpectedJudgments }, null, 2));
+  writeFileSync(join(output, 'attempt-receipts.json'), JSON.stringify({ speechReceipts, ancillaryCounts, unknownShapes: [...unknownShapes], unexpectedNetwork, unexpectedJudgments }, null, 2));
   assert.deepEqual(unexpectedNetwork, []); assert.deepEqual(unexpectedJudgments, []);
   writeFileSync(join(output, 'receipts.json'), JSON.stringify({ kind: 'synthetic protocol wiring, not live model quality', receipts,
-    speechReceipts, speechRequests: speechJudgments.length, synthesisRequests: synthesis.length, answerRequests: answers.length, categorizationRequests: judgments.length, speechResponses, ancillaryCounts, unexpectedNetwork, unexpectedJudgments }, null, 2));
+    speechReceipts, synthesisRequests: synthesis.length, answerRequests: answers.length, categorizationRequests: judgments.length, ancillaryCounts, unexpectedNetwork, unexpectedJudgments }, null, 2));
   process.stdout.write(`Connected Router acceptance passed: ${receipts.length} viewports, ${answers.length} answer HTTP calls, ${judgments.length} bounded classifications.\n`);
 } catch (error) {
   if (browser) for (const context of browser.contexts()) for (const page of context.pages()) {

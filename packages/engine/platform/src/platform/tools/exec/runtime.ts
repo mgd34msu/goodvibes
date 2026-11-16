@@ -1114,9 +1114,10 @@ export interface ExecToolOptions {
    * Credential-bearing env-var scrub applied to every spawned command's
    * environment. Enabled by default (see resolveCredentialEnvScrub). Consumers
    * wire their `permissions.exec.*` config through here; the withheld names are
-   * reported on each ExecCommandResult (`withheld_env`) by name only.
+   * reported on each ExecCommandResult (`withheld_env`) by name only. A function
+   * is read at each run, so a changed setting applies to the next command.
    */
-  readonly credentialEnvScrub?: CredentialEnvScrubConfig | undefined;
+  readonly credentialEnvScrub?: CredentialEnvScrubConfig | (() => CredentialEnvScrubConfig) | undefined;
   /**
    * Per-command exec sandbox wiring. When present AND active (gate on,
    * config enabled, host provides a boundary), each foreground command runs
@@ -1140,10 +1141,18 @@ export interface ExecToolOptions {
   readonly containment?: ExecContainmentRequirement | null | undefined;
 }
 
+/** A fixed scrub is resolved once; a source is read at each run. */
+function scrubSource(config: ExecToolOptions['credentialEnvScrub']): () => ResolvedCredentialEnvScrub {
+  if (typeof config === 'function') return () => resolveCredentialEnvScrub(config());
+  const fixed = resolveCredentialEnvScrub(config);
+  return () => fixed;
+}
+
 function prepareExecRun(options: ExecToolOptions): {
   readonly overflowHandler: OverflowHandler;
   readonly featureFlags: Pick<FeatureFlagManager, 'isEnabled'> | null;
-  readonly credentialEnvScrub: ResolvedCredentialEnvScrub;
+  /** The scrub for one run: read from its source when the run starts. */
+  readonly credentialEnvScrub: () => ResolvedCredentialEnvScrub;
   readonly policy: ExecRunPolicy;
 } {
   if (!options.overflowHandler) {
@@ -1152,7 +1161,7 @@ function prepareExecRun(options: ExecToolOptions): {
   return {
     overflowHandler: options.overflowHandler,
     featureFlags: options.featureFlags ?? null,
-    credentialEnvScrub: resolveCredentialEnvScrub(options.credentialEnvScrub),
+    credentialEnvScrub: scrubSource(options.credentialEnvScrub),
     policy: {
       capturedInput: options.capturedInput ? Object.freeze({ ...options.capturedInput, dependencyInputs: options.capturedInput.dependencyInputs ? Object.freeze([...options.capturedInput.dependencyInputs]) : undefined }) : undefined,
       sandbox: options.sandbox ?? null,
@@ -1180,7 +1189,7 @@ export function createExecValidatorRunner(processManager: ProcessManager, option
     const command = validatorCommand(name).map(shellWord).join(' ');
     const timeoutMs = execution?.timeoutMs ?? DEFAULT_VALIDATOR_TIMEOUT_MS;
     const result = await executeResolvedCommand(processManager, overflowHandler, featureFlags, command,
-      { cmd: command, timeout_ms: timeoutMs, progress: false, interactive: false }, cwd, timeoutMs, credentialEnvScrub,
+      { cmd: command, timeout_ms: timeoutMs, progress: false, interactive: false }, cwd, timeoutMs, credentialEnvScrub(),
       { ...policy, ...(execution ? { assertCurrent: execution.assertCurrent } : {}) }, execution?.signal);
     const stopped = result.timed_out ? `Validator '${name}' timed out after ${timeoutMs}ms and was killed`
       : result.cancelled ? `Validator '${name}' was cancelled and killed` : undefined;
@@ -1313,7 +1322,7 @@ export function createExecTool(
           workingDirectory,
           globalTimeout,
           failFast,
-          credentialEnvScrub,
+          credentialEnvScrub(),
           executionPolicy,
           signal,
         );

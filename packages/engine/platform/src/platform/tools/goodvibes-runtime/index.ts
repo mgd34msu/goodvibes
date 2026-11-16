@@ -13,6 +13,7 @@ import {
   readRoutedConfigValue,
   readRoutedConfigValues,
   resolveRouterDeps,
+  settingsWriteRefusal,
   type ConfigReadResult,
   type ConfigRoutingOptions,
 } from './config-routing.js';
@@ -30,8 +31,7 @@ import type { CloudflareComponentSelection } from '../../cloudflare/types.js';
 import { summarizeError } from '../../utils/error-display.js';
 import { mapWithConcurrency } from '../../utils/concurrency.js';
 import { SETUP_INTENT_CONTRACT_PROMPT } from '../../runtime/setup-contract.js';
-import { isCredentialConfigKey, redactConfigValue, redactObjectByPath } from './credential-redaction.js';
-import { isSecretReferenceValue } from '../../config/secret-bearing-config-keys.js';
+import { redactConfigValue, redactObjectByPath } from './credential-redaction.js';
 import { executeAdmittedAgentSettings } from './settings-admission.js';
 
 type JsonRecord = Record<string, unknown>;
@@ -162,7 +162,8 @@ export function createGoodVibesSettingsTool(
       'Apply a GoodVibes setting. When the user supplies a concrete configuration value, a bot username, a chat id, a host, a port, a model, a path, that is a request to set it: call this tool, then tell the user the key and the persistedTo store it landed in. A value only mentioned in your reply has not been set. '
       + 'The write is routed to the runtime that owns the key: daemon-owned settings (surfaces.*, control-plane binding, watchers, device pairing, provisioning, retention) go to the daemon\'s config, client-owned settings stay in this client\'s config. The value is then re-read from that store, so a write that did not land is reported as a failure rather than as success. '
       + 'If you cannot tell which key a stated value belongs to, ask one short question instead of guessing, and do not set anything the user did not ask for. '
-      + 'Raw secret/token/password values are rejected: store the secret separately and set the key to a goodvibes:// secret reference.',
+      + 'Raw secret/token/password values are rejected: store the secret separately and set the key to a goodvibes:// secret reference. '
+      + 'A key the project overlay sets to something else is refused before anything is written, naming the overlay file to change instead.',
     parameters: {
       type: 'object',
       properties: {
@@ -184,24 +185,20 @@ export function createGoodVibesSettingsTool(
       if (!assertCurrentToolExecution(args, options) && !isYoloExecution() && args.confirm !== true) {
         return { success: false, error: 'Set confirm=true to change GoodVibes settings.' };
       }
+      if (args.mode !== 'set' && args.mode !== 'reset') {
+        return { success: false, error: `Unknown goodvibes_settings mode: ${String(args.mode)}. Use "set" or "reset".` };
+      }
       const key = readString(args.key);
-      if (!key || !isValidConfigKey(key)) {
-        return { success: false, error: `Unknown config key: ${key || '<missing>'}` };
+      // The same admission the Agent's settings path runs, before anything is read or written.
+      const refusal = settingsWriteRefusal(deps.configManager, { mode: args.mode, key, value: args.value }, routing);
+      if (refusal || !isValidConfigKey(key)) {
+        return { success: false, error: refusal?.message ?? 'No setting has that key, so nothing was changed.' };
       }
       const before = await readRoutedConfigValue(deps.configManager, key, routing);
       const previous = before.available ? await redactConfigValue(key, before.value) : { unavailable: true };
 
       if (args.mode === 'reset') {
         return await resetRoutedSetting(deps.configManager, key, previous, routing);
-      }
-      if (args.mode !== 'set') {
-        return { success: false, error: `Unknown goodvibes_settings mode: ${String(args.mode)}` };
-      }
-      if (rejectsRawSecretValue(args.value) && await isCredentialConfigKey(key)) {
-        return {
-          success: false,
-          error: `Refusing to persist a raw credential in ${key}. Store it as a GoodVibes secret and set this key to a goodvibes:// secret reference.`,
-        };
       }
 
       // Route by ownership, then re-read from the OWNING store.
@@ -218,6 +215,7 @@ export function createGoodVibesSettingsTool(
       return ok({
         key,
         action: 'set',
+        status: 'committed',
         previous,
         current: await redactConfigValue(key, applied.value),
         // Name the exact store. A host reading a different root will not see it.
@@ -226,6 +224,7 @@ export function createGoodVibesSettingsTool(
         owner: applied.scope,
         ownership: applied.ownership,
         verifiedInOwningStore: true,
+        completedPaths: [applied.persistedTo],
       });
     } catch (error) {
       // Routing failures already say which key, which runtime, and that nothing
@@ -269,6 +268,7 @@ async function resetRoutedSetting(
     return ok({
       key,
       action: 'reset',
+      status: 'committed',
       previous,
       current: await redactConfigValue(key, applied.value, setting.default),
       persistedTo: applied.persistedTo,
@@ -276,6 +276,7 @@ async function resetRoutedSetting(
       owner: applied.scope,
       ownership: applied.ownership,
       verifiedInOwningStore: true,
+      completedPaths: [applied.persistedTo],
     });
   }
   configManager.reset(key);
@@ -283,15 +284,19 @@ async function resetRoutedSetting(
   // The in-process object says "reset" whatever the stores hold; read them back as a set does.
   const incomplete = describeIncompleteLocalReset(configManager, key, defaultValue);
   if (incomplete) return { success: false, error: incomplete };
+  const persistedTo = localStorePathForKey(configManager, key);
   return ok({
     key,
     action: 'reset',
+    status: 'committed',
     previous,
     current: await redactConfigValue(key, configManager.get(key)),
-    persistedTo: localStorePathForKey(configManager, key),
+    persistedTo,
     appliedBy: 'local',
     owner: configKeyScope(key),
     ownership: route.reason,
+    verifiedInOwningStore: true,
+    completedPaths: [persistedTo],
   });
 }
 
@@ -559,12 +564,6 @@ async function redactCloudflareStatus(status: unknown): Promise<JsonRecord> {
 /** The value of a routed read, or a marker saying its owning runtime could not supply it. */
 function routedValue(read: ConfigReadResult): unknown {
   return read.available ? read.value : { unavailable: true, reason: read.reason };
-}
-
-function rejectsRawSecretValue(value: unknown): boolean {
-  if (typeof value !== 'string') return value !== '' && value !== null && value !== undefined;
-  if (!value.trim()) return false;
-  return !isSecretReferenceValue(value);
 }
 
 function readComponents(value: unknown): CloudflareComponentSelection | undefined {

@@ -56,13 +56,24 @@ const defaultTimer = (callback: () => void, ms: number): (() => void) => {
   return () => clearTimeout(timer);
 };
 
+const DEFAULT_SCRUB: ResolvedCredentialEnvScrub = resolveCredentialEnvScrub();
+
 export class AutomationCommands {
   readonly #runs = new Set<Run>();
-  #scrub: ResolvedCredentialEnvScrub = resolveCredentialEnvScrub();
+  #scrub: () => ResolvedCredentialEnvScrub = () => DEFAULT_SCRUB;
 
-  /** The credential-env scrub the exec tool uses; registerAllTools passes the same configuration to both. */
-  setCredentialEnvScrub(config: CredentialEnvScrubConfig | undefined): void {
-    this.#scrub = resolveCredentialEnvScrub(config);
+  /**
+   * The credential-env scrub the exec tool uses; registerAllTools passes the
+   * same source to both. A function is read at each start, so the owner's
+   * setting applies to the next command whichever registry set it.
+   */
+  setCredentialEnvScrub(config: CredentialEnvScrubConfig | (() => CredentialEnvScrubConfig) | undefined): void {
+    if (typeof config === 'function') {
+      this.#scrub = () => resolveCredentialEnvScrub(config());
+      return;
+    }
+    const fixed = resolveCredentialEnvScrub(config);
+    this.#scrub = () => fixed;
   }
 
   /** Runs of this kind and key that are starting or running. */
@@ -89,7 +100,7 @@ export class AutomationCommands {
         if (refusal !== undefined) return { started: false, reason: 'refused', message: refusal };
       }
       const hostEnv = Object.fromEntries(Object.entries(process.env).filter(([, value]) => value !== undefined)) as Record<string, string>;
-      const { env } = await scrubCredentialEnv(hostEnv, this.#scrub);
+      const { env } = await scrubCredentialEnv(hostEnv, this.#scrub());
       // stop() ran while the guard or the scrub was being read: nothing may start that stop() cannot kill.
       if (run.stopped) return { started: false, reason: 'stopped', message: 'Automation was stopped before the command started.' };
       const spawn = request.spawn ?? Bun.spawn;

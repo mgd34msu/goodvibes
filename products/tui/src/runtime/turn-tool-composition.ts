@@ -2,7 +2,6 @@
 import { registerAllTools, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { PermissionManager, createPermissionConfigReader } from '@goodvibes-jev/engine/platform/platform/permissions';
 import { trustGatedAsk, type WorkspaceTrustLevel } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
-import { readExecEnvScrubAllowlist } from '../input/exec-env-scrub-config.ts';
 import { createSandboxExecAsk, sandboxExecAskDepsFromRuntime } from '../permissions/sandbox-exec-gate.ts';
 import { readDaemonOperatorToken } from './daemon-operator-token.ts';
 import { terminalOwnerQuestions } from './client/owner-questions.ts';
@@ -57,8 +56,6 @@ export function registerTuiTurnTools(toolRegistry: ToolRegistry, services: Runti
     serviceRegistry: services.serviceRegistry,
     overflowHandler: services.overflowHandler,
     changeTracker: services.sessionChangeTracker,
-    // Widens the allowlist of credential-looking variable NAMES kept (master switch stays on). See exec-env-scrub-config.ts.
-    credentialEnvScrub: { allowlist: readExecEnvScrubAllowlist(services.configManager) },
     // Register context_accounting against OUR holder (the Orchestrator-backed source bound at bootstrap.ts). See runtime/context-accounting-source.ts.
     contextAccountingHolder: services.contextAccountingHolder,
     // First contained (sandboxed) command run announces "commands now run contained" once, recorded and surfaced now.

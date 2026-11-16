@@ -1,3 +1,4 @@
+import { extname } from 'node:path';
 import { logger } from '../../utils/logger.js';
 import { CodeIntelligence } from '../../intelligence/facade.js';
 import type { SymbolInfo } from '../../intelligence/tree-sitter/queries.js';
@@ -92,11 +93,25 @@ function formatSymbolEntries(symbols: SymbolInfo[], includeLineNumbers: boolean)
     .join('\n');
 }
 
-/** Says why the regex result is shown: the parser failed, or it ran and returned nothing (no grammar for the type, or nothing to list). */
-function fallbackNote(what: 'outline' | 'symbols', parserFailed: boolean): string {
-  return parserFailed
-    ? `# Note: tree-sitter ${what} unavailable for this file. Falling back to regex.\n`
-    : `# Note: tree-sitter returned no ${what === 'symbols' ? 'exported symbols' : 'entries'} for this file (its language may have no grammar, or it has none). Falling back to regex; the result may be empty.\n`;
+/** The parts of the code-intelligence facade the read tool uses; the optional ones are used when present. */
+type ReadIntelligence = Pick<CodeIntelligence, 'getOutline' | 'getSymbols'> & Partial<Pick<CodeIntelligence, 'getSyntaxTree' | 'hasTreeSitter'>>;
+
+function readIntelligence(filePath: string, supplied: ReadIntelligence | undefined): ReadIntelligence {
+  return supplied ?? CodeIntelligence.forPath(filePath);
+}
+
+/**
+ * Says why the line-pattern result is shown, naming the cause that applies:
+ * the file's language has no grammar, the parser failed, or it parsed the file
+ * and found nothing to list.
+ */
+function fallbackNote(what: 'outline' | 'symbols' | 'syntax tree', filePath: string, ci: ReadIntelligence, parserFailed: boolean): string {
+  const ext = extname(filePath) || 'this file type';
+  if (parserFailed) return `# Note: the tree-sitter parser failed on this file, so no ${what} could be read. Falling back to regex (line patterns: top-level declarations only).\n`;
+  if (ci.hasTreeSitter?.(filePath) === false) {
+    return `# Note: no tree-sitter grammar is installed for ${ext} files. Falling back to regex (line patterns: top-level declarations only).\n`;
+  }
+  return `# Note: tree-sitter parsed this file and found no ${what === 'symbols' ? 'exported symbols' : 'entries'}. Falling back to regex; the result may be empty.\n`;
 }
 
 export async function extractOutline(
@@ -104,18 +119,18 @@ export async function extractOutline(
   rawContent: string,
   lines: string[],
   includeLineNumbers: boolean,
-  codeIntelligence?: Pick<CodeIntelligence, 'getOutline' | 'getSymbols'>,
+  codeIntelligence?: ReadIntelligence,
 ): Promise<string> {
+  const ci = readIntelligence(filePath, codeIntelligence);
   let failed = false;
   try {
-    const ci = codeIntelligence ?? new CodeIntelligence({});
     const entries = await ci.getOutline(filePath, rawContent);
     if (entries.length > 0) return formatOutlineEntries(entries, includeLineNumbers);
   } catch (err) {
     failed = true;
     logger.debug('read tool: tree-sitter outline failed, using regex fallback', { filePath, error: summarizeError(err) });
   }
-  return fallbackNote('outline', failed) + extractOutlineRegex(lines, includeLineNumbers);
+  return fallbackNote('outline', filePath, ci, failed) + extractOutlineRegex(lines, includeLineNumbers);
 }
 
 export async function extractSymbols(
@@ -123,11 +138,11 @@ export async function extractSymbols(
   rawContent: string,
   lines: string[],
   includeLineNumbers: boolean,
-  codeIntelligence?: Pick<CodeIntelligence, 'getOutline' | 'getSymbols'>,
+  codeIntelligence?: ReadIntelligence,
 ): Promise<string> {
+  const ci = readIntelligence(filePath, codeIntelligence);
   let failed = false;
   try {
-    const ci = codeIntelligence ?? new CodeIntelligence({});
     const symbols = await ci.getSymbols(filePath, rawContent);
     const exported = symbols.filter((s) => s.exported);
     if (exported.length > 0) return formatSymbolEntries(exported, includeLineNumbers);
@@ -135,26 +150,40 @@ export async function extractSymbols(
     failed = true;
     logger.debug('read tool: tree-sitter symbols failed, using regex fallback', { filePath, error: summarizeError(err) });
   }
-  return fallbackNote('symbols', failed) + extractSymbolsRegex(lines, includeLineNumbers);
+  return fallbackNote('symbols', filePath, ci, failed) + extractSymbolsRegex(lines, includeLineNumbers);
 }
 
+/**
+ * The file's syntax tree: every structural node (declarations, blocks,
+ * statements that hold others) with its type, name and line range, indented by
+ * depth. Where `outline` lists signatures, this shows the shape of the code.
+ */
 export async function extractAst(
   filePath: string,
   rawContent: string,
   lines: string[],
   includeLineNumbers: boolean,
-  codeIntelligence?: Pick<CodeIntelligence, 'getOutline' | 'getSymbols'>,
+  codeIntelligence?: ReadIntelligence,
 ): Promise<string> {
+  const ci = readIntelligence(filePath, codeIntelligence);
   let failed = false;
   try {
-    const ci = codeIntelligence ?? new CodeIntelligence({});
-    const entries = await ci.getOutline(filePath, rawContent);
-    if (entries.length > 0) return formatOutlineEntries(entries, includeLineNumbers);
+    const tree = ci.getSyntaxTree ? await ci.getSyntaxTree(filePath, rawContent) : null;
+    if (tree && tree.entries.length > 0) {
+      const body = tree.entries.map((entry) => {
+        const label = `${'  '.repeat(entry.depth)}${entry.type}${entry.name !== undefined ? ` ${entry.name}` : ''}`;
+        const span = entry.startLine === entry.endLine ? `${entry.startLine}` : `${entry.startLine}-${entry.endLine}`;
+        return includeLineNumbers ? `${span.padStart(11)} | ${label}` : `${label} (${span})`;
+      }).join('\n');
+      return tree.truncated
+        ? `${body}\n# Note: the tree was cut (6 levels, 2000 nodes); read a line range for the rest.`
+        : body;
+    }
   } catch (err) {
     failed = true;
-    logger.debug('read tool: tree-sitter ast failed, using outline fallback', { filePath, error: summarizeError(err) });
+    logger.debug('read tool: tree-sitter syntax tree failed, using outline fallback', { filePath, error: summarizeError(err) });
   }
-  return fallbackNote('outline', failed) + extractOutlineRegex(lines, includeLineNumbers);
+  return fallbackNote('syntax tree', filePath, ci, failed) + extractOutlineRegex(lines, includeLineNumbers);
 }
 
 export function formatContent(

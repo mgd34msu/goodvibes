@@ -13,12 +13,70 @@
  *     so every tool parses with one parser and loads each grammar once.
  */
 import { readFileSync } from 'fs';
-import { basename, resolve } from 'path';
+import { basename, resolve, sep } from 'path';
 import { pathToFileURL, fileURLToPath } from 'url';
 import { BUILTIN_LANGUAGES, resolveLanguages, type ResolvedLanguages } from './config.js';
 import { TreeSitterService, sharedTreeSitterService } from './tree-sitter/service.js';
 
 import type { Tree, Language, Node } from 'web-tree-sitter';
+
+/** One node of a file's syntax tree as `getSyntaxTree` lists it: named nodes that hold structure, depth first. */
+export interface SyntaxTreeEntry {
+  /** Depth below the file's root node (its direct children are 0). */
+  readonly depth: number;
+  /** The grammar's node type, such as `class_declaration` or `method_definition`. */
+  readonly type: string;
+  /** The node's `name` field text, when it has one. */
+  readonly name?: string;
+  /** 1-based first and last line. */
+  readonly startLine: number;
+  readonly endLine: number;
+}
+
+/** A file's syntax tree, cut to a depth and a node count; `truncated` says a cut was made. */
+export interface SyntaxTree {
+  readonly entries: readonly SyntaxTreeEntry[];
+  readonly truncated: boolean;
+}
+
+/**
+ * The named nodes of a parse that hold structure (a node with named children,
+ * or with a `name` field), depth first, down to `maxDepth` below the root and
+ * at most `maxNodes` of them. Leaves such as identifiers and literals are left
+ * out: they are the text, not its shape.
+ */
+function listSyntaxTree(tree: Tree, maxDepth: number, maxNodes: number): SyntaxTree {
+  const entries: SyntaxTreeEntry[] = [];
+  let truncated = false;
+  const stack: Array<{ node: Node; depth: number }> = [];
+  const root = tree.rootNode;
+  for (let i = root.namedChildCount - 1; i >= 0; i--) {
+    const child = root.namedChild(i);
+    if (child) stack.push({ node: child, depth: 0 });
+  }
+  while (stack.length > 0) {
+    const { node, depth } = stack.pop()!;
+    const name = node.childForFieldName('name')?.text;
+    if (node.namedChildCount === 0 && name === undefined) continue;
+    if (entries.length >= maxNodes) { truncated = true; break; }
+    entries.push({
+      depth,
+      type: node.type,
+      ...(name !== undefined ? { name: name.length > 80 ? `${name.slice(0, 80)}...` : name } : {}),
+      startLine: node.startPosition.row + 1,
+      endLine: node.endPosition.row + 1,
+    });
+    if (depth + 1 >= maxDepth) {
+      if (node.namedChildCount > 0) truncated = true;
+      continue;
+    }
+    for (let i = node.namedChildCount - 1; i >= 0; i--) {
+      const child = node.namedChild(i);
+      if (child) stack.push({ node: child, depth: depth + 1 });
+    }
+  }
+  return { entries, truncated };
+}
 
 /** Result of parsing a file with tree-sitter. */
 export interface ParseResult { tree: Tree; language: Language; lang: string; }
@@ -133,7 +191,9 @@ export interface WorkspaceCodeIntelligenceHold {
   release(): Promise<void>;
 }
 
-const workspaceFacades = new Map<string, { readonly intelligence: CodeIntelligence; holders: number }>();
+const workspaceFacades = new Map<string, { readonly intelligence: CodeIntelligence; readonly workingDirectory: string; holders: number }>();
+/** The facade for a path no held workspace contains: built-in languages, the shared parser, no language servers. */
+let processFacade: CodeIntelligence | undefined;
 
 export class CodeIntelligence {
   /**
@@ -146,7 +206,7 @@ export class CodeIntelligence {
     const key = `${resolve(shellPaths.workingDirectory)}\0${resolve(shellPaths.homeDirectory)}`;
     let entry = workspaceFacades.get(key);
     if (!entry) {
-      entry = { intelligence: new CodeIntelligence({ shellPaths }), holders: 0 };
+      entry = { intelligence: new CodeIntelligence({ shellPaths }), workingDirectory: resolve(shellPaths.workingDirectory), holders: 0 };
       workspaceFacades.set(key, entry);
     }
     entry.holders += 1;
@@ -163,6 +223,23 @@ export class CodeIntelligence {
         await held.intelligence.dispose();
       },
     };
+  }
+
+  /**
+   * The facade a tool should parse `path` with: the held workspace facade whose
+   * working directory contains it (the deepest one), so its language files and
+   * grammars apply; otherwise one process-wide facade. Never starts a language
+   * server and never creates a second facade for a held workspace.
+   */
+  static forPath(path: string): CodeIntelligence {
+    const target = resolve(path);
+    let best: { readonly intelligence: CodeIntelligence; readonly workingDirectory: string } | undefined;
+    for (const entry of workspaceFacades.values()) {
+      const root = entry.workingDirectory;
+      const inside = target === root || target.startsWith(root.endsWith(sep) ? root : root + sep);
+      if (inside && (!best || root.length > best.workingDirectory.length)) best = entry;
+    }
+    return best?.intelligence ?? (processFacade ??= new CodeIntelligence({}));
   }
 
   private treeSitter: TreeSitterService;
@@ -297,6 +374,24 @@ export class CodeIntelligence {
     } catch (err) {
       logger.warn('CodeIntelligence.getOutline error', { filePath, error: summarizeError(err) });
       return [];
+    }
+  }
+
+  /**
+   * The file's syntax tree: its structural nodes, depth first, cut at
+   * `maxDepth` levels and `maxNodes` nodes. Null when the language has no
+   * grammar or the parse failed.
+   */
+  async getSyntaxTree(
+    filePath: string,
+    content: string,
+    options: { readonly maxDepth?: number | undefined; readonly maxNodes?: number | undefined } = {},
+  ): Promise<SyntaxTree | null> {
+    try {
+      return await this._withParsed(filePath, content, (parsed) => listSyntaxTree(parsed.tree, options.maxDepth ?? 6, options.maxNodes ?? 2_000));
+    } catch (err) {
+      logger.warn('CodeIntelligence.getSyntaxTree error', { filePath, error: summarizeError(err) });
+      return null;
     }
   }
 

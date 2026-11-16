@@ -31,6 +31,7 @@ import { createShellPathService } from '../runtime/shell-paths.js';
 import { createExecTool } from './exec/index.js';
 import { createExecValidatorRunner, type ExecToolOptions } from './exec/runtime.js';
 import type { CredentialEnvScrubConfig } from './exec/credential-env.js';
+import { configuredCredentialEnvScrub } from './exec/credential-env-config.js';
 import { hostSandboxAvailability, type ExecSandboxRuntime } from './exec/sandbox.js';
 import { createSandboxRuntimeConfig } from './exec/sandbox-config-lists.js';
 import {
@@ -246,6 +247,13 @@ export function registerToolWithContractGate(
  * Creates shared FileStateCache and ProjectIndex instances so read/write/edit
  * tools share cache state within a session.
  */
+/** The PTY backend of this host, probed once per process (a `command -v script` spawn), not once per registry. */
+let ptyAvailability: ReturnType<typeof detectPtyAvailability> | undefined;
+function hostPtyAvailability(): ReturnType<typeof detectPtyAvailability> {
+  ptyAvailability ??= detectPtyAvailability(probePtyHost());
+  return ptyAvailability;
+}
+
 export function registerAllTools(
   registry: ToolRegistry,
   deps?: {
@@ -327,12 +335,11 @@ export function registerAllTools(
      */
     diagnosticsProvider?: import('./shared/post-edit-diagnostics.js').DiagnosticsProvider | null | undefined;
     /**
-     * Credential-bearing env-var scrub applied to every spawned exec command's
-     * environment. Threaded straight into createExecTool so a consumer can wire
-     * its `permissions.exec.*` config (master switch + allowlist) at the
-     * composition root instead of the scrub always resolving to its built-in
-     * default. Omitted → scrub enabled with the default allowlist (see
-     * resolveCredentialEnvScrub).
+     * A fixed credential-env scrub for exec, scheduled commands and trigger
+     * actions, for an embedder or test that does not use the owner's setting.
+     * Omitted (every product): the scrub stays on and the owner's
+     * `permissions.execEnvScrubAllowlist` is read from the config manager at
+     * each spawn (exec/credential-env-config.ts).
      */
     credentialEnvScrub?: CredentialEnvScrubConfig | undefined;
     /**
@@ -440,12 +447,17 @@ export function registerAllTools(
   const channelRegistry = deps?.channelRegistry ?? null;
   const remoteRunnerRegistry = deps?.remoteRunnerRegistry;
   const workflowServices = deps.workflowServices;
-  // Trigger actions and scheduled commands get the same credential-env scrub settings as exec.
-  workflowServices.commands.setCredentialEnvScrub(deps.credentialEnvScrub);
   const mcpRegistry = deps?.mcpRegistry;
   if (!deps?.configManager || !deps?.providerRegistry || !deps?.toolLLM) {
     throw new Error('registerAllTools requires configManager, providerRegistry, and toolLLM');
   }
+  // Exec, trigger actions and scheduled commands read the owner's scrub setting
+  // from the config manager when they spawn: every registry hands over the same
+  // source, so a spawned agent's registry cannot reset what the main one set,
+  // and a changed setting applies to the next command without a restart.
+  const scrubConfig = deps.configManager;
+  const credentialEnvScrub = deps.credentialEnvScrub ?? ((): CredentialEnvScrubConfig => configuredCredentialEnvScrub(scrubConfig));
+  workflowServices.commands.setCredentialEnvScrub(credentialEnvScrub);
   if (!deps?.sandboxSessionRegistry) {
     throw new Error('registerAllTools requires sandboxSessionRegistry');
   }
@@ -556,7 +568,7 @@ export function registerAllTools(
   // path stays zero-cost and byte-for-byte unchanged.
   const execInteraction: ExecInteractionRuntime | null = deps.execPromptAnswerHandler
     ? {
-        availability: detectPtyAvailability(probePtyHost()),
+        availability: hostPtyAvailability(),
         requestPromptAnswer: deps.execPromptAnswerHandler,
       }
     : null;
@@ -565,7 +577,7 @@ export function registerAllTools(
     featureFlags: deps.featureFlags,
     overflowHandler: deps.overflowHandler,
     defaultWorkingDirectory: workingDirectory,
-    ...(deps.credentialEnvScrub ? { credentialEnvScrub: deps.credentialEnvScrub } : {}),
+    credentialEnvScrub,
     ...(execSandbox ? { sandbox: execSandbox } : {}),
     ...(execInteraction ? { interaction: execInteraction } : {}),
     ...(deps.execContainment ? { containment: deps.execContainment } : {}),
@@ -573,7 +585,7 @@ export function registerAllTools(
   const capturedAutoHeal = deps.capturedExec ? createCapturedAutoHealBackend(deps.capturedExec) : undefined;
   // Validators run only through exec's own path (sandbox plan, containment, credential scrub), never a separate spawn.
   const validatorRunner = deps.capturedExec
-    ? createCapturedValidatorRunner(deps.capturedExec, { sandbox: execSandbox, credentialEnvScrub: deps.credentialEnvScrub })
+    ? createCapturedValidatorRunner(deps.capturedExec, { sandbox: execSandbox, credentialEnvScrub: typeof credentialEnvScrub === 'function' ? credentialEnvScrub() : credentialEnvScrub })
     : createExecValidatorRunner(processManager, execOptions);
   registerTool(
     createWriteTool({

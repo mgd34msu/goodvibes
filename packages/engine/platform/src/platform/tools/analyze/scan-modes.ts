@@ -99,7 +99,7 @@ export async function runImpact(
 
   const deadline = Date.now() + MAX_SCAN_MS;
   const expired = pastDeadline ?? (() => Date.now() > deadline);
-  const intelligence = new CodeIntelligence({});
+  const intelligence = CodeIntelligence.forPath(projectRoot);
   const exportedNames = await collectExportedSymbols(
     targetFiles.map((rawFile) => resolveInsideRoot(rawFile, projectRoot)),
     intelligence,
@@ -280,7 +280,7 @@ export async function runDeadCode(
 ): Promise<Record<string, unknown>> {
   const deadline = Date.now() + MAX_SCAN_MS;
   const expired = pastDeadline ?? (() => Date.now() > deadline);
-  const intelligence = new CodeIntelligence({});
+  const intelligence = CodeIntelligence.forPath(projectRoot);
   const unreadable: string[] = [];
   const allFiles = await collectScanFiles(input, projectRoot, deadline, walkOptions, unreadable);
 
@@ -403,7 +403,7 @@ export async function runBundle(_input: AnalyzeInput, projectRoot: string): Prom
 }
 
 export async function runSurface(input: AnalyzeInput, projectRoot: string): Promise<Record<string, unknown>> {
-  const intelligence = new CodeIntelligence({});
+  const intelligence = CodeIntelligence.forPath(projectRoot);
   const targetFiles: string[] = [];
 
   if (input.files && input.files.length > 0) {

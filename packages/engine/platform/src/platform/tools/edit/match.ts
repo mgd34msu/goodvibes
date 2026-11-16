@@ -400,28 +400,18 @@ export function computeAstEdit(fileContent: string, item: EditItem, filePath: st
   const text = resolveEditText(item);
   if ('error' in text) return Promise.resolve(inputFailure(text));
   const { find: findStr, replace: replaceStr } = text;
-  let intel: CodeIntelligence;
-  try {
-    intel = new CodeIntelligence({});
-  } catch (e) {
-    logger.debug('CodeIntelligence instance not available', { error: summarizeError(e) });
-    return Promise.resolve(
-      withExactFallbackWarning(computeExactEdit(fileContent, item), 'AST match unavailable; used exact match instead.'),
-    );
-  }
-
-  if (!intel.hasTreeSitter(filePath)) {
-    return Promise.resolve(
-      withExactFallbackWarning(
-        computeExactEdit(fileContent, item),
-        'AST match unavailable for this file type; used exact match instead.',
-      ),
-    );
-  }
-
+  // The workspace's facade: its language files decide which files have a grammar.
+  const intel = CodeIntelligence.forPath(filePath);
   return intel
     .getSymbols(filePath, fileContent)
     .then((symbols) => {
+      // Asked after the parse, when the workspace's language files are loaded.
+      if (symbols.length === 0 && !intel.hasTreeSitter(filePath)) {
+        return withExactFallbackWarning(
+          computeExactEdit(fileContent, item),
+          `AST match unavailable: no grammar is installed for ${extname(filePath) || 'this file type'}; used exact match instead.`,
+        );
+      }
       const normalizedFind = findStr.replace(/\s+/g, ' ').trim();
       const positions: { start: number; end: number }[] = [];
       const lines = fileContent.split('\n');

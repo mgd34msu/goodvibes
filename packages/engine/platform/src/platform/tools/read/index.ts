@@ -9,7 +9,7 @@ import { toRecord } from '../../utils/record-coerce.js';
 import type { ReadInput, ReadFileInput, ExtractMode, OutputFormat } from './schema.js';
 import { FileStateCache } from '../../state/file-cache.js';
 import { ProjectIndex } from '../../state/project-index.js';
-import { CodeIntelligence } from '../../intelligence/facade.js';
+import type { CodeIntelligence } from '../../intelligence/facade.js';
 import { logger } from '../../utils/logger.js';
 import { summarizeError } from '../../utils/error-display.js';
 import { describeUnexpectedToolError } from '../input-projection.js';
@@ -49,7 +49,8 @@ export class ReadTool implements Tool {
 
   private readonly fileCache: FileStateCache;
   private readonly projectIndex: ProjectIndex;
-  private readonly codeIntelligence: Pick<CodeIntelligence, 'getOutline' | 'getSymbols'>;
+  /** The workspace's facade from the composition; without one each file is read with the facade for its path. */
+  private readonly codeIntelligence: Pick<CodeIntelligence, 'getOutline' | 'getSymbols'> | undefined;
 
   constructor(
     projectIndex: ProjectIndex,
@@ -64,7 +65,7 @@ export class ReadTool implements Tool {
   ) {
     this.fileCache = fileCache ?? new FileStateCache();
     this.projectIndex = projectIndex;
-    this.codeIntelligence = codeIntelligence ?? new CodeIntelligence({});
+    this.codeIntelligence = codeIntelligence;
   }
 
   async execute(args: Record<string, unknown>, options?: ToolExecuteOptions): Promise<{ success: boolean; output?: string; error?: string; hostEvidence?: ToolHostEvidence; _images?: readonly ReadImage[] }> {

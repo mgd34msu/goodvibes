@@ -40,8 +40,19 @@ const PROJECTION_PROBLEM_TEXT: Readonly<Record<ToolInputProjectionProblem, strin
  * next step. Value-free like the error itself; never echoes the input.
  */
 export function describeToolInputProjectionProblem(problem: ToolInputProjectionProblem, detail?: string): string {
+  // A detail names the rule the arguments broke and the next step, so the
+  // generic text must not contradict it ("not caused by your arguments").
+  if (detail && (problem === 'held' || problem === 'invalid')) {
+    return `Tool input projection ${problem}: ${PROJECTION_PROBLEM_TEXT_WITH_DETAIL[problem]}. ${detail}`;
+  }
   return `Tool input projection ${problem}: ${PROJECTION_PROBLEM_TEXT[problem]}.${detail ? ` ${detail}` : ''}`;
 }
+
+/** The text for a refusal whose detail says which rule the arguments broke. */
+const PROJECTION_PROBLEM_TEXT_WITH_DETAIL: Readonly<Record<'held' | 'invalid', string>> = {
+  held: 'the host refused these arguments before anything took effect',
+  invalid: 'the arguments could not be prepared for this tool. Nothing was executed',
+};
 
 /** A tool's own catch-all text: projection problems get their cause and next step. */
 export function describeUnexpectedToolError(error: unknown, summarize: (error: unknown) => string): string {

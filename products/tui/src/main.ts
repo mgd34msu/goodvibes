@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import './runtime/native-data-writer.ts';
+import { installedDataWriterAdmission } from './runtime/native-data-writer.ts';
 import { installedReaderCommand } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
 import { COMPILED_VERSION } from './version.ts';
 import { metadataCliResult } from './cli/metadata.ts';
@@ -15,6 +15,10 @@ if (readerDescription !== undefined) {
   if (metadata.stdout !== undefined) process.stdout.write(`${metadata.stdout}\n`);
   if (metadata.stderr !== undefined) process.stderr.write(`${metadata.stderr}\n`);
   process.exitCode = metadata.exitCode;
+} else if (!installedDataWriterAdmission.ok) {
+  // Reader checks, help and version answered above; nothing else runs from an image that could not be admitted.
+  process.stderr.write(`${installedDataWriterAdmission.message}\n`);
+  process.exitCode = 1;
 } else if (process.argv[2] === 'acp') {
   // An ACP agent server owns stdout for protocol frames, so it never reaches
   // the interactive entry's config, gitignore and migration side effects.

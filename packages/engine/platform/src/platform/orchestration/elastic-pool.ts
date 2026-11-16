@@ -1,11 +1,11 @@
 /**
- * elastic-pool.ts, the elastic-fleet muscles of the shared workstream engine
- * : a ready task with no available agent SPAWNS one (the phase-runner's
- * fresh per-task agent), up to `fleet.maxSize`; at-cap is a VISIBLE state
- * ("N ready, M running, at cap"), never a silent stall; a spawn refusal
- * leaves the task visibly ready with its reason; and when the ready set is
- * empty with no imminent edge release, the finishing agent RETIRES instead of
- * idling warm, fleet size tracks the graph's width over time.
+ * elastic-pool.ts, the elastic-fleet muscles of the shared workstream engine.
+ * Agents are per task: a ready task SPAWNS a fresh agent for its phase (the
+ * phase runner), up to `fleet.maxSize`, and that agent ends with its phase,
+ * so the fleet's size follows the graph's width with nothing kept warm.
+ * At cap is a VISIBLE state on the task ("N ready, M running, at cap") and in
+ * the pool snapshot (`poolState`), never a silent stall; a spawn refusal
+ * leaves the task visibly ready with its reason.
  *
  * Also owns the bounded per-task retry decision (auto-retry a failed task up
  * to the bound, then hard-fail → the orphan pass surfaces dependents).
@@ -50,14 +50,13 @@ export interface PoolGateDecision {
 /**
  * Gate one claim against the fleet ceiling. Allowing the claim IS the spawn,
  * the phase-runner spawns a fresh per-task agent for it. Refusals leave the
- * item in its ready state with the honest reason; the at-cap event fires once
- * per transition (the caller tracks the edge).
+ * item in its ready state with the honest reason, which is where at cap is
+ * shown; only a policy refusal is also announced as an event.
  */
 export function gateClaimAgainstFleet(
   workstream: Workstream,
   item: WorkItem,
   probe: FleetCapacityProbe,
-  wasAtCap: boolean,
 ): PoolGateDecision {
   if (probe.refusal) {
     return {
@@ -67,14 +66,9 @@ export function gateClaimAgainstFleet(
     };
   }
   if (probe.active >= probe.maxSize) {
-    const ready = readyCount(workstream);
-    const running = runningCount(workstream);
     return {
       allow: false,
-      reason: `${ready} ready, ${running} running, at cap (${probe.capKey}=${probe.maxSize})`,
-      event: wasAtCap
-        ? undefined
-        : { type: 'pool-at-cap', workstreamId: workstream.id, ready, running, capKey: probe.capKey, maxSize: probe.maxSize },
+      reason: `${readyCount(workstream)} ready, ${runningCount(workstream)} running, at cap (${probe.capKey}=${probe.maxSize})`,
     };
   }
   return { allow: true };
@@ -107,23 +101,4 @@ export function shouldAutoRetry(item: WorkItem, cancelled: boolean, maxItemRetri
 /** True when a FAILED item is past its retry bound (the orphan pass's blocker predicate). */
 export function isHardFailed(item: WorkItem, maxItemRetries: number): boolean {
   return item.state === 'failed' && (maxItemRetries <= 0 || (item.retryCount ?? 0) >= maxItemRetries);
-}
-
-/**
- * Retirement check, run when a phase agent finishes and its tick found no
- * claim: with an empty ready set and NO imminent edge release (nothing
- * in-phase that could release an edge), the agent retires cleanly instead of
- * idling warm. Returns the event to emit, or null.
- */
-export function retirementEvent(workstream: Workstream, agentId: string | undefined): OrchestrationEvent | null {
-  if (!isElastic(workstream)) return null;
-  if (!agentId) return null;
-  if (readyCount(workstream) > 0) return null;
-  if (runningCount(workstream) > 0) return null; // an in-flight sibling may release an edge imminently
-  return {
-    type: 'agent-retired',
-    workstreamId: workstream.id,
-    agentId,
-    reason: 'ready set empty; no imminent edge release',
-  };
 }

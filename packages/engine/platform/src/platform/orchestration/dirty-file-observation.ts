@@ -1,131 +1,154 @@
-/** Native local dirty-file reads. No content hash, pathname-keyed byte cache or
- * following a dirty symlink into another file. Callers retain only their own
- * original observations for the lifetime of the launch/baseline owner. */
+/**
+ * The identity of an uncommitted path, from git and the file system, without
+ * holding its bytes: a regular file is its git blob id (`git hash-object
+ * --no-filters --stdin-paths`, one child process for every path asked at once),
+ * a symbolic link the sha256 of its target, a deleted path `null`. Anything
+ * else (a nested repository, a path git cannot name on one line) is `other`,
+ * which a comparison treats as uncertain, so it is never swept into a commit.
+ *
+ * Everything here runs off the event loop: git runs as a child process and the
+ * file system is read through its promise API.
+ */
 import { createHash } from 'node:crypto';
-import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync, readlinkSync, readSync, realpathSync, type BigIntStats } from 'node:fs';
-import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { lstatSync, readlinkSync, type Stats } from 'node:fs';
+import { lstat, readFile, readlink } from 'node:fs/promises';
+import { isAbsolute, join } from 'node:path';
 
-export type CapturedDirtyFile =
-  | { readonly kind: 'file' | 'symlink'; readonly root: string; readonly bytes: Buffer; readonly executable: boolean; readonly revision: string; readonly assertCurrent: () => void }
-  | { readonly kind: 'missing'; readonly root: string; readonly revision: string; readonly assertCurrent: () => void }
-  | { readonly kind: 'unavailable'; readonly revision: null };
-const facts = (value: BigIntStats): string => [value.dev, value.ino, value.mode, value.uid, value.gid,
-  value.nlink, value.size, value.mtimeNs, value.ctimeNs, value.birthtimeNs].join(':');
-function directory(path: string): string | null {
+/** `file:<oid>`, `executable:<oid>`, `symlink:<sha256 of the target>`, `other`, or null for a path that does not exist. */
+export type DirtyPathId = string | null;
+
+/** The id that stands for a path whose content cannot be named. */
+export const OTHER_PATH_ID = 'other';
+
+/** Whether a path is one this module names: relative, inside the tree, outside `.git` and `.goodvibes`. */
+export function isOrdinaryProjectPath(path: string): boolean {
+  return path.length > 0 && !isAbsolute(path) && !path.includes('\0')
+    && !path.split('/').some((part) => part === '' || part === '.' || part === '..' || part === '.git' || part === '.goodvibes');
+}
+
+async function run(args: readonly string[], cwd: string, stdin?: string, signal?: AbortSignal): Promise<{ readonly code: number; readonly stdout: string }> {
+  const proc = Bun.spawn(['git', ...args], {
+    cwd,
+    stdin: stdin === undefined ? 'ignore' : new TextEncoder().encode(stdin),
+    stdout: 'pipe',
+    stderr: 'ignore',
+    env: { ...process.env, LC_ALL: 'C' },
+  });
+  const [code, stdout] = await Promise.all([proc.exited, new Response(proc.stdout).text()]);
+  signal?.throwIfAborted();
+  return { code, stdout };
+}
+
+/** Blob ids of regular files, in one git process; a path git could not hash (gone meanwhile) is retried alone. */
+async function blobIds(cwd: string, paths: readonly string[], signal?: AbortSignal): Promise<Map<string, string | undefined>> {
+  const ids = new Map<string, string | undefined>();
+  if (paths.length === 0) return ids;
+  const batch = await run(['hash-object', '--no-filters', '--stdin-paths'], cwd, `${paths.join('\n')}\n`, signal);
+  const lines = batch.stdout.split('\n').filter((line) => line.length > 0);
+  if (batch.code === 0 && lines.length === paths.length) {
+    paths.forEach((path, index) => ids.set(path, lines[index]));
+    return ids;
+  }
+  for (const path of paths) {
+    const one = await run(['hash-object', '--no-filters', '--', path], cwd, undefined, signal);
+    ids.set(path, one.code === 0 ? one.stdout.trim() || undefined : undefined);
+  }
+  return ids;
+}
+
+/**
+ * The current id of each path under `cwd`. One `lstat` per path and one git
+ * process for all regular files; nothing is kept but the ids.
+ */
+export async function dirtyPathIds(cwd: string, paths: readonly string[], signal?: AbortSignal): Promise<Map<string, DirtyPathId>> {
+  const result = new Map<string, DirtyPathId>();
+  const files: string[] = [];
+  const executable = new Set<string>();
+  await Promise.all(paths.map(async (path) => {
+    if (!isOrdinaryProjectPath(path) || path.includes('\n')) { result.set(path, OTHER_PATH_ID); return; }
+    const absolute = join(cwd, path);
+    try {
+      const stat = await lstat(absolute);
+      if (stat.isSymbolicLink()) {
+        const target = await readlink(absolute, { encoding: 'buffer' });
+        result.set(path, `symlink:${createHash('sha256').update(target).digest('hex')}`);
+      } else if (stat.isFile()) {
+        files.push(path);
+        if ((stat.mode & 0o111) !== 0) executable.add(path);
+      } else {
+        result.set(path, OTHER_PATH_ID);
+      }
+    } catch (error) {
+      result.set(path, (error as NodeJS.ErrnoException).code === 'ENOENT' ? null : OTHER_PATH_ID);
+    }
+  }));
+  signal?.throwIfAborted();
+  const ids = await blobIds(cwd, files, signal);
+  for (const path of files) {
+    const id = ids.get(path);
+    result.set(path, id === undefined || !/^[a-f0-9]{40}(?:[a-f0-9]{24})?$/.test(id) ? OTHER_PATH_ID : `${executable.has(path) ? 'executable' : 'file'}:${id}`);
+  }
+  return result;
+}
+
+function idOf(stat: Stats, target: () => Buffer): DirtyPathId | 'file' {
+  if (stat.isSymbolicLink()) return `symlink:${createHash('sha256').update(target()).digest('hex')}`;
+  return stat.isFile() ? 'file' : OTHER_PATH_ID;
+}
+
+/**
+ * The same ids, synchronously, for a caller that cannot wait (a session turn
+ * that found no baseline): still one git process for every file and no bytes kept.
+ */
+export function dirtyPathIdsSync(cwd: string, paths: readonly string[]): Map<string, DirtyPathId> {
+  const result = new Map<string, DirtyPathId>();
+  const files: string[] = [];
+  const executable = new Set<string>();
+  for (const path of paths) {
+    if (!isOrdinaryProjectPath(path) || path.includes('\n')) { result.set(path, OTHER_PATH_ID); continue; }
+    const absolute = join(cwd, path);
+    try {
+      const stat = lstatSync(absolute);
+      const id = idOf(stat, () => readlinkSync(absolute, { encoding: 'buffer' }));
+      if (id !== 'file') { result.set(path, id); continue; }
+      files.push(path);
+      if ((stat.mode & 0o111) !== 0) executable.add(path);
+    } catch (error) {
+      result.set(path, (error as NodeJS.ErrnoException).code === 'ENOENT' ? null : OTHER_PATH_ID);
+    }
+  }
+  if (files.length === 0) return result;
+  const hashed = Bun.spawnSync(['git', 'hash-object', '--no-filters', '--stdin-paths'], { cwd, stdin: new TextEncoder().encode(`${files.join('\n')}\n`), env: { ...process.env, LC_ALL: 'C' } });
+  const lines = hashed.exitCode === 0 ? new TextDecoder().decode(hashed.stdout).split('\n').filter((line) => line.length > 0) : [];
+  files.forEach((path, index) => {
+    const id = lines.length === files.length ? lines[index] : undefined;
+    result.set(path, id === undefined || !/^[a-f0-9]{40}(?:[a-f0-9]{24})?$/.test(id) ? OTHER_PATH_ID : `${executable.has(path) ? 'executable' : 'file'}:${id}`);
+  });
+  return result;
+}
+
+/**
+ * The sha256 commitment an older baseline saved for a path (`file:`,
+ * `executable:` or `symlink:` plus the sha256 of the bytes), read now; null
+ * when the path is gone, undefined when it cannot be read. Only resumed
+ * contracts with such a baseline read file bytes, one file at a time.
+ */
+export async function legacyPathCommitment(cwd: string, path: string): Promise<string | null | undefined> {
+  if (!isOrdinaryProjectPath(path)) return undefined;
+  const absolute = join(cwd, path);
   try {
-    const value = lstatSync(path, { bigint: true });
-    if (!value.isDirectory() || value.isSymbolicLink()) throw new Error('Dirty snapshot parent is not an ordinary directory');
-    return [value.dev, value.ino, value.mode, value.uid, value.gid, value.birthtimeNs].join(':');
+    const stat = await lstat(absolute);
+    if (stat.isSymbolicLink()) return `symlink:${createHash('sha256').update(await readlink(absolute, { encoding: 'buffer' })).digest('hex')}`;
+    if (!stat.isFile()) return undefined;
+    const digest = createHash('sha256').update(await readFile(absolute)).digest('hex');
+    return `${(stat.mode & 0o111) !== 0 ? 'executable' : 'file'}:${digest}`;
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
-    throw error;
+    return (error as NodeJS.ErrnoException).code === 'ENOENT' ? null : undefined;
   }
-}
-function leaf(path: string): BigIntStats | null {
-  try { return lstatSync(path, { bigint: true }); }
-  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error; }
-}
-function selectedPath(cwd: string, path: string): string {
-  if (!path || isAbsolute(path) || path.includes('\0') || path.split('/').some(part => part === '' || part === '.' || part === '..' || part === '.git' || part === '.goodvibes'))
-    throw new Error('Dirty snapshot path is not an ordinary project path');
-  return join(resolve(cwd), path);
-}
-/** Original lexical selection plus its actual physical directory tree. Root
- * aliases such as Darwin /tmp -> /private/tmp are supported, but neither later
- * retargets nor a copied token can select a different root after an await. */
-export interface DirtyTreeRoot { readonly path: string; readonly resolvedPath: string; readonly revision: string; assertCurrent(): void }
-const nativeRoots = new WeakSet<DirtyTreeRoot>();
-function rootSlot(path: string): string {
-  const value = lstatSync(path, { bigint: true });
-  if (value.isSymbolicLink()) return 'link:' + facts(value) + ':' + readlinkSync(path, { encoding: 'buffer' }).toString('base64');
-  if (!value.isDirectory()) throw new Error('Dirty snapshot root path is not a directory');
-  return 'directory:' + [value.dev, value.ino, value.mode, value.uid, value.gid, value.birthtimeNs].join(':');
-}
-export function captureDirtyTreeRoot(cwd: string): DirtyTreeRoot {
-  const path = resolve(cwd), resolvedPath = realpathSync(path), lexical: Array<{ readonly path: string; readonly value: string }> = [];
-  for (let current = path;; current = dirname(current)) {
-    lexical.push({ path: current, value: rootSlot(current) }); if (current === dirname(current)) break;
-  }
-  const physical: Array<{ readonly path: string; readonly value: string }> = [];
-  for (let current = resolvedPath;; current = dirname(current)) {
-    const value = directory(current); if (value === null) throw new Error('Dirty snapshot physical root is unavailable');
-    physical.push({ path: current, value }); if (current === dirname(current)) break;
-  }
-  const assertCurrent = () => {
-    for (const entry of lexical) if (rootSlot(entry.path) !== entry.value) throw new Error('Dirty snapshot root alias changed');
-    if (realpathSync(path) !== resolvedPath) throw new Error('Dirty snapshot root target changed');
-    for (const entry of physical) if (directory(entry.path) !== entry.value) throw new Error('Dirty snapshot physical root changed');
-  };
-  assertCurrent(); const selected = Object.freeze({ path, resolvedPath, revision: JSON.stringify({ lexical, physical }), assertCurrent }); nativeRoots.add(selected); return selected;
-}
-/** A synchronous detached source read, or explicit unavailable. A read failure
- * cannot become the missing-file state used for a real working-tree deletion. */
-export function captureDirtyFile(cwd: string, path: string, selectedRoot?: DirtyTreeRoot, maxBytes?: number): CapturedDirtyFile {
-  try {
-    const root = selectedRoot ?? captureDirtyTreeRoot(cwd);
-    if (!nativeRoots.has(root) || root.path !== resolve(cwd)) throw new Error('Original dirty snapshot root is unavailable');
-    root.assertCurrent();
-    const absolute = selectedPath(root.resolvedPath, path), parents: Array<{ readonly path: string; readonly original: string | null }> = [];
-    for (let current = dirname(absolute); current !== root.resolvedPath; current = dirname(current)) {
-      parents.push({ path: current, original: directory(current) });
-    }
-    const before = leaf(absolute), original = before === null ? null : facts(before);
-    const assertCurrent = () => {
-      root.assertCurrent();
-      for (const parent of parents) if (directory(parent.path) !== parent.original) throw new Error('Dirty snapshot parent changed');
-      const current = leaf(absolute);
-      if ((current === null ? null : facts(current)) !== original) throw new Error('Dirty snapshot file changed');
-      root.assertCurrent();
-    };
-    assertCurrent();
-    const revision = JSON.stringify([parents.map(parent => [parent.path, parent.original]), original]);
-    if (before === null) return Object.freeze({ kind: 'missing', root: resolve(cwd), revision, assertCurrent });
-    if (before.isSymbolicLink()) {
-      const bytes = readlinkSync(absolute, { encoding: 'buffer' }); assertCurrent();
-      return Object.freeze({ kind: 'symlink', root: resolve(cwd), bytes, executable: false, revision, assertCurrent });
-    }
-    // A file past the caller's bound is not read into memory: it is reported
-    // unavailable, the state callers already treat as uncertain.
-    if (!before.isFile() || (maxBytes !== undefined && before.size > BigInt(Math.max(0, Math.floor(maxBytes))))) return Object.freeze({ kind: 'unavailable', revision: null });
-    const descriptor = openSync(absolute, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
-    try {
-      assertCurrent(); if (facts(fstatSync(descriptor, { bigint: true })) !== original) throw new Error('Dirty snapshot descriptor changed');
-      const bytes = readFileSync(descriptor);
-      if (BigInt(bytes.length) !== before.size || facts(fstatSync(descriptor, { bigint: true })) !== original) throw new Error('Dirty snapshot bytes changed');
-      assertCurrent(); return Object.freeze({ kind: 'file', root: resolve(cwd), bytes, executable: (before.mode & 0o111n) !== 0n, revision, assertCurrent });
-    } finally { closeSync(descriptor); }
-  } catch { return Object.freeze({ kind: 'unavailable', revision: null }); }
-}
-export function equalDirtyFiles(left: CapturedDirtyFile, right: CapturedDirtyFile): boolean | undefined {
-  if (left.kind === 'unavailable' || right.kind === 'unavailable') return undefined;
-  if (left.kind !== right.kind) return false;
-  if (left.kind === 'missing' || right.kind === 'missing') return true;
-  return left.executable === right.executable && left.bytes.equals(right.bytes);
 }
 
-/** What a regular file held when it was too large to keep in memory: its content digest, read in chunks. */
-export type DirtyFileDigest =
-  | { readonly kind: 'file'; readonly digest: string; readonly executable: boolean }
-  | { readonly kind: 'missing' };
-/** Streams a regular file through sha256 without holding it. Undefined when the file is not an ordinary
- * readable file or changed while it was read, so the caller keeps treating it as uncertain. */
-export function digestDirtyFile(cwd: string, path: string, selectedRoot: DirtyTreeRoot, maxBytes: number): DirtyFileDigest | undefined {
-  try {
-    if (!nativeRoots.has(selectedRoot) || selectedRoot.path !== resolve(cwd)) return undefined;
-    selectedRoot.assertCurrent();
-    const absolute = selectedPath(selectedRoot.resolvedPath, path);
-    const before = leaf(absolute);
-    if (before === null) return { kind: 'missing' };
-    if (!before.isFile() || before.size > BigInt(maxBytes)) return undefined;
-    const original = facts(before);
-    const descriptor = openSync(absolute, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
-    try {
-      if (facts(fstatSync(descriptor, { bigint: true })) !== original) return undefined;
-      const hash = createHash('sha256'), chunk = Buffer.allocUnsafe(1024 * 1024);
-      for (let read = readSync(descriptor, chunk, 0, chunk.length, null); read > 0; read = readSync(descriptor, chunk, 0, chunk.length, null)) hash.update(chunk.subarray(0, read));
-      if (facts(fstatSync(descriptor, { bigint: true })) !== original) return undefined;
-      selectedRoot.assertCurrent();
-      return { kind: 'file', digest: hash.digest('hex'), executable: (before.mode & 0o111n) !== 0n };
-    } finally { closeSync(descriptor); }
-  } catch { return undefined; }
+/** Two ids name the same content: equal and not `other`. Undefined when either cannot be compared. */
+export function sameDirtyPathId(left: DirtyPathId | undefined, right: DirtyPathId | undefined): boolean | undefined {
+  if (left === undefined || right === undefined || left === OTHER_PATH_ID || right === OTHER_PATH_ID) return undefined;
+  return left === right;
 }

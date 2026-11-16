@@ -1,51 +1,51 @@
-/** Owner-residue protection for scoped commits. Original bytes stay private to
- * the actual launch snapshot; public values describe states, never content. */
-import { resolve } from 'node:path';
-import { captureDirtyFile, captureDirtyTreeRoot, digestDirtyFile, equalDirtyFiles, type CapturedDirtyFile, type DirtyFileDigest, type DirtyTreeRoot } from './dirty-file-observation.js';
+/**
+ * Owner-residue protection for scoped commits. The paths that were uncommitted
+ * when work started, and what each held, are recorded as git object ids
+ * (dirty-file-observation.ts): one `git status` and one `git hash-object`,
+ * run as child processes, with no file bytes kept. A later commit compares
+ * the ids of its candidate paths with the recorded ones and leaves out the
+ * paths the work did not change.
+ *
+ * A capture is started at once and read when first needed; captures of one
+ * root that overlap share one run, so an engine and the contract it serves
+ * take one capture between them.
+ */
+import { existsSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
+import { dirtyPathIds, dirtyPathIdsSync, sameDirtyPathId, type DirtyPathId } from './dirty-file-observation.js';
 
 const INTERNAL_STATE_PREFIX = '.goodvibes/';
-/** Original bytes are held in memory per engine, so a very large dirty file, or a very large dirty tree, is left unread. */
-const DEFAULT_PER_FILE_BYTES = 8 * 1024 * 1024;
-const DEFAULT_TOTAL_BYTES = 64 * 1024 * 1024;
-/** A file left unread is compared by a content digest instead, so it stays decidable; past this size it is uncertain. */
-const DIGEST_MAX_BYTES = 2 * 1024 * 1024 * 1024;
-export interface DirtySnapshotLimits { readonly perFileBytes?: number | undefined; readonly totalBytes?: number | undefined }
-export interface DirtyPathState { readonly kind: CapturedDirtyFile['kind'] }
-export type DirtyLaunchSnapshot = ReadonlyMap<string, DirtyPathState>;
-interface NativeSnapshot { readonly root: string; readonly selection: DirtyTreeRoot | undefined; readonly entries: ReadonlyMap<string, CapturedDirtyFile>; readonly available: boolean; readonly latest: Map<string, CapturedDirtyFile>; readonly digests: ReadonlyMap<string, DirtyFileDigest> }
-const snapshots = new WeakMap<DirtyLaunchSnapshot, NativeSnapshot>();
+
+/** What `git status` listed as uncommitted, and the id of each such path then. */
+export interface DirtyTreeIds {
+  /** False outside a git repository: nothing is known, so nothing may be excluded or committed on its strength. */
+  readonly available: boolean;
+  readonly ids: ReadonlyMap<string, DirtyPathId>;
+}
+
+/** The uncommitted tree as it was when an engine launched; `ready` settles once its ids are read. */
+export interface DirtyLaunchSnapshot {
+  readonly root: string;
+  readonly ready: Promise<DirtyTreeIds>;
+  /** The ids once `ready` settled (at once outside a repository), so a caller need not wait again. */
+  readonly current: DirtyTreeIds | undefined;
+}
 
 /**
  * Parse `git status --porcelain -z --untracked-files=all` output into a set of
- * paths. The `-z` (NUL-terminated) format is used deliberately because it emits
- * paths VERBATIM: git's default porcelain C-quotes any path containing
- * non-ASCII or special bytes (core.quotePath defaults to true), rendering
- * `café.txt` as `"caf\303\251.txt"`. Keying the launch snapshot on that quoted
- * string while scoped commits and evidence readers receive the
- * RAW path would silently bypass exclusion (residue leaks into scoped commits)
- * and make the original read select the wrong (nonexistent, quoted) filename. With
- * `-z` there is no quoting, so snapshot keys match the raw paths used
- * everywhere else.
- *
- * Record shape: each NUL-terminated record is `XY<space><path>`. A rename or
- * copy (X or Y is 'R'/'C') is split across TWO NUL-terminated fields, the
- * destination first, then the origin. We keep the destination (the actual
- * scoped-commit candidate, already in this record) and consume the following
- * origin field so it is never mis-parsed as its own dirty path.
+ * paths. `-z` emits paths verbatim (the default porcelain C-quotes non-ASCII
+ * names, which would never match the raw paths commits receive). Each record
+ * is `XY<space><path>`; a rename or copy is followed by a second field (the
+ * origin), which is consumed so it is not read as its own record.
  */
 function parsePorcelainPaths(output: string): Set<string> {
   const paths = new Set<string>();
   const records = output.split('\0');
   for (let i = 0; i < records.length; i++) {
     const record = records[i]!;
-    // Skips the trailing empty field left by the final NUL, plus any record too
-    // short to hold a 2-char status pair + separator + a 1-char path.
     if (record.length < 4) continue;
     const x = record[0]!;
     const y = record[1]!;
-    // A rename/copy record is followed by a second NUL-separated field (the
-    // origin path). Consume it so the next iteration does not treat it as a
-    // standalone status record, done before any early-continue below.
     if (x === 'R' || y === 'R' || x === 'C' || y === 'C') i++;
     const path = record.slice(3);
     if (path.startsWith(INTERNAL_STATE_PREFIX)) continue;
@@ -54,96 +54,119 @@ function parsePorcelainPaths(output: string): Set<string> {
   return paths;
 }
 
-/** Enumerate only. Phase checks that need paths do not read file content. A
- * failed status/ambiguous path cannot silently disable owner-residue protection. */
-function dirtyPaths(cwd: string, selection = captureDirtyTreeRoot(cwd)): { readonly paths: readonly string[]; readonly available: boolean } {
-  selection.assertCurrent();
-  const result = Bun.spawnSync(['git', '-C', selection.resolvedPath, 'status', '--porcelain', '-z', '--untracked-files=all'], { env: { ...process.env, LC_ALL: 'C' } });
-  selection.assertCurrent();
-  if (result.exitCode !== 0) {
-    const error = new TextDecoder('utf-8', { fatal: true }).decode(result.stderr);
+const STATUS_ARGS = ['status', '--porcelain', '-z', '--untracked-files=all'] as const;
+const NOT_A_REPOSITORY = /not a git repository/;
+
+function readStatus(cwd: string, code: number, stdout: Uint8Array, stderr: Uint8Array): { readonly paths: readonly string[]; readonly available: boolean } {
+  if (code !== 0) {
     // Ordinary non-Git work remains supported, but this observation cannot
     // authorize an automatic scoped commit if a repository appears later.
-    if (error.trim() === 'fatal: not a git repository (or any of the parent directories): .git') return { paths: [], available: false };
-    throw new Error('Could not enumerate the original dirty working tree');
+    if (NOT_A_REPOSITORY.test(new TextDecoder().decode(stderr))) return { paths: [], available: false };
+    throw new Error(`The uncommitted files of ${cwd} could not be listed (git status failed)`);
   }
-  const output = new TextDecoder('utf-8', { fatal: true }).decode(result.stdout);
-  return { paths: [...parsePorcelainPaths(output)], available: true };
+  return { paths: [...parsePorcelainPaths(new TextDecoder('utf-8', { fatal: true }).decode(stdout))], available: true };
 }
-export function listDirtyTreePaths(cwd: string): readonly string[] { return dirtyPaths(cwd).paths; }
-/** Snapshot once, synchronously before an engine can launch its first phase.
- * No SHA is required for local exact equality; no bytes are put on this map. */
-export function snapshotDirtyTree(cwd: string): DirtyLaunchSnapshot { return snapshotDirtyTreeWithin(cwd, {}); }
-/** The same snapshot with its read bounds stated; the public entry point uses the defaults. */
-export function snapshotDirtyTreeWithin(cwd: string, limits: DirtySnapshotLimits): DirtyLaunchSnapshot {
-  let available = true, selection: DirtyTreeRoot | undefined, entries: ReadonlyMap<string, CapturedDirtyFile>;
-  const digests = new Map<string, DirtyFileDigest>();
-  const perFile = limits.perFileBytes ?? DEFAULT_PER_FILE_BYTES;
-  let remaining = limits.totalBytes ?? DEFAULT_TOTAL_BYTES;
-  try {
-    selection = captureDirtyTreeRoot(cwd); const selected = dirtyPaths(cwd, selection); available = selected.available;
-    const captured = new Map<string, CapturedDirtyFile>();
-    for (const path of selected.paths) {
-      const file = captureDirtyFile(cwd, path, selection, Math.min(perFile, remaining));
-      if (file.kind === 'file') remaining -= file.bytes.length;
-      else if (file.kind === 'unavailable') {
-        const digest = digestDirtyFile(cwd, path, selection, DIGEST_MAX_BYTES);
-        if (digest !== undefined) digests.set(path, digest);
-      }
-      captured.set(path, file);
-    }
-    entries = captured; selection.assertCurrent();
+
+/** The uncommitted paths under `cwd`, from one `git status` run as a child process. */
+export async function readDirtyTreePaths(cwd: string): Promise<{ readonly paths: readonly string[]; readonly available: boolean }> {
+  if (!mayBeGitRepository(resolve(cwd))) return { paths: [], available: false };
+  const proc = Bun.spawn(['git', '-C', cwd, ...STATUS_ARGS], { stdout: 'pipe', stderr: 'pipe', env: { ...process.env, LC_ALL: 'C' } });
+  const [code, stdout, stderr] = await Promise.all([proc.exited, new Response(proc.stdout).arrayBuffer(), new Response(proc.stderr).arrayBuffer()]);
+  return readStatus(cwd, code, new Uint8Array(stdout), new Uint8Array(stderr));
+}
+
+/** The same list, synchronously; kept for callers outside a running engine. */
+export function listDirtyTreePaths(cwd: string): readonly string[] {
+  const result = Bun.spawnSync(['git', '-C', cwd, ...STATUS_ARGS], { env: { ...process.env, LC_ALL: 'C' } });
+  return readStatus(cwd, result.exitCode, result.stdout, result.stderr).paths;
+}
+
+/**
+ * Whether `root` can be inside a git repository: a `.git` in it or in an
+ * ancestor, or a GIT_DIR naming one. A few `stat` calls, so work outside any
+ * repository settles at once instead of waiting on a git process to say so.
+ */
+function mayBeGitRepository(root: string): boolean {
+  if (process.env['GIT_DIR'] !== undefined) return true;
+  for (let current = root; ; current = dirname(current)) {
+    if (existsSync(join(current, '.git'))) return true;
+    if (dirname(current) === current) return false;
   }
-  catch { available = false; entries = new Map(); }
-  const snapshot = new Map([...entries].map(([path, value]) => [path, Object.freeze({ kind: value.kind })] as const));
-  snapshots.set(snapshot, { root: resolve(cwd), selection, entries, available, latest: new Map(entries), digests }); return snapshot;
 }
-/** Internal native baseline seam. Only an original snapshot of this root can
- * supply its own captures; copied maps or JSON cannot mint byte provenance. */
-export function nativeDirtySnapshotEntries(snapshot: DirtyLaunchSnapshot, cwd: string): ReadonlyMap<string, CapturedDirtyFile> {
-  const original = snapshots.get(snapshot);
-  if (!original || !original.available || !original.selection || original.root !== resolve(cwd)) throw new Error('Original dirty snapshot is unavailable');
-  original.selection.assertCurrent(); return original.entries;
+
+/** Captures of one root still running, so overlapping callers share one. */
+const inflight = new Map<string, Promise<DirtyTreeIds>>();
+
+/** The uncommitted paths of `cwd` and their ids now. Callers that overlap on one root share the run. */
+export function captureDirtyTreeIds(cwd: string): Promise<DirtyTreeIds> {
+  const root = resolve(cwd);
+  if (!mayBeGitRepository(root)) return Promise.resolve({ available: false, ids: new Map() });
+  const running = inflight.get(root);
+  if (running !== undefined) return running;
+  const capture = (async (): Promise<DirtyTreeIds> => {
+    const listed = await readDirtyTreePaths(root);
+    if (!listed.available) return { available: false, ids: new Map() };
+    return { available: true, ids: await dirtyPathIds(root, listed.paths) };
+  })();
+  inflight.set(root, capture);
+  const done = () => { if (inflight.get(root) === capture) inflight.delete(root); };
+  capture.then(done, done);
+  return capture;
 }
-/** The same original root selection used by a native baseline capture. */
-export function nativeDirtySnapshotRoot(snapshot: DirtyLaunchSnapshot, cwd: string): DirtyTreeRoot {
-  const original = snapshots.get(snapshot), selected = original?.selection;
-  if (!selected || original?.root !== resolve(cwd)) throw new Error('Original dirty snapshot root is unavailable');
-  selected.assertCurrent(); return selected;
+
+/** The same capture, synchronously, for a caller that cannot wait. */
+export function captureDirtyTreeIdsSync(cwd: string): DirtyTreeIds {
+  const root = resolve(cwd);
+  const result = Bun.spawnSync(['git', '-C', root, ...STATUS_ARGS], { env: { ...process.env, LC_ALL: 'C' } });
+  const listed = readStatus(root, result.exitCode, result.stdout, result.stderr);
+  return listed.available ? { available: true, ids: dirtyPathIdsSync(root, listed.paths) } : { available: false, ids: new Map() };
 }
+
+/**
+ * Starts the launch capture and returns at once; nothing blocks the process.
+ * A phase reads `ready` before its agent starts, so the capture always
+ * precedes the work it is compared with.
+ */
+export function snapshotDirtyTree(cwd: string): DirtyLaunchSnapshot {
+  const root = resolve(cwd);
+  if (!mayBeGitRepository(root)) {
+    const unavailable: DirtyTreeIds = { available: false, ids: new Map() };
+    return { root, ready: Promise.resolve(unavailable), current: unavailable };
+  }
+  const snapshot: { root: string; ready: Promise<DirtyTreeIds>; current: DirtyTreeIds | undefined } = { root, ready: Promise.resolve({ available: false, ids: new Map() }), current: undefined };
+  snapshot.ready = captureDirtyTreeIds(root)
+    .catch((): DirtyTreeIds => ({ available: false, ids: new Map() }))
+    .then((ids) => { snapshot.current = ids; return ids; });
+  return snapshot;
+}
+
+/** @deprecated The launch snapshot holds object ids now; nothing produces this shape. Kept for the package index. */
+export interface DirtyPathState { readonly kind: 'file' | 'symlink' | 'missing' | 'unavailable' }
+
 export interface ScopedCommitExclusion {
   readonly included: readonly string[];
   readonly excluded: readonly string[];
-  /** Unavailable original/current reads are preserved, never swept into work. */
+  /** Paths whose launch or current content cannot be named; preserved, never swept into work. */
   readonly uncertain: readonly string[];
 }
-function currentDirtyFile(owner: NativeSnapshot, cwd: string, path: string): CapturedDirtyFile {
-  const previous = owner.latest.get(path);
-  if (previous && previous.kind !== 'unavailable') {
-    try { previous.assertCurrent(); return previous; }
-    catch { /* Observe the actual new version; keep the original comparison bytes. */ }
-  }
-  const file = captureDirtyFile(cwd, path, owner.selection); owner.latest.set(path, file); return file;
-}
-/** A file too large to keep is compared by digest: unchanged, changed, or undecidable if it cannot be read now. */
-function equalToLaunchDigest(owner: NativeSnapshot, launch: DirtyFileDigest, path: string): boolean | undefined {
-  if (!owner.selection) return undefined;
-  const now = digestDirtyFile(owner.root, path, owner.selection, DIGEST_MAX_BYTES);
-  if (now === undefined) return undefined;
-  if (launch.kind !== now.kind) return false;
-  return launch.kind === 'missing' || (now.kind === 'file' && launch.digest === now.digest && launch.executable === now.executable);
-}
-export function excludeUntouchedLaunchResidue(cwd: string, candidatePaths: readonly string[], launchSnapshot: DirtyLaunchSnapshot): ScopedCommitExclusion {
-  const original = nativeDirtySnapshotEntries(launchSnapshot, cwd), owner = snapshots.get(launchSnapshot);
-  if (!owner) throw new Error('Original dirty snapshot is unavailable');
+
+/**
+ * Splits candidate paths into the work's changes (included) and launch
+ * residue the work left as it was (excluded). A path that was clean at launch
+ * is the work's. One `hash-object` run covers every launch-dirty candidate.
+ */
+export async function excludeUntouchedLaunchResidue(cwd: string, candidatePaths: readonly string[], launchSnapshot: DirtyLaunchSnapshot): Promise<ScopedCommitExclusion> {
+  if (launchSnapshot.root !== resolve(cwd)) throw new Error('The launch snapshot belongs to another working tree');
+  const launch = await launchSnapshot.ready;
+  if (!launch.available) throw new Error('The uncommitted files at launch could not be listed; owner edits remain uncommitted');
+  const residue = candidatePaths.filter((path) => launch.ids.has(path));
+  const now = await dirtyPathIds(cwd, residue);
   const included: string[] = [], excluded: string[] = [], uncertain: string[] = [];
   for (const path of candidatePaths) {
-    const initial = original.get(path);
-    if (initial === undefined) { included.push(path); continue; }
-    const launchDigest = initial.kind === 'unavailable' ? owner.digests.get(path) : undefined;
-    const equal = launchDigest !== undefined ? equalToLaunchDigest(owner, launchDigest, path) : equalDirtyFiles(initial, currentDirtyFile(owner, cwd, path));
-    if (equal === false) included.push(path);
-    else { excluded.push(path); if (equal === undefined) uncertain.push(path); }
+    if (!launch.ids.has(path)) { included.push(path); continue; }
+    const same = sameDirtyPathId(launch.ids.get(path), now.get(path));
+    if (same === false) included.push(path);
+    else { excluded.push(path); if (same === undefined) uncertain.push(path); }
   }
   return { included, excluded, uncertain };
 }

@@ -30,7 +30,7 @@ import {
 import { computeClaims, firstPhase, nextPhaseAfter, sortedPhases } from './scheduler.js';
 import { applyDependencyGates } from './dependency-gate.js';
 import { addConflictSerializationEdges, addDependencyEdge, buildGraphSnapshot, detectOrphans, type EdgeAddResult, type WorkstreamGraphSnapshot } from './graph-dynamics.js';
-import { gateClaimAgainstFleet, isElastic, isHardFailed, poolState, retirementEvent, shouldAutoRetry, type FleetCapacityFn } from './elastic-pool.js';
+import { gateClaimAgainstFleet, isElastic, isHardFailed, poolState, shouldAutoRetry, type FleetCapacityFn } from './elastic-pool.js';
 import {
   CURRENT_WORKSTREAM_SCHEMA_VERSION,
   emptyWorkItemUsage,
@@ -203,8 +203,6 @@ export function createOrchestrationEngine(deps: OrchestrationEngineDeps): Orches
   const snapshotRoot: SnapshotRoot = deps.stateNamespace === undefined ? stateRoot : { root: stateRoot, namespace: deps.stateNamespace };
   const maxItemRetries = deps.maxItemRetries ?? 0;
   const stallAfterMs = deps.stallAfterMs ?? 10 * 60 * 1000;
-  /** Workstreams currently in the announced at-cap state (event fires once per transition). */
-  const atCapNoted = new Set<string>();
   /** Items whose current spawn refusal was already announced, with its reason: an unchanged refusal is not re-announced. */
   const refusalNoted = new Map<string, string>();
   function announceRefusal(workstreamId: string, itemId: string, reason: string): void {
@@ -274,16 +272,19 @@ export function createOrchestrationEngine(deps: OrchestrationEngineDeps): Orches
     return () => listeners.delete(listener);
   }
 
-  // Dirty-residue guard: snapshot original dirty paths+private bytes ONCE at launch (sync,
-  // see dirty-guard.ts) so a later scoped commit can tell prior-run residue
-  // from this run's own changes.
+  // Dirty-residue guard: the uncommitted paths at launch and their git object
+  // ids, captured once in child processes (dirty-guard.ts); a phase waits for
+  // the capture before its agent starts, so a later scoped commit can tell
+  // earlier residue from this run's own changes. Construction does not wait.
   const launchDirtySnapshot: DirtyLaunchSnapshot = snapshotDirtyTree(deps.projectRoot);
-  // Nobody can be subscribed while the engine is still being built, so the
-  // notice is held and handed to each listener as it subscribes.
-  const launchDirtyPaths: readonly string[] | undefined = launchDirtySnapshot.size > 0 ? [...launchDirtySnapshot.keys()] : undefined;
-  if (launchDirtyPaths !== undefined) {
+  // The notice is sent when the capture settles and handed to each later listener as it subscribes.
+  let launchDirtyPaths: readonly string[] | undefined;
+  void launchDirtySnapshot.ready.then((launch) => {
+    if (disposed || launch.ids.size === 0) return;
+    launchDirtyPaths = [...launch.ids.keys()];
     logger.info('orchestration engine: the working tree had uncommitted changes at launch; they are left out of scoped commits unless a phase edits them', { paths: launchDirtyPaths.slice(0, 20), count: launchDirtyPaths.length });
-  }
+    dispatch({ type: 'dirty-tree-at-launch', paths: [...launchDirtyPaths] });
+  });
 
   // Worktree-isolation lane (worktree-mode workstreams only; no I/O until
   // used). Cold-start setup hook: injected override (tests) else the derived
@@ -689,24 +690,8 @@ export function createOrchestrationEngine(deps: OrchestrationEngineDeps): Orches
       // Reentrant ticks and deliberate requeues must not overlap two real runs.
       if (activeItems.has(item) || item.state === 'passed' || item.state === 'failed') continue;
       if (item.orphaned) continue; // orphaned outcome already surfaced
-      if (fleetProbe) {
-        const decision = gateClaimAgainstFleet(workstream, item, { ...fleetProbe, active: fleetActive }, atCapNoted.has(workstreamId));
-        if (!decision.allow) {
-          if (decision.event) {
-            if (decision.event.type === 'pool-at-cap') atCapNoted.add(workstreamId);
-            if (decision.event.type === 'pool-spawn-refused') announceRefusal(workstreamId, item.id, decision.event.reason);
-            else emit(decision.event);
-          }
-          // The task stays VISIBLY ready with its reason, never a silent stall.
-          item.state = 'awaiting-capacity';
-          item.blockedReason = decision.reason;
-          retryWhenCapacityChanges();
-          continue;
-        }
-        atCapNoted.delete(workstreamId);
-        fleetActive += 1; // this claim spawns a fresh fleet agent
-        item.blockedReason = undefined;
-      }
+      // The budget is decided first: a claim the budget refuses never takes a
+      // fleet slot, so each item carries one refusal with its true reason.
       const budgetCheck = checkBudget(workstream, item);
       if (!budgetCheck.allowed) { // re-decided every tick; the event fires once per NEW block
         const wasAlreadyBlocked = item.state === 'blocked-budget';
@@ -716,6 +701,20 @@ export function createOrchestrationEngine(deps: OrchestrationEngineDeps): Orches
           emit({ type: 'item-blocked-budget', workstreamId, itemId: item.id, phaseId: phase.id, reason: budgetCheck.reason ?? 'budget ceiling reached' });
         }
         continue;
+      }
+      if (fleetProbe) {
+        const decision = gateClaimAgainstFleet(workstream, item, { ...fleetProbe, active: fleetActive });
+        if (!decision.allow) {
+          if (decision.event?.type === 'pool-spawn-refused') announceRefusal(workstreamId, item.id, decision.event.reason);
+          // The task stays VISIBLY ready with its reason, never a silent stall.
+          item.state = 'awaiting-capacity';
+          item.blockedReason = decision.reason;
+          // Only a real fleet refusal can clear by itself; it is rechecked with backoff.
+          retryWhenCapacityChanges();
+          continue;
+        }
+        fleetActive += 1; // this claim spawns a fresh fleet agent
+        item.blockedReason = undefined;
       }
       let releasePhase!: () => void;
       activeItems.set(item, new Promise<void>((resolve) => { releasePhase = resolve; }));
@@ -759,11 +758,7 @@ export function createOrchestrationEngine(deps: OrchestrationEngineDeps): Orches
             terminatedWorktreeCleanup.delete(item);
             activeItems.delete(item);
             releasePhase();
-            if (!disposed && !capacityRefused) {
-              tick(workstreamId);
-              const retire = retirementEvent(workstream, item.agentId);
-              if (retire) emit(retire);
-            }
+            if (!disposed && !capacityRefused) tick(workstreamId);
           }
         }
       }).catch((error) => {

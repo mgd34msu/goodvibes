@@ -36,7 +36,7 @@ import { getContractTransportRetryDelayMs, getContractTransportRetryLimit } from
 import { readFailure } from '@goodvibes-jev/engine/errors';
 import { logger } from '../utils/logger.js';
 import type { CancellationRegistry } from './cancellation.js';
-import { excludeUntouchedLaunchResidue, listDirtyTreePaths, nativeDirtySnapshotRoot, type DirtyLaunchSnapshot } from './dirty-guard.js';
+import { excludeUntouchedLaunchResidue, readDirtyTreePaths, type DirtyLaunchSnapshot } from './dirty-guard.js';
 import { classifyBookkeepingFailure, type BookkeepingFailureReading } from './bookkeeping.js';
 import { mergeWorkItemUsage } from './types.js';
 import type { UnitRoute } from '../contract/types.js';
@@ -122,9 +122,9 @@ export interface PhaseRunnerDeps {
   /** Called synchronously right after the agent is spawned, before any await. */
   readonly onAgentSpawned?: ((agentId: string) => void) | undefined;
   /**
-   * The dirty-tree snapshot taken synchronously at engine launch (see
-   * CHANGELOG 0.38.0 and dirty-guard.ts). Absent (undefined) degrades to
-   * today's behavior: no exclusion, every candidate path is committed.
+   * The uncommitted tree as the engine found it at launch, as git object ids
+   * (dirty-guard.ts). A phase waits for it before its agent starts. Absent:
+   * no exclusion, every candidate path is committed.
    */
   readonly launchDirtySnapshot?: DirtyLaunchSnapshot | undefined;
   /**
@@ -279,12 +279,11 @@ export function mergeUsage(a: WorkItemUsage, b: WorkItemUsage): WorkItemUsage {
 const WRITING_PHASE_KINDS: ReadonlySet<Phase['kind']> = new Set(['engineer', 'integrate']);
 
 /** The paths a phase changed: the item worktree's own changes, or the shared tree's less untouched launch residue. */
-function phaseChangedPaths(deps: Pick<PhaseRunnerDeps, 'projectRoot' | 'itemWorktree' | 'launchDirtySnapshot'>): readonly string[] {
+async function phaseChangedPaths(deps: Pick<PhaseRunnerDeps, 'projectRoot' | 'itemWorktree' | 'launchDirtySnapshot'>): Promise<readonly string[]> {
   const cwd = deps.itemWorktree?.path ?? deps.projectRoot;
-  const originalRoot = deps.itemWorktree === undefined && deps.launchDirtySnapshot ? nativeDirtySnapshotRoot(deps.launchDirtySnapshot, cwd) : undefined;
-  const dirty = listDirtyTreePaths(cwd); originalRoot?.assertCurrent();
+  const dirty = (await readDirtyTreePaths(cwd)).paths;
   if (dirty.length === 0 || deps.itemWorktree !== undefined || deps.launchDirtySnapshot === undefined) return dirty;
-  const result = excludeUntouchedLaunchResidue(cwd, dirty, deps.launchDirtySnapshot);
+  const result = await excludeUntouchedLaunchResidue(cwd, dirty, deps.launchDirtySnapshot);
   if (result.uncertain.length) throw new Error('Original dirty owner edits could not be safely read');
   return result.included;
 }
@@ -323,7 +322,7 @@ async function evaluateGate(
     const verification = verifyUnitClaims(report, {
       cwd: deps.itemWorktree?.path ?? deps.projectRoot,
       mustWrite: WRITING_PHASE_KINDS.has(phase.kind),
-      changedPaths: phaseChangedPaths(deps),
+      changedPaths: await phaseChangedPaths(deps),
     });
     if (verification.kind === 'unverified' || verification.kind === 'unverifiable_no_claims') {
       results.push({ gate: 'phantom-work-guard', passed: false, output: verification.summary, durationMs: 0 });
@@ -388,7 +387,7 @@ async function commitPhaseWork(
   if (paths && paths.length > 0 && deps.launchDirtySnapshot) {
     const launchSnapshot = deps.launchDirtySnapshot;
     {
-      const { included, excluded, uncertain } = excludeUntouchedLaunchResidue(deps.projectRoot, paths, launchSnapshot);
+      const { included, excluded, uncertain } = await excludeUntouchedLaunchResidue(deps.projectRoot, paths, launchSnapshot);
       if (uncertain.length) return { commit: { status: 'skipped', reason: 'original dirty owner edits could not be safely read' }, exclusion: { excludedPaths: excluded, skipped: true } };
       if (excluded.length > 0) {
         exclusion = { excludedPaths: excluded, skipped: included.length === 0 };
@@ -414,10 +413,7 @@ async function commitPhaseWork(
   }
 
   try {
-    const originalRoot = deps.launchDirtySnapshot ? nativeDirtySnapshotRoot(deps.launchDirtySnapshot, deps.projectRoot) : undefined;
-    const assertRoot = originalRoot?.assertCurrent; assertRoot?.();
-    const result = await worktree.commitWorkingTree(`orchestration: ${item.title}, ${phase.kind} phase`, paths, assertRoot);
-    assertRoot?.();
+    const result = await worktree.commitWorkingTree(`orchestration: ${item.title}, ${phase.kind} phase`, paths);
     const ignoredNote = result.skippedIgnored.length > 0
       ? `${result.skippedIgnored.length} ignored path${result.skippedIgnored.length === 1 ? '' : 's'} skipped`
       : undefined;
@@ -545,6 +541,11 @@ async function runPhaseWithSignal(
   const createWorktree = deps.createWorktree ?? (() => new AgentWorktree(deps.projectRoot));
   const worktree = createWorktree();
   if (signal.aborted) return settleWithoutAgent(item, phase, 'cancelled', startedAt, worktree, deps);
+  // In the shared tree the launch capture must precede any write of this phase.
+  if (deps.itemWorktree === undefined && deps.launchDirtySnapshot !== undefined && deps.launchDirtySnapshot.current === undefined) {
+    await deps.launchDirtySnapshot.ready;
+    if (signal.aborted) return settleWithoutAgent(item, phase, 'cancelled', startedAt, worktree, deps);
+  }
 
   // A contract unit's item spawns its agent bound to the unit, with the unit
   // brief (item.task) verbatim, the route's model and the item's tool contract.

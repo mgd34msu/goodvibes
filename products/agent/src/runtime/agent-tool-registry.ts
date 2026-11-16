@@ -33,7 +33,6 @@ import { registerAgentScheduleEditTool } from '../tools/agent-schedule-edit-tool
 import { registerAgentScheduleTool } from '../tools/agent-schedule-tool.ts';
 import { registerAgentWorkPlanTool } from '../tools/agent-work-plan-tool.ts';
 import { compactRegisteredToolDefinitions } from '../tools/tool-definition-compaction.ts';
-import { installToolExecutionSafetyGuard } from '../tools/tool-execution-safety.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { readSurfaceEmailSettings } from '@goodvibes-jev/engine/platform/platform/email';
@@ -60,8 +59,6 @@ export interface AgentToolRegistryDeps {
   readonly homeDirectory: string;
   /** The runtime session id, read fresh on every call. */
   readonly resolveSessionId: () => string;
-  /** What the owner said this turn; the policy guard reads it. */
-  readonly getLastUserMessage: () => string | null;
 }
 
 export interface AgentToolRegistry {
@@ -73,19 +70,17 @@ export interface AgentToolRegistry {
 }
 
 /**
- * The wrappers a spawned or background worker's registry gets, so delegating
- * does not step around the restrictions the main conversation has. The main
- * registry's extra layer is left out on purpose: definition compaction only
- * shapes what the main model sees.
- * Nothing here reads the owner's last message, which a worker does not have.
+ * The policy a spawned or background worker's registry gets, so a worker's
+ * calls are decided by the same read modes and admission readers as the main
+ * conversation's. The main registry's extra layer is left out on purpose:
+ * definition compaction only shapes what the main model sees.
  */
 export function decorateAgentWorkerRegistry(registry: ToolRegistry): void {
   installAgentToolPolicyGuard(registry);
-  installToolExecutionSafetyGuard(registry);
 }
 
 export function composeAgentToolRegistry(deps: AgentToolRegistryDeps): AgentToolRegistry {
-  const { services, configManager, homeDirectory, resolveSessionId, getLastUserMessage } = deps;
+  const { services, configManager, homeDirectory, resolveSessionId } = deps;
   const toolRegistry = new ToolRegistry(services.permissionManager);
   const { fileCache, projectIndex, dispose } = registerAllTools(toolRegistry, {
     hookDispatcher: services.hookDispatcher,
@@ -236,10 +231,7 @@ export function composeAgentToolRegistry(deps: AgentToolRegistryDeps): AgentTool
   registerAgentScheduleEditTool(toolRegistry, services.shellPaths, configManager);
   registerAgentScheduleTool(toolRegistry, services.shellPaths, configManager);
   registerAgentWorkPlanTool(toolRegistry, services.workPlanStore);
-  installAgentToolPolicyGuard(toolRegistry, {
-    getLastUserMessage: getLastUserMessage,
-  });
-  installToolExecutionSafetyGuard(toolRegistry);
+  installAgentToolPolicyGuard(toolRegistry);
   compactRegisteredToolDefinitions(toolRegistry);
   return { toolRegistry, fileCache, projectIndex, dispose };
 }

@@ -75,8 +75,10 @@ export type {
   ToolConcurrencyMode,
   ToolDefinition,
   ToolExecuteOptions,
+  ToolReadModes,
   ToolResult,
   ToolSideEffect,
 } from './tools.js';
+export { readModeCategory } from './tools.js';
 export type { Cell, Line } from './grid.js';
 export { createEmptyCell, createEmptyLine, createStyledCell } from './grid.js';

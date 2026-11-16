@@ -1,7 +1,6 @@
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { assertCurrentToolExecution, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { captureCatalogData } from './agent-harness-catalog-ranking.ts';
-import { failureMessage } from './agent-projection-failure.ts';
 import { agentLocalStateWrite, assertAgentLocalStateCurrent, createAgentLocalStateInputProjector } from './agent-local-state-admission.ts';
 import {
   WORK_PLAN_STATUSES,
@@ -218,65 +217,61 @@ export function createAgentWorkPlanTool(store: WorkPlanStore): Tool {
       sideEffects: ['state'],
     },
     execute: async (rawArgs, options) => {
-      try {
-        const args = captureCatalogData(rawArgs);
-        options?.signal?.throwIfAborted(); assertCurrentToolExecution(rawArgs, options);
-        if (!isAction(args.action)) return failure(`Unknown agent_work_plan action. Valid values ${ACTIONS.join(', ')}.`);
-        if (args.action === 'list' || args.action === 'get') {
-          const result = args.action === 'list' ? listOutput(store, readOptionalStatus(args.status), readListLimit(args.limit)) : formatItemDetail(resolveItem(store, requireId(args)));
-          assertAgentLocalStateCurrent(rawArgs, options); return output(result);
-        }
-        const effects = agentLocalStateWrite(rawArgs, options);
-        if (args.action === 'create') {
-          const item = store.addItem(requireTitle(args), {
-            status: readOptionalStatus(args.status) ?? 'pending',
-            owner: readString(args.owner) || 'agent',
-            source: readString(args.source) || 'main-conversation',
-            notes: readString(args.notes) || undefined,
-          }, effects);
-          return output([
-            'Created Agent todo',
-            `  id ${item.id}`,
-            `  title ${item.title}`,
-          ].join('\n'));
-        }
-        if (args.action === 'update') {
-          const patch = updatePatch(args);
-          if (Object.keys(patch).length === 0) return failure('Nothing to update: give at least one of title, status, owner, source or notes.');
-          const item = store.updateItem(requireId(args), patch, effects);
-          return output([
-            'Updated Agent todo',
-            `  id ${item.id}`,
-            `  title ${item.title}`,
-          ].join('\n'));
-        }
-        if (args.action === 'set_status') {
-          const status = readOptionalStatus(args.status);
-          if (!status) throw new Error('status is required.');
-          const item = store.setItemStatus(requireId(args), status, effects);
-          return output([
-            'Set Agent todo status',
-            `  id ${item.id}`,
-            `  status ${formatStatus(item.status)}`,
-            `  title ${item.title}`,
-          ].join('\n'));
-        }
-        if (args.action === 'remove') {
-          const item = store.removeItem(requireId(args), effects);
-          return output([
-            'Removed Agent todo',
-            `  id ${item.id}`,
-            `  title ${item.title}`,
-          ].join('\n'));
-        }
-        const count = store.clearCompleted(effects);
-        return output([
-          `Cleared ${count} done or cancelled Agent todos`,
-          `  count ${count}`,
-        ].join('\n'));
-      } catch (error) {
-        return failure(failureMessage(error, options?.signal));
+      const args = captureCatalogData(rawArgs);
+      options?.signal?.throwIfAborted(); assertCurrentToolExecution(rawArgs, options);
+      if (!isAction(args.action)) return failure(`Unknown agent_work_plan action. Valid values ${ACTIONS.join(', ')}.`);
+      if (args.action === 'list' || args.action === 'get') {
+        const result = args.action === 'list' ? listOutput(store, readOptionalStatus(args.status), readListLimit(args.limit)) : formatItemDetail(resolveItem(store, requireId(args)));
+        assertAgentLocalStateCurrent(rawArgs, options); return output(result);
       }
+      const effects = agentLocalStateWrite(rawArgs, options);
+      if (args.action === 'create') {
+        const item = store.addItem(requireTitle(args), {
+          status: readOptionalStatus(args.status) ?? 'pending',
+          owner: readString(args.owner) || 'agent',
+          source: readString(args.source) || 'main-conversation',
+          notes: readString(args.notes) || undefined,
+        }, effects);
+        return output([
+          'Created Agent todo',
+          `  id ${item.id}`,
+          `  title ${item.title}`,
+        ].join('\n'));
+      }
+      if (args.action === 'update') {
+        const patch = updatePatch(args);
+        if (Object.keys(patch).length === 0) return failure('Nothing to update: give at least one of title, status, owner, source or notes.');
+        const item = store.updateItem(requireId(args), patch, effects);
+        return output([
+          'Updated Agent todo',
+          `  id ${item.id}`,
+          `  title ${item.title}`,
+        ].join('\n'));
+      }
+      if (args.action === 'set_status') {
+        const status = readOptionalStatus(args.status);
+        if (!status) throw new Error('status is required.');
+        const item = store.setItemStatus(requireId(args), status, effects);
+        return output([
+          'Set Agent todo status',
+          `  id ${item.id}`,
+          `  status ${formatStatus(item.status)}`,
+          `  title ${item.title}`,
+        ].join('\n'));
+      }
+      if (args.action === 'remove') {
+        const item = store.removeItem(requireId(args), effects);
+        return output([
+          'Removed Agent todo',
+          `  id ${item.id}`,
+          `  title ${item.title}`,
+        ].join('\n'));
+      }
+      const count = store.clearCompleted(effects);
+      return output([
+        `Cleared ${count} done or cancelled Agent todos`,
+        `  count ${count}`,
+      ].join('\n'));
     },
   };
 }

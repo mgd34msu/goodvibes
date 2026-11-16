@@ -16,7 +16,7 @@ import { ConversationManager } from '../core/conversation.js';
 import { executeToolCalls as executeAutonomousToolCalls, applyToolBudget, capToolResultOutput, toolBudgetFromConfig } from '../core/orchestrator-tool-runtime.js';
 import { withExecutionMode } from '../gate/execution-context.js';
 import { captureToolInputCalls, projectToolInputBatch } from '../core/tool-input-ingress.js';
-import { captureProjectionArgs } from '../tools/input-projection.js';
+import { captureProjectionArgs, describeToolInputProjectionProblem, ToolInputProjectionError } from '../tools/input-projection.js';
 import type { ToolRegistry } from '../tools/registry.js';
 import { logger } from '../utils/logger.js';
 import { CIRCUIT_BREAKER_TRIPPED, CONSECUTIVE_ERROR_BREAK, ConsecutiveErrorBreaker } from '../core/circuit-breaker.js';
@@ -307,7 +307,9 @@ async function executeToolCalls(
     } catch (err) {
       assertDecisionAvailable(err);
       if (err instanceof OrchestratorObservationHeldError || (err instanceof Error && err.cause instanceof OrchestratorObservationHeldError)) throw new OrchestratorObservationHeldError();
-      const toolErr = signal?.aborted ? 'cancelled by user' : summarizeError(err);
+      // A projection problem reads with its cause and next step, the same words the main loop uses.
+      const toolErr = signal?.aborted ? 'cancelled by user'
+        : err instanceof ToolInputProjectionError ? describeToolInputProjectionProblem(err.problem, err.detail) : summarizeError(err);
       recordResult({ callId: call.id, success: false, error: toolErr, ...(signal?.aborted ? { cancelled: true } : {}) }, requestedArguments);
     } finally {
       stopLongCallNotice();

@@ -49,6 +49,32 @@ export interface ToolSubjectDeclaration {
   readonly recipients?: readonly ToolArgumentPath[] | undefined;
 }
 
+/**
+ * The values of one argument (usually `mode`) with which a call only reads.
+ * A call naming one of `values`, or omitting the argument when `defaultValue`
+ * is one of them, and carrying none of `unless`, is classed 'read'; any other
+ * call is classed as a change (the tool's own category, or 'write' when that
+ * is 'read'), so the gate decides it like any change.
+ */
+export interface ToolReadModes {
+  readonly field: string;
+  readonly values: readonly string[];
+  readonly defaultValue?: string | undefined;
+  readonly unless?: readonly ToolArgumentPath[] | undefined;
+}
+
+/** The category a call of a tool with {@link ToolReadModes} is classed under. */
+export function readModeCategory(readModes: ToolReadModes, args: Record<string, unknown>, own: PermissionCategory): PermissionCategory {
+  const raw = args[readModes.field];
+  const value = raw === undefined ? readModes.defaultValue : raw;
+  const present = (path: string): boolean => {
+    const found = args[path];
+    return found !== undefined && found !== null && found !== false && !(typeof found === 'string' && found.length === 0);
+  };
+  const reads = typeof value === 'string' && readModes.values.includes(value) && !(readModes.unless ?? []).some(present);
+  return reads ? 'read' : own === 'read' ? 'write' : own;
+}
+
 /** A tool whose changes are recorded where the owner can undo them, except when a listed argument is present. */
 export interface ToolRecoverability {
   readonly unless?: readonly ToolArgumentPath[] | undefined;
@@ -83,6 +109,8 @@ export interface ToolDefinition {
    * the change is not known to be recoverable.
    */
   recoverable?: ToolRecoverability | undefined;
+  /** The argument values with which a call only reads; see {@link ToolReadModes}. */
+  readModes?: ToolReadModes | undefined;
   /** Whether multiple calls can safely run in parallel. */
   concurrency?: ToolConcurrencyMode | undefined;
   /** Whether the tool can emit meaningful progress before final completion. */

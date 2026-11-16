@@ -227,7 +227,7 @@ export async function initializeBootstrapCore(
   const selection = new SelectionManager();
 
   // The main conversation's tool registry: the platform tools, the Agent's own
-  // tools, then its policy and execution-safety wrappers, in
+  // tools, then its policy, in
   // that order (agent-tool-registry.ts). One function, so the exec
   // refusal-and-kill test drives exactly the chain a live turn uses.
   const { toolRegistry, fileCache, projectIndex, dispose: disposeToolRegistry } = composeAgentToolRegistry({
@@ -236,7 +236,6 @@ export async function initializeBootstrapCore(
     homeDirectory,
     // Task refs are owned by the REAL runtime session, read fresh on every call.
     resolveSessionId: () => runtimeSessionIdRef.value,
-    getLastUserMessage: () => conversation.getLastUserMessage(),
     researchReportSourceOwner: services.researchReportSourceOwner,
     // First-party local reads need no hosted screening: a code-only local owner, always bound.
     researchSourceOwner: services.localReadSourceOwner,

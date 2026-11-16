@@ -35,7 +35,7 @@ import { extractPathArgs } from '../runtime/permissions/rules/path-scope.js';
 import { buildDurableRuleForDecision, buildRememberOptions, matchDurableRulesAsync, sessionApprovalKey } from './approval-rules.js';
 import { changesMcpTrust, classifyCall, classifyPaths, declaredRecoverable, declaredValues, ownerOnlyReason, recognizeOwnerOnly, type CallClass, type CallFacts, type CallRuleFact, type OwnerOnlyKind } from '../gate/classify.js';
 import { toolDecisionOf } from './denial.js';
-import { toolCategoryOf, type ToolDefinition } from '../types/tools.js';
+import { readModeCategory, toolCategoryOf, type ToolDefinition } from '../types/tools.js';
 import { projectIdentity, type UserPermissionRuleStore } from './user-rule-store.js';
 import type { PolicyRuntimeState } from '../runtime/permissions/policy-runtime.js';
 import { LayeredPolicyEvaluator } from '../runtime/permissions/evaluator.js';
@@ -1603,10 +1603,8 @@ export class PermissionManager {
    * (toolCategoryOf its registered definition), narrowed by what these
    * arguments do. A tool that declares none is 'delegate'.
    */
-  getCategory(toolName: string, args: Record<string, unknown> = {}, definition?: Pick<ToolDefinition, 'category'>): PermissionCategory {
-    if (toolName === 'inspect' && args.mode === 'scaffold' && args.dryRun === false) {
-      return 'write';
-    }
+  getCategory(toolName: string, args: Record<string, unknown> = {}, definition?: Pick<ToolDefinition, 'category' | 'readModes'>): PermissionCategory {
+    // inspect's scaffold creates its files through the write tool, which is asked about as a write itself.
     // A state call that writes (a value, a memory, a hook registration, a mode
     // change) is not the read the state tool's category names: it gets the
     // gate's full reading. The state tool's own read-only surface decides.
@@ -1617,7 +1615,9 @@ export class PermissionManager {
     // Changing what an MCP server may do is not the delegation a remembered
     // allow for the mcp tool was given for.
     if (changesMcpTrust(toolName, args)) return 'execute';
-    return toolCategoryOf({ name: toolName, category: definition?.category }) ?? 'delegate';
+    const own = toolCategoryOf({ name: toolName, category: definition?.category }) ?? 'delegate';
+    // A tool that names its read-only modes: a listed mode is a read, any other is decided as a change.
+    return definition?.readModes ? readModeCategory(definition.readModes, args, own) : own;
   }
 
   /**

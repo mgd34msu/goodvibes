@@ -244,6 +244,7 @@ export const builtinGatewayControlAutomationMethodDescriptors: readonly GatewayM
   // packages/contracts/src/core-verbs.ts and docs/decisions/2026-07-06-core-verb-spec.md.
   methodDescriptor({
     id: 'automation.jobs.run',
+    effect: 'outward',
     title: 'Run Automation Job Now',
     description: 'Trigger an automation job immediately.',
     category: 'automation',
@@ -291,6 +292,7 @@ export const builtinGatewayControlAutomationMethodDescriptors: readonly GatewayM
   }),
   methodDescriptor({
     id: 'automation.runs.retry',
+    effect: 'outward',
     title: 'Retry Automation Run',
     description: 'Retry a completed or failed automation run.',
     category: 'automation',
@@ -312,6 +314,7 @@ export const builtinGatewayControlAutomationMethodDescriptors: readonly GatewayM
   }),
   methodDescriptor({
     id: 'automation.heartbeat.run',
+    effect: 'outward',
     title: 'Run Automation Heartbeat',
     description: 'Process automation jobs queued for the next heartbeat.',
     category: 'automation',
@@ -427,6 +430,7 @@ export const builtinGatewayControlAutomationMethodDescriptors: readonly GatewayM
   }),
   methodDescriptor({
     id: 'automation.schedules.run',
+    effect: 'outward',
     title: 'Run Schedule Now',
     description: 'Trigger a schedule immediately.',
     category: 'automation',

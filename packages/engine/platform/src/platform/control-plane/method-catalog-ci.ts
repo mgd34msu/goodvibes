@@ -142,6 +142,7 @@ export const builtinGatewayCiMethodDescriptors: readonly GatewayMethodDescriptor
   }),
   methodDescriptor({
     id: 'ci.watches.run',
+    effect: 'outward',
     title: 'Check CI Watch Now',
     description: 'Poll a standing watch immediately: returns the per-job report, whether a completion notification fired, and whether an admitted fix-session started, or an honest refusal/error.',
     category: 'ci',

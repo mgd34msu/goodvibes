@@ -175,6 +175,7 @@ export const builtinGatewayHomeGraphMethodDescriptors: readonly GatewayMethodDes
   }),
   homeGraphDescriptor({
     id: 'homeassistant.homeGraph.askHomeGraph',
+    effect: 'outward',
     title: 'Ask Home Graph',
     description: 'Search a Home Graph knowledge space and return a source-backed answer.',
     method: 'POST',
@@ -322,6 +323,7 @@ export const builtinGatewayHomeGraphMethodDescriptors: readonly GatewayMethodDes
   }),
   homeGraphDescriptor({
     id: 'homeassistant.homeGraph.refinement.run',
+    effect: 'outward',
     title: 'Run Home Graph Refinement',
     description: 'Run source-backed Home Graph self-improvement for a space, source list, or specific gaps.',
     method: 'POST',

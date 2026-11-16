@@ -296,6 +296,7 @@ export const builtinGatewayKnowledgeMethodDescriptors: readonly GatewayMethodDes
   }),
   methodDescriptor({
     id: 'knowledge.ask',
+    effect: 'outward',
     title: 'Ask Knowledge',
     description: 'Search, semantically synthesize, and return a source-backed answer from the structured knowledge/wiki store.',
     category: 'knowledge',
@@ -490,6 +491,7 @@ export const builtinGatewayKnowledgeMethodDescriptors: readonly GatewayMethodDes
   }),
   methodDescriptor({
     id: 'knowledge.refinement.run',
+    effect: 'outward',
     title: 'Run Knowledge Refinement',
     description: 'Run source-backed semantic self-improvement for a space, source list, or specific gaps.',
     category: 'knowledge',
@@ -583,6 +585,7 @@ export const builtinGatewayKnowledgeMethodDescriptors: readonly GatewayMethodDes
   }),
   methodDescriptor({
     id: 'knowledge.job.run',
+    effect: 'outward',
     title: 'Run Knowledge Job',
     description: 'Queue or run a structured knowledge maintenance job.',
     category: 'knowledge',
@@ -688,6 +691,7 @@ export const builtinGatewayKnowledgeMethodDescriptors: readonly GatewayMethodDes
   }),
   methodDescriptor({
     id: 'knowledge.graphql.execute',
+    effect: 'outward',
     title: 'Execute Knowledge GraphQL',
     description: 'Execute a GraphQL query or mutation against the dedicated knowledge domain endpoint.',
     category: 'knowledge',

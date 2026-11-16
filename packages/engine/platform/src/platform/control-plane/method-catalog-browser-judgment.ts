@@ -57,7 +57,7 @@ const output = (battery: BrowserJudgmentBatteryId, value: Record<string, unknown
 };
 
 export const builtinBrowserJudgmentMethodDescriptors = [methodDescriptor({
-  id: 'judgment.battery.run', title: 'Run Browser Judgment Battery', category: 'judgment',
+  id: 'judgment.battery.run', effect: 'outward', title: 'Run Browser Judgment Battery', category: 'judgment',
   description: 'Run one explicitly installed, authorized browser battery. Unconfigured services and unresolved or unauthorized input remain held.',
   access: 'authenticated', scopes: ['write:judgment'], transport: ['http'], invokable: false,
   http: { method: 'POST', path: BROWSER_JUDGMENT_PATH },

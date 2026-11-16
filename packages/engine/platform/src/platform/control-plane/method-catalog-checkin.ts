@@ -131,6 +131,7 @@ export const builtinGatewayCheckinMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'checkin.run',
+    effect: 'outward',
     title: 'Run Check-in Now',
     description: 'Trigger one check-in evaluation immediately (a manual run): assemble the briefing, judge whether to contact the user, deliver if so, and record a receipt.',
     category: 'checkin',

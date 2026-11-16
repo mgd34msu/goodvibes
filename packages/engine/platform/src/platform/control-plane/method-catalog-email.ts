@@ -317,6 +317,7 @@ export const builtinGatewayEmailMethodDescriptors: readonly GatewayMethodDescrip
   }),
   methodDescriptor({
     id: 'email.send',
+    effect: 'outward',
     title: 'Send Email',
     description:
       'Send a composed email via the configured SMTP account. Irreversible external send; requires confirm: true and explicit user review of recipients and body. Pass a clientSendId (8-128 letters, digits, - or _) chosen when the message was composed: a repeat with the same id and the same message within ten minutes returns the first answer instead of sending again (the id also becomes the Message-ID), and the same id with a different message is refused (409 CLIENT_SEND_ID_REUSED). A send whose final server reply was lost fails with EMAIL_DELIVERY_UNCONFIRMED: it may have gone, and repeating it with the same id will not send it twice.',

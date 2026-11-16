@@ -288,6 +288,7 @@ export const builtinGatewayRuntimeMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'remote.peers.invoke',
+    effect: 'outward',
     title: 'Invoke Remote Peer',
     description: 'Invoke a method on a connected remote peer.',
     category: 'remote',
@@ -481,6 +482,7 @@ export const builtinGatewayRuntimeMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'memory.vector.rebuild',
+    effect: 'outward',
     title: 'Rebuild Memory Vector Index',
     description: 'Rebuild the sqlite-vec vector index.',
     category: 'memory',

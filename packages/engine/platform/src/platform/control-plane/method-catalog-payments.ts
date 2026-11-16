@@ -53,14 +53,14 @@ import {
 export const builtinGatewayPaymentsMethodDescriptors: readonly GatewayMethodDescriptor[] = [
   methodDescriptor({
     id: 'payments.purchase.reconcile', title: 'Record the Merchant Order Finding', category: 'payments',
-    scopes: ['write:payments'], access: 'admin', dangerous: true,
+    scopes: ['write:payments'], access: 'admin', dangerous: true, ownerOnly: true,
     description: 'After inspecting the merchant’s order history, explicitly record whether this exact uncertain or unverified checkout placed an order. Requires current paired admin authority, write:payments, confirm: true and inspectedMerchantHistory: true. The saved finding cannot be changed by a retry. Settles only original purchase/budget bookkeeping after its actual executor has drained; never submits or resumes an order. Missing local receipts never imply no charge. A no-order finding releases an original unspent hold but never credits already committed spend.',
     http: PAYMENT_PURCHASE_RECONCILE_HTTP,
     inputSchema: PAYMENTS_PURCHASE_RECONCILE_INPUT_SCHEMA, outputSchema: PAYMENTS_PURCHASE_RECONCILE_OUTPUT_SCHEMA,
   }),
   methodDescriptor({
     id: 'payments.purchase.securityCode', title: 'Type the Card Security Code', category: 'payments',
-    scopes: ['write:payments'], access: 'admin', dangerous: true,
+    scopes: ['write:payments'], access: 'admin', dangerous: true, ownerOnly: true,
     description: 'Under payments.cvvHandling prompt, hand the card security code the owner typed to the one approved purchase waiting for it, by its exact purchaseId and windowId from payments.purchase.status. Requires an explicit owner action, confirm: true and current paired admin authority with write:payments. The code is used for that purchase\'s card entry and kept nowhere. A closed or replaced request refuses; this never submits directly or overrides any budget, merchant, page or address check.',
     http: { method: 'POST', path: '/api/payments/purchase/security-code' },
     inputSchema: PAYMENTS_PURCHASE_SECURITY_CODE_INPUT_SCHEMA, outputSchema: PAYMENTS_PURCHASE_SECURITY_CODE_OUTPUT_SCHEMA,
@@ -74,6 +74,8 @@ export const builtinGatewayPaymentsMethodDescriptors: readonly GatewayMethodDesc
   ...(['approve', 'deny', 'cancel'] as const).map(action => methodDescriptor({
     id: `payments.purchase.${action}`, title: action === 'approve' ? 'Approve This Purchase' : action === 'deny' ? 'Deny This Purchase' : 'Stop This Purchase',
     category: 'payments', scopes: ['write:payments'], access: 'admin', dangerous: true,
+    // Answering a purchase window is the owner's; stopping a purchase is open to the Agent.
+    ...(action === 'cancel' ? {} : { ownerOnly: true }),
     description: action === 'cancel'
       ? 'Stop an admitted checkout using its exact purchaseId and operationId, or object to a live window using purchaseId and windowId. Requires an explicit owner action, confirm: true and current paired admin authority with write:payments. Stopping is a request, not proof that an order was undone; inspect final status and merchant history if submission may have begun. No automatic retry.'
       : `${action === 'approve' ? 'Approve an above-budget purchase or explicitly acknowledge an in-budget purchase' : 'Refuse the pending purchase'} using the exact live purchase and window references. Requires an explicit owner action, confirm: true and current paired admin authority with write:payments. The same inbox also consumes authenticated channel replies. A stale, answered or expired window refuses; this never submits directly or overrides budget, merchant, page or address checks.`,
@@ -137,6 +139,7 @@ export const builtinGatewayPaymentsMethodDescriptors: readonly GatewayMethodDesc
     access: 'admin',
     http: { method: 'POST', path: '/api/payments/checkout/approve' },
     dangerous: true,
+    ownerOnly: true,
     inputSchema: objectSchema({
       confirm: BOOLEAN_SCHEMA,
       merchantDomain: STRING_SCHEMA,

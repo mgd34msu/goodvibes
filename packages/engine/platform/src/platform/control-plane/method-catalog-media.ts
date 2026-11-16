@@ -65,6 +65,7 @@ export const builtinGatewayMediaMethodDescriptors: readonly GatewayMethodDescrip
   }),
   methodDescriptor({
     id: 'voice.tts',
+    effect: 'outward',
     title: 'Run Text To Speech',
     description: 'Synthesize audio through a registered voice provider.',
     category: 'voice',
@@ -76,6 +77,7 @@ export const builtinGatewayMediaMethodDescriptors: readonly GatewayMethodDescrip
   }),
   methodDescriptor({
     id: 'voice.tts.stream',
+    effect: 'outward',
     title: 'Stream Text To Speech',
     description: 'Synthesize audio as streamed bytes through a registered streaming voice provider.',
     category: 'voice',
@@ -94,6 +96,7 @@ export const builtinGatewayMediaMethodDescriptors: readonly GatewayMethodDescrip
   }),
   methodDescriptor({
     id: 'voice.stt',
+    effect: 'outward',
     title: 'Run Speech To Text',
     description: 'Transcribe an audio artifact through a registered voice provider.',
     category: 'voice',
@@ -105,6 +108,7 @@ export const builtinGatewayMediaMethodDescriptors: readonly GatewayMethodDescrip
   }),
   methodDescriptor({
     id: 'voice.realtime.session',
+    effect: 'outward',
     title: 'Open Voice Realtime Session',
     description: 'Open a realtime voice session through a registered voice provider.',
     category: 'voice',
@@ -126,6 +130,7 @@ export const builtinGatewayMediaMethodDescriptors: readonly GatewayMethodDescrip
   }),
   methodDescriptor({
     id: 'web_search.query',
+    effect: 'outward',
     title: 'Run Web Search',
     description: 'Execute a provider-backed web search and return normalized ranked results.',
     category: 'web-search',
@@ -239,6 +244,7 @@ export const builtinGatewayMediaMethodDescriptors: readonly GatewayMethodDescrip
   }),
   methodDescriptor({
     id: 'media.analyze',
+    effect: 'outward',
     title: 'Analyze Media Artifact',
     description: 'Analyze an artifact through a registered media provider.',
     category: 'media',
@@ -250,6 +256,7 @@ export const builtinGatewayMediaMethodDescriptors: readonly GatewayMethodDescrip
   }),
   methodDescriptor({
     id: 'media.transform',
+    effect: 'outward',
     title: 'Transform Media Artifact',
     description: 'Transform an artifact through a registered media provider.',
     category: 'media',
@@ -261,6 +268,7 @@ export const builtinGatewayMediaMethodDescriptors: readonly GatewayMethodDescrip
   }),
   methodDescriptor({
     id: 'media.generate',
+    effect: 'outward',
     title: 'Generate Media Artifact',
     description: 'Generate a media artifact through a registered media provider.',
     category: 'media',
@@ -292,6 +300,7 @@ export const builtinGatewayMediaMethodDescriptors: readonly GatewayMethodDescrip
   }),
   methodDescriptor({
     id: 'multimodal.analyze',
+    effect: 'outward',
     title: 'Run Multimodal Analysis',
     description: 'Analyze an image, audio file, video artifact, or document through the unified multimodal service.',
     category: 'media',

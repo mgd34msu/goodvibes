@@ -30,6 +30,8 @@ export const builtinGatewayNativeWorkExecutionMethodDescriptors: readonly Gatewa
       id: `workLedger.execution.${operation}`,
       title, description, category: 'work-ledger',
       access: 'admin', scopes: ['read:work-ledger', 'write:fleet'],
+      // Starting or resuming an attempt runs metered model work.
+      ...(operation === 'start' || operation === 'resume' ? { effect: 'outward' as const } : {}),
       http: { method: 'POST', path: `/api/work-ledger/execution/${operation}` },
       inputSchema: json(nativeWorkExecutionRequestSchema),
       outputSchema: json(nativeWorkExecutionSnapshotSchema),

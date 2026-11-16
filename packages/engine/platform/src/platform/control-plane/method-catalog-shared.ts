@@ -38,6 +38,12 @@ export interface GatewayMethodDescriptor {
   readonly dangerous?: boolean | undefined;
   /** Set by `methodDescriptor` for every builtin method; see `GatewayMethodEffect`. */
   readonly effect?: GatewayMethodEffect | undefined;
+  /**
+   * The owner's own act (answering a purchase window, typing a card security
+   * code): the daemon takes it only with the owner-request signal, and an agent
+   * is refused and told how the owner does it.
+   */
+  readonly ownerOnly?: boolean | undefined;
   /** The header or body field that makes a retry safe; the route that reads it is its owner. */
   readonly replay?: ContractReplayKey | undefined;
   /** Codes this method's route puts on an error body beyond the shared engine codes. */
@@ -189,6 +195,7 @@ export const METHOD_DESCRIPTOR_SCHEMA = objectSchema({
   pluginId: STRING_SCHEMA,
   dangerous: BOOLEAN_SCHEMA,
   effect: stringEnumSchema(['read', 'write', 'outward']),
+  ownerOnly: BOOLEAN_SCHEMA,
   invokable: BOOLEAN_SCHEMA,
   replay: objectSchema({ in: STRING_SCHEMA, name: STRING_SCHEMA, behavior: STRING_SCHEMA }, ['in', 'name', 'behavior']),
   errorCodes: arraySchema(objectSchema({ code: STRING_SCHEMA, status: NUMBER_SCHEMA, meaning: STRING_SCHEMA }, ['code', 'status', 'meaning'])),
@@ -331,32 +338,11 @@ export function exhaustiveStringEnumSchema<Member extends string>() {
 }
 
 /**
- * Methods whose catalog file does not yet state `effect: 'outward'` itself but
- * that dispatch messages, remote commands or metered model work. A descriptor
- * that sets `effect` wins; a new outward method sets it on its descriptor.
+ * A method that sends messages, drives a remote host or browser, or runs
+ * metered model work states `effect: 'outward'` on its own descriptor; any
+ * other method is a read when every scope is a read scope, else a write.
  */
-const OUTWARD_METHOD_IDS: ReadonlySet<string> = new Set([
-  'email.send', 'channels.actions.invoke', 'channels.tools.invoke', 'channels.accounts.action.default',
-  'channels.accounts.action.named', 'remote.peers.invoke', 'web_search.query', 'judgment.battery.run',
-  'voice.realtime.session', 'voice.stt', 'voice.tts', 'voice.tts.stream', 'sessions.messages.create',
-  'sessions.inputs.deliver', 'sessions.followUp', 'sessions.steer', 'companion.chat.messages.create',
-  'companion.chat.messages.edit', 'companion.chat.messages.retry', 'companion.chat.messages.steer',
-  'contracts.start', 'contracts.reply', 'workLedger.turn.start', 'workLedger.turn.startAgent',
-  'workLedger.execution.start', 'workLedger.execution.resume', 'automation.jobs.run',
-  'automation.schedules.run', 'automation.runs.retry', 'checkin.run',
-  'media.analyze', 'media.transform', 'media.generate', 'memory.vector.rebuild',
-  'tasks.create', 'tasks.retry',
-  'automation.heartbeat.run', 'ci.watches.run', 'watchers.run', 'knowledge.job.run', 'knowledge.refinement.run',
-  'homeassistant.homeGraph.refinement.run', 'fleet.observed.steer',
-  'multimodal.analyze', 'homeassistant.conversation.submit', 'homeassistant.conversation.stream',
-  // Read-scoped POSTs that still run metered model work or may carry a mutation.
-  'knowledge.ask', 'homeassistant.homeGraph.askHomeGraph',
-  // Read-scoped, but the body is a GraphQL document that may be a mutation.
-  'knowledge.graphql.execute',
-]);
-
-function defaultMethodEffect(id: string, scopes: readonly string[]): GatewayMethodEffect {
-  if (OUTWARD_METHOD_IDS.has(id)) return 'outward';
+function defaultMethodEffect(scopes: readonly string[]): GatewayMethodEffect {
   return scopes.length > 0 && scopes.every((scope) => scope.startsWith('read:')) ? 'read' : 'write';
 }
 
@@ -395,7 +381,7 @@ export function methodDescriptor(input: Omit<GatewayMethodDescriptor, 'source' |
     access,
     ...input,
     ...(dangerous === undefined ? {} : { dangerous }),
-    effect: input.effect ?? defaultMethodEffect(input.id, input.scopes),
+    effect: input.effect ?? defaultMethodEffect(input.scopes),
   };
 }
 

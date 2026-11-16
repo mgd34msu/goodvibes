@@ -57,6 +57,14 @@ export interface OperatorMethodContract {
   readonly outputSchema?: JsonSchema | undefined;
   readonly pluginId?: string | undefined;
   readonly dangerous?: boolean | undefined;
+  /**
+   * What calling the method does: `read` changes nothing, `write` changes the
+   * daemon's own state, `outward` sends messages, drives a remote host or a
+   * browser, or runs metered model work. Set where the method is defined.
+   */
+  readonly effect?: 'read' | 'write' | 'outward' | undefined;
+  /** The owner's own act: taken only with the owner-request signal; an agent is refused. */
+  readonly ownerOnly?: boolean | undefined;
   readonly invokable?: boolean | undefined;
   /** Whether this method is idempotent. When true, safe to retry on 5xx + network errors. */
   readonly idempotent?: boolean | undefined;

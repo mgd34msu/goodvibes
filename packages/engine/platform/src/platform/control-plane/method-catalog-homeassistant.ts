@@ -38,6 +38,7 @@ export const builtinGatewayHomeAssistantMethodDescriptors: readonly GatewayMetho
   }),
   methodDescriptor({
     id: 'homeassistant.conversation.submit',
+    effect: 'outward',
     title: 'Submit Home Assistant Conversation Message',
     description: 'Post one utterance to the isolated chat session of a Home Assistant conversation and wait for the reply (or return at once with wait false). A providerId or modelId of the caller\'s choosing needs an admin token. A tools list is refused.',
     category: 'channels',
@@ -51,6 +52,7 @@ export const builtinGatewayHomeAssistantMethodDescriptors: readonly GatewayMetho
   }),
   methodDescriptor({
     id: 'homeassistant.conversation.stream',
+    effect: 'outward',
     title: 'Stream Home Assistant Conversation Message',
     description: 'Post one utterance and stream the reply as server-sent events: delta frames, then one final or error frame. A providerId or modelId of the caller\'s choosing needs an admin token.',
     category: 'channels',

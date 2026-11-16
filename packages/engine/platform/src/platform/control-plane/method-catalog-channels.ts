@@ -121,6 +121,7 @@ export const builtinGatewayChannelMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'channels.accounts.action.default',
+    effect: 'outward',
     title: 'Run Channel Account Action',
     description: 'Run a lifecycle action on the default channel account for a surface.',
     category: 'channels',
@@ -137,6 +138,7 @@ export const builtinGatewayChannelMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'channels.accounts.action.named',
+    effect: 'outward',
     title: 'Run Named Channel Account Action',
     description: 'Run a lifecycle action on a specific channel account.',
     category: 'channels',
@@ -193,6 +195,7 @@ export const builtinGatewayChannelMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'channels.tools.invoke',
+    effect: 'outward',
     title: 'Run Channel Tool',
     description: 'Run a channel-owned operator tool.',
     category: 'channels',
@@ -249,6 +252,7 @@ export const builtinGatewayChannelMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'channels.actions.invoke',
+    effect: 'outward',
     title: 'Run Channel Action',
     description: 'Run a channel-owned operator action.',
     category: 'channels',
@@ -511,6 +515,7 @@ export const builtinGatewayChannelMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'watchers.run',
+    effect: 'outward',
     title: 'Run Watcher',
     description: 'Trigger a watcher immediately.',
     category: 'watchers',

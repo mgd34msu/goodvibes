@@ -232,6 +232,7 @@ export const builtinGatewayBrowserMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'browser.navigate',
+    effect: 'outward',
     title: 'Navigate',
     description: 'Load a URL, opening a session first if none is open. http, https, file and about schemes only; a javascript: URL is refused because it runs script against whatever page is already loaded.',
     category: 'browser',
@@ -272,6 +273,7 @@ export const builtinGatewayBrowserMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'browser.click',
+    effect: 'outward',
     title: 'Click Element',
     description: 'Click an element resolved from the latest snapshot of this page. Activating a control that submits a form is an outward effect and is refused when this turn has read untrusted page content.',
     category: 'browser',
@@ -293,6 +295,7 @@ export const builtinGatewayBrowserMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'browser.type',
+    effect: 'outward',
     title: 'Type Into Element',
     description: 'Type into an element resolved from the latest snapshot. There is no variant that types into whatever window has focus. submit:true presses Enter afterwards and is an outward effect.',
     category: 'browser',

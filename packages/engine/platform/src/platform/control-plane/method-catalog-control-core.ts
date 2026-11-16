@@ -561,6 +561,7 @@ export const builtinGatewayControlCoreMethodDescriptors: readonly GatewayMethodD
   }),
   methodDescriptor({
     id: 'sessions.messages.create',
+    effect: 'outward',
     title: 'Post Shared Session Message',
     description: 'Append a user message to a shared session. Omitted `kind` defaults to `message` conversation routing; send `kind: "task"` to request agent or contract task continuation.',
     category: 'sessions',
@@ -597,6 +598,7 @@ export const builtinGatewayControlCoreMethodDescriptors: readonly GatewayMethodD
   }),
   methodDescriptor({
     id: 'sessions.steer',
+    effect: 'outward',
     title: 'Steer Shared Session',
     description: 'Deliver a live steering message to the active agent for a shared session, optionally falling back to spawn when explicitly allowed.',
     category: 'sessions',
@@ -617,6 +619,7 @@ export const builtinGatewayControlCoreMethodDescriptors: readonly GatewayMethodD
   }),
   methodDescriptor({
     id: 'sessions.followUp',
+    effect: 'outward',
     title: 'Queue Shared Session Follow-Up',
     description: 'Queue a deferred follow-up for a shared session so it runs after the current agent completes, or spawn immediately when the session is idle.',
     category: 'sessions',
@@ -652,6 +655,7 @@ export const builtinGatewayControlCoreMethodDescriptors: readonly GatewayMethodD
   }),
   methodDescriptor({
     id: 'sessions.inputs.deliver',
+    effect: 'outward',
     title: 'Mark Shared Session Input Delivered',
     description: 'A live registered surface reports that it collected a queued input (moves it to `delivered`) or finished acting on it (`consumed:true` moves it to `completed`). This is how a surface-managed session, where steer/follow-up inputs queue for the surface rather than spawn a daemon executor, closes the input lifecycle honestly. Only queued/delivered inputs advance; a report on an input that already ended (cancelled, failed, answered by a daemon agent) is refused with 409 `INPUT_NOT_DELIVERABLE` naming its state, binds no agent and forwards no answer. One exception: an input a daemon restart cancelled while a surface in another process was answering it completes on that surface\'s `consumed:true` report. `agentId` names the agent the surface is running for this input: it binds the reply so a message that arrived over a channel gets its answer routed back to that conversation, the same binding the daemon makes for the executors it spawns itself. `answer` (sent with `consumed:true`, optionally with `status`) is the output that agent finished with, the daemon writes it into the session and delivers it to the channel. `claim:true` is how a surface takes an input before it starts work on it: it succeeds for one caller only, for a `queued` input, or for a `delivered` one with no agent bound for at least two minutes (a claimant that died before starting it). Any other caller is refused with 409 `INPUT_NOT_CLAIMABLE` naming the state, and nothing changes.',
     category: 'sessions',
@@ -733,6 +737,7 @@ export const builtinGatewayControlCoreMethodDescriptors: readonly GatewayMethodD
   }),
   methodDescriptor({
     id: 'tasks.create',
+    effect: 'outward',
     title: 'Create Task',
     description: 'Submit a task to the daemon or a shared session.',
     category: 'tasks',
@@ -767,6 +772,7 @@ export const builtinGatewayControlCoreMethodDescriptors: readonly GatewayMethodD
   }),
   methodDescriptor({
     id: 'tasks.retry',
+    effect: 'outward',
     title: 'Retry Runtime Task',
     description: 'Retry a runtime task through the task action endpoint.',
     category: 'tasks',

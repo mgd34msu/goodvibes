@@ -198,6 +198,7 @@ export const builtinGatewayFleetMethodDescriptors: readonly GatewayMethodDescrip
   }),
   methodDescriptor({
     id: 'fleet.observed.steer',
+    effect: 'outward',
     title: 'Steer an Observed Foreign Agent',
     description: 'Type text into an externally-launched coding-agent session goodvibes only OBSERVES (a Claude Code / Codex process it did not spawn or host), over the session\'s own control channel (a tmux pane). That agent runs with its own permissions, so every steer is first put to the owner through the approval broker, naming the session, its directory, the exact text and whether it is submitted; "always" for that session holds until the daemon stops. The text is typed only; it is submitted with Enter only when submit is true. queued:false with an honest reason when the owner declines, the row exposes no channel, or a send fails; nothing was sent then. STOP is never offered on an observed row.',
     category: 'fleet',

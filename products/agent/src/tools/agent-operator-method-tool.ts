@@ -8,7 +8,7 @@ import type { AgentConnectedHostConfigReader } from '../agent/routine-schedule-p
 import { assertOperatorEffect, captureOperatorConnection } from '../agent/operator-connection-owner.ts';
 import { publishOperatorMethodReceipt } from '../agent/operator-method-receipt.ts';
 import { appendOperatorQuery, operatorMethodIsReadOnly, READ_ONLY_HTTP_METHODS, resolveOperatorContractMethod, substituteOperatorPath } from '../agent/operator-contract-routes.ts';
-import { createOperatorInputProjector, operatorExecutionConnection, operatorExecutionWireInput, operatorExecutionRequestPolicy, operatorMethodIsOutward } from './agent-operator-input-projector.ts';
+import { createOperatorInputProjector, operatorExecutionConnection, operatorExecutionWireInput, operatorExecutionRequestPolicy, operatorMethodIsOutward, operatorMethodIsOwnerOnly } from './agent-operator-input-projector.ts';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -51,13 +51,6 @@ type WatcherMethodId =
   | 'watchers.stop'
   | 'watchers.delete';
 
-// The owner's own acts: answering a purchase window over his limits, typing a card's security code,
-// recording what the merchant history shows, and approving a purchase in advance. Refused here with
-// the way the owner does each one.
-const OWNER_ONLY_PAYMENT_METHOD_IDS = new Set([
-  'payments.purchase.approve', 'payments.purchase.deny', 'payments.purchase.reconcile',
-  'payments.purchase.securityCode', 'payments.checkout.approve',
-]);
 // Inside the owner's limits the Agent starts and stops purchases itself. The daemon takes these only
 // with the owner-request signal; this tool sends it after this call's own admission passed, never
 // because an argument asked for it.
@@ -573,7 +566,8 @@ export function createAgentOperatorMethodTool(
           error: `Unknown GoodVibes operator method '${methodId}'. Inspect host action:"methods" first.`,
         };
       }
-      if (OWNER_ONLY_PAYMENT_METHOD_IDS.has(method.id)) {
+      // The owner's own acts (the method descriptor's ownerOnly) are refused with the way the owner does each one.
+      if (operatorMethodIsOwnerOnly(method.id)) {
         return {
           success: false,
           error: `operator method '${method.id}' is the owner's own act (answering a purchase window, typing a card security code, recording what the merchant history shows, or approving a purchase in advance). Nothing was sent. Ask the owner: /payments pending answers windows and codes, /payments approve <merchant> <item> <maximum> approves a purchase in advance, and the web UI Purchases panel does both. payments.purchase.status and payments.purchases.list can be read here to tell him where it stands; payments.checkout.begin and payments.purchase.cancel can be called here.`,

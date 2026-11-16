@@ -85,6 +85,8 @@ function buildOperation(method: OperatorMethodContract): OpenApiOperation {
     'x-transport': method.transport,
     ...(method.scopes.length > 0 ? { 'x-scopes': method.scopes } : {}),
     ...(method.dangerous !== undefined ? { 'x-dangerous': method.dangerous } : {}),
+    ...(method.effect !== undefined ? { 'x-effect': method.effect } : {}),
+    ...(method.ownerOnly !== undefined ? { 'x-owner-only': method.ownerOnly } : {}),
     ...(method.idempotent !== undefined ? { 'x-idempotent': method.idempotent } : {}),
     ...(replay ? { 'x-replay-key': replay.extension } : {}),
     ...(method.errorCodes ? { 'x-error-codes': method.errorCodes } : {}),

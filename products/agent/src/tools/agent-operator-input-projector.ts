@@ -22,6 +22,12 @@ export function operatorMethodIsOutward(methodId: string): boolean {
   return builtinMethods.get(methodId)?.effect === 'outward';
 }
 
+/** True when the method is the owner's own act (its descriptor's `ownerOnly`): the Agent never calls it. */
+export function operatorMethodIsOwnerOnly(methodId: string): boolean {
+  builtinMethods ??= new GatewayMethodCatalog();
+  return builtinMethods.get(methodId)?.ownerOnly === true;
+}
+
 type CapturedConnection = ReturnType<typeof captureOperatorConnection>;
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);

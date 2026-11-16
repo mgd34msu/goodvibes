@@ -5,7 +5,7 @@ import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { lstatSync } from 'node:fs';
 import { assertClientReaderPayload, clientReaderMemberPath, parseClientReaderArtifact, type ClientReaderArtifact } from './client-reader-artifact.js';
 import { retainDaemonNativeFiles } from './daemon-native-cohort.js';
-import { hasNativeUpdateObservations, type UpdateFileIo } from './update-file-io.js';
+import type { UpdateFileIo } from './update-file-io.js';
 import type { UpdateTarget } from './self-update.js';
 import type { NativeReaderCapabilities } from './native-reader-compatibility.js';
 export interface DarwinDaemonSqliteOwner {
@@ -52,7 +52,7 @@ export function inspectDarwinDaemonInstallation(execPath: string, arch: string, 
   for (const target of selected) if (observe(target.path)?.mode !== (target.executable ? 0o755 : 0o644)) throw new Error('Darwin daemon installation is incomplete or has invalid modes');
   const bounded = (path: string, limit: number): Buffer => {
     current();
-    if (hasNativeUpdateObservations(io, read, observe) && lstatSync(path).size > limit) throw new Error('Darwin daemon metadata exceeds its bound');
+    if (lstatSync(path).size > limit) throw new Error('Darwin daemon metadata exceeds its bound');
     const bytes = read(path); current(); if (bytes.byteLength > limit) throw new Error('Darwin daemon metadata exceeds its bound'); return bytes;
   };
   const artifact = parseClientReaderArtifact(JSON.parse(bounded(selected[1]!.path, 128 * 1024).toString('utf8')));

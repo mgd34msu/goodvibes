@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import { applyVerifiedUpdate, CHECKSUM_MANIFEST_NAME, DEFAULT_UPDATE_TIMEOUT_MS, parseChecksumFile, rollbackKeptPrevious, sha256, UpdateTransactionError,
   verifyChecksum, withUpdateBudget, type DaemonCurrentReader, type UpdateFetchLike, type UpdateRequestOptions } from './self-update.js';
 import { assertStagedClientReaderCompatible } from './client-reader-update.js';
-import { captureUpdateFileIo, hasNativeUpdateObservations, realUpdateFileIo, retainNativeUpdateDirectory, type UpdateFileIo } from './update-file-io.js';
+import { captureUpdateFileIo, observesUpdateFiles, realUpdateFileIo, retainNativeUpdateDirectory, type UpdateFileIo } from './update-file-io.js';
 import { NativeDirectoryUpdateError, prepareNativeDirectoryRollback, prepareNativeUpdateDirectory, retainNativeUpdateTree, type NativeUpdateDirectory } from './update-directories.js';
 import { resolveSuiteUpdatePlan, SeparatelyManagedWebuiError, type SuiteProgram, type SuiteUpdatePlan } from './suite-update-plan.js';
 import { inspectDaemonNativeInstallation, resolveDaemonInstallationReaders, resolveDaemonNativeTargets } from './daemon-native-cohort.js';
@@ -76,7 +76,7 @@ export function installedSuiteNeedsRepair(options: {
   readonly webuiDirectory?: string | undefined; readonly io?: UpdateFileIo;
 }): boolean {
   const io = captureUpdateFileIo(options.io ?? realUpdateFileIo);
-  if (!hasNativeUpdateObservations(io, io.readFile, io.observe)) return false;
+  if (!observesUpdateFiles(io)) return false;
   try {
     // A separately managed WebUI is refused by the update itself, with its own message; it is
     // not something repair can fix, so the other products are still checked without it.
@@ -188,7 +188,7 @@ export async function applySuiteUpdate(options: SuiteUpdateOptions): Promise<Sui
     let publishedTrees: readonly ReturnType<typeof retainNativeUpdateTree>[] = [];
     await applyVerifiedUpdate({ fetchImpl, downloadBaseUrl: options.downloadBaseUrl, targets: plan.files, io,
       platform: options.platform, native: true, readerExecPath: options.execPath,
-      ...(hasNativeUpdateObservations(io, io.readFile, io.observe) ? { retainPublication(currentFiles: () => void) {
+      ...(observesUpdateFiles(io) ? { retainPublication(currentFiles: () => void) {
         currentFiles();
         for (const directory of prepared) directory.assertCurrent();
         publishedTrees = plan.directories.map(directory => retainNativeUpdateTree(directory.path));

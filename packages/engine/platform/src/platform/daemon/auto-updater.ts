@@ -79,7 +79,7 @@ import { CLIENT_COMPATIBILITY_FLOOR } from '../control-plane/client-compatibilit
 import type { ServiceHandoverOutcome } from './service-handover.js';
 import { inspectDaemonUpdateInstallation, resolveDaemonUpdateTargets } from '../runtime/daemon-update-installation.js';
 import { assertStagedClientReaderCompatible } from '../runtime/client-reader-update.js';
-import { hasNativeUpdateObservations } from '../runtime/update-file-io.js';
+import { observesUpdateFiles } from '../runtime/update-file-io.js';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { applySuiteUpdate, installedSuiteNeedsRepair, retainSuiteUpdateConfiguration, SuiteUpdatePreparationError, SuiteUpdateRecoveryError, type SuiteUpdateResult } from '../runtime/suite-update.js';
 import { prepareHandoverBeforeStop, prepareServiceHandover, ServiceHandoverPreflightError, type PreparedServiceHandover } from './service-handover-preflight.js';
@@ -589,7 +589,7 @@ export class DaemonAutoUpdater {
     const installedTargets = resolveDaemonUpdateTargets(this.options.execPath, this.options.platform, this.options.arch);
     if (!installedTargets) return;
     const readerOwner = this.options.currentReader;
-    const retainedNative = readerOwner !== undefined && hasNativeUpdateObservations(io, io.readFile, io.observe);
+    const retainedNative = readerOwner !== undefined && observesUpdateFiles(io);
     const retainedCurrent = () => {
       if (!retainedNative || !readerOwner) return;
       const result: unknown = readerOwner.assertCurrent();

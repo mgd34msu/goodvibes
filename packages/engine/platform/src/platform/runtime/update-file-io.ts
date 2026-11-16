@@ -1,4 +1,4 @@
-/** Captured native update I/O and private physical-observation provenance. */
+/** Captured native update I/O. */
 import { chmodSync, closeSync, constants, fchmodSync, fstatSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import type { BigIntStats } from 'node:fs';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
@@ -61,27 +61,22 @@ export const realUpdateFileIo: UpdateFileIo = {
   },
 };
 
-// Only these actual OS readers and captures made here can certify physical
-// revisions. Neither Object.freeze nor a custom adapter's metadata is proof.
-const nativeReadFile = realUpdateFileIo.readFile, nativeObserve = realUpdateFileIo.observe;
-const nativeObservations = new WeakMap<UpdateFileIo, {
-  readonly readFile: UpdateFileIo['readFile']; readonly observe: UpdateFileIo['observe'];
-}>();
-function ownsNativeObservations(io: UpdateFileIo, readFile: UpdateFileIo['readFile'], observe: UpdateFileIo['observe']): boolean {
-  if (readFile === nativeReadFile && observe === nativeObserve) return true;
-  const owned = nativeObservations.get(io);
-  return owned !== undefined && owned.readFile === readFile && owned.observe === observe;
-}
-/** Internal provenance check. There is no exported registration/mint operation. */
-export function hasNativeUpdateObservations(io: UpdateFileIo, readFile: UpdateFileIo['readFile'], observe: UpdateFileIo['observe']): boolean {
-  return ownsNativeObservations(io, readFile, observe);
+/**
+ * Whether an adapter reads bytes and observes file identities, so native
+ * update paths hold files to their file-system identity (the rule
+ * `retainNativeUpdateSources` states) and use the cross-process lock and the
+ * retained-directory checks. One rule for every adapter: the daemon and the
+ * updaters pass `realUpdateFileIo`; an adapter is composition input, trusted
+ * like the rest of it.
+ */
+export function observesUpdateFiles(io: Pick<UpdateFileIo, 'readFile' | 'observe'>): boolean {
+  return io.readFile !== undefined && io.observe !== undefined;
 }
 
 /** Capture adapter methods before asynchronous caller preparation can replace them. */
 export function captureUpdateFileIo(io: UpdateFileIo): UpdateFileIo {
   const readFile = io.readFile, observe = io.observe;
-  const native = ownsNativeObservations(io, readFile, observe);
-  const captured: UpdateFileIo = {
+  return {
     writeFile: io.writeFile.bind(io), rename: io.rename.bind(io), chmod: io.chmod.bind(io),
     exists: io.exists.bind(io), mkdir: io.mkdir.bind(io),
     ...(io.writeExclusive ? { writeExclusive: io.writeExclusive.bind(io) } : {}),
@@ -89,8 +84,6 @@ export function captureUpdateFileIo(io: UpdateFileIo): UpdateFileIo {
     ...(readFile ? { readFile: readFile.bind(io) } : {}),
     ...(observe ? { observe: observe.bind(io) } : {}),
   };
-  if (native) nativeObservations.set(captured, { readFile: captured.readFile, observe: captured.observe });
-  return captured;
 }
 
 

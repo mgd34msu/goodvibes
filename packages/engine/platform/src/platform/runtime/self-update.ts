@@ -26,7 +26,7 @@ import { assertSynchronousJudgmentGuard, drainOwned } from '@goodvibes-jev/judgm
  * not a power-loss durable journal or a guarantee against unrelated writers.
  */
 import { createHash, randomUUID } from 'node:crypto';
-import { captureUpdateFileIo, createOwnedNativeUpdateFile, retainNativeUpdateDirectory, hasNativeUpdateObservations, realUpdateFileIo, type OwnedNativeUpdateFile, type NativeUpdateDirectoryOwner, type UpdateFileIo } from './update-file-io.js';
+import { captureUpdateFileIo, createOwnedNativeUpdateFile, retainNativeUpdateDirectory, observesUpdateFiles, realUpdateFileIo, type OwnedNativeUpdateFile, type NativeUpdateDirectoryOwner, type UpdateFileIo } from './update-file-io.js';
 export { captureUpdateFileIo, realUpdateFileIo, retainNativeUpdateDirectory, type NativeUpdateDirectoryOwner, type UpdateFileIo } from './update-file-io.js';
 import { dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import { compareSemanticVersions, parseSemanticVersion } from './semantic-version.js';
@@ -429,7 +429,7 @@ function createLogicalUpdateFile(path: string, bytes: Buffer, mode: number, io: 
 }
 function acquireUpdateReaderLease(execPath: string, io: UpdateFileIo, physical: () => void): () => void {
   const path = join(dirname(execPath), NATIVE_READER_REQUIREMENT_FILE + '.lock'); physical();
-  if (hasNativeUpdateObservations(io, io.readFile, io.observe)) {
+  if (observesUpdateFiles(io)) {
     const release = tryAcquireCrossProcessLock(path, { assertCurrent: physical });
     if (!release) throw new Error('Another native reader requirement publication is active');
     return release;
@@ -456,7 +456,7 @@ function transact(
   const journal: Array<{ from: string; to: string }> = [];
   let phase: UpdateTransactionReceipt['phase'] = 'claim', committed = false, blockedClaim = false, blockedStage = false;
   let nativeGuard: DaemonNativeRenameGuard | undefined, readerLease: (() => void) | undefined;
-  const nativeIo = hasNativeUpdateObservations(io, io.readFile, io.observe);
+  const nativeIo = observesUpdateFiles(io);
   const physical = () => restrictions.directory?.assertCurrent();
   const assertClaims = () => { for (const claim of activeClaims) { const owner = created.get(claim); if (!owner) throw new Error('Native update claim is unavailable'); owner.assertAt(claim); } };
   const current = () => { physical(); assertClaims(); assertSynchronousCurrent(restrictions.current); physical(); assertClaims(); };
@@ -666,7 +666,7 @@ export async function applyVerifiedUpdate(options: ApplyVerifiedUpdateOptions): 
   const readerExecPath = options.readerExecPath ?? native?.execPath ?? (options.native ? options.targets[0]?.path : undefined);
   if (readerExecPath && (!isAbsolute(readerExecPath) || resolve(readerExecPath) !== readerExecPath)) throw new Error('Native reader executable must be absolute and normalized');
   const capturedIo = options.io ?? realUpdateFileIo;
-  const directory = readerExecPath && hasNativeUpdateObservations(capturedIo, capturedIo.readFile, capturedIo.observe)
+  const directory = readerExecPath && observesUpdateFiles(capturedIo)
     ? retainNativeUpdateDirectory(dirname(readerExecPath), options.targets.map(target => dirname(target.path))) : undefined;
   const verifiedMembers = new Map<string, VerifiedUpdateMember>();
   let assertStagedCurrent: (() => void) | undefined;
@@ -865,7 +865,7 @@ export async function applyVerifiedUpdate(options: ApplyVerifiedUpdateOptions): 
     }
     const guard = createDaemonNativeRenameGuard(options.targets, io);
     assertStagedCurrent = guard.assertCurrent.bind(guard);
-    nativeStage = hasNativeUpdateObservations(io, io.readFile, io.observe);
+    nativeStage = observesUpdateFiles(io);
     return guard;
   } } : {}) });
 }
@@ -891,7 +891,7 @@ export function rollbackKeptPrevious(
   const paths = validateTargets(targets);
   const readerExecPath = options.readerExecPath ?? (options.native ? targets[0]?.path : undefined);
   if (readerExecPath && (!isAbsolute(readerExecPath) || resolve(readerExecPath) !== readerExecPath)) throw new Error('Native reader executable must be absolute and normalized');
-  const directory = readerExecPath && hasNativeUpdateObservations(io, io.readFile, io.observe)
+  const directory = readerExecPath && observesUpdateFiles(io)
     ? retainNativeUpdateDirectory(dirname(readerExecPath), targets.map(target => dirname(target.path))) : undefined;
   const restored: RollbackTarget[] = [];
   const skipped: RollbackTarget[] = [];

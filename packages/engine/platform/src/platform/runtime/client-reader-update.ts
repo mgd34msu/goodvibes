@@ -5,7 +5,6 @@ import { dirname, join } from 'node:path';
 import { assertNativeReaderCompatible, NATIVE_READER_REQUIREMENT_FILE, NativeDataCompatibilityError } from './native-reader-compatibility.js';
 import { assertClientReaderPayload, clientReaderMemberPath, clientReaderMemberAsset, clientReaderAsset, parseClientReaderArtifact, type ClientReaderArtifact } from './client-reader-artifact.js';
 import { verifiedUpdateStageMembers, type VerifiedUpdateStage } from './verified-update-stage.js';
-import { hasNativeUpdateObservations } from './update-file-io.js';
 import type { UpdateFileIo } from './update-file-io.js';
 
 export function assertStagedClientReaderCompatible(execPath: string, candidatePath: string, io: UpdateFileIo, expectedVersion?: string, expectedAsset?: string, verifiedStage?: VerifiedUpdateStage, requireEvidence = false): void {
@@ -31,7 +30,7 @@ export function assertStagedClientReaderCompatible(execPath: string, candidatePa
   const basename = execPath.slice(execPath.lastIndexOf('/') + 1);
   const product = artifact.packageName === '@goodvibes-jev/tui' ? 'goodvibes' : artifact.packageName === '@goodvibes-jev/agent' ? 'goodvibes-agent' : 'goodvibes-daemon';
   if (basename !== product && basename !== asset) throw new NativeDataCompatibilityError('unconfirmed-reader');
-  const alreadyVerified = suffix === '.update-download' && verifiedStage && hasNativeUpdateObservations(io, readFile, observe)
+  const alreadyVerified = suffix === '.update-download' && verifiedStage
     ? verifiedUpdateStageMembers(verifiedStage) : undefined;
   if (alreadyVerified && !alreadyVerified.some(member => member.path === execPath + '.readers.json' && member.assetName === asset + '.reader-ci-artifact.json')) throw new NativeDataCompatibilityError('unconfirmed-reader');
   for (const member of artifact.files) {

@@ -122,6 +122,14 @@ export const recallCommand: SlashCommand = {
     'Bare opens the Memory modal; project memory subcommands add decisions, constraints, incidents, and patterns with provenance',
   usage: '[<subcommand> [args]]: bare opens the modal; report prints the subcommand usage text',
   argsHint: 'add|search|link|get|list|remove|report',
+  confirm(args) {
+    if (args[0] !== 'remove' || !args[1]) return undefined;
+    return {
+      title: `Delete memory record ${args[1]}?`,
+      detail: `The durable memory record ${args[1]} and its links are deleted and cannot be recovered; /recall get ${args[1]} shows it first.`,
+      confirmLabel: 'Delete',
+    };
+  },
   handler: async (args: string[], context: CommandContext): Promise<void> => {
     const [sub, ...rest] = args;
 

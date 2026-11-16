@@ -1,4 +1,5 @@
 import type { TerminalSlashCommand } from './command-registry.js';
+import type { CommandSubcommandHints } from './command-args-hint.js';
 interface EntryContext {
   print(message: string): void;
   readonly openSettingsModal?: ((target?: string) => void) | undefined;
@@ -33,7 +34,7 @@ export function createConfigWorkspaceCommand<Context extends EntryContext>(polic
   readonly argsHint: string;
   readonly hidden?: boolean | undefined;
   readonly set?: ((args: string[], context: Context) => void | Promise<void>) | undefined;
-}): TerminalSlashCommand<Context> {
+}): TerminalSlashCommand<Context> & CommandSubcommandHints {
   return {
     name: 'config',
     aliases: ['cfg'],
@@ -41,6 +42,8 @@ export function createConfigWorkspaceCommand<Context extends EntryContext>(polic
     usage: policy.usage,
     argsHint: policy.argsHint,
     hidden: policy.hidden,
+    // Any other word opens the settings workspace filtered by it, so only `set` takes arguments.
+    subcommands: policy.set ? { set: '<key> <value>' } : undefined,
     async handler(args, context) {
       if (args[0] === 'set' && policy.set) {
         await policy.set(args, context);

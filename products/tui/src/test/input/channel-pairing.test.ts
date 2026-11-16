@@ -49,25 +49,21 @@ describe('/channel pair', () => {
     expect(text()).toContain('not set');
   });
 
-  it('verify reports missing credentials, then passes locally once every credential resolves', async () => {
+  it('verify marks only required values as missing, then passes once they are set', async () => {
     const { ctx, store, printed, text } = makeCtx();
-    await runChannelPairing(['slack', 'verify'], ctx);
-    expect(text()).toContain('[fail]');
+    await runChannelPairing(['signal', 'verify'], ctx);
+    expect(text()).toContain('[missing]');
     // No control-plane base URL is configured in this stub, so the live
     // round-trip is honestly reported as unavailable rather than skipped silently.
     expect(text()).toContain('Cannot perform a live round-trip');
 
-    // Populate every declared credential field for slack, then re-verify.
-    const schema = getBuiltinSetupSchema('slack');
-    for (const field of schema.fields) {
-      if (!field.configKey) continue;
-      if (field.kind === 'secret') store.set(field.configKey, 'goodvibes-secret://slack');
-      else if (field.kind === 'string' || field.kind === 'url' || field.kind === 'number') store.set(field.configKey, 'T123');
+    for (const field of getBuiltinSetupSchema('signal').fields) {
+      if (field.required && field.configKey && field.kind !== 'boolean') store.set(field.configKey, 'value');
     }
     printed.length = 0;
-    await runChannelPairing(['slack', 'verify'], ctx);
-    expect(text()).not.toContain('[fail]');
-    expect(text()).toContain('All declared credentials resolve');
+    await runChannelPairing(['signal', 'verify'], ctx);
+    expect(text()).not.toContain('[missing]');
+    expect(text()).toContain('Every required value is set');
   });
 
   describe('secret entry chain', () => {
@@ -100,33 +96,40 @@ describe('/channel pair', () => {
       }
     }
 
-    it('enables the surface only when every missing secret was stored', async () => {
+    const enabledKeyOf = (surface: 'signal' | 'ntfy' | 'telegram') =>
+      getBuiltinSetupSchema(surface).fields.find((f) => f.id === 'enabled')?.configKey as string;
+
+    it('asks for every missing required value, plain ones included, and enables the surface once they are set', async () => {
       const { ctx, store, text, prompts } = makeChainCtx(true);
-      const enabledKey = getBuiltinSetupSchema('slack').fields.find((f) => f.id === 'enabled')?.configKey as string;
-      await runChannelPairing(['slack'], ctx);
-      await answerAll(prompts, () => 'a-secret-value', () => text().includes('credentials stored'));
-      expect(store.get(enabledKey)).toBe(true);
-      expect(text()).toContain('and the surface is enabled');
+      await runChannelPairing(['signal'], ctx);
+      // Required values are asked first; the optional token is skipped with an empty answer.
+      await answerAll(prompts, (index) => (index < 2 ? 'https://bridge.example.test' : ''), () => text().includes('Verify with'));
+      expect(store.get('surfaces.signal.bridgeUrl')).toBe('https://bridge.example.test');
+      expect(store.get(enabledKeyOf('signal'))).toBe(true);
+      expect(text()).toContain('The surface is enabled');
     });
 
-    it('does not enable the surface or say stored when a secret was left empty', async () => {
+    it('does not enable the surface while a required value is left empty, and names it', async () => {
       const { ctx, store, text, prompts } = makeChainCtx(true);
-      const enabledKey = getBuiltinSetupSchema('slack').fields.find((f) => f.id === 'enabled')?.configKey as string;
-      await runChannelPairing(['slack'], ctx);
-      await answerAll(prompts, (index) => (index === 0 ? '' : 'a-secret-value'), () => text().includes('was NOT enabled'));
-      expect(store.get(enabledKey)).not.toBe(true);
+      await runChannelPairing(['signal'], ctx);
+      await answerAll(prompts, () => '', () => text().includes('was NOT enabled'));
+      expect(store.get(enabledKeyOf('signal'))).not.toBe(true);
       expect(text()).toContain('was NOT enabled: still missing');
-      expect(text()).not.toContain('credentials stored');
     });
 
-    it('does not enable the surface when every store fails', async () => {
+    it('a skipped optional value does not block enabling', async () => {
+      const { ctx, store, text, prompts } = makeChainCtx(true);
+      await runChannelPairing(['ntfy'], ctx);
+      await answerAll(prompts, () => '', () => text().includes('Verify with'));
+      expect(store.get(enabledKeyOf('ntfy'))).toBe(true);
+    });
+
+    it('does not enable the surface when a required secret could not be stored', async () => {
       const { ctx, store, text, prompts } = makeChainCtx(false);
-      const enabledKey = getBuiltinSetupSchema('slack').fields.find((f) => f.id === 'enabled')?.configKey as string;
-      await runChannelPairing(['slack'], ctx);
+      await runChannelPairing(['telegram'], ctx);
       await answerAll(prompts, () => 'a-secret-value', () => text().includes('was NOT enabled'));
       expect(text()).toContain('Failed to store');
-      expect(store.get(enabledKey)).not.toBe(true);
-      expect(text()).not.toContain('credentials stored');
+      expect(store.get(enabledKeyOf('telegram'))).not.toBe(true);
     });
   });
 });

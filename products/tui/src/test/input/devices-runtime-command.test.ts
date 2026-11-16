@@ -67,7 +67,7 @@ describe('/devices command', () => {
 
   test('revoke removes the token', async () => {
     const tokens = fakePairingTokens(SAMPLE);
-    const text = await run(tokens, ['revoke', 'cccc']);
+    const text = await run(tokens, ['revoke', 'cccc', '--yes']);
     expect(text).toContain('Revoked "kitchen tablet"');
     expect(tokens._tokens().some((t) => t.id === 'cccc3333dddd')).toBe(false);
   });

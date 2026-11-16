@@ -151,7 +151,7 @@ describe('hooks command', () => {
 
     out.length = 0;
     await hooks!.handler(['import', bundlePath, 'replace'], ctx);
-    expect(out.join('\n')).toContain('Nothing was imported');
+    expect(out.join('\n')).toContain('not done');
     expect(out.join('\n')).toContain('--yes');
     expect(existsSync(configManager.get('tools.hooksFile') as string) ? readFileSync(configManager.get('tools.hooksFile') as string, 'utf-8') : '').not.toContain('after-tool');
 

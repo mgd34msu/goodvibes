@@ -10,8 +10,10 @@
  * transcript.
  *
  *   /channel pair                  → list adapters + how many credentials are set
- *   /channel pair <surface>        → show the adapter's declared credentials and
- *                                     prompt (masked) for each missing secret
+ *   /channel pair <surface>        → show the adapter's declared fields, ask for
+ *                                     every missing required one (and offer the
+ *                                     optional ones, skippable), then enable the
+ *                                     surface once every required field is set
  *   /channel pair <surface> verify → a REAL round-trip: send a test message
  *                                     through the daemon (channels.test.send)
  *                                     and report the actual delivered/error
@@ -59,6 +61,17 @@ function enabledConfigKey(schema: ChannelSetupSchema): ConfigKey | undefined {
   return schema.fields.find((f) => f.id === 'enabled' && f.kind === 'boolean')?.configKey as ConfigKey | undefined;
 }
 
+/**
+ * Whether a surface is switched on in settings, read through the key its setup
+ * schema declares (`surfaces.googleChat.enabled` for google-chat); undefined
+ * for a surface with no schema or no such switch.
+ */
+export function surfaceEnabledInSettings(configManager: ConfigManager, surface: string): boolean | undefined {
+  const schema = findSchema(surface);
+  const key = schema ? enabledConfigKey(schema) : undefined;
+  return key === undefined ? undefined : configManager.get(key) === true;
+}
+
 function fieldValue(field: ChannelSetupFieldDescriptor, configManager: ConfigManager): string {
   if (!field.configKey) return '';
   const raw = configManager.get(field.configKey as ConfigKey);
@@ -71,7 +84,7 @@ function fieldConfigured(field: ChannelSetupFieldDescriptor, configManager: Conf
   return fieldValue(field, configManager).length > 0;
 }
 
-/** Credential fields the user must supply, secret (masked) and plain text; booleans/selects are defaulted. */
+/** Values the user supplies, secret and plain; booleans and selects carry defaults. Each says whether it is required. */
 function credentialFields(schema: ChannelSetupSchema): ChannelSetupFieldDescriptor[] {
   return schema.fields.filter((field) => field.kind === 'secret' || field.kind === 'string' || field.kind === 'url' || field.kind === 'number');
 }
@@ -94,7 +107,9 @@ function listAdapters(ctx: CommandContext): void {
     const set = creds.filter((f) => fieldConfigured(f, configManager)).length;
     const enabledKey = enabledConfigKey(schema);
     const enabled = enabledKey !== undefined && configManager.get(enabledKey) === true;
-    const state = creds.length === 0 ? 'no credentials' : `${set}/${creds.length} set`;
+    const required = creds.filter((f) => f.required);
+    const requiredSet = required.filter((f) => fieldConfigured(f, configManager)).length;
+    const state = creds.length === 0 ? 'no values' : required.length > 0 ? `${requiredSet}/${required.length} required set` : `${set}/${creds.length} optional set`;
     lines.push(`  ${surface.padEnd(14)} ${schema.label.padEnd(22)} ${state.padEnd(12)} ${enabled ? '(enabled)' : ''}`);
   }
   lines.push('');
@@ -108,7 +123,7 @@ function renderSurface(schema: ChannelSetupSchema, configManager: ConfigManager)
     const configured = fieldConfigured(field, configManager);
     const kindTag = field.kind === 'secret' ? 'secret' : 'value';
     const status = configured ? 'set' : 'not set';
-    lines.push(`  - ${field.label} (${kindTag}): ${status}; ${fieldHint(field, schema)}`);
+    lines.push(`  - ${field.label} (${kindTag}, ${field.required ? 'required' : 'optional'}): ${status}; ${fieldHint(field, schema)}`);
   }
   if (schema.externalSteps.length > 0) {
     lines.push('', 'External setup steps:');
@@ -117,61 +132,94 @@ function renderSurface(schema: ChannelSetupSchema, configManager: ConfigManager)
   return lines;
 }
 
-/** Chain a masked prompt for each missing secret field, storing each securely. */
-function promptMissingSecrets(
+/** Required fields that still have no stored value. */
+function missingRequired(schema: ChannelSetupSchema, configManager: ConfigManager): ChannelSetupFieldDescriptor[] {
+  return credentialFields(schema).filter((field) => field.required && !fieldConfigured(field, configManager));
+}
+
+/**
+ * Enable the surface when every required field has a value, or say which are
+ * missing. Optional fields never block it.
+ */
+function finishPairing(ctx: CommandContext, schema: ChannelSetupSchema, storedAny: boolean): void {
+  const configManager = ctx.platform.configManager;
+  const missing = missingRequired(schema, configManager);
+  if (missing.length > 0) {
+    // Enabling a surface with a required value missing would start it half-configured.
+    ctx.print(`\n${schema.label} was NOT enabled: still missing ${missing.map((f) => f.label).join(', ')} (required). Re-run /channel pair ${schema.surface} to enter ${missing.length === 1 ? 'it' : 'them'}.`);
+    ctx.renderRequest();
+    return;
+  }
+  const enabledKey = enabledConfigKey(schema);
+  const wasEnabled = enabledKey !== undefined && configManager.get(enabledKey) === true;
+  if (enabledKey !== undefined && !wasEnabled) configManager.setDynamic(enabledKey, true);
+  const state = enabledKey === undefined ? '' : wasEnabled ? ' The surface was already enabled.' : ' The surface is enabled.';
+  ctx.print(`\n${schema.label}: every required value is set${storedAny ? ' and the new ones are stored' : ''}.${state} Verify with: /channel pair ${schema.surface} verify`);
+  ctx.renderRequest();
+}
+
+/** Store one entered value: secrets through the secret store (config keeps a reference), plain values in config. */
+async function storeFieldValue(ctx: CommandContext, field: ChannelSetupFieldDescriptor, configKey: ConfigKey, value: string): Promise<void> {
+  const configManager = ctx.platform.configManager;
+  if (field.kind === 'secret') {
+    await persistSecretBackedConfigValue(configManager, ctx.platform.secretsManager, configKey, value);
+    return;
+  }
+  if (field.kind === 'number') {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) throw new Error(`"${value}" is not a number`);
+    configManager.setDynamic(configKey, parsed);
+    return;
+  }
+  configManager.setDynamic(configKey, value);
+}
+
+/** Ask for each missing field in turn (required first), then finish. A skipped optional field is not a failure. */
+function promptMissingFields(
   ctx: CommandContext,
   schema: ChannelSetupSchema,
   missing: readonly ChannelSetupFieldDescriptor[],
   index: number,
-  /** Labels of fields that ended up with no stored value (skipped, left empty, or a failed write). */
-  notStored: readonly string[] = [],
+  storedAny = false,
 ): void {
-  const configManager = ctx.platform.configManager;
   if (index >= missing.length) {
-    if (notStored.length > 0) {
-      // Enabling a surface with credentials missing would start it half-configured.
-      ctx.print(`\n${schema.label} was NOT enabled: still missing ${notStored.join(', ')}. Re-run /channel pair ${schema.surface} to enter ${notStored.length === 1 ? 'it' : 'them'}.`);
-      ctx.renderRequest();
-      return;
-    }
-    const enabledKey = enabledConfigKey(schema);
-    if (enabledKey !== undefined) configManager.setDynamic(enabledKey, true);
-    ctx.print(`\n${schema.label} credentials stored${enabledKey !== undefined ? ' and the surface is enabled' : ''}. Verify with: /channel pair ${schema.surface} verify`);
-    ctx.renderRequest();
+    finishPairing(ctx, schema, storedAny);
     return;
   }
   const field = missing[index]!;
   if (!field.configKey) {
     ctx.print(`[pair] ${field.label} has no config key declared; skipping.`);
-    promptMissingSecrets(ctx, schema, missing, index + 1, [...notStored, field.label]);
+    promptMissingFields(ctx, schema, missing, index + 1, storedAny);
     return;
   }
   const configKey = field.configKey as ConfigKey;
   if (!ctx.beginConcealedInput) {
-    ctx.print('[pair] Concealed input is unavailable on this surface; set credentials via /config and re-run verify.');
+    ctx.print(`[pair] This surface cannot take typed input; set ${missing.slice(index).map((f) => `${f.label} (${f.configKey})`).join(', ')} with /config, then run /channel pair ${schema.surface} again.`);
     return;
   }
-  ctx.print(`[pair] Enter ${field.label} (${field.placeholder || 'value'}): masked; Enter to store, Esc to stop.`);
+  const what = field.required ? 'required' : 'optional, Enter to skip';
+  ctx.print(`[pair] Enter ${field.label} (${field.placeholder || fieldHint(field, schema)}; ${what}): typing is masked; Esc to stop.`);
   ctx.beginConcealedInput({
     label: field.label,
     onSubmit: (value) => {
-      if (value.length === 0) {
-        ctx.print(`[pair] ${field.label} left unset.`);
-        promptMissingSecrets(ctx, schema, missing, index + 1, [...notStored, field.label]);
+      const entered = value.trim();
+      if (entered.length === 0) {
+        ctx.print(`[pair] ${field.label} ${field.required ? 'left unset' : 'skipped'}.`);
+        promptMissingFields(ctx, schema, missing, index + 1, storedAny);
         return;
       }
-      void persistSecretBackedConfigValue(configManager, ctx.platform.secretsManager, configKey, value)
+      void storeFieldValue(ctx, field, configKey, entered)
         .then(() => {
-          ctx.print(`[pair] ${field.label} stored securely (hidden).`);
-          promptMissingSecrets(ctx, schema, missing, index + 1, notStored);
+          ctx.print(`[pair] ${field.label} stored${field.kind === 'secret' ? ' securely (hidden)' : ''}.`);
+          promptMissingFields(ctx, schema, missing, index + 1, true);
         })
         .catch((error: unknown) => {
           ctx.print(`[pair] Failed to store ${field.label}: ${error instanceof Error ? error.message : String(error)}`);
-          promptMissingSecrets(ctx, schema, missing, index + 1, [...notStored, field.label]);
+          promptMissingFields(ctx, schema, missing, index + 1, storedAny);
         });
     },
     onCancel: () => {
-      ctx.print(`[pair] Stopped. Re-run /channel pair ${schema.surface} to finish the remaining credentials.`);
+      ctx.print(`[pair] Stopped. Re-run /channel pair ${schema.surface} to finish the remaining values.`);
     },
   });
 }
@@ -188,14 +236,14 @@ async function verifySurface(ctx: CommandContext, schema: ChannelSetupSchema): P
   const missing: ChannelSetupFieldDescriptor[] = [];
   for (const field of creds) {
     const ok = fieldConfigured(field, configManager);
-    if (!ok) missing.push(field);
-    lines.push(`  ${ok ? '[ok]  ' : '[fail]'} ${field.label}${ok ? '' : '; missing'}`);
+    if (!ok && field.required) missing.push(field);
+    lines.push(`  ${ok ? '[set] ' : field.required ? '[missing]' : '[unset]'} ${field.label}${field.required ? '' : ' (optional)'}`);
   }
   lines.push('');
   if (missing.length === 0) {
-    lines.push('All declared credentials resolve.');
+    lines.push('Every required value is set. The live test below is what shows they work.');
   } else {
-    lines.push(`${missing.length} credential(s) still missing: ${missing.map((f) => f.label).join(', ')}.`);
+    lines.push(`${missing.length} required value(s) missing: ${missing.map((f) => f.label).join(', ')}.`);
     lines.push(`Run /channel pair ${schema.surface} to enter them.`);
   }
   ctx.print(lines.join('\n'));
@@ -238,16 +286,13 @@ export async function runChannelPairing(args: readonly string[], ctx: CommandCon
 
   const configManager = ctx.platform.configManager;
   ctx.print(renderSurface(schema, configManager).join('\n'));
-  const creds = credentialFields(schema);
-  const missingSecrets = creds.filter((f) => f.kind === 'secret' && !fieldConfigured(f, configManager));
-  const missingText = creds.filter((f) => f.kind !== 'secret' && !fieldConfigured(f, configManager));
-  if (missingText.length > 0) {
-    ctx.print(`\nNon-secret values to set with /config (or accept defaults): ${missingText.map((f) => `${f.label} → ${f.configKey}`).join('; ')}`);
-  }
-  if (missingSecrets.length === 0) {
-    ctx.print(`\nNo missing secrets. Verify with: /channel pair ${schema.surface} verify`);
+  const unset = credentialFields(schema).filter((f) => !fieldConfigured(f, configManager));
+  const missing = [...unset.filter((f) => f.required), ...unset.filter((f) => !f.required)];
+  if (missing.length === 0) {
+    finishPairing(ctx, schema, false);
     return;
   }
-  ctx.print(`\nEntering ${missingSecrets.length} secret credential(s): Esc to stop.`);
-  promptMissingSecrets(ctx, schema, missingSecrets, 0);
+  const required = missing.filter((f) => f.required).length;
+  ctx.print(`\nEntering ${missing.length} value(s)${required > 0 ? `, ${required} required` : ', all optional'}: Esc to stop.`);
+  promptMissingFields(ctx, schema, missing, 0);
 }

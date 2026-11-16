@@ -13,7 +13,7 @@ import { createEmptyLine, type Line } from '@goodvibes-jev/engine/platform/platf
 import type { HostedSessionFeedState, HostedSessionRow } from '../views/hosted-session-feed.ts';
 import type { AgentsText } from '../renderer/agents-modal.ts';
 import { activeTokens } from '../renderer/theme.ts';
-import { wrapText, getDisplayWidth } from '../utils/terminal-width.ts';
+import { wrapText, getDisplayWidth, expandTabs } from '../utils/terminal-width.ts';
 
 /** What the hosted session is, what it is doing, and what leaving it would do. */
 export function hostedHeaderTexts(state: HostedSessionFeedState): AgentsText[] {
@@ -30,6 +30,7 @@ export function hostedHeaderTexts(state: HostedSessionFeedState): AgentsText[] {
   ];
   if (record.status === 'terminated') lines.push({ text: `ended: ${record.terminatedReason ?? 'no reason recorded'}`, tone: 'error' });
   if (record.restoredFromDisk) lines.push({ text: 'restored from disk after a daemon restart', tone: 'warning' });
+  if (record.saveError) lines.push({ text: `not saved: ${record.saveError}. What it did since its last save is lost if the daemon restarts.`, tone: 'error' });
   lines.push(state.streaming
     ? { text: 'live event stream open', tone: 'success' }
     : { text: `no live stream: ${state.streamNote ?? 'not subscribed'}`, tone: 'warning' });
@@ -53,6 +54,9 @@ export function hostedRowTexts(rows: readonly HostedSessionRow[]): AgentsText[] 
   });
 }
 
+/** Combining marks other than variation selectors (which change a glyph's width). */
+const COMBINING_MARK = /^(?![\uFE00-\uFE0F\u{E0100}-\u{E01EF}])\p{M}$/u;
+
 export interface HostedTranscriptLine {
   readonly line: Line;
   readonly row: number;
@@ -67,18 +71,27 @@ export function hostedTranscriptLines(rows: readonly HostedSessionRow[], width: 
   const textWidth = Math.max(8, width - 9);
   for (const [row, item] of hostedRowTexts(rows).entries()) {
     const fg = item.tone === 'error' ? t.error : item.tone === 'brand' ? t.brand : item.tone === 'faint' ? t.textFaint : t.text;
-    const text = item.glyph ? `${item.glyph} ${item.text}` : item.text;
+    const text = expandTabs(item.glyph ? `${item.glyph} ${item.text}` : item.text);
     let nextOffset = 0;
     for (const part of wrapText(text, textWidth)) {
       const offset = Math.max(nextOffset, text.indexOf(part, nextOffset));
       nextOffset = offset + Math.max(1, part.length);
       const line = createEmptyLine(width);
       let x = 5;
+      let last = -1;
       for (const ch of part) {
         const w = getDisplayWidth(ch);
-        if (w <= 0 || x + w > width - 4) break;
+        if (w <= 0) {
+          // A zero-width code point takes no cell of its own: a combining
+          // accent joins the character before it; a joiner or variation
+          // selector is dropped so the cell keeps the width counted for it.
+          if (last >= 0 && COMBINING_MARK.test(ch)) line[last] = { ...line[last]!, char: line[last]!.char + ch };
+          continue;
+        }
+        if (x + w > width - 4) break;
         line[x] = { ...line[x]!, char: ch, fg, bold: item.bold === true };
         if (w === 2) line[x + 1] = { ...line[x]!, char: '' };
+        last = x;
         x += w;
       }
       out.push({ line, row, offset });

@@ -46,9 +46,9 @@ describe('/cloudflare guards', () => {
     expect(requests).toHaveLength(0);
   });
 
-  test('disable without --yes describes the effect and sends nothing', async () => {
+  test('disable without --yes, on a surface that cannot ask, describes the effect and sends nothing', async () => {
     const text = await run(['disable']);
-    expect(text).toContain('Nothing was changed');
+    expect(text).toContain('not done');
     expect(text).toContain('--yes');
     expect(requests).toHaveLength(0);
   });

@@ -39,7 +39,7 @@ function setup(options: { invokedByModel?: boolean; failFirstSend?: boolean } = 
   return { run, invocations, sends: () => invocations.filter((entry) => entry.method === 'email.send').length };
 }
 
-const SEND = ['send', 'a@b.com', '|', 'Hi', '|', 'Body', '--confirm'];
+const SEND = ['send', 'a@b.com', '|', 'Hi', '|', 'Body', '--yes'];
 
 describe('/mail send', () => {
   test('the same confirmed message is not sent twice from one session unless --again is given', async () => {
@@ -58,9 +58,9 @@ describe('/mail send', () => {
     expect(f.sends()).toBe(1);
   });
 
-  test('a model-invoked confirmed send is refused and reaches no daemon verb', async () => {
+  test('a model-invoked send carrying --yes is put to the owner and, with no dialog, reaches no daemon verb', async () => {
     const f = setup({ invokedByModel: true });
-    expect(await f.run('mail', SEND)).toContain('must be typed by the user');
+    expect(await f.run('mail', SEND)).toContain('not done');
     expect(f.sends()).toBe(0);
   });
 
@@ -73,7 +73,7 @@ describe('/mail send', () => {
 });
 
 describe('/calendar create', () => {
-  const CREATE = ['create', 'Review', '|', '2026-08-01T14:00:00Z', '|', '2026-08-01T15:00:00Z', '--confirm'];
+  const CREATE = ['create', 'Review', '|', '2026-08-01T14:00:00Z', '|', '2026-08-01T15:00:00Z', '--yes'];
 
   test('an identical event is not created twice unless --again is given', async () => {
     const f = setup();
@@ -82,9 +82,9 @@ describe('/calendar create', () => {
     expect(f.invocations.filter((entry) => entry.method === 'calendar.events.create')).toHaveLength(1);
   });
 
-  test('a model-invoked confirmed create is refused', async () => {
+  test('a model-invoked create carrying --yes is put to the owner and, with no dialog, creates nothing', async () => {
     const f = setup({ invokedByModel: true });
-    expect(await f.run('calendar', CREATE)).toContain('must be typed by the user');
+    expect(await f.run('calendar', CREATE)).toContain('not done');
     expect(f.invocations.filter((entry) => entry.method === 'calendar.events.create')).toHaveLength(0);
   });
 });

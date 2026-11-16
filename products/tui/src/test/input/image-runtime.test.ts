@@ -1,8 +1,9 @@
 // ---------------------------------------------------------------------------
 // image-runtime.test.ts, /imagine
 //
-// Pure command-layer test: fake MediaProviderRegistry + ArtifactStore on
-// ctx.platform (no real network calls, no real filesystem writes),
+// Command-layer test: fake MediaProviderRegistry + ArtifactStore on
+// ctx.platform (no real network calls; images are written under a temporary
+// working directory and no viewer is opened),
 // following the project's existing runtime-command test pattern (see
 // workstream-runtime-command.test.ts's makeCtx()). Exercises: the
 // providers/store-absent guard, empty-prompt usage message, honest
@@ -16,6 +17,10 @@ import { CommandRegistry } from '../../input/command-registry.ts';
 import type { CommandContext } from '../../input/command-registry.ts';
 import { registerImageRuntimeCommands } from '../../input/commands/image-runtime.ts';
 import { withPublicErrorText } from '../helpers/user-error-reading.ts';
+import { readdirSync } from 'node:fs';
+import { join } from 'node:path';
+import { createShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
 interface FakeGenerateResult {
   providerId: string;
@@ -59,6 +64,7 @@ function makeFakeArtifactStore() {
   let nextId = 1;
   return {
     created,
+    readContent: async (_id: string) => ({ buffer: Buffer.from('remote-bytes') }),
     create: async (input: Record<string, unknown>) => {
       created.push(input);
       const id = `artifact-${nextId++}`;
@@ -80,22 +86,23 @@ function makeFakeArtifactStore() {
 
 function makeCtx(mediaProviders?: ReturnType<typeof makeFakeMediaProviders>, artifactStore?: ReturnType<typeof makeFakeArtifactStore>) {
   const printed: string[] = [];
+  const root = makeProjectTempDir('gv-imagine');
   const ctx = {
     print: (text: string) => { printed.push(text); },
     session: {},
-    workspace: {},
+    workspace: { shellPaths: createShellPathService({ workingDirectory: root, homeDirectory: root }) },
     provider: {},
     platform: { mediaProviders, artifactStore },
     ops: {},
     extensions: {},
   } as unknown as CommandContext;
-  return { ctx, printed };
+  return { ctx, printed, root };
 }
 
 describe('/imagine: honest degradation', () => {
   test('prints an honest message when mediaProviders/artifactStore are not available', async () => {
     const registry = new CommandRegistry();
-    registerImageRuntimeCommands(registry);
+    registerImageRuntimeCommands(registry, { openFile: async () => false });
     const { ctx, printed } = makeCtx(undefined, undefined);
 
     await registry.execute('imagine', ['a', 'cat'], ctx);
@@ -105,7 +112,7 @@ describe('/imagine: honest degradation', () => {
 
   test('prints the registry\'s own per-provider status when no generate-capable provider is found', async () => {
     const registry = new CommandRegistry();
-    registerImageRuntimeCommands(registry);
+    registerImageRuntimeCommands(registry, { openFile: async () => false });
     const mediaProviders = makeFakeMediaProviders(null, [
       { id: 'byteplus', label: 'BytePlus', state: 'unconfigured', capabilities: ['generate'], configured: false, detail: 'Set BYTEPLUS_API_KEY to enable BytePlus video generation.' },
       { id: 'fal', label: 'fal', state: 'unconfigured', capabilities: ['generate'], configured: false, detail: 'Set FAL_KEY or FAL_API_KEY to enable fal generation.' },
@@ -124,7 +131,7 @@ describe('/imagine: honest degradation', () => {
 
   test('states plainly when no media-generation providers are registered at all', async () => {
     const registry = new CommandRegistry();
-    registerImageRuntimeCommands(registry);
+    registerImageRuntimeCommands(registry, { openFile: async () => false });
     const mediaProviders = makeFakeMediaProviders(null, []);
     const artifactStore = makeFakeArtifactStore();
     const { ctx, printed } = makeCtx(mediaProviders, artifactStore);
@@ -136,7 +143,7 @@ describe('/imagine: honest degradation', () => {
 
   test('renders a failure message from a thrown error', async () => {
     const registry = new CommandRegistry();
-    registerImageRuntimeCommands(registry);
+    registerImageRuntimeCommands(registry, { openFile: async () => false });
     const provider = makeFakeProvider({ throwError: new Error('provider API rejected the request') });
     const mediaProviders = makeFakeMediaProviders(provider);
     const artifactStore = makeFakeArtifactStore();
@@ -153,7 +160,7 @@ describe('/imagine: honest degradation', () => {
 
   test('a provider failure never prints the credential it echoes and cannot store an artifact', async () => {
     const registry = new CommandRegistry();
-    registerImageRuntimeCommands(registry);
+    registerImageRuntimeCommands(registry, { openFile: async () => false });
     const provider = makeFakeProvider({ throwError: new Error('Bearer synthetic-private-provider-token') });
     const artifactStore = makeFakeArtifactStore();
     const { ctx, printed } = makeCtx(makeFakeMediaProviders(provider), artifactStore);
@@ -172,11 +179,11 @@ describe('/imagine: honest degradation', () => {
 describe('/imagine: success paths', () => {
   test('persists an inline-bytes artifact and renders its id', async () => {
     const registry = new CommandRegistry();
-    registerImageRuntimeCommands(registry);
+    registerImageRuntimeCommands(registry, { openFile: async () => false });
     const provider = makeFakeProvider();
     const mediaProviders = makeFakeMediaProviders(provider);
     const artifactStore = makeFakeArtifactStore();
-    const { ctx, printed } = makeCtx(mediaProviders, artifactStore);
+    const { ctx, printed, root } = makeCtx(mediaProviders, artifactStore);
 
     await registry.execute('imagine', ['a', 'cat', 'wearing', 'a', 'hat'], ctx);
 
@@ -186,12 +193,16 @@ describe('/imagine: success paths', () => {
     expect(artifactStore.created[0]!['dataBase64']).toBe('ZmFrZS1ieXRlcw==');
     const text = printed.join('\n');
     expect(text).toContain('Generated 1 artifact(s) via Fake Generator (fake-gen)');
-    expect(text).toContain('artifact: artifact-1');
+    expect(text).toContain('saved: generated/a-cat-wearing-a-hat-');
+    expect(text).toContain('artifact artifact-1');
+    const saved = readdirSync(join(root, 'generated'));
+    expect(saved).toHaveLength(1);
+    expect(saved[0]).toEndWith('.png');
   });
 
   test('keeps the bytes of a remote artifact instead of a link that expires', async () => {
     const registry = new CommandRegistry();
-    registerImageRuntimeCommands(registry);
+    registerImageRuntimeCommands(registry, { openFile: async () => false });
     const provider = makeFakeProvider({
       generateResult: {
         providerId: 'fake-gen',
@@ -209,12 +220,12 @@ describe('/imagine: success paths', () => {
     const stored = artifactStore.created[0]!;
     expect(stored['uri']).toBe('https://provider.example/out.png');
     expect(stored['fetchMode']).toBe('public-only');
-    expect(printed.join('\n')).toContain('artifact: artifact-1');
+    expect(printed.join('\n')).toContain('artifact artifact-1');
   });
 
   test('notes honestly when the found provider produced a non-image artifact', async () => {
     const registry = new CommandRegistry();
-    registerImageRuntimeCommands(registry);
+    registerImageRuntimeCommands(registry, { openFile: async () => false });
     const provider = makeFakeProvider({
       label: 'BytePlus',
       generateResult: {
@@ -237,7 +248,7 @@ describe('/imagine: success paths', () => {
 describe('/imagine: partial storage', () => {
   test('a storage failure on the second artifact still reports the first and counts what was kept', async () => {
     const registry = new CommandRegistry();
-    registerImageRuntimeCommands(registry);
+    registerImageRuntimeCommands(registry, { openFile: async () => false });
     const provider = makeFakeProvider({
       generateResult: {
         providerId: 'fake-gen',
@@ -261,7 +272,7 @@ describe('/imagine: partial storage', () => {
     await registry.execute('imagine', ['a', 'cat'], ctx);
 
     const text = printed.join('\n');
-    expect(text).toContain('artifact: artifact-1');
+    expect(text).toContain('artifact artifact-1');
     expect(text).toContain('artifact 2: could not be stored');
     expect(text).toContain('1 of 2 artifact(s) were stored');
     expect(text).not.toContain('Image generation failed');

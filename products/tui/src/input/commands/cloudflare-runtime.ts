@@ -12,10 +12,84 @@ import {
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { requireShellPaths } from './runtime-services.ts';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { parseDeclaredFlags, type DeclaredFlags, type ParsedDeclaredFlags } from './declared-flags.ts';
 
-interface ParsedCloudflareArgs {
-  readonly positional: readonly string[];
-  readonly flags: ReadonlyMap<string, readonly string[]>;
+type ParsedCloudflareArgs = ParsedDeclaredFlags;
+
+const AUTH_FLAGS = ['account', 'account-id', 'token', 'token-env', 'token-ref'] as const;
+const COMPONENT_FLAGS = ['component', 'no-component'] as const;
+const ZONE_FLAGS = ['zone-id', 'zone', 'zone-name'] as const;
+/** Every value of `--batch-mode` the daemon accepts. */
+const BATCH_MODES = ['off', 'explicit', 'eligible-by-default'] as const;
+
+/**
+ * Each subcommand's flags, declared once: the parse, the unknown-flag refusal
+ * and the "needs a value" refusal all come from this table. `components` says
+ * whether bare words name components (`provision tunnel kv`). `--yes` is
+ * accepted everywhere as the owner's answer given in advance.
+ */
+const SUBCOMMAND_FLAGS: Readonly<Record<string, DeclaredFlags & { readonly components: boolean }>> = {
+  status: { values: [], booleans: ['yes'], components: false },
+  show: { values: [], booleans: ['yes'], components: false },
+  requirements: { values: [...COMPONENT_FLAGS], booleans: ['all', 'advanced', 'yes'], components: true },
+  'create-token': {
+    values: [...COMPONENT_FLAGS, ...ZONE_FLAGS, 'account', 'account-id', 'bootstrap-token', 'bootstrap-env'],
+    booleans: ['all', 'advanced', 'yes'],
+    components: true,
+  },
+  discover: { values: [...AUTH_FLAGS, ...COMPONENT_FLAGS, ...ZONE_FLAGS], booleans: ['fast', 'all', 'advanced', 'yes'], components: true },
+  validate: { values: [...AUTH_FLAGS], booleans: ['yes'], components: false },
+  provision: {
+    values: [
+      ...AUTH_FLAGS, ...COMPONENT_FLAGS, ...ZONE_FLAGS,
+      'daemon-url', 'daemon-hostname', 'worker-name', 'worker-subdomain', 'worker-hostname', 'worker-url',
+      'queue', 'queue-name', 'dlq', 'dead-letter-queue', 'tunnel-name', 'tunnel-id', 'tunnel-service-url', 'tunnel-token-ref',
+      'access-app-id', 'access-service-token-id', 'access-service-token-ref', 'kv-namespace-name', 'kv-namespace-id',
+      'do-namespace-name', 'durable-object-namespace-name', 'r2-bucket-name', 'secrets-store-name', 'secrets-store-id',
+      'worker-cron', 'operator-token', 'operator-token-ref', 'worker-client-token', 'worker-client-token-ref', 'batch-mode',
+    ],
+    booleans: ['all', 'advanced', 'no-verify', 'no-store-token', 'no-workers-dev', 'yes'],
+    components: true,
+  },
+  verify: { values: ['worker-url', 'worker-token', 'worker-token-ref'], booleans: ['yes'], components: false },
+  disable: { values: [...AUTH_FLAGS, 'worker-name'], booleans: ['keep-cron', 'keep-worker-subdomain', 'yes'], components: false },
+};
+const CLOUDFLARE_USAGE = 'Usage: /cloudflare [status|setup|requirements|create-token|discover|validate|provision|verify|disable] [flags]';
+
+/**
+ * Parse one line against its subcommand's declared flags and refuse, before
+ * any request, an unknown flag, a value flag with no value, a word that names
+ * no component, an invalid --batch-mode and a --token-env/--bootstrap-env
+ * naming a variable this app does not have.
+ */
+export function readCloudflareLine(
+  subcommand: string,
+  args: readonly string[],
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): { readonly ok: true; readonly parsed: ParsedCloudflareArgs } | { readonly ok: false; readonly problem: string } {
+  const spec = SUBCOMMAND_FLAGS[subcommand];
+  if (!spec) return { ok: false, problem: CLOUDFLARE_USAGE };
+  const parsed = parseDeclaredFlags(args, spec);
+  if (!parsed.ok) return parsed;
+  const words = spec.components ? [...parsed.positional, ...getFlagValues(parsed, 'component'), ...getFlagValues(parsed, 'no-component')] : [];
+  const unknownComponents = words.filter((word) => normalizeComponent(word) === null);
+  if (unknownComponents.length > 0) {
+    return { ok: false, problem: `${unknownComponents.map((word) => `"${word}"`).join(', ')} ${unknownComponents.length === 1 ? 'names' : 'name'} no component. Components: ${CLOUDFLARE_COMPONENT_IDS.join(', ')}.` };
+  }
+  if (!spec.components && parsed.positional.length > 0) {
+    return { ok: false, problem: `${subcommand} takes no arguments besides flags; "${parsed.positional.join(' ')}" was not understood.` };
+  }
+  const batchMode = getFlag(parsed, 'batch-mode');
+  if (batchMode && !(BATCH_MODES as readonly string[]).includes(batchMode)) {
+    return { ok: false, problem: `--batch-mode must be one of ${BATCH_MODES.join(', ')}; "${batchMode}" is not.` };
+  }
+  for (const key of ['token-env', 'bootstrap-env']) {
+    const name = getFlag(parsed, key);
+    if (name && !env[name]) {
+      return { ok: false, problem: `--${key} ${name}: that variable is not set in this app's environment, so the stored credential would be used instead. Export it before starting the app, or pass the token with --${key === 'token-env' ? 'token' : 'bootstrap-token'}.` };
+    }
+  }
+  return { ok: true, parsed };
 }
 
 export function registerCloudflareRuntimeCommands(registry: CommandRegistry): void {
@@ -23,21 +97,43 @@ export function registerCloudflareRuntimeCommands(registry: CommandRegistry): vo
     name: 'cloudflare',
     aliases: ['cf'],
     description: 'Inspect and manage optional Cloudflare batch/control-plane integration through daemon routes',
-    usage: '[status|setup|requirements|create-token|discover|validate|provision|verify|disable --yes] [flags]',
+    usage: '[status|setup|requirements|create-token|discover|validate|provision|verify|disable] [flags]',
+    argsHint: '[status|setup|requirements|create-token|discover|validate|provision|verify|disable]',
+    subcommands: {
+      status: '', setup: '', requirements: '[component...] [--all]', 'create-token': '--bootstrap-token <token> | --bootstrap-env <name> [--account <id>]',
+      discover: '[--token-ref <ref>] [--fast]', validate: '[--token <token> | --token-env <name> | --token-ref <ref>]',
+      provision: '[component...] [--account <id>] [--no-verify]', verify: '[--worker-url <url>]', disable: '[--keep-cron] [--keep-worker-subdomain]',
+    },
+    confirm(args) {
+      if ((args[0] ?? '').toLowerCase() !== 'disable') return undefined;
+      const line = readCloudflareLine('disable', args.slice(1));
+      if (!line.ok) return undefined; // The handler refuses the line and nothing changes.
+      const keepCron = hasFlag(line.parsed, 'keep-cron');
+      const keepSubdomain = hasFlag(line.parsed, 'keep-worker-subdomain');
+      return {
+        title: 'Disable the Cloudflare integration?',
+        detail: [
+          'The integration is turned off in config, the Worker\'s daemon credential is removed and this daemon\'s tunnel connector stops.',
+          `The Worker cron is ${keepCron ? 'kept (--keep-cron)' : 'disabled (add --keep-cron to keep it)'}; the workers.dev route is ${keepSubdomain ? 'kept (--keep-worker-subdomain)' : 'disabled (add --keep-worker-subdomain to keep it)'}.`,
+          '/cloudflare provision sets it up again.',
+        ].join('\n'),
+        confirmLabel: 'Disable',
+      };
+    },
     async handler(args, ctx) {
       const subcommand = (args[0] ?? 'status').toLowerCase();
-      const parsed = parseCloudflareArgs(args.slice(1));
       if (subcommand === 'setup' || subcommand === 'onboarding') {
         ctx.openOnboardingWizard?.({ mode: 'edit', reset: true });
         ctx.print('Opening onboarding wizard. Select the Cloudflare batch capability to configure Cloudflare.');
         return;
       }
 
-      const valueless = valuelessValueFlags(parsed);
-      if (valueless.length > 0) {
-        ctx.print(`Cloudflare ${subcommand}: ${valueless.join(', ')} ${valueless.length === 1 ? 'needs' : 'need'} a value, so nothing was sent. Example: ${valueless[0]} <value>`);
+      const line = readCloudflareLine(subcommand, args.slice(1));
+      if (!line.ok) {
+        ctx.print(line.problem === CLOUDFLARE_USAGE ? CLOUDFLARE_USAGE : `Cloudflare ${subcommand}: ${line.problem} Nothing was sent.`);
         return;
       }
+      const parsed = line.parsed;
 
       let client: CloudflareDaemonClient;
       try {
@@ -227,15 +323,6 @@ export function registerCloudflareRuntimeCommands(registry: CommandRegistry): vo
         }
 
         if (subcommand === 'disable') {
-          if (!hasFlag(parsed, 'yes')) {
-            ctx.print([
-              'Cloudflare disable turns the integration off and persists that in config.',
-              '  It also removes the Worker\'s daemon credential and stops this daemon\'s tunnel connector.',
-              `  By default it disables the Worker cron${hasFlag(parsed, 'keep-cron') ? ' (not with --keep-cron, which you gave)' : ' (add --keep-cron to leave it running)'} and the workers.dev route${hasFlag(parsed, 'keep-worker-subdomain') ? ' (not with --keep-worker-subdomain, which you gave)' : ' (add --keep-worker-subdomain to keep it)'}.`,
-              'Nothing was changed. Re-run with --yes to confirm.',
-            ].join('\n'));
-            return;
-          }
           const result = await client.disable({
             ...cloudflareAuthInput(parsed),
             ...optionalString('workerName', getFlag(parsed, 'worker-name')),
@@ -252,69 +339,12 @@ export function registerCloudflareRuntimeCommands(registry: CommandRegistry): vo
           return;
         }
 
-        ctx.print('Usage: /cloudflare [status|setup|requirements|create-token|discover|validate|provision|verify|disable --yes] [flags]');
+        ctx.print(CLOUDFLARE_USAGE);
       } catch (error) {
         ctx.print(`Cloudflare ${subcommand} failed: ${formatCloudflareError(error)}`);
       }
     },
   });
-}
-
-/**
- * Flags that carry a value. Given with no value (`--token-env` at the end of the line),
- * they would read as empty and silently fall back to a stored credential, so they are refused.
- */
-const VALUE_FLAGS: ReadonlySet<string> = new Set([
-  'access-app-id',
-  'access-service-token-id',
-  'access-service-token-ref',
-  'account',
-  'account-id',
-  'batch-mode',
-  'bootstrap-env',
-  'bootstrap-token',
-  'component',
-  'daemon-hostname',
-  'daemon-url',
-  'dead-letter-queue',
-  'dlq',
-  'do-namespace-name',
-  'durable-object-namespace-name',
-  'kv-namespace-id',
-  'kv-namespace-name',
-  'no-component',
-  'operator-token',
-  'operator-token-ref',
-  'queue',
-  'queue-name',
-  'r2-bucket-name',
-  'secrets-store-id',
-  'secrets-store-name',
-  'token',
-  'token-env',
-  'token-ref',
-  'tunnel-id',
-  'tunnel-name',
-  'tunnel-service-url',
-  'tunnel-token-ref',
-  'worker-client-token',
-  'worker-client-token-ref',
-  'worker-cron',
-  'worker-hostname',
-  'worker-name',
-  'worker-subdomain',
-  'worker-token',
-  'worker-token-ref',
-  'worker-url',
-  'zone',
-  'zone-id',
-  'zone-name',
-]);
-
-function valuelessValueFlags(args: ParsedCloudflareArgs): string[] {
-  return [...args.flags]
-    .filter(([key, values]) => VALUE_FLAGS.has(key) && values[values.length - 1] === 'true')
-    .map(([key]) => `--${key}`);
 }
 
 function createCloudflareClient(ctx: CommandContext): CloudflareDaemonClient {
@@ -325,46 +355,17 @@ function createCloudflareClient(ctx: CommandContext): CloudflareDaemonClient {
   });
 }
 
-function parseCloudflareArgs(args: readonly string[]): ParsedCloudflareArgs {
-  const positional: string[] = [];
-  const flags = new Map<string, string[]>();
-  for (let index = 0; index < args.length; index += 1) {
-    const arg = args[index]!;
-    if (!arg.startsWith('--')) {
-      positional.push(arg);
-      continue;
-    }
-    const raw = arg.slice(2);
-    const equalsIndex = raw.indexOf('=');
-    if (equalsIndex >= 0) {
-      const key = raw.slice(0, equalsIndex);
-      const value = raw.slice(equalsIndex + 1);
-      flags.set(key, [...(flags.get(key) ?? []), value]);
-      continue;
-    }
-    const next = args[index + 1];
-    if (next && !next.startsWith('--')) {
-      flags.set(raw, [...(flags.get(raw) ?? []), next]);
-      index += 1;
-    } else {
-      flags.set(raw, [...(flags.get(raw) ?? []), 'true']);
-    }
-  }
-  return { positional, flags };
-}
-
 function hasFlag(args: ParsedCloudflareArgs, key: string): boolean {
   return args.flags.has(key);
 }
 
 function getFlag(args: ParsedCloudflareArgs, key: string): string {
   const values = args.flags.get(key);
-  const value = values?.[values.length - 1] ?? '';
-  return value === 'true' ? '' : value.trim();
+  return values?.[values.length - 1] ?? '';
 }
 
 function getFlagValues(args: ParsedCloudflareArgs, key: string): readonly string[] {
-  return args.flags.get(key)?.map((value) => value.trim()).filter(Boolean) ?? [];
+  return args.flags.get(key) ?? [];
 }
 
 function componentsFromArgs(args: ParsedCloudflareArgs): Record<CloudflareComponent, boolean> {
@@ -424,10 +425,9 @@ function readTokenEnv(args: ParsedCloudflareArgs, key: string): string {
   return process.env[envName] ?? '';
 }
 
-function readBatchMode(args: ParsedCloudflareArgs): 'off' | 'explicit' | 'eligible-by-default' | undefined {
+function readBatchMode(args: ParsedCloudflareArgs): (typeof BATCH_MODES)[number] | undefined {
   const value = getFlag(args, 'batch-mode');
-  if (value === 'off' || value === 'explicit' || value === 'eligible-by-default') return value;
-  return undefined;
+  return (BATCH_MODES as readonly string[]).includes(value) ? value as (typeof BATCH_MODES)[number] : undefined;
 }
 
 function optionalString<K extends string>(key: K, value: string): Partial<Record<K, string>> {

@@ -2,11 +2,134 @@ import { openTelegramCursorRecovery } from './telegram-cursor.ts';
 import { isSettableGatePresetName, SESSION_GATE_PRESET_NAMES } from '@goodvibes-jev/engine/platform/platform/gate/presets';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { requireIntegrationHelpers } from './runtime-services.ts';
-import { PAIRABLE_SURFACES, runChannelPairing } from './channel-pairing.ts';
+import { PAIRABLE_SURFACES, runChannelPairing, surfaceEnabledInSettings } from './channel-pairing.ts';
+import { parseDeclaredFlags, describeDeclaredFlags, type DeclaredFlags } from './declared-flags.ts';
 import { describeOperatorRpcError, getOperatorRpc } from './operator-rpc.ts';
-import type { OperatorMethodOutput } from '@goodvibes-jev/engine/platform';
+import type { OperatorMethodInput, OperatorMethodOutput } from '@goodvibes-jev/engine/platform';
 
 type ChannelProfileBinding = OperatorMethodOutput<'channels.profiles.list'>['bindings'][number];
+type ChannelPolicy = OperatorMethodOutput<'channels.policies.list'>['policies'][number];
+
+const ON_OFF: Readonly<Record<string, boolean>> = { on: true, true: true, yes: true, off: false, false: false, no: false };
+const CONVERSATION_POLICIES = ['allow', 'deny', 'inherit'] as const;
+/** `/channel policy set` options and the daemon field each one writes. */
+const POLICY_BOOLEAN_OPTIONS = {
+  enabled: 'enabled',
+  'require-mention': 'requireMention',
+  'allow-dms': 'allowDirectMessages',
+  'allow-groups': 'allowGroupMessages',
+  'allow-threads': 'allowThreadMessages',
+  'commands-without-mention': 'allowTextCommandsWithoutMention',
+} as const;
+const POLICY_CHOICE_OPTIONS = { 'dm-policy': 'dmPolicy', 'group-policy': 'groupPolicy' } as const;
+const POLICY_LIST_OPTIONS = {
+  'allow-users': 'allowlistUserIds',
+  'allow-channels': 'allowlistChannelIds',
+  'allow-group-ids': 'allowlistGroupIds',
+  'allowed-commands': 'allowedCommands',
+} as const;
+const POLICY_SET_FLAGS: DeclaredFlags = {
+  values: [...Object.keys(POLICY_BOOLEAN_OPTIONS), ...Object.keys(POLICY_CHOICE_OPTIONS), ...Object.keys(POLICY_LIST_OPTIONS)],
+};
+type PolicyUpdateInput = OperatorMethodInput<'channels.policies.update'>;
+/** The rule fields one `/channel policy set` line writes, typed by the daemon method's own input. */
+type PolicyUpdateFields = { -readonly [K in Exclude<keyof PolicyUpdateInput, 'surface'>]?: PolicyUpdateInput[K] };
+
+/** Read `/channel policy set` options into daemon fields, refusing any value the daemon would not take. */
+export function readPolicyUpdate(args: readonly string[]): { readonly ok: true; readonly fields: PolicyUpdateFields } | { readonly ok: false; readonly problem: string } {
+  const parsed = parseDeclaredFlags(args, POLICY_SET_FLAGS);
+  if (!parsed.ok) return parsed;
+  if (parsed.positional.length > 0) return { ok: false, problem: `"${parsed.positional.join(' ')}" was not understood. Options: ${describeDeclaredFlags(POLICY_SET_FLAGS)}.` };
+  const fields: PolicyUpdateFields = {};
+  for (const [option, values] of parsed.flags) {
+    const value = values[values.length - 1]!;
+    if (option in POLICY_BOOLEAN_OPTIONS) {
+      const on = ON_OFF[value.toLowerCase()];
+      if (on === undefined) return { ok: false, problem: `--${option} takes on or off, not "${value}".` };
+      fields[POLICY_BOOLEAN_OPTIONS[option as keyof typeof POLICY_BOOLEAN_OPTIONS]] = on;
+    } else if (option in POLICY_CHOICE_OPTIONS) {
+      if (!(CONVERSATION_POLICIES as readonly string[]).includes(value)) return { ok: false, problem: `--${option} takes ${CONVERSATION_POLICIES.join(', ')}, not "${value}".` };
+      fields[POLICY_CHOICE_OPTIONS[option as keyof typeof POLICY_CHOICE_OPTIONS]] = value;
+    } else {
+      fields[POLICY_LIST_OPTIONS[option as keyof typeof POLICY_LIST_OPTIONS]] = value === 'none' ? [] : value.split(',').map((entry) => entry.trim()).filter(Boolean);
+    }
+  }
+  return { ok: true, fields };
+}
+
+function describePolicyUpdate(fields: PolicyUpdateFields): string {
+  return Object.entries(fields)
+    .map(([field, value]) => `${field} → ${Array.isArray(value) ? (value.length > 0 ? value.join(', ') : '(empty)') : typeof value === 'boolean' ? (value ? 'on' : 'off') : String(value)}`)
+    .join('; ');
+}
+
+function renderPolicy(policy: ChannelPolicy, enabledInSettings: boolean | undefined): string {
+  const onOff = (value: boolean): string => (value ? 'on' : 'off');
+  const list = (values: readonly string[]): string => (values.length > 0 ? values.join(', ') : 'anyone');
+  const lines = [
+    `  ${policy.surface}${enabledInSettings === undefined ? '' : `  (surface ${enabledInSettings ? 'enabled' : 'not enabled'} in settings)`}`,
+    `    ingress: ${policy.enabled ? 'accepted' : 'refused'}; mention required: ${onOff(policy.requireMention)}; commands without mention: ${onOff(policy.allowTextCommandsWithoutMention)}`,
+    `    direct messages: ${onOff(policy.allowDirectMessages)} (${policy.dmPolicy}); groups: ${onOff(policy.allowGroupMessages)} (${policy.groupPolicy}); threads: ${onOff(policy.allowThreadMessages)}`,
+    `    users: ${list(policy.allowlistUserIds)}; channels: ${list(policy.allowlistChannelIds)}; groups: ${list(policy.allowlistGroupIds)}`,
+    `    commands: ${policy.allowedCommands.length > 0 ? policy.allowedCommands.join(', ') : 'all'}`,
+  ];
+  for (const group of policy.groupPolicies) {
+    lines.push(`    group rule ${group.label ?? group.id}${group.groupId ? ` (group ${group.groupId})` : group.channelId ? ` (channel ${group.channelId})` : ''}`);
+  }
+  return lines.join('\n');
+}
+
+async function handleChannelPolicy(args: readonly string[], asJson: boolean, ctx: CommandContext): Promise<void> {
+  const rpc = getOperatorRpc(ctx);
+  if (args[0] === 'set') {
+    const surface = args[1];
+    const update = readPolicyUpdate(args.slice(2));
+    if (!surface || (update.ok && Object.keys(update.fields).length === 0)) {
+      ctx.print(`Usage: /channel policy set <surface> ${describeDeclaredFlags(POLICY_SET_FLAGS)}\n  on|off for switches, allow|deny|inherit for --dm-policy and --group-policy, a comma list or none for lists.`);
+      return;
+    }
+    if (!update.ok) {
+      ctx.print(`[channel policy set] ${update.problem} Nothing was changed.`);
+      return;
+    }
+    if (!rpc.available) {
+      ctx.print(`[channel policy set] Nothing was changed: ${rpc.reason}`);
+      return;
+    }
+    try {
+      const policy = await rpc.platformClient.operator.invoke('channels.policies.update', { surface, ...update.fields });
+      ctx.print(asJson ? JSON.stringify(policy, null, 2) : `[channel policy set] ${surface} updated.\n${renderPolicy(policy, surfaceEnabledInSettings(ctx.platform.configManager, policy.surface))}`);
+    } catch (error) {
+      ctx.print(`[channel policy set] Nothing was changed: ${describeOperatorRpcError(error)}`);
+    }
+    return;
+  }
+
+  const only = args[0];
+  if (!rpc.available) {
+    // The rules live in the daemon; without it only the surface switches from settings are known here.
+    const enabled = PAIRABLE_SURFACES.filter((surface) => surfaceEnabledInSettings(ctx.platform.configManager, surface) === true);
+    ctx.print(`[channel policy] The ingress rules come from the daemon, which is not reachable: ${rpc.reason}\n  Surfaces enabled in settings: ${enabled.length > 0 ? enabled.join(', ') : 'none'}.`);
+    return;
+  }
+  try {
+    const { policies } = await rpc.platformClient.operator.invoke('channels.policies.list', {});
+    const shown = only ? policies.filter((policy) => policy.surface === only) : policies;
+    if (asJson) {
+      ctx.print(JSON.stringify(shown.map((policy) => ({ ...policy, enabledInSettings: surfaceEnabledInSettings(ctx.platform.configManager, policy.surface) ?? null })), null, 2));
+      return;
+    }
+    if (shown.length === 0) {
+      ctx.print(only
+        ? `[channel policy] No ingress rules are stored for ${only}; it uses the defaults. Set them with /channel policy set ${only} ...`
+        : '[channel policy] No ingress rules are stored; every surface uses the defaults. Set them with /channel policy set <surface> ...');
+      return;
+    }
+    ctx.print(['Channel ingress rules:', ...shown.map((policy) => renderPolicy(policy, surfaceEnabledInSettings(ctx.platform.configManager, policy.surface)))].join('\n'));
+  } catch (error) {
+    ctx.print(`[channel policy] ${describeOperatorRpcError(error)}`);
+  }
+}
 
 function renderProfileBinding(binding: ChannelProfileBinding): string {
   const scope = binding.channelId ? `${binding.surfaceKind}:${binding.channelId}` : `${binding.surfaceKind} (surface-wide default)`;
@@ -80,25 +203,20 @@ async function handleChannelProfilesSubcommand(args: string[], ctx: CommandConte
     const surfaceKind = positional[0];
     const channelId = positional[1];
     if (!surfaceKind) {
-      ctx.print('Usage: /channel profiles set <surfaceKind> [channelId] [--model x] [--provider x] [--permission-mode safe-owner|safe-jev|yolo|plan]');
+      ctx.print(`Usage: /channel profiles set <surfaceKind> [channelId] [--model x] [--provider x] [--permission-mode ${SESSION_GATE_PRESET_NAMES.join('|')}]`);
       return;
     }
-    const flags = new Map<string, string>();
-    for (let i = 0; i < flagTokens.length; i++) {
-      const token = flagTokens[i]!;
-      const name = token.slice(2);
-      if (!token.startsWith('--') || !PROFILE_FLAGS.includes(name)) {
-        ctx.print(`[channel profiles set] Unknown option "${token}"; nothing was bound. Options: ${PROFILE_FLAGS.map((flag) => `--${flag}`).join(', ')}.`);
-        return;
-      }
-      const value = flagTokens[i + 1];
-      if (value === undefined || value.startsWith('--')) {
-        ctx.print(`[channel profiles set] --${name} needs a value; nothing was bound.`);
-        return;
-      }
-      flags.set(name, value);
-      i++;
+    // An unknown option or one without a value would bind the wrong thing (`--model --provider x` as a model name).
+    const parsedFlags = parseDeclaredFlags(flagTokens, { values: PROFILE_FLAGS });
+    if (!parsedFlags.ok) {
+      ctx.print(`[channel profiles set] ${parsedFlags.problem} Nothing was bound.`);
+      return;
     }
+    if (parsedFlags.positional.length > 0) {
+      ctx.print(`[channel profiles set] "${parsedFlags.positional.join(' ')}" after the options was not understood; nothing was bound. Put <surfaceKind> [channelId] first.`);
+      return;
+    }
+    const flags = new Map([...parsedFlags.flags].map(([name, values]) => [name, values[values.length - 1]!]));
     const rpc = getOperatorRpc(ctx);
     if (!rpc.available) {
       ctx.print(`[channel profiles] ${rpc.reason}`);
@@ -152,8 +270,22 @@ export function registerChannelRuntimeCommands(registry: CommandRegistry): void 
     name: 'channel',
     aliases: ['channels'],
     description: 'Pair channels and inspect routes, delivery strategies, ingress policies, and per-channel profile bindings',
-    usage: '[pair [surface]|telegram-cursor|status|routes|delivery|policy|profiles [list|get|set|delete]] [--json]',
+    usage: '[pair [surface]|telegram-cursor|status|routes|delivery|policy [surface]|policy set <surface> [flags]|profiles [list|get|set|delete]] [--json]',
     argsHint: 'pair | telegram-cursor | status | routes | delivery | policy | profiles',
+    subcommands: {
+      pair: '[surface] [verify]', 'telegram-cursor': '', status: '[--json]', routes: '[--json]', delivery: '[--json]',
+      policy: '[surface] | set <surface> [flags]', profiles: '[list|get|set|delete]',
+    },
+    confirm(args) {
+      if (args[0] !== 'policy' || args[1] !== 'set' || !args[2]) return undefined;
+      const update = readPolicyUpdate(args.slice(3).filter((arg) => arg !== '--json'));
+      if (!update.ok || Object.keys(update.fields).length === 0) return undefined; // The handler refuses; nothing changes.
+      return {
+        title: `Change who may reach the assistant on ${args[2]}?`,
+        detail: `The ${args[2]} ingress rules change: ${describePolicyUpdate(update.fields)}. /channel policy ${args[2]} shows the rules now in force.`,
+        confirmLabel: 'Change',
+      };
+    },
     async handler(args, ctx) {
       const sub = args[0];
       const asJson = args.includes('--json');
@@ -243,37 +375,7 @@ export function registerChannelRuntimeCommands(registry: CommandRegistry): void 
       }
 
       if (sub === 'policy') {
-        const configManager = ctx.platform.configManager;
-        // Channel policy is persisted by ChannelPolicyManager in
-        // .goodvibes/tui/channels/policies.json, surface via configManager
-        // category (runtime-accessible without a daemon round-trip).
-        const surfaces = PAIRABLE_SURFACES;
-        const lines: string[] = ['Channel Ingress Policies'];
-        let found = false;
-        for (const surface of surfaces) {
-          const key = `surfaces.${surface}.enabled` as Parameters<typeof configManager.get>[0];
-          const enabled = configManager.get(key);
-          if (enabled !== undefined && enabled !== null) {
-            found = true;
-            lines.push(`  ${surface.padEnd(20)} enabled=${String(enabled)}`);
-          }
-        }
-        if (!found) {
-          lines.push('  No channel surfaces configured.');
-          lines.push('');
-          lines.push('  Configure surfaces via /onboarding or Settings > Surfaces.');
-          lines.push('  Fine-grained ingress policies (allowedCommands, requireMention, groupPolicies)');
-          lines.push('  are managed by ChannelPolicyManager in .goodvibes/tui/channels/policies.json.');
-        } else {
-          lines.push('');
-          lines.push('  Fine-grained ingress policies (allowedCommands, requireMention, groupPolicies)');
-          lines.push('  are managed by ChannelPolicyManager in .goodvibes/tui/channels/policies.json.');
-        }
-        if (asJson) {
-          ctx.print(JSON.stringify({ surfaces: Object.fromEntries(surfaces.map((s) => [s, configManager.get(`surfaces.${s}.enabled` as Parameters<typeof configManager.get>[0])])) }, null, 2));
-          return;
-        }
-        ctx.print(lines.join('\n'));
+        await handleChannelPolicy(args.slice(1).filter((arg) => arg !== '--json'), asJson, ctx);
         return;
       }
 
@@ -285,7 +387,8 @@ export function registerChannelRuntimeCommands(registry: CommandRegistry): void 
         + '  status     — channel overview: routes, sessions, tasks, pending approvals\n'
         + '  routes     — active route binding snapshot\n'
         + '  delivery   — outbound delivery snapshot\n'
-        + '  policy     — configured channel surfaces and ingress policy location\n'
+        + '  policy [surface]  — who may reach the assistant on each surface (the daemon\'s ingress rules)\n'
+        + '  policy set <surface> [--enabled on|off] [--require-mention on|off] [--dm-policy allow|deny|inherit] ...  — change them (asks first)\n'
         + '  profiles [list|get|set|delete]  — per-channel model/permission profile bindings\n'
         + '\n'
         + 'Options:\n'

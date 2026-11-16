@@ -1,18 +1,12 @@
 // ---------------------------------------------------------------------------
-// command-args-hint.test.ts, drift guard for the hardcoded subcommand-hint
-// table in src/input/command-args-hint.ts.
+// command-args-hint.test.ts, the composer's argument hints come from each
+// command's own `subcommands`, resolved through aliases.
 //
 // Covers:
-//   - every top-level key in SUBCOMMAND_HINTS names a command actually
-//     registered in the real registry (catches the 'danger' class of bug:
-//     a hint entry for a command that doesn't exist).
-//   - /session's subcommand hints (imported straight from session.ts) cover
-//     every real subcommand the /session switch recognizes, by cross-
-//     checking against the default-branch usage text (the same text a user
-//     sees on /session <bad-subcommand>) rather than re-deriving the switch
-//     cases via reflection.
+//   - /session's subcommand hints cover every real subcommand the /session
+//     switch recognizes, cross-checked against the default-branch usage text.
 //   - buildCommandArgsHint resolves a real hint for a representative
-//     subcommand of each hinted command.
+//     subcommand, under the primary name and under an alias.
 // ---------------------------------------------------------------------------
 
 import { describe, test, expect } from 'bun:test';
@@ -62,8 +56,19 @@ describe('command-args-hint drift guard', () => {
     expect(buildCommandArgsHint('/session rename', registry)).toBe('<name>');
     expect(buildCommandArgsHint('/session link-task', registry)).toBe(SESSION_SUBCOMMAND_ARG_HINTS['link-task']);
     expect(buildCommandArgsHint('/template save', registry)).toBe('<name>');
-    expect(buildCommandArgsHint('/secrets set', registry)).toBe('<KEY> <value>');
+    expect(buildCommandArgsHint('/secrets set', registry)).toBe('<KEY> <value> [--user|--project] [--secure|--plaintext]');
     expect(buildCommandArgsHint('/plugin enable', registry)).toBe('<name>');
+    expect(buildCommandArgsHint('/permissions revoke', registry)).toBe('<rule-id>');
+  });
+
+  test('an alias gets the same hint as the primary name', () => {
+    expect(buildCommandArgsHint('/sess resume', registry)).toBe(buildCommandArgsHint('/session resume', registry));
+    expect(buildCommandArgsHint('/tmpl use', registry)).toBe('<name> [args]');
+  });
+
+  test('subcommands the commands do not have get no hint', () => {
+    expect(buildCommandArgsHint('/permissions tool', registry)).toBeUndefined();
+    expect(buildCommandArgsHint('/config reset', registry)).toBeUndefined();
   });
 
   test('an unhinted subcommand yields no hint rather than a stale one', () => {

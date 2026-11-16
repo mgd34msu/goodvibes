@@ -2,7 +2,6 @@ import { describe, expect, test } from 'bun:test';
 import { CommandRegistry } from '../../input/command-registry.ts';
 import { registerChannelRuntimeCommands } from '../../input/commands/channel-runtime.ts';
 import type { CommandContext } from '../../input/command-registry.ts';
-import { PAIRABLE_SURFACES } from '../../input/commands/channel-pairing.ts';
 
 // ---------------------------------------------------------------------------
 // Minimal command context stub for /channel tests
@@ -156,32 +155,14 @@ describe('/channel command', () => {
     expect(parsed).toHaveProperty('queued');
   });
 
-  test('policy shows enabled surfaces', () => {
+  test('policy without the daemon says where the rules live and reads each surface switch through its schema key', async () => {
     const registry = makeRegistry();
-    const ctx = makeCtx();
-    registry.get('channel')!.handler(['policy'], ctx);
+    const ctx = makeCtx({ configGet: (key) => key === 'surfaces.slack.enabled' || key === 'surfaces.googleChat.enabled' });
+    await registry.get('channel')!.handler(['policy'], ctx);
     const output = ctx.printed.join('\n');
-    expect(output).toContain('Channel Ingress Policies');
+    expect(output).toContain('The ingress rules come from the daemon');
     expect(output).toContain('slack');
-    expect(output).toContain('webhook');
-    expect(output).toContain('enabled=true');
-  });
-
-  test('policy covers every surface /channel pair supports', () => {
-    const registry = makeRegistry();
-    const asked: string[] = [];
-    const ctx = makeCtx({ configGet: (key) => { asked.push(key); return false; } });
-    registry.get('channel')!.handler(['policy'], ctx);
-    for (const surface of PAIRABLE_SURFACES) expect(asked).toContain(`surfaces.${surface}.enabled`);
-    expect(asked).toContain('surfaces.telephony.enabled');
-  });
-
-  test('policy shows empty state when no surfaces configured', () => {
-    const registry = makeRegistry();
-    const ctx = makeCtx({ configGet: () => undefined });
-    registry.get('channel')!.handler(['policy'], ctx);
-    const output = ctx.printed.join('\n');
-    expect(output).toContain('No channel surfaces configured');
+    expect(output).toContain('google-chat');
   });
 
   test('unknown subcommand prints usage', () => {
@@ -232,7 +213,7 @@ describe('/channel command', () => {
         const ctx = makeCtx();
         await registry.get('channel')!.handler(['profiles', 'set', 'slack', ...flags], ctx);
         const output = ctx.printed.join('\n');
-        expect(output).toContain('nothing was bound');
+        expect(output.toLowerCase()).toContain('nothing was bound');
         expect(output).not.toContain('no control-plane base URL');
       }
     });

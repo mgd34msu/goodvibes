@@ -27,16 +27,83 @@
 
 import { readFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import type { ConfigKey } from '../../config/schema.js';
 import type { ConfigManager } from '../../config/manager.js';
 import { configKeyScope, describeConfigOwnership, isDaemonOwnedConfigKey } from '../../config/config-ownership.js';
 import {
   applyConfigWrite,
+  resolveConfigWriteRoute,
   type DaemonConfigRouterDeps,
 } from '../../config/daemon-config-route.js';
 import { loadDaemonConfigSnapshot } from '../../config/daemon-config-read.js';
 import { DEFAULT_CONFIG_SNAPSHOT } from '../../config/manager-bootstrap.js';
 import { persistSharedKey } from '../../config/shared-config-tier.js';
+import { isValidConfigKey, type ConfigKey } from '../../config/schema.js';
+import { isSecretBearingConfigKey } from '../../config/secret-bearing-config-keys.js';
+import { agentSettingsWriteRefusal } from '../../gate/policy/agent-settings-refusals.js';
+
+/**
+ * Why a model's settings write is refused before anything is written, with
+ * the sentence the model is given: what is true, and what to do instead.
+ * `unknown-key`: no setting has the key. `value-refused`: the key or the value
+ * is one only the owner sets (a literal credential, card material, a
+ * credential's destination). `shadowed-by-overlay`: the project overlay sets
+ * the key, and it wins over the store the write would land in.
+ */
+export interface SettingsWriteRefusal {
+  readonly code: 'unknown-key' | 'value-refused' | 'shadowed-by-overlay';
+  readonly message: string;
+}
+
+/**
+ * The one admission of a settings write a model asks for, used by every path
+ * that writes one (the routed tool and the Agent's input projector), before
+ * any write is prepared. Code decides from the schema, the key's facts and the
+ * project overlay file: no model request. Cost: a property lookup, plus one read
+ * of the project overlay file when the write would land in this client's store.
+ */
+export function settingsWriteRefusal(
+  configManager: ConfigManager,
+  request: { readonly mode: unknown; readonly key: string; readonly value?: unknown },
+  options: ConfigRoutingOptions = {},
+): SettingsWriteRefusal | null {
+  const { key } = request;
+  if (!isValidConfigKey(key)) {
+    return {
+      code: 'unknown-key',
+      message: 'No setting has that key, so nothing was changed. List the keys with goodvibes_context mode "config_schema" (prefix narrows the list), then set one of those.',
+    };
+  }
+  const refused = agentSettingsWriteRefusal({ mode: request.mode, key, value: request.value });
+  if (refused) return { code: 'value-refused', message: refused };
+  if (request.mode !== 'set') return null;
+  return projectOverlayRefusal(configManager, key, request.value, options);
+}
+
+/**
+ * A set the project overlay would undo on reload: the overlay sets the key to
+ * something else and wins over the store a local write lands in. Only a write
+ * that lands in this client's own store is checked; a daemon-owned key or a
+ * hosted surface's own file is not under this overlay.
+ */
+export function projectOverlayRefusal(
+  configManager: ConfigManager,
+  key: ConfigKey,
+  value: unknown,
+  options: ConfigRoutingOptions = {},
+): SettingsWriteRefusal | null {
+  if (usesClientOwnedStore(key, options)) return null;
+  const projectPath = configManager.getProjectConfigPath?.();
+  if (!projectPath) return null;
+  if (resolveConfigWriteRoute(key, resolveRouterDeps(configManager, options)).mode === 'daemon') return null;
+  const shadow = readKeyFromFile(projectPath, key);
+  if (!shadow.present || valuesMatch(shadow.value, value)) return null;
+  const held = isSecretBearingConfigKey(key) ? 'to another value' : `to ${JSON.stringify(shadow.value)}`;
+  return {
+    code: 'shadowed-by-overlay',
+    message: `The project overlay at ${projectPath} sets ${key} ${held}, and it wins over the store this write would land in, so the change would not take effect. Nothing was changed. `
+      + `Change ${key} in ${projectPath}, or remove it there and set it again.`,
+  };
+}
 
 /**
  * Host-supplied routing facts.
@@ -266,14 +333,7 @@ export async function applyRoutedConfigWrite(
       + 'this key reads. The running host may behave as if the change never happened.',
     );
   }
-  const projectPath = configManager.getProjectConfigPath?.();
-  const shadow = projectPath ? readKeyFromFile(projectPath, key) : { present: false, value: undefined };
-  if (shadow.present && !valuesMatch(shadow.value, value)) {
-    throw new Error(
-      `${key} was written to ${persistedTo}, but a project overlay at ${projectPath} sets it to `
-      + `${JSON.stringify(shadow.value)} and wins on reload. The setting will NOT take effect.`,
-    );
-  }
+  // A project overlay that would undo the write is refused before it, by settingsWriteRefusal.
   return {
     key,
     scope: outcome.scope,

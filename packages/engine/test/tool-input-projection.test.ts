@@ -539,7 +539,7 @@ test('Classic preparation never borrows a supplied semantic port recorder and ex
 test('a projection refusal carries its fixed detail into the model-facing text, and without one reads as before', () => {
   const detailed = new ToolInputProjectionError('invalid', 'The path must be inside the workspace.');
   expect(detailed.message).toContain('The path must be inside the workspace.');
-  expect(describeToolInputProjectionProblem(detailed.problem, detailed.detail)).toMatch(/check them against the tool schema.*The path must be inside the workspace\.$/);
+  expect(describeToolInputProjectionProblem(detailed.problem, detailed.detail)).toMatch(/The path must be inside the workspace\.$/);
   expect(describeUnexpectedToolError(detailed, String)).toContain('The path must be inside the workspace.');
   const plain = new ToolInputProjectionError('invalid');
   expect(plain.detail).toBeUndefined();

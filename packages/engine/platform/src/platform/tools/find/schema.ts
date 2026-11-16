@@ -10,6 +10,8 @@ export const findSchema: ToolDefinition = {
     'Search the codebase using glob patterns, regex content search, or symbol extraction. ' +
     'Supports multiple queries in one call. Modes: files (glob), content (grep), symbols (regex).',
   sideEffects: ['read_fs'],
+  // Every mode searches under `path` (and reads `file` in references mode); globs match below it only.
+  subjects: { paths: ['queries[].path', 'queries[].file'] },
   concurrency: 'parallel',
   supportsProgress: true,
   parameters: {
@@ -29,7 +31,7 @@ export const findSchema: ToolDefinition = {
             mode: {
               type: 'string',
               enum: ['files', 'content', 'symbols', 'references', 'structural'],
-              description: 'Search mode: files (glob), content (grep), symbols (regex extraction), references (references from the language server when the host has one attached, otherwise a word match on the symbol name; fallback_reason says which), structural (AST pattern matching via ast-grep).',
+              description: 'Search mode: files (glob), content (grep; files over 8 MiB are skipped and counted), symbols (declarations from the tree-sitter parser; a language without a grammar uses line patterns and a warning says so), references (the language server\'s answer when one is attached, an empty answer included, scoped to path; otherwise a word match on the symbol name with fallback_reason saying why), structural (AST pattern matching via ast-grep).',
             },
             // files mode
             patterns: {
@@ -189,8 +191,9 @@ export const findSchema: ToolDefinition = {
               type: 'string',
               enum: ['ts', 'tsx', 'js', 'jsx', 'css', 'html'],
               description:
-                'Language for AST parsing (mode: structural). Auto-detected from file extension when omitted. ' +
-                'Supported: ts, tsx, js, jsx, css, html. Files with unrecognized extensions are skipped.',
+                'Language for AST parsing (mode: structural). Omitted: each file is parsed by its extension. ' +
+                'Set without glob: only files with this language\'s extensions are searched. Set with glob: every file the glob names is parsed as this language. ' +
+                'Supported: ts, tsx, js, jsx, css, html. Files with other extensions are skipped and counted.',
             },
           },
         },
@@ -258,8 +261,8 @@ export const findSchema: ToolDefinition = {
           max_tokens: {
             type: 'integer',
             minimum: 0,
-            description: 'Approximate token budget for each query\'s page of results (about 4 characters per token). '
-              + 'A page that would exceed it is shortened; continue with next_offset. Default: about 10,000 tokens.',
+            description: 'Approximate token budget for the whole call\'s results (about 4 characters per token), shared equally among its queries. '
+              + 'A page that would exceed its share is shortened; continue with next_offset. Default: about 10,000 tokens per query, less when several queries share the call.',
           },
           max_line_length: {
             type: 'integer',

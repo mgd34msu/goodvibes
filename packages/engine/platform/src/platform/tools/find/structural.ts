@@ -1,5 +1,5 @@
 import type { FindSearchOptions } from './shared.js';
-import { paginateFindResult } from './pagination.js';
+import { DEFAULT_PAGE_SIZE, paginateFindResult } from './pagination.js';
 import { extname } from 'node:path';
 import type { OutputOptions, StructuralQuery } from './shared.js';
 import { addBudgetStopWarning, addDiscoveryCutWarning, addFindWarning, collectFilesForSearch, createFindDiagnostics, makeCountResult, makeFilesResult, makeLocationsResult, readTextFile, validateSearchPath, withFindWarnings, withholdRestrictedFiles } from './shared.js';
@@ -14,24 +14,38 @@ async function loadAstGrep(): Promise<AstGrepModule> {
   return astGrepModulePromise;
 }
 
-function getAstGrepLang(
-  astGrep: AstGrepModule,
-  filePath: string,
-  override?: StructuralQuery['lang'],
-): { parse: (src: string) => { root(): { findAll(pat: string): Array<{ text(): string; range(): { start: { line: number } } }> } } } | null {
-  const lang = override ?? extname(filePath).slice(1).toLowerCase();
+type StructuralLang = NonNullable<StructuralQuery['lang']>;
+
+/** The parser for each extension structural mode reads; anything else is not a candidate. */
+const LANG_BY_EXTENSION: Readonly<Record<string, StructuralLang>> = {
+  ts: 'ts', mts: 'ts', cts: 'ts', tsx: 'tsx',
+  js: 'js', mjs: 'js', cjs: 'js', jsx: 'jsx',
+  css: 'css', html: 'html', htm: 'html',
+};
+
+/**
+ * The language a file is parsed as, decided from its name before it is
+ * opened. `lang` with a `glob` parses every file the glob names as that
+ * language (the caller named them); `lang` alone narrows the search to that
+ * language's own extensions; neither uses the extension.
+ */
+function structuralLang(filePath: string, override: StructuralLang | undefined, glob: string | undefined): StructuralLang | null {
+  const byExtension = LANG_BY_EXTENSION[extname(filePath).slice(1).toLowerCase()] ?? null;
+  if (!override) return byExtension;
+  if (glob) return override;
+  return byExtension === override ? override : null;
+}
+
+type StructuralParser = { parse: (src: string) => { root(): { findAll(pat: string): Array<{ text(): string; range(): { start: { line: number } } }> } } };
+
+function astGrepParser(astGrep: AstGrepModule, lang: StructuralLang): StructuralParser {
   switch (lang) {
-    case 'ts':
-    case 'mts':
-    case 'cts': return astGrep.ts;
+    case 'ts': return astGrep.ts;
     case 'tsx': return astGrep.tsx;
-    case 'js':
-    case 'mjs':
-    case 'cjs': return astGrep.js;
+    case 'js': return astGrep.js;
     case 'jsx': return astGrep.jsx;
     case 'css': return astGrep.css;
     case 'html': return astGrep.html;
-    default: return null;
   }
 }
 
@@ -59,15 +73,35 @@ async function scanStructuralQuery(
 
   const format = output.format ?? 'matches';
   const diagnostics = createFindDiagnostics();
-  const discovered = await collectFilesForSearch(basePath, query.glob, diagnostics, walkOptions);
+  // Candidates are chosen by name first: a file structural mode cannot parse is
+  // never opened or put to the read filter.
+  const unsupported = new Set<string>();
+  const discovered = await collectFilesForSearch(basePath, query.glob, diagnostics, {
+    ...walkOptions,
+    selectFile: (file) => {
+      if (walkOptions.selectFile?.(file) === false) return false;
+      if (structuralLang(file, query.lang, query.glob) !== null) return true;
+      unsupported.add(file);
+      return false;
+    },
+  });
   if (walkOptions.shouldContinue?.() === false) addDiscoveryCutWarning(diagnostics, discovered.length);
   const files = await withholdRestrictedFiles(discovered, diagnostics, walkOptions.readAccessFilter);
 
-  interface StructuralMatch { file: string; line: number; text: string }
+  // Only rows a page can show keep their text: the window is the same one
+  // pagination applies (offset, page size, per-file limit), so a broad pattern
+  // over a large tree holds a file and a line per match, not every match's text.
+  const keepText = format !== 'count_only' && format !== 'files_only' && format !== 'locations';
+  const offset = output.offset ?? 0;
+  const pageEnd = offset + (output.max_total_matches ?? output.max_results ?? DEFAULT_PAGE_SIZE);
+  const perFile = output.max_per_item;
+  const perFileCounts = new Map<string, number>();
+  let eligibleIndex = 0;
+
+  interface StructuralMatch { file: string; line: number; text?: string }
   const allMatches: StructuralMatch[] = [];
   const matchedFiles = new Set<string>();
   let totalMatches = 0;
-  let unsupportedFiles = 0;
   let searchedFiles = 0;
   let patternFailures = 0;
   let firstPatternError: string | undefined;
@@ -80,8 +114,9 @@ async function scanStructuralQuery(
       break;
     }
 
-    const parser = getAstGrepLang(astGrep, file, query.lang);
-    if (!parser) { unsupportedFiles++; continue; }
+    const lang = structuralLang(file, query.lang, query.glob);
+    if (!lang) continue;
+    const parser = astGrepParser(astGrep, lang);
 
     const content = await readTextFile(file, diagnostics);
     if (content === null) continue;
@@ -90,7 +125,7 @@ async function scanStructuralQuery(
     try {
       root = parser.parse(content);
     } catch (err) {
-      addFindWarning(diagnostics, `Skipped '${file}': it could not be parsed as ${query.lang ?? extname(file).slice(1)}: ${summarizeError(err)}`);
+      addFindWarning(diagnostics, `Skipped '${file}': it could not be parsed as ${lang}: ${summarizeError(err)}`);
       continue;
     }
 
@@ -105,11 +140,20 @@ async function scanStructuralQuery(
     searchedFiles++;
 
     for (const match of matches) {
-      const text = match.text();
-      const line = match.range().start.line + 1;
-      allMatches.push({ file, line, text });
-      matchedFiles.add(file);
       totalMatches++;
+      matchedFiles.add(file);
+      if (format === 'count_only' || format === 'files_only') continue;
+      const line = match.range().start.line + 1;
+      let shown = false;
+      if (keepText) {
+        const seen = perFileCounts.get(file) ?? 0;
+        perFileCounts.set(file, seen + 1);
+        if (perFile === undefined || seen < perFile) {
+          shown = eligibleIndex >= offset && eligibleIndex < pageEnd;
+          eligibleIndex++;
+        }
+      }
+      allMatches.push(shown ? { file, line, text: match.text() } : { file, line });
     }
   }
 
@@ -120,8 +164,11 @@ async function scanStructuralQuery(
   if (patternFailures > 0) {
     addFindWarning(diagnostics, `The pattern could not be applied to ${patternFailures} file(s) and they were skipped: ${firstPatternError}`);
   }
+  const unsupportedFiles = unsupported.size;
   if (unsupportedFiles > 0) {
-    addFindWarning(diagnostics, `Skipped ${unsupportedFiles} file(s) whose language structural mode does not support (ts, tsx, js, jsx, css, html); use content mode for those.`);
+    addFindWarning(diagnostics, query.lang && !query.glob
+      ? `Searched only ${query.lang} files: ${unsupportedFiles} file(s) with other extensions were skipped. To parse other files as ${query.lang}, name them with glob.`
+      : `Skipped ${unsupportedFiles} file(s) whose language structural mode does not support (ts, tsx, js, jsx, css, html); use content mode for those.`);
   }
 
   if (format === 'count_only') {

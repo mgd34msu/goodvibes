@@ -124,7 +124,6 @@ describe('GoodVibes runtime tools', () => {
     });
 
     expect(result.success).toBe(false);
-    expect(result.error).toContain('Refusing to persist a raw credential');
     expect(configManager.get('surfaces.slack.botToken')).toBe('');
   });
 

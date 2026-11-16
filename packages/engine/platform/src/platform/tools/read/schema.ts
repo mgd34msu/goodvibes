@@ -26,7 +26,7 @@ export const READ_TOOL_SCHEMA = {
               'Extraction mode. Overrides the global extract for this file.'
               + ' content: full text; outline: signatures without bodies;'
               + ' symbols: exported names only; lines: specific line range;'
-              + ' ast: structural outline via tree-sitter (falls back to regex if grammar unavailable).',
+              + ' ast: the syntax tree from tree-sitter, each structural node (declarations, blocks) with its type, name and line range, indented by depth (falls back to a line-pattern outline, with a note saying why, when the file has no grammar).',
           },
           range: {
             type: 'object',

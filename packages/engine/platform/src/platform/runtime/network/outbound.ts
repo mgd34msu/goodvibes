@@ -28,7 +28,7 @@ export interface OutboundTlsSnapshot {
 
 interface ResolvedOutboundTlsContext {
   readonly snapshot: OutboundTlsSnapshot;
-  readonly caEntries?: readonly string[] | undefined;
+  readonly caEntries?: string[] | undefined;
 }
 
 const NETWORK_FETCH_WRAPPER = Symbol.for('goodvibes.network.fetch-wrapper');
@@ -151,16 +151,35 @@ export function inspectOutboundTls(configManager: OutboundTlsConfigReader): Outb
   return snapshotOf(readMode(configManager), readAllowInsecureLocalhost(configManager), loadCustomCaEntries(configManager));
 }
 
+/**
+ * The resolved CA list per config reader, keyed by the settings it was built
+ * from. A changed mode or CA path is a different key, so a settings change takes
+ * effect on the next request; CA files are read once per key instead of on
+ * every https request. A result with load errors is not kept, so the refusal
+ * still fires and a file the owner then puts in place is picked up at once.
+ */
+const resolvedContexts = new WeakMap<OutboundTlsConfigReader, { readonly key: string; readonly context: ResolvedOutboundTlsContext }>();
+
 function resolveOutboundTlsContext(configManager: OutboundTlsConfigReader): ResolvedOutboundTlsContext {
+  const mode = readMode(configManager);
+  const allowInsecureLocalhost = readAllowInsecureLocalhost(configManager);
+  const key = mode === 'bundled'
+    ? `${mode}\0${allowInsecureLocalhost}`
+    : `${mode}\0${allowInsecureLocalhost}\0${readCustomCaFile(configManager) ?? ''}\0${readCustomCaDir(configManager) ?? ''}`;
+  const kept = resolvedContexts.get(configManager);
+  if (kept?.key === key) return kept.context;
   // One read of the custom CA files serves both the snapshot and the CA list.
   const custom = loadCustomCaEntries(configManager);
-  const snapshot = snapshotOf(readMode(configManager), readAllowInsecureLocalhost(configManager), custom);
+  const snapshot = snapshotOf(mode, allowInsecureLocalhost, custom);
   const caEntries = snapshot.mode === 'bundled'
     ? undefined
     : snapshot.mode === 'bundled+custom'
       ? [...getBundledCaEntries(), ...custom.entries]
       : [...custom.entries];
-  return { snapshot, ...(caEntries ? { caEntries } : {}) };
+  const context: ResolvedOutboundTlsContext = { snapshot, ...(caEntries ? { caEntries } : {}) };
+  if (snapshot.errors.length === 0) resolvedContexts.set(configManager, { key, context });
+  else resolvedContexts.delete(configManager);
+  return context;
 }
 
 function extractRequestUrl(input: RequestInfo | URL): URL | null {
@@ -279,7 +298,7 @@ export function applyOutboundTlsToFetchInit(
   }
 
   if (!nextTls.ca && context.caEntries && context.caEntries.length > 0) {
-    nextTls.ca = [...context.caEntries];
+    nextTls.ca = context.caEntries;
   }
 
   if (

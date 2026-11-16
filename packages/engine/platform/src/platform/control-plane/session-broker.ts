@@ -107,6 +107,15 @@ const MAX_CONTINUATION_MESSAGES = 100;
  */
 const SESSION_DELETION_RETENTION_MS = Number.POSITIVE_INFINITY;
 
+/** What an attach can change that a client shows: who takes part, through which routes, under which title. Seen-times are left out. */
+function attachedFacts(session: SharedSessionRecord): string {
+  return JSON.stringify([
+    session.title,
+    session.routeIds,
+    session.participants.map(({ lastSeenAt: _seen, ...participant }) => participant),
+  ]);
+}
+
 /** How long a started-but-unbound agent holds back a session's other messages if nothing ends the claim. */
 const SPAWN_IN_FLIGHT_MS = 30_000;
 
@@ -809,10 +818,16 @@ export class SharedSessionBroker {
     await this.start();
     const session = this.sessions.get(sessionId);
     if (!session) return null;
-    // One stored completion per agent (see shouldStoreAgentCompletion); the rest of this method still runs for the second reporter.
+    // One completion per agent. A second reporter of the same end (the reply
+    // poll after the agent's own terminal event, a surface's retried report)
+    // finds the answer stored, the session released and no row left to settle:
+    // nothing is written and no event is published again.
     const role = metadata.status === 'failed' || metadata.status === 'cancelled' ? 'system' : 'assistant';
     if (shouldStoreAgentCompletion(this.messageStore(), sessionId, agentId)) {
       await this.appendMessage(sessionId, { role, body, agentId, metadata });
+    } else if (session.activeAgentId !== agentId && !(this.inputs.get(sessionId) ?? []).some((entry) => !isDelegatedSessionInput(entry)
+      && entry.activeAgentId === agentId && (entry.state === 'delivered' || entry.state === 'spawned'))) {
+      return { session };
     }
     // The session can be deleted while the message above is being written; do not bring it back.
     const current = this.sessions.get(sessionId);
@@ -916,10 +931,13 @@ export class SharedSessionBroker {
       await this.routeBindings.patchBinding(binding.id, { sessionId: updated.id });
     }
     await this.persist();
-    this.publishUpdate('session-route-attached', {
-      sessionId: updated.id,
-      routeId: binding?.id,
-    });
+    // A heartbeat from a known participant only moves times: no client has anything to redraw.
+    if (attachedFacts(existing) !== attachedFacts(updated)) {
+      this.publishUpdate('session-route-attached', {
+        sessionId: updated.id,
+        routeId: binding?.id,
+      });
+    }
     return updated;
   }
 

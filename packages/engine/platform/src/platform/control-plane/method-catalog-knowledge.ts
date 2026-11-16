@@ -724,8 +724,6 @@ export const builtinGatewayKnowledgeMethodDescriptors: readonly GatewayMethodDes
     inputSchema: objectSchema({ projectId: STRING_SCHEMA, knowledgeSpaceId: STRING_SCHEMA, planningId: STRING_SCHEMA }),
     outputSchema: PROJECT_PLANNING_STATE_OUTPUT_SCHEMA,
   }),
-    outputSchema: PROJECT_PLANNING_EVALUATION_SCHEMA,
-  }),
   methodDescriptor({
     id: 'projectPlanning.decisions.list',
     title: 'List Project Decisions',

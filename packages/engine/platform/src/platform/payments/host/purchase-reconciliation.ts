@@ -202,11 +202,11 @@ export class PurchaseReconciliations {
       totalMinorUnits: (checkpoint.journal ?? checkpoint.purchase)?.totalMinorUnits ?? null,
       currency: (checkpoint.journal ?? checkpoint.purchase)?.currency ?? null };
     writer.update(operation, current); current();
-    const settled = writer.read();
+    const completed = writer.read();
     // Settled by the owner's finding: the request kept as evidence until now
     // has no further use. A failed removal leaves it for the next start's sweep.
-    try { await this.deps.settled?.(settled.purchaseId, settled.operationId); }
+    try { await this.deps.settled?.(completed.purchaseId, completed.operationId); }
     catch { /* The boot sweep removes it. */ }
-    return settled;
+    return completed;
   }
 }

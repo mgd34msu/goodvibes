@@ -263,6 +263,7 @@ export function createRegistryTool(toolRegistry: ToolRegistry, roots: RegistryTo
       + ' dependencies reads a skill\'s dependency chain; content returns full markdown file.',
     parameters: toRecord(REGISTRY_TOOL_SCHEMA),
     sideEffects: ['read_fs'],
+    subjects: { paths: ['path'] },
     concurrency: 'parallel',
   };
 

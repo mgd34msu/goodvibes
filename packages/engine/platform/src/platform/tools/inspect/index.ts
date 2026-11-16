@@ -29,6 +29,8 @@ export class InspectTool implements Tool {
       + ' accessibility (a11y issues), scaffold (module skeleton generator).',
     parameters: INSPECT_TOOL_SCHEMA,
     sideEffects: ['read_fs'],
+    // The three file arguments resolve under projectRoot; scaffold's files go through the write tool's own admission.
+    subjects: { paths: ['projectRoot', 'file', 'specPath', 'schemaPath'] },
     concurrency: 'parallel',
     supportsProgress: true,
   };

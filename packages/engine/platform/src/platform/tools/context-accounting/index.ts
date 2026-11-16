@@ -142,6 +142,8 @@ export function createContextAccountingTool(holder: ContextAccountingHolder): To
       + '"no memory exists" apart from "recall was floored" apart from "the index is unavailable". Read-only.',
     parameters: CONTEXT_ACCOUNTING_SCHEMA,
     sideEffects: ['read_fs'],
+    // Takes no arguments: it reads this session's own accounting.
+    subjects: { paths: [] },
     concurrency: 'parallel',
   };
 

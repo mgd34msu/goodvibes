@@ -18,6 +18,9 @@ export function createContractSelfCheckTool(runner: Pick<ContractRunner, 'list'>
       + 'Read-only; it passes nothing and describes the last check, not work done since.',
     parameters: SCHEMA,
     sideEffects: ['read_fs'],
+    category: 'read',
+    // Takes no arguments: it reads the calling unit's last check.
+    subjects: { paths: [] },
     concurrency: 'parallel',
   };
 

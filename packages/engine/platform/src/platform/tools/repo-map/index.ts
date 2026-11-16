@@ -203,6 +203,7 @@ export function createRepoMapTool(options: {
       + 'codebase before reading files; narrow it with path. Use detail="structure" for directories and source paths without reading bodies or building an import graph. Read-only; covers TypeScript/JavaScript source files.',
     parameters: REPO_MAP_SCHEMA,
     sideEffects: ['read_fs'],
+    subjects: { paths: ['path'] },
     concurrency: 'parallel',
   };
 

@@ -29,7 +29,8 @@ export interface MemoryGovernanceHandles {
    * Set when the configured budget, tiers or hard limit were refused and the
    * shipped ones are in use, whether the governor replaced one group or refused
    * the whole configuration; says why. The same text went out once on the ops
-   * memory event, so status surfaces show it.
+   * memory event and stays in the governor snapshot (`configFallback`), so
+   * ops.memory.get and the status surfaces show it.
    */
   readonly configFallback?: string | undefined;
 }
@@ -102,23 +103,17 @@ export function createMemoryGovernance(options: MemoryGovernanceWiringOptions): 
     shutdown: options.onTripwireShutdown,
   } satisfies MemoryGovernorDeps;
   let memoryGovernor: MemoryGovernor;
-  let configFallback: string | undefined;
   try {
     memoryGovernor = new MemoryGovernor(options.config, governorDeps);
   } catch (error) {
     // A hand-edited or too-large memory setting must not stop the daemon from starting without its safety governor:
-    // run on the shipped budget, tiers and hard limit, and say so.
-    configFallback = `${error instanceof Error ? error.message : String(error)} The shipped memory budget, tiers and hard limit are in use until it is fixed and the daemon restarts.`;
-    logger.warn('[memory] configured memory limits refused; using the shipped ones', { reason: configFallback });
-    memoryGovernor = new MemoryGovernor({ ...options.config, ...SHIPPED_GOVERNOR_POLICY }, governorDeps);
-    // The governor announces its own per-group fallback; this whole-config refusal happened before it existed.
-    if (governorDeps.emitOps) {
-      const snapshot = memoryGovernor.snapshot();
-      governorDeps.emitOps({ tier: snapshot.tier, previousTier: snapshot.tier, rssMb: snapshot.rssMb, heapMb: snapshot.heapUsedMb,
-        budgetMb: snapshot.budgetMb, usedPct: snapshot.usedPct, note: configFallback });
-    }
+    // run on the shipped budget, tiers and hard limit. The governor owns the announcement: its snapshot
+    // (ops.memory.get) and its ops event name the refused settings, why, and that a restart applies the fix.
+    const configRefusal = error instanceof Error ? error.message : String(error);
+    logger.warn('[memory] configured memory limits refused; using the shipped ones', { reason: configRefusal });
+    memoryGovernor = new MemoryGovernor({ ...options.config, ...SHIPPED_GOVERNOR_POLICY }, governorDeps, { configRefusal });
   }
-  configFallback ??= memoryGovernor.policyFallbackReason();
+  const configFallback = memoryGovernor.policyFallbackReason();
 
   if (options.start !== false) memoryGovernor.start();
   return { cacheRegistry, pauseController, memoryGovernor, ...(configFallback === undefined ? {} : { configFallback }) };

@@ -7,8 +7,9 @@
 // background jobs), refuses new expensive work at the critical tier, and trips
 // on a genuine leak before the OS OOM-kills it. This module is the read-only
 // projection the /health memory (doctor) surface renders from, the snapshot
-// rows, and the attention line OPS_MEMORY_PRESSURE produces when the tier
-// changes or the tripwire fires.
+// rows (including the limits in force and any refused memory setting), and the
+// attention line OPS_MEMORY_PRESSURE produces when the tier changes or the
+// tripwire fires.
 //
 // Pure formatting only (no I/O): a caller fetches the typed verb response over
 // the operator invoke seam and hands it here, so these builders are
@@ -20,6 +21,11 @@ import type { OpsEvent } from '../../../events/ops.js';
 
 /** ops.memory.get output, the full governor snapshot. */
 export type MemoryGovernorSnapshotResult = OperatorMethodOutput<'ops.memory.get'>;
+/** The limits in force and a refused setting, as the governor reports them (optional for an older daemon). */
+interface MemoryLimitsView {
+  readonly hardLimit?: { readonly pct: number; readonly mb: number; readonly ceilingMb: number } | undefined;
+  readonly configFallback?: { readonly settings: readonly string[]; readonly reason: string } | undefined;
+}
 /** The OPS_MEMORY_PRESSURE event payload (a tier change or a tripwire firing). */
 export type MemoryPressurePayload = Extract<OpsEvent, { type: 'OPS_MEMORY_PRESSURE' }>;
 
@@ -60,9 +66,13 @@ export function memoryTierNote(tier: MemoryGovernorSnapshotResult['tier']): stri
  * per-cache footprints the governor can shrink, which deferrable jobs are
  * paused, and the leak-tripwire state.
  */
-export function memoryStatusLines(snapshot: MemoryGovernorSnapshotResult): string[] {
+export function memoryStatusLines(snapshot: MemoryGovernorSnapshotResult & MemoryLimitsView): string[] {
   const lines: string[] = [];
   lines.push(`  tier: ${snapshot.tier}, ${memoryTierNote(snapshot.tier)}`);
+  if (snapshot.configFallback) {
+    lines.push(`  settings refused: ${snapshot.configFallback.settings.join(', ')}; the limits below are the ones in force`);
+    lines.push(`    ${snapshot.configFallback.reason}`);
+  }
   if (snapshot.refusingExpensiveWork) {
     lines.push('  expensive work: REFUSED (critical tier), new ingestion / reindex / voice install is declined until RSS recovers');
   }
@@ -72,6 +82,9 @@ export function memoryStatusLines(snapshot: MemoryGovernorSnapshotResult): strin
     : formatMb(snapshot.heapUsedMb);
   lines.push(`  heap: ${heap}`);
   lines.push(`  tiers: elevated ${snapshot.thresholds.elevatedPct}% · high ${snapshot.thresholds.highPct}% · critical ${snapshot.thresholds.criticalPct}%`);
+  if (snapshot.hardLimit) {
+    lines.push(`  hard limit: ${formatMb(snapshot.hardLimit.mb)} (${snapshot.hardLimit.pct}% of the ${formatMb(snapshot.hardLimit.ceilingMb)} this machine can use)`);
+  }
 
   if (snapshot.caches.length === 0) {
     lines.push('  caches: none registered');

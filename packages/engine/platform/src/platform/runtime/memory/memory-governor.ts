@@ -182,6 +182,20 @@ export interface MemoryPolicyProblem {
 /** The shipped values the governor falls back to for a group that cannot run. */
 const SHIPPED_TIERS = { elevatedPct: 60, highPct: 80, criticalPct: 95 } as const;
 const SHIPPED_HARD_LIMIT_PCT = 90;
+/** The settings each group stands for, named in status when the group falls back. */
+const POLICY_GROUP_SETTINGS: Readonly<Record<MemoryPolicyProblem['group'], readonly string[]>> = {
+  tiers: ['memory.tier.elevatedPct', 'memory.tier.highPct', 'memory.tier.criticalPct'],
+  'hard-limit': ['memory.budgetMb', 'memory.hardLimitPct'],
+};
+
+/** Options the composition hands the governor besides its configuration. */
+export interface MemoryGovernorOptions {
+  /**
+   * Why the configured memory settings were refused as a whole before this
+   * governor was built on the shipped ones; status and the ops event say so.
+   */
+  readonly configRefusal?: string | undefined;
+}
 
 /** The budget in MB a configured value resolves to: 0 or less is auto, min(25% of the ceiling, 4096), at least 256. */
 export function resolveMemoryBudgetMb(budgetMb: number, ceilingMb: number): number {
@@ -308,6 +322,22 @@ export interface MemoryGovernorSnapshot {
     readonly highPct: number;
     readonly criticalPct: number;
   };
+  /** The hard limit in force: RSS held at or above `mb` (`pct`% of the `ceilingMb` this machine can use) for the sustain window ends the daemon gracefully. */
+  readonly hardLimit: {
+    readonly pct: number;
+    readonly mb: number;
+    readonly ceilingMb: number;
+  };
+  /**
+   * Present when configured memory settings were refused: which settings, and
+   * why. The budget, thresholds and hard limit above are the ones in force (the
+   * shipped values for the refused settings) until the setting is fixed and the
+   * daemon restarts.
+   */
+  readonly configFallback?: {
+    readonly settings: readonly string[];
+    readonly reason: string;
+  };
 }
 
 /** Structured refusal returned when the governor is at the critical tier. */
@@ -382,8 +412,10 @@ export class MemoryGovernor {
 
   /** Why the configured values are not the ones running, when they are not. */
   private readonly policyFallback: string | undefined;
+  /** The settings whose configured values are not running. */
+  private readonly refusedSettings: readonly string[];
 
-  constructor(configured: MemoryGovernorConfig, deps: MemoryGovernorDeps) {
+  constructor(configured: MemoryGovernorConfig, deps: MemoryGovernorDeps, options: MemoryGovernorOptions = {}) {
     this.caches = deps.caches;
     this.pauses = deps.pauses;
     this.pauses.setPressureProbe(() => (TIER_RANK[this.tier] >= TIER_RANK.high ? `memory-pressure:${this.tier}` : undefined));
@@ -407,16 +439,24 @@ export class MemoryGovernor {
     // group falls back to the shipped values, and status and the ops event say so.
     let config = configured;
     const fallbacks: string[] = [];
+    const refused = new Set<string>();
+    if (options.configRefusal !== undefined) {
+      fallbacks.push(options.configRefusal.replace(/[.\s]+$/, ''));
+      for (const keys of Object.values(POLICY_GROUP_SETTINGS)) for (const key of keys) refused.add(key);
+    }
     for (let attempt = 0; attempt < 3; attempt += 1) {
       const problem = validateMemoryPolicy(config, this.effectiveCeilingMb);
       if (problem === null) break;
       fallbacks.push(problem.message);
+      for (const key of POLICY_GROUP_SETTINGS[problem.group]) refused.add(key);
       config = problem.group === 'tiers'
         ? { ...config, ...SHIPPED_TIERS }
         : { ...config, budgetMb: 0, hardLimitPct: SHIPPED_HARD_LIMIT_PCT };
     }
+    this.refusedSettings = [...refused];
     this.policyFallback = fallbacks.length > 0
-      ? `The memory settings could not run, so shipped values are in use for them: ${fallbacks.join('; ')}.`
+      ? `The memory settings ${this.refusedSettings.join(', ')} could not run, so shipped values are in use for them: ${fallbacks.join('; ')}. `
+        + 'Fix the setting; the change applies after the daemon restarts.'
       : undefined;
     if (this.policyFallback) logger.warn(this.policyFallback);
     const hardLimitPct = config.hardLimitPct ?? SHIPPED_HARD_LIMIT_PCT;
@@ -515,6 +555,8 @@ export class MemoryGovernor {
         highPct: round1((this.highBytes / (this.budgetMb * MB)) * 100),
         criticalPct: round1((this.criticalBytes / (this.budgetMb * MB)) * 100),
       },
+      hardLimit: { pct: this.hardLimitPct, mb: Math.round(this.hardLimitBytes / MB), ceilingMb: Math.round(this.effectiveCeilingMb) },
+      ...(this.policyFallback !== undefined ? { configFallback: { settings: this.refusedSettings, reason: this.policyFallback } } : {}),
     };
   }
 

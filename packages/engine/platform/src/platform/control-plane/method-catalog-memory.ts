@@ -43,9 +43,20 @@ const MEMORY_SNAPSHOT_SCHEMA = objectSchema({
     highPct: NUMBER_SCHEMA,
     criticalPct: NUMBER_SCHEMA,
   }, ['elevatedPct', 'highPct', 'criticalPct']),
+  /** The hard limit in force, in MB and as a percent of the memory this machine can use. */
+  hardLimit: objectSchema({
+    pct: NUMBER_SCHEMA,
+    mb: NUMBER_SCHEMA,
+    ceilingMb: NUMBER_SCHEMA,
+  }, ['pct', 'mb', 'ceilingMb']),
+  /** Present when memory settings were refused: which ones and why; the budget, thresholds and hard limit are the values in force until the setting is fixed and the daemon restarts. */
+  configFallback: objectSchema({
+    settings: arraySchema(STRING_SCHEMA),
+    reason: STRING_SCHEMA,
+  }, ['settings', 'reason']),
 }, [
   'tier', 'budgetMb', 'rssMb', 'heapUsedMb', 'usedPct',
-  'refusingExpensiveWork', 'caches', 'pausedJobs', 'tripwire', 'thresholds',
+  'refusingExpensiveWork', 'caches', 'pausedJobs', 'tripwire', 'thresholds', 'hardLimit',
 ]);
 
 export const builtinGatewayMemoryMethodDescriptors: readonly GatewayMethodDescriptor[] = [
@@ -53,7 +64,7 @@ export const builtinGatewayMemoryMethodDescriptors: readonly GatewayMethodDescri
     id: 'ops.memory.get',
     title: 'Get Memory Governance State',
     description:
-      'The MemoryGovernor snapshot: the current memory-pressure tier and budget, resident set size and heap, per-cache footprints the governor can shrink, which deferrable background jobs are paused, and the leak-tripwire state. Read-only observability so operators can see the daemon shedding memory before it approaches OOM.',
+      'The MemoryGovernor snapshot: the current memory-pressure tier and budget, resident set size and heap, the tier thresholds and hard limit in force, per-cache footprints the governor can shrink, which deferrable background jobs are paused, and the leak-tripwire state. When memory.budgetMb, memory.tier.* or memory.hardLimitPct were refused, `configFallback` names the settings and why; the shipped values shown are in force until the setting is fixed and the daemon restarts. Read-only observability so operators can see the daemon shedding memory before it approaches OOM.',
     category: 'health',
     scopes: ['read:health'],
     http: { method: 'GET', path: '/api/ops/memory' },

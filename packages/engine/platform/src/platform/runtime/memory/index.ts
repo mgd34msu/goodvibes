@@ -42,6 +42,7 @@ export {
   type MemorySampler,
   type MemoryGovernorConfig,
   type MemoryGovernorDeps,
+  type MemoryGovernorOptions,
   type MemoryGovernorSnapshot,
   type MemoryPressureEvent,
   type MemoryTripwireReceipt,

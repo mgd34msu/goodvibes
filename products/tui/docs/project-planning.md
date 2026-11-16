@@ -70,12 +70,12 @@ The command surface (aliases `/wp`, `/todo`, `/workplan`):
 | Command | Does |
 | --- | --- |
 | `/work-plan` or `/work-plan panel` | Open the Work Plan modal |
-| `/work-plan add <title> [--owner name] [--source label] [--notes text]` | Add an item |
-| `/work-plan edit <id> [<new title>] [--owner name] [--source label] [--notes text]` | Edit an item's title or fields |
+| `/work-plan add <title> [--owner name] [--source label] [--notes text]` | Add an item; `/work-plan add` alone puts `/work-plan add ` back in an empty composer to finish |
+| `/work-plan edit <id> [<new title>] [--owner name] [--source label] [--notes text]` | Edit an item's title or fields; `/work-plan edit <id>` alone puts the command with the item's current title back in an empty composer |
 | `/work-plan list` | Print the plan as a list |
 | `/work-plan show` (alias `markdown`) | Print the plan rendered as Markdown |
 | `/work-plan export` | Write that same Markdown rendering to a file next to the JSON store |
-| `/work-plan done\|start\|block\|fail\|cancel\|pending <id>` | Set an item's status directly |
+| `/work-plan done\|start\|in_progress\|block\|fail\|cancel\|pending <id>` | Set an item's status directly |
 | `/work-plan cycle <id>` (alias `toggle`) | Advance the item to its next status |
 | `/work-plan remove <id>` | Remove an item |
 | `/work-plan clear-done` | Clear completed (done/cancelled) items |
@@ -89,18 +89,17 @@ The modal's keys:
 | Key | Action |
 | --- | --- |
 | Up/Down | Navigate items |
-| `Enter` / `Space` | Cycle the selected item's status |
+| `Enter` | Cycle the selected item's status |
 | `1`-`6` | Set status directly (pending/active/blocked/done/failed/cancelled) |
-| `a` | Open an inline add form (title/owner/notes fields) |
-| `e` | Open the same form pre-filled to edit the selected item |
-| `Tab` / `Enter` / `Esc` | In the form: cycle fields, save, cancel |
-| `d` / `Delete` | Remove the selected item |
+| `a` | Close the modal and put `/work-plan add ` in the composer; type the title and press Enter |
+| `e` | Close the modal and put `/work-plan edit <id> <current title>` in the composer; change it and press Enter |
+| `d` | Remove the selected item |
 | `c` | Clear completed (done/cancelled) items |
 | `r` | Refresh from disk |
-| `x` | Export to a Markdown file next to the JSON store (`<store-file>.md`), the same rendering `/work-plan show` prints |
-| `i` / `w` | On an item with linked ids, open the Agents modal on the linked agent or on the linked WRFC chain |
+| `x` | Close the modal and export to a Markdown file next to the JSON store (`<store-file>.md`), the same rendering `/work-plan show` prints; the path is printed |
+| `i` / `w` | On an item with a linked agent or contract, open the Agents modal on it |
 
-When the selected item has linked ids (`item.linked` holds any of `agentId`, `wrfcId`, `taskId`, `sessionId`), the detail block shows them with their jump key.
+`a` and `e` leave a draft already in the composer untouched; the usage line is printed instead. Each row starts with its status: `[ ]` pending, `[>]` in progress, `[!]` blocked, `[x]` done, `[✕]` failed, `[-]` cancelled. Linked ids (`agent:`, `contract:`, `task:`, `session:`) are shown on the row.
 
 ## platform routes and operator methods
 

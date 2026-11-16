@@ -143,11 +143,12 @@ The `/channel` command gives in-session visibility into the channel runtime stat
 |---|---|
 | `/channel` | Opens the Routes view in the TUI |
 | `/channel panel` | Same as above |
-| `/channel pair [surface]` | Guided channel pairing: lists adapters, collects declared credentials, verifies them |
+| `/channel pair [surface]` | Guided channel pairing: lists adapters, asks for every missing required value (optional ones can be skipped with Enter), enables the surface once every required value is set or says which are missing; `/channel pair <surface> verify` sends a real test message |
 | `/channel status` | Builds a full integration review (routes, delivery, sessions, tasks, pending approvals) |
 | `/channel routes` | Raw route binding snapshot from the integration helper service |
 | `/channel delivery` | Current delivery snapshot: per-route delivery counts and last-error state |
-| `/channel policy` | Configured channel surfaces (enabled/disabled) and the location of fine-grained ingress policies |
+| `/channel policy [surface]` | The daemon's ingress rules for each surface (who may reach the assistant: direct messages, groups, threads, mention, allowlists, allowed commands), with whether the surface is enabled in settings |
+| `/channel policy set <surface> [--enabled on\|off] [--require-mention on\|off] [--dm-policy allow\|deny\|inherit] [--group-policy allow\|deny\|inherit] [--allow-users a,b\|none] ...` | Change those rules through the daemon; asks once first, because it changes who has access |
 | `/channel profiles [list\|get\|set\|delete]` | Per-channel model and permission-mode profile bindings |
 
 `status`, `routes`, `delivery`, and `policy` accept `--json` for
@@ -160,7 +161,8 @@ Examples:
 /channel routes
 /channel status --json
 /channel delivery
-/channel policy
+/channel policy slack
+/channel policy set slack --require-mention on --allow-users U123,U456
 ```
 
 ## GitHub event narration

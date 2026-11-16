@@ -43,6 +43,27 @@ export class AttemptError extends Error {
   }
 }
 
+/**
+ * A pick whose winner did not merge. `conflict`: the winner's branch conflicts
+ * with the base in `files`; `not-merged`: the merge did not complete (`reason`).
+ * Either way nothing was discarded: every attempt is still a candidate and the
+ * group can be picked again.
+ */
+export class AttemptMergeError extends AttemptError {
+  constructor(
+    readonly groupId: string,
+    readonly winnerItemId: string,
+    readonly outcome: 'conflict' | 'not-merged',
+    readonly files: readonly string[],
+    readonly detail: string,
+  ) {
+    super(outcome === 'conflict'
+      ? `the winner ${winnerItemId} of best-of-N group ${groupId} conflicts with the base in ${files.slice(0, 5).join(', ')}${files.length > 5 ? ` and ${files.length - 5} more` : ''}; nothing was discarded and the group can be picked again: pick another attempt, or resolve the conflict and pick it again`
+      : `the winner ${winnerItemId} of best-of-N group ${groupId} was not merged (${detail}); nothing was discarded and the group can be picked again`);
+    this.name = 'AttemptMergeError';
+  }
+}
+
 export interface AttemptsCoordinatorDeps {
   /** Shared with the engine so nested integration/cleanup belongs to the same drain. */
   readonly ownedWork?: OwnedWork | undefined;
@@ -287,7 +308,7 @@ export function createAttemptsCoordinator(deps: AttemptsCoordinatorDeps): Attemp
     if (entry) entry.readyEmitted = false;
   }
 
-  async function buildCandidate(item: WorkItem): Promise<AttemptCandidate> {
+  async function buildCandidate(item: WorkItem, withDiff: boolean): Promise<AttemptCandidate> {
     const state = item.state === 'failed' ? 'failed' : 'held-merge';
     return {
       itemId: item.id,
@@ -298,7 +319,7 @@ export function createAttemptsCoordinator(deps: AttemptsCoordinatorDeps): Attemp
       branch: item.worktreeBranch ?? null,
       usage: item.usage,
       failureReason: item.failureReason ?? null,
-      diff: state === 'held-merge' ? await deps.diffItem(item) : null,
+      diff: state === 'held-merge' && withDiff ? await deps.diffItem(item) : null,
     };
   }
 
@@ -310,12 +331,14 @@ export function createAttemptsCoordinator(deps: AttemptsCoordinatorDeps): Attemp
       const workstream = deps.getWorkstream(entry.workstreamId);
       if (!workstream) continue;
       const siblings = siblingsOf(workstream, entry);
-      const candidates = await Promise.all(siblings.filter(item => item.state === 'held-merge' || item.state === 'failed').map(buildCandidate));
+      // A diff is computed only for a group that can be picked now; one still running shows its candidates without.
+      const ready = allTerminal(siblings);
+      const candidates = await Promise.all(siblings.filter(item => item.state === 'held-merge' || item.state === 'failed').map((item) => buildCandidate(item, ready)));
       result.push({
         groupId,
         workstreamId: entry.workstreamId,
         sourceTitle: entry.sourceTitle,
-        ready: allTerminal(siblings),
+        ready,
         attemptCount: siblings.length,
         selectableCandidateCount: siblings.filter(item => item.state === 'held-merge').length,
         unresolved: siblings.filter(item => item.state !== 'held-merge' && item.state !== 'failed').map(item => ({
@@ -355,39 +378,42 @@ export function createAttemptsCoordinator(deps: AttemptsCoordinatorDeps): Attemp
     winner.state = 'passed';
     winner.attemptWinner = true;
     resolving.add(groupId);
-    // The losers' work is discarded only once the winner's merge has been
-    // attempted without the lane itself failing. If it fails, the winner goes
-    // back to being a held candidate and the group is pickable again, so no
-    // attempt's work is lost to a merge that never happened.
-    const revertWinner = (reason: unknown): void => {
-      logger.warn('attempts: winner integration did not complete; the group stays pickable', { groupId, itemId: winner.id, error: summarizeError(reason) });
+    // The pick answers with the merge outcome. The losers' work is discarded
+    // only once the winner merged; a conflict or a merge that did not complete
+    // puts the winner back among the candidates, and the group stays pickable.
+    const reopen = (): void => {
       winner.state = 'held-merge';
       winner.attemptWinner = undefined;
       resolving.delete(groupId);
       deps.emit({ type: 'item-attempt-held', workstreamId: entry.workstreamId, groupId, itemId: winner.id });
     };
-    void ownedWork.run(() => deps.enqueueIntegration(workstream, winner)).then(() => {
-      // The real lane never rejects: a merge that threw is recorded on the item as a
-      // conflict with no conflicting files. That is a failed attempt, not a conflict to resolve.
-      if (winner.mergeState === 'conflict' && winner.conflictFiles === undefined) {
-        revertWinner(winner.blockedReason ?? 'the winner merge did not complete');
-        return;
+    try {
+      await ownedWork.run(() => deps.enqueueIntegration(workstream, winner));
+    } catch (error) {
+      logger.warn('attempts: winner integration did not complete; the group stays pickable', { groupId, itemId: winner.id, error: summarizeError(error) });
+      reopen();
+      throw new AttemptMergeError(groupId, winner.id, 'not-merged', [], summarizeError(error));
+    }
+    if (winner.mergeState === 'conflict') {
+      // The real lane never rejects: a merge that threw is recorded as a conflict with no conflicting files.
+      const files = winner.conflictFiles ?? [];
+      reopen();
+      throw new AttemptMergeError(groupId, winner.id, files.length > 0 ? 'conflict' : 'not-merged', files, winner.blockedReason ?? 'the winner merge did not complete');
+    }
+    // Losers: discard their work (clean the worktree) and mark terminal. A held
+    // loser passed its gates, it is 'passed' with an honest "not selected" note,
+    // not a failure; a failed loser is left failed.
+    for (const loser of losers) {
+      if (loser.state === 'held-merge') {
+        loser.state = 'passed';
+        (loser.warnings ??= []).push('best-of-N: not selected (loser worktree cleaned)');
       }
-      // Losers: discard their work (clean the worktree) and mark terminal. A held
-      // loser passed its gates, it is 'passed' with an honest "not selected" note,
-      // not a failure; a failed loser is left failed.
-      for (const loser of losers) {
-        if (loser.state === 'held-merge') {
-          loser.state = 'passed';
-          (loser.warnings ??= []).push('best-of-N: not selected (loser worktree cleaned)');
-        }
-        void ownedWork.run(() => deps.cleanupWorktree(workstream, loser)).catch((error) => {
-          logger.warn('attempts: loser worktree cleanup did not complete', { itemId: loser.id, error: summarizeError(error) });
-        });
-      }
-      groups.delete(groupId);
-      resolving.delete(groupId);
-    }, revertWinner);
+      void ownedWork.run(() => deps.cleanupWorktree(workstream, loser)).catch((error) => {
+        logger.warn('attempts: loser worktree cleanup did not complete', { itemId: loser.id, error: summarizeError(error) });
+      });
+    }
+    groups.delete(groupId);
+    resolving.delete(groupId);
     const loserItemIds = losers.map((l) => l.id);
     deps.emit({ type: 'attempt-winner-picked', workstreamId: entry.workstreamId, groupId, winnerItemId, loserItemIds, auto });
     return { groupId, winnerItemId, loserItemIds, auto };

@@ -8,7 +8,10 @@ import { readTuiNotificationsMetadataOnly } from '../config/host-settings.ts';
  * the device-posture runtime and its housekeeping, the mail service deps,
  * lives in the daemon product. This composition serves no verbs, elects
  * nothing, polls no mailbox, and supervises no remote runner. It builds what
- * a TURN needs in this process and reaches the daemon for the rest.
+ * a TURN needs in this process and reaches the daemon for the rest. Its
+ * automation manager arms no timers while the daemon is on: routines belong to
+ * the daemon, and only with the daemon off does the one terminal holding the
+ * routine lock run them (runtime/terminal-routines.ts).
  *
  * ── The floor comes from the platform ───────────────────────────────────────────
  *
@@ -49,7 +52,8 @@ import { wireIdlePowerAndLiveTurn } from '@goodvibes-jev/engine/platform/platfor
 import { createAsyncDisposalScope, createRuntimeStopRequests } from '@goodvibes-jev/engine/platform/platform/runtime/disposal';
 import { registerSurfaceRuntimePollers } from './disposal-wiring.ts';
 import { forwardGatewayMethodsToDaemon } from './gateway-daemon-forward.ts';
-import { createAutomationSpawnTask } from './automation-spawn.ts';
+import { createAutomationAgentControls } from './automation-spawn.ts';
+import { terminalRunsRoutines } from './terminal-routines.ts';
 import { buildContinuationSpawnInput } from './continuation-spawn.ts';
 import { gateConsolidationToLocalWriter } from './memory-consolidation-gate.ts';
 import { composeCredentialServices } from './credential-composition.ts';
@@ -448,7 +452,8 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
     deliveryManager,
     providerRegistry,
     featureFlags,
-    spawnTask: createAutomationSpawnTask(agentManager),
+    // Spawns, reads and stops a routine's agent, so a run settles and its timeout can stop it.
+    ...createAutomationAgentControls(agentManager),
   });
   // Knowledge/wiki + home-graph stack (governor backpressure wired in), see knowledge-services.ts.
   const {
@@ -643,9 +648,10 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
       !pauseController.isPaused('memory-consolidation') &&
       admitExpensiveWork('memory consolidation').allowed,
     snapshotTick: () => storeSnapshotScheduler.tick(),
-    // Routines are kept and run by the daemon (/schedule is its client), so a
-    // wake has no local routine to catch up.
-    heartbeat: async () => {},
+    // The daemon catches its routines up on wake; a terminal does only while it runs them itself (daemon off).
+    heartbeat: async () => {
+      if (terminalRunsRoutines(automationManager)) await automationManager.triggerHeartbeat({ source: 'wake-catchup' });
+    },
     powerSeam: options.powerSeam,
   });
 

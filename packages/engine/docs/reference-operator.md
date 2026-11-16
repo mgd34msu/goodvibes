@@ -4,8 +4,8 @@ Generated from the synced GoodVibes operator contract artifact.
 
 ## Summary
 
-- Methods: `572`
-- Events: `34`
+- Methods: `595`
+- Events: `36`
 - Auth modes: `shared-bearer`, `session-login`
 - HTTP status path: `/status`
 - Methods catalog path: `/api/control-plane/methods`
@@ -380,7 +380,7 @@ none
 
 #### `acp.sessions.create`
 
-Spawn a discovered third-party agent into a working directory as a hosted daemon session in ONE act: the binary is launched in ACP stdio mode, the handshake and session creation run under a bound timeout, and the result is the hosted record, which appears as a steerable/stoppable fleet row (kind acp-agent) whose permission asks classify as waiting-on-human. A binary that fails the handshake returns the SAME record with state "failed" and a structured error (which binary, which stage, what happened), an honest outcome, never a hung row and never a bare string. An optional initial prompt starts the first turn.
+Spawn a discovered third-party agent into a working directory as a hosted daemon session in ONE act: the binary is launched in ACP stdio mode, the handshake and session creation run under a bound timeout, and the result is the hosted record, which appears as a steerable/stoppable fleet row (kind acp-agent). Its permission asks are decided by the autonomous admission of the daemon against the current policy, never by a person, so a row is never waiting on a human; an ask that times out or cannot be decided is refused and shown as `lastRefusal`. A binary that fails the handshake returns the SAME record with state "failed" and a structured error (which binary, which stage, what happened), an honest outcome, never a hung row and never a bare string. An optional initial prompt starts the first turn.
 
 - Title: `Spawn a Third-Party Coding Agent Session`
 - Source: `builtin`
@@ -444,7 +444,14 @@ Spawn a discovered third-party agent into a working directory as a hosted daemon
           "type": "string"
         },
         "state": {
-          "type": "string"
+          "type": "string",
+          "enum": [
+            "starting",
+            "idle",
+            "prompting",
+            "failed",
+            "stopped"
+          ]
         },
         "startedAt": {
           "type": "number"
@@ -458,9 +465,6 @@ Spawn a discovered third-party agent into a working directory as a hosted daemon
         "progress": {
           "type": "string"
         },
-        "pendingPermission": {
-          "type": "string"
-        },
         "error": {
           "type": "object",
           "properties": {
@@ -468,7 +472,13 @@ Spawn a discovered third-party agent into a working directory as a hosted daemon
               "type": "string"
             },
             "stage": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "spawn",
+                "initialize",
+                "session",
+                "prompt"
+              ]
             },
             "message": {
               "type": "string"
@@ -478,6 +488,22 @@ Spawn a discovered third-party agent into a working directory as a hosted daemon
             "binary",
             "stage",
             "message"
+          ],
+          "additionalProperties": false
+        },
+        "lastRefusal": {
+          "type": "object",
+          "properties": {
+            "at": {
+              "type": "number"
+            },
+            "reason": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "at",
+            "reason"
           ],
           "additionalProperties": false
         },
@@ -2726,11 +2752,7 @@ Return pending and historical approval records, newest 50. Pass `approvalId` to 
         "safe-owner",
         "safe-jev",
         "yolo",
-        "default",
-        "plan",
-        "allow-all",
-        "custom",
-        "background-restricted"
+        "plan"
       ]
     },
     "lastDecision": {
@@ -2754,12 +2776,14 @@ Return pending and historical approval records, newest 50. Pass `approvalId` to 
         "machineState": {
           "type": "string",
           "enum": [
+            "check_boundary",
             "collect_rules",
             "normalize_input",
             "evaluate_policy",
-            "evaluate_runtime_mode",
             "evaluate_session_override",
-            "final_safety_checks",
+            "read_stakes",
+            "evaluate_preset",
+            "awaiting_owner",
             "decision_emitted"
           ]
         },
@@ -2774,33 +2798,49 @@ Return pending and historical approval records, newest 50. Pass `approvalId` to 
         "reason": {
           "type": "string",
           "enum": [
+            "boundary_judgment_input",
+            "boundary_catastrophic",
+            "boundary_surface_authority",
+            "boundary_card_details",
+            "boundary_outward_effect",
+            "preset_allow",
+            "preset_deny",
+            "owner_approved_outward",
             "config_allow",
             "config_deny",
             "managed_policy_allow",
             "managed_policy_deny",
-            "mode_allow_all",
-            "mode_denied",
-            "mode_plan_deny",
-            "mode_background_restricted",
-            "session_cached_approval",
-            "session_cached_denial",
             "safety_guardrail",
+            "mode_allow_all",
+            "invocation_already_admitted",
+            "mode_denied",
+            "plan_mode",
+            "session_cached_allow",
+            "session_cached_deny",
             "user_rule_allow",
             "user_rule_deny",
             "user_approved",
-            "user_denied"
+            "user_denied",
+            "jev_act",
+            "jev_revise",
+            "jev_defer",
+            "jev_reject"
           ]
         },
         "sourceLayer": {
           "type": "string",
           "enum": [
+            "boundary",
+            "stakes_preset",
             "config_policy",
             "managed_policy",
-            "runtime_mode",
-            "session_override",
             "safety_check",
+            "runtime_mode",
+            "invocation_admission",
+            "session_override",
             "user_rule",
-            "user_prompt"
+            "user_prompt",
+            "jev_decision"
           ]
         },
         "persisted": {
@@ -4054,6 +4094,866 @@ Raise a permission ask INTO the shared broker from a surface that is not in the 
 }
 ```
 
+#### `inbox.answer`
+
+Answer one open inbox item with one of its `options`, or with `text` when it has none (text may also accompany an option). An approval answered approve or deny is decided through the approval broker exactly as approvals.approve/deny would. The first answer wins: a later one, or an answer to a withdrawn or expired item, returns `applied: false` with a `refusal` naming who answered and from where (still 200, so a raced answer does not fail). Who answered is taken from the authenticated caller.
+
+- Title: `Answer Owner Inbox Item`
+- Source: `builtin`
+- Access: `admin`
+- Transport: `ws`
+- HTTP: none
+- Scopes: `write:approvals`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "itemId": {
+      "type": "string"
+    },
+    "option": {
+      "type": "string"
+    },
+    "text": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "itemId"
+  ],
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "applied": {
+      "type": "boolean"
+    },
+    "item": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "approval",
+            "question",
+            "claim",
+            "purchase",
+            "queued-action"
+          ]
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "open",
+            "answered",
+            "withdrawn",
+            "expired"
+          ]
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "detail": {
+          "type": "string"
+        },
+        "options": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "askedBy": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "number"
+        },
+        "expiresAt": {
+          "type": "number"
+        },
+        "answer": {
+          "type": "object",
+          "properties": {
+            "option": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "answeredBy": {
+          "type": "object",
+          "properties": {
+            "actor": {
+              "type": "string"
+            },
+            "surface": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "actor",
+            "surface"
+          ],
+          "additionalProperties": false
+        },
+        "closedAt": {
+          "type": "number"
+        },
+        "withdrawnReason": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string"
+        },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              },
+              {
+                "type": "object",
+                "additionalProperties": {}
+              },
+              {
+                "type": "array",
+                "items": {}
+              }
+            ]
+          }
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "status",
+        "title",
+        "detail",
+        "options",
+        "createdAt"
+      ],
+      "additionalProperties": false
+    },
+    "refusal": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "next": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "retryable": {
+          "type": "boolean"
+        },
+        "retryAfterMs": {
+          "type": "number"
+        },
+        "status": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "code",
+        "state",
+        "reason",
+        "next",
+        "retryable"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "applied"
+  ],
+  "additionalProperties": false
+}
+```
+
+#### `inbox.list`
+
+Everything waiting on the owner in one list, newest first: permission asks (kind approval), questions agents left, channel claims, purchase windows and queued actions. `status` is open (default), closed or all; pass `itemId` to read one item wherever it ranks. `revision` moves on every change, so a surface can tell whether its copy is current by comparing one number.
+
+- Title: `List Owner Inbox`
+- Source: `builtin`
+- Access: `authenticated`
+- Transport: `ws`
+- HTTP: none
+- Scopes: `read:approvals`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "itemId": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "open",
+        "closed",
+        "all"
+      ]
+    },
+    "kinds": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "approval",
+          "question",
+          "claim",
+          "purchase",
+          "queued-action"
+        ]
+      }
+    },
+    "sessionId": {
+      "type": "string"
+    },
+    "limit": {
+      "type": "number"
+    }
+  },
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "approval",
+              "question",
+              "claim",
+              "purchase",
+              "queued-action"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "open",
+              "answered",
+              "withdrawn",
+              "expired"
+            ]
+          },
+          "sessionId": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "options": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "askedBy": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "number"
+          },
+          "expiresAt": {
+            "type": "number"
+          },
+          "answer": {
+            "type": "object",
+            "properties": {
+              "option": {
+                "type": "string"
+              },
+              "text": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          "answeredBy": {
+            "type": "object",
+            "properties": {
+              "actor": {
+                "type": "string"
+              },
+              "surface": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "actor",
+              "surface"
+            ],
+            "additionalProperties": false
+          },
+          "closedAt": {
+            "type": "number"
+          },
+          "withdrawnReason": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": {}
+                },
+                {
+                  "type": "array",
+                  "items": {}
+                }
+              ]
+            }
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "status",
+          "title",
+          "detail",
+          "options",
+          "createdAt"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "revision": {
+      "type": "number"
+    }
+  },
+  "required": [
+    "items",
+    "revision"
+  ],
+  "additionalProperties": false
+}
+```
+
+#### `inbox.post`
+
+Leave the owner a question or a queued action from a process that is not the daemon (an agent in a terminal app). Returns at once; the asker carries on and reads the answer later with inbox.list (`itemId`). A post under a `key` that already has an open item returns that item with `created: false`, so a retried post never asks twice. Permission asks are raised with approvals.raise; claims and purchase windows are posted by the daemon itself.
+
+- Title: `Post to Owner Inbox`
+- Source: `builtin`
+- Access: `authenticated`
+- Transport: `ws`
+- HTTP: none
+- Scopes: `write:approvals`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "kind": {
+      "type": "string",
+      "enum": [
+        "question",
+        "queued-action"
+      ]
+    },
+    "title": {
+      "type": "string"
+    },
+    "detail": {
+      "type": "string"
+    },
+    "options": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "sessionId": {
+      "type": "string"
+    },
+    "askedBy": {
+      "type": "string"
+    },
+    "key": {
+      "type": "string"
+    },
+    "expiresAt": {
+      "type": "number"
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "null"
+          },
+          {
+            "type": "object",
+            "additionalProperties": {}
+          },
+          {
+            "type": "array",
+            "items": {}
+          }
+        ]
+      }
+    }
+  },
+  "required": [
+    "kind",
+    "title"
+  ],
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "created": {
+      "type": "boolean"
+    },
+    "item": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "approval",
+            "question",
+            "claim",
+            "purchase",
+            "queued-action"
+          ]
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "open",
+            "answered",
+            "withdrawn",
+            "expired"
+          ]
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "detail": {
+          "type": "string"
+        },
+        "options": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "askedBy": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "number"
+        },
+        "expiresAt": {
+          "type": "number"
+        },
+        "answer": {
+          "type": "object",
+          "properties": {
+            "option": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "answeredBy": {
+          "type": "object",
+          "properties": {
+            "actor": {
+              "type": "string"
+            },
+            "surface": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "actor",
+            "surface"
+          ],
+          "additionalProperties": false
+        },
+        "closedAt": {
+          "type": "number"
+        },
+        "withdrawnReason": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string"
+        },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              },
+              {
+                "type": "object",
+                "additionalProperties": {}
+              },
+              {
+                "type": "array",
+                "items": {}
+              }
+            ]
+          }
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "status",
+        "title",
+        "detail",
+        "options",
+        "createdAt"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "created",
+    "item"
+  ],
+  "additionalProperties": false
+}
+```
+
+#### `inbox.withdraw`
+
+Take back an open item this caller posted, because the answer is no longer needed. Only the principal that posted an item may withdraw it. An item that is no longer open returns `applied: false` with a `refusal`.
+
+- Title: `Withdraw Owner Inbox Item`
+- Source: `builtin`
+- Access: `authenticated`
+- Transport: `ws`
+- HTTP: none
+- Scopes: `write:approvals`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "itemId": {
+      "type": "string"
+    },
+    "reason": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "itemId"
+  ],
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "applied": {
+      "type": "boolean"
+    },
+    "item": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "approval",
+            "question",
+            "claim",
+            "purchase",
+            "queued-action"
+          ]
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "open",
+            "answered",
+            "withdrawn",
+            "expired"
+          ]
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "detail": {
+          "type": "string"
+        },
+        "options": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "askedBy": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "number"
+        },
+        "expiresAt": {
+          "type": "number"
+        },
+        "answer": {
+          "type": "object",
+          "properties": {
+            "option": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "answeredBy": {
+          "type": "object",
+          "properties": {
+            "actor": {
+              "type": "string"
+            },
+            "surface": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "actor",
+            "surface"
+          ],
+          "additionalProperties": false
+        },
+        "closedAt": {
+          "type": "number"
+        },
+        "withdrawnReason": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string"
+        },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              },
+              {
+                "type": "object",
+                "additionalProperties": {}
+              },
+              {
+                "type": "array",
+                "items": {}
+              }
+            ]
+          }
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "status",
+        "title",
+        "detail",
+        "options",
+        "createdAt"
+      ],
+      "additionalProperties": false
+    },
+    "refusal": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "next": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "retryable": {
+          "type": "boolean"
+        },
+        "retryAfterMs": {
+          "type": "number"
+        },
+        "status": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "code",
+        "state",
+        "reason",
+        "next",
+        "retryable"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "applied"
+  ],
+  "additionalProperties": false
+}
+```
+
 ### artifacts
 
 #### `artifacts.content.get`
@@ -4277,10 +5177,22 @@ Store a file or attachment artifact for later delivery, analysis, or knowledge i
           "type": "string"
         },
         "acquisitionMode": {
-          "type": "string"
+          "type": "string",
+          "enum": [
+            "inline-data",
+            "local-path",
+            "remote-fetch",
+            "unknown"
+          ]
         },
         "fetchMode": {
-          "type": "string"
+          "type": "string",
+          "enum": [
+            "not-applicable",
+            "public-only",
+            "allow-private-hosts",
+            "unknown"
+          ]
         },
         "metadata": {
           "type": "object",
@@ -4396,10 +5308,22 @@ Return metadata for a stored artifact.
           "type": "string"
         },
         "acquisitionMode": {
-          "type": "string"
+          "type": "string",
+          "enum": [
+            "inline-data",
+            "local-path",
+            "remote-fetch",
+            "unknown"
+          ]
         },
         "fetchMode": {
-          "type": "string"
+          "type": "string",
+          "enum": [
+            "not-applicable",
+            "public-only",
+            "allow-private-hosts",
+            "unknown"
+          ]
         },
         "metadata": {
           "type": "object",
@@ -4510,10 +5434,22 @@ Return stored artifact metadata for files and attachments.
             "type": "string"
           },
           "acquisitionMode": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "inline-data",
+              "local-path",
+              "remote-fetch",
+              "unknown"
+            ]
           },
           "fetchMode": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "not-applicable",
+              "public-only",
+              "allow-private-hosts",
+              "unknown"
+            ]
           },
           "metadata": {
             "type": "object",
@@ -4768,7 +5704,7 @@ Create a local auth user.
 - HTTP: `POST /api/local-auth/users`
 - Scopes: `write:auth`
 - Emits events: none
-- Dangerous: `no`
+- Dangerous: `yes`
 - Invokable: `yes`
 
 ##### Input schema
@@ -4884,7 +5820,7 @@ Rotate a local auth user password.
 - HTTP: `POST /api/local-auth/users/{username}/password`
 - Scopes: `write:auth`
 - Emits events: none
-- Dangerous: `no`
+- Dangerous: `yes`
 - Invokable: `yes`
 
 ##### Input schema
@@ -4893,11 +5829,15 @@ Rotate a local auth user password.
 {
   "type": "object",
   "properties": {
+    "username": {
+      "type": "string"
+    },
     "password": {
       "type": "string"
     }
   },
   "required": [
+    "username",
     "password"
   ],
   "additionalProperties": true
@@ -6836,7 +7776,6 @@ Create a durable automation job.
         }
       },
       "required": [
-        "kind",
         "every"
       ],
       "additionalProperties": true
@@ -6855,7 +7794,6 @@ Create a durable automation job.
         }
       },
       "required": [
-        "kind",
         "at"
       ],
       "additionalProperties": true
@@ -16436,7 +17374,6 @@ Create a schedule record.
         }
       },
       "required": [
-        "kind",
         "every"
       ],
       "additionalProperties": true
@@ -16455,7 +17392,6 @@ Create a schedule record.
         }
       },
       "required": [
-        "kind",
         "at"
       ],
       "additionalProperties": true
@@ -19454,7 +20390,7 @@ Cancel a queued job. A job already in a terminal state is returned unchanged; a 
 
 #### `batch.jobs.create`
 
-Queue one chat request to run later as part of a provider batch, answered 202 with the queued job. A message or tool the provider could never accept is refused here with INVALID_BATCH_REQUEST rather than accepted with a job id. `flush: true` submits it right away instead of waiting for the next pass, and the response then carries the job as that pass left it. Refused with BATCH_DISABLED (409) while the mode is `off`, LIVE_REQUEST_NOT_ACCEPTED (400) for `executionMode: "live"`, and BATCH_REQUEST_TOO_LARGE (413) above the request size limit. Spends provider budget, so it needs an admin.
+Queue one chat request to run later as part of a provider batch, answered 202 with the queued job. A message or tool the provider could never accept is refused here with INVALID_BATCH_REQUEST rather than accepted with a job id. `flush: true` submits it right away instead of waiting for the next pass, and the response then carries the job as that pass left it. When the provider cannot batch (no batch API, or not configured for it) and `batch.fallback` is `live`, the request runs at once on the live path and the job comes back finished: `completed` with its result, or `failed` with code LIVE_FALLBACK_FAILED, marked `metadata["goodvibes.execution"] = "live-fallback"`; with `fallback: fail` it is refused with BATCH_PROVIDER_UNSUPPORTED or BATCH_PROVIDER_NOT_CONFIGURED (409). Refused with BATCH_DISABLED (409) while the mode is `off`, LIVE_REQUEST_NOT_ACCEPTED (400) for `executionMode: "live"`, and BATCH_REQUEST_TOO_LARGE (413) above the request size limit. Spends provider budget, so it needs an admin.
 
 - Title: `Create Batch Job`
 - Source: `builtin`
@@ -20032,7 +20968,7 @@ Run one submit-and-poll pass over the queue now instead of waiting for the timer
 
 #### `batch.runtime.get`
 
-The batch queue's current mode (`off`, `explicit` or `eligible-by-default`), what happens when a provider cannot batch (`fallback`), which queue backend holds jobs, the Cloudflare settings it would use, its limits, and the providers that can batch. `GET /api/batch` and `GET /api/batch/config` return the same document.
+The batch queue's current mode (`off`, `explicit` or `eligible-by-default`; the last is accepted and behaves like `explicit`, nothing enqueues by default yet), what happens to a job whose provider cannot batch (`fallback`: `live` runs it at once on the live path and answers it finished, `fail` refuses it), which queue backend holds jobs, the Cloudflare settings it would use, its limits, and the providers that can batch. `GET /api/batch` and `GET /api/batch/config` return the same document.
 
 - Title: `Batch Runtime`
 - Source: `builtin`
@@ -22618,9 +23554,66 @@ Wait for text to become visible, for the URL to match, or for the network to set
 
 ### calendar
 
+#### `calendar.calendars.list`
+
+The calendars the configured account can reach, so a setup flow can offer them for surfaces.calendar.defaultCalendarId. A backend that cannot discover calendars answers 501 CALENDAR_NOT_SUPPORTED.
+
+- Title: `List Calendars`
+- Source: `builtin`
+- Access: `authenticated`
+- Transport: `http`, `ws`
+- HTTP: `GET /api/calendar/calendars`
+- Scopes: `read:calendar`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {},
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "calendars": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "calendarId": {
+            "type": "string"
+          },
+          "displayName": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "calendarId",
+          "displayName"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "calendars"
+  ],
+  "additionalProperties": false
+}
+```
+
 #### `calendar.events.create`
 
-Create an event on the configured CalDAV calendar. Requires explicit confirmation.
+Create an event on the configured calendar. Requires explicit confirmation (confirm: true); attendees are invited by the calendar. Change it with calendar.events.update and remove it with calendar.events.delete.
 
 - Title: `Create Calendar Event`
 - Source: `builtin`
@@ -22629,7 +23622,7 @@ Create an event on the configured CalDAV calendar. Requires explicit confirmatio
 - HTTP: `POST /api/calendar/events`
 - Scopes: `write:calendar`
 - Emits events: none
-- Dangerous: `no`
+- Dangerous: `yes`
 - Invokable: `yes`
 
 ##### Input schema
@@ -22701,6 +23694,65 @@ Create an event on the configured CalDAV calendar. Requires explicit confirmatio
 }
 ```
 
+#### `calendar.events.delete`
+
+Remove an event from the configured calendar. Requires explicit confirmation (confirm: true). `deleted: false` means the calendar no longer held it; a backend that cannot delete events answers 501 CALENDAR_NOT_SUPPORTED.
+
+- Title: `Delete Calendar Event`
+- Source: `builtin`
+- Access: `admin`
+- Transport: `http`, `ws`
+- HTTP: `DELETE /api/calendar/events/{eventId}`
+- Scopes: `write:calendar`
+- Emits events: none
+- Dangerous: `yes`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "eventId": {
+      "type": "string"
+    },
+    "calendarId": {
+      "type": "string"
+    },
+    "confirm": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "eventId",
+    "confirm"
+  ],
+  "additionalProperties": true
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "eventId": {
+      "type": "string"
+    },
+    "deleted": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "eventId",
+    "deleted"
+  ],
+  "additionalProperties": false
+}
+```
+
 #### `calendar.events.get`
 
 Return the full event object including attendees, recurrence, and raw iCalendar UID.
@@ -22756,6 +23808,9 @@ Return the full event object including attendees, recurrence, and raw iCalendar 
     "end": {
       "type": "string"
     },
+    "allDay": {
+      "type": "boolean"
+    },
     "location": {
       "type": "string"
     },
@@ -22784,7 +23839,7 @@ Return the full event object including attendees, recurrence, and raw iCalendar 
 
 #### `calendar.events.list`
 
-Return calendar event summaries from the configured CalDAV calendar within an optional time window. With no from or to, lists events starting from 24 hours ago onward.
+Return event summaries from the configured calendar (a CalDAV server, or the connected Google account) within an optional time window. With no from or to, lists from 24 hours ago to 30 days ahead; a recurring event is listed at each occurrence in the window.
 
 - Title: `List Calendar Events`
 - Source: `builtin`
@@ -22842,6 +23897,9 @@ Return calendar event summaries from the configured CalDAV calendar within an op
           "end": {
             "type": "string"
           },
+          "allDay": {
+            "type": "boolean"
+          },
           "location": {
             "type": "string"
           },
@@ -22872,9 +23930,89 @@ Return calendar event summaries from the configured CalDAV calendar within an op
 }
 ```
 
+#### `calendar.events.update`
+
+Change an event on the configured calendar: only the fields sent change (attendees replaces the guest list). Requires explicit confirmation (confirm: true). An unknown eventId is a 404; a backend that cannot change events answers 501 CALENDAR_NOT_SUPPORTED.
+
+- Title: `Update Calendar Event`
+- Source: `builtin`
+- Access: `admin`
+- Transport: `http`, `ws`
+- HTTP: `PATCH /api/calendar/events/{eventId}`
+- Scopes: `write:calendar`
+- Emits events: none
+- Dangerous: `yes`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "eventId": {
+      "type": "string"
+    },
+    "title": {
+      "type": "string"
+    },
+    "start": {
+      "type": "string"
+    },
+    "end": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "attendees": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "location": {
+      "type": "string"
+    },
+    "calendarId": {
+      "type": "string"
+    },
+    "confirm": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "eventId",
+    "confirm"
+  ],
+  "additionalProperties": true
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "eventId": {
+      "type": "string"
+    },
+    "updatedAt": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "eventId",
+    "updatedAt"
+  ],
+  "additionalProperties": false
+}
+```
+
 #### `calendar.ics.export`
 
-Export events from the configured CalDAV calendar as raw .ics content within an optional time window.
+Export events from the configured calendar as raw .ics content within an optional time window.
 
 - Title: `Export iCalendar`
 - Source: `builtin`
@@ -22929,7 +24067,7 @@ Export events from the configured CalDAV calendar as raw .ics content within an 
 
 #### `calendar.ics.import`
 
-Import raw .ics content into the configured CalDAV calendar. Requires explicit confirmation.
+Import raw .ics content into the configured calendar. Requires explicit confirmation (confirm: true). A series and its overrides are stored together as written; an event already on the calendar is kept unless replace: true. Guests an imported event names are not invited; they are listed in attendeesLeftOff.
 
 - Title: `Import iCalendar`
 - Source: `builtin`
@@ -22938,7 +24076,7 @@ Import raw .ics content into the configured CalDAV calendar. Requires explicit c
 - HTTP: `POST /api/calendar/ics/import`
 - Scopes: `write:calendar`
 - Emits events: none
-- Dangerous: `no`
+- Dangerous: `yes`
 - Invokable: `yes`
 
 ##### Input schema
@@ -22952,6 +24090,9 @@ Import raw .ics content into the configured CalDAV calendar. Requires explicit c
     },
     "calendarId": {
       "type": "string"
+    },
+    "replace": {
+      "type": "boolean"
     },
     "confirm": {
       "type": "boolean"
@@ -22984,6 +24125,36 @@ Import raw .ics content into the configured CalDAV calendar. Requires explicit c
       "type": "array",
       "items": {
         "type": "string"
+      }
+    },
+    "attendeesLeftOff": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "eventId": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "attendees": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "next": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "eventId",
+          "title",
+          "attendees",
+          "next"
+        ],
+        "additionalProperties": false
       }
     }
   },
@@ -27891,7 +29062,7 @@ Return the profile binding for a channel (surfaceKind plus optional channelId). 
 
 #### `channels.profiles.list`
 
-Return every per-channel profile binding (the model/permission defaults applied to sessions each channel originates).
+Return every per-channel profile binding: the model, provider and permission-mode defaults the daemon applies to the sessions each channel originates. These are the values that apply; a channels.routing assignment for the same channel names a profile that only the surface owning it resolves.
 
 - Title: `List Channel Profile Bindings`
 - Source: `builtin`
@@ -27997,7 +29168,7 @@ Return every per-channel profile binding (the model/permission defaults applied 
 
 #### `channels.profiles.set`
 
-Bind (upsert) the model/provider and permission-mode defaults for a channel. Keyed on (surfaceKind, channelId?): a channelId-scoped binding wins over the surface-wide default; setting the same key again replaces it.
+Bind (upsert) the model/provider and permission-mode defaults for a channel. Keyed on (surfaceKind, channelId?): field by field, a channelId-scoped binding wins over the surface-wide default; setting the same key again replaces it. A session the daemon originates from the channel uses these values whatever a channels.routing assignment names.
 
 - Title: `Bind Channel Profile`
 - Source: `builtin`
@@ -28279,7 +29450,7 @@ Return repair actions exposed by a channel surface.
 
 #### `channels.routing.assign`
 
-Create or update a channel-to-profile routing rule in the daemon-persisted routing table. Requires explicit confirmation or fresh recorded native admission for a paired autonomous caller.
+Create or update a channel-to-profile routing rule in the daemon-persisted routing table. The daemon applies it to inbox items from slack, discord and email (surfaceKind any reaches the same three); any other surface is refused with 400 ROUTING_SURFACE_NOT_ROUTED, because nothing there reads the rule. Requires explicit confirmation or fresh recorded native admission for a paired autonomous caller.
 
 - Title: `Assign Channel Routing Rule`
 - Source: `builtin`
@@ -29863,7 +31034,7 @@ Post one utterance to the isolated chat session of a Home Assistant conversation
 
 #### `checkin.config.get`
 
-Return the proactive check-in configuration: enabled, cadence (cron), delivery channel, and quiet hours.
+Return the proactive check-in configuration (enabled, cadence (cron), delivery channel, quiet hours) and `schedule`: whether the scheduler really holds the check-in job (scheduled), none is needed (not-needed: check-ins are off), or it could not be installed (failed, with the reason; for example the automation subsystem is off). Enabled with a failed schedule means no check-in will arrive.
 
 - Title: `Get Check-in Config`
 - Source: `builtin`
@@ -29914,10 +31085,31 @@ Return the proactive check-in configuration: enabled, cadence (cron), delivery c
         "quietHours"
       ],
       "additionalProperties": false
+    },
+    "schedule": {
+      "type": "object",
+      "properties": {
+        "state": {
+          "type": "string",
+          "enum": [
+            "scheduled",
+            "not-needed",
+            "failed"
+          ]
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "state"
+      ],
+      "additionalProperties": false
     }
   },
   "required": [
-    "config"
+    "config",
+    "schedule"
   ],
   "additionalProperties": false
 }
@@ -31831,7 +33023,7 @@ Check that the API token (inline, by reference, or the stored one) is valid and 
 
 #### `cloudflare.disable`
 
-Switch the Cloudflare integration off. Always disables it locally (`cloudflare.enabled` false and the batch queue back to `local`; `persistConfig` defaults to true) so the daemon stops using the worker, and, when an API token and account are available, removes the worker's cron trigger (`disableCron`, default true) and optionally its workers.dev subdomain (`disableWorkerSubdomain`, default false). `remote` is `not-disabled` when any Cloudflare step failed or was skipped: the deployed worker may then keep calling the daemon until it is disabled in the Cloudflare dashboard, and `steps` says which. The worker and the account's other resources are left in place.
+Switch the Cloudflare integration off. Always disables it locally (`cloudflare.enabled` false and the batch queue back to `local`; `persistConfig` defaults to true) and stops this daemon's tunnel connector, so the daemon stops using the worker. When an API token and account are available it also removes the worker's daemon credential (the script secret and its Secrets Store copy), its cron trigger (`disableCron`, default true) and its workers.dev route (`disableWorkerSubdomain`, default true; pass false to keep the route). `remote` is `disabled` only when every Cloudflare step succeeded; otherwise it is `not-disabled`, the deployed worker may keep calling the daemon until it is disabled in the Cloudflare dashboard, and `steps` says which. The worker and the account's other resources stay in place; each one still deployed is listed as a `still-deployed` step. With `bootstrapToken` (a token allowed to edit API tokens) it also revokes the operational token this daemon created; without it a `revoke-operational-token` step says that token is still live.
 
 - Title: `Disable Cloudflare Worker`
 - Source: `builtin`
@@ -31856,6 +33048,9 @@ Switch the Cloudflare integration off. Always disables it locally (`cloudflare.e
       "type": "string"
     },
     "apiTokenRef": {
+      "type": "string"
+    },
+    "bootstrapToken": {
       "type": "string"
     },
     "workerName": {
@@ -31933,7 +33128,7 @@ Switch the Cloudflare integration off. Always disables it locally (`cloudflare.e
 
 #### `cloudflare.provision`
 
-Create or update the selected Cloudflare resources (worker, queues and dead-letter queue, tunnel, Access application and service token, DNS records, KV, Durable Objects, R2, Secrets Store), answered 202 with one step per resource: `ok`, `skipped` or `warning`. Generated secrets are stored as `goodvibes://` secrets when asked and returned only when `returnGeneratedSecrets` is true. With Workers selected and a worker URL known it then runs the `cloudflare.worker.verify` check unless `verify` is false. Creates and changes billable resources in the Cloudflare account.
+Create or update the selected Cloudflare resources (worker, queues and dead-letter queue, tunnel and its connector on this daemon, Access application and service token, DNS records, KV for queued-job state, Durable Objects for the daily queue budget, R2 for job bodies, Secrets Store for the worker's credentials), answered 202 with one step per resource: `ok`, `skipped` or `warning`; `warnings` repeats the message of every warning step. Generated secrets are stored as `goodvibes://` secrets when asked and returned only when `returnGeneratedSecrets` is true. With Workers selected and a worker URL known it then runs the `cloudflare.worker.verify` check unless `verify` is false. `ok` is true, and `cloudflare.enabled` and the Cloudflare batch queue are switched on, only when that check passed (or was turned off) and Access, when asked for, protects the daemon hostname; otherwise a `switch-on` warning step says why nothing was switched. Creates and changes billable resources in the Cloudflare account.
 
 - Title: `Provision Cloudflare Platform`
 - Source: `builtin`
@@ -32059,9 +33254,6 @@ Create or update the selected Cloudflare resources (worker, queues and dead-lett
       "type": "string"
     },
     "durableObjectNamespaceName": {
-      "type": "string"
-    },
-    "durableObjectNamespaceId": {
       "type": "string"
     },
     "r2BucketName": {
@@ -32278,6 +33470,12 @@ Create or update the selected Cloudflare resources (worker, queues and dead-lett
       "type": "object",
       "properties": {},
       "additionalProperties": true
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
     }
   },
   "required": [
@@ -32510,7 +33708,7 @@ List what the account already has for the selected components: accounts, zones, 
 
 #### `cloudflare.status`
 
-Whether the Cloudflare control plane is enabled and ready, which of its settings and credentials are configured (booleans only, never values), the stored non-secret configuration, and the warnings that explain anything missing. `GET /api/cloudflare` returns the same document.
+Whether the Cloudflare control plane is enabled and ready, which of its settings and credentials are configured (booleans only, never values), the stored non-secret configuration, and the warnings that explain anything missing. A resource (worker, queues, tunnel, Access, KV, Durable Objects, R2, Secrets Store) reads as configured only when a provision created or confirmed it at Cloudflare. Where this daemon runs the Cloudflare Tunnel connector, `tunnelConnector` says whether it is connected and what to do when it is not; `ready` requires it. `GET /api/cloudflare` returns the same document.
 
 - Title: `Cloudflare Status`
 - Source: `builtin`
@@ -32559,6 +33757,36 @@ Whether the Cloudflare control plane is enabled and ready, which of its settings
       "items": {
         "type": "string"
       }
+    },
+    "tunnelConnector": {
+      "type": "object",
+      "properties": {
+        "state": {
+          "type": "string",
+          "enum": [
+            "not-configured",
+            "not-installed",
+            "starting",
+            "connected",
+            "failed",
+            "stopped"
+          ]
+        },
+        "detail": {
+          "type": "string"
+        },
+        "next": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "state",
+        "detail"
+      ],
+      "additionalProperties": true
     }
   },
   "required": [
@@ -32574,7 +33802,7 @@ Whether the Cloudflare control plane is enabled and ready, which of its settings
 
 #### `cloudflare.token.create`
 
-Use a temporary bootstrap token (required, used once, never stored) to create a narrower operational token with the permissions `cloudflare.token.requirements.get` lists. With `storeApiToken` the operational token is saved as a `goodvibes://` secret and its reference is returned; the plaintext token comes back only when `returnGeneratedToken` is true. Answered 201. Creates a credential in the Cloudflare account.
+Use a temporary bootstrap token (required, used once, never stored) to create a narrower operational token with the permissions `cloudflare.token.requirements.get` lists. With `storeApiToken` the operational token is saved as a `goodvibes://` secret and its reference is returned; the plaintext token comes back only when `returnGeneratedToken` is true. When this daemon already holds the operational token it made for the same account, zone and components, that token is returned with `reused` true and nothing is created (`reuse: false` makes a new one). A new token revokes the one it replaces; `replaced` says whether that worked. Answered 201. Creates a credential in the Cloudflare account unless one is reused.
 
 - Title: `Create Cloudflare Operational Token`
 - Source: `builtin`
@@ -32654,6 +33882,9 @@ Use a temporary bootstrap token (required, used once, never stored) to create a 
     },
     "returnGeneratedToken": {
       "type": "boolean"
+    },
+    "reuse": {
+      "type": "boolean"
     }
   },
   "required": [
@@ -32680,6 +33911,28 @@ Use a temporary bootstrap token (required, used once, never stored) to create a 
     },
     "tokenSource": {
       "type": "string"
+    },
+    "reused": {
+      "type": "boolean"
+    },
+    "replaced": {
+      "type": "object",
+      "properties": {
+        "tokenId": {
+          "type": "string"
+        },
+        "revoked": {
+          "type": "boolean"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "tokenId",
+        "revoked"
+      ],
+      "additionalProperties": false
     },
     "apiTokenRef": {
       "type": "string"
@@ -33606,6 +34859,110 @@ Regenerate an assistant response. Optional `messageId` targets a specific assist
     "regeneratedFrom",
     "supersededMessageIds",
     "turnStarted"
+  ],
+  "additionalProperties": false
+}
+```
+
+#### `companion.chat.messages.search`
+
+Find companion-chat messages whose text contains `query` (case-insensitive) across every chat, newest first. Each item names the chat (`sessionId`, `sessionTitle`), the message (`messageId`, `role`), a snippet around the match and `createdAt`. History retained behind a regenerate or edit is not searched. Closed chats are searched only with `includeClosed`. Paged: `limit` 1-100 (default 25); pass `nextCursor` back as `cursor` while `hasMore` is true. A blank query is 400 INVALID_ARGUMENT; a cursor this search did not return is 400 INVALID_CURSOR.
+
+- Title: `Search Companion Chat Messages`
+- Source: `builtin`
+- Access: `authenticated`
+- Transport: `http`, `ws`
+- HTTP: `GET /api/companion/chat/messages/search`
+- Scopes: `read:sessions`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "query": {
+      "type": "string"
+    },
+    "limit": {
+      "type": "number"
+    },
+    "cursor": {
+      "type": "string"
+    },
+    "includeClosed": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "query"
+  ],
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "query": {
+      "type": "string"
+    },
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string"
+          },
+          "sessionTitle": {
+            "type": "string"
+          },
+          "messageId": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "snippet": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "sessionId",
+          "sessionTitle",
+          "messageId",
+          "role",
+          "snippet",
+          "createdAt"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "total": {
+      "type": "number"
+    },
+    "hasMore": {
+      "type": "boolean"
+    },
+    "nextCursor": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "query",
+    "items",
+    "total",
+    "hasMore"
   ],
   "additionalProperties": false
 }
@@ -35180,7 +36537,7 @@ Return the resolved GoodVibes config snapshot.
 
 #### `config.reset`
 
-Remove the explicit value of one config key through the daemon API so it reads as its default again, in every settings file that holds it. The response reports the value the host now holds and which file and tier it came from. Refuses a key that holds a credential (use credentials.delete) and a key the host does not know.
+Remove the explicit value of one config key through the daemon API so it reads as its default again, in every settings file that holds it. The response reports the value the host now holds and which file and tier it came from. Refuses a key that holds a credential (use credentials.delete), a key the host does not know, a key locked by managed policy, and runtime.workingDir (change the workspace with config.set).
 
 - Title: `Reset Config Value`
 - Source: `builtin`
@@ -35189,7 +36546,7 @@ Remove the explicit value of one config key through the daemon API so it reads a
 - HTTP: `POST /config/reset`
 - Scopes: `write:config`
 - Emits events: none
-- Dangerous: `no`
+- Dangerous: `yes`
 - Invokable: `yes`
 
 ##### Input schema
@@ -35265,7 +36622,7 @@ Remove the explicit value of one config key through the daemon API so it reads a
 
 #### `config.set`
 
-Set a config value through the daemon API.
+Write one config value on the daemon: `{ key, value }`, where value is any JSON the key accepts. The response reports the value the host now holds and which file and tier it is in; a value that did not take is refused with what the host holds instead. A key that holds a credential takes only a goodvibes://secrets/ reference (store the secret with credentials.set); runtime.workingDir swaps the workspace. The same route also serves the settings clients' two-step lanes, `{ settingsPrecondition }` and `{ settingsImportPrecondition }` (capture, then apply the returned reference), which answer with that lane's own object.
 
 - Title: `Set Config Value`
 - Source: `builtin`
@@ -35274,7 +36631,7 @@ Set a config value through the daemon API.
 - HTTP: `POST /config`
 - Scopes: `write:config`
 - Emits events: none
-- Dangerous: `no`
+- Dangerous: `yes`
 - Invokable: `yes`
 
 ##### Input schema
@@ -35285,12 +36642,182 @@ Set a config value through the daemon API.
   "properties": {
     "key": {
       "type": "string"
+    },
+    "value": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        {
+          "type": "array",
+          "items": {}
+        }
+      ]
+    },
+    "settingsPrecondition": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "type": "number"
+        },
+        "action": {
+          "type": "string",
+          "enum": [
+            "capture",
+            "apply"
+          ]
+        },
+        "reference": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "version",
+        "action"
+      ],
+      "additionalProperties": true
+    },
+    "settingsImportPrecondition": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "type": "number"
+        },
+        "action": {
+          "type": "string",
+          "enum": [
+            "capture",
+            "apply"
+          ]
+        },
+        "reference": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "version",
+        "action"
+      ],
+      "additionalProperties": true
     }
   },
-  "required": [
-    "key"
-  ],
-  "additionalProperties": true
+  "additionalProperties": true,
+  "anyOf": [
+    {
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": {}
+            },
+            {
+              "type": "array",
+              "items": {}
+            }
+          ]
+        }
+      },
+      "required": [
+        "key",
+        "value"
+      ],
+      "additionalProperties": true
+    },
+    {
+      "type": "object",
+      "properties": {
+        "settingsPrecondition": {
+          "type": "object",
+          "properties": {
+            "version": {
+              "type": "number"
+            },
+            "action": {
+              "type": "string",
+              "enum": [
+                "capture",
+                "apply"
+              ]
+            },
+            "reference": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "version",
+            "action"
+          ],
+          "additionalProperties": true
+        }
+      },
+      "required": [
+        "settingsPrecondition"
+      ],
+      "additionalProperties": true
+    },
+    {
+      "type": "object",
+      "properties": {
+        "settingsImportPrecondition": {
+          "type": "object",
+          "properties": {
+            "version": {
+              "type": "number"
+            },
+            "action": {
+              "type": "string",
+              "enum": [
+                "capture",
+                "apply"
+              ]
+            },
+            "reference": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "version",
+            "action"
+          ],
+          "additionalProperties": true
+        }
+      },
+      "required": [
+        "settingsImportPrecondition"
+      ],
+      "additionalProperties": true
+    }
+  ]
 }
 ```
 
@@ -35809,9 +37336,7993 @@ Stop a contract and every unit agent it runs; its status line records how many f
 }
 ```
 
+#### `contracts.dispatch`
+
+Start a contract for `ask` (the person's words verbatim) in a hosted session created for it, in `workspaceRoot` (absolute, inside the daemon's workspace) or the daemon's working directory. The contract's questions arrive as that session's replies, and the session ends when the contract passes, fails or is cancelled. Returns at once with the contract and its owner agent id; read it with `contracts.get`, stop it with `contracts.cancel`, answer it with `contracts.reply`. `idempotencyKey` returns the first dispatch's contract to a retry by the same caller while that contract runs. 400 with INVALID_ARGUMENT when `ask` is empty or `workspaceRoot` is relative or outside the daemon's workspace; 409 with NOT_HOSTING when this daemon hosts no sessions (use `contracts.start`).
+
+- Title: `Dispatch Contract Work`
+- Source: `builtin`
+- Access: `authenticated`
+- Transport: `http`, `ws`
+- HTTP: none
+- Scopes: `write:fleet`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "ask": {
+      "type": "string"
+    },
+    "workspaceRoot": {
+      "type": "string"
+    },
+    "idempotencyKey": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "ask"
+  ],
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "contract": {
+      "type": "object",
+      "properties": {
+        "originalSource": {
+          "type": "object",
+          "properties": {
+            "goal": {
+              "type": "string"
+            },
+            "criteria": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "conversationContext": {
+              "type": "array",
+              "items": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "role": {
+                    "type": "string",
+                    "enum": [
+                      "user",
+                      "assistant",
+                      "system",
+                      "tool"
+                    ]
+                  },
+                  "content": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "role",
+                  "content"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "selectedDiffContext": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "session"
+                    },
+                    "revision": {
+                      "type": "string",
+                      "maxLength": 200,
+                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                    },
+                    "fileIndex": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "hunkIndex": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "unifiedDiff": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 65536
+                    },
+                    "provenance": {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "const": "session"
+                        },
+                        "sessionId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200
+                        },
+                        "baselineCheckpointId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200
+                        },
+                        "latestCheckpointId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "sessionId",
+                        "baselineCheckpointId",
+                        "latestCheckpointId"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "revision",
+                    "fileIndex",
+                    "hunkIndex",
+                    "unifiedDiff",
+                    "provenance"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "workspace"
+                    },
+                    "baselineId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    },
+                    "revision": {
+                      "type": "string",
+                      "maxLength": 200,
+                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                    },
+                    "fileIndex": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "hunkIndex": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "unifiedDiff": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 65536
+                    },
+                    "provenance": {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "const": "workspace"
+                        },
+                        "baselineId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200
+                        },
+                        "to": {
+                          "type": "string",
+                          "const": "WORKING"
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "baselineId",
+                        "to"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "baselineId",
+                    "revision",
+                    "fileIndex",
+                    "hunkIndex",
+                    "unifiedDiff",
+                    "provenance"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            }
+          },
+          "required": [
+            "goal",
+            "criteria"
+          ],
+          "additionalProperties": false
+        },
+        "taskEvidence": {
+          "type": "string"
+        },
+        "reviewInventory": {
+          "type": "object",
+          "properties": {
+            "paths": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "source": {
+              "type": "string",
+              "enum": [
+                "git",
+                "filesystem"
+              ]
+            },
+            "errors": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "paths",
+            "source",
+            "errors"
+          ],
+          "additionalProperties": false
+        },
+        "reviewExclusions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "files": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "files",
+              "reason"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "nativeSource": {
+          "type": "object",
+          "properties": {
+            "sourceId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "pattern": "^[!-~][ -~]{0,255}$"
+            },
+            "sourceRevision": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "pattern": "^[!-~][ -~]{0,255}$"
+            },
+            "inputRevision": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "pattern": "^[!-~][ -~]{0,255}$"
+            },
+            "criteriaId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "pattern": "^[!-~][ -~]{0,255}$"
+            },
+            "criteriaRevision": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "pattern": "^[!-~][ -~]{0,255}$"
+            },
+            "goal": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "\\S"
+            },
+            "criteria": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              },
+              "minItems": 1
+            }
+          },
+          "required": [
+            "sourceId",
+            "sourceRevision",
+            "inputRevision",
+            "criteriaId",
+            "criteriaRevision",
+            "goal",
+            "criteria"
+          ],
+          "additionalProperties": false
+        },
+        "nativeDecisions": {
+          "type": "object",
+          "properties": {
+            "schemaVersion": {
+              "const": 1
+            },
+            "history": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "schemaVersion": {
+                    "const": 1
+                  },
+                  "stage": {
+                    "type": "string",
+                    "enum": [
+                      "shape",
+                      "plan",
+                      "evidence",
+                      "stall",
+                      "fix-plan",
+                      "attempts"
+                    ]
+                  },
+                  "targetId": {
+                    "type": "string"
+                  },
+                  "decision": {
+                    "$schema": "http://json-schema.org/draft-07/schema#",
+                    "title": "JevDecision",
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "schemaVersion",
+                          "decisionId",
+                          "binding",
+                          "judgmentDecisionIds",
+                          "evidence",
+                          "summary",
+                          "outcome"
+                        ],
+                        "properties": {
+                          "schemaVersion": {
+                            "const": 1
+                          },
+                          "decisionId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 256,
+                            "not": {
+                              "pattern": "[^!-~]"
+                            }
+                          },
+                          "binding": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "sourceId",
+                              "inputRevision",
+                              "actionId",
+                              "actionRevision",
+                              "authorityId",
+                              "authorityRevision",
+                              "scopeId",
+                              "scopeRevision"
+                            ],
+                            "properties": {
+                              "sourceId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "not": {
+                                  "pattern": "[^!-~]"
+                                }
+                              },
+                              "inputRevision": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "not": {
+                                  "pattern": "[^!-~]"
+                                }
+                              },
+                              "actionId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "not": {
+                                  "pattern": "[^!-~]"
+                                }
+                              },
+                              "actionRevision": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "not": {
+                                  "pattern": "[^!-~]"
+                                }
+                              },
+                              "authorityId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "not": {
+                                  "pattern": "[^!-~]"
+                                }
+                              },
+                              "authorityRevision": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "not": {
+                                  "pattern": "[^!-~]"
+                                }
+                              },
+                              "scopeId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "not": {
+                                  "pattern": "[^!-~]"
+                                }
+                              },
+                              "scopeRevision": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "not": {
+                                  "pattern": "[^!-~]"
+                                }
+                              }
+                            }
+                          },
+                          "judgmentDecisionIds": {
+                            "type": "array",
+                            "minItems": 1,
+                            "maxItems": 256,
+                            "uniqueItems": true,
+                            "items": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 256,
+                              "not": {
+                                "pattern": "[^!-~]"
+                              }
+                            }
+                          },
+                          "evidence": {
+                            "type": "array",
+                            "maxItems": 256,
+                            "uniqueItems": true,
+                            "items": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "id",
+                                "revision"
+                              ],
+                              "properties": {
+                                "id": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 256,
+                                  "not": {
+                                    "pattern": "[^!-~]"
+                                  }
+                                },
+                                "revision": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 256,
+                                  "not": {
+                                    "pattern": "[^!-~]"
+                                  }
+                                }
+                              }
+                            },
+                            "minItems": 1
+                          },
+                          "summary": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 2000,
+                            "pattern": "\\S"
+                          },
+                          "outcome": {
+                            "const": "act"
+                          }
+                        }
+                      },
+                      {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "schemaVersion",
+                          "decisionId",
+                          "binding",
+                          "judgmentDecisionIds",
+                          "evidence",
+                          "summary",
+                          "outcome",
+                          "next"
+                        ],
+                        "properties": {
+                          "schemaVersion": {
+                            "const": 1
+                          },
+                          "decisionId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 256,
+                            "not": {
+                              "pattern": "[^!-~]"
+                            }
+                          },
+                          "binding": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "sourceId",
+                              "inputRevision",
+                              "actionId",
+                              "actionRevision",
+                              "authorityId",
+                              "authorityRevision",
+                              "scopeId",
+                              "scopeRevision"
+                            ],
+                            "properties": {
+                              "sourceId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "not": {
+                                  "pattern": "[^!-~]"
+                                }
+                              },
+                              "inputRevision": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "not": {
+                                  "pattern": "[^!-~]"
+                                }
+                              },
+                              "actionId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "not": {
+                                  "pattern": "[^!-~]"
+                                }
+                              },
+                              "actionRevision": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "not": {
+                                  "pattern": "[^!-~]"
+                                }
+                              },
+                              "authorityId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "not": {
+                                  "pattern": "[^!-~]"
+                                }
+                              },
+                              "authorityRevision": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "not": {
+                                  "pattern": "[^!-~]"
+                                }
+                              },
+                              "scopeId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "not": {
+                                  "pattern": "[^!-~]"
+                                }
+                              },
+                              "scopeRevision": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "not": {
+                                  "pattern": "[^!-~]"
+                                }
+                              }
+                            }
+                          },
+                          "judgmentDecisionIds": {
+                            "type": "array",
+                            "minItems": 1,
+                            "maxItems": 256,
+                            "uniqueItems": true,
+                            "items": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 256,
+                              "not": {
+                                "pattern": "[^!-~]"
+                              }
+                            }
+                          },
+                          "evidence": {
+                            "type": "array",
+                            "maxItems": 256,
+                            "uniqueItems": true,
+                            "items": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "id",
+                                "revision"
+                              ],
+                              "properties": {
+                                "id": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 256,
+                                  "not": {
+                                    "pattern": "[^!-~]"
+                                  }
+                                },
+                                "revision": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 256,
+                                  "not": {
+                                    "pattern": "[^!-~]"
+                                  }
+                                }
+                              }
+                            }
+                          },
+                          "summary": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 2000,
+                            "pattern": "\\S"
+                          },
+                          "outcome": {
+                            "const": "revise"
+                          },
+                          "next": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "id",
+                              "revision",
+                              "kind"
+                            ],
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "not": {
+                                  "pattern": "[^!-~]"
+                                }
+                              },
+                              "revision": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "not": {
+                                  "pattern": "[^!-~]"
+                                }
+                              },
+                              "kind": {
+                                "enum": [
+                                  "reconsider",
+                                  "gather-evidence",
+                                  "revise-action"
+                                ]
+                              }
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "schemaVersion",
+                          "decisionId",
+                          "binding",
+                          "judgmentDecisionIds",
+                          "evidence",
+                          "summary",
+                          "outcome",
+                          "until"
+                        ],
+                        "properties": {
+                          "schemaVersion": {
+                            "const": 1
+                          },
+                          "decisionId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 256,
+                            "not": {
+                              "pattern": "[^!-~]"
+                            }
+                          },
+                          "binding": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "sourceId",
+                              "inputRevision",
+                              "actionId",
+                              "actionRevision",
+                              "authorityId",
+                              "authorityRevision",
+                              "scopeId",
+                              "scopeRevision"
+                            ],
+                            "properties": {
+                              "sourceId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "not": {
+                                  "pattern": "[^!-~]"
+                                }
+                              },
+                              "inputRevision": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "not": {
+                                  "pattern": "[^!-~]"
+                                }
+                              },
+                              "actionId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "not": {
+                                  "pattern": "[^!-~]"
+                                }
+                              },
+                              "actionRevision": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "not": {
+                                  "pattern": "[^!-~]"
+                                }
+                              },
+                              "authorityId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "not": {
+                                  "pattern": "[^!-~]"
+                                }
+                              },
+                              "authorityRevision": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "not": {
+                                  "pattern": "[^!-~]"
+                                }
+                              },
+                              "scopeId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "not": {
+                                  "pattern": "[^!-~]"
+                                }
+                              },
+                              "scopeRevision": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "not": {
+                                  "pattern": "[^!-~]"
+                                }
+                              }
+                            }
+                          },
+                          "judgmentDecisionIds": {
+                            "type": "array",
+                            "minItems": 1,
+                            "maxItems": 256,
+                            "uniqueItems": true,
+                            "items": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 256,
+                              "not": {
+                                "pattern": "[^!-~]"
+                              }
+                            }
+                          },
+                          "evidence": {
+                            "type": "array",
+                            "maxItems": 256,
+                            "uniqueItems": true,
+                            "items": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "id",
+                                "revision"
+                              ],
+                              "properties": {
+                                "id": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 256,
+                                  "not": {
+                                    "pattern": "[^!-~]"
+                                  }
+                                },
+                                "revision": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 256,
+                                  "not": {
+                                    "pattern": "[^!-~]"
+                                  }
+                                }
+                              }
+                            }
+                          },
+                          "summary": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 2000,
+                            "pattern": "\\S"
+                          },
+                          "outcome": {
+                            "const": "defer"
+                          },
+                          "until": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "id",
+                              "revision"
+                            ],
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "not": {
+                                  "pattern": "[^!-~]"
+                                }
+                              },
+                              "revision": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "not": {
+                                  "pattern": "[^!-~]"
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "schemaVersion",
+                          "decisionId",
+                          "binding",
+                          "judgmentDecisionIds",
+                          "evidence",
+                          "summary",
+                          "outcome"
+                        ],
+                        "properties": {
+                          "schemaVersion": {
+                            "const": 1
+                          },
+                          "decisionId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 256,
+                            "not": {
+                              "pattern": "[^!-~]"
+                            }
+                          },
+                          "binding": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "sourceId",
+                              "inputRevision",
+                              "actionId",
+                              "actionRevision",
+                              "authorityId",
+                              "authorityRevision",
+                              "scopeId",
+                              "scopeRevision"
+                            ],
+                            "properties": {
+                              "sourceId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "not": {
+                                  "pattern": "[^!-~]"
+                                }
+                              },
+                              "inputRevision": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "not": {
+                                  "pattern": "[^!-~]"
+                                }
+                              },
+                              "actionId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "not": {
+                                  "pattern": "[^!-~]"
+                                }
+                              },
+                              "actionRevision": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "not": {
+                                  "pattern": "[^!-~]"
+                                }
+                              },
+                              "authorityId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "not": {
+                                  "pattern": "[^!-~]"
+                                }
+                              },
+                              "authorityRevision": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "not": {
+                                  "pattern": "[^!-~]"
+                                }
+                              },
+                              "scopeId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "not": {
+                                  "pattern": "[^!-~]"
+                                }
+                              },
+                              "scopeRevision": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "not": {
+                                  "pattern": "[^!-~]"
+                                }
+                              }
+                            }
+                          },
+                          "judgmentDecisionIds": {
+                            "type": "array",
+                            "minItems": 1,
+                            "maxItems": 256,
+                            "uniqueItems": true,
+                            "items": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 256,
+                              "not": {
+                                "pattern": "[^!-~]"
+                              }
+                            }
+                          },
+                          "evidence": {
+                            "type": "array",
+                            "maxItems": 256,
+                            "uniqueItems": true,
+                            "items": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "id",
+                                "revision"
+                              ],
+                              "properties": {
+                                "id": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 256,
+                                  "not": {
+                                    "pattern": "[^!-~]"
+                                  }
+                                },
+                                "revision": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 256,
+                                  "not": {
+                                    "pattern": "[^!-~]"
+                                  }
+                                }
+                              }
+                            }
+                          },
+                          "summary": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 2000,
+                            "pattern": "\\S"
+                          },
+                          "outcome": {
+                            "const": "reject"
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  "operationRevision": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "schemaVersion",
+                  "stage",
+                  "targetId",
+                  "decision",
+                  "operationRevision"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "pending": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "object",
+                "properties": {
+                  "schemaVersion": {
+                    "const": 1
+                  },
+                  "stage": {
+                    "type": "string",
+                    "enum": [
+                      "shape",
+                      "plan",
+                      "evidence",
+                      "stall",
+                      "fix-plan",
+                      "attempts"
+                    ]
+                  },
+                  "targetId": {
+                    "type": "string"
+                  },
+                  "decision": {
+                    "$schema": "http://json-schema.org/draft-07/schema#",
+                    "title": "JevDecision",
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "schemaVersion",
+                          "decisionId",
+                          "binding",
+                          "judgmentDecisionIds",
+                          "evidence",
+                          "summary",
+                          "outcome"
+                        ],
+                        "properties": {
+                          "schemaVersion": {
+                            "const": 1
+                          },
+                          "decisionId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 256,
+                            "not": {
+                              "pattern": "[^!-~]"
+                            }
+                          },
+                          "binding": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "sourceId",
+                              "inputRevision",
+                              "actionId",
+                              "actionRevision",
+                              "authorityId",
+                              "authorityRevision",
+                              "scopeId",
+                              "scopeRevision"
+                            ],
+                            "properties": {
+                              "sourceId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "not": {
+                                  "pattern": "[^!-~]"
+                                }
+                              },
+                              "inputRevision": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "not": {
+                                  "pattern": "[^!-~]"
+                                }
+                              },
+                              "actionId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "not": {
+                                  "pattern": "[^!-~]"
+                                }
+                              },
+                              "actionRevision": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "not": {
+                                  "pattern": "[^!-~]"
+                                }
+                              },
+                              "authorityId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "not": {
+                                  "pattern": "[^!-~]"
+                                }
+                              },
+                              "authorityRevision": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "not": {
+                                  "pattern": "[^!-~]"
+                                }
+                              },
+                              "scopeId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "not": {
+                                  "pattern": "[^!-~]"
+                                }
+                              },
+                              "scopeRevision": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "not": {
+                                  "pattern": "[^!-~]"
+                                }
+                              }
+                            }
+                          },
+                          "judgmentDecisionIds": {
+                            "type": "array",
+                            "minItems": 1,
+                            "maxItems": 256,
+                            "uniqueItems": true,
+                            "items": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 256,
+                              "not": {
+                                "pattern": "[^!-~]"
+                              }
+                            }
+                          },
+                          "evidence": {
+                            "type": "array",
+                            "maxItems": 256,
+                            "uniqueItems": true,
+                            "items": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "id",
+                                "revision"
+                              ],
+                              "properties": {
+                                "id": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 256,
+                                  "not": {
+                                    "pattern": "[^!-~]"
+                                  }
+                                },
+                                "revision": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 256,
+                                  "not": {
+                                    "pattern": "[^!-~]"
+                                  }
+                                }
+                              }
+                            },
+                            "minItems": 1
+                          },
+                          "summary": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 2000,
+                            "pattern": "\\S"
+                          },
+                          "outcome": {
+                            "const": "act"
+                          }
+                        }
+                      },
+                      {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "schemaVersion",
+                          "decisionId",
+                          "binding",
+                          "judgmentDecisionIds",
+                          "evidence",
+                          "summary",
+                          "outcome",
+                          "next"
+                        ],
+                        "properties": {
+                          "schemaVersion": {
+                            "const": 1
+                          },
+                          "decisionId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 256,
+                            "not": {
+                              "pattern": "[^!-~]"
+                            }
+                          },
+                          "binding": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "sourceId",
+                              "inputRevision",
+                              "actionId",
+                              "actionRevision",
+                              "authorityId",
+                              "authorityRevision",
+                              "scopeId",
+                              "scopeRevision"
+                            ],
+                            "properties": {
+                              "sourceId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "not": {
+                                  "pattern": "[^!-~]"
+                                }
+                              },
+                              "inputRevision": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "not": {
+                                  "pattern": "[^!-~]"
+                                }
+                              },
+                              "actionId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "not": {
+                                  "pattern": "[^!-~]"
+                                }
+                              },
+                              "actionRevision": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "not": {
+                                  "pattern": "[^!-~]"
+                                }
+                              },
+                              "authorityId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "not": {
+                                  "pattern": "[^!-~]"
+                                }
+                              },
+                              "authorityRevision": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "not": {
+                                  "pattern": "[^!-~]"
+                                }
+                              },
+                              "scopeId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "not": {
+                                  "pattern": "[^!-~]"
+                                }
+                              },
+                              "scopeRevision": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "not": {
+                                  "pattern": "[^!-~]"
+                                }
+                              }
+                            }
+                          },
+                          "judgmentDecisionIds": {
+                            "type": "array",
+                            "minItems": 1,
+                            "maxItems": 256,
+                            "uniqueItems": true,
+                            "items": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 256,
+                              "not": {
+                                "pattern": "[^!-~]"
+                              }
+                            }
+                          },
+                          "evidence": {
+                            "type": "array",
+                            "maxItems": 256,
+                            "uniqueItems": true,
+                            "items": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "id",
+                                "revision"
+                              ],
+                              "properties": {
+                                "id": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 256,
+                                  "not": {
+                                    "pattern": "[^!-~]"
+                                  }
+                                },
+                                "revision": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 256,
+                                  "not": {
+                                    "pattern": "[^!-~]"
+                                  }
+                                }
+                              }
+                            }
+                          },
+                          "summary": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 2000,
+                            "pattern": "\\S"
+                          },
+                          "outcome": {
+                            "const": "revise"
+                          },
+                          "next": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "id",
+                              "revision",
+                              "kind"
+                            ],
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "not": {
+                                  "pattern": "[^!-~]"
+                                }
+                              },
+                              "revision": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "not": {
+                                  "pattern": "[^!-~]"
+                                }
+                              },
+                              "kind": {
+                                "enum": [
+                                  "reconsider",
+                                  "gather-evidence",
+                                  "revise-action"
+                                ]
+                              }
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "schemaVersion",
+                          "decisionId",
+                          "binding",
+                          "judgmentDecisionIds",
+                          "evidence",
+                          "summary",
+                          "outcome",
+                          "until"
+                        ],
+                        "properties": {
+                          "schemaVersion": {
+                            "const": 1
+                          },
+                          "decisionId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 256,
+                            "not": {
+                              "pattern": "[^!-~]"
+                            }
+                          },
+                          "binding": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "sourceId",
+                              "inputRevision",
+                              "actionId",
+                              "actionRevision",
+                              "authorityId",
+                              "authorityRevision",
+                              "scopeId",
+                              "scopeRevision"
+                            ],
+                            "properties": {
+                              "sourceId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "not": {
+                                  "pattern": "[^!-~]"
+                                }
+                              },
+                              "inputRevision": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "not": {
+                                  "pattern": "[^!-~]"
+                                }
+                              },
+                              "actionId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "not": {
+                                  "pattern": "[^!-~]"
+                                }
+                              },
+                              "actionRevision": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "not": {
+                                  "pattern": "[^!-~]"
+                                }
+                              },
+                              "authorityId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "not": {
+                                  "pattern": "[^!-~]"
+                                }
+                              },
+                              "authorityRevision": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "not": {
+                                  "pattern": "[^!-~]"
+                                }
+                              },
+                              "scopeId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "not": {
+                                  "pattern": "[^!-~]"
+                                }
+                              },
+                              "scopeRevision": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "not": {
+                                  "pattern": "[^!-~]"
+                                }
+                              }
+                            }
+                          },
+                          "judgmentDecisionIds": {
+                            "type": "array",
+                            "minItems": 1,
+                            "maxItems": 256,
+                            "uniqueItems": true,
+                            "items": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 256,
+                              "not": {
+                                "pattern": "[^!-~]"
+                              }
+                            }
+                          },
+                          "evidence": {
+                            "type": "array",
+                            "maxItems": 256,
+                            "uniqueItems": true,
+                            "items": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "id",
+                                "revision"
+                              ],
+                              "properties": {
+                                "id": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 256,
+                                  "not": {
+                                    "pattern": "[^!-~]"
+                                  }
+                                },
+                                "revision": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 256,
+                                  "not": {
+                                    "pattern": "[^!-~]"
+                                  }
+                                }
+                              }
+                            }
+                          },
+                          "summary": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 2000,
+                            "pattern": "\\S"
+                          },
+                          "outcome": {
+                            "const": "defer"
+                          },
+                          "until": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "id",
+                              "revision"
+                            ],
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "not": {
+                                  "pattern": "[^!-~]"
+                                }
+                              },
+                              "revision": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "not": {
+                                  "pattern": "[^!-~]"
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "schemaVersion",
+                          "decisionId",
+                          "binding",
+                          "judgmentDecisionIds",
+                          "evidence",
+                          "summary",
+                          "outcome"
+                        ],
+                        "properties": {
+                          "schemaVersion": {
+                            "const": 1
+                          },
+                          "decisionId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 256,
+                            "not": {
+                              "pattern": "[^!-~]"
+                            }
+                          },
+                          "binding": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "sourceId",
+                              "inputRevision",
+                              "actionId",
+                              "actionRevision",
+                              "authorityId",
+                              "authorityRevision",
+                              "scopeId",
+                              "scopeRevision"
+                            ],
+                            "properties": {
+                              "sourceId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "not": {
+                                  "pattern": "[^!-~]"
+                                }
+                              },
+                              "inputRevision": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "not": {
+                                  "pattern": "[^!-~]"
+                                }
+                              },
+                              "actionId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "not": {
+                                  "pattern": "[^!-~]"
+                                }
+                              },
+                              "actionRevision": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "not": {
+                                  "pattern": "[^!-~]"
+                                }
+                              },
+                              "authorityId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "not": {
+                                  "pattern": "[^!-~]"
+                                }
+                              },
+                              "authorityRevision": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "not": {
+                                  "pattern": "[^!-~]"
+                                }
+                              },
+                              "scopeId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "not": {
+                                  "pattern": "[^!-~]"
+                                }
+                              },
+                              "scopeRevision": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "not": {
+                                  "pattern": "[^!-~]"
+                                }
+                              }
+                            }
+                          },
+                          "judgmentDecisionIds": {
+                            "type": "array",
+                            "minItems": 1,
+                            "maxItems": 256,
+                            "uniqueItems": true,
+                            "items": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 256,
+                              "not": {
+                                "pattern": "[^!-~]"
+                              }
+                            }
+                          },
+                          "evidence": {
+                            "type": "array",
+                            "maxItems": 256,
+                            "uniqueItems": true,
+                            "items": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "id",
+                                "revision"
+                              ],
+                              "properties": {
+                                "id": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 256,
+                                  "not": {
+                                    "pattern": "[^!-~]"
+                                  }
+                                },
+                                "revision": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 256,
+                                  "not": {
+                                    "pattern": "[^!-~]"
+                                  }
+                                }
+                              }
+                            }
+                          },
+                          "summary": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 2000,
+                            "pattern": "\\S"
+                          },
+                          "outcome": {
+                            "const": "reject"
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  "operationRevision": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "schemaVersion",
+                  "stage",
+                  "targetId",
+                  "decision",
+                  "operationRevision"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "spent": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "plannerOutputs": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "attemptChoices": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "attemptedChoices": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "required": [
+            "schemaVersion",
+            "history",
+            "pending",
+            "spent",
+            "plannerOutputs",
+            "attemptChoices",
+            "attemptedChoices"
+          ],
+          "additionalProperties": false
+        },
+        "nativeProgress": {
+          "type": "object",
+          "properties": {
+            "schemaVersion": {
+              "const": 1
+            },
+            "state": {
+              "type": "string",
+              "enum": [
+                "deciding",
+                "deferred",
+                "refused"
+              ]
+            },
+            "stage": {
+              "type": "string"
+            },
+            "targetId": {
+              "type": "string"
+            },
+            "until": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256,
+                  "pattern": "^[!-~][ -~]{0,255}$"
+                },
+                "revision": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256,
+                  "pattern": "^[!-~][ -~]{0,255}$"
+                }
+              },
+              "required": [
+                "id",
+                "revision"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "schemaVersion",
+            "state",
+            "stage",
+            "targetId"
+          ],
+          "additionalProperties": false
+        },
+        "nativeWaiting": {
+          "type": "object",
+          "properties": {
+            "schemaVersion": {
+              "const": 1
+            },
+            "requests": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "logicalRequestId": {
+                    "type": "string"
+                  },
+                  "attempt": {
+                    "type": "object",
+                    "properties": {
+                      "attempt": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "endpointIndex": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "dispatched": {
+                        "type": "boolean"
+                      },
+                      "endpointKind": {
+                        "type": "string",
+                        "enum": [
+                          "hosted",
+                          "local"
+                        ]
+                      },
+                      "requestedModel": {
+                        "type": "string"
+                      },
+                      "latencyMs": {
+                        "type": "number"
+                      },
+                      "outcome": {
+                        "type": "string",
+                        "enum": [
+                          "answered",
+                          "invalid-request",
+                          "rejected",
+                          "unavailable",
+                          "aborted",
+                          "invalid-response",
+                          "internal",
+                          "unrecorded"
+                        ]
+                      },
+                      "requestId": {
+                        "type": "string"
+                      },
+                      "status": {
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "attempt",
+                      "endpointIndex",
+                      "endpointKind",
+                      "requestedModel",
+                      "latencyMs",
+                      "outcome"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "elapsedMs": {
+                    "type": "number"
+                  },
+                  "nextDelayMs": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "logicalRequestId",
+                  "attempt",
+                  "elapsedMs",
+                  "nextDelayMs"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "schemaVersion",
+            "requests"
+          ],
+          "additionalProperties": false
+        },
+        "durableAdmission": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "schemaVersion": {
+                  "const": 1
+                },
+                "key": {
+                  "type": "object",
+                  "properties": {
+                    "workId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256,
+                      "pattern": "^[!-~][ -~]{0,255}$"
+                    },
+                    "criteriaId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256,
+                      "pattern": "^[!-~][ -~]{0,255}$"
+                    },
+                    "criteriaRevision": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256,
+                      "pattern": "^[!-~][ -~]{0,255}$"
+                    },
+                    "attemptId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256,
+                      "pattern": "^[!-~][ -~]{0,255}$"
+                    }
+                  },
+                  "required": [
+                    "workId",
+                    "criteriaId",
+                    "criteriaRevision",
+                    "attemptId"
+                  ],
+                  "additionalProperties": false
+                },
+                "binding": {
+                  "type": "object",
+                  "properties": {
+                    "sourceId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256,
+                      "pattern": "^[!-~][ -~]{0,255}$"
+                    },
+                    "inputRevision": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256,
+                      "pattern": "^[!-~][ -~]{0,255}$"
+                    },
+                    "actionId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256,
+                      "pattern": "^[!-~][ -~]{0,255}$"
+                    },
+                    "actionRevision": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256,
+                      "pattern": "^[!-~][ -~]{0,255}$"
+                    },
+                    "authorityId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256,
+                      "pattern": "^[!-~][ -~]{0,255}$"
+                    },
+                    "authorityRevision": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256,
+                      "pattern": "^[!-~][ -~]{0,255}$"
+                    },
+                    "scopeId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256,
+                      "pattern": "^[!-~][ -~]{0,255}$"
+                    },
+                    "scopeRevision": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256,
+                      "pattern": "^[!-~][ -~]{0,255}$"
+                    }
+                  },
+                  "required": [
+                    "sourceId",
+                    "inputRevision",
+                    "actionId",
+                    "actionRevision",
+                    "authorityId",
+                    "authorityRevision",
+                    "scopeId",
+                    "scopeRevision"
+                  ],
+                  "additionalProperties": false
+                },
+                "input": {
+                  "type": "object",
+                  "properties": {
+                    "ask": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "sessionId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "origin": {
+                      "type": "string",
+                      "enum": [
+                        "turn",
+                        "agent-tool",
+                        "cli",
+                        "hosted",
+                        "external",
+                        "proposal"
+                      ]
+                    },
+                    "projectRoot": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "nativeSource": {
+                      "type": "object",
+                      "properties": {
+                        "sourceId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 256,
+                          "pattern": "^[!-~][ -~]{0,255}$"
+                        },
+                        "sourceRevision": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 256,
+                          "pattern": "^[!-~][ -~]{0,255}$"
+                        },
+                        "inputRevision": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 256,
+                          "pattern": "^[!-~][ -~]{0,255}$"
+                        },
+                        "criteriaId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 256,
+                          "pattern": "^[!-~][ -~]{0,255}$"
+                        },
+                        "criteriaRevision": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 256,
+                          "pattern": "^[!-~][ -~]{0,255}$"
+                        },
+                        "goal": {
+                          "type": "string",
+                          "minLength": 1,
+                          "pattern": "\\S"
+                        },
+                        "criteria": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1,
+                            "pattern": "\\S"
+                          },
+                          "minItems": 1
+                        }
+                      },
+                      "required": [
+                        "sourceId",
+                        "sourceRevision",
+                        "inputRevision",
+                        "criteriaId",
+                        "criteriaRevision",
+                        "goal",
+                        "criteria"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "proposedUnits": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "task": {
+                            "type": "string"
+                          },
+                          "template": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "task"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "parentAgentId": {
+                      "type": "string"
+                    },
+                    "budget": {
+                      "type": "object",
+                      "properties": {
+                        "maxTokens": {
+                          "type": "number"
+                        },
+                        "maxCostUsd": {
+                          "type": "number"
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    "isolation": {
+                      "type": "string",
+                      "enum": [
+                        "auto",
+                        "worktree",
+                        "shared"
+                      ]
+                    },
+                    "selectedModel": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "provider": {
+                          "type": "string"
+                        },
+                        "registryKey": {
+                          "type": "string"
+                        },
+                        "displayName": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "provider",
+                        "registryKey",
+                        "displayName"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "taskEvidence": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ask",
+                    "sessionId",
+                    "origin",
+                    "projectRoot"
+                  ],
+                  "additionalProperties": false
+                },
+                "contractId": {
+                  "type": "string"
+                },
+                "ownerAgentId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "payloadRevision": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "schemaVersion",
+                "key",
+                "binding",
+                "input",
+                "contractId",
+                "ownerAgentId",
+                "payloadRevision"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "schemaVersion": {
+                  "const": 2
+                },
+                "key": {
+                  "type": "object",
+                  "properties": {
+                    "workId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256,
+                      "pattern": "^[!-~][ -~]{0,255}$"
+                    },
+                    "criteriaId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256,
+                      "pattern": "^[!-~][ -~]{0,255}$"
+                    },
+                    "criteriaRevision": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256,
+                      "pattern": "^[!-~][ -~]{0,255}$"
+                    },
+                    "attemptId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256,
+                      "pattern": "^[!-~][ -~]{0,255}$"
+                    }
+                  },
+                  "required": [
+                    "workId",
+                    "criteriaId",
+                    "criteriaRevision",
+                    "attemptId"
+                  ],
+                  "additionalProperties": false
+                },
+                "binding": {
+                  "type": "object",
+                  "properties": {
+                    "sourceId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256,
+                      "pattern": "^[!-~][ -~]{0,255}$"
+                    },
+                    "inputRevision": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256,
+                      "pattern": "^[!-~][ -~]{0,255}$"
+                    },
+                    "actionId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256,
+                      "pattern": "^[!-~][ -~]{0,255}$"
+                    },
+                    "actionRevision": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256,
+                      "pattern": "^[!-~][ -~]{0,255}$"
+                    },
+                    "authorityId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256,
+                      "pattern": "^[!-~][ -~]{0,255}$"
+                    },
+                    "authorityRevision": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256,
+                      "pattern": "^[!-~][ -~]{0,255}$"
+                    },
+                    "scopeId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256,
+                      "pattern": "^[!-~][ -~]{0,255}$"
+                    },
+                    "scopeRevision": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256,
+                      "pattern": "^[!-~][ -~]{0,255}$"
+                    }
+                  },
+                  "required": [
+                    "sourceId",
+                    "inputRevision",
+                    "actionId",
+                    "actionRevision",
+                    "authorityId",
+                    "authorityRevision",
+                    "scopeId",
+                    "scopeRevision"
+                  ],
+                  "additionalProperties": false
+                },
+                "input": {
+                  "type": "object",
+                  "properties": {
+                    "ask": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "sessionId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "origin": {
+                      "type": "string",
+                      "enum": [
+                        "turn",
+                        "agent-tool",
+                        "cli",
+                        "hosted",
+                        "external",
+                        "proposal"
+                      ]
+                    },
+                    "projectRoot": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "nativeSource": {
+                      "type": "object",
+                      "properties": {
+                        "sourceId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 256,
+                          "pattern": "^[!-~][ -~]{0,255}$"
+                        },
+                        "sourceRevision": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 256,
+                          "pattern": "^[!-~][ -~]{0,255}$"
+                        },
+                        "inputRevision": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 256,
+                          "pattern": "^[!-~][ -~]{0,255}$"
+                        },
+                        "criteriaId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 256,
+                          "pattern": "^[!-~][ -~]{0,255}$"
+                        },
+                        "criteriaRevision": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 256,
+                          "pattern": "^[!-~][ -~]{0,255}$"
+                        },
+                        "goal": {
+                          "type": "string",
+                          "minLength": 1,
+                          "pattern": "\\S"
+                        },
+                        "criteria": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1,
+                            "pattern": "\\S"
+                          },
+                          "minItems": 1
+                        }
+                      },
+                      "required": [
+                        "sourceId",
+                        "sourceRevision",
+                        "inputRevision",
+                        "criteriaId",
+                        "criteriaRevision",
+                        "goal",
+                        "criteria"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "proposedUnits": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "task": {
+                            "type": "string"
+                          },
+                          "template": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "task"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "parentAgentId": {
+                      "type": "string"
+                    },
+                    "budget": {
+                      "type": "object",
+                      "properties": {
+                        "maxTokens": {
+                          "type": "number"
+                        },
+                        "maxCostUsd": {
+                          "type": "number"
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    "isolation": {
+                      "type": "string",
+                      "enum": [
+                        "auto",
+                        "worktree",
+                        "shared"
+                      ]
+                    },
+                    "selectedModel": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "provider": {
+                          "type": "string"
+                        },
+                        "registryKey": {
+                          "type": "string"
+                        },
+                        "displayName": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "provider",
+                        "registryKey",
+                        "displayName"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "taskEvidence": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ask",
+                    "sessionId",
+                    "origin",
+                    "projectRoot"
+                  ],
+                  "additionalProperties": false
+                },
+                "contractId": {
+                  "type": "string"
+                },
+                "ownerAgentId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "payloadRevision": {
+                  "type": "string"
+                },
+                "execution": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "isolation": {
+                          "const": "shared"
+                        }
+                      },
+                      "required": [
+                        "isolation"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "isolation": {
+                          "const": "worktree"
+                        },
+                        "branch": {
+                          "type": "string"
+                        },
+                        "worktreePath": {
+                          "type": "string"
+                        },
+                        "baseBranch": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "isolation",
+                        "branch",
+                        "worktreePath",
+                        "baseBranch"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "schemaVersion",
+                "key",
+                "binding",
+                "input",
+                "contractId",
+                "ownerAgentId",
+                "payloadRevision",
+                "execution"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
+        "durableLaunchState": {
+          "type": "string",
+          "enum": [
+            "prepared",
+            "launch-claimed"
+          ]
+        },
+        "inputSnapshot": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "version": {
+                  "const": 1
+                },
+                "id": {
+                  "type": "string"
+                },
+                "sourceRoot": {
+                  "type": "string"
+                },
+                "sourceIdentity": {
+                  "type": "string"
+                },
+                "gitIdentity": {
+                  "type": "string"
+                },
+                "ownerHead": {
+                  "type": "string"
+                },
+                "ownerRef": {
+                  "type": "string"
+                },
+                "indexFingerprint": {
+                  "type": "string"
+                },
+                "inputTree": {
+                  "type": "string"
+                },
+                "inputCommit": {
+                  "type": "string"
+                },
+                "capturedAt": {
+                  "type": "number"
+                },
+                "dirty": {
+                  "type": "boolean"
+                },
+                "exclusions": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "files": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "path": {
+                        "type": "string"
+                      },
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "file",
+                          "symlink",
+                          "missing"
+                        ]
+                      },
+                      "mode": {
+                        "type": "string",
+                        "enum": [
+                          "100644",
+                          "100755",
+                          "120000",
+                          "0"
+                        ]
+                      },
+                      "oid": {
+                        "type": "string"
+                      },
+                      "identity": {
+                        "type": "string"
+                      },
+                      "digest": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "path",
+                      "kind",
+                      "mode"
+                    ],
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "required": [
+                "version",
+                "id",
+                "sourceRoot",
+                "sourceIdentity",
+                "gitIdentity",
+                "ownerHead",
+                "ownerRef",
+                "indexFingerprint",
+                "inputTree",
+                "inputCommit",
+                "capturedAt",
+                "dirty",
+                "exclusions",
+                "files"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "version": {
+                  "const": 2
+                },
+                "id": {
+                  "type": "string"
+                },
+                "sourceRoot": {
+                  "type": "string"
+                },
+                "sourceIdentity": {
+                  "type": "string"
+                },
+                "gitIdentity": {
+                  "type": "string"
+                },
+                "ownerHead": {
+                  "type": "string"
+                },
+                "ownerRef": {
+                  "type": "string"
+                },
+                "indexFingerprint": {
+                  "type": "string"
+                },
+                "inputTree": {
+                  "type": "string"
+                },
+                "inputCommit": {
+                  "type": "string"
+                },
+                "capturedAt": {
+                  "type": "number"
+                },
+                "dirty": {
+                  "type": "boolean"
+                },
+                "exclusions": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "files": {
+                  "type": "array",
+                  "items": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "path": {
+                            "type": "string"
+                          },
+                          "kind": {
+                            "const": "missing"
+                          },
+                          "mode": {
+                            "const": "0"
+                          }
+                        },
+                        "required": [
+                          "path",
+                          "kind",
+                          "mode"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "path": {
+                            "type": "string"
+                          },
+                          "kind": {
+                            "const": "file"
+                          },
+                          "mode": {
+                            "type": "string",
+                            "enum": [
+                              "100644",
+                              "100755"
+                            ]
+                          },
+                          "oid": {
+                            "type": "string"
+                          },
+                          "identity": {
+                            "type": "string"
+                          },
+                          "digest": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "path",
+                          "kind",
+                          "mode",
+                          "oid",
+                          "identity"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "path": {
+                            "type": "string"
+                          },
+                          "kind": {
+                            "const": "symlink"
+                          },
+                          "mode": {
+                            "const": "120000"
+                          },
+                          "oid": {
+                            "type": "string"
+                          },
+                          "identity": {
+                            "type": "string"
+                          },
+                          "digest": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "path",
+                          "kind",
+                          "mode",
+                          "oid",
+                          "identity"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "version",
+                "id",
+                "sourceRoot",
+                "sourceIdentity",
+                "gitIdentity",
+                "ownerHead",
+                "ownerRef",
+                "indexFingerprint",
+                "inputTree",
+                "inputCommit",
+                "capturedAt",
+                "dirty",
+                "exclusions",
+                "files"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "schemaVersion": {
+          "type": "number"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "origin": {
+          "type": "string",
+          "enum": [
+            "turn",
+            "agent-tool",
+            "cli",
+            "hosted",
+            "external",
+            "proposal"
+          ]
+        },
+        "ask": {
+          "type": "string"
+        },
+        "selectedModel": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "provider": {
+              "type": "string"
+            },
+            "registryKey": {
+              "type": "string"
+            },
+            "displayName": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "provider",
+            "registryKey",
+            "displayName"
+          ],
+          "additionalProperties": false
+        },
+        "ownerAgentId": {
+          "type": "string"
+        },
+        "parentAgentId": {
+          "type": "string"
+        },
+        "projectRoot": {
+          "type": "string"
+        },
+        "isolation": {
+          "type": "string",
+          "enum": [
+            "worktree",
+            "shared"
+          ]
+        },
+        "branch": {
+          "type": "string"
+        },
+        "worktreePath": {
+          "type": "string"
+        },
+        "baseBranch": {
+          "type": "string"
+        },
+        "baseline": {
+          "type": "object",
+          "properties": {
+            "version": {
+              "type": "number",
+              "enum": [
+                2,
+                3,
+                4
+              ]
+            },
+            "head": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "dirty": {
+              "type": "object",
+              "additionalProperties": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            }
+          },
+          "required": [
+            "head",
+            "dirty"
+          ],
+          "additionalProperties": false
+        },
+        "sessionMode": {
+          "type": "boolean"
+        },
+        "proposedUnits": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "task": {
+                "type": "string"
+              },
+              "template": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "task"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "draftPlan": {
+          "type": "object",
+          "properties": {
+            "goal": {
+              "type": "string"
+            },
+            "units": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string"
+                  },
+                  "brief": {
+                    "type": "string"
+                  },
+                  "dependsOn": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "files": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "attempts": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "id",
+                  "title",
+                  "brief",
+                  "dependsOn"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "goal",
+            "units"
+          ],
+          "additionalProperties": false
+        },
+        "budget": {
+          "type": "object",
+          "properties": {
+            "maxTokens": {
+              "type": "number"
+            },
+            "maxCostUsd": {
+              "type": "number"
+            }
+          },
+          "additionalProperties": false
+        },
+        "goal": {
+          "type": "string"
+        },
+        "criteria": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "text": {
+                "type": "string"
+              },
+              "origin": {
+                "type": "string",
+                "enum": [
+                  "stated",
+                  "derived",
+                  "integration",
+                  "fix",
+                  "owner"
+                ]
+              },
+              "quote": {
+                "type": "string"
+              },
+              "serves": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "contribution": {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "outcome",
+                      "support",
+                      "scaffolding",
+                      "secondary"
+                    ]
+                  },
+                  "reason": {
+                    "type": "string"
+                  },
+                  "verification": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "reason",
+                  "verification"
+                ],
+                "additionalProperties": false
+              },
+              "disposition": {
+                "type": "string",
+                "enum": [
+                  "judged",
+                  "excluded",
+                  "met-by-structure"
+                ]
+              },
+              "dispositionReason": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "unread",
+                  "met",
+                  "unmet",
+                  "unshown"
+                ]
+              },
+              "readings": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "checkId": {
+                      "type": "string"
+                    },
+                    "at": {
+                      "type": "number"
+                    },
+                    "probabilityUnmet": {
+                      "type": "number"
+                    },
+                    "verdict": {
+                      "type": "string",
+                      "enum": [
+                        "met",
+                        "unmet",
+                        "unshown"
+                      ]
+                    },
+                    "outcome": {
+                      "type": "string",
+                      "enum": [
+                        "act",
+                        "confirm",
+                        "escalate"
+                      ]
+                    },
+                    "severity": {
+                      "type": "string",
+                      "enum": [
+                        "critical",
+                        "major",
+                        "minor"
+                      ]
+                    },
+                    "decisionId": {
+                      "type": "string"
+                    },
+                    "severityDecisionId": {
+                      "type": "string"
+                    },
+                    "rationale": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "checkId",
+                    "at",
+                    "probabilityUnmet",
+                    "verdict",
+                    "outcome"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": [
+              "id",
+              "text",
+              "origin",
+              "serves",
+              "disposition",
+              "status",
+              "readings"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "groups": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "goal": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "work",
+                  "fix",
+                  "integration"
+                ]
+              },
+              "repairs": {
+                "type": "object",
+                "properties": {
+                  "scope": {
+                    "type": "string",
+                    "enum": [
+                      "unit",
+                      "group",
+                      "deliverable"
+                    ]
+                  },
+                  "targetId": {
+                    "type": "string"
+                  },
+                  "criterionIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "scope",
+                  "targetId",
+                  "criterionIds"
+                ],
+                "additionalProperties": false
+              },
+              "dependsOn": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "criteria": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "text": {
+                      "type": "string"
+                    },
+                    "origin": {
+                      "type": "string",
+                      "enum": [
+                        "stated",
+                        "derived",
+                        "integration",
+                        "fix",
+                        "owner"
+                      ]
+                    },
+                    "quote": {
+                      "type": "string"
+                    },
+                    "serves": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "contribution": {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "outcome",
+                            "support",
+                            "scaffolding",
+                            "secondary"
+                          ]
+                        },
+                        "reason": {
+                          "type": "string"
+                        },
+                        "verification": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "reason",
+                        "verification"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "disposition": {
+                      "type": "string",
+                      "enum": [
+                        "judged",
+                        "excluded",
+                        "met-by-structure"
+                      ]
+                    },
+                    "dispositionReason": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "unread",
+                        "met",
+                        "unmet",
+                        "unshown"
+                      ]
+                    },
+                    "readings": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "checkId": {
+                            "type": "string"
+                          },
+                          "at": {
+                            "type": "number"
+                          },
+                          "probabilityUnmet": {
+                            "type": "number"
+                          },
+                          "verdict": {
+                            "type": "string",
+                            "enum": [
+                              "met",
+                              "unmet",
+                              "unshown"
+                            ]
+                          },
+                          "outcome": {
+                            "type": "string",
+                            "enum": [
+                              "act",
+                              "confirm",
+                              "escalate"
+                            ]
+                          },
+                          "severity": {
+                            "type": "string",
+                            "enum": [
+                              "critical",
+                              "major",
+                              "minor"
+                            ]
+                          },
+                          "decisionId": {
+                            "type": "string"
+                          },
+                          "severityDecisionId": {
+                            "type": "string"
+                          },
+                          "rationale": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "checkId",
+                          "at",
+                          "probabilityUnmet",
+                          "verdict",
+                          "outcome"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "text",
+                    "origin",
+                    "serves",
+                    "disposition",
+                    "status",
+                    "readings"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "unitIds": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "pending",
+                  "blocked",
+                  "running",
+                  "judging",
+                  "fixing",
+                  "awaiting-owner",
+                  "passed",
+                  "failed",
+                  "cancelled"
+                ]
+              },
+              "checks": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "at": {
+                      "type": "number"
+                    },
+                    "trigger": {
+                      "type": "string",
+                      "enum": [
+                        "turn-end",
+                        "completion",
+                        "agent-failed",
+                        "fix-passed",
+                        "resume",
+                        "owner-amend"
+                      ]
+                    },
+                    "claims": {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "files_verified",
+                            "git_corroborated",
+                            "verified_empty",
+                            "unverifiable_no_claims",
+                            "unverified"
+                          ]
+                        },
+                        "summary": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "summary"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "gates": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "gate": {
+                            "type": "string"
+                          },
+                          "passed": {
+                            "type": "boolean"
+                          },
+                          "output": {
+                            "type": "string"
+                          },
+                          "durationMs": {
+                            "type": "number"
+                          },
+                          "skipped": {
+                            "type": "boolean"
+                          },
+                          "outcome": {
+                            "type": "string",
+                            "enum": [
+                              "passed",
+                              "failed",
+                              "unverified"
+                            ]
+                          },
+                          "required": {
+                            "type": "boolean"
+                          },
+                          "reason": {
+                            "type": "string"
+                          },
+                          "completion": {
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "enum": [
+                                      "command-exit"
+                                    ]
+                                  },
+                                  "exitCode": {
+                                    "type": "number"
+                                  }
+                                },
+                                "required": [
+                                  "kind",
+                                  "exitCode"
+                                ],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "enum": [
+                                      "assertions"
+                                    ]
+                                  },
+                                  "runner": {
+                                    "type": "string",
+                                    "enum": [
+                                      "bun-junit",
+                                      "registered-protocol"
+                                    ]
+                                  },
+                                  "checks": {
+                                    "type": "object",
+                                    "properties": {
+                                      "passed": {
+                                        "type": "number"
+                                      },
+                                      "failed": {
+                                        "type": "number"
+                                      },
+                                      "skipped": {
+                                        "type": "number"
+                                      }
+                                    },
+                                    "required": [
+                                      "passed",
+                                      "failed",
+                                      "skipped"
+                                    ],
+                                    "additionalProperties": false
+                                  }
+                                },
+                                "required": [
+                                  "kind",
+                                  "runner",
+                                  "checks"
+                                ],
+                                "additionalProperties": false
+                              }
+                            ]
+                          },
+                          "provenance": {
+                            "type": "object",
+                            "properties": {
+                              "sourceBefore": {
+                                "type": "string"
+                              },
+                              "sourceAfter": {
+                                "type": "string"
+                              },
+                              "definitionBefore": {
+                                "type": "string"
+                              },
+                              "definitionAfter": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "sourceBefore",
+                              "sourceAfter",
+                              "definitionBefore",
+                              "definitionAfter"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": [
+                          "gate",
+                          "passed",
+                          "output",
+                          "durationMs"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "goal": {
+                      "type": "object",
+                      "properties": {
+                        "probabilityUnmet": {
+                          "type": "number"
+                        },
+                        "verdict": {
+                          "type": "string",
+                          "enum": [
+                            "met",
+                            "unmet",
+                            "unshown"
+                          ]
+                        },
+                        "outcome": {
+                          "type": "string",
+                          "enum": [
+                            "act",
+                            "confirm",
+                            "escalate"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "probabilityUnmet",
+                        "verdict",
+                        "outcome"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "quality": {
+                      "type": "object",
+                      "properties": {
+                        "placeholder": {
+                          "type": "object",
+                          "properties": {
+                            "verdict": {
+                              "type": "string",
+                              "enum": [
+                                "yes",
+                                "no",
+                                "uncertain"
+                              ]
+                            },
+                            "outcome": {
+                              "type": "string",
+                              "enum": [
+                                "act",
+                                "confirm",
+                                "escalate"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "verdict",
+                            "outcome"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "tests_weakened": {
+                          "type": "object",
+                          "properties": {
+                            "verdict": {
+                              "type": "string",
+                              "enum": [
+                                "yes",
+                                "no",
+                                "uncertain"
+                              ]
+                            },
+                            "outcome": {
+                              "type": "string",
+                              "enum": [
+                                "act",
+                                "confirm",
+                                "escalate"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "verdict",
+                            "outcome"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "breaks_existing": {
+                          "type": "object",
+                          "properties": {
+                            "verdict": {
+                              "type": "string",
+                              "enum": [
+                                "yes",
+                                "no",
+                                "uncertain"
+                              ]
+                            },
+                            "outcome": {
+                              "type": "string",
+                              "enum": [
+                                "act",
+                                "confirm",
+                                "escalate"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "verdict",
+                            "outcome"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "out_of_scope": {
+                          "type": "object",
+                          "properties": {
+                            "verdict": {
+                              "type": "string",
+                              "enum": [
+                                "yes",
+                                "no",
+                                "uncertain"
+                              ]
+                            },
+                            "outcome": {
+                              "type": "string",
+                              "enum": [
+                                "act",
+                                "confirm",
+                                "escalate"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "verdict",
+                            "outcome"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "hidden_failure": {
+                          "type": "object",
+                          "properties": {
+                            "verdict": {
+                              "type": "string",
+                              "enum": [
+                                "yes",
+                                "no",
+                                "uncertain"
+                              ]
+                            },
+                            "outcome": {
+                              "type": "string",
+                              "enum": [
+                                "act",
+                                "confirm",
+                                "escalate"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "verdict",
+                            "outcome"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "unsupported_claims": {
+                          "type": "object",
+                          "properties": {
+                            "verdict": {
+                              "type": "string",
+                              "enum": [
+                                "yes",
+                                "no",
+                                "uncertain"
+                              ]
+                            },
+                            "outcome": {
+                              "type": "string",
+                              "enum": [
+                                "act",
+                                "confirm",
+                                "escalate"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "verdict",
+                            "outcome"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    "result": {
+                      "type": "string",
+                      "enum": [
+                        "pass",
+                        "nudge",
+                        "await-owner",
+                        "native-decision",
+                        "stall",
+                        "recorded"
+                      ]
+                    },
+                    "problems": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "unmet",
+                          "unshown",
+                          "regression",
+                          "quality",
+                          "gate",
+                          "claims"
+                        ]
+                      }
+                    },
+                    "qualityProblems": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "placeholder",
+                          "tests_weakened",
+                          "breaks_existing",
+                          "out_of_scope",
+                          "hidden_failure",
+                          "unsupported_claims"
+                        ]
+                      }
+                    },
+                    "decisionIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "evidenceDigest": {
+                      "type": "string"
+                    },
+                    "reviewedFiles": {
+                      "type": "array",
+                      "items": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "path": {
+                                "type": "string"
+                              },
+                              "sha256": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "path",
+                              "sha256"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "path": {
+                                "type": "string"
+                              },
+                              "observationId": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "path",
+                              "observationId"
+                            ],
+                            "additionalProperties": false
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "at",
+                    "trigger",
+                    "goal",
+                    "quality",
+                    "result",
+                    "decisionIds"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "fixRounds": {
+                "type": "number"
+              },
+              "baseline": {
+                "type": "object",
+                "properties": {
+                  "version": {
+                    "type": "number",
+                    "enum": [
+                      2,
+                      3,
+                      4
+                    ]
+                  },
+                  "head": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "dirty": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "head",
+                  "dirty"
+                ],
+                "additionalProperties": false
+              },
+              "usage": {
+                "type": "object",
+                "properties": {
+                  "inputTokens": {
+                    "type": "number"
+                  },
+                  "outputTokens": {
+                    "type": "number"
+                  },
+                  "cacheReadTokens": {
+                    "type": "number"
+                  },
+                  "cacheWriteTokens": {
+                    "type": "number"
+                  },
+                  "reasoningTokens": {
+                    "type": "number"
+                  },
+                  "llmCallCount": {
+                    "type": "number"
+                  },
+                  "turnCount": {
+                    "type": "number"
+                  },
+                  "toolCallCount": {
+                    "type": "number"
+                  },
+                  "costUsd": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "costState": {
+                    "type": "string",
+                    "enum": [
+                      "priced",
+                      "unpriced",
+                      "estimated"
+                    ]
+                  },
+                  "costSource": {
+                    "type": "string",
+                    "enum": [
+                      "user",
+                      "provider",
+                      "catalog",
+                      "mixed"
+                    ]
+                  },
+                  "pricingAsOf": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "inputTokens",
+                  "outputTokens",
+                  "cacheReadTokens",
+                  "cacheWriteTokens",
+                  "llmCallCount",
+                  "turnCount",
+                  "toolCallCount",
+                  "costUsd",
+                  "costState"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "id",
+              "title",
+              "goal",
+              "kind",
+              "dependsOn",
+              "criteria",
+              "unitIds",
+              "status",
+              "checks",
+              "fixRounds",
+              "usage"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "units": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "groupId": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "goal": {
+                "type": "string"
+              },
+              "brief": {
+                "type": "string"
+              },
+              "role": {
+                "type": "string",
+                "enum": [
+                  "implement",
+                  "research",
+                  "design",
+                  "integration"
+                ]
+              },
+              "dependsOn": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "files": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "attempts": {
+                "type": "number"
+              },
+              "criteria": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "text": {
+                      "type": "string"
+                    },
+                    "origin": {
+                      "type": "string",
+                      "enum": [
+                        "stated",
+                        "derived",
+                        "integration",
+                        "fix",
+                        "owner"
+                      ]
+                    },
+                    "quote": {
+                      "type": "string"
+                    },
+                    "serves": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "contribution": {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "outcome",
+                            "support",
+                            "scaffolding",
+                            "secondary"
+                          ]
+                        },
+                        "reason": {
+                          "type": "string"
+                        },
+                        "verification": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "reason",
+                        "verification"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "disposition": {
+                      "type": "string",
+                      "enum": [
+                        "judged",
+                        "excluded",
+                        "met-by-structure"
+                      ]
+                    },
+                    "dispositionReason": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "unread",
+                        "met",
+                        "unmet",
+                        "unshown"
+                      ]
+                    },
+                    "readings": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "checkId": {
+                            "type": "string"
+                          },
+                          "at": {
+                            "type": "number"
+                          },
+                          "probabilityUnmet": {
+                            "type": "number"
+                          },
+                          "verdict": {
+                            "type": "string",
+                            "enum": [
+                              "met",
+                              "unmet",
+                              "unshown"
+                            ]
+                          },
+                          "outcome": {
+                            "type": "string",
+                            "enum": [
+                              "act",
+                              "confirm",
+                              "escalate"
+                            ]
+                          },
+                          "severity": {
+                            "type": "string",
+                            "enum": [
+                              "critical",
+                              "major",
+                              "minor"
+                            ]
+                          },
+                          "decisionId": {
+                            "type": "string"
+                          },
+                          "severityDecisionId": {
+                            "type": "string"
+                          },
+                          "rationale": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "checkId",
+                          "at",
+                          "probabilityUnmet",
+                          "verdict",
+                          "outcome"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "text",
+                    "origin",
+                    "serves",
+                    "disposition",
+                    "status",
+                    "readings"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "pending",
+                  "blocked",
+                  "running",
+                  "checking",
+                  "held",
+                  "nudged",
+                  "fixing",
+                  "awaiting-owner",
+                  "held-merge",
+                  "passed",
+                  "failed",
+                  "cancelled"
+                ]
+              },
+              "agentIds": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "activeAgentId": {
+                "type": "string"
+              },
+              "route": {
+                "type": "object",
+                "properties": {
+                  "model": {
+                    "type": "string"
+                  },
+                  "provider": {
+                    "type": "string"
+                  },
+                  "fallbackModels": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "routing": {
+                    "type": "object",
+                    "properties": {
+                      "providerSelection": {
+                        "type": "string",
+                        "enum": [
+                          "inherit-current",
+                          "concrete",
+                          "synthetic"
+                        ]
+                      },
+                      "providerFailurePolicy": {
+                        "type": "string",
+                        "enum": [
+                          "ordered-fallbacks",
+                          "fail"
+                        ]
+                      },
+                      "fallbackModels": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "reasoningEffort": {
+                    "type": "string"
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "model",
+                  "provider",
+                  "reason"
+                ],
+                "additionalProperties": false
+              },
+              "checks": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "at": {
+                      "type": "number"
+                    },
+                    "trigger": {
+                      "type": "string",
+                      "enum": [
+                        "turn-end",
+                        "completion",
+                        "agent-failed",
+                        "fix-passed",
+                        "resume",
+                        "owner-amend"
+                      ]
+                    },
+                    "claims": {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "files_verified",
+                            "git_corroborated",
+                            "verified_empty",
+                            "unverifiable_no_claims",
+                            "unverified"
+                          ]
+                        },
+                        "summary": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "summary"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "gates": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "gate": {
+                            "type": "string"
+                          },
+                          "passed": {
+                            "type": "boolean"
+                          },
+                          "output": {
+                            "type": "string"
+                          },
+                          "durationMs": {
+                            "type": "number"
+                          },
+                          "skipped": {
+                            "type": "boolean"
+                          },
+                          "outcome": {
+                            "type": "string",
+                            "enum": [
+                              "passed",
+                              "failed",
+                              "unverified"
+                            ]
+                          },
+                          "required": {
+                            "type": "boolean"
+                          },
+                          "reason": {
+                            "type": "string"
+                          },
+                          "completion": {
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "enum": [
+                                      "command-exit"
+                                    ]
+                                  },
+                                  "exitCode": {
+                                    "type": "number"
+                                  }
+                                },
+                                "required": [
+                                  "kind",
+                                  "exitCode"
+                                ],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "enum": [
+                                      "assertions"
+                                    ]
+                                  },
+                                  "runner": {
+                                    "type": "string",
+                                    "enum": [
+                                      "bun-junit",
+                                      "registered-protocol"
+                                    ]
+                                  },
+                                  "checks": {
+                                    "type": "object",
+                                    "properties": {
+                                      "passed": {
+                                        "type": "number"
+                                      },
+                                      "failed": {
+                                        "type": "number"
+                                      },
+                                      "skipped": {
+                                        "type": "number"
+                                      }
+                                    },
+                                    "required": [
+                                      "passed",
+                                      "failed",
+                                      "skipped"
+                                    ],
+                                    "additionalProperties": false
+                                  }
+                                },
+                                "required": [
+                                  "kind",
+                                  "runner",
+                                  "checks"
+                                ],
+                                "additionalProperties": false
+                              }
+                            ]
+                          },
+                          "provenance": {
+                            "type": "object",
+                            "properties": {
+                              "sourceBefore": {
+                                "type": "string"
+                              },
+                              "sourceAfter": {
+                                "type": "string"
+                              },
+                              "definitionBefore": {
+                                "type": "string"
+                              },
+                              "definitionAfter": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "sourceBefore",
+                              "sourceAfter",
+                              "definitionBefore",
+                              "definitionAfter"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": [
+                          "gate",
+                          "passed",
+                          "output",
+                          "durationMs"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "goal": {
+                      "type": "object",
+                      "properties": {
+                        "probabilityUnmet": {
+                          "type": "number"
+                        },
+                        "verdict": {
+                          "type": "string",
+                          "enum": [
+                            "met",
+                            "unmet",
+                            "unshown"
+                          ]
+                        },
+                        "outcome": {
+                          "type": "string",
+                          "enum": [
+                            "act",
+                            "confirm",
+                            "escalate"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "probabilityUnmet",
+                        "verdict",
+                        "outcome"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "quality": {
+                      "type": "object",
+                      "properties": {
+                        "placeholder": {
+                          "type": "object",
+                          "properties": {
+                            "verdict": {
+                              "type": "string",
+                              "enum": [
+                                "yes",
+                                "no",
+                                "uncertain"
+                              ]
+                            },
+                            "outcome": {
+                              "type": "string",
+                              "enum": [
+                                "act",
+                                "confirm",
+                                "escalate"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "verdict",
+                            "outcome"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "tests_weakened": {
+                          "type": "object",
+                          "properties": {
+                            "verdict": {
+                              "type": "string",
+                              "enum": [
+                                "yes",
+                                "no",
+                                "uncertain"
+                              ]
+                            },
+                            "outcome": {
+                              "type": "string",
+                              "enum": [
+                                "act",
+                                "confirm",
+                                "escalate"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "verdict",
+                            "outcome"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "breaks_existing": {
+                          "type": "object",
+                          "properties": {
+                            "verdict": {
+                              "type": "string",
+                              "enum": [
+                                "yes",
+                                "no",
+                                "uncertain"
+                              ]
+                            },
+                            "outcome": {
+                              "type": "string",
+                              "enum": [
+                                "act",
+                                "confirm",
+                                "escalate"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "verdict",
+                            "outcome"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "out_of_scope": {
+                          "type": "object",
+                          "properties": {
+                            "verdict": {
+                              "type": "string",
+                              "enum": [
+                                "yes",
+                                "no",
+                                "uncertain"
+                              ]
+                            },
+                            "outcome": {
+                              "type": "string",
+                              "enum": [
+                                "act",
+                                "confirm",
+                                "escalate"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "verdict",
+                            "outcome"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "hidden_failure": {
+                          "type": "object",
+                          "properties": {
+                            "verdict": {
+                              "type": "string",
+                              "enum": [
+                                "yes",
+                                "no",
+                                "uncertain"
+                              ]
+                            },
+                            "outcome": {
+                              "type": "string",
+                              "enum": [
+                                "act",
+                                "confirm",
+                                "escalate"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "verdict",
+                            "outcome"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "unsupported_claims": {
+                          "type": "object",
+                          "properties": {
+                            "verdict": {
+                              "type": "string",
+                              "enum": [
+                                "yes",
+                                "no",
+                                "uncertain"
+                              ]
+                            },
+                            "outcome": {
+                              "type": "string",
+                              "enum": [
+                                "act",
+                                "confirm",
+                                "escalate"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "verdict",
+                            "outcome"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    "result": {
+                      "type": "string",
+                      "enum": [
+                        "pass",
+                        "nudge",
+                        "await-owner",
+                        "native-decision",
+                        "stall",
+                        "recorded"
+                      ]
+                    },
+                    "problems": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "unmet",
+                          "unshown",
+                          "regression",
+                          "quality",
+                          "gate",
+                          "claims"
+                        ]
+                      }
+                    },
+                    "qualityProblems": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "placeholder",
+                          "tests_weakened",
+                          "breaks_existing",
+                          "out_of_scope",
+                          "hidden_failure",
+                          "unsupported_claims"
+                        ]
+                      }
+                    },
+                    "decisionIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "evidenceDigest": {
+                      "type": "string"
+                    },
+                    "reviewedFiles": {
+                      "type": "array",
+                      "items": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "path": {
+                                "type": "string"
+                              },
+                              "sha256": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "path",
+                              "sha256"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "path": {
+                                "type": "string"
+                              },
+                              "observationId": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "path",
+                              "observationId"
+                            ],
+                            "additionalProperties": false
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "at",
+                    "trigger",
+                    "goal",
+                    "quality",
+                    "result",
+                    "decisionIds"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "nudges": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "checkId": {
+                      "type": "string"
+                    },
+                    "at": {
+                      "type": "number"
+                    },
+                    "kinds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "unmet",
+                          "unshown",
+                          "regression",
+                          "quality",
+                          "gate",
+                          "claims"
+                        ]
+                      }
+                    },
+                    "criterionIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "text": {
+                      "type": "string"
+                    },
+                    "delivery": {
+                      "type": "string",
+                      "enum": [
+                        "hold",
+                        "bus",
+                        "wake"
+                      ]
+                    },
+                    "agentId": {
+                      "type": "string"
+                    },
+                    "consumedAt": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "checkId",
+                    "at",
+                    "kinds",
+                    "criterionIds",
+                    "text",
+                    "delivery",
+                    "agentId"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "fixRounds": {
+                "type": "number"
+              },
+              "freshAgents": {
+                "type": "number"
+              },
+              "transportRetries": {
+                "type": "number"
+              },
+              "touchedPaths": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "baseline": {
+                "type": "object",
+                "properties": {
+                  "version": {
+                    "type": "number",
+                    "enum": [
+                      2,
+                      3,
+                      4
+                    ]
+                  },
+                  "head": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "dirty": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "head",
+                  "dirty"
+                ],
+                "additionalProperties": false
+              },
+              "usage": {
+                "type": "object",
+                "properties": {
+                  "inputTokens": {
+                    "type": "number"
+                  },
+                  "outputTokens": {
+                    "type": "number"
+                  },
+                  "cacheReadTokens": {
+                    "type": "number"
+                  },
+                  "cacheWriteTokens": {
+                    "type": "number"
+                  },
+                  "reasoningTokens": {
+                    "type": "number"
+                  },
+                  "llmCallCount": {
+                    "type": "number"
+                  },
+                  "turnCount": {
+                    "type": "number"
+                  },
+                  "toolCallCount": {
+                    "type": "number"
+                  },
+                  "costUsd": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "costState": {
+                    "type": "string",
+                    "enum": [
+                      "priced",
+                      "unpriced",
+                      "estimated"
+                    ]
+                  },
+                  "costSource": {
+                    "type": "string",
+                    "enum": [
+                      "user",
+                      "provider",
+                      "catalog",
+                      "mixed"
+                    ]
+                  },
+                  "pricingAsOf": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "inputTokens",
+                  "outputTokens",
+                  "cacheReadTokens",
+                  "cacheWriteTokens",
+                  "llmCallCount",
+                  "turnCount",
+                  "toolCallCount",
+                  "costUsd",
+                  "costState"
+                ],
+                "additionalProperties": false
+              },
+              "answer": {
+                "type": "string"
+              },
+              "lastOutput": {
+                "type": "string"
+              },
+              "readEvidence": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": "string"
+                    },
+                    "returnedRanges": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "returnedLines": {
+                      "type": "number"
+                    },
+                    "returnedContent": {
+                      "type": "string"
+                    },
+                    "contentKind": {
+                      "type": "string",
+                      "enum": [
+                        "declared-reference",
+                        "cited-source"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "returnedRanges",
+                    "returnedLines"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "commandEvidence": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "agentId": {
+                      "type": "string"
+                    },
+                    "callId": {
+                      "type": "string"
+                    },
+                    "turn": {
+                      "type": "number"
+                    },
+                    "callIndex": {
+                      "type": "number"
+                    },
+                    "command": {
+                      "type": "string"
+                    },
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "head": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "agentId",
+                    "turn",
+                    "callIndex",
+                    "callId",
+                    "command",
+                    "success",
+                    "head"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "lastReport": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "version": {
+                        "const": 1
+                      },
+                      "summary": {
+                        "type": "string"
+                      },
+                      "filesCreated": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "filesModified": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "filesDeleted": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "archetype": {
+                        "const": "engineer"
+                      },
+                      "gatheredContext": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "plannedActions": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "appliedChanges": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "decisions": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "what": {
+                              "type": "string"
+                            },
+                            "why": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "what",
+                            "why"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "issues": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "uncertainties": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "required": [
+                      "version",
+                      "archetype"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "version": {
+                        "const": 1
+                      },
+                      "summary": {
+                        "type": "string"
+                      },
+                      "filesCreated": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "filesModified": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "filesDeleted": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "archetype": {
+                        "const": "tester"
+                      },
+                      "testsWritten": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "testsPassed": {
+                        "type": "number"
+                      },
+                      "testsFailed": {
+                        "type": "number"
+                      },
+                      "coverage": {
+                        "type": "object",
+                        "properties": {
+                          "lines": {
+                            "type": "number"
+                          },
+                          "branches": {
+                            "type": "number"
+                          },
+                          "functions": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "lines",
+                          "branches",
+                          "functions"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "failures": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "test": {
+                              "type": "string"
+                            },
+                            "error": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "test",
+                            "error"
+                          ],
+                          "additionalProperties": false
+                        }
+                      }
+                    },
+                    "required": [
+                      "version",
+                      "archetype"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "version": {
+                        "const": 1
+                      },
+                      "summary": {
+                        "type": "string"
+                      },
+                      "filesCreated": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "filesModified": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "filesDeleted": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "archetype": {
+                        "type": "string",
+                        "not": {
+                          "enum": [
+                            "engineer",
+                            "tester"
+                          ]
+                        }
+                      },
+                      "result": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "version",
+                      "archetype"
+                    ],
+                    "additionalProperties": false
+                  }
+                ]
+              },
+              "failureReason": {
+                "type": "string"
+              },
+              "attemptOf": {
+                "type": "string"
+              },
+              "attemptIndex": {
+                "type": "number"
+              },
+              "attemptSelection": {
+                "type": "object",
+                "properties": {
+                  "engineGroupId": {
+                    "type": "string"
+                  },
+                  "candidateIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "proposedId": {
+                    "type": "string"
+                  },
+                  "outcome": {
+                    "type": "string",
+                    "enum": [
+                      "act",
+                      "confirm",
+                      "escalate"
+                    ]
+                  },
+                  "reasons": {
+                    "type": "string"
+                  },
+                  "decisionId": {
+                    "type": "string"
+                  },
+                  "pickedId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "engineGroupId",
+                  "candidateIds",
+                  "outcome",
+                  "reasons"
+                ],
+                "additionalProperties": false
+              },
+              "attemptUnits": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "groupId": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "goal": {
+                      "type": "string"
+                    },
+                    "brief": {
+                      "type": "string"
+                    },
+                    "role": {
+                      "type": "string",
+                      "enum": [
+                        "implement",
+                        "research",
+                        "design",
+                        "integration"
+                      ]
+                    },
+                    "dependsOn": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "files": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "attempts": {
+                      "type": "number"
+                    },
+                    "criteria": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "text": {
+                            "type": "string"
+                          },
+                          "origin": {
+                            "type": "string",
+                            "enum": [
+                              "stated",
+                              "derived",
+                              "integration",
+                              "fix",
+                              "owner"
+                            ]
+                          },
+                          "quote": {
+                            "type": "string"
+                          },
+                          "serves": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "contribution": {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "outcome",
+                                  "support",
+                                  "scaffolding",
+                                  "secondary"
+                                ]
+                              },
+                              "reason": {
+                                "type": "string"
+                              },
+                              "verification": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "reason",
+                              "verification"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "disposition": {
+                            "type": "string",
+                            "enum": [
+                              "judged",
+                              "excluded",
+                              "met-by-structure"
+                            ]
+                          },
+                          "dispositionReason": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "unread",
+                              "met",
+                              "unmet",
+                              "unshown"
+                            ]
+                          },
+                          "readings": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "checkId": {
+                                  "type": "string"
+                                },
+                                "at": {
+                                  "type": "number"
+                                },
+                                "probabilityUnmet": {
+                                  "type": "number"
+                                },
+                                "verdict": {
+                                  "type": "string",
+                                  "enum": [
+                                    "met",
+                                    "unmet",
+                                    "unshown"
+                                  ]
+                                },
+                                "outcome": {
+                                  "type": "string",
+                                  "enum": [
+                                    "act",
+                                    "confirm",
+                                    "escalate"
+                                  ]
+                                },
+                                "severity": {
+                                  "type": "string",
+                                  "enum": [
+                                    "critical",
+                                    "major",
+                                    "minor"
+                                  ]
+                                },
+                                "decisionId": {
+                                  "type": "string"
+                                },
+                                "severityDecisionId": {
+                                  "type": "string"
+                                },
+                                "rationale": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "checkId",
+                                "at",
+                                "probabilityUnmet",
+                                "verdict",
+                                "outcome"
+                              ],
+                              "additionalProperties": false
+                            }
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "text",
+                          "origin",
+                          "serves",
+                          "disposition",
+                          "status",
+                          "readings"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "pending",
+                        "blocked",
+                        "running",
+                        "checking",
+                        "held",
+                        "nudged",
+                        "fixing",
+                        "awaiting-owner",
+                        "held-merge",
+                        "passed",
+                        "failed",
+                        "cancelled"
+                      ]
+                    },
+                    "agentIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "activeAgentId": {
+                      "type": "string"
+                    },
+                    "route": {
+                      "type": "object",
+                      "properties": {
+                        "model": {
+                          "type": "string"
+                        },
+                        "provider": {
+                          "type": "string"
+                        },
+                        "fallbackModels": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "routing": {
+                          "type": "object",
+                          "properties": {
+                            "providerSelection": {
+                              "type": "string",
+                              "enum": [
+                                "inherit-current",
+                                "concrete",
+                                "synthetic"
+                              ]
+                            },
+                            "providerFailurePolicy": {
+                              "type": "string",
+                              "enum": [
+                                "ordered-fallbacks",
+                                "fail"
+                              ]
+                            },
+                            "fallbackModels": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            }
+                          },
+                          "additionalProperties": false
+                        },
+                        "reasoningEffort": {
+                          "type": "string"
+                        },
+                        "reason": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "model",
+                        "provider",
+                        "reason"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "checks": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "at": {
+                            "type": "number"
+                          },
+                          "trigger": {
+                            "type": "string",
+                            "enum": [
+                              "turn-end",
+                              "completion",
+                              "agent-failed",
+                              "fix-passed",
+                              "resume",
+                              "owner-amend"
+                            ]
+                          },
+                          "claims": {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "files_verified",
+                                  "git_corroborated",
+                                  "verified_empty",
+                                  "unverifiable_no_claims",
+                                  "unverified"
+                                ]
+                              },
+                              "summary": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "summary"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "gates": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "gate": {
+                                  "type": "string"
+                                },
+                                "passed": {
+                                  "type": "boolean"
+                                },
+                                "output": {
+                                  "type": "string"
+                                },
+                                "durationMs": {
+                                  "type": "number"
+                                },
+                                "skipped": {
+                                  "type": "boolean"
+                                },
+                                "outcome": {
+                                  "type": "string",
+                                  "enum": [
+                                    "passed",
+                                    "failed",
+                                    "unverified"
+                                  ]
+                                },
+                                "required": {
+                                  "type": "boolean"
+                                },
+                                "reason": {
+                                  "type": "string"
+                                },
+                                "completion": {
+                                  "anyOf": [
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "kind": {
+                                          "type": "string",
+                                          "enum": [
+                                            "command-exit"
+                                          ]
+                                        },
+                                        "exitCode": {
+                                          "type": "number"
+                                        }
+                                      },
+                                      "required": [
+                                        "kind",
+                                        "exitCode"
+                                      ],
+                                      "additionalProperties": false
+                                    },
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "kind": {
+                                          "type": "string",
+                                          "enum": [
+                                            "assertions"
+                                          ]
+                                        },
+                                        "runner": {
+                                          "type": "string",
+                                          "enum": [
+                                            "bun-junit",
+                                            "registered-protocol"
+                                          ]
+                                        },
+                                        "checks": {
+                                          "type": "object",
+                                          "properties": {
+                                            "passed": {
+                                              "type": "number"
+                                            },
+                                            "failed": {
+                                              "type": "number"
+                                            },
+                                            "skipped": {
+                                              "type": "number"
+                                            }
+                                          },
+                                          "required": [
+                                            "passed",
+                                            "failed",
+                                            "skipped"
+                                          ],
+                                          "additionalProperties": false
+                                        }
+                                      },
+                                      "required": [
+                                        "kind",
+                                        "runner",
+                                        "checks"
+                                      ],
+                                      "additionalProperties": false
+                                    }
+                                  ]
+                                },
+                                "provenance": {
+                                  "type": "object",
+                                  "properties": {
+                                    "sourceBefore": {
+                                      "type": "string"
+                                    },
+                                    "sourceAfter": {
+                                      "type": "string"
+                                    },
+                                    "definitionBefore": {
+                                      "type": "string"
+                                    },
+                                    "definitionAfter": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "sourceBefore",
+                                    "sourceAfter",
+                                    "definitionBefore",
+                                    "definitionAfter"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "required": [
+                                "gate",
+                                "passed",
+                                "output",
+                                "durationMs"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
+                          "goal": {
+                            "type": "object",
+                            "properties": {
+                              "probabilityUnmet": {
+                                "type": "number"
+                              },
+                              "verdict": {
+                                "type": "string",
+                                "enum": [
+                                  "met",
+                                  "unmet",
+                                  "unshown"
+                                ]
+                              },
+                              "outcome": {
+                                "type": "string",
+                                "enum": [
+                                  "act",
+                                  "confirm",
+                                  "escalate"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "probabilityUnmet",
+                              "verdict",
+                              "outcome"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "quality": {
+                            "type": "object",
+                            "properties": {
+                              "placeholder": {
+                                "type": "object",
+                                "properties": {
+                                  "verdict": {
+                                    "type": "string",
+                                    "enum": [
+                                      "yes",
+                                      "no",
+                                      "uncertain"
+                                    ]
+                                  },
+                                  "outcome": {
+                                    "type": "string",
+                                    "enum": [
+                                      "act",
+                                      "confirm",
+                                      "escalate"
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "verdict",
+                                  "outcome"
+                                ],
+                                "additionalProperties": false
+                              },
+                              "tests_weakened": {
+                                "type": "object",
+                                "properties": {
+                                  "verdict": {
+                                    "type": "string",
+                                    "enum": [
+                                      "yes",
+                                      "no",
+                                      "uncertain"
+                                    ]
+                                  },
+                                  "outcome": {
+                                    "type": "string",
+                                    "enum": [
+                                      "act",
+                                      "confirm",
+                                      "escalate"
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "verdict",
+                                  "outcome"
+                                ],
+                                "additionalProperties": false
+                              },
+                              "breaks_existing": {
+                                "type": "object",
+                                "properties": {
+                                  "verdict": {
+                                    "type": "string",
+                                    "enum": [
+                                      "yes",
+                                      "no",
+                                      "uncertain"
+                                    ]
+                                  },
+                                  "outcome": {
+                                    "type": "string",
+                                    "enum": [
+                                      "act",
+                                      "confirm",
+                                      "escalate"
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "verdict",
+                                  "outcome"
+                                ],
+                                "additionalProperties": false
+                              },
+                              "out_of_scope": {
+                                "type": "object",
+                                "properties": {
+                                  "verdict": {
+                                    "type": "string",
+                                    "enum": [
+                                      "yes",
+                                      "no",
+                                      "uncertain"
+                                    ]
+                                  },
+                                  "outcome": {
+                                    "type": "string",
+                                    "enum": [
+                                      "act",
+                                      "confirm",
+                                      "escalate"
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "verdict",
+                                  "outcome"
+                                ],
+                                "additionalProperties": false
+                              },
+                              "hidden_failure": {
+                                "type": "object",
+                                "properties": {
+                                  "verdict": {
+                                    "type": "string",
+                                    "enum": [
+                                      "yes",
+                                      "no",
+                                      "uncertain"
+                                    ]
+                                  },
+                                  "outcome": {
+                                    "type": "string",
+                                    "enum": [
+                                      "act",
+                                      "confirm",
+                                      "escalate"
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "verdict",
+                                  "outcome"
+                                ],
+                                "additionalProperties": false
+                              },
+                              "unsupported_claims": {
+                                "type": "object",
+                                "properties": {
+                                  "verdict": {
+                                    "type": "string",
+                                    "enum": [
+                                      "yes",
+                                      "no",
+                                      "uncertain"
+                                    ]
+                                  },
+                                  "outcome": {
+                                    "type": "string",
+                                    "enum": [
+                                      "act",
+                                      "confirm",
+                                      "escalate"
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "verdict",
+                                  "outcome"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "additionalProperties": false
+                          },
+                          "result": {
+                            "type": "string",
+                            "enum": [
+                              "pass",
+                              "nudge",
+                              "await-owner",
+                              "native-decision",
+                              "stall",
+                              "recorded"
+                            ]
+                          },
+                          "problems": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "enum": [
+                                "unmet",
+                                "unshown",
+                                "regression",
+                                "quality",
+                                "gate",
+                                "claims"
+                              ]
+                            }
+                          },
+                          "qualityProblems": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "enum": [
+                                "placeholder",
+                                "tests_weakened",
+                                "breaks_existing",
+                                "out_of_scope",
+                                "hidden_failure",
+                                "unsupported_claims"
+                              ]
+                            }
+                          },
+                          "decisionIds": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "evidenceDigest": {
+                            "type": "string"
+                          },
+                          "reviewedFiles": {
+                            "type": "array",
+                            "items": {
+                              "anyOf": [
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "path": {
+                                      "type": "string"
+                                    },
+                                    "sha256": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "path",
+                                    "sha256"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "path": {
+                                      "type": "string"
+                                    },
+                                    "observationId": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "path",
+                                    "observationId"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              ]
+                            }
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "at",
+                          "trigger",
+                          "goal",
+                          "quality",
+                          "result",
+                          "decisionIds"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "nudges": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "checkId": {
+                            "type": "string"
+                          },
+                          "at": {
+                            "type": "number"
+                          },
+                          "kinds": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "enum": [
+                                "unmet",
+                                "unshown",
+                                "regression",
+                                "quality",
+                                "gate",
+                                "claims"
+                              ]
+                            }
+                          },
+                          "criterionIds": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "text": {
+                            "type": "string"
+                          },
+                          "delivery": {
+                            "type": "string",
+                            "enum": [
+                              "hold",
+                              "bus",
+                              "wake"
+                            ]
+                          },
+                          "agentId": {
+                            "type": "string"
+                          },
+                          "consumedAt": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "checkId",
+                          "at",
+                          "kinds",
+                          "criterionIds",
+                          "text",
+                          "delivery",
+                          "agentId"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "fixRounds": {
+                      "type": "number"
+                    },
+                    "freshAgents": {
+                      "type": "number"
+                    },
+                    "transportRetries": {
+                      "type": "number"
+                    },
+                    "touchedPaths": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "baseline": {
+                      "type": "object",
+                      "properties": {
+                        "version": {
+                          "type": "number",
+                          "enum": [
+                            2,
+                            3,
+                            4
+                          ]
+                        },
+                        "head": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "dirty": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        }
+                      },
+                      "required": [
+                        "head",
+                        "dirty"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "usage": {
+                      "type": "object",
+                      "properties": {
+                        "inputTokens": {
+                          "type": "number"
+                        },
+                        "outputTokens": {
+                          "type": "number"
+                        },
+                        "cacheReadTokens": {
+                          "type": "number"
+                        },
+                        "cacheWriteTokens": {
+                          "type": "number"
+                        },
+                        "reasoningTokens": {
+                          "type": "number"
+                        },
+                        "llmCallCount": {
+                          "type": "number"
+                        },
+                        "turnCount": {
+                          "type": "number"
+                        },
+                        "toolCallCount": {
+                          "type": "number"
+                        },
+                        "costUsd": {
+                          "anyOf": [
+                            {
+                              "type": "number"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "costState": {
+                          "type": "string",
+                          "enum": [
+                            "priced",
+                            "unpriced",
+                            "estimated"
+                          ]
+                        },
+                        "costSource": {
+                          "type": "string",
+                          "enum": [
+                            "user",
+                            "provider",
+                            "catalog",
+                            "mixed"
+                          ]
+                        },
+                        "pricingAsOf": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "inputTokens",
+                        "outputTokens",
+                        "cacheReadTokens",
+                        "cacheWriteTokens",
+                        "llmCallCount",
+                        "turnCount",
+                        "toolCallCount",
+                        "costUsd",
+                        "costState"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "answer": {
+                      "type": "string"
+                    },
+                    "lastOutput": {
+                      "type": "string"
+                    },
+                    "readEvidence": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "path": {
+                            "type": "string"
+                          },
+                          "returnedRanges": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "returnedLines": {
+                            "type": "number"
+                          },
+                          "returnedContent": {
+                            "type": "string"
+                          },
+                          "contentKind": {
+                            "type": "string",
+                            "enum": [
+                              "declared-reference",
+                              "cited-source"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "path",
+                          "returnedRanges",
+                          "returnedLines"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "commandEvidence": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "agentId": {
+                            "type": "string"
+                          },
+                          "callId": {
+                            "type": "string"
+                          },
+                          "turn": {
+                            "type": "number"
+                          },
+                          "callIndex": {
+                            "type": "number"
+                          },
+                          "command": {
+                            "type": "string"
+                          },
+                          "success": {
+                            "type": "boolean"
+                          },
+                          "head": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "agentId",
+                          "turn",
+                          "callIndex",
+                          "callId",
+                          "command",
+                          "success",
+                          "head"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "lastReport": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "version": {
+                              "const": 1
+                            },
+                            "summary": {
+                              "type": "string"
+                            },
+                            "filesCreated": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            },
+                            "filesModified": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            },
+                            "filesDeleted": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            },
+                            "archetype": {
+                              "const": "engineer"
+                            },
+                            "gatheredContext": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            },
+                            "plannedActions": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            },
+                            "appliedChanges": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            },
+                            "decisions": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "what": {
+                                    "type": "string"
+                                  },
+                                  "why": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "what",
+                                  "why"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "issues": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            },
+                            "uncertainties": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            }
+                          },
+                          "required": [
+                            "version",
+                            "archetype"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "version": {
+                              "const": 1
+                            },
+                            "summary": {
+                              "type": "string"
+                            },
+                            "filesCreated": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            },
+                            "filesModified": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            },
+                            "filesDeleted": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            },
+                            "archetype": {
+                              "const": "tester"
+                            },
+                            "testsWritten": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            },
+                            "testsPassed": {
+                              "type": "number"
+                            },
+                            "testsFailed": {
+                              "type": "number"
+                            },
+                            "coverage": {
+                              "type": "object",
+                              "properties": {
+                                "lines": {
+                                  "type": "number"
+                                },
+                                "branches": {
+                                  "type": "number"
+                                },
+                                "functions": {
+                                  "type": "number"
+                                }
+                              },
+                              "required": [
+                                "lines",
+                                "branches",
+                                "functions"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "failures": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "test": {
+                                    "type": "string"
+                                  },
+                                  "error": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "test",
+                                  "error"
+                                ],
+                                "additionalProperties": false
+                              }
+                            }
+                          },
+                          "required": [
+                            "version",
+                            "archetype"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "version": {
+                              "const": 1
+                            },
+                            "summary": {
+                              "type": "string"
+                            },
+                            "filesCreated": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            },
+                            "filesModified": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            },
+                            "filesDeleted": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            },
+                            "archetype": {
+                              "type": "string",
+                              "not": {
+                                "enum": [
+                                  "engineer",
+                                  "tester"
+                                ]
+                              }
+                            },
+                            "result": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "version",
+                            "archetype"
+                          ],
+                          "additionalProperties": false
+                        }
+                      ]
+                    },
+                    "failureReason": {
+                      "type": "string"
+                    },
+                    "attemptOf": {
+                      "type": "string"
+                    },
+                    "attemptIndex": {
+                      "type": "number"
+                    },
+                    "attemptSelection": {
+                      "type": "object",
+                      "properties": {
+                        "engineGroupId": {
+                          "type": "string"
+                        },
+                        "candidateIds": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "proposedId": {
+                          "type": "string"
+                        },
+                        "outcome": {
+                          "type": "string",
+                          "enum": [
+                            "act",
+                            "confirm",
+                            "escalate"
+                          ]
+                        },
+                        "reasons": {
+                          "type": "string"
+                        },
+                        "decisionId": {
+                          "type": "string"
+                        },
+                        "pickedId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "engineGroupId",
+                        "candidateIds",
+                        "outcome",
+                        "reasons"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "groupId",
+                    "title",
+                    "goal",
+                    "brief",
+                    "role",
+                    "dependsOn",
+                    "files",
+                    "attempts",
+                    "criteria",
+                    "status",
+                    "agentIds",
+                    "checks",
+                    "nudges",
+                    "fixRounds",
+                    "freshAgents",
+                    "transportRetries",
+                    "touchedPaths",
+                    "usage"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": [
+              "id",
+              "groupId",
+              "title",
+              "goal",
+              "brief",
+              "role",
+              "dependsOn",
+              "files",
+              "attempts",
+              "criteria",
+              "status",
+              "agentIds",
+              "checks",
+              "nudges",
+              "fixRounds",
+              "freshAgents",
+              "transportRetries",
+              "touchedPaths",
+              "usage"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "shape": {
+          "type": "object",
+          "properties": {
+            "forbids_delegation": {
+              "type": "object",
+              "properties": {
+                "verdict": {
+                  "type": "string",
+                  "enum": [
+                    "yes",
+                    "no",
+                    "uncertain"
+                  ]
+                },
+                "probability": {
+                  "type": "number"
+                },
+                "outcome": {
+                  "type": "string",
+                  "enum": [
+                    "act",
+                    "confirm",
+                    "escalate"
+                  ]
+                }
+              },
+              "required": [
+                "verdict",
+                "probability",
+                "outcome"
+              ],
+              "additionalProperties": false
+            },
+            "requests_parallel_agents": {
+              "type": "object",
+              "properties": {
+                "verdict": {
+                  "type": "string",
+                  "enum": [
+                    "yes",
+                    "no",
+                    "uncertain"
+                  ]
+                },
+                "probability": {
+                  "type": "number"
+                },
+                "outcome": {
+                  "type": "string",
+                  "enum": [
+                    "act",
+                    "confirm",
+                    "escalate"
+                  ]
+                }
+              },
+              "required": [
+                "verdict",
+                "probability",
+                "outcome"
+              ],
+              "additionalProperties": false
+            },
+            "forbids_writing": {
+              "type": "object",
+              "properties": {
+                "verdict": {
+                  "type": "string",
+                  "enum": [
+                    "yes",
+                    "no",
+                    "uncertain"
+                  ]
+                },
+                "probability": {
+                  "type": "number"
+                },
+                "outcome": {
+                  "type": "string",
+                  "enum": [
+                    "act",
+                    "confirm",
+                    "escalate"
+                  ]
+                }
+              },
+              "required": [
+                "verdict",
+                "probability",
+                "outcome"
+              ],
+              "additionalProperties": false
+            },
+            "asks_for_attempts": {
+              "type": "object",
+              "properties": {
+                "verdict": {
+                  "type": "string",
+                  "enum": [
+                    "yes",
+                    "no",
+                    "uncertain"
+                  ]
+                },
+                "probability": {
+                  "type": "number"
+                },
+                "outcome": {
+                  "type": "string",
+                  "enum": [
+                    "act",
+                    "confirm",
+                    "escalate"
+                  ]
+                }
+              },
+              "required": [
+                "verdict",
+                "probability",
+                "outcome"
+              ],
+              "additionalProperties": false
+            },
+            "project_review": {
+              "type": "object",
+              "properties": {
+                "verdict": {
+                  "type": "string",
+                  "enum": [
+                    "yes",
+                    "no",
+                    "uncertain"
+                  ]
+                },
+                "probability": {
+                  "type": "number"
+                },
+                "outcome": {
+                  "type": "string",
+                  "enum": [
+                    "act",
+                    "confirm",
+                    "escalate"
+                  ]
+                }
+              },
+              "required": [
+                "verdict",
+                "probability",
+                "outcome"
+              ],
+              "additionalProperties": false
+            },
+            "decisionIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "forbids_delegation",
+            "requests_parallel_agents",
+            "forbids_writing",
+            "asks_for_attempts",
+            "decisionIds"
+          ],
+          "additionalProperties": false
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "queued",
+            "shaping",
+            "planning",
+            "checking-plan",
+            "running",
+            "judging",
+            "fixing",
+            "committing",
+            "awaiting-owner",
+            "passed",
+            "failed",
+            "cancelled"
+          ]
+        },
+        "statusBeforeOwner": {
+          "type": "string",
+          "enum": [
+            "queued",
+            "shaping",
+            "planning",
+            "checking-plan",
+            "running",
+            "judging",
+            "fixing",
+            "committing",
+            "awaiting-owner",
+            "passed",
+            "failed",
+            "cancelled"
+          ]
+        },
+        "resumeFrom": {
+          "type": "string",
+          "enum": [
+            "queued",
+            "shaping",
+            "planning",
+            "checking-plan",
+            "running",
+            "judging",
+            "fixing",
+            "committing",
+            "awaiting-owner",
+            "passed",
+            "failed",
+            "cancelled"
+          ]
+        },
+        "checks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "at": {
+                "type": "number"
+              },
+              "trigger": {
+                "type": "string",
+                "enum": [
+                  "turn-end",
+                  "completion",
+                  "agent-failed",
+                  "fix-passed",
+                  "resume",
+                  "owner-amend"
+                ]
+              },
+              "claims": {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "files_verified",
+                      "git_corroborated",
+                      "verified_empty",
+                      "unverifiable_no_claims",
+                      "unverified"
+                    ]
+                  },
+                  "summary": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "summary"
+                ],
+                "additionalProperties": false
+              },
+              "gates": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "gate": {
+                      "type": "string"
+                    },
+                    "passed": {
+                      "type": "boolean"
+                    },
+                    "output": {
+                      "type": "string"
+                    },
+                    "durationMs": {
+                      "type": "number"
+                    },
+                    "skipped": {
+                      "type": "boolean"
+                    },
+                    "outcome": {
+                      "type": "string",
+                      "enum": [
+                        "passed",
+                        "failed",
+                        "unverified"
+                      ]
+                    },
+                    "required": {
+                      "type": "boolean"
+                    },
+                    "reason": {
+                      "type": "string"
+                    },
+                    "completion": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "command-exit"
+                              ]
+                            },
+                            "exitCode": {
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "exitCode"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "assertions"
+                              ]
+                            },
+                            "runner": {
+                              "type": "string",
+                              "enum": [
+                                "bun-junit",
+                                "registered-protocol"
+                              ]
+                            },
+                            "checks": {
+                              "type": "object",
+                              "properties": {
+                                "passed": {
+                                  "type": "number"
+                                },
+                                "failed": {
+                                  "type": "number"
+                                },
+                                "skipped": {
+                                  "type": "number"
+                                }
+                              },
+                              "required": [
+                                "passed",
+                                "failed",
+                                "skipped"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "runner",
+                            "checks"
+                          ],
+                          "additionalProperties": false
+                        }
+                      ]
+                    },
+                    "provenance": {
+                      "type": "object",
+                      "properties": {
+                        "sourceBefore": {
+                          "type": "string"
+                        },
+                        "sourceAfter": {
+                          "type": "string"
+                        },
+                        "definitionBefore": {
+                          "type": "string"
+                        },
+                        "definitionAfter": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "sourceBefore",
+                        "sourceAfter",
+                        "definitionBefore",
+                        "definitionAfter"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "gate",
+                    "passed",
+                    "output",
+                    "durationMs"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "goal": {
+                "type": "object",
+                "properties": {
+                  "probabilityUnmet": {
+                    "type": "number"
+                  },
+                  "verdict": {
+                    "type": "string",
+                    "enum": [
+                      "met",
+                      "unmet",
+                      "unshown"
+                    ]
+                  },
+                  "outcome": {
+                    "type": "string",
+                    "enum": [
+                      "act",
+                      "confirm",
+                      "escalate"
+                    ]
+                  }
+                },
+                "required": [
+                  "probabilityUnmet",
+                  "verdict",
+                  "outcome"
+                ],
+                "additionalProperties": false
+              },
+              "quality": {
+                "type": "object",
+                "properties": {
+                  "placeholder": {
+                    "type": "object",
+                    "properties": {
+                      "verdict": {
+                        "type": "string",
+                        "enum": [
+                          "yes",
+                          "no",
+                          "uncertain"
+                        ]
+                      },
+                      "outcome": {
+                        "type": "string",
+                        "enum": [
+                          "act",
+                          "confirm",
+                          "escalate"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "verdict",
+                      "outcome"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "tests_weakened": {
+                    "type": "object",
+                    "properties": {
+                      "verdict": {
+                        "type": "string",
+                        "enum": [
+                          "yes",
+                          "no",
+                          "uncertain"
+                        ]
+                      },
+                      "outcome": {
+                        "type": "string",
+                        "enum": [
+                          "act",
+                          "confirm",
+                          "escalate"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "verdict",
+                      "outcome"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "breaks_existing": {
+                    "type": "object",
+                    "properties": {
+                      "verdict": {
+                        "type": "string",
+                        "enum": [
+                          "yes",
+                          "no",
+                          "uncertain"
+                        ]
+                      },
+                      "outcome": {
+                        "type": "string",
+                        "enum": [
+                          "act",
+                          "confirm",
+                          "escalate"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "verdict",
+                      "outcome"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "out_of_scope": {
+                    "type": "object",
+                    "properties": {
+                      "verdict": {
+                        "type": "string",
+                        "enum": [
+                          "yes",
+                          "no",
+                          "uncertain"
+                        ]
+                      },
+                      "outcome": {
+                        "type": "string",
+                        "enum": [
+                          "act",
+                          "confirm",
+                          "escalate"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "verdict",
+                      "outcome"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "hidden_failure": {
+                    "type": "object",
+                    "properties": {
+                      "verdict": {
+                        "type": "string",
+                        "enum": [
+                          "yes",
+                          "no",
+                          "uncertain"
+                        ]
+                      },
+                      "outcome": {
+                        "type": "string",
+                        "enum": [
+                          "act",
+                          "confirm",
+                          "escalate"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "verdict",
+                      "outcome"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "unsupported_claims": {
+                    "type": "object",
+                    "properties": {
+                      "verdict": {
+                        "type": "string",
+                        "enum": [
+                          "yes",
+                          "no",
+                          "uncertain"
+                        ]
+                      },
+                      "outcome": {
+                        "type": "string",
+                        "enum": [
+                          "act",
+                          "confirm",
+                          "escalate"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "verdict",
+                      "outcome"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "additionalProperties": false
+              },
+              "result": {
+                "type": "string",
+                "enum": [
+                  "pass",
+                  "nudge",
+                  "await-owner",
+                  "native-decision",
+                  "stall",
+                  "recorded"
+                ]
+              },
+              "problems": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "unmet",
+                    "unshown",
+                    "regression",
+                    "quality",
+                    "gate",
+                    "claims"
+                  ]
+                }
+              },
+              "qualityProblems": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "placeholder",
+                    "tests_weakened",
+                    "breaks_existing",
+                    "out_of_scope",
+                    "hidden_failure",
+                    "unsupported_claims"
+                  ]
+                }
+              },
+              "decisionIds": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "evidenceDigest": {
+                "type": "string"
+              },
+              "reviewedFiles": {
+                "type": "array",
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "path": {
+                          "type": "string"
+                        },
+                        "sha256": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "path",
+                        "sha256"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "path": {
+                          "type": "string"
+                        },
+                        "observationId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "path",
+                        "observationId"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                }
+              }
+            },
+            "required": [
+              "id",
+              "at",
+              "trigger",
+              "goal",
+              "quality",
+              "result",
+              "decisionIds"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "fixRounds": {
+          "type": "number"
+        },
+        "escalations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "at": {
+                "type": "number"
+              },
+              "scope": {
+                "type": "string",
+                "enum": [
+                  "plan",
+                  "unit",
+                  "group",
+                  "deliverable",
+                  "shape"
+                ]
+              },
+              "targetId": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string",
+                "enum": [
+                  "plan-unresolved",
+                  "stalled",
+                  "unsettled",
+                  "fix-rounds-exhausted",
+                  "writing-unclear",
+                  "attempts-undecided",
+                  "owner-decision-needed"
+                ]
+              },
+              "question": {
+                "type": "string"
+              },
+              "unmetCriterionIds": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "decisionIds": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "failurePause": {
+                "type": "boolean",
+                "enum": [
+                  true
+                ]
+              },
+              "resolvedAt": {
+                "type": "number"
+              },
+              "reply": {
+                "type": "object",
+                "properties": {
+                  "text": {
+                    "type": "string"
+                  },
+                  "reading": {
+                    "type": "string",
+                    "enum": [
+                      "approve",
+                      "reject",
+                      "amend",
+                      "unclear"
+                    ]
+                  },
+                  "outcome": {
+                    "type": "string",
+                    "enum": [
+                      "act",
+                      "confirm",
+                      "escalate"
+                    ]
+                  },
+                  "decisionId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "text",
+                  "reading",
+                  "outcome"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "id",
+              "at",
+              "scope",
+              "targetId",
+              "reason",
+              "question",
+              "unmetCriterionIds"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "decisions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "at": {
+                "type": "number"
+              },
+              "action": {
+                "type": "string",
+                "enum": [
+                  "created",
+                  "queued",
+                  "shaped",
+                  "planned",
+                  "plan-repaired",
+                  "plan-accepted",
+                  "spawned",
+                  "checked",
+                  "nudged",
+                  "woke",
+                  "regressed",
+                  "stalled",
+                  "fix-planned",
+                  "fresh-agent",
+                  "escalated",
+                  "owner-replied",
+                  "transport-retry",
+                  "silence-retry",
+                  "attempts-selected",
+                  "attempts-reduced",
+                  "group-passed",
+                  "committed",
+                  "passed",
+                  "failed",
+                  "cancelled",
+                  "resumed",
+                  "reaped"
+                ]
+              },
+              "targetId": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "decisionIds": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "route": {
+                "type": "object",
+                "properties": {
+                  "model": {
+                    "type": "string"
+                  },
+                  "provider": {
+                    "type": "string"
+                  },
+                  "fallbackModels": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "routing": {
+                    "type": "object",
+                    "properties": {
+                      "providerSelection": {
+                        "type": "string",
+                        "enum": [
+                          "inherit-current",
+                          "concrete",
+                          "synthetic"
+                        ]
+                      },
+                      "providerFailurePolicy": {
+                        "type": "string",
+                        "enum": [
+                          "ordered-fallbacks",
+                          "fail"
+                        ]
+                      },
+                      "fallbackModels": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "reasoningEffort": {
+                    "type": "string"
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "model",
+                  "provider",
+                  "reason"
+                ],
+                "additionalProperties": false
+              },
+              "record": {
+                "type": "object",
+                "required": [
+                  "kind"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "fix-scheduled",
+                      "amended",
+                      "receipt"
+                    ]
+                  }
+                }
+              }
+            },
+            "required": [
+              "id",
+              "at",
+              "action",
+              "targetId",
+              "reason",
+              "decisionIds"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "usage": {
+          "type": "object",
+          "properties": {
+            "inputTokens": {
+              "type": "number"
+            },
+            "outputTokens": {
+              "type": "number"
+            },
+            "cacheReadTokens": {
+              "type": "number"
+            },
+            "cacheWriteTokens": {
+              "type": "number"
+            },
+            "reasoningTokens": {
+              "type": "number"
+            },
+            "llmCallCount": {
+              "type": "number"
+            },
+            "turnCount": {
+              "type": "number"
+            },
+            "toolCallCount": {
+              "type": "number"
+            },
+            "costUsd": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "costState": {
+              "type": "string",
+              "enum": [
+                "priced",
+                "unpriced",
+                "estimated"
+              ]
+            },
+            "costSource": {
+              "type": "string",
+              "enum": [
+                "user",
+                "provider",
+                "catalog",
+                "mixed"
+              ]
+            },
+            "pricingAsOf": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "inputTokens",
+            "outputTokens",
+            "cacheReadTokens",
+            "cacheWriteTokens",
+            "llmCallCount",
+            "turnCount",
+            "toolCallCount",
+            "costUsd",
+            "costState"
+          ],
+          "additionalProperties": false
+        },
+        "judgmentUsage": {
+          "type": "object",
+          "properties": {
+            "calls": {
+              "type": "number"
+            },
+            "inputTokens": {
+              "type": "number"
+            },
+            "outputTokens": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "calls",
+            "inputTokens",
+            "outputTokens"
+          ],
+          "additionalProperties": false
+        },
+        "plannerAgentIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "agentUsage": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "usage": {
+                "type": "object",
+                "properties": {
+                  "inputTokens": {
+                    "type": "number"
+                  },
+                  "outputTokens": {
+                    "type": "number"
+                  },
+                  "cacheReadTokens": {
+                    "type": "number"
+                  },
+                  "cacheWriteTokens": {
+                    "type": "number"
+                  },
+                  "reasoningTokens": {
+                    "type": "number"
+                  },
+                  "llmCallCount": {
+                    "type": "number"
+                  },
+                  "turnCount": {
+                    "type": "number"
+                  },
+                  "toolCallCount": {
+                    "type": "number"
+                  },
+                  "costUsd": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "costState": {
+                    "type": "string",
+                    "enum": [
+                      "priced",
+                      "unpriced",
+                      "estimated"
+                    ]
+                  },
+                  "costSource": {
+                    "type": "string",
+                    "enum": [
+                      "user",
+                      "provider",
+                      "catalog",
+                      "mixed"
+                    ]
+                  },
+                  "pricingAsOf": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "inputTokens",
+                  "outputTokens",
+                  "cacheReadTokens",
+                  "cacheWriteTokens",
+                  "llmCallCount",
+                  "turnCount",
+                  "toolCallCount",
+                  "costUsd",
+                  "costState"
+                ],
+                "additionalProperties": false
+              },
+              "agent": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": {}
+                  },
+                  {
+                    "type": "array",
+                    "items": {}
+                  }
+                ]
+              },
+              "toolCallCount": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "usage",
+              "toolCallCount"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "answer": {
+          "type": "string"
+        },
+        "statusLine": {
+          "type": "string"
+        },
+        "commit": {
+          "type": "object",
+          "properties": {
+            "status": {
+              "type": "string",
+              "enum": [
+                "committed",
+                "applied",
+                "skipped",
+                "failed"
+              ]
+            },
+            "hash": {
+              "type": "string"
+            },
+            "note": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "status",
+            "note"
+          ],
+          "additionalProperties": false
+        },
+        "failureKind": {
+          "type": "string",
+          "enum": [
+            "transport",
+            "max_turns",
+            "planning",
+            "budget",
+            "owner-rejected",
+            "judgment-unavailable",
+            "zombie",
+            "other"
+          ]
+        },
+        "error": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "number"
+        },
+        "completedAt": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "schemaVersion",
+        "sessionId",
+        "origin",
+        "ask",
+        "ownerAgentId",
+        "projectRoot",
+        "isolation",
+        "goal",
+        "criteria",
+        "groups",
+        "units",
+        "status",
+        "checks",
+        "fixRounds",
+        "escalations",
+        "decisions",
+        "usage",
+        "judgmentUsage",
+        "plannerAgentIds",
+        "createdAt"
+      ],
+      "additionalProperties": false
+    },
+    "ownerAgentId": {
+      "type": "string"
+    },
+    "replayed": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "contract",
+    "ownerAgentId"
+  ],
+  "additionalProperties": false
+}
+```
+
 #### `contracts.get`
 
-One contract with its whole tree, running or ended. 404 with CONTRACT_NOT_FOUND when no runner on this daemon holds the id.
+One contract with its whole tree, running or ended. The captured input's per-file list, which only contracts captured before the input was recorded as a git tree carry, is left out unless `includeInputFiles` is true. To poll for progress, use `contracts.status`. 404 with CONTRACT_NOT_FOUND when no runner on this daemon holds the id.
 
 - Title: `Get a Contract`
 - Source: `builtin`
@@ -35831,6 +45342,9 @@ One contract with its whole tree, running or ended. 404 with CONTRACT_NOT_FOUND 
   "properties": {
     "contractId": {
       "type": "string"
+    },
+    "includeInputFiles": {
+      "type": "boolean"
     }
   },
   "required": [
@@ -38810,7 +48324,9 @@ One contract with its whole tree, running or ended. 404 with CONTRACT_NOT_FOUND 
         "version": {
           "type": "number",
           "enum": [
-            2
+            2,
+            3,
+            4
           ]
         },
         "head": {
@@ -39782,7 +49298,9 @@ One contract with its whole tree, running or ended. 404 with CONTRACT_NOT_FOUND 
               "version": {
                 "type": "number",
                 "enum": [
-                  2
+                  2,
+                  3,
+                  4
                 ]
               },
               "head": {
@@ -40734,7 +50252,9 @@ One contract with its whole tree, running or ended. 404 with CONTRACT_NOT_FOUND 
               "version": {
                 "type": "number",
                 "enum": [
-                  2
+                  2,
+                  3,
+                  4
                 ]
               },
               "head": {
@@ -42024,7 +51544,9 @@ One contract with its whole tree, running or ended. 404 with CONTRACT_NOT_FOUND 
                     "version": {
                       "type": "number",
                       "enum": [
-                        2
+                        2,
+                        3,
+                        4
                       ]
                     },
                     "head": {
@@ -43445,6 +52967,22 @@ One contract with its whole tree, running or ended. 404 with CONTRACT_NOT_FOUND 
               "reason"
             ],
             "additionalProperties": false
+          },
+          "record": {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "fix-scheduled",
+                  "amended",
+                  "receipt"
+                ]
+              }
+            }
           }
         },
         "required": [
@@ -43555,6 +53093,117 @@ One contract with its whole tree, running or ended. 404 with CONTRACT_NOT_FOUND 
         "type": "string"
       }
     },
+    "agentUsage": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "usage": {
+            "type": "object",
+            "properties": {
+              "inputTokens": {
+                "type": "number"
+              },
+              "outputTokens": {
+                "type": "number"
+              },
+              "cacheReadTokens": {
+                "type": "number"
+              },
+              "cacheWriteTokens": {
+                "type": "number"
+              },
+              "reasoningTokens": {
+                "type": "number"
+              },
+              "llmCallCount": {
+                "type": "number"
+              },
+              "turnCount": {
+                "type": "number"
+              },
+              "toolCallCount": {
+                "type": "number"
+              },
+              "costUsd": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "costState": {
+                "type": "string",
+                "enum": [
+                  "priced",
+                  "unpriced",
+                  "estimated"
+                ]
+              },
+              "costSource": {
+                "type": "string",
+                "enum": [
+                  "user",
+                  "provider",
+                  "catalog",
+                  "mixed"
+                ]
+              },
+              "pricingAsOf": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "inputTokens",
+              "outputTokens",
+              "cacheReadTokens",
+              "cacheWriteTokens",
+              "llmCallCount",
+              "turnCount",
+              "toolCallCount",
+              "costUsd",
+              "costState"
+            ],
+            "additionalProperties": false
+          },
+          "agent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              },
+              {
+                "type": "object",
+                "additionalProperties": {}
+              },
+              {
+                "type": "array",
+                "items": {}
+              }
+            ]
+          },
+          "toolCallCount": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "usage",
+          "toolCallCount"
+        ],
+        "additionalProperties": false
+      }
+    },
     "answer": {
       "type": "string"
     },
@@ -43638,7 +53287,7 @@ One contract with its whole tree, running or ended. 404 with CONTRACT_NOT_FOUND 
 
 #### `contracts.list`
 
-Every contract this daemon holds, newest first, each with its whole tree: the ask, the goal, the acceptance criteria with every Jev reading, the groups and units with their checks and nudges, open and answered owner escalations, decisions, usage, and the answer or status line once it ends. `sessionId` narrows the list to one session's contracts (a hosted session's, or a shared session's); ended contracts are left out unless `includeTerminal` is set.
+Every contract this daemon holds, newest first, each with its whole tree: the ask, the goal, the acceptance criteria with every Jev reading, the groups and units with their checks and nudges, open and answered owner escalations, decisions, usage, and the answer or status line once it ends. `sessionId` narrows the list to one session's contracts (a hosted session's, or a shared session's); ended contracts are left out unless `includeTerminal` is set. For a list view, `contracts.summaries` returns the same contracts as small summaries.
 
 - Title: `List Contracts`
 - Source: `builtin`
@@ -46642,7 +56291,9 @@ Every contract this daemon holds, newest first, each with its whole tree: the as
               "version": {
                 "type": "number",
                 "enum": [
-                  2
+                  2,
+                  3,
+                  4
                 ]
               },
               "head": {
@@ -47614,7 +57265,9 @@ Every contract this daemon holds, newest first, each with its whole tree: the as
                     "version": {
                       "type": "number",
                       "enum": [
-                        2
+                        2,
+                        3,
+                        4
                       ]
                     },
                     "head": {
@@ -48566,7 +58219,9 @@ Every contract this daemon holds, newest first, each with its whole tree: the as
                     "version": {
                       "type": "number",
                       "enum": [
-                        2
+                        2,
+                        3,
+                        4
                       ]
                     },
                     "head": {
@@ -49856,7 +59511,9 @@ Every contract this daemon holds, newest first, each with its whole tree: the as
                           "version": {
                             "type": "number",
                             "enum": [
-                              2
+                              2,
+                              3,
+                              4
                             ]
                           },
                           "head": {
@@ -51277,6 +60934,22 @@ Every contract this daemon holds, newest first, each with its whole tree: the as
                     "reason"
                   ],
                   "additionalProperties": false
+                },
+                "record": {
+                  "type": "object",
+                  "required": [
+                    "kind"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "fix-scheduled",
+                        "amended",
+                        "receipt"
+                      ]
+                    }
+                  }
                 }
               },
               "required": [
@@ -51387,6 +61060,117 @@ Every contract this daemon holds, newest first, each with its whole tree: the as
               "type": "string"
             }
           },
+          "agentUsage": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "properties": {
+                "usage": {
+                  "type": "object",
+                  "properties": {
+                    "inputTokens": {
+                      "type": "number"
+                    },
+                    "outputTokens": {
+                      "type": "number"
+                    },
+                    "cacheReadTokens": {
+                      "type": "number"
+                    },
+                    "cacheWriteTokens": {
+                      "type": "number"
+                    },
+                    "reasoningTokens": {
+                      "type": "number"
+                    },
+                    "llmCallCount": {
+                      "type": "number"
+                    },
+                    "turnCount": {
+                      "type": "number"
+                    },
+                    "toolCallCount": {
+                      "type": "number"
+                    },
+                    "costUsd": {
+                      "anyOf": [
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "costState": {
+                      "type": "string",
+                      "enum": [
+                        "priced",
+                        "unpriced",
+                        "estimated"
+                      ]
+                    },
+                    "costSource": {
+                      "type": "string",
+                      "enum": [
+                        "user",
+                        "provider",
+                        "catalog",
+                        "mixed"
+                      ]
+                    },
+                    "pricingAsOf": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "inputTokens",
+                    "outputTokens",
+                    "cacheReadTokens",
+                    "cacheWriteTokens",
+                    "llmCallCount",
+                    "turnCount",
+                    "toolCallCount",
+                    "costUsd",
+                    "costState"
+                  ],
+                  "additionalProperties": false
+                },
+                "agent": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "type": "object",
+                      "additionalProperties": {}
+                    },
+                    {
+                      "type": "array",
+                      "items": {}
+                    }
+                  ]
+                },
+                "toolCallCount": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "usage",
+                "toolCallCount"
+              ],
+              "additionalProperties": false
+            }
+          },
           "answer": {
             "type": "string"
           },
@@ -51470,6 +61254,54 @@ Every contract this daemon holds, newest first, each with its whole tree: the as
   },
   "required": [
     "contracts"
+  ],
+  "additionalProperties": false
+}
+```
+
+#### `contracts.remove`
+
+Delete the record of a contract that has ended (passed, failed or cancelled): its checkpoint and summary. Its branch and worktree, if any, are left to the worktree retention rules. Ended contracts are also removed automatically 30 days after they end, and beyond the newest 100 per project. `removed` is true when it was deleted. 404 with CONTRACT_NOT_FOUND for an unknown id; 409 with CONTRACT_NOT_ENDED while it runs (cancel it first); 409 with CONTRACT_NATIVE for native work, whose record its native execution keeps.
+
+- Title: `Remove an Ended Contract`
+- Source: `builtin`
+- Access: `authenticated`
+- Transport: `http`, `ws`
+- HTTP: none
+- Scopes: `write:fleet`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "contractId": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "contractId"
+  ],
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "removed": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "removed"
   ],
   "additionalProperties": false
 }
@@ -51600,6 +61432,9 @@ Start a contract for `ask`, the person's words verbatim, which every stated acce
         "worktree",
         "shared"
       ]
+    },
+    "idempotencyKey": {
+      "type": "string"
     }
   },
   "required": [
@@ -54582,7 +64417,9 @@ Start a contract for `ask`, the person's words verbatim, which every stated acce
             "version": {
               "type": "number",
               "enum": [
-                2
+                2,
+                3,
+                4
               ]
             },
             "head": {
@@ -55554,7 +65391,9 @@ Start a contract for `ask`, the person's words verbatim, which every stated acce
                   "version": {
                     "type": "number",
                     "enum": [
-                      2
+                      2,
+                      3,
+                      4
                     ]
                   },
                   "head": {
@@ -56506,7 +66345,9 @@ Start a contract for `ask`, the person's words verbatim, which every stated acce
                   "version": {
                     "type": "number",
                     "enum": [
-                      2
+                      2,
+                      3,
+                      4
                     ]
                   },
                   "head": {
@@ -57796,7 +67637,9 @@ Start a contract for `ask`, the person's words verbatim, which every stated acce
                         "version": {
                           "type": "number",
                           "enum": [
-                            2
+                            2,
+                            3,
+                            4
                           ]
                         },
                         "head": {
@@ -59217,6 +69060,22 @@ Start a contract for `ask`, the person's words verbatim, which every stated acce
                   "reason"
                 ],
                 "additionalProperties": false
+              },
+              "record": {
+                "type": "object",
+                "required": [
+                  "kind"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "fix-scheduled",
+                      "amended",
+                      "receipt"
+                    ]
+                  }
+                }
               }
             },
             "required": [
@@ -59327,6 +69186,117 @@ Start a contract for `ask`, the person's words verbatim, which every stated acce
             "type": "string"
           }
         },
+        "agentUsage": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "usage": {
+                "type": "object",
+                "properties": {
+                  "inputTokens": {
+                    "type": "number"
+                  },
+                  "outputTokens": {
+                    "type": "number"
+                  },
+                  "cacheReadTokens": {
+                    "type": "number"
+                  },
+                  "cacheWriteTokens": {
+                    "type": "number"
+                  },
+                  "reasoningTokens": {
+                    "type": "number"
+                  },
+                  "llmCallCount": {
+                    "type": "number"
+                  },
+                  "turnCount": {
+                    "type": "number"
+                  },
+                  "toolCallCount": {
+                    "type": "number"
+                  },
+                  "costUsd": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "costState": {
+                    "type": "string",
+                    "enum": [
+                      "priced",
+                      "unpriced",
+                      "estimated"
+                    ]
+                  },
+                  "costSource": {
+                    "type": "string",
+                    "enum": [
+                      "user",
+                      "provider",
+                      "catalog",
+                      "mixed"
+                    ]
+                  },
+                  "pricingAsOf": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "inputTokens",
+                  "outputTokens",
+                  "cacheReadTokens",
+                  "cacheWriteTokens",
+                  "llmCallCount",
+                  "turnCount",
+                  "toolCallCount",
+                  "costUsd",
+                  "costState"
+                ],
+                "additionalProperties": false
+              },
+              "agent": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": {}
+                  },
+                  {
+                    "type": "array",
+                    "items": {}
+                  }
+                ]
+              },
+              "toolCallCount": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "usage",
+              "toolCallCount"
+            ],
+            "additionalProperties": false
+          }
+        },
         "answer": {
           "type": "string"
         },
@@ -59408,11 +69378,540 @@ Start a contract for `ask`, the person's words verbatim, which every stated acce
     },
     "ownerAgentId": {
       "type": "string"
+    },
+    "replayed": {
+      "type": "boolean"
     }
   },
   "required": [
     "contract",
     "ownerAgentId"
+  ],
+  "additionalProperties": false
+}
+```
+
+#### `contracts.status`
+
+One contract's summary (as `contracts.summaries` gives it), for polling. Pass the `revision` of the last answer as `ifRevision`: when nothing changed the answer is only `{ id, revision, notModified: true }`. 404 with CONTRACT_NOT_FOUND when no runner on this daemon holds the id.
+
+- Title: `Get a Contract's Status`
+- Source: `builtin`
+- Access: `authenticated`
+- Transport: `http`, `ws`
+- HTTP: none
+- Scopes: `read:fleet`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "contractId": {
+      "type": "string"
+    },
+    "ifRevision": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "contractId"
+  ],
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "anyOf": [
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "ownerAgentId": {
+          "type": "string"
+        },
+        "origin": {
+          "type": "string",
+          "enum": [
+            "turn",
+            "agent-tool",
+            "cli",
+            "hosted",
+            "external",
+            "proposal"
+          ]
+        },
+        "ask": {
+          "type": "string"
+        },
+        "goal": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "queued",
+            "shaping",
+            "planning",
+            "checking-plan",
+            "running",
+            "judging",
+            "fixing",
+            "committing",
+            "awaiting-owner",
+            "passed",
+            "failed",
+            "cancelled"
+          ]
+        },
+        "statusLine": {
+          "type": "string"
+        },
+        "failureKind": {
+          "type": "string",
+          "enum": [
+            "transport",
+            "max_turns",
+            "planning",
+            "budget",
+            "owner-rejected",
+            "judgment-unavailable",
+            "zombie",
+            "other"
+          ]
+        },
+        "error": {
+          "type": "string"
+        },
+        "groupCount": {
+          "type": "number"
+        },
+        "unitCount": {
+          "type": "number"
+        },
+        "unitsPassed": {
+          "type": "number"
+        },
+        "unitsFailed": {
+          "type": "number"
+        },
+        "openEscalationIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "openEscalation": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "at": {
+              "type": "number"
+            },
+            "question": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "at",
+            "question"
+          ],
+          "additionalProperties": false
+        },
+        "usage": {
+          "type": "object",
+          "properties": {
+            "inputTokens": {
+              "type": "number"
+            },
+            "outputTokens": {
+              "type": "number"
+            },
+            "cacheReadTokens": {
+              "type": "number"
+            },
+            "cacheWriteTokens": {
+              "type": "number"
+            },
+            "reasoningTokens": {
+              "type": "number"
+            },
+            "llmCallCount": {
+              "type": "number"
+            },
+            "turnCount": {
+              "type": "number"
+            },
+            "toolCallCount": {
+              "type": "number"
+            },
+            "costUsd": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "costState": {
+              "type": "string",
+              "enum": [
+                "priced",
+                "unpriced",
+                "estimated"
+              ]
+            },
+            "costSource": {
+              "type": "string",
+              "enum": [
+                "user",
+                "provider",
+                "catalog",
+                "mixed"
+              ]
+            },
+            "pricingAsOf": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "inputTokens",
+            "outputTokens",
+            "cacheReadTokens",
+            "cacheWriteTokens",
+            "llmCallCount",
+            "turnCount",
+            "toolCallCount",
+            "costUsd",
+            "costState"
+          ],
+          "additionalProperties": false
+        },
+        "createdAt": {
+          "type": "number"
+        },
+        "completedAt": {
+          "type": "number"
+        },
+        "updatedAt": {
+          "type": "number"
+        },
+        "revision": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "sessionId",
+        "ownerAgentId",
+        "origin",
+        "ask",
+        "goal",
+        "status",
+        "groupCount",
+        "unitCount",
+        "unitsPassed",
+        "unitsFailed",
+        "openEscalationIds",
+        "usage",
+        "createdAt",
+        "updatedAt",
+        "revision"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "string"
+        },
+        "notModified": {
+          "type": "boolean",
+          "const": true
+        }
+      },
+      "required": [
+        "id",
+        "revision",
+        "notModified"
+      ],
+      "additionalProperties": false
+    }
+  ]
+}
+```
+
+#### `contracts.summaries`
+
+The contracts `contracts.list` returns (same `sessionId` and `includeTerminal`), newest first, each as a small summary: id, session, owner agent, origin, ask, goal, status and status line, failure, group and unit counts, open owner question ids and the newest open question, usage, created, ended and last-changed times, and a `revision` that changes whenever any of these does. Nothing of the evidence, readings or history is sent; read one contract's tree with `contracts.get`.
+
+- Title: `List Contract Summaries`
+- Source: `builtin`
+- Access: `authenticated`
+- Transport: `http`, `ws`
+- HTTP: none
+- Scopes: `read:fleet`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "sessionId": {
+      "type": "string"
+    },
+    "includeTerminal": {
+      "type": "boolean"
+    }
+  },
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "contracts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "sessionId": {
+            "type": "string"
+          },
+          "ownerAgentId": {
+            "type": "string"
+          },
+          "origin": {
+            "type": "string",
+            "enum": [
+              "turn",
+              "agent-tool",
+              "cli",
+              "hosted",
+              "external",
+              "proposal"
+            ]
+          },
+          "ask": {
+            "type": "string"
+          },
+          "goal": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "shaping",
+              "planning",
+              "checking-plan",
+              "running",
+              "judging",
+              "fixing",
+              "committing",
+              "awaiting-owner",
+              "passed",
+              "failed",
+              "cancelled"
+            ]
+          },
+          "statusLine": {
+            "type": "string"
+          },
+          "failureKind": {
+            "type": "string",
+            "enum": [
+              "transport",
+              "max_turns",
+              "planning",
+              "budget",
+              "owner-rejected",
+              "judgment-unavailable",
+              "zombie",
+              "other"
+            ]
+          },
+          "error": {
+            "type": "string"
+          },
+          "groupCount": {
+            "type": "number"
+          },
+          "unitCount": {
+            "type": "number"
+          },
+          "unitsPassed": {
+            "type": "number"
+          },
+          "unitsFailed": {
+            "type": "number"
+          },
+          "openEscalationIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "openEscalation": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "at": {
+                "type": "number"
+              },
+              "question": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "at",
+              "question"
+            ],
+            "additionalProperties": false
+          },
+          "usage": {
+            "type": "object",
+            "properties": {
+              "inputTokens": {
+                "type": "number"
+              },
+              "outputTokens": {
+                "type": "number"
+              },
+              "cacheReadTokens": {
+                "type": "number"
+              },
+              "cacheWriteTokens": {
+                "type": "number"
+              },
+              "reasoningTokens": {
+                "type": "number"
+              },
+              "llmCallCount": {
+                "type": "number"
+              },
+              "turnCount": {
+                "type": "number"
+              },
+              "toolCallCount": {
+                "type": "number"
+              },
+              "costUsd": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "costState": {
+                "type": "string",
+                "enum": [
+                  "priced",
+                  "unpriced",
+                  "estimated"
+                ]
+              },
+              "costSource": {
+                "type": "string",
+                "enum": [
+                  "user",
+                  "provider",
+                  "catalog",
+                  "mixed"
+                ]
+              },
+              "pricingAsOf": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "inputTokens",
+              "outputTokens",
+              "cacheReadTokens",
+              "cacheWriteTokens",
+              "llmCallCount",
+              "turnCount",
+              "toolCallCount",
+              "costUsd",
+              "costState"
+            ],
+            "additionalProperties": false
+          },
+          "createdAt": {
+            "type": "number"
+          },
+          "completedAt": {
+            "type": "number"
+          },
+          "updatedAt": {
+            "type": "number"
+          },
+          "revision": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "sessionId",
+          "ownerAgentId",
+          "origin",
+          "ask",
+          "goal",
+          "status",
+          "groupCount",
+          "unitCount",
+          "unitsPassed",
+          "unitsFailed",
+          "openEscalationIds",
+          "usage",
+          "createdAt",
+          "updatedAt",
+          "revision"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "contracts"
   ],
   "additionalProperties": false
 }
@@ -59497,6 +69996,22 @@ Return the current control-plane principal, granted scopes, and authentication m
         }
       ]
     },
+    "credential": {
+      "anyOf": [
+        {
+          "type": "string",
+          "enum": [
+            "local",
+            "shared-token",
+            "device-token",
+            "user-session"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "admin": {
       "type": "boolean"
     },
@@ -59521,6 +70036,7 @@ Return the current control-plane principal, granted scopes, and authentication m
     "sessionCookiePresent",
     "principalId",
     "principalKind",
+    "credential",
     "admin",
     "scopes",
     "roles"
@@ -59853,6 +70369,22 @@ Return the operator-facing control-plane contract manifest, including auth, tran
                         }
                       ]
                     },
+                    "credential": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "local",
+                            "shared-token",
+                            "device-token",
+                            "user-session"
+                          ]
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
                     "admin": {
                       "type": "boolean"
                     },
@@ -59877,6 +70409,7 @@ Return the operator-facing control-plane contract manifest, including auth, tran
                     "sessionCookiePresent",
                     "principalId",
                     "principalKind",
+                    "credential",
                     "admin",
                     "scopes",
                     "roles"
@@ -60170,8 +70703,62 @@ Return the operator-facing control-plane contract manifest, including auth, tran
                   "dangerous": {
                     "type": "boolean"
                   },
+                  "effect": {
+                    "type": "string",
+                    "enum": [
+                      "read",
+                      "write",
+                      "outward"
+                    ]
+                  },
+                  "ownerOnly": {
+                    "type": "boolean"
+                  },
                   "invokable": {
                     "type": "boolean"
+                  },
+                  "replay": {
+                    "type": "object",
+                    "properties": {
+                      "in": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "behavior": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "in",
+                      "name",
+                      "behavior"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "errorCodes": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "number"
+                        },
+                        "meaning": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "status",
+                        "meaning"
+                      ],
+                      "additionalProperties": false
+                    }
                   },
                   "metadata": {
                     "type": "object",
@@ -60991,8 +71578,62 @@ Return a single gateway method descriptor.
         "dangerous": {
           "type": "boolean"
         },
+        "effect": {
+          "type": "string",
+          "enum": [
+            "read",
+            "write",
+            "outward"
+          ]
+        },
+        "ownerOnly": {
+          "type": "boolean"
+        },
         "invokable": {
           "type": "boolean"
+        },
+        "replay": {
+          "type": "object",
+          "properties": {
+            "in": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "behavior": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "in",
+            "name",
+            "behavior"
+          ],
+          "additionalProperties": false
+        },
+        "errorCodes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "status": {
+                "type": "number"
+              },
+              "meaning": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "status",
+              "meaning"
+            ],
+            "additionalProperties": false
+          }
         },
         "metadata": {
           "type": "object",
@@ -61187,8 +71828,62 @@ Return the gateway method catalog.
           "dangerous": {
             "type": "boolean"
           },
+          "effect": {
+            "type": "string",
+            "enum": [
+              "read",
+              "write",
+              "outward"
+            ]
+          },
+          "ownerOnly": {
+            "type": "boolean"
+          },
           "invokable": {
             "type": "boolean"
+          },
+          "replay": {
+            "type": "object",
+            "properties": {
+              "in": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "behavior": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "in",
+              "name",
+              "behavior"
+            ],
+            "additionalProperties": false
+          },
+          "errorCodes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "number"
+                },
+                "meaning": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "code",
+                "status",
+                "meaning"
+              ],
+              "additionalProperties": false
+            }
           },
           "metadata": {
             "type": "object",
@@ -61982,6 +72677,22 @@ Run one update check immediately instead of waiting for the next interval, and r
         }
       ]
     },
+    "pendingSince": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "pendingBlockedBy": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
     "rejectedVersion": {
       "anyOf": [
         {
@@ -62080,6 +72791,8 @@ Run one update check immediately instead of waiting for the next interval, and r
     "failedCheckCount",
     "lastCheckFailure",
     "pendingVersion",
+    "pendingSince",
+    "pendingBlockedBy",
     "rejectedVersion",
     "check"
   ],
@@ -62089,7 +72802,7 @@ Run one update check immediately instead of waiting for the next interval, and r
 
 #### `update.status`
 
-Whether this daemon is keeping itself current, and, when it is not, the reason in one line. `armed` is false whenever no loop is running and `offReason` says which gate stopped it: update.auto not set, no artifact identity (a host that manages its own updates), or no release URL to resolve tags from. `failedCheckCount` with `lastCheckFailure` is the case that used to be invisible: checks running on schedule and failing every time, which looks exactly like having nothing to update to. `pendingVersion` is a release already downloaded and verified, waiting for a moment when no work is in flight. `rejectedVersion` is a release that was installed here, failed to start, and was rolled back, it is deliberately not reinstalled. `recoveryRequired` (true) and `transactionRecovery` appear only while an interrupted update or rollback fences the loop: `transactionRecovery.recoveryPaths` lists the retained files to inspect, `recoveryErrors` what went wrong, and the loop stays off until they are dealt with.
+Whether this daemon is keeping itself current, and, when it is not, the reason in one line. `armed` is false whenever no loop is running and `offReason` says which gate stopped it: update.auto not set, no artifact identity (a host that manages its own updates), or no release URL to resolve tags from. `failedCheckCount` with `lastCheckFailure` is the case that used to be invisible: checks running on schedule and failing every time, which looks exactly like having nothing to update to. `pendingVersion` is a release already downloaded and verified, waiting for a moment when no work is in flight; `pendingSince` says since when a release has waited and `pendingBlockedBy` names the fleet ids of the work it waits behind (the owner is told once after 24 hours). `rejectedVersion` is a release that was installed here, failed to start, and was rolled back, it is deliberately not reinstalled. `recoveryRequired` (true) and `transactionRecovery` appear only while an interrupted update or rollback fences the loop: `transactionRecovery.recoveryPaths` lists the retained files to inspect, `recoveryErrors` what went wrong, and the loop stays off until they are dealt with.
 
 - Title: `Self-Update Status`
 - Source: `builtin`
@@ -62178,6 +72891,22 @@ Whether this daemon is keeping itself current, and, when it is not, the reason i
           "type": "null"
         }
       ]
+    },
+    "pendingSince": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "pendingBlockedBy": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
     },
     "rejectedVersion": {
       "anyOf": [
@@ -62269,6 +72998,8 @@ Whether this daemon is keeping itself current, and, when it is not, the reason i
     "failedCheckCount",
     "lastCheckFailure",
     "pendingVersion",
+    "pendingSince",
+    "pendingBlockedBy",
     "rejectedVersion"
   ],
   "additionalProperties": false
@@ -62848,7 +73579,257 @@ Return delivery records and integration snapshot data.
 }
 ```
 
+#### `notifications.deadLetters.list`
+
+Outbound notifications (Slack, Discord, webhooks) that failed every attempt, oldest first. They are kept across restarts until resent. Each entry gives the channel, the event, what it said in metadata-only form, when it failed, the attempt count and the last error (HTTP status when there was one). Pass `channel` (slack, discord or webhook) to list one. Resend with notifications.deadLetters.replay.
+
+- Title: `List Failed Notifications`
+- Source: `builtin`
+- Access: `authenticated`
+- Transport: `ws`
+- HTTP: none
+- Scopes: `read:deliveries`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "channel": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "entries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "channel": {
+            "type": "string"
+          },
+          "event": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "number"
+          },
+          "deadAt": {
+            "type": "number"
+          },
+          "attempts": {
+            "type": "number"
+          },
+          "finalError": {
+            "type": "string"
+          },
+          "failureClass": {
+            "type": "string",
+            "enum": [
+              "retryable",
+              "terminal"
+            ]
+          },
+          "status": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "id",
+          "channel",
+          "event",
+          "summary",
+          "createdAt",
+          "deadAt",
+          "attempts",
+          "finalError",
+          "failureClass"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "total": {
+      "type": "number"
+    }
+  },
+  "required": [
+    "entries",
+    "total"
+  ],
+  "additionalProperties": false
+}
+```
+
+#### `notifications.deadLetters.replay`
+
+Send failed notifications again: those named in `ids`, or all of them when `ids` is absent. Each is queued with a fresh retry budget; the result per id is delivered, retrying (still queued), dead_letter (failed again and back in the list) or not-found. A webhook notification is not sent to a URL that was removed since it failed.
+
+- Title: `Resend Failed Notifications`
+- Source: `builtin`
+- Access: `authenticated`
+- Transport: `ws`
+- HTTP: none
+- Scopes: `write:deliveries`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "delivered",
+              "retrying",
+              "dead_letter",
+              "not-found"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "outcome"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "delivered": {
+      "type": "number"
+    },
+    "retrying": {
+      "type": "number"
+    },
+    "failed": {
+      "type": "number"
+    },
+    "notFound": {
+      "type": "number"
+    }
+  },
+  "required": [
+    "results",
+    "delivered",
+    "retrying",
+    "failed",
+    "notFound"
+  ],
+  "additionalProperties": false
+}
+```
+
 ### email
+
+#### `email.attachment.get`
+
+Return one attachment of an inbox message as base64 bytes, by UID and its position (from 0) in the attachments list email.inbox.read returns. Read-only (BODY.PEEK). Meant to be saved as a file, never rendered: the bytes are whatever the sender attached. Attachments over 25 MB are refused with the reason.
+
+- Title: `Download an Email Attachment`
+- Source: `builtin`
+- Access: `admin`
+- Transport: `ws`
+- HTTP: none
+- Scopes: `read:email`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "uid": {
+      "type": "number"
+    },
+    "index": {
+      "type": "number"
+    }
+  },
+  "required": [
+    "uid",
+    "index"
+  ],
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "filename": {
+      "type": "string"
+    },
+    "contentType": {
+      "type": "string"
+    },
+    "sizeBytes": {
+      "type": "number"
+    },
+    "contentBase64": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "filename",
+    "contentType",
+    "sizeBytes",
+    "contentBase64"
+  ],
+  "additionalProperties": false
+}
+```
 
 #### `email.draft.create`
 
@@ -62913,6 +73894,91 @@ Append a draft message to the configured IMAP Drafts folder. Distinct from the l
   },
   "required": [
     "draftId",
+    "mailbox"
+  ],
+  "additionalProperties": false
+}
+```
+
+#### `email.drafts.list`
+
+Return the newest drafts (default 25, at most 100) in the account's Drafts folder, newest first, each with its recipient, subject, date, the Message-ID it replies to and up to 64 KB of body text, so a draft can be reopened in a composer. Read-only.
+
+- Title: `List Email Drafts`
+- Source: `builtin`
+- Access: `admin`
+- Transport: `ws`
+- HTTP: none
+- Scopes: `read:email`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "limit": {
+      "type": "number"
+    }
+  },
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "drafts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "uid": {
+            "type": "number"
+          },
+          "to": {
+            "type": "string"
+          },
+          "subject": {
+            "type": "string"
+          },
+          "date": {
+            "type": "string"
+          },
+          "inReplyTo": {
+            "type": "string"
+          },
+          "body": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "uid",
+          "to",
+          "subject",
+          "date",
+          "inReplyTo",
+          "body"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "total": {
+      "type": "number"
+    },
+    "mailbox": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "drafts",
+    "total",
     "mailbox"
   ],
   "additionalProperties": false
@@ -63595,7 +74661,7 @@ Disclose the inbound-mail watcher: whether it is running and why, which source i
 
 #### `email.inbox.list`
 
-Return inbox message summaries fetched live from the configured IMAP account, newest first (ordered by server-assigned UID, never by the sender-written Date header). Read-only (EXAMINE / BODY.PEEK); never marks messages read. When the server answered for a message and the daemon could not read the answer, the page is short and `unreadable` says so, an omitted message is not by itself evidence that it was deleted.
+Return inbox message summaries fetched live from the configured IMAP account, newest first (ordered by server-assigned UID, never by the sender-written Date header). Read-only (EXAMINE / BODY.PEEK); never marks messages read. `before` pages backwards: pass the smallest UID of the page you have to get the next older page; `total` counts every match. When the server answered for a message and the daemon could not read the answer, the page is short and `unreadable` says so, an omitted message is not by itself evidence that it was deleted.
 
 - Title: `List Email Inbox`
 - Source: `builtin`
@@ -63621,6 +74687,9 @@ Return inbox message summaries fetched live from the configured IMAP account, ne
     },
     "unreadOnly": {
       "type": "boolean"
+    },
+    "before": {
+      "type": "number"
     }
   },
   "additionalProperties": false
@@ -63708,7 +74777,7 @@ Return the full body and attachment metadata for a single inbox message by IMAP 
 
 - Title: `Read Email Message`
 - Source: `builtin`
-- Access: `authenticated`
+- Access: `admin`
 - Transport: `http`, `ws`
 - HTTP: `GET /api/email/inbox/{uid}`
 - Scopes: `read:email`
@@ -63782,9 +74851,6 @@ Return the full body and attachment metadata for a single inbox message by IMAP 
         ],
         "additionalProperties": false
       }
-    },
-    "replySubjectRef": {
-      "type": "string"
     }
   },
   "required": [
@@ -63799,9 +74865,77 @@ Return the full body and attachment metadata for a single inbox message by IMAP 
 }
 ```
 
+#### `email.inbox.update`
+
+Change one inbox message by IMAP UID: action seen or unseen sets or clears its read flag; archive moves it to the folder the server marks Archive (or All Mail); delete moves it to the folder the server marks Trash, so it can be recovered there. A server with no such folder is refused and nothing changes; nothing here expunges permanently. Pass uidValidity when you have it so a reset mailbox refuses instead of changing another message. Answers { uid, action, movedTo? }.
+
+- Title: `Mark, Archive or Delete an Email`
+- Source: `builtin`
+- Access: `admin`
+- Transport: `ws`
+- HTTP: none
+- Scopes: `write:email`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "uid": {
+      "type": "number"
+    },
+    "action": {
+      "type": "string",
+      "enum": [
+        "seen",
+        "unseen",
+        "archive",
+        "delete"
+      ]
+    },
+    "uidValidity": {
+      "type": "number"
+    }
+  },
+  "required": [
+    "uid",
+    "action"
+  ],
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "uid": {
+      "type": "number"
+    },
+    "action": {
+      "type": "string"
+    },
+    "movedTo": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "uid",
+    "action"
+  ],
+  "additionalProperties": false
+}
+```
+
 #### `email.send`
 
-Send a composed email via the configured SMTP account. Irreversible external send; requires confirm: true and explicit user review of recipients and body.
+Send a composed email via the configured SMTP account. Irreversible external send; requires confirm: true and explicit user review of recipients and body. Pass a clientSendId (8-128 letters, digits, - or _) chosen when the message was composed: a repeat with the same id and the same message within ten minutes returns the first answer instead of sending again (the id also becomes the Message-ID), and the same id with a different message is refused (409 CLIENT_SEND_ID_REUSED). A send whose final server reply was lost fails with EMAIL_DELIVERY_UNCONFIRMED: it may have gone, and repeating it with the same id will not send it twice.
 
 - Title: `Send Email`
 - Source: `builtin`
@@ -63833,6 +74967,9 @@ Send a composed email via the configured SMTP account. Irreversible external sen
     },
     "confirm": {
       "type": "boolean"
+    },
+    "clientSendId": {
+      "type": "string"
     }
   },
   "required": [
@@ -63870,7 +75007,7 @@ Send a composed email via the configured SMTP account. Irreversible external sen
 
 #### `flags.graduation.report`
 
-Return the feature defaults report: every platform capability with its current default, default-disposition state (dark = default-off with no evidence, soaking = accumulating evidence, graduate-candidate = judged ready and awaiting a release decision, graduated = default on, blocked = held off with a dated reason), and its validation evidence. Evidence is real-only: a capability with no instrumentation reports "no evidence collected", never a fabricated readiness; the permissions divergence simulation is the one wired instrumentation today. releaseBlockers lists every graduate-candidate entry, the release policy (bun run flags:graduation) fails while that list is non-empty, forcing each ready default to flip on or record a dated blocker.
+Return the feature defaults report: every platform capability with its current default, default-disposition state (dark = default-off with no evidence, soaking = accumulating evidence, graduate-candidate = judged ready and awaiting a release decision, graduated = default on, blocked = held off with a dated reason), and its validation evidence. The daemon collects no validation readings, so every entry's evidence says "no evidence collected"; the only instrumentation, the permissions divergence simulation, runs in the terminal app with /policy simulate and reports there. releaseBlockers lists every graduate-candidate entry: capabilities judged ready that are neither on by default nor held with a dated reason.
 
 - Title: `Feature Defaults Report`
 - Source: `builtin`
@@ -64086,6 +75223,77 @@ Return the feature defaults report: every platform capability with its current d
 }
 ```
 
+#### `flags.status`
+
+Return the features whose saved setting the running daemon has not applied yet. A feature that only changes at daemon start keeps its running state when its setting is saved; each entry names the feature id (the id settings surfaces render), the state it is running in and the saved state that takes effect at the next daemon restart. An empty list means every feature runs as saved. config.get returns saved values only; read this beside it to learn what is running.
+
+- Title: `Feature Restart Status`
+- Source: `builtin`
+- Access: `admin`
+- Transport: `ws`
+- HTTP: none
+- Scopes: `read:config`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {},
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "pendingRestart": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "featureId": {
+            "type": "string"
+          },
+          "running": {
+            "type": "string",
+            "enum": [
+              "enabled",
+              "disabled",
+              "killed"
+            ]
+          },
+          "saved": {
+            "type": "string",
+            "enum": [
+              "enabled",
+              "disabled",
+              "killed"
+            ]
+          }
+        },
+        "required": [
+          "featureId",
+          "running",
+          "saved"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "pendingRestart"
+  ],
+  "additionalProperties": false
+}
+```
+
 ### fleet
 
 #### `fleet.archive`
@@ -64193,6 +75401,7 @@ Return the session-archived process nodes (same node shape as fleet.snapshot; st
               "contract-unit",
               "workflow",
               "trigger",
+              "hook-action",
               "schedule",
               "watcher",
               "background-process",
@@ -65481,7 +76690,7 @@ Return every work item whose integration merge CONFLICTED and is waiting on a hu
 
 #### `fleet.conflicts.resolve`
 
-The conflict row's one action: spawn a resolution session INSIDE the kept worktree, seeded with the structured conflict list and tree path (the same seeded-session machinery as the CI fix flow), and stamp the REAL session id back onto the item. When the resolution lands and the re-merge succeeds, the kept tree is reclaimed automatically. An item with no unresolved conflict is an honest 409.
+The conflict row's one action: spawn a resolution session INSIDE the kept worktree, seeded with the structured conflict list and tree path (the same seeded-session machinery as the CI fix flow), and stamp the REAL session id back onto the item. When the resolution session ends with success, the merge is retried automatically (also after a daemon restart) and a clean merge reclaims the kept tree; otherwise fleet.conflicts.retry retries it. An item with no unresolved conflict is an honest 409.
 
 - Title: `Spawn a Conflict-Resolution Session`
 - Source: `builtin`
@@ -65537,6 +76746,63 @@ The conflict row's one action: spawn a resolution session INSIDE the kept worktr
     "sessionId",
     "worktreePath",
     "files"
+  ],
+  "additionalProperties": false
+}
+```
+
+#### `fleet.conflicts.retry`
+
+Attempt the integration merge of a conflicted item again, for a conflict resolved by hand in the kept worktree or by a resolution session that ended without a clean re-merge. Answers outcome merged (the kept tree is reclaimed), conflict (still conflicted; the row stays) or not-conflicted (nothing to retry). Refused with 409 while that item's resolution session is still running.
+
+- Title: `Retry a Conflicted Merge`
+- Source: `builtin`
+- Access: `authenticated`
+- Transport: `ws`
+- HTTP: none
+- Scopes: `write:fleet`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "itemId": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "itemId"
+  ],
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "itemId": {
+      "type": "string"
+    },
+    "outcome": {
+      "type": "string",
+      "enum": [
+        "merged",
+        "conflict",
+        "not-conflicted"
+      ]
+    }
+  },
+  "required": [
+    "itemId",
+    "outcome"
   ],
   "additionalProperties": false
 }
@@ -65774,6 +77040,7 @@ Paginated, filtered (kinds/states) query over the live process registry. Cursor 
               "contract-unit",
               "workflow",
               "trigger",
+              "hook-action",
               "schedule",
               "watcher",
               "background-process",
@@ -66165,7 +77432,7 @@ Paginated, filtered (kinds/states) query over the live process registry. Cursor 
 
 #### `fleet.observed.steer`
 
-Drill-in steer of an externally-launched coding-agent session goodvibes only OBSERVES (a Claude Code / Codex process it did not spawn or host). The steer rides the foreign session's own control channel, for a tmux-hosted session, the exact three-send recipe (message text, then two Enters) targeted at its pane. queued:false with an honest reason when the row exposes no channel (no controlling terminal / no tmux pane) or a send fails. STOP is never offered on an observed row, observing and steering is not owning the lifecycle. Weighted as a drill-in capability (see the node's observed.steerDrillInOnly), never a bulk affordance.
+Type text into an externally-launched coding-agent session goodvibes only OBSERVES (a Claude Code / Codex process it did not spawn or host), over the session's own control channel (a tmux pane). That agent runs with its own permissions, so every steer is first put to the owner through the approval broker, naming the session, its directory, the exact text and whether it is submitted; "always" for that session holds until the daemon stops. The text is typed only; it is submitted with Enter only when submit is true. queued:false with an honest reason when the owner declines, the row exposes no channel, or a send fails; nothing was sent then. STOP is never offered on an observed row.
 
 - Title: `Steer an Observed Foreign Agent`
 - Source: `builtin`
@@ -66174,7 +77441,7 @@ Drill-in steer of an externally-launched coding-agent session goodvibes only OBS
 - HTTP: none
 - Scopes: `write:fleet`
 - Emits events: none
-- Dangerous: `no`
+- Dangerous: `yes`
 - Invokable: `yes`
 
 ##### Input schema
@@ -66188,6 +77455,9 @@ Drill-in steer of an externally-launched coding-agent session goodvibes only OBS
     },
     "text": {
       "type": "string"
+    },
+    "submit": {
+      "type": "boolean"
     }
   },
   "required": [
@@ -66271,6 +77541,7 @@ Return a point-in-time capture of every live/completed runtime process (agents, 
               "contract-unit",
               "workflow",
               "trigger",
+              "hook-action",
               "schedule",
               "watcher",
               "background-process",
@@ -67025,7 +78296,7 @@ Return the health integration snapshot.
 
 #### `ops.memory.get`
 
-The MemoryGovernor snapshot: the current memory-pressure tier and budget, resident set size and heap, per-cache footprints the governor can shrink, which deferrable background jobs are paused, and the leak-tripwire state. Read-only observability so operators can see the daemon shedding memory before it approaches OOM.
+The MemoryGovernor snapshot: the current memory-pressure tier and budget, resident set size and heap, the tier thresholds and hard limit in force, per-cache footprints the governor can shrink, which deferrable background jobs are paused, and the leak-tripwire state. When memory.budgetMb, memory.tier.* or memory.hardLimitPct were refused, `configFallback` names the settings and why; the shipped values shown are in force until the setting is fixed and the daemon restarts. Read-only observability so operators can see the daemon shedding memory before it approaches OOM.
 
 - Title: `Get Memory Governance State`
 - Source: `builtin`
@@ -67154,6 +78425,45 @@ The MemoryGovernor snapshot: the current memory-pressure tier and budget, reside
         "criticalPct"
       ],
       "additionalProperties": false
+    },
+    "hardLimit": {
+      "type": "object",
+      "properties": {
+        "pct": {
+          "type": "number"
+        },
+        "mb": {
+          "type": "number"
+        },
+        "ceilingMb": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "pct",
+        "mb",
+        "ceilingMb"
+      ],
+      "additionalProperties": false
+    },
+    "configFallback": {
+      "type": "object",
+      "properties": {
+        "settings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "settings",
+        "reason"
+      ],
+      "additionalProperties": false
     }
   },
   "required": [
@@ -67166,7 +78476,8 @@ The MemoryGovernor snapshot: the current memory-pressure tier and budget, reside
     "caches",
     "pausedJobs",
     "tripwire",
-    "thresholds"
+    "thresholds",
+    "hardLimit"
   ],
   "additionalProperties": false
 }
@@ -67533,7 +78844,7 @@ The host sleep-ownership state: whether the automatic work inhibitor is held (an
 
 #### `voice.local.install`
 
-One-act setup: download + checksum-verify the piper TTS engine, a default voice, and (where a pinned goodvibes-built bundle exists) the whisper.cpp STT engine with its default model into the goodvibes-managed directory, then point the voice.local.* config keys at the managed install, never overwriting a key you already set to a custom value (skipped keys are reported). The physical round trip reports its actual transcript and comparison basis; Classic uses native ordered word tokens without semantic verification. Downloads only when you ask; a failed or checksum-mismatched download keeps nothing.
+Starts the one-act setup and answers at once with the run it started (or the run already in progress it joined); the install runs on in the daemon, voice.local.status serves its live progress as installInProgress and, when it ends, its receipt as lastInstall. The setup: download + checksum-verify the piper TTS engine, a default voice, and (where a pinned goodvibes-built bundle exists) the whisper.cpp STT engine with its default model into the goodvibes-managed directory, then point the voice.local.* config keys at the managed install, never overwriting a key you already set to a custom value (skipped keys are reported). The physical round trip reports its actual transcript and comparison basis; Classic uses native ordered word tokens without semantic verification. Downloads only when you ask; a failed or checksum-mismatched download keeps nothing.
 
 - Title: `Install the Managed Local-Voice Runtime`
 - Source: `builtin`
@@ -67542,7 +78853,7 @@ One-act setup: download + checksum-verify the piper TTS engine, a default voice,
 - HTTP: `POST /api/voice/local/install`
 - Scopes: `write:config`
 - Emits events: none
-- Dangerous: `no`
+- Dangerous: `yes`
 - Invokable: `yes`
 
 ##### Input schema
@@ -67561,277 +78872,23 @@ One-act setup: download + checksum-verify the piper TTS engine, a default voice,
 {
   "type": "object",
   "properties": {
-    "operationProvenance": {
+    "state": {
       "type": "string",
       "enum": [
-        "classic"
+        "running"
       ]
     },
-    "semanticAssessment": {
-      "type": "string",
-      "enum": [
-        "not-evaluated"
-      ]
+    "startedAt": {
+      "type": "number"
     },
-    "proof": {
-      "type": "object",
-      "properties": {
-        "proved": {
-          "type": "boolean"
-        },
-        "stage": {
-          "type": "string",
-          "enum": [
-            "synthesize",
-            "transcribe",
-            "compare"
-          ]
-        },
-        "phrase": {
-          "type": "string"
-        },
-        "transcript": {
-          "type": "string"
-        },
-        "wordOverlap": {
-          "type": "number"
-        },
-        "comparison": {
-          "type": "string",
-          "enum": [
-            "yes",
-            "no",
-            "uncertain",
-            "unavailable",
-            "classic-exact-match",
-            "classic-mismatch"
-          ]
-        },
-        "operationProvenance": {
-          "type": "string",
-          "enum": [
-            "classic"
-          ]
-        },
-        "semanticAssessment": {
-          "type": "string",
-          "enum": [
-            "not-evaluated"
-          ]
-        },
-        "proofBasis": {
-          "type": "string",
-          "enum": [
-            "native-word-sequence"
-          ]
-        },
-        "error": {
-          "type": "string"
-        },
-        "summary": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "proved",
-        "stage",
-        "phrase",
-        "summary"
-      ],
-      "additionalProperties": false
-    },
-    "notes": {
-      "type": "array",
-      "items": {
-        "type": "string"
-      }
-    },
-    "provisioned": {
+    "joined": {
       "type": "boolean"
-    },
-    "platform": {
-      "anyOf": [
-        {
-          "type": "string"
-        },
-        {
-          "type": "null"
-        }
-      ]
-    },
-    "tts": {
-      "type": "object",
-      "properties": {
-        "engine": {
-          "type": "string"
-        },
-        "state": {
-          "type": "string",
-          "enum": [
-            "provisioned",
-            "unsupported-platform",
-            "download-failed",
-            "checksum-mismatch"
-          ]
-        },
-        "binaryPath": {
-          "type": "string"
-        },
-        "modelPath": {
-          "type": "string"
-        },
-        "reason": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "engine",
-        "state"
-      ],
-      "additionalProperties": false
-    },
-    "stt": {
-      "type": "object",
-      "properties": {
-        "engine": {
-          "type": "string"
-        },
-        "state": {
-          "type": "string",
-          "enum": [
-            "provisioned",
-            "unsupported-platform",
-            "download-failed",
-            "checksum-mismatch",
-            "bundle-unavailable",
-            "sideload-mismatch"
-          ]
-        },
-        "binaryPath": {
-          "type": "string"
-        },
-        "modelPath": {
-          "type": "string"
-        },
-        "reason": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "engine",
-        "state"
-      ],
-      "additionalProperties": false
-    },
-    "components": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "state": {
-            "type": "string",
-            "enum": [
-              "installed",
-              "skipped",
-              "failed"
-            ]
-          },
-          "bytes": {
-            "type": "number"
-          },
-          "error": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "state"
-        ],
-        "additionalProperties": false
-      }
-    },
-    "configured": {
-      "type": "object",
-      "properties": {
-        "set": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "key": {
-                "type": "string"
-              },
-              "value": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "key",
-              "value"
-            ],
-            "additionalProperties": false
-          }
-        },
-        "skipped": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "key": {
-                "type": "string"
-              },
-              "reason": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "key",
-              "reason"
-            ],
-            "additionalProperties": false
-          }
-        },
-        "superseded": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "key": {
-                "type": "string"
-              },
-              "previousValue": {
-                "type": "string"
-              },
-              "value": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "key",
-              "previousValue",
-              "value"
-            ],
-            "additionalProperties": false
-          }
-        }
-      },
-      "required": [
-        "set",
-        "skipped"
-      ],
-      "additionalProperties": false
     }
   },
   "required": [
-    "provisioned",
-    "platform",
-    "tts",
-    "stt",
-    "components",
-    "configured"
+    "state",
+    "startedAt",
+    "joined"
   ],
   "additionalProperties": false
 }
@@ -67839,7 +78896,7 @@ One-act setup: download + checksum-verify the piper TTS engine, a default voice,
 
 #### `voice.local.status`
 
-Whether the managed local voice runtime (piper TTS + a default voice) is installed: not-provisioned (with a size-labeled offer), partial, provisioned, or unsupported-platform. STT (whisper.cpp) reports its own managed state: goodvibes builds and pins the whisper.cpp bundle per platform (no official prebuilt exists; provisioning never compiles on your machine), so where a pinned bundle exists STT provisions like TTS, and elsewhere it reports unsupported honestly. While a voice.local.install run is active, the response also carries installInProgress, the live per-component progress (phase, byte sizes where known) of that run, so surfaces poll this read during the install to render real progress; the section is absent when no install is running. Read-only.
+Whether the managed local voice runtime (piper TTS + a default voice) is installed: not-provisioned (with a size-labeled offer), partial, provisioned, or unsupported-platform. STT (whisper.cpp) reports its own managed state: goodvibes builds and pins the whisper.cpp bundle per platform (no official prebuilt exists; provisioning never compiles on your machine), so where a pinned bundle exists STT provisions like TTS, and elsewhere it reports unsupported honestly. While a voice.local.install run is active, the response also carries installInProgress, the live per-component progress (phase, byte sizes where known) of that run, so surfaces poll this read during the install to render real progress; the section is absent when no install is running. Once a run ends, lastInstall carries its receipt (or the reason it stopped without one) with the run's start and finish times; a surface that started an install reads its result here. Read-only.
 
 - Title: `Get Managed Local-Voice Runtime State`
 - Source: `builtin`
@@ -68017,6 +79074,302 @@ Whether the managed local voice runtime (piper TTS + a default voice) is install
         "components"
       ],
       "additionalProperties": false
+    },
+    "lastInstall": {
+      "type": "object",
+      "properties": {
+        "startedAt": {
+          "type": "number"
+        },
+        "finishedAt": {
+          "type": "number"
+        },
+        "receipt": {
+          "type": "object",
+          "properties": {
+            "operationProvenance": {
+              "type": "string",
+              "enum": [
+                "classic"
+              ]
+            },
+            "semanticAssessment": {
+              "type": "string",
+              "enum": [
+                "not-evaluated"
+              ]
+            },
+            "proof": {
+              "type": "object",
+              "properties": {
+                "proved": {
+                  "type": "boolean"
+                },
+                "stage": {
+                  "type": "string",
+                  "enum": [
+                    "synthesize",
+                    "transcribe",
+                    "compare"
+                  ]
+                },
+                "phrase": {
+                  "type": "string"
+                },
+                "transcript": {
+                  "type": "string"
+                },
+                "wordOverlap": {
+                  "type": "number"
+                },
+                "comparison": {
+                  "type": "string",
+                  "enum": [
+                    "yes",
+                    "no",
+                    "uncertain",
+                    "unavailable",
+                    "classic-exact-match",
+                    "classic-mismatch"
+                  ]
+                },
+                "operationProvenance": {
+                  "type": "string",
+                  "enum": [
+                    "classic"
+                  ]
+                },
+                "semanticAssessment": {
+                  "type": "string",
+                  "enum": [
+                    "not-evaluated"
+                  ]
+                },
+                "proofBasis": {
+                  "type": "string",
+                  "enum": [
+                    "native-word-sequence"
+                  ]
+                },
+                "error": {
+                  "type": "string"
+                },
+                "summary": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "proved",
+                "stage",
+                "phrase",
+                "summary"
+              ],
+              "additionalProperties": false
+            },
+            "notes": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "provisioned": {
+              "type": "boolean"
+            },
+            "platform": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "tts": {
+              "type": "object",
+              "properties": {
+                "engine": {
+                  "type": "string"
+                },
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "provisioned",
+                    "unsupported-platform",
+                    "download-failed",
+                    "checksum-mismatch"
+                  ]
+                },
+                "binaryPath": {
+                  "type": "string"
+                },
+                "modelPath": {
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "engine",
+                "state"
+              ],
+              "additionalProperties": false
+            },
+            "stt": {
+              "type": "object",
+              "properties": {
+                "engine": {
+                  "type": "string"
+                },
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "provisioned",
+                    "unsupported-platform",
+                    "download-failed",
+                    "checksum-mismatch",
+                    "bundle-unavailable",
+                    "sideload-mismatch"
+                  ]
+                },
+                "binaryPath": {
+                  "type": "string"
+                },
+                "modelPath": {
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "engine",
+                "state"
+              ],
+              "additionalProperties": false
+            },
+            "components": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "state": {
+                    "type": "string",
+                    "enum": [
+                      "installed",
+                      "skipped",
+                      "failed"
+                    ]
+                  },
+                  "bytes": {
+                    "type": "number"
+                  },
+                  "error": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id",
+                  "state"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "configured": {
+              "type": "object",
+              "properties": {
+                "set": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "key": {
+                        "type": "string"
+                      },
+                      "value": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "key",
+                      "value"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "skipped": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "key": {
+                        "type": "string"
+                      },
+                      "reason": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "key",
+                      "reason"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "superseded": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "key": {
+                        "type": "string"
+                      },
+                      "previousValue": {
+                        "type": "string"
+                      },
+                      "value": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "key",
+                      "previousValue",
+                      "value"
+                    ],
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "required": [
+                "set",
+                "skipped"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "provisioned",
+            "platform",
+            "tts",
+            "stt",
+            "components",
+            "configured"
+          ],
+          "additionalProperties": false
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "startedAt",
+        "finishedAt"
+      ],
+      "additionalProperties": false
     }
   },
   "required": [
@@ -68137,7 +79490,7 @@ Download and checksum-verify the pinned wake-word classifier in both runtime for
 - HTTP: `POST /api/voice/wake/provision`
 - Scopes: `write:config`
 - Emits events: none
-- Dangerous: `no`
+- Dangerous: `yes`
 - Invokable: `yes`
 
 ##### Input schema
@@ -68510,7 +79863,7 @@ Whether the pinned wake-word artifacts are on disk and VERIFIED BY CONTENT: the 
 
 #### `inbound.telegram.cancel`
 
-Explicit paired-owner command for bounded in-memory original-source intake. Configure chooses the pending source lifetime; decide approves one exact external message and metadata-only review receipt. No execution, standing processing grant, or owner-text capture.
+Close a review: the row leaves the queue at once, its place is freed and its original is released. Also withdraws a message still waiting for a decision.
 
 - Title: `Telegram Delegated Intake cancel`
 - Source: `builtin`
@@ -68580,122 +79933,66 @@ Explicit paired-owner command for bounded in-memory original-source intake. Conf
 ```json
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "type": "object",
-  "properties": {
-    "accountIdentity": {
+  "anyOf": [
+    {
       "type": "object",
       "properties": {
-        "id": {
+        "outcome": {
           "type": "string",
-          "minLength": 1,
-          "maxLength": 256
+          "const": "cancelled"
         },
-        "username": {
+        "execution": {
           "type": "string",
-          "minLength": 1,
-          "maxLength": 256
-        },
-        "revision": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256
+          "const": "not-started"
         }
       },
       "required": [
-        "id",
-        "username",
-        "revision"
+        "outcome",
+        "execution"
       ],
       "additionalProperties": false
     },
-    "outcome": {
-      "type": "string"
-    },
-    "reason": {
-      "type": "string"
-    },
-    "ref": {
+    {
       "type": "object",
       "properties": {
-        "sessionId": {
+        "outcome": {
           "type": "string",
-          "minLength": 1,
-          "maxLength": 256
+          "const": "held"
         },
-        "inputId": {
+        "reason": {
           "type": "string",
-          "minLength": 1,
-          "maxLength": 256
+          "enum": [
+            "account-proof-required",
+            "account-not-chosen",
+            "account-proof-unavailable",
+            "account-proof-changed",
+            "workspace-changed",
+            "lifecycle-changed",
+            "owner-changed",
+            "not-owner",
+            "message-identity-missing",
+            "tracking-full",
+            "message-edited",
+            "no-configuration",
+            "configuration-not-current",
+            "source-unavailable",
+            "missing-source-proof",
+            "configuration-unavailable",
+            "chat-not-selected",
+            "already-decided",
+            "lifetime-exceeds-configuration",
+            "not-durably-resolved",
+            "review-queue-refused",
+            "review-held",
+            "review-closed",
+            "handoff-held"
+          ]
         },
-        "sourceId": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256
+        "message": {
+          "type": "string"
         },
-        "sourceRevision": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256
-        },
-        "requestId": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256
-        }
-      },
-      "required": [
-        "sessionId",
-        "inputId",
-        "sourceId",
-        "sourceRevision",
-        "requestId"
-      ],
-      "additionalProperties": false
-    },
-    "configurationId": {
-      "type": "string",
-      "minLength": 1,
-      "maxLength": 256
-    },
-    "expiresAt": {
-      "type": "number"
-    },
-    "pendingRetentionMs": {
-      "type": "integer",
-      "minimum": 1,
-      "maximum": 2147483647
-    },
-    "processing": {
-      "type": "string"
-    },
-    "restart": {
-      "type": "string"
-    },
-    "route": {
-      "type": "string"
-    },
-    "execution": {
-      "type": "string",
-      "const": "not-started"
-    },
-    "approvalId": {
-      "type": "string",
-      "minLength": 1,
-      "maxLength": 256
-    },
-    "source": {
-      "type": "string"
-    },
-    "recovery": {
-      "type": "string"
-    },
-    "record": {
-      "type": "object",
-      "properties": {
-        "id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256
+        "nextStep": {
+          "type": "string"
         },
         "ref": {
           "type": "object",
@@ -68735,533 +80032,59 @@ Explicit paired-owner command for bounded in-memory original-source intake. Conf
           ],
           "additionalProperties": false
         },
-        "origin": {
+        "route": {
+          "type": "string"
+        },
+        "accountIdentity": {
           "type": "object",
           "properties": {
-            "kind": {
-              "type": "string",
-              "const": "external-original"
-            },
-            "accountId": {
+            "id": {
               "type": "string",
               "minLength": 1,
               "maxLength": 256
             },
-            "accountRevision": {
+            "username": {
               "type": "string",
               "minLength": 1,
               "maxLength": 256
             },
-            "routeId": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256
-            },
-            "routeRevision": {
+            "revision": {
               "type": "string",
               "minLength": 1,
               "maxLength": 256
             }
           },
           "required": [
-            "kind",
-            "accountId",
-            "accountRevision",
-            "routeId",
-            "routeRevision"
+            "id",
+            "username",
+            "revision"
           ],
           "additionalProperties": false
-        },
-        "configurationId": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256
-        },
-        "ownerRevision": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256
-        },
-        "owner": {
-          "type": "object",
-          "properties": {
-            "kind": {
-              "type": "string",
-              "const": "pairing-token"
-            },
-            "principalId": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256
-            },
-            "tokenId": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256
-            },
-            "authorityId": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256
-            },
-            "authorityRevision": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256
-            },
-            "scopes": {
-              "maxItems": 256,
-              "type": "array",
-              "items": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              }
-            }
-          },
-          "required": [
-            "kind",
-            "principalId",
-            "tokenId",
-            "authorityId",
-            "authorityRevision",
-            "scopes"
-          ],
-          "additionalProperties": false
-        },
-        "workspaceRevision": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256
         },
         "approvalId": {
           "type": "string",
           "minLength": 1,
           "maxLength": 256
         },
-        "choices": {
-          "type": "object",
-          "properties": {
-            "processingPurpose": {
-              "type": "string",
-              "const": "accept-external-message-for-owner-review"
-            },
-            "sourceRetention": {
-              "type": "string",
-              "const": "memory-only-until-review-close-or-deadline"
-            },
-            "sourceRetentionMs": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 2147483647
-            },
-            "derivedRecord": {
-              "type": "string",
-              "const": "external-source-reference-only-v1"
-            },
-            "derivedRecordRetentionMs": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 2147483647
-            },
-            "execution": {
-              "type": "string",
-              "const": "none"
-            },
-            "ownerMayReadOriginal": {
-              "type": "boolean",
-              "const": true
-            }
-          },
-          "required": [
-            "processingPurpose",
-            "sourceRetention",
-            "sourceRetentionMs",
-            "derivedRecord",
-            "derivedRecordRetentionMs",
-            "execution",
-            "ownerMayReadOriginal"
-          ],
-          "additionalProperties": false
-        },
-        "acceptedAt": {
-          "type": "number"
-        },
-        "sourceExpiresAt": {
-          "type": "number"
-        },
-        "recordExpiresAt": {
-          "type": "number"
-        },
-        "state": {
-          "type": "string",
-          "enum": [
-            "accepted-for-review",
-            "cancelled"
-          ]
-        },
-        "execution": {
-          "type": "string",
-          "const": "not-started"
-        }
-      },
-      "required": [
-        "id",
-        "ref",
-        "origin",
-        "configurationId",
-        "ownerRevision",
-        "workspaceRevision",
-        "approvalId",
-        "choices",
-        "acceptedAt",
-        "sourceExpiresAt",
-        "recordExpiresAt",
-        "state",
-        "execution"
-      ],
-      "additionalProperties": false
-    },
-    "records": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 256
-          },
-          "ref": {
-            "type": "object",
-            "properties": {
-              "sessionId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "inputId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "sourceId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "sourceRevision": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "requestId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              }
-            },
-            "required": [
-              "sessionId",
-              "inputId",
-              "sourceId",
-              "sourceRevision",
-              "requestId"
-            ],
-            "additionalProperties": false
-          },
-          "origin": {
-            "type": "object",
-            "properties": {
-              "kind": {
-                "type": "string",
-                "const": "external-original"
-              },
-              "accountId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "accountRevision": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "routeId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "routeRevision": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              }
-            },
-            "required": [
-              "kind",
-              "accountId",
-              "accountRevision",
-              "routeId",
-              "routeRevision"
-            ],
-            "additionalProperties": false
-          },
-          "configurationId": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 256
-          },
-          "ownerRevision": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 256
-          },
-          "owner": {
-            "type": "object",
-            "properties": {
-              "kind": {
-                "type": "string",
-                "const": "pairing-token"
-              },
-              "principalId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "tokenId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "authorityId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "authorityRevision": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "scopes": {
-                "maxItems": 256,
-                "type": "array",
-                "items": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 256
-                }
-              }
-            },
-            "required": [
-              "kind",
-              "principalId",
-              "tokenId",
-              "authorityId",
-              "authorityRevision",
-              "scopes"
-            ],
-            "additionalProperties": false
-          },
-          "workspaceRevision": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 256
-          },
-          "approvalId": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 256
-          },
-          "choices": {
-            "type": "object",
-            "properties": {
-              "processingPurpose": {
-                "type": "string",
-                "const": "accept-external-message-for-owner-review"
-              },
-              "sourceRetention": {
-                "type": "string",
-                "const": "memory-only-until-review-close-or-deadline"
-              },
-              "sourceRetentionMs": {
-                "type": "integer",
-                "minimum": 1,
-                "maximum": 2147483647
-              },
-              "derivedRecord": {
-                "type": "string",
-                "const": "external-source-reference-only-v1"
-              },
-              "derivedRecordRetentionMs": {
-                "type": "integer",
-                "minimum": 1,
-                "maximum": 2147483647
-              },
-              "execution": {
-                "type": "string",
-                "const": "none"
-              },
-              "ownerMayReadOriginal": {
-                "type": "boolean",
-                "const": true
-              }
-            },
-            "required": [
-              "processingPurpose",
-              "sourceRetention",
-              "sourceRetentionMs",
-              "derivedRecord",
-              "derivedRecordRetentionMs",
-              "execution",
-              "ownerMayReadOriginal"
-            ],
-            "additionalProperties": false
-          },
-          "acceptedAt": {
-            "type": "number"
-          },
-          "sourceExpiresAt": {
-            "type": "number"
-          },
-          "recordExpiresAt": {
-            "type": "number"
-          },
-          "state": {
-            "type": "string",
-            "enum": [
-              "accepted-for-review",
-              "cancelled"
-            ]
-          },
-          "execution": {
-            "type": "string",
-            "const": "not-started"
-          }
-        },
-        "required": [
-          "id",
-          "ref",
-          "origin",
-          "configurationId",
-          "ownerRevision",
-          "workspaceRevision",
-          "approvalId",
-          "choices",
-          "acceptedAt",
-          "sourceExpiresAt",
-          "recordExpiresAt",
-          "state",
-          "execution"
-        ],
-        "additionalProperties": false
-      }
-    },
-    "pending": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "properties": {
-          "ref": {
-            "type": "object",
-            "properties": {
-              "sessionId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "inputId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "sourceId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "sourceRevision": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "requestId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              }
-            },
-            "required": [
-              "sessionId",
-              "inputId",
-              "sourceId",
-              "sourceRevision",
-              "requestId"
-            ],
-            "additionalProperties": false
-          },
-          "approvalId": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 256
-          },
-          "sourceExpiresAt": {
-            "type": "number"
-          },
-          "outcome": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "ref",
-          "approvalId",
-          "sourceExpiresAt",
-          "outcome"
-        ],
-        "additionalProperties": false
-      }
-    },
-    "original": {
-      "type": "object",
-      "properties": {
-        "text": {
+        "source": {
           "type": "string"
-        },
-        "unsupportedSources": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "kind": {
-                "type": "string"
-              },
-              "label": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "kind",
-              "label"
-            ],
-            "additionalProperties": false
-          }
         }
       },
       "required": [
-        "text",
-        "unsupportedSources"
+        "outcome",
+        "reason",
+        "message",
+        "nextStep"
       ],
       "additionalProperties": false
     }
-  },
-  "additionalProperties": false
+  ]
 }
 ```
 
 #### `inbound.telegram.configure`
 
-Explicit paired-owner command for bounded in-memory original-source intake. Configure chooses the pending source lifetime; decide approves one exact external message and metadata-only review receipt. No execution, standing processing grant, or owner-text capture.
+Select one Telegram chat (and thread) for delegated intake: its messages stop being handled normally and each one waits for the owner instead, held in memory only for pendingRetentionMs. The configuration ends after configurationLifetimeMs; the chat stays selected and held until released.
 
 - Title: `Telegram Delegated Intake configure`
 - Source: `builtin`
@@ -69331,122 +80154,114 @@ Explicit paired-owner command for bounded in-memory original-source intake. Conf
 ```json
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "type": "object",
-  "properties": {
-    "accountIdentity": {
+  "anyOf": [
+    {
       "type": "object",
       "properties": {
-        "id": {
+        "outcome": {
+          "type": "string",
+          "const": "configured"
+        },
+        "configurationId": {
           "type": "string",
           "minLength": 1,
           "maxLength": 256
         },
-        "username": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256
+        "accountIdentity": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "username": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "revision": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          },
+          "required": [
+            "id",
+            "username",
+            "revision"
+          ],
+          "additionalProperties": false
         },
-        "revision": {
+        "expiresAt": {
+          "type": "number"
+        },
+        "pendingRetentionMs": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647
+        },
+        "processing": {
           "type": "string",
-          "minLength": 1,
-          "maxLength": 256
+          "const": "requires-per-message-approval"
+        },
+        "restart": {
+          "type": "string",
+          "const": "selected-route-held-without-original-or-grant"
         }
       },
       "required": [
-        "id",
-        "username",
-        "revision"
+        "outcome",
+        "configurationId",
+        "accountIdentity",
+        "expiresAt",
+        "pendingRetentionMs",
+        "processing",
+        "restart"
       ],
       "additionalProperties": false
     },
-    "outcome": {
-      "type": "string"
-    },
-    "reason": {
-      "type": "string"
-    },
-    "ref": {
+    {
       "type": "object",
       "properties": {
-        "sessionId": {
+        "outcome": {
           "type": "string",
-          "minLength": 1,
-          "maxLength": 256
+          "const": "held"
         },
-        "inputId": {
+        "reason": {
           "type": "string",
-          "minLength": 1,
-          "maxLength": 256
+          "enum": [
+            "account-proof-required",
+            "account-not-chosen",
+            "account-proof-unavailable",
+            "account-proof-changed",
+            "workspace-changed",
+            "lifecycle-changed",
+            "owner-changed",
+            "not-owner",
+            "message-identity-missing",
+            "tracking-full",
+            "message-edited",
+            "no-configuration",
+            "configuration-not-current",
+            "source-unavailable",
+            "missing-source-proof",
+            "configuration-unavailable",
+            "chat-not-selected",
+            "already-decided",
+            "lifetime-exceeds-configuration",
+            "not-durably-resolved",
+            "review-queue-refused",
+            "review-held",
+            "review-closed",
+            "handoff-held"
+          ]
         },
-        "sourceId": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256
+        "message": {
+          "type": "string"
         },
-        "sourceRevision": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256
-        },
-        "requestId": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256
-        }
-      },
-      "required": [
-        "sessionId",
-        "inputId",
-        "sourceId",
-        "sourceRevision",
-        "requestId"
-      ],
-      "additionalProperties": false
-    },
-    "configurationId": {
-      "type": "string",
-      "minLength": 1,
-      "maxLength": 256
-    },
-    "expiresAt": {
-      "type": "number"
-    },
-    "pendingRetentionMs": {
-      "type": "integer",
-      "minimum": 1,
-      "maximum": 2147483647
-    },
-    "processing": {
-      "type": "string"
-    },
-    "restart": {
-      "type": "string"
-    },
-    "route": {
-      "type": "string"
-    },
-    "execution": {
-      "type": "string",
-      "const": "not-started"
-    },
-    "approvalId": {
-      "type": "string",
-      "minLength": 1,
-      "maxLength": 256
-    },
-    "source": {
-      "type": "string"
-    },
-    "recovery": {
-      "type": "string"
-    },
-    "record": {
-      "type": "object",
-      "properties": {
-        "id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256
+        "nextStep": {
+          "type": "string"
         },
         "ref": {
           "type": "object",
@@ -69486,533 +80301,59 @@ Explicit paired-owner command for bounded in-memory original-source intake. Conf
           ],
           "additionalProperties": false
         },
-        "origin": {
+        "route": {
+          "type": "string"
+        },
+        "accountIdentity": {
           "type": "object",
           "properties": {
-            "kind": {
-              "type": "string",
-              "const": "external-original"
-            },
-            "accountId": {
+            "id": {
               "type": "string",
               "minLength": 1,
               "maxLength": 256
             },
-            "accountRevision": {
+            "username": {
               "type": "string",
               "minLength": 1,
               "maxLength": 256
             },
-            "routeId": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256
-            },
-            "routeRevision": {
+            "revision": {
               "type": "string",
               "minLength": 1,
               "maxLength": 256
             }
           },
           "required": [
-            "kind",
-            "accountId",
-            "accountRevision",
-            "routeId",
-            "routeRevision"
+            "id",
+            "username",
+            "revision"
           ],
           "additionalProperties": false
-        },
-        "configurationId": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256
-        },
-        "ownerRevision": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256
-        },
-        "owner": {
-          "type": "object",
-          "properties": {
-            "kind": {
-              "type": "string",
-              "const": "pairing-token"
-            },
-            "principalId": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256
-            },
-            "tokenId": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256
-            },
-            "authorityId": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256
-            },
-            "authorityRevision": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256
-            },
-            "scopes": {
-              "maxItems": 256,
-              "type": "array",
-              "items": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              }
-            }
-          },
-          "required": [
-            "kind",
-            "principalId",
-            "tokenId",
-            "authorityId",
-            "authorityRevision",
-            "scopes"
-          ],
-          "additionalProperties": false
-        },
-        "workspaceRevision": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256
         },
         "approvalId": {
           "type": "string",
           "minLength": 1,
           "maxLength": 256
         },
-        "choices": {
-          "type": "object",
-          "properties": {
-            "processingPurpose": {
-              "type": "string",
-              "const": "accept-external-message-for-owner-review"
-            },
-            "sourceRetention": {
-              "type": "string",
-              "const": "memory-only-until-review-close-or-deadline"
-            },
-            "sourceRetentionMs": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 2147483647
-            },
-            "derivedRecord": {
-              "type": "string",
-              "const": "external-source-reference-only-v1"
-            },
-            "derivedRecordRetentionMs": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 2147483647
-            },
-            "execution": {
-              "type": "string",
-              "const": "none"
-            },
-            "ownerMayReadOriginal": {
-              "type": "boolean",
-              "const": true
-            }
-          },
-          "required": [
-            "processingPurpose",
-            "sourceRetention",
-            "sourceRetentionMs",
-            "derivedRecord",
-            "derivedRecordRetentionMs",
-            "execution",
-            "ownerMayReadOriginal"
-          ],
-          "additionalProperties": false
-        },
-        "acceptedAt": {
-          "type": "number"
-        },
-        "sourceExpiresAt": {
-          "type": "number"
-        },
-        "recordExpiresAt": {
-          "type": "number"
-        },
-        "state": {
-          "type": "string",
-          "enum": [
-            "accepted-for-review",
-            "cancelled"
-          ]
-        },
-        "execution": {
-          "type": "string",
-          "const": "not-started"
-        }
-      },
-      "required": [
-        "id",
-        "ref",
-        "origin",
-        "configurationId",
-        "ownerRevision",
-        "workspaceRevision",
-        "approvalId",
-        "choices",
-        "acceptedAt",
-        "sourceExpiresAt",
-        "recordExpiresAt",
-        "state",
-        "execution"
-      ],
-      "additionalProperties": false
-    },
-    "records": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 256
-          },
-          "ref": {
-            "type": "object",
-            "properties": {
-              "sessionId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "inputId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "sourceId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "sourceRevision": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "requestId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              }
-            },
-            "required": [
-              "sessionId",
-              "inputId",
-              "sourceId",
-              "sourceRevision",
-              "requestId"
-            ],
-            "additionalProperties": false
-          },
-          "origin": {
-            "type": "object",
-            "properties": {
-              "kind": {
-                "type": "string",
-                "const": "external-original"
-              },
-              "accountId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "accountRevision": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "routeId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "routeRevision": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              }
-            },
-            "required": [
-              "kind",
-              "accountId",
-              "accountRevision",
-              "routeId",
-              "routeRevision"
-            ],
-            "additionalProperties": false
-          },
-          "configurationId": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 256
-          },
-          "ownerRevision": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 256
-          },
-          "owner": {
-            "type": "object",
-            "properties": {
-              "kind": {
-                "type": "string",
-                "const": "pairing-token"
-              },
-              "principalId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "tokenId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "authorityId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "authorityRevision": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "scopes": {
-                "maxItems": 256,
-                "type": "array",
-                "items": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 256
-                }
-              }
-            },
-            "required": [
-              "kind",
-              "principalId",
-              "tokenId",
-              "authorityId",
-              "authorityRevision",
-              "scopes"
-            ],
-            "additionalProperties": false
-          },
-          "workspaceRevision": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 256
-          },
-          "approvalId": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 256
-          },
-          "choices": {
-            "type": "object",
-            "properties": {
-              "processingPurpose": {
-                "type": "string",
-                "const": "accept-external-message-for-owner-review"
-              },
-              "sourceRetention": {
-                "type": "string",
-                "const": "memory-only-until-review-close-or-deadline"
-              },
-              "sourceRetentionMs": {
-                "type": "integer",
-                "minimum": 1,
-                "maximum": 2147483647
-              },
-              "derivedRecord": {
-                "type": "string",
-                "const": "external-source-reference-only-v1"
-              },
-              "derivedRecordRetentionMs": {
-                "type": "integer",
-                "minimum": 1,
-                "maximum": 2147483647
-              },
-              "execution": {
-                "type": "string",
-                "const": "none"
-              },
-              "ownerMayReadOriginal": {
-                "type": "boolean",
-                "const": true
-              }
-            },
-            "required": [
-              "processingPurpose",
-              "sourceRetention",
-              "sourceRetentionMs",
-              "derivedRecord",
-              "derivedRecordRetentionMs",
-              "execution",
-              "ownerMayReadOriginal"
-            ],
-            "additionalProperties": false
-          },
-          "acceptedAt": {
-            "type": "number"
-          },
-          "sourceExpiresAt": {
-            "type": "number"
-          },
-          "recordExpiresAt": {
-            "type": "number"
-          },
-          "state": {
-            "type": "string",
-            "enum": [
-              "accepted-for-review",
-              "cancelled"
-            ]
-          },
-          "execution": {
-            "type": "string",
-            "const": "not-started"
-          }
-        },
-        "required": [
-          "id",
-          "ref",
-          "origin",
-          "configurationId",
-          "ownerRevision",
-          "workspaceRevision",
-          "approvalId",
-          "choices",
-          "acceptedAt",
-          "sourceExpiresAt",
-          "recordExpiresAt",
-          "state",
-          "execution"
-        ],
-        "additionalProperties": false
-      }
-    },
-    "pending": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "properties": {
-          "ref": {
-            "type": "object",
-            "properties": {
-              "sessionId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "inputId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "sourceId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "sourceRevision": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "requestId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              }
-            },
-            "required": [
-              "sessionId",
-              "inputId",
-              "sourceId",
-              "sourceRevision",
-              "requestId"
-            ],
-            "additionalProperties": false
-          },
-          "approvalId": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 256
-          },
-          "sourceExpiresAt": {
-            "type": "number"
-          },
-          "outcome": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "ref",
-          "approvalId",
-          "sourceExpiresAt",
-          "outcome"
-        ],
-        "additionalProperties": false
-      }
-    },
-    "original": {
-      "type": "object",
-      "properties": {
-        "text": {
+        "source": {
           "type": "string"
-        },
-        "unsupportedSources": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "kind": {
-                "type": "string"
-              },
-              "label": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "kind",
-              "label"
-            ],
-            "additionalProperties": false
-          }
         }
       },
       "required": [
-        "text",
-        "unsupportedSources"
+        "outcome",
+        "reason",
+        "message",
+        "nextStep"
       ],
       "additionalProperties": false
     }
-  },
-  "additionalProperties": false
+  ]
 }
 ```
 
 #### `inbound.telegram.decide`
 
-Explicit paired-owner command for bounded in-memory original-source intake. Configure chooses the pending source lifetime; decide approves one exact external message and metadata-only review receipt. No execution, standing processing grant, or owner-text capture.
+Answer one waiting message: approve it with explicit retention choices (it enters the review queue as accepted-for-review) or deny it (its original is released). One decision per message; nothing is executed.
 
 - Title: `Telegram Delegated Intake decide`
 - Source: `builtin`
@@ -70137,122 +80478,17 @@ Explicit paired-owner command for bounded in-memory original-source intake. Conf
 ```json
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "type": "object",
-  "properties": {
-    "accountIdentity": {
+  "anyOf": [
+    {
       "type": "object",
       "properties": {
-        "id": {
+        "outcome": {
           "type": "string",
-          "minLength": 1,
-          "maxLength": 256
-        },
-        "username": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256
-        },
-        "revision": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256
-        }
-      },
-      "required": [
-        "id",
-        "username",
-        "revision"
-      ],
-      "additionalProperties": false
-    },
-    "outcome": {
-      "type": "string"
-    },
-    "reason": {
-      "type": "string"
-    },
-    "ref": {
-      "type": "object",
-      "properties": {
-        "sessionId": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256
-        },
-        "inputId": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256
-        },
-        "sourceId": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256
-        },
-        "sourceRevision": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256
-        },
-        "requestId": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256
-        }
-      },
-      "required": [
-        "sessionId",
-        "inputId",
-        "sourceId",
-        "sourceRevision",
-        "requestId"
-      ],
-      "additionalProperties": false
-    },
-    "configurationId": {
-      "type": "string",
-      "minLength": 1,
-      "maxLength": 256
-    },
-    "expiresAt": {
-      "type": "number"
-    },
-    "pendingRetentionMs": {
-      "type": "integer",
-      "minimum": 1,
-      "maximum": 2147483647
-    },
-    "processing": {
-      "type": "string"
-    },
-    "restart": {
-      "type": "string"
-    },
-    "route": {
-      "type": "string"
-    },
-    "execution": {
-      "type": "string",
-      "const": "not-started"
-    },
-    "approvalId": {
-      "type": "string",
-      "minLength": 1,
-      "maxLength": 256
-    },
-    "source": {
-      "type": "string"
-    },
-    "recovery": {
-      "type": "string"
-    },
-    "record": {
-      "type": "object",
-      "properties": {
-        "id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256
+          "enum": [
+            "transferred",
+            "started",
+            "unknown"
+          ]
         },
         "ref": {
           "type": "object",
@@ -70292,170 +80528,62 @@ Explicit paired-owner command for bounded in-memory original-source intake. Conf
           ],
           "additionalProperties": false
         },
-        "origin": {
+        "execution": {
+          "type": "string",
+          "const": "not-started"
+        }
+      },
+      "required": [
+        "outcome",
+        "ref",
+        "execution"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "outcome": {
+          "type": "string",
+          "const": "denied"
+        },
+        "ref": {
           "type": "object",
           "properties": {
-            "kind": {
-              "type": "string",
-              "const": "external-original"
-            },
-            "accountId": {
+            "sessionId": {
               "type": "string",
               "minLength": 1,
               "maxLength": 256
             },
-            "accountRevision": {
+            "inputId": {
               "type": "string",
               "minLength": 1,
               "maxLength": 256
             },
-            "routeId": {
+            "sourceId": {
               "type": "string",
               "minLength": 1,
               "maxLength": 256
             },
-            "routeRevision": {
+            "sourceRevision": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "requestId": {
               "type": "string",
               "minLength": 1,
               "maxLength": 256
             }
           },
           "required": [
-            "kind",
-            "accountId",
-            "accountRevision",
-            "routeId",
-            "routeRevision"
+            "sessionId",
+            "inputId",
+            "sourceId",
+            "sourceRevision",
+            "requestId"
           ],
           "additionalProperties": false
-        },
-        "configurationId": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256
-        },
-        "ownerRevision": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256
-        },
-        "owner": {
-          "type": "object",
-          "properties": {
-            "kind": {
-              "type": "string",
-              "const": "pairing-token"
-            },
-            "principalId": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256
-            },
-            "tokenId": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256
-            },
-            "authorityId": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256
-            },
-            "authorityRevision": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256
-            },
-            "scopes": {
-              "maxItems": 256,
-              "type": "array",
-              "items": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              }
-            }
-          },
-          "required": [
-            "kind",
-            "principalId",
-            "tokenId",
-            "authorityId",
-            "authorityRevision",
-            "scopes"
-          ],
-          "additionalProperties": false
-        },
-        "workspaceRevision": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256
-        },
-        "approvalId": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256
-        },
-        "choices": {
-          "type": "object",
-          "properties": {
-            "processingPurpose": {
-              "type": "string",
-              "const": "accept-external-message-for-owner-review"
-            },
-            "sourceRetention": {
-              "type": "string",
-              "const": "memory-only-until-review-close-or-deadline"
-            },
-            "sourceRetentionMs": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 2147483647
-            },
-            "derivedRecord": {
-              "type": "string",
-              "const": "external-source-reference-only-v1"
-            },
-            "derivedRecordRetentionMs": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 2147483647
-            },
-            "execution": {
-              "type": "string",
-              "const": "none"
-            },
-            "ownerMayReadOriginal": {
-              "type": "boolean",
-              "const": true
-            }
-          },
-          "required": [
-            "processingPurpose",
-            "sourceRetention",
-            "sourceRetentionMs",
-            "derivedRecord",
-            "derivedRecordRetentionMs",
-            "execution",
-            "ownerMayReadOriginal"
-          ],
-          "additionalProperties": false
-        },
-        "acceptedAt": {
-          "type": "number"
-        },
-        "sourceExpiresAt": {
-          "type": "number"
-        },
-        "recordExpiresAt": {
-          "type": "number"
-        },
-        "state": {
-          "type": "string",
-          "enum": [
-            "accepted-for-review",
-            "cancelled"
-          ]
         },
         "execution": {
           "type": "string",
@@ -70463,362 +80591,145 @@ Explicit paired-owner command for bounded in-memory original-source intake. Conf
         }
       },
       "required": [
-        "id",
+        "outcome",
         "ref",
-        "origin",
-        "configurationId",
-        "ownerRevision",
-        "workspaceRevision",
-        "approvalId",
-        "choices",
-        "acceptedAt",
-        "sourceExpiresAt",
-        "recordExpiresAt",
-        "state",
         "execution"
       ],
       "additionalProperties": false
     },
-    "records": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 256
-          },
-          "ref": {
-            "type": "object",
-            "properties": {
-              "sessionId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "inputId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "sourceId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "sourceRevision": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "requestId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              }
-            },
-            "required": [
-              "sessionId",
-              "inputId",
-              "sourceId",
-              "sourceRevision",
-              "requestId"
-            ],
-            "additionalProperties": false
-          },
-          "origin": {
-            "type": "object",
-            "properties": {
-              "kind": {
-                "type": "string",
-                "const": "external-original"
-              },
-              "accountId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "accountRevision": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "routeId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "routeRevision": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              }
-            },
-            "required": [
-              "kind",
-              "accountId",
-              "accountRevision",
-              "routeId",
-              "routeRevision"
-            ],
-            "additionalProperties": false
-          },
-          "configurationId": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 256
-          },
-          "ownerRevision": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 256
-          },
-          "owner": {
-            "type": "object",
-            "properties": {
-              "kind": {
-                "type": "string",
-                "const": "pairing-token"
-              },
-              "principalId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "tokenId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "authorityId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "authorityRevision": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "scopes": {
-                "maxItems": 256,
-                "type": "array",
-                "items": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 256
-                }
-              }
-            },
-            "required": [
-              "kind",
-              "principalId",
-              "tokenId",
-              "authorityId",
-              "authorityRevision",
-              "scopes"
-            ],
-            "additionalProperties": false
-          },
-          "workspaceRevision": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 256
-          },
-          "approvalId": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 256
-          },
-          "choices": {
-            "type": "object",
-            "properties": {
-              "processingPurpose": {
-                "type": "string",
-                "const": "accept-external-message-for-owner-review"
-              },
-              "sourceRetention": {
-                "type": "string",
-                "const": "memory-only-until-review-close-or-deadline"
-              },
-              "sourceRetentionMs": {
-                "type": "integer",
-                "minimum": 1,
-                "maximum": 2147483647
-              },
-              "derivedRecord": {
-                "type": "string",
-                "const": "external-source-reference-only-v1"
-              },
-              "derivedRecordRetentionMs": {
-                "type": "integer",
-                "minimum": 1,
-                "maximum": 2147483647
-              },
-              "execution": {
-                "type": "string",
-                "const": "none"
-              },
-              "ownerMayReadOriginal": {
-                "type": "boolean",
-                "const": true
-              }
-            },
-            "required": [
-              "processingPurpose",
-              "sourceRetention",
-              "sourceRetentionMs",
-              "derivedRecord",
-              "derivedRecordRetentionMs",
-              "execution",
-              "ownerMayReadOriginal"
-            ],
-            "additionalProperties": false
-          },
-          "acceptedAt": {
-            "type": "number"
-          },
-          "sourceExpiresAt": {
-            "type": "number"
-          },
-          "recordExpiresAt": {
-            "type": "number"
-          },
-          "state": {
-            "type": "string",
-            "enum": [
-              "accepted-for-review",
-              "cancelled"
-            ]
-          },
-          "execution": {
-            "type": "string",
-            "const": "not-started"
-          }
-        },
-        "required": [
-          "id",
-          "ref",
-          "origin",
-          "configurationId",
-          "ownerRevision",
-          "workspaceRevision",
-          "approvalId",
-          "choices",
-          "acceptedAt",
-          "sourceExpiresAt",
-          "recordExpiresAt",
-          "state",
-          "execution"
-        ],
-        "additionalProperties": false
-      }
-    },
-    "pending": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "properties": {
-          "ref": {
-            "type": "object",
-            "properties": {
-              "sessionId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "inputId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "sourceId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "sourceRevision": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "requestId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              }
-            },
-            "required": [
-              "sessionId",
-              "inputId",
-              "sourceId",
-              "sourceRevision",
-              "requestId"
-            ],
-            "additionalProperties": false
-          },
-          "approvalId": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 256
-          },
-          "sourceExpiresAt": {
-            "type": "number"
-          },
-          "outcome": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "ref",
-          "approvalId",
-          "sourceExpiresAt",
-          "outcome"
-        ],
-        "additionalProperties": false
-      }
-    },
-    "original": {
+    {
       "type": "object",
       "properties": {
-        "text": {
+        "outcome": {
+          "type": "string",
+          "const": "held"
+        },
+        "reason": {
+          "type": "string",
+          "enum": [
+            "account-proof-required",
+            "account-not-chosen",
+            "account-proof-unavailable",
+            "account-proof-changed",
+            "workspace-changed",
+            "lifecycle-changed",
+            "owner-changed",
+            "not-owner",
+            "message-identity-missing",
+            "tracking-full",
+            "message-edited",
+            "no-configuration",
+            "configuration-not-current",
+            "source-unavailable",
+            "missing-source-proof",
+            "configuration-unavailable",
+            "chat-not-selected",
+            "already-decided",
+            "lifetime-exceeds-configuration",
+            "not-durably-resolved",
+            "review-queue-refused",
+            "review-held",
+            "review-closed",
+            "handoff-held"
+          ]
+        },
+        "message": {
           "type": "string"
         },
-        "unsupportedSources": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "kind": {
-                "type": "string"
-              },
-              "label": {
-                "type": "string"
-              }
+        "nextStep": {
+          "type": "string"
+        },
+        "ref": {
+          "type": "object",
+          "properties": {
+            "sessionId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
             },
-            "required": [
-              "kind",
-              "label"
-            ],
-            "additionalProperties": false
-          }
+            "inputId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "sourceId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "sourceRevision": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "requestId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          },
+          "required": [
+            "sessionId",
+            "inputId",
+            "sourceId",
+            "sourceRevision",
+            "requestId"
+          ],
+          "additionalProperties": false
+        },
+        "route": {
+          "type": "string"
+        },
+        "accountIdentity": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "username": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "revision": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          },
+          "required": [
+            "id",
+            "username",
+            "revision"
+          ],
+          "additionalProperties": false
+        },
+        "approvalId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "source": {
+          "type": "string"
         }
       },
       "required": [
-        "text",
-        "unsupportedSources"
+        "outcome",
+        "reason",
+        "message",
+        "nextStep"
       ],
       "additionalProperties": false
     }
-  },
-  "additionalProperties": false
+  ]
 }
 ```
 
 #### `inbound.telegram.list`
 
-Explicit paired-owner command for bounded in-memory original-source intake. Configure chooses the pending source lifetime; decide approves one exact external message and metadata-only review receipt. No execution, standing processing grant, or owner-text capture.
+The review queue (accepted-for-review and reviewed rows) and the messages still waiting for the owner's decision, for the calling owner.
 
 - Title: `Telegram Delegated Intake list`
 - Source: `builtin`
@@ -70848,345 +80759,9 @@ Explicit paired-owner command for bounded in-memory original-source intake. Conf
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "properties": {
-    "accountIdentity": {
-      "type": "object",
-      "properties": {
-        "id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256
-        },
-        "username": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256
-        },
-        "revision": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256
-        }
-      },
-      "required": [
-        "id",
-        "username",
-        "revision"
-      ],
-      "additionalProperties": false
-    },
     "outcome": {
-      "type": "string"
-    },
-    "reason": {
-      "type": "string"
-    },
-    "ref": {
-      "type": "object",
-      "properties": {
-        "sessionId": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256
-        },
-        "inputId": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256
-        },
-        "sourceId": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256
-        },
-        "sourceRevision": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256
-        },
-        "requestId": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256
-        }
-      },
-      "required": [
-        "sessionId",
-        "inputId",
-        "sourceId",
-        "sourceRevision",
-        "requestId"
-      ],
-      "additionalProperties": false
-    },
-    "configurationId": {
       "type": "string",
-      "minLength": 1,
-      "maxLength": 256
-    },
-    "expiresAt": {
-      "type": "number"
-    },
-    "pendingRetentionMs": {
-      "type": "integer",
-      "minimum": 1,
-      "maximum": 2147483647
-    },
-    "processing": {
-      "type": "string"
-    },
-    "restart": {
-      "type": "string"
-    },
-    "route": {
-      "type": "string"
-    },
-    "execution": {
-      "type": "string",
-      "const": "not-started"
-    },
-    "approvalId": {
-      "type": "string",
-      "minLength": 1,
-      "maxLength": 256
-    },
-    "source": {
-      "type": "string"
-    },
-    "recovery": {
-      "type": "string"
-    },
-    "record": {
-      "type": "object",
-      "properties": {
-        "id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256
-        },
-        "ref": {
-          "type": "object",
-          "properties": {
-            "sessionId": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256
-            },
-            "inputId": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256
-            },
-            "sourceId": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256
-            },
-            "sourceRevision": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256
-            },
-            "requestId": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256
-            }
-          },
-          "required": [
-            "sessionId",
-            "inputId",
-            "sourceId",
-            "sourceRevision",
-            "requestId"
-          ],
-          "additionalProperties": false
-        },
-        "origin": {
-          "type": "object",
-          "properties": {
-            "kind": {
-              "type": "string",
-              "const": "external-original"
-            },
-            "accountId": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256
-            },
-            "accountRevision": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256
-            },
-            "routeId": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256
-            },
-            "routeRevision": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256
-            }
-          },
-          "required": [
-            "kind",
-            "accountId",
-            "accountRevision",
-            "routeId",
-            "routeRevision"
-          ],
-          "additionalProperties": false
-        },
-        "configurationId": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256
-        },
-        "ownerRevision": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256
-        },
-        "owner": {
-          "type": "object",
-          "properties": {
-            "kind": {
-              "type": "string",
-              "const": "pairing-token"
-            },
-            "principalId": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256
-            },
-            "tokenId": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256
-            },
-            "authorityId": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256
-            },
-            "authorityRevision": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256
-            },
-            "scopes": {
-              "maxItems": 256,
-              "type": "array",
-              "items": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              }
-            }
-          },
-          "required": [
-            "kind",
-            "principalId",
-            "tokenId",
-            "authorityId",
-            "authorityRevision",
-            "scopes"
-          ],
-          "additionalProperties": false
-        },
-        "workspaceRevision": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256
-        },
-        "approvalId": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256
-        },
-        "choices": {
-          "type": "object",
-          "properties": {
-            "processingPurpose": {
-              "type": "string",
-              "const": "accept-external-message-for-owner-review"
-            },
-            "sourceRetention": {
-              "type": "string",
-              "const": "memory-only-until-review-close-or-deadline"
-            },
-            "sourceRetentionMs": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 2147483647
-            },
-            "derivedRecord": {
-              "type": "string",
-              "const": "external-source-reference-only-v1"
-            },
-            "derivedRecordRetentionMs": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 2147483647
-            },
-            "execution": {
-              "type": "string",
-              "const": "none"
-            },
-            "ownerMayReadOriginal": {
-              "type": "boolean",
-              "const": true
-            }
-          },
-          "required": [
-            "processingPurpose",
-            "sourceRetention",
-            "sourceRetentionMs",
-            "derivedRecord",
-            "derivedRecordRetentionMs",
-            "execution",
-            "ownerMayReadOriginal"
-          ],
-          "additionalProperties": false
-        },
-        "acceptedAt": {
-          "type": "number"
-        },
-        "sourceExpiresAt": {
-          "type": "number"
-        },
-        "recordExpiresAt": {
-          "type": "number"
-        },
-        "state": {
-          "type": "string",
-          "enum": [
-            "accepted-for-review",
-            "cancelled"
-          ]
-        },
-        "execution": {
-          "type": "string",
-          "const": "not-started"
-        }
-      },
-      "required": [
-        "id",
-        "ref",
-        "origin",
-        "configurationId",
-        "ownerRevision",
-        "workspaceRevision",
-        "approvalId",
-        "choices",
-        "acceptedAt",
-        "sourceExpiresAt",
-        "recordExpiresAt",
-        "state",
-        "execution"
-      ],
-      "additionalProperties": false
+      "const": "listed"
     },
     "records": {
       "type": "array",
@@ -71398,6 +80973,7 @@ Explicit paired-owner command for bounded in-memory original-source intake. Conf
             "type": "string",
             "enum": [
               "accepted-for-review",
+              "reviewed",
               "cancelled"
             ]
           },
@@ -71476,7 +81052,24 @@ Explicit paired-owner command for bounded in-memory original-source intake. Conf
             "type": "number"
           },
           "outcome": {
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "awaiting-owner",
+                  "deciding",
+                  "approved",
+                  "cancelled",
+                  "transferred",
+                  "started",
+                  "unknown"
+                ]
+              },
+              {
+                "type": "string",
+                "const": "held"
+              }
+            ]
           }
         },
         "required": [
@@ -71487,47 +81080,20 @@ Explicit paired-owner command for bounded in-memory original-source intake. Conf
         ],
         "additionalProperties": false
       }
-    },
-    "original": {
-      "type": "object",
-      "properties": {
-        "text": {
-          "type": "string"
-        },
-        "unsupportedSources": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "kind": {
-                "type": "string"
-              },
-              "label": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "kind",
-              "label"
-            ],
-            "additionalProperties": false
-          }
-        }
-      },
-      "required": [
-        "text",
-        "unsupportedSources"
-      ],
-      "additionalProperties": false
     }
   },
+  "required": [
+    "outcome",
+    "records",
+    "pending"
+  ],
   "additionalProperties": false
 }
 ```
 
 #### `inbound.telegram.read`
 
-Explicit paired-owner command for bounded in-memory original-source intake. Configure chooses the pending source lifetime; decide approves one exact external message and metadata-only review receipt. No execution, standing processing grant, or owner-text capture.
+Read the original text of a message in the review queue while it is still in memory; the review is marked reviewed. Held with the reason when the original expired or was released.
 
 - Title: `Telegram Delegated Intake read`
 - Source: `builtin`
@@ -71597,122 +81163,317 @@ Explicit paired-owner command for bounded in-memory original-source intake. Conf
 ```json
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "type": "object",
-  "properties": {
-    "accountIdentity": {
+  "anyOf": [
+    {
       "type": "object",
       "properties": {
-        "id": {
+        "outcome": {
           "type": "string",
-          "minLength": 1,
-          "maxLength": 256
+          "const": "recorded"
         },
-        "username": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256
+        "record": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "ref": {
+              "type": "object",
+              "properties": {
+                "sessionId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                },
+                "inputId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                },
+                "sourceId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                },
+                "sourceRevision": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                },
+                "requestId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                }
+              },
+              "required": [
+                "sessionId",
+                "inputId",
+                "sourceId",
+                "sourceRevision",
+                "requestId"
+              ],
+              "additionalProperties": false
+            },
+            "origin": {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "external-original"
+                },
+                "accountId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                },
+                "accountRevision": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                },
+                "routeId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                },
+                "routeRevision": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                }
+              },
+              "required": [
+                "kind",
+                "accountId",
+                "accountRevision",
+                "routeId",
+                "routeRevision"
+              ],
+              "additionalProperties": false
+            },
+            "configurationId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "ownerRevision": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "owner": {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "pairing-token"
+                },
+                "principalId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                },
+                "tokenId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                },
+                "authorityId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                },
+                "authorityRevision": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                },
+                "scopes": {
+                  "maxItems": 256,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256
+                  }
+                }
+              },
+              "required": [
+                "kind",
+                "principalId",
+                "tokenId",
+                "authorityId",
+                "authorityRevision",
+                "scopes"
+              ],
+              "additionalProperties": false
+            },
+            "workspaceRevision": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "approvalId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "choices": {
+              "type": "object",
+              "properties": {
+                "processingPurpose": {
+                  "type": "string",
+                  "const": "accept-external-message-for-owner-review"
+                },
+                "sourceRetention": {
+                  "type": "string",
+                  "const": "memory-only-until-review-close-or-deadline"
+                },
+                "sourceRetentionMs": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 2147483647
+                },
+                "derivedRecord": {
+                  "type": "string",
+                  "const": "external-source-reference-only-v1"
+                },
+                "derivedRecordRetentionMs": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 2147483647
+                },
+                "execution": {
+                  "type": "string",
+                  "const": "none"
+                },
+                "ownerMayReadOriginal": {
+                  "type": "boolean",
+                  "const": true
+                }
+              },
+              "required": [
+                "processingPurpose",
+                "sourceRetention",
+                "sourceRetentionMs",
+                "derivedRecord",
+                "derivedRecordRetentionMs",
+                "execution",
+                "ownerMayReadOriginal"
+              ],
+              "additionalProperties": false
+            },
+            "acceptedAt": {
+              "type": "number"
+            },
+            "sourceExpiresAt": {
+              "type": "number"
+            },
+            "recordExpiresAt": {
+              "type": "number"
+            },
+            "state": {
+              "type": "string",
+              "enum": [
+                "accepted-for-review",
+                "reviewed",
+                "cancelled"
+              ]
+            },
+            "execution": {
+              "type": "string",
+              "const": "not-started"
+            }
+          },
+          "required": [
+            "id",
+            "ref",
+            "origin",
+            "configurationId",
+            "ownerRevision",
+            "workspaceRevision",
+            "approvalId",
+            "choices",
+            "acceptedAt",
+            "sourceExpiresAt",
+            "recordExpiresAt",
+            "state",
+            "execution"
+          ],
+          "additionalProperties": false
         },
-        "revision": {
+        "source": {
           "type": "string",
-          "minLength": 1,
-          "maxLength": 256
+          "enum": [
+            "available-in-memory",
+            "expired-or-lost"
+          ]
+        },
+        "recovery": {
+          "type": "string",
+          "enum": [
+            "owner-review-available",
+            "new-original-required"
+          ]
+        },
+        "original": {
+          "type": "object",
+          "properties": {
+            "text": {
+              "type": "string"
+            },
+            "unsupportedSources": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string"
+                  },
+                  "label": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "label"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "text",
+            "unsupportedSources"
+          ],
+          "additionalProperties": false
         }
       },
       "required": [
-        "id",
-        "username",
-        "revision"
+        "outcome",
+        "record",
+        "source",
+        "recovery"
       ],
       "additionalProperties": false
     },
-    "outcome": {
-      "type": "string"
-    },
-    "reason": {
-      "type": "string"
-    },
-    "ref": {
+    {
       "type": "object",
       "properties": {
-        "sessionId": {
+        "outcome": {
           "type": "string",
-          "minLength": 1,
-          "maxLength": 256
-        },
-        "inputId": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256
-        },
-        "sourceId": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256
-        },
-        "sourceRevision": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256
-        },
-        "requestId": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256
-        }
-      },
-      "required": [
-        "sessionId",
-        "inputId",
-        "sourceId",
-        "sourceRevision",
-        "requestId"
-      ],
-      "additionalProperties": false
-    },
-    "configurationId": {
-      "type": "string",
-      "minLength": 1,
-      "maxLength": 256
-    },
-    "expiresAt": {
-      "type": "number"
-    },
-    "pendingRetentionMs": {
-      "type": "integer",
-      "minimum": 1,
-      "maximum": 2147483647
-    },
-    "processing": {
-      "type": "string"
-    },
-    "restart": {
-      "type": "string"
-    },
-    "route": {
-      "type": "string"
-    },
-    "execution": {
-      "type": "string",
-      "const": "not-started"
-    },
-    "approvalId": {
-      "type": "string",
-      "minLength": 1,
-      "maxLength": 256
-    },
-    "source": {
-      "type": "string"
-    },
-    "recovery": {
-      "type": "string"
-    },
-    "record": {
-      "type": "object",
-      "properties": {
-        "id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256
+          "enum": [
+            "awaiting-owner",
+            "deciding",
+            "approved",
+            "cancelled",
+            "transferred",
+            "started",
+            "unknown"
+          ]
         },
         "ref": {
           "type": "object",
@@ -71752,527 +81513,154 @@ Explicit paired-owner command for bounded in-memory original-source intake. Conf
           ],
           "additionalProperties": false
         },
-        "origin": {
+        "source": {
+          "type": "string",
+          "enum": [
+            "awaiting-owner",
+            "released"
+          ]
+        },
+        "approvalId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      },
+      "required": [
+        "outcome",
+        "ref",
+        "source",
+        "approvalId"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "outcome": {
+          "type": "string",
+          "const": "held"
+        },
+        "reason": {
+          "type": "string",
+          "enum": [
+            "account-proof-required",
+            "account-not-chosen",
+            "account-proof-unavailable",
+            "account-proof-changed",
+            "workspace-changed",
+            "lifecycle-changed",
+            "owner-changed",
+            "not-owner",
+            "message-identity-missing",
+            "tracking-full",
+            "message-edited",
+            "no-configuration",
+            "configuration-not-current",
+            "source-unavailable",
+            "missing-source-proof",
+            "configuration-unavailable",
+            "chat-not-selected",
+            "already-decided",
+            "lifetime-exceeds-configuration",
+            "not-durably-resolved",
+            "review-queue-refused",
+            "review-held",
+            "review-closed",
+            "handoff-held"
+          ]
+        },
+        "message": {
+          "type": "string"
+        },
+        "nextStep": {
+          "type": "string"
+        },
+        "ref": {
           "type": "object",
           "properties": {
-            "kind": {
-              "type": "string",
-              "const": "external-original"
-            },
-            "accountId": {
+            "sessionId": {
               "type": "string",
               "minLength": 1,
               "maxLength": 256
             },
-            "accountRevision": {
+            "inputId": {
               "type": "string",
               "minLength": 1,
               "maxLength": 256
             },
-            "routeId": {
+            "sourceId": {
               "type": "string",
               "minLength": 1,
               "maxLength": 256
             },
-            "routeRevision": {
+            "sourceRevision": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "requestId": {
               "type": "string",
               "minLength": 1,
               "maxLength": 256
             }
           },
           "required": [
-            "kind",
-            "accountId",
-            "accountRevision",
-            "routeId",
-            "routeRevision"
+            "sessionId",
+            "inputId",
+            "sourceId",
+            "sourceRevision",
+            "requestId"
           ],
           "additionalProperties": false
         },
-        "configurationId": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256
+        "route": {
+          "type": "string"
         },
-        "ownerRevision": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256
-        },
-        "owner": {
+        "accountIdentity": {
           "type": "object",
           "properties": {
-            "kind": {
-              "type": "string",
-              "const": "pairing-token"
-            },
-            "principalId": {
+            "id": {
               "type": "string",
               "minLength": 1,
               "maxLength": 256
             },
-            "tokenId": {
+            "username": {
               "type": "string",
               "minLength": 1,
               "maxLength": 256
             },
-            "authorityId": {
+            "revision": {
               "type": "string",
               "minLength": 1,
               "maxLength": 256
-            },
-            "authorityRevision": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256
-            },
-            "scopes": {
-              "maxItems": 256,
-              "type": "array",
-              "items": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              }
             }
           },
           "required": [
-            "kind",
-            "principalId",
-            "tokenId",
-            "authorityId",
-            "authorityRevision",
-            "scopes"
+            "id",
+            "username",
+            "revision"
           ],
           "additionalProperties": false
-        },
-        "workspaceRevision": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256
         },
         "approvalId": {
           "type": "string",
           "minLength": 1,
           "maxLength": 256
         },
-        "choices": {
-          "type": "object",
-          "properties": {
-            "processingPurpose": {
-              "type": "string",
-              "const": "accept-external-message-for-owner-review"
-            },
-            "sourceRetention": {
-              "type": "string",
-              "const": "memory-only-until-review-close-or-deadline"
-            },
-            "sourceRetentionMs": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 2147483647
-            },
-            "derivedRecord": {
-              "type": "string",
-              "const": "external-source-reference-only-v1"
-            },
-            "derivedRecordRetentionMs": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 2147483647
-            },
-            "execution": {
-              "type": "string",
-              "const": "none"
-            },
-            "ownerMayReadOriginal": {
-              "type": "boolean",
-              "const": true
-            }
-          },
-          "required": [
-            "processingPurpose",
-            "sourceRetention",
-            "sourceRetentionMs",
-            "derivedRecord",
-            "derivedRecordRetentionMs",
-            "execution",
-            "ownerMayReadOriginal"
-          ],
-          "additionalProperties": false
-        },
-        "acceptedAt": {
-          "type": "number"
-        },
-        "sourceExpiresAt": {
-          "type": "number"
-        },
-        "recordExpiresAt": {
-          "type": "number"
-        },
-        "state": {
-          "type": "string",
-          "enum": [
-            "accepted-for-review",
-            "cancelled"
-          ]
-        },
-        "execution": {
-          "type": "string",
-          "const": "not-started"
-        }
-      },
-      "required": [
-        "id",
-        "ref",
-        "origin",
-        "configurationId",
-        "ownerRevision",
-        "workspaceRevision",
-        "approvalId",
-        "choices",
-        "acceptedAt",
-        "sourceExpiresAt",
-        "recordExpiresAt",
-        "state",
-        "execution"
-      ],
-      "additionalProperties": false
-    },
-    "records": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 256
-          },
-          "ref": {
-            "type": "object",
-            "properties": {
-              "sessionId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "inputId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "sourceId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "sourceRevision": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "requestId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              }
-            },
-            "required": [
-              "sessionId",
-              "inputId",
-              "sourceId",
-              "sourceRevision",
-              "requestId"
-            ],
-            "additionalProperties": false
-          },
-          "origin": {
-            "type": "object",
-            "properties": {
-              "kind": {
-                "type": "string",
-                "const": "external-original"
-              },
-              "accountId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "accountRevision": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "routeId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "routeRevision": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              }
-            },
-            "required": [
-              "kind",
-              "accountId",
-              "accountRevision",
-              "routeId",
-              "routeRevision"
-            ],
-            "additionalProperties": false
-          },
-          "configurationId": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 256
-          },
-          "ownerRevision": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 256
-          },
-          "owner": {
-            "type": "object",
-            "properties": {
-              "kind": {
-                "type": "string",
-                "const": "pairing-token"
-              },
-              "principalId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "tokenId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "authorityId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "authorityRevision": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "scopes": {
-                "maxItems": 256,
-                "type": "array",
-                "items": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 256
-                }
-              }
-            },
-            "required": [
-              "kind",
-              "principalId",
-              "tokenId",
-              "authorityId",
-              "authorityRevision",
-              "scopes"
-            ],
-            "additionalProperties": false
-          },
-          "workspaceRevision": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 256
-          },
-          "approvalId": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 256
-          },
-          "choices": {
-            "type": "object",
-            "properties": {
-              "processingPurpose": {
-                "type": "string",
-                "const": "accept-external-message-for-owner-review"
-              },
-              "sourceRetention": {
-                "type": "string",
-                "const": "memory-only-until-review-close-or-deadline"
-              },
-              "sourceRetentionMs": {
-                "type": "integer",
-                "minimum": 1,
-                "maximum": 2147483647
-              },
-              "derivedRecord": {
-                "type": "string",
-                "const": "external-source-reference-only-v1"
-              },
-              "derivedRecordRetentionMs": {
-                "type": "integer",
-                "minimum": 1,
-                "maximum": 2147483647
-              },
-              "execution": {
-                "type": "string",
-                "const": "none"
-              },
-              "ownerMayReadOriginal": {
-                "type": "boolean",
-                "const": true
-              }
-            },
-            "required": [
-              "processingPurpose",
-              "sourceRetention",
-              "sourceRetentionMs",
-              "derivedRecord",
-              "derivedRecordRetentionMs",
-              "execution",
-              "ownerMayReadOriginal"
-            ],
-            "additionalProperties": false
-          },
-          "acceptedAt": {
-            "type": "number"
-          },
-          "sourceExpiresAt": {
-            "type": "number"
-          },
-          "recordExpiresAt": {
-            "type": "number"
-          },
-          "state": {
-            "type": "string",
-            "enum": [
-              "accepted-for-review",
-              "cancelled"
-            ]
-          },
-          "execution": {
-            "type": "string",
-            "const": "not-started"
-          }
-        },
-        "required": [
-          "id",
-          "ref",
-          "origin",
-          "configurationId",
-          "ownerRevision",
-          "workspaceRevision",
-          "approvalId",
-          "choices",
-          "acceptedAt",
-          "sourceExpiresAt",
-          "recordExpiresAt",
-          "state",
-          "execution"
-        ],
-        "additionalProperties": false
-      }
-    },
-    "pending": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "properties": {
-          "ref": {
-            "type": "object",
-            "properties": {
-              "sessionId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "inputId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "sourceId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "sourceRevision": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "requestId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              }
-            },
-            "required": [
-              "sessionId",
-              "inputId",
-              "sourceId",
-              "sourceRevision",
-              "requestId"
-            ],
-            "additionalProperties": false
-          },
-          "approvalId": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 256
-          },
-          "sourceExpiresAt": {
-            "type": "number"
-          },
-          "outcome": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "ref",
-          "approvalId",
-          "sourceExpiresAt",
-          "outcome"
-        ],
-        "additionalProperties": false
-      }
-    },
-    "original": {
-      "type": "object",
-      "properties": {
-        "text": {
+        "source": {
           "type": "string"
-        },
-        "unsupportedSources": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "kind": {
-                "type": "string"
-              },
-              "label": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "kind",
-              "label"
-            ],
-            "additionalProperties": false
-          }
         }
       },
       "required": [
-        "text",
-        "unsupportedSources"
+        "outcome",
+        "reason",
+        "message",
+        "nextStep"
       ],
       "additionalProperties": false
     }
-  },
-  "additionalProperties": false
+  ]
 }
 ```
 
@@ -72338,122 +81726,66 @@ Stop routing this chat through delegated intake and return it to normal handling
 ```json
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "type": "object",
-  "properties": {
-    "accountIdentity": {
+  "anyOf": [
+    {
       "type": "object",
       "properties": {
-        "id": {
+        "outcome": {
           "type": "string",
-          "minLength": 1,
-          "maxLength": 256
+          "const": "released"
         },
-        "username": {
+        "route": {
           "type": "string",
-          "minLength": 1,
-          "maxLength": 256
-        },
-        "revision": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256
+          "const": "normal-handling-resumes"
         }
       },
       "required": [
-        "id",
-        "username",
-        "revision"
+        "outcome",
+        "route"
       ],
       "additionalProperties": false
     },
-    "outcome": {
-      "type": "string"
-    },
-    "reason": {
-      "type": "string"
-    },
-    "ref": {
+    {
       "type": "object",
       "properties": {
-        "sessionId": {
+        "outcome": {
           "type": "string",
-          "minLength": 1,
-          "maxLength": 256
+          "const": "held"
         },
-        "inputId": {
+        "reason": {
           "type": "string",
-          "minLength": 1,
-          "maxLength": 256
+          "enum": [
+            "account-proof-required",
+            "account-not-chosen",
+            "account-proof-unavailable",
+            "account-proof-changed",
+            "workspace-changed",
+            "lifecycle-changed",
+            "owner-changed",
+            "not-owner",
+            "message-identity-missing",
+            "tracking-full",
+            "message-edited",
+            "no-configuration",
+            "configuration-not-current",
+            "source-unavailable",
+            "missing-source-proof",
+            "configuration-unavailable",
+            "chat-not-selected",
+            "already-decided",
+            "lifetime-exceeds-configuration",
+            "not-durably-resolved",
+            "review-queue-refused",
+            "review-held",
+            "review-closed",
+            "handoff-held"
+          ]
         },
-        "sourceId": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256
+        "message": {
+          "type": "string"
         },
-        "sourceRevision": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256
-        },
-        "requestId": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256
-        }
-      },
-      "required": [
-        "sessionId",
-        "inputId",
-        "sourceId",
-        "sourceRevision",
-        "requestId"
-      ],
-      "additionalProperties": false
-    },
-    "configurationId": {
-      "type": "string",
-      "minLength": 1,
-      "maxLength": 256
-    },
-    "expiresAt": {
-      "type": "number"
-    },
-    "pendingRetentionMs": {
-      "type": "integer",
-      "minimum": 1,
-      "maximum": 2147483647
-    },
-    "processing": {
-      "type": "string"
-    },
-    "restart": {
-      "type": "string"
-    },
-    "route": {
-      "type": "string"
-    },
-    "execution": {
-      "type": "string",
-      "const": "not-started"
-    },
-    "approvalId": {
-      "type": "string",
-      "minLength": 1,
-      "maxLength": 256
-    },
-    "source": {
-      "type": "string"
-    },
-    "recovery": {
-      "type": "string"
-    },
-    "record": {
-      "type": "object",
-      "properties": {
-        "id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256
+        "nextStep": {
+          "type": "string"
         },
         "ref": {
           "type": "object",
@@ -72493,533 +81825,59 @@ Stop routing this chat through delegated intake and return it to normal handling
           ],
           "additionalProperties": false
         },
-        "origin": {
+        "route": {
+          "type": "string"
+        },
+        "accountIdentity": {
           "type": "object",
           "properties": {
-            "kind": {
-              "type": "string",
-              "const": "external-original"
-            },
-            "accountId": {
+            "id": {
               "type": "string",
               "minLength": 1,
               "maxLength": 256
             },
-            "accountRevision": {
+            "username": {
               "type": "string",
               "minLength": 1,
               "maxLength": 256
             },
-            "routeId": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256
-            },
-            "routeRevision": {
+            "revision": {
               "type": "string",
               "minLength": 1,
               "maxLength": 256
             }
           },
           "required": [
-            "kind",
-            "accountId",
-            "accountRevision",
-            "routeId",
-            "routeRevision"
+            "id",
+            "username",
+            "revision"
           ],
           "additionalProperties": false
-        },
-        "configurationId": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256
-        },
-        "ownerRevision": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256
-        },
-        "owner": {
-          "type": "object",
-          "properties": {
-            "kind": {
-              "type": "string",
-              "const": "pairing-token"
-            },
-            "principalId": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256
-            },
-            "tokenId": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256
-            },
-            "authorityId": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256
-            },
-            "authorityRevision": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256
-            },
-            "scopes": {
-              "maxItems": 256,
-              "type": "array",
-              "items": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              }
-            }
-          },
-          "required": [
-            "kind",
-            "principalId",
-            "tokenId",
-            "authorityId",
-            "authorityRevision",
-            "scopes"
-          ],
-          "additionalProperties": false
-        },
-        "workspaceRevision": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256
         },
         "approvalId": {
           "type": "string",
           "minLength": 1,
           "maxLength": 256
         },
-        "choices": {
-          "type": "object",
-          "properties": {
-            "processingPurpose": {
-              "type": "string",
-              "const": "accept-external-message-for-owner-review"
-            },
-            "sourceRetention": {
-              "type": "string",
-              "const": "memory-only-until-review-close-or-deadline"
-            },
-            "sourceRetentionMs": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 2147483647
-            },
-            "derivedRecord": {
-              "type": "string",
-              "const": "external-source-reference-only-v1"
-            },
-            "derivedRecordRetentionMs": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 2147483647
-            },
-            "execution": {
-              "type": "string",
-              "const": "none"
-            },
-            "ownerMayReadOriginal": {
-              "type": "boolean",
-              "const": true
-            }
-          },
-          "required": [
-            "processingPurpose",
-            "sourceRetention",
-            "sourceRetentionMs",
-            "derivedRecord",
-            "derivedRecordRetentionMs",
-            "execution",
-            "ownerMayReadOriginal"
-          ],
-          "additionalProperties": false
-        },
-        "acceptedAt": {
-          "type": "number"
-        },
-        "sourceExpiresAt": {
-          "type": "number"
-        },
-        "recordExpiresAt": {
-          "type": "number"
-        },
-        "state": {
-          "type": "string",
-          "enum": [
-            "accepted-for-review",
-            "cancelled"
-          ]
-        },
-        "execution": {
-          "type": "string",
-          "const": "not-started"
-        }
-      },
-      "required": [
-        "id",
-        "ref",
-        "origin",
-        "configurationId",
-        "ownerRevision",
-        "workspaceRevision",
-        "approvalId",
-        "choices",
-        "acceptedAt",
-        "sourceExpiresAt",
-        "recordExpiresAt",
-        "state",
-        "execution"
-      ],
-      "additionalProperties": false
-    },
-    "records": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 256
-          },
-          "ref": {
-            "type": "object",
-            "properties": {
-              "sessionId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "inputId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "sourceId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "sourceRevision": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "requestId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              }
-            },
-            "required": [
-              "sessionId",
-              "inputId",
-              "sourceId",
-              "sourceRevision",
-              "requestId"
-            ],
-            "additionalProperties": false
-          },
-          "origin": {
-            "type": "object",
-            "properties": {
-              "kind": {
-                "type": "string",
-                "const": "external-original"
-              },
-              "accountId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "accountRevision": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "routeId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "routeRevision": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              }
-            },
-            "required": [
-              "kind",
-              "accountId",
-              "accountRevision",
-              "routeId",
-              "routeRevision"
-            ],
-            "additionalProperties": false
-          },
-          "configurationId": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 256
-          },
-          "ownerRevision": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 256
-          },
-          "owner": {
-            "type": "object",
-            "properties": {
-              "kind": {
-                "type": "string",
-                "const": "pairing-token"
-              },
-              "principalId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "tokenId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "authorityId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "authorityRevision": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "scopes": {
-                "maxItems": 256,
-                "type": "array",
-                "items": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 256
-                }
-              }
-            },
-            "required": [
-              "kind",
-              "principalId",
-              "tokenId",
-              "authorityId",
-              "authorityRevision",
-              "scopes"
-            ],
-            "additionalProperties": false
-          },
-          "workspaceRevision": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 256
-          },
-          "approvalId": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 256
-          },
-          "choices": {
-            "type": "object",
-            "properties": {
-              "processingPurpose": {
-                "type": "string",
-                "const": "accept-external-message-for-owner-review"
-              },
-              "sourceRetention": {
-                "type": "string",
-                "const": "memory-only-until-review-close-or-deadline"
-              },
-              "sourceRetentionMs": {
-                "type": "integer",
-                "minimum": 1,
-                "maximum": 2147483647
-              },
-              "derivedRecord": {
-                "type": "string",
-                "const": "external-source-reference-only-v1"
-              },
-              "derivedRecordRetentionMs": {
-                "type": "integer",
-                "minimum": 1,
-                "maximum": 2147483647
-              },
-              "execution": {
-                "type": "string",
-                "const": "none"
-              },
-              "ownerMayReadOriginal": {
-                "type": "boolean",
-                "const": true
-              }
-            },
-            "required": [
-              "processingPurpose",
-              "sourceRetention",
-              "sourceRetentionMs",
-              "derivedRecord",
-              "derivedRecordRetentionMs",
-              "execution",
-              "ownerMayReadOriginal"
-            ],
-            "additionalProperties": false
-          },
-          "acceptedAt": {
-            "type": "number"
-          },
-          "sourceExpiresAt": {
-            "type": "number"
-          },
-          "recordExpiresAt": {
-            "type": "number"
-          },
-          "state": {
-            "type": "string",
-            "enum": [
-              "accepted-for-review",
-              "cancelled"
-            ]
-          },
-          "execution": {
-            "type": "string",
-            "const": "not-started"
-          }
-        },
-        "required": [
-          "id",
-          "ref",
-          "origin",
-          "configurationId",
-          "ownerRevision",
-          "workspaceRevision",
-          "approvalId",
-          "choices",
-          "acceptedAt",
-          "sourceExpiresAt",
-          "recordExpiresAt",
-          "state",
-          "execution"
-        ],
-        "additionalProperties": false
-      }
-    },
-    "pending": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "properties": {
-          "ref": {
-            "type": "object",
-            "properties": {
-              "sessionId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "inputId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "sourceId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "sourceRevision": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "requestId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              }
-            },
-            "required": [
-              "sessionId",
-              "inputId",
-              "sourceId",
-              "sourceRevision",
-              "requestId"
-            ],
-            "additionalProperties": false
-          },
-          "approvalId": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 256
-          },
-          "sourceExpiresAt": {
-            "type": "number"
-          },
-          "outcome": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "ref",
-          "approvalId",
-          "sourceExpiresAt",
-          "outcome"
-        ],
-        "additionalProperties": false
-      }
-    },
-    "original": {
-      "type": "object",
-      "properties": {
-        "text": {
+        "source": {
           "type": "string"
-        },
-        "unsupportedSources": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "kind": {
-                "type": "string"
-              },
-              "label": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "kind",
-              "label"
-            ],
-            "additionalProperties": false
-          }
         }
       },
       "required": [
-        "text",
-        "unsupportedSources"
+        "outcome",
+        "reason",
+        "message",
+        "nextStep"
       ],
       "additionalProperties": false
     }
-  },
-  "additionalProperties": false
+  ]
 }
 ```
 
 #### `inbound.telegram.revoke`
 
-Explicit paired-owner command for bounded in-memory original-source intake. Configure chooses the pending source lifetime; decide approves one exact external message and metadata-only review receipt. No execution, standing processing grant, or owner-text capture.
+End a configuration: no new message is captured. The chat stays selected and held (not answered normally) until inbound.telegram.release.
 
 - Title: `Telegram Delegated Intake revoke`
 - Source: `builtin`
@@ -73056,122 +81914,66 @@ Explicit paired-owner command for bounded in-memory original-source intake. Conf
 ```json
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "type": "object",
-  "properties": {
-    "accountIdentity": {
+  "anyOf": [
+    {
       "type": "object",
       "properties": {
-        "id": {
+        "outcome": {
           "type": "string",
-          "minLength": 1,
-          "maxLength": 256
+          "const": "revoked"
         },
-        "username": {
+        "route": {
           "type": "string",
-          "minLength": 1,
-          "maxLength": 256
-        },
-        "revision": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256
+          "const": "remains-selected-and-held"
         }
       },
       "required": [
-        "id",
-        "username",
-        "revision"
+        "outcome",
+        "route"
       ],
       "additionalProperties": false
     },
-    "outcome": {
-      "type": "string"
-    },
-    "reason": {
-      "type": "string"
-    },
-    "ref": {
+    {
       "type": "object",
       "properties": {
-        "sessionId": {
+        "outcome": {
           "type": "string",
-          "minLength": 1,
-          "maxLength": 256
+          "const": "held"
         },
-        "inputId": {
+        "reason": {
           "type": "string",
-          "minLength": 1,
-          "maxLength": 256
+          "enum": [
+            "account-proof-required",
+            "account-not-chosen",
+            "account-proof-unavailable",
+            "account-proof-changed",
+            "workspace-changed",
+            "lifecycle-changed",
+            "owner-changed",
+            "not-owner",
+            "message-identity-missing",
+            "tracking-full",
+            "message-edited",
+            "no-configuration",
+            "configuration-not-current",
+            "source-unavailable",
+            "missing-source-proof",
+            "configuration-unavailable",
+            "chat-not-selected",
+            "already-decided",
+            "lifetime-exceeds-configuration",
+            "not-durably-resolved",
+            "review-queue-refused",
+            "review-held",
+            "review-closed",
+            "handoff-held"
+          ]
         },
-        "sourceId": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256
+        "message": {
+          "type": "string"
         },
-        "sourceRevision": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256
-        },
-        "requestId": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256
-        }
-      },
-      "required": [
-        "sessionId",
-        "inputId",
-        "sourceId",
-        "sourceRevision",
-        "requestId"
-      ],
-      "additionalProperties": false
-    },
-    "configurationId": {
-      "type": "string",
-      "minLength": 1,
-      "maxLength": 256
-    },
-    "expiresAt": {
-      "type": "number"
-    },
-    "pendingRetentionMs": {
-      "type": "integer",
-      "minimum": 1,
-      "maximum": 2147483647
-    },
-    "processing": {
-      "type": "string"
-    },
-    "restart": {
-      "type": "string"
-    },
-    "route": {
-      "type": "string"
-    },
-    "execution": {
-      "type": "string",
-      "const": "not-started"
-    },
-    "approvalId": {
-      "type": "string",
-      "minLength": 1,
-      "maxLength": 256
-    },
-    "source": {
-      "type": "string"
-    },
-    "recovery": {
-      "type": "string"
-    },
-    "record": {
-      "type": "object",
-      "properties": {
-        "id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256
+        "nextStep": {
+          "type": "string"
         },
         "ref": {
           "type": "object",
@@ -73211,533 +82013,59 @@ Explicit paired-owner command for bounded in-memory original-source intake. Conf
           ],
           "additionalProperties": false
         },
-        "origin": {
+        "route": {
+          "type": "string"
+        },
+        "accountIdentity": {
           "type": "object",
           "properties": {
-            "kind": {
-              "type": "string",
-              "const": "external-original"
-            },
-            "accountId": {
+            "id": {
               "type": "string",
               "minLength": 1,
               "maxLength": 256
             },
-            "accountRevision": {
+            "username": {
               "type": "string",
               "minLength": 1,
               "maxLength": 256
             },
-            "routeId": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256
-            },
-            "routeRevision": {
+            "revision": {
               "type": "string",
               "minLength": 1,
               "maxLength": 256
             }
           },
           "required": [
-            "kind",
-            "accountId",
-            "accountRevision",
-            "routeId",
-            "routeRevision"
+            "id",
+            "username",
+            "revision"
           ],
           "additionalProperties": false
-        },
-        "configurationId": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256
-        },
-        "ownerRevision": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256
-        },
-        "owner": {
-          "type": "object",
-          "properties": {
-            "kind": {
-              "type": "string",
-              "const": "pairing-token"
-            },
-            "principalId": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256
-            },
-            "tokenId": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256
-            },
-            "authorityId": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256
-            },
-            "authorityRevision": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256
-            },
-            "scopes": {
-              "maxItems": 256,
-              "type": "array",
-              "items": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              }
-            }
-          },
-          "required": [
-            "kind",
-            "principalId",
-            "tokenId",
-            "authorityId",
-            "authorityRevision",
-            "scopes"
-          ],
-          "additionalProperties": false
-        },
-        "workspaceRevision": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256
         },
         "approvalId": {
           "type": "string",
           "minLength": 1,
           "maxLength": 256
         },
-        "choices": {
-          "type": "object",
-          "properties": {
-            "processingPurpose": {
-              "type": "string",
-              "const": "accept-external-message-for-owner-review"
-            },
-            "sourceRetention": {
-              "type": "string",
-              "const": "memory-only-until-review-close-or-deadline"
-            },
-            "sourceRetentionMs": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 2147483647
-            },
-            "derivedRecord": {
-              "type": "string",
-              "const": "external-source-reference-only-v1"
-            },
-            "derivedRecordRetentionMs": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 2147483647
-            },
-            "execution": {
-              "type": "string",
-              "const": "none"
-            },
-            "ownerMayReadOriginal": {
-              "type": "boolean",
-              "const": true
-            }
-          },
-          "required": [
-            "processingPurpose",
-            "sourceRetention",
-            "sourceRetentionMs",
-            "derivedRecord",
-            "derivedRecordRetentionMs",
-            "execution",
-            "ownerMayReadOriginal"
-          ],
-          "additionalProperties": false
-        },
-        "acceptedAt": {
-          "type": "number"
-        },
-        "sourceExpiresAt": {
-          "type": "number"
-        },
-        "recordExpiresAt": {
-          "type": "number"
-        },
-        "state": {
-          "type": "string",
-          "enum": [
-            "accepted-for-review",
-            "cancelled"
-          ]
-        },
-        "execution": {
-          "type": "string",
-          "const": "not-started"
-        }
-      },
-      "required": [
-        "id",
-        "ref",
-        "origin",
-        "configurationId",
-        "ownerRevision",
-        "workspaceRevision",
-        "approvalId",
-        "choices",
-        "acceptedAt",
-        "sourceExpiresAt",
-        "recordExpiresAt",
-        "state",
-        "execution"
-      ],
-      "additionalProperties": false
-    },
-    "records": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 256
-          },
-          "ref": {
-            "type": "object",
-            "properties": {
-              "sessionId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "inputId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "sourceId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "sourceRevision": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "requestId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              }
-            },
-            "required": [
-              "sessionId",
-              "inputId",
-              "sourceId",
-              "sourceRevision",
-              "requestId"
-            ],
-            "additionalProperties": false
-          },
-          "origin": {
-            "type": "object",
-            "properties": {
-              "kind": {
-                "type": "string",
-                "const": "external-original"
-              },
-              "accountId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "accountRevision": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "routeId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "routeRevision": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              }
-            },
-            "required": [
-              "kind",
-              "accountId",
-              "accountRevision",
-              "routeId",
-              "routeRevision"
-            ],
-            "additionalProperties": false
-          },
-          "configurationId": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 256
-          },
-          "ownerRevision": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 256
-          },
-          "owner": {
-            "type": "object",
-            "properties": {
-              "kind": {
-                "type": "string",
-                "const": "pairing-token"
-              },
-              "principalId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "tokenId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "authorityId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "authorityRevision": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "scopes": {
-                "maxItems": 256,
-                "type": "array",
-                "items": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 256
-                }
-              }
-            },
-            "required": [
-              "kind",
-              "principalId",
-              "tokenId",
-              "authorityId",
-              "authorityRevision",
-              "scopes"
-            ],
-            "additionalProperties": false
-          },
-          "workspaceRevision": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 256
-          },
-          "approvalId": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 256
-          },
-          "choices": {
-            "type": "object",
-            "properties": {
-              "processingPurpose": {
-                "type": "string",
-                "const": "accept-external-message-for-owner-review"
-              },
-              "sourceRetention": {
-                "type": "string",
-                "const": "memory-only-until-review-close-or-deadline"
-              },
-              "sourceRetentionMs": {
-                "type": "integer",
-                "minimum": 1,
-                "maximum": 2147483647
-              },
-              "derivedRecord": {
-                "type": "string",
-                "const": "external-source-reference-only-v1"
-              },
-              "derivedRecordRetentionMs": {
-                "type": "integer",
-                "minimum": 1,
-                "maximum": 2147483647
-              },
-              "execution": {
-                "type": "string",
-                "const": "none"
-              },
-              "ownerMayReadOriginal": {
-                "type": "boolean",
-                "const": true
-              }
-            },
-            "required": [
-              "processingPurpose",
-              "sourceRetention",
-              "sourceRetentionMs",
-              "derivedRecord",
-              "derivedRecordRetentionMs",
-              "execution",
-              "ownerMayReadOriginal"
-            ],
-            "additionalProperties": false
-          },
-          "acceptedAt": {
-            "type": "number"
-          },
-          "sourceExpiresAt": {
-            "type": "number"
-          },
-          "recordExpiresAt": {
-            "type": "number"
-          },
-          "state": {
-            "type": "string",
-            "enum": [
-              "accepted-for-review",
-              "cancelled"
-            ]
-          },
-          "execution": {
-            "type": "string",
-            "const": "not-started"
-          }
-        },
-        "required": [
-          "id",
-          "ref",
-          "origin",
-          "configurationId",
-          "ownerRevision",
-          "workspaceRevision",
-          "approvalId",
-          "choices",
-          "acceptedAt",
-          "sourceExpiresAt",
-          "recordExpiresAt",
-          "state",
-          "execution"
-        ],
-        "additionalProperties": false
-      }
-    },
-    "pending": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "properties": {
-          "ref": {
-            "type": "object",
-            "properties": {
-              "sessionId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "inputId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "sourceId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "sourceRevision": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "requestId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              }
-            },
-            "required": [
-              "sessionId",
-              "inputId",
-              "sourceId",
-              "sourceRevision",
-              "requestId"
-            ],
-            "additionalProperties": false
-          },
-          "approvalId": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 256
-          },
-          "sourceExpiresAt": {
-            "type": "number"
-          },
-          "outcome": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "ref",
-          "approvalId",
-          "sourceExpiresAt",
-          "outcome"
-        ],
-        "additionalProperties": false
-      }
-    },
-    "original": {
-      "type": "object",
-      "properties": {
-        "text": {
+        "source": {
           "type": "string"
-        },
-        "unsupportedSources": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "kind": {
-                "type": "string"
-              },
-              "label": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "kind",
-              "label"
-            ],
-            "additionalProperties": false
-          }
         }
       },
       "required": [
-        "text",
-        "unsupportedSources"
+        "outcome",
+        "reason",
+        "message",
+        "nextStep"
       ],
       "additionalProperties": false
     }
-  },
-  "additionalProperties": false
+  ]
 }
 ```
 
 #### `inbound.telegram.status`
 
-Explicit paired-owner command for bounded in-memory original-source intake. Configure chooses the pending source lifetime; decide approves one exact external message and metadata-only review receipt. No execution, standing processing grant, or owner-text capture.
+Where one message stands: waiting for the owner, in the review queue (accepted-for-review or reviewed, with whether its original is still in memory), or held with the reason and next step.
 
 - Title: `Telegram Delegated Intake status`
 - Source: `builtin`
@@ -73807,122 +82135,317 @@ Explicit paired-owner command for bounded in-memory original-source intake. Conf
 ```json
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "type": "object",
-  "properties": {
-    "accountIdentity": {
+  "anyOf": [
+    {
       "type": "object",
       "properties": {
-        "id": {
+        "outcome": {
           "type": "string",
-          "minLength": 1,
-          "maxLength": 256
+          "const": "recorded"
         },
-        "username": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256
+        "record": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "ref": {
+              "type": "object",
+              "properties": {
+                "sessionId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                },
+                "inputId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                },
+                "sourceId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                },
+                "sourceRevision": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                },
+                "requestId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                }
+              },
+              "required": [
+                "sessionId",
+                "inputId",
+                "sourceId",
+                "sourceRevision",
+                "requestId"
+              ],
+              "additionalProperties": false
+            },
+            "origin": {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "external-original"
+                },
+                "accountId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                },
+                "accountRevision": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                },
+                "routeId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                },
+                "routeRevision": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                }
+              },
+              "required": [
+                "kind",
+                "accountId",
+                "accountRevision",
+                "routeId",
+                "routeRevision"
+              ],
+              "additionalProperties": false
+            },
+            "configurationId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "ownerRevision": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "owner": {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "pairing-token"
+                },
+                "principalId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                },
+                "tokenId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                },
+                "authorityId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                },
+                "authorityRevision": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                },
+                "scopes": {
+                  "maxItems": 256,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256
+                  }
+                }
+              },
+              "required": [
+                "kind",
+                "principalId",
+                "tokenId",
+                "authorityId",
+                "authorityRevision",
+                "scopes"
+              ],
+              "additionalProperties": false
+            },
+            "workspaceRevision": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "approvalId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "choices": {
+              "type": "object",
+              "properties": {
+                "processingPurpose": {
+                  "type": "string",
+                  "const": "accept-external-message-for-owner-review"
+                },
+                "sourceRetention": {
+                  "type": "string",
+                  "const": "memory-only-until-review-close-or-deadline"
+                },
+                "sourceRetentionMs": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 2147483647
+                },
+                "derivedRecord": {
+                  "type": "string",
+                  "const": "external-source-reference-only-v1"
+                },
+                "derivedRecordRetentionMs": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 2147483647
+                },
+                "execution": {
+                  "type": "string",
+                  "const": "none"
+                },
+                "ownerMayReadOriginal": {
+                  "type": "boolean",
+                  "const": true
+                }
+              },
+              "required": [
+                "processingPurpose",
+                "sourceRetention",
+                "sourceRetentionMs",
+                "derivedRecord",
+                "derivedRecordRetentionMs",
+                "execution",
+                "ownerMayReadOriginal"
+              ],
+              "additionalProperties": false
+            },
+            "acceptedAt": {
+              "type": "number"
+            },
+            "sourceExpiresAt": {
+              "type": "number"
+            },
+            "recordExpiresAt": {
+              "type": "number"
+            },
+            "state": {
+              "type": "string",
+              "enum": [
+                "accepted-for-review",
+                "reviewed",
+                "cancelled"
+              ]
+            },
+            "execution": {
+              "type": "string",
+              "const": "not-started"
+            }
+          },
+          "required": [
+            "id",
+            "ref",
+            "origin",
+            "configurationId",
+            "ownerRevision",
+            "workspaceRevision",
+            "approvalId",
+            "choices",
+            "acceptedAt",
+            "sourceExpiresAt",
+            "recordExpiresAt",
+            "state",
+            "execution"
+          ],
+          "additionalProperties": false
         },
-        "revision": {
+        "source": {
           "type": "string",
-          "minLength": 1,
-          "maxLength": 256
+          "enum": [
+            "available-in-memory",
+            "expired-or-lost"
+          ]
+        },
+        "recovery": {
+          "type": "string",
+          "enum": [
+            "owner-review-available",
+            "new-original-required"
+          ]
+        },
+        "original": {
+          "type": "object",
+          "properties": {
+            "text": {
+              "type": "string"
+            },
+            "unsupportedSources": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string"
+                  },
+                  "label": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "label"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "text",
+            "unsupportedSources"
+          ],
+          "additionalProperties": false
         }
       },
       "required": [
-        "id",
-        "username",
-        "revision"
+        "outcome",
+        "record",
+        "source",
+        "recovery"
       ],
       "additionalProperties": false
     },
-    "outcome": {
-      "type": "string"
-    },
-    "reason": {
-      "type": "string"
-    },
-    "ref": {
+    {
       "type": "object",
       "properties": {
-        "sessionId": {
+        "outcome": {
           "type": "string",
-          "minLength": 1,
-          "maxLength": 256
-        },
-        "inputId": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256
-        },
-        "sourceId": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256
-        },
-        "sourceRevision": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256
-        },
-        "requestId": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256
-        }
-      },
-      "required": [
-        "sessionId",
-        "inputId",
-        "sourceId",
-        "sourceRevision",
-        "requestId"
-      ],
-      "additionalProperties": false
-    },
-    "configurationId": {
-      "type": "string",
-      "minLength": 1,
-      "maxLength": 256
-    },
-    "expiresAt": {
-      "type": "number"
-    },
-    "pendingRetentionMs": {
-      "type": "integer",
-      "minimum": 1,
-      "maximum": 2147483647
-    },
-    "processing": {
-      "type": "string"
-    },
-    "restart": {
-      "type": "string"
-    },
-    "route": {
-      "type": "string"
-    },
-    "execution": {
-      "type": "string",
-      "const": "not-started"
-    },
-    "approvalId": {
-      "type": "string",
-      "minLength": 1,
-      "maxLength": 256
-    },
-    "source": {
-      "type": "string"
-    },
-    "recovery": {
-      "type": "string"
-    },
-    "record": {
-      "type": "object",
-      "properties": {
-        "id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256
+          "enum": [
+            "awaiting-owner",
+            "deciding",
+            "approved",
+            "cancelled",
+            "transferred",
+            "started",
+            "unknown"
+          ]
         },
         "ref": {
           "type": "object",
@@ -73962,527 +82485,154 @@ Explicit paired-owner command for bounded in-memory original-source intake. Conf
           ],
           "additionalProperties": false
         },
-        "origin": {
+        "source": {
+          "type": "string",
+          "enum": [
+            "awaiting-owner",
+            "released"
+          ]
+        },
+        "approvalId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      },
+      "required": [
+        "outcome",
+        "ref",
+        "source",
+        "approvalId"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "outcome": {
+          "type": "string",
+          "const": "held"
+        },
+        "reason": {
+          "type": "string",
+          "enum": [
+            "account-proof-required",
+            "account-not-chosen",
+            "account-proof-unavailable",
+            "account-proof-changed",
+            "workspace-changed",
+            "lifecycle-changed",
+            "owner-changed",
+            "not-owner",
+            "message-identity-missing",
+            "tracking-full",
+            "message-edited",
+            "no-configuration",
+            "configuration-not-current",
+            "source-unavailable",
+            "missing-source-proof",
+            "configuration-unavailable",
+            "chat-not-selected",
+            "already-decided",
+            "lifetime-exceeds-configuration",
+            "not-durably-resolved",
+            "review-queue-refused",
+            "review-held",
+            "review-closed",
+            "handoff-held"
+          ]
+        },
+        "message": {
+          "type": "string"
+        },
+        "nextStep": {
+          "type": "string"
+        },
+        "ref": {
           "type": "object",
           "properties": {
-            "kind": {
-              "type": "string",
-              "const": "external-original"
-            },
-            "accountId": {
+            "sessionId": {
               "type": "string",
               "minLength": 1,
               "maxLength": 256
             },
-            "accountRevision": {
+            "inputId": {
               "type": "string",
               "minLength": 1,
               "maxLength": 256
             },
-            "routeId": {
+            "sourceId": {
               "type": "string",
               "minLength": 1,
               "maxLength": 256
             },
-            "routeRevision": {
+            "sourceRevision": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "requestId": {
               "type": "string",
               "minLength": 1,
               "maxLength": 256
             }
           },
           "required": [
-            "kind",
-            "accountId",
-            "accountRevision",
-            "routeId",
-            "routeRevision"
+            "sessionId",
+            "inputId",
+            "sourceId",
+            "sourceRevision",
+            "requestId"
           ],
           "additionalProperties": false
         },
-        "configurationId": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256
+        "route": {
+          "type": "string"
         },
-        "ownerRevision": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256
-        },
-        "owner": {
+        "accountIdentity": {
           "type": "object",
           "properties": {
-            "kind": {
-              "type": "string",
-              "const": "pairing-token"
-            },
-            "principalId": {
+            "id": {
               "type": "string",
               "minLength": 1,
               "maxLength": 256
             },
-            "tokenId": {
+            "username": {
               "type": "string",
               "minLength": 1,
               "maxLength": 256
             },
-            "authorityId": {
+            "revision": {
               "type": "string",
               "minLength": 1,
               "maxLength": 256
-            },
-            "authorityRevision": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256
-            },
-            "scopes": {
-              "maxItems": 256,
-              "type": "array",
-              "items": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              }
             }
           },
           "required": [
-            "kind",
-            "principalId",
-            "tokenId",
-            "authorityId",
-            "authorityRevision",
-            "scopes"
+            "id",
+            "username",
+            "revision"
           ],
           "additionalProperties": false
-        },
-        "workspaceRevision": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256
         },
         "approvalId": {
           "type": "string",
           "minLength": 1,
           "maxLength": 256
         },
-        "choices": {
-          "type": "object",
-          "properties": {
-            "processingPurpose": {
-              "type": "string",
-              "const": "accept-external-message-for-owner-review"
-            },
-            "sourceRetention": {
-              "type": "string",
-              "const": "memory-only-until-review-close-or-deadline"
-            },
-            "sourceRetentionMs": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 2147483647
-            },
-            "derivedRecord": {
-              "type": "string",
-              "const": "external-source-reference-only-v1"
-            },
-            "derivedRecordRetentionMs": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 2147483647
-            },
-            "execution": {
-              "type": "string",
-              "const": "none"
-            },
-            "ownerMayReadOriginal": {
-              "type": "boolean",
-              "const": true
-            }
-          },
-          "required": [
-            "processingPurpose",
-            "sourceRetention",
-            "sourceRetentionMs",
-            "derivedRecord",
-            "derivedRecordRetentionMs",
-            "execution",
-            "ownerMayReadOriginal"
-          ],
-          "additionalProperties": false
-        },
-        "acceptedAt": {
-          "type": "number"
-        },
-        "sourceExpiresAt": {
-          "type": "number"
-        },
-        "recordExpiresAt": {
-          "type": "number"
-        },
-        "state": {
-          "type": "string",
-          "enum": [
-            "accepted-for-review",
-            "cancelled"
-          ]
-        },
-        "execution": {
-          "type": "string",
-          "const": "not-started"
-        }
-      },
-      "required": [
-        "id",
-        "ref",
-        "origin",
-        "configurationId",
-        "ownerRevision",
-        "workspaceRevision",
-        "approvalId",
-        "choices",
-        "acceptedAt",
-        "sourceExpiresAt",
-        "recordExpiresAt",
-        "state",
-        "execution"
-      ],
-      "additionalProperties": false
-    },
-    "records": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 256
-          },
-          "ref": {
-            "type": "object",
-            "properties": {
-              "sessionId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "inputId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "sourceId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "sourceRevision": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "requestId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              }
-            },
-            "required": [
-              "sessionId",
-              "inputId",
-              "sourceId",
-              "sourceRevision",
-              "requestId"
-            ],
-            "additionalProperties": false
-          },
-          "origin": {
-            "type": "object",
-            "properties": {
-              "kind": {
-                "type": "string",
-                "const": "external-original"
-              },
-              "accountId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "accountRevision": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "routeId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "routeRevision": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              }
-            },
-            "required": [
-              "kind",
-              "accountId",
-              "accountRevision",
-              "routeId",
-              "routeRevision"
-            ],
-            "additionalProperties": false
-          },
-          "configurationId": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 256
-          },
-          "ownerRevision": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 256
-          },
-          "owner": {
-            "type": "object",
-            "properties": {
-              "kind": {
-                "type": "string",
-                "const": "pairing-token"
-              },
-              "principalId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "tokenId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "authorityId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "authorityRevision": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "scopes": {
-                "maxItems": 256,
-                "type": "array",
-                "items": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 256
-                }
-              }
-            },
-            "required": [
-              "kind",
-              "principalId",
-              "tokenId",
-              "authorityId",
-              "authorityRevision",
-              "scopes"
-            ],
-            "additionalProperties": false
-          },
-          "workspaceRevision": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 256
-          },
-          "approvalId": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 256
-          },
-          "choices": {
-            "type": "object",
-            "properties": {
-              "processingPurpose": {
-                "type": "string",
-                "const": "accept-external-message-for-owner-review"
-              },
-              "sourceRetention": {
-                "type": "string",
-                "const": "memory-only-until-review-close-or-deadline"
-              },
-              "sourceRetentionMs": {
-                "type": "integer",
-                "minimum": 1,
-                "maximum": 2147483647
-              },
-              "derivedRecord": {
-                "type": "string",
-                "const": "external-source-reference-only-v1"
-              },
-              "derivedRecordRetentionMs": {
-                "type": "integer",
-                "minimum": 1,
-                "maximum": 2147483647
-              },
-              "execution": {
-                "type": "string",
-                "const": "none"
-              },
-              "ownerMayReadOriginal": {
-                "type": "boolean",
-                "const": true
-              }
-            },
-            "required": [
-              "processingPurpose",
-              "sourceRetention",
-              "sourceRetentionMs",
-              "derivedRecord",
-              "derivedRecordRetentionMs",
-              "execution",
-              "ownerMayReadOriginal"
-            ],
-            "additionalProperties": false
-          },
-          "acceptedAt": {
-            "type": "number"
-          },
-          "sourceExpiresAt": {
-            "type": "number"
-          },
-          "recordExpiresAt": {
-            "type": "number"
-          },
-          "state": {
-            "type": "string",
-            "enum": [
-              "accepted-for-review",
-              "cancelled"
-            ]
-          },
-          "execution": {
-            "type": "string",
-            "const": "not-started"
-          }
-        },
-        "required": [
-          "id",
-          "ref",
-          "origin",
-          "configurationId",
-          "ownerRevision",
-          "workspaceRevision",
-          "approvalId",
-          "choices",
-          "acceptedAt",
-          "sourceExpiresAt",
-          "recordExpiresAt",
-          "state",
-          "execution"
-        ],
-        "additionalProperties": false
-      }
-    },
-    "pending": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "properties": {
-          "ref": {
-            "type": "object",
-            "properties": {
-              "sessionId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "inputId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "sourceId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "sourceRevision": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "requestId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              }
-            },
-            "required": [
-              "sessionId",
-              "inputId",
-              "sourceId",
-              "sourceRevision",
-              "requestId"
-            ],
-            "additionalProperties": false
-          },
-          "approvalId": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 256
-          },
-          "sourceExpiresAt": {
-            "type": "number"
-          },
-          "outcome": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "ref",
-          "approvalId",
-          "sourceExpiresAt",
-          "outcome"
-        ],
-        "additionalProperties": false
-      }
-    },
-    "original": {
-      "type": "object",
-      "properties": {
-        "text": {
+        "source": {
           "type": "string"
-        },
-        "unsupportedSources": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "kind": {
-                "type": "string"
-              },
-              "label": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "kind",
-              "label"
-            ],
-            "additionalProperties": false
-          }
         }
       },
       "required": [
-        "text",
-        "unsupportedSources"
+        "outcome",
+        "reason",
+        "message",
+        "nextStep"
       ],
       "additionalProperties": false
     }
-  },
-  "additionalProperties": false
+  ]
 }
 ```
 
@@ -74841,55 +82991,6 @@ Run one explicitly installed, authorized browser battery. Unconfigured services 
             "query",
             "registryVersion",
             "candidates"
-          ],
-          "additionalProperties": false
-        }
-      },
-      "required": [
-        "protocolVersion",
-        "requestId",
-        "battery",
-        "batteryVersion",
-        "input"
-      ],
-      "additionalProperties": false
-    },
-    {
-      "type": "object",
-      "properties": {
-        "protocolVersion": {
-          "type": "number",
-          "enum": [
-            1
-          ]
-        },
-        "requestId": {
-          "type": "string",
-          "format": "uuid"
-        },
-        "battery": {
-          "type": "string",
-          "enum": [
-            "webui.mail.reply-subject"
-          ]
-        },
-        "batteryVersion": {
-          "type": "number",
-          "enum": [
-            1
-          ]
-        },
-        "input": {
-          "type": "object",
-          "properties": {
-            "subjectRef": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256
-            }
-          },
-          "required": [
-            "subjectRef"
           ],
           "additionalProperties": false
         }
@@ -76502,7 +84603,7 @@ Run one explicitly installed, authorized browser battery. Unconfigured services 
             "battery": {
               "type": "string",
               "enum": [
-                "webui.mail.reply-subject"
+                "webui.models.catalog-provider-match"
               ]
             },
             "batteryVersion": {
@@ -76526,400 +84627,6 @@ Run one explicitly installed, authorized browser battery. Unconfigured services 
               },
               "required": [
                 "alreadyReply"
-              ],
-              "additionalProperties": false
-            },
-            "readings": {
-              "type": "object",
-              "additionalProperties": {
-                "anyOf": [
-                  {
-                    "type": "object",
-                    "properties": {
-                      "kind": {
-                        "type": "string",
-                        "enum": [
-                          "yes-no"
-                        ]
-                      },
-                      "probability": {
-                        "type": "number",
-                        "minimum": 0,
-                        "maximum": 1
-                      },
-                      "verdict": {
-                        "type": "string",
-                        "enum": [
-                          "yes",
-                          "no",
-                          "uncertain"
-                        ]
-                      },
-                      "outcome": {
-                        "type": "string",
-                        "enum": [
-                          "act",
-                          "confirm",
-                          "escalate"
-                        ]
-                      }
-                    },
-                    "required": [
-                      "kind",
-                      "probability",
-                      "verdict",
-                      "outcome"
-                    ],
-                    "additionalProperties": false
-                  },
-                  {
-                    "type": "object",
-                    "properties": {
-                      "kind": {
-                        "type": "string",
-                        "enum": [
-                          "choice"
-                        ]
-                      },
-                      "choice": {
-                        "type": "string"
-                      },
-                      "confidence": {
-                        "type": "number",
-                        "minimum": 0,
-                        "maximum": 1
-                      },
-                      "probabilities": {
-                        "type": "object",
-                        "additionalProperties": {
-                          "type": "number",
-                          "minimum": 0,
-                          "maximum": 1
-                        }
-                      },
-                      "outcome": {
-                        "type": "string",
-                        "enum": [
-                          "act",
-                          "confirm",
-                          "escalate"
-                        ]
-                      }
-                    },
-                    "required": [
-                      "kind",
-                      "choice",
-                      "confidence",
-                      "probabilities",
-                      "outcome"
-                    ],
-                    "additionalProperties": false
-                  }
-                ]
-              }
-            },
-            "outcome": {
-              "type": "string",
-              "enum": [
-                "act",
-                "confirm",
-                "escalate"
-              ]
-            },
-            "evidence": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "decisionId": {
-                    "type": "string"
-                  },
-                  "model": {
-                    "type": "string"
-                  },
-                  "requestedModel": {
-                    "type": "string"
-                  },
-                  "usage": {
-                    "type": "object",
-                    "properties": {
-                      "inputTokens": {
-                        "type": "number"
-                      },
-                      "outputTokens": {
-                        "type": "number"
-                      }
-                    },
-                    "required": [
-                      "inputTokens",
-                      "outputTokens"
-                    ],
-                    "additionalProperties": false
-                  },
-                  "latencyMs": {
-                    "type": "number"
-                  }
-                },
-                "required": [
-                  "decisionId",
-                  "model",
-                  "requestedModel",
-                  "usage",
-                  "latencyMs"
-                ],
-                "additionalProperties": false
-              }
-            }
-          },
-          "required": [
-            "protocolVersion",
-            "requestId",
-            "battery",
-            "batteryVersion",
-            "status",
-            "value",
-            "readings",
-            "outcome",
-            "evidence"
-          ],
-          "additionalProperties": false
-        },
-        {
-          "type": "object",
-          "properties": {
-            "protocolVersion": {
-              "type": "number",
-              "enum": [
-                1
-              ]
-            },
-            "requestId": {
-              "type": "string"
-            },
-            "battery": {
-              "type": "string",
-              "enum": [
-                "webui.mail.reply-subject"
-              ]
-            },
-            "batteryVersion": {
-              "type": "number",
-              "enum": [
-                1
-              ]
-            },
-            "status": {
-              "type": "string",
-              "enum": [
-                "held"
-              ]
-            },
-            "reason": {
-              "type": "string",
-              "enum": [
-                "uncertain"
-              ]
-            },
-            "readings": {
-              "type": "object",
-              "additionalProperties": {
-                "anyOf": [
-                  {
-                    "type": "object",
-                    "properties": {
-                      "kind": {
-                        "type": "string",
-                        "enum": [
-                          "yes-no"
-                        ]
-                      },
-                      "probability": {
-                        "type": "number",
-                        "minimum": 0,
-                        "maximum": 1
-                      },
-                      "verdict": {
-                        "type": "string",
-                        "enum": [
-                          "yes",
-                          "no",
-                          "uncertain"
-                        ]
-                      },
-                      "outcome": {
-                        "type": "string",
-                        "enum": [
-                          "act",
-                          "confirm",
-                          "escalate"
-                        ]
-                      }
-                    },
-                    "required": [
-                      "kind",
-                      "probability",
-                      "verdict",
-                      "outcome"
-                    ],
-                    "additionalProperties": false
-                  },
-                  {
-                    "type": "object",
-                    "properties": {
-                      "kind": {
-                        "type": "string",
-                        "enum": [
-                          "choice"
-                        ]
-                      },
-                      "choice": {
-                        "type": "string"
-                      },
-                      "confidence": {
-                        "type": "number",
-                        "minimum": 0,
-                        "maximum": 1
-                      },
-                      "probabilities": {
-                        "type": "object",
-                        "additionalProperties": {
-                          "type": "number",
-                          "minimum": 0,
-                          "maximum": 1
-                        }
-                      },
-                      "outcome": {
-                        "type": "string",
-                        "enum": [
-                          "act",
-                          "confirm",
-                          "escalate"
-                        ]
-                      }
-                    },
-                    "required": [
-                      "kind",
-                      "choice",
-                      "confidence",
-                      "probabilities",
-                      "outcome"
-                    ],
-                    "additionalProperties": false
-                  }
-                ]
-              }
-            },
-            "outcome": {
-              "type": "string",
-              "enum": [
-                "confirm",
-                "escalate"
-              ]
-            },
-            "evidence": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "decisionId": {
-                    "type": "string"
-                  },
-                  "model": {
-                    "type": "string"
-                  },
-                  "requestedModel": {
-                    "type": "string"
-                  },
-                  "usage": {
-                    "type": "object",
-                    "properties": {
-                      "inputTokens": {
-                        "type": "number"
-                      },
-                      "outputTokens": {
-                        "type": "number"
-                      }
-                    },
-                    "required": [
-                      "inputTokens",
-                      "outputTokens"
-                    ],
-                    "additionalProperties": false
-                  },
-                  "latencyMs": {
-                    "type": "number"
-                  }
-                },
-                "required": [
-                  "decisionId",
-                  "model",
-                  "requestedModel",
-                  "usage",
-                  "latencyMs"
-                ],
-                "additionalProperties": false
-              }
-            }
-          },
-          "required": [
-            "protocolVersion",
-            "requestId",
-            "battery",
-            "batteryVersion",
-            "status",
-            "reason",
-            "readings",
-            "outcome",
-            "evidence"
-          ],
-          "additionalProperties": false
-        }
-      ]
-    },
-    {
-      "anyOf": [
-        {
-          "type": "object",
-          "properties": {
-            "protocolVersion": {
-              "type": "number",
-              "enum": [
-                1
-              ]
-            },
-            "requestId": {
-              "type": "string"
-            },
-            "battery": {
-              "type": "string",
-              "enum": [
-                "webui.models.catalog-provider-match"
-              ]
-            },
-            "batteryVersion": {
-              "type": "number",
-              "enum": [
-                1
-              ]
-            },
-            "status": {
-              "type": "string",
-              "enum": [
-                "settled"
-              ]
-            },
-            "value": {
-              "type": "object",
-              "properties": {
-                "matches": {
-                  "type": "array",
-                  "items": {
-                    "type": "boolean"
-                  }
-                }
-              },
-              "required": [
-                "matches"
               ],
               "additionalProperties": false
             },
@@ -78487,38 +86194,15 @@ Run one explicitly installed, authorized browser battery. Unconfigured services 
             "value": {
               "type": "object",
               "properties": {
-                "language": {
-                  "type": "string",
-                  "enum": [
-                    "bash",
-                    "c",
-                    "cpp",
-                    "csharp",
-                    "css",
-                    "diff",
-                    "dockerfile",
-                    "go",
-                    "ini",
-                    "java",
-                    "javascript",
-                    "json",
-                    "markdown",
-                    "php",
-                    "plaintext",
-                    "python",
-                    "ruby",
-                    "rust",
-                    "shell",
-                    "sql",
-                    "typescript",
-                    "wasm",
-                    "xml",
-                    "yaml"
-                  ]
+                "matches": {
+                  "type": "array",
+                  "items": {
+                    "type": "boolean"
+                  }
                 }
               },
               "required": [
-                "language"
+                "matches"
               ],
               "additionalProperties": false
             },
@@ -95073,10 +102757,22 @@ Render and persist a markdown/wiki projection as a derived artifact.
           "type": "string"
         },
         "acquisitionMode": {
-          "type": "string"
+          "type": "string",
+          "enum": [
+            "inline-data",
+            "local-path",
+            "remote-fetch",
+            "unknown"
+          ]
         },
         "fetchMode": {
-          "type": "string"
+          "type": "string",
+          "enum": [
+            "not-applicable",
+            "public-only",
+            "allow-private-hosts",
+            "unknown"
+          ]
         },
         "metadata": {
           "type": "object",
@@ -99425,811 +107121,9 @@ Persist a meaningful project decision record for future TUI and agent context.
 }
 ```
 
-#### `projectPlanning.evaluate`
-
-Validate planning state and return gaps/next-question hints without mutating state or driving conversation.
-
-- Title: `Evaluate Project Planning Readiness`
-- Source: `builtin`
-- Access: `authenticated`
-- Transport: `http`, `ws`
-- HTTP: `POST /api/projects/planning/evaluate`
-- Scopes: `read:knowledge`
-- Emits events: none
-- Dangerous: `no`
-- Invokable: `yes`
-
-##### Input schema
-
-```json
-{
-  "type": "object",
-  "properties": {
-    "projectId": {
-      "type": "string"
-    },
-    "knowledgeSpaceId": {
-      "type": "string"
-    },
-    "planningId": {
-      "type": "string"
-    },
-    "state": {
-      "type": "object",
-      "additionalProperties": {
-        "anyOf": [
-          {
-            "type": "string"
-          },
-          {
-            "type": "number"
-          },
-          {
-            "type": "boolean"
-          },
-          {
-            "type": "null"
-          },
-          {
-            "type": "object",
-            "additionalProperties": {}
-          },
-          {
-            "type": "array",
-            "items": {}
-          }
-        ]
-      }
-    }
-  },
-  "additionalProperties": true
-}
-```
-
-##### Output schema
-
-```json
-{
-  "type": "object",
-  "properties": {
-    "operationProvenance": {
-      "type": "string",
-      "enum": [
-        "classic"
-      ]
-    },
-    "semanticAssessment": {
-      "type": "string",
-      "enum": [
-        "not-evaluated"
-      ]
-    },
-    "readinessAssessment": {
-      "type": "object",
-      "properties": {
-        "basis": {
-          "type": "string",
-          "enum": [
-            "native-structure-and-owner-approval",
-            "semantic-and-native"
-          ]
-        },
-        "semanticAssessment": {
-          "type": "string",
-          "enum": [
-            "specified",
-            "ambiguous",
-            "unavailable",
-            "not-evaluated"
-          ]
-        }
-      },
-      "required": [
-        "basis",
-        "semanticAssessment"
-      ],
-      "additionalProperties": false
-    },
-    "ok": {
-      "type": "boolean"
-    },
-    "projectId": {
-      "type": "string"
-    },
-    "knowledgeSpaceId": {
-      "type": "string"
-    },
-    "readiness": {
-      "type": "string"
-    },
-    "gaps": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "kind": {
-            "type": "string"
-          },
-          "severity": {
-            "type": "string"
-          },
-          "message": {
-            "type": "string"
-          },
-          "question": {
-            "type": "object",
-            "properties": {
-              "id": {
-                "type": "string"
-              },
-              "prompt": {
-                "type": "string"
-              },
-              "whyItMatters": {
-                "type": "string"
-              },
-              "recommendedAnswer": {
-                "type": "string"
-              },
-              "consequence": {
-                "type": "string"
-              },
-              "status": {
-                "type": "string"
-              },
-              "answer": {
-                "type": "string"
-              },
-              "answeredAt": {
-                "type": "number"
-              },
-              "metadata": {
-                "type": "object",
-                "additionalProperties": {
-                  "anyOf": [
-                    {
-                      "type": "string"
-                    },
-                    {
-                      "type": "number"
-                    },
-                    {
-                      "type": "boolean"
-                    },
-                    {
-                      "type": "null"
-                    },
-                    {
-                      "type": "object",
-                      "additionalProperties": {}
-                    },
-                    {
-                      "type": "array",
-                      "items": {}
-                    }
-                  ]
-                }
-              }
-            },
-            "required": [
-              "id",
-              "prompt"
-            ],
-            "additionalProperties": true
-          },
-          "relatedTaskIds": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "metadata": {
-            "type": "object",
-            "additionalProperties": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "number"
-                },
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "null"
-                },
-                {
-                  "type": "object",
-                  "additionalProperties": {}
-                },
-                {
-                  "type": "array",
-                  "items": {}
-                }
-              ]
-            }
-          }
-        },
-        "required": [
-          "id",
-          "kind",
-          "severity",
-          "message"
-        ],
-        "additionalProperties": true
-      }
-    },
-    "nextQuestion": {
-      "type": "object",
-      "properties": {
-        "id": {
-          "type": "string"
-        },
-        "prompt": {
-          "type": "string"
-        },
-        "whyItMatters": {
-          "type": "string"
-        },
-        "recommendedAnswer": {
-          "type": "string"
-        },
-        "consequence": {
-          "type": "string"
-        },
-        "status": {
-          "type": "string"
-        },
-        "answer": {
-          "type": "string"
-        },
-        "answeredAt": {
-          "type": "number"
-        },
-        "metadata": {
-          "type": "object",
-          "additionalProperties": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "number"
-              },
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              },
-              {
-                "type": "object",
-                "additionalProperties": {}
-              },
-              {
-                "type": "array",
-                "items": {}
-              }
-            ]
-          }
-        }
-      },
-      "required": [
-        "id",
-        "prompt"
-      ],
-      "additionalProperties": true
-    },
-    "state": {
-      "type": "object",
-      "properties": {
-        "id": {
-          "type": "string"
-        },
-        "projectId": {
-          "type": "string"
-        },
-        "knowledgeSpaceId": {
-          "type": "string"
-        },
-        "goal": {
-          "type": "string"
-        },
-        "scope": {
-          "type": "string"
-        },
-        "knownContext": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "openQuestions": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "id": {
-                "type": "string"
-              },
-              "prompt": {
-                "type": "string"
-              },
-              "whyItMatters": {
-                "type": "string"
-              },
-              "recommendedAnswer": {
-                "type": "string"
-              },
-              "consequence": {
-                "type": "string"
-              },
-              "status": {
-                "type": "string"
-              },
-              "answer": {
-                "type": "string"
-              },
-              "answeredAt": {
-                "type": "number"
-              },
-              "metadata": {
-                "type": "object",
-                "additionalProperties": {
-                  "anyOf": [
-                    {
-                      "type": "string"
-                    },
-                    {
-                      "type": "number"
-                    },
-                    {
-                      "type": "boolean"
-                    },
-                    {
-                      "type": "null"
-                    },
-                    {
-                      "type": "object",
-                      "additionalProperties": {}
-                    },
-                    {
-                      "type": "array",
-                      "items": {}
-                    }
-                  ]
-                }
-              }
-            },
-            "required": [
-              "id",
-              "prompt"
-            ],
-            "additionalProperties": true
-          }
-        },
-        "answeredQuestions": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "id": {
-                "type": "string"
-              },
-              "prompt": {
-                "type": "string"
-              },
-              "whyItMatters": {
-                "type": "string"
-              },
-              "recommendedAnswer": {
-                "type": "string"
-              },
-              "consequence": {
-                "type": "string"
-              },
-              "status": {
-                "type": "string"
-              },
-              "answer": {
-                "type": "string"
-              },
-              "answeredAt": {
-                "type": "number"
-              },
-              "metadata": {
-                "type": "object",
-                "additionalProperties": {
-                  "anyOf": [
-                    {
-                      "type": "string"
-                    },
-                    {
-                      "type": "number"
-                    },
-                    {
-                      "type": "boolean"
-                    },
-                    {
-                      "type": "null"
-                    },
-                    {
-                      "type": "object",
-                      "additionalProperties": {}
-                    },
-                    {
-                      "type": "array",
-                      "items": {}
-                    }
-                  ]
-                }
-              }
-            },
-            "required": [
-              "id",
-              "prompt"
-            ],
-            "additionalProperties": true
-          }
-        },
-        "decisions": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "id": {
-                "type": "string"
-              },
-              "title": {
-                "type": "string"
-              },
-              "context": {
-                "type": "string"
-              },
-              "decision": {
-                "type": "string"
-              },
-              "alternatives": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
-              "reasoning": {
-                "type": "string"
-              },
-              "consequences": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
-              "status": {
-                "type": "string"
-              },
-              "createdAt": {
-                "type": "number"
-              },
-              "updatedAt": {
-                "type": "number"
-              },
-              "metadata": {
-                "type": "object",
-                "additionalProperties": {
-                  "anyOf": [
-                    {
-                      "type": "string"
-                    },
-                    {
-                      "type": "number"
-                    },
-                    {
-                      "type": "boolean"
-                    },
-                    {
-                      "type": "null"
-                    },
-                    {
-                      "type": "object",
-                      "additionalProperties": {}
-                    },
-                    {
-                      "type": "array",
-                      "items": {}
-                    }
-                  ]
-                }
-              }
-            },
-            "required": [
-              "id",
-              "title",
-              "decision"
-            ],
-            "additionalProperties": true
-          }
-        },
-        "assumptions": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "constraints": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "risks": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "tasks": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "id": {
-                "type": "string"
-              },
-              "title": {
-                "type": "string"
-              },
-              "why": {
-                "type": "string"
-              },
-              "status": {
-                "type": "string"
-              },
-              "dependencies": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
-              "likelyFiles": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
-              "verification": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
-              "canRunConcurrently": {
-                "type": "boolean"
-              },
-              "needsReview": {
-                "type": "boolean"
-              },
-              "blockedOnUserInput": {
-                "type": "boolean"
-              },
-              "recommendedAgent": {
-                "type": "string"
-              },
-              "metadata": {
-                "type": "object",
-                "additionalProperties": {
-                  "anyOf": [
-                    {
-                      "type": "string"
-                    },
-                    {
-                      "type": "number"
-                    },
-                    {
-                      "type": "boolean"
-                    },
-                    {
-                      "type": "null"
-                    },
-                    {
-                      "type": "object",
-                      "additionalProperties": {}
-                    },
-                    {
-                      "type": "array",
-                      "items": {}
-                    }
-                  ]
-                }
-              }
-            },
-            "required": [
-              "id",
-              "title"
-            ],
-            "additionalProperties": true
-          }
-        },
-        "dependencies": {
-          "type": "array",
-          "items": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "number"
-              },
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              },
-              {
-                "type": "object",
-                "additionalProperties": {}
-              },
-              {}
-            ]
-          }
-        },
-        "verificationGates": {
-          "type": "array",
-          "items": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "number"
-              },
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              },
-              {
-                "type": "object",
-                "additionalProperties": {}
-              },
-              {}
-            ]
-          }
-        },
-        "agentAssignments": {
-          "type": "array",
-          "items": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "number"
-              },
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              },
-              {
-                "type": "object",
-                "additionalProperties": {}
-              },
-              {}
-            ]
-          }
-        },
-        "readiness": {
-          "type": "string"
-        },
-        "readinessAssessment": {
-          "type": "object",
-          "properties": {
-            "basis": {
-              "type": "string",
-              "enum": [
-                "native-structure-and-owner-approval",
-                "semantic-and-native"
-              ]
-            },
-            "semanticAssessment": {
-              "type": "string",
-              "enum": [
-                "specified",
-                "ambiguous",
-                "unavailable",
-                "not-evaluated"
-              ]
-            }
-          },
-          "required": [
-            "basis",
-            "semanticAssessment"
-          ],
-          "additionalProperties": false
-        },
-        "executionApproved": {
-          "type": "boolean"
-        },
-        "createdAt": {
-          "type": "number"
-        },
-        "updatedAt": {
-          "type": "number"
-        },
-        "metadata": {
-          "type": "object",
-          "additionalProperties": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "number"
-              },
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              },
-              {
-                "type": "object",
-                "additionalProperties": {}
-              },
-              {
-                "type": "array",
-                "items": {}
-              }
-            ]
-          }
-        }
-      },
-      "required": [
-        "id",
-        "projectId",
-        "knowledgeSpaceId",
-        "goal",
-        "knownContext",
-        "openQuestions",
-        "answeredQuestions",
-        "decisions",
-        "assumptions",
-        "constraints",
-        "risks",
-        "tasks",
-        "dependencies",
-        "verificationGates",
-        "agentAssignments",
-        "readiness",
-        "executionApproved",
-        "createdAt",
-        "updatedAt"
-      ],
-      "additionalProperties": true
-    }
-  },
-  "required": [
-    "ok",
-    "projectId",
-    "knowledgeSpaceId",
-    "readiness",
-    "gaps",
-    "state"
-  ],
-  "additionalProperties": true
-}
-```
-
 #### `projectPlanning.language.get`
 
-Return canonical project vocabulary and resolved ambiguity records from the project knowledge space.
+Return the saved historical project vocabulary and resolved ambiguity records from the project knowledge space.
 
 - Title: `Get Project Language`
 - Source: `builtin`
@@ -100505,317 +107399,9 @@ Return canonical project vocabulary and resolved ambiguity records from the proj
 }
 ```
 
-#### `projectPlanning.language.upsert`
-
-Persist project vocabulary and ambiguity-resolution records without changing any live daemon session behavior.
-
-- Title: `Upsert Project Language`
-- Source: `builtin`
-- Access: `admin`
-- Transport: `http`, `ws`
-- HTTP: `POST /api/projects/planning/language`
-- Scopes: `write:knowledge`
-- Emits events: none
-- Dangerous: `no`
-- Invokable: `yes`
-
-##### Input schema
-
-```json
-{
-  "type": "object",
-  "properties": {
-    "projectId": {
-      "type": "string"
-    },
-    "knowledgeSpaceId": {
-      "type": "string"
-    },
-    "language": {
-      "type": "object",
-      "additionalProperties": {
-        "anyOf": [
-          {
-            "type": "string"
-          },
-          {
-            "type": "number"
-          },
-          {
-            "type": "boolean"
-          },
-          {
-            "type": "null"
-          },
-          {
-            "type": "object",
-            "additionalProperties": {}
-          },
-          {
-            "type": "array",
-            "items": {}
-          }
-        ]
-      }
-    }
-  },
-  "required": [
-    "language"
-  ],
-  "additionalProperties": true
-}
-```
-
-##### Output schema
-
-```json
-{
-  "type": "object",
-  "properties": {
-    "ok": {
-      "type": "boolean"
-    },
-    "projectId": {
-      "type": "string"
-    },
-    "knowledgeSpaceId": {
-      "type": "string"
-    },
-    "language": {
-      "anyOf": [
-        {
-          "type": "object",
-          "properties": {
-            "projectId": {
-              "type": "string"
-            },
-            "knowledgeSpaceId": {
-              "type": "string"
-            },
-            "terms": {
-              "type": "array",
-              "items": {
-                "anyOf": [
-                  {
-                    "type": "string"
-                  },
-                  {
-                    "type": "number"
-                  },
-                  {
-                    "type": "boolean"
-                  },
-                  {
-                    "type": "null"
-                  },
-                  {
-                    "type": "object",
-                    "additionalProperties": {}
-                  },
-                  {}
-                ]
-              }
-            },
-            "ambiguities": {
-              "type": "array",
-              "items": {
-                "anyOf": [
-                  {
-                    "type": "string"
-                  },
-                  {
-                    "type": "number"
-                  },
-                  {
-                    "type": "boolean"
-                  },
-                  {
-                    "type": "null"
-                  },
-                  {
-                    "type": "object",
-                    "additionalProperties": {}
-                  },
-                  {}
-                ]
-              }
-            },
-            "examples": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            },
-            "updatedAt": {
-              "type": "number"
-            },
-            "metadata": {
-              "type": "object",
-              "additionalProperties": {
-                "anyOf": [
-                  {
-                    "type": "string"
-                  },
-                  {
-                    "type": "number"
-                  },
-                  {
-                    "type": "boolean"
-                  },
-                  {
-                    "type": "null"
-                  },
-                  {
-                    "type": "object",
-                    "additionalProperties": {}
-                  },
-                  {
-                    "type": "array",
-                    "items": {}
-                  }
-                ]
-              }
-            }
-          },
-          "required": [
-            "projectId",
-            "knowledgeSpaceId",
-            "terms",
-            "ambiguities",
-            "updatedAt"
-          ],
-          "additionalProperties": true
-        },
-        {
-          "type": "null"
-        }
-      ]
-    },
-    "source": {
-      "type": "object",
-      "properties": {
-        "id": {
-          "type": "string"
-        },
-        "connectorId": {
-          "type": "string"
-        },
-        "sourceType": {
-          "type": "string",
-          "enum": [
-            "url",
-            "bookmark",
-            "bookmark-list",
-            "history",
-            "document",
-            "repo",
-            "dataset",
-            "image",
-            "manual",
-            "other"
-          ]
-        },
-        "title": {
-          "type": "string"
-        },
-        "sourceUri": {
-          "type": "string"
-        },
-        "canonicalUri": {
-          "type": "string"
-        },
-        "summary": {
-          "type": "string"
-        },
-        "description": {
-          "type": "string"
-        },
-        "tags": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "folderPath": {
-          "type": "string"
-        },
-        "status": {
-          "type": "string"
-        },
-        "artifactId": {
-          "type": "string"
-        },
-        "contentHash": {
-          "type": "string"
-        },
-        "lastCrawledAt": {
-          "type": "number"
-        },
-        "crawlError": {
-          "type": "string"
-        },
-        "sessionId": {
-          "type": "string"
-        },
-        "metadata": {
-          "type": "object",
-          "additionalProperties": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "number"
-              },
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              },
-              {
-                "type": "object",
-                "additionalProperties": {}
-              },
-              {
-                "type": "array",
-                "items": {}
-              }
-            ]
-          }
-        },
-        "createdAt": {
-          "type": "number"
-        },
-        "updatedAt": {
-          "type": "number"
-        }
-      },
-      "required": [
-        "id",
-        "connectorId",
-        "sourceType",
-        "tags",
-        "status",
-        "metadata",
-        "createdAt",
-        "updatedAt"
-      ],
-      "additionalProperties": true
-    }
-  },
-  "required": [
-    "ok",
-    "projectId",
-    "knowledgeSpaceId"
-  ],
-  "additionalProperties": true
-}
-```
-
 #### `projectPlanning.state.get`
 
-Return the current project-scoped planning state artifact. The TUI owns the active conversation loop.
+Return a saved historical planning state record. Planning state is read-only history; the work plan is the live plan.
 
 - Title: `Get Project Planning State`
 - Source: `builtin`
@@ -100844,717 +107430,6 @@ Return the current project-scoped planning state artifact. The TUI owns the acti
     }
   },
   "additionalProperties": false
-}
-```
-
-##### Output schema
-
-```json
-{
-  "type": "object",
-  "properties": {
-    "ok": {
-      "type": "boolean"
-    },
-    "projectId": {
-      "type": "string"
-    },
-    "knowledgeSpaceId": {
-      "type": "string"
-    },
-    "state": {
-      "anyOf": [
-        {
-          "type": "object",
-          "properties": {
-            "id": {
-              "type": "string"
-            },
-            "projectId": {
-              "type": "string"
-            },
-            "knowledgeSpaceId": {
-              "type": "string"
-            },
-            "goal": {
-              "type": "string"
-            },
-            "scope": {
-              "type": "string"
-            },
-            "knownContext": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            },
-            "openQuestions": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "id": {
-                    "type": "string"
-                  },
-                  "prompt": {
-                    "type": "string"
-                  },
-                  "whyItMatters": {
-                    "type": "string"
-                  },
-                  "recommendedAnswer": {
-                    "type": "string"
-                  },
-                  "consequence": {
-                    "type": "string"
-                  },
-                  "status": {
-                    "type": "string"
-                  },
-                  "answer": {
-                    "type": "string"
-                  },
-                  "answeredAt": {
-                    "type": "number"
-                  },
-                  "metadata": {
-                    "type": "object",
-                    "additionalProperties": {
-                      "anyOf": [
-                        {
-                          "type": "string"
-                        },
-                        {
-                          "type": "number"
-                        },
-                        {
-                          "type": "boolean"
-                        },
-                        {
-                          "type": "null"
-                        },
-                        {
-                          "type": "object",
-                          "additionalProperties": {}
-                        },
-                        {
-                          "type": "array",
-                          "items": {}
-                        }
-                      ]
-                    }
-                  }
-                },
-                "required": [
-                  "id",
-                  "prompt"
-                ],
-                "additionalProperties": true
-              }
-            },
-            "answeredQuestions": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "id": {
-                    "type": "string"
-                  },
-                  "prompt": {
-                    "type": "string"
-                  },
-                  "whyItMatters": {
-                    "type": "string"
-                  },
-                  "recommendedAnswer": {
-                    "type": "string"
-                  },
-                  "consequence": {
-                    "type": "string"
-                  },
-                  "status": {
-                    "type": "string"
-                  },
-                  "answer": {
-                    "type": "string"
-                  },
-                  "answeredAt": {
-                    "type": "number"
-                  },
-                  "metadata": {
-                    "type": "object",
-                    "additionalProperties": {
-                      "anyOf": [
-                        {
-                          "type": "string"
-                        },
-                        {
-                          "type": "number"
-                        },
-                        {
-                          "type": "boolean"
-                        },
-                        {
-                          "type": "null"
-                        },
-                        {
-                          "type": "object",
-                          "additionalProperties": {}
-                        },
-                        {
-                          "type": "array",
-                          "items": {}
-                        }
-                      ]
-                    }
-                  }
-                },
-                "required": [
-                  "id",
-                  "prompt"
-                ],
-                "additionalProperties": true
-              }
-            },
-            "decisions": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "id": {
-                    "type": "string"
-                  },
-                  "title": {
-                    "type": "string"
-                  },
-                  "context": {
-                    "type": "string"
-                  },
-                  "decision": {
-                    "type": "string"
-                  },
-                  "alternatives": {
-                    "type": "array",
-                    "items": {
-                      "type": "string"
-                    }
-                  },
-                  "reasoning": {
-                    "type": "string"
-                  },
-                  "consequences": {
-                    "type": "array",
-                    "items": {
-                      "type": "string"
-                    }
-                  },
-                  "status": {
-                    "type": "string"
-                  },
-                  "createdAt": {
-                    "type": "number"
-                  },
-                  "updatedAt": {
-                    "type": "number"
-                  },
-                  "metadata": {
-                    "type": "object",
-                    "additionalProperties": {
-                      "anyOf": [
-                        {
-                          "type": "string"
-                        },
-                        {
-                          "type": "number"
-                        },
-                        {
-                          "type": "boolean"
-                        },
-                        {
-                          "type": "null"
-                        },
-                        {
-                          "type": "object",
-                          "additionalProperties": {}
-                        },
-                        {
-                          "type": "array",
-                          "items": {}
-                        }
-                      ]
-                    }
-                  }
-                },
-                "required": [
-                  "id",
-                  "title",
-                  "decision"
-                ],
-                "additionalProperties": true
-              }
-            },
-            "assumptions": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            },
-            "constraints": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            },
-            "risks": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            },
-            "tasks": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "id": {
-                    "type": "string"
-                  },
-                  "title": {
-                    "type": "string"
-                  },
-                  "why": {
-                    "type": "string"
-                  },
-                  "status": {
-                    "type": "string"
-                  },
-                  "dependencies": {
-                    "type": "array",
-                    "items": {
-                      "type": "string"
-                    }
-                  },
-                  "likelyFiles": {
-                    "type": "array",
-                    "items": {
-                      "type": "string"
-                    }
-                  },
-                  "verification": {
-                    "type": "array",
-                    "items": {
-                      "type": "string"
-                    }
-                  },
-                  "canRunConcurrently": {
-                    "type": "boolean"
-                  },
-                  "needsReview": {
-                    "type": "boolean"
-                  },
-                  "blockedOnUserInput": {
-                    "type": "boolean"
-                  },
-                  "recommendedAgent": {
-                    "type": "string"
-                  },
-                  "metadata": {
-                    "type": "object",
-                    "additionalProperties": {
-                      "anyOf": [
-                        {
-                          "type": "string"
-                        },
-                        {
-                          "type": "number"
-                        },
-                        {
-                          "type": "boolean"
-                        },
-                        {
-                          "type": "null"
-                        },
-                        {
-                          "type": "object",
-                          "additionalProperties": {}
-                        },
-                        {
-                          "type": "array",
-                          "items": {}
-                        }
-                      ]
-                    }
-                  }
-                },
-                "required": [
-                  "id",
-                  "title"
-                ],
-                "additionalProperties": true
-              }
-            },
-            "dependencies": {
-              "type": "array",
-              "items": {
-                "anyOf": [
-                  {
-                    "type": "string"
-                  },
-                  {
-                    "type": "number"
-                  },
-                  {
-                    "type": "boolean"
-                  },
-                  {
-                    "type": "null"
-                  },
-                  {
-                    "type": "object",
-                    "additionalProperties": {}
-                  },
-                  {}
-                ]
-              }
-            },
-            "verificationGates": {
-              "type": "array",
-              "items": {
-                "anyOf": [
-                  {
-                    "type": "string"
-                  },
-                  {
-                    "type": "number"
-                  },
-                  {
-                    "type": "boolean"
-                  },
-                  {
-                    "type": "null"
-                  },
-                  {
-                    "type": "object",
-                    "additionalProperties": {}
-                  },
-                  {}
-                ]
-              }
-            },
-            "agentAssignments": {
-              "type": "array",
-              "items": {
-                "anyOf": [
-                  {
-                    "type": "string"
-                  },
-                  {
-                    "type": "number"
-                  },
-                  {
-                    "type": "boolean"
-                  },
-                  {
-                    "type": "null"
-                  },
-                  {
-                    "type": "object",
-                    "additionalProperties": {}
-                  },
-                  {}
-                ]
-              }
-            },
-            "readiness": {
-              "type": "string"
-            },
-            "readinessAssessment": {
-              "type": "object",
-              "properties": {
-                "basis": {
-                  "type": "string",
-                  "enum": [
-                    "native-structure-and-owner-approval",
-                    "semantic-and-native"
-                  ]
-                },
-                "semanticAssessment": {
-                  "type": "string",
-                  "enum": [
-                    "specified",
-                    "ambiguous",
-                    "unavailable",
-                    "not-evaluated"
-                  ]
-                }
-              },
-              "required": [
-                "basis",
-                "semanticAssessment"
-              ],
-              "additionalProperties": false
-            },
-            "executionApproved": {
-              "type": "boolean"
-            },
-            "createdAt": {
-              "type": "number"
-            },
-            "updatedAt": {
-              "type": "number"
-            },
-            "metadata": {
-              "type": "object",
-              "additionalProperties": {
-                "anyOf": [
-                  {
-                    "type": "string"
-                  },
-                  {
-                    "type": "number"
-                  },
-                  {
-                    "type": "boolean"
-                  },
-                  {
-                    "type": "null"
-                  },
-                  {
-                    "type": "object",
-                    "additionalProperties": {}
-                  },
-                  {
-                    "type": "array",
-                    "items": {}
-                  }
-                ]
-              }
-            }
-          },
-          "required": [
-            "id",
-            "projectId",
-            "knowledgeSpaceId",
-            "goal",
-            "knownContext",
-            "openQuestions",
-            "answeredQuestions",
-            "decisions",
-            "assumptions",
-            "constraints",
-            "risks",
-            "tasks",
-            "dependencies",
-            "verificationGates",
-            "agentAssignments",
-            "readiness",
-            "executionApproved",
-            "createdAt",
-            "updatedAt"
-          ],
-          "additionalProperties": true
-        },
-        {
-          "type": "null"
-        }
-      ]
-    },
-    "revision": {
-      "type": "object",
-      "properties": {
-        "sourceId": {
-          "type": "string"
-        },
-        "generation": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "sourceId",
-        "generation"
-      ],
-      "additionalProperties": false
-    },
-    "source": {
-      "type": "object",
-      "properties": {
-        "id": {
-          "type": "string"
-        },
-        "connectorId": {
-          "type": "string"
-        },
-        "sourceType": {
-          "type": "string",
-          "enum": [
-            "url",
-            "bookmark",
-            "bookmark-list",
-            "history",
-            "document",
-            "repo",
-            "dataset",
-            "image",
-            "manual",
-            "other"
-          ]
-        },
-        "title": {
-          "type": "string"
-        },
-        "sourceUri": {
-          "type": "string"
-        },
-        "canonicalUri": {
-          "type": "string"
-        },
-        "summary": {
-          "type": "string"
-        },
-        "description": {
-          "type": "string"
-        },
-        "tags": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "folderPath": {
-          "type": "string"
-        },
-        "status": {
-          "type": "string"
-        },
-        "artifactId": {
-          "type": "string"
-        },
-        "contentHash": {
-          "type": "string"
-        },
-        "lastCrawledAt": {
-          "type": "number"
-        },
-        "crawlError": {
-          "type": "string"
-        },
-        "sessionId": {
-          "type": "string"
-        },
-        "metadata": {
-          "type": "object",
-          "additionalProperties": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "number"
-              },
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              },
-              {
-                "type": "object",
-                "additionalProperties": {}
-              },
-              {
-                "type": "array",
-                "items": {}
-              }
-            ]
-          }
-        },
-        "createdAt": {
-          "type": "number"
-        },
-        "updatedAt": {
-          "type": "number"
-        }
-      },
-      "required": [
-        "id",
-        "connectorId",
-        "sourceType",
-        "tags",
-        "status",
-        "metadata",
-        "createdAt",
-        "updatedAt"
-      ],
-      "additionalProperties": true
-    }
-  },
-  "required": [
-    "ok",
-    "projectId",
-    "knowledgeSpaceId"
-  ],
-  "additionalProperties": true
-}
-```
-
-#### `projectPlanning.state.upsert`
-
-Persist project-scoped planning state from the TUI interview loop and evaluate readiness.
-
-- Title: `Upsert Project Planning State`
-- Source: `builtin`
-- Access: `admin`
-- Transport: `http`, `ws`
-- HTTP: `POST /api/projects/planning/state`
-- Scopes: `write:knowledge`
-- Emits events: none
-- Dangerous: `no`
-- Invokable: `yes`
-
-##### Input schema
-
-```json
-{
-  "type": "object",
-  "properties": {
-    "projectId": {
-      "type": "string"
-    },
-    "knowledgeSpaceId": {
-      "type": "string"
-    },
-    "state": {
-      "type": "object",
-      "additionalProperties": {
-        "anyOf": [
-          {
-            "type": "string"
-          },
-          {
-            "type": "number"
-          },
-          {
-            "type": "boolean"
-          },
-          {
-            "type": "null"
-          },
-          {
-            "type": "object",
-            "additionalProperties": {}
-          },
-          {
-            "type": "array",
-            "items": {}
-          }
-        ]
-      }
-    }
-  },
-  "required": [
-    "state"
-  ],
-  "additionalProperties": true
 }
 ```
 
@@ -107501,6 +113376,41 @@ Return configured MCP servers, runtime security posture, and sandbox bindings.
           },
           "lastError": {
             "type": "string"
+          },
+          "reconnect": {
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "configured",
+                  "connecting",
+                  "connected",
+                  "degraded",
+                  "auth_required",
+                  "reconnecting",
+                  "disconnected"
+                ]
+              },
+              "attempt": {
+                "type": "number"
+              },
+              "maxAttempts": {
+                "type": "number"
+              },
+              "nextAttemptAt": {
+                "type": "number"
+              },
+              "stoppedReason": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "state",
+              "attempt",
+              "maxAttempts"
+            ],
+            "additionalProperties": false
           }
         },
         "required": [
@@ -109431,7 +115341,81 @@ Analyze an image, audio file, video artifact, or document through the unified mu
       }
     }
   },
-  "additionalProperties": true
+  "additionalProperties": true,
+  "anyOf": [
+    {
+      "type": "object",
+      "properties": {
+        "artifact": {
+          "type": "object",
+          "properties": {
+            "artifactId": {
+              "type": "string"
+            },
+            "mimeType": {
+              "type": "string"
+            },
+            "dataBase64": {
+              "type": "string"
+            },
+            "uri": {
+              "type": "string"
+            },
+            "allowPrivateHosts": {
+              "type": "boolean"
+            },
+            "filename": {
+              "type": "string"
+            },
+            "metadata": {
+              "type": "object",
+              "additionalProperties": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": {}
+                  },
+                  {
+                    "type": "array",
+                    "items": {}
+                  }
+                ]
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "artifact"
+      ],
+      "additionalProperties": true
+    },
+    {
+      "type": "object",
+      "properties": {
+        "artifactId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "artifactId"
+      ],
+      "additionalProperties": true
+    }
+  ]
 }
 ```
 
@@ -109481,10 +115465,22 @@ Analyze an image, audio file, video artifact, or document through the unified mu
               "type": "string"
             },
             "acquisitionMode": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "inline-data",
+                "local-path",
+                "remote-fetch",
+                "unknown"
+              ]
             },
             "fetchMode": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "not-applicable",
+                "public-only",
+                "allow-private-hosts",
+                "unknown"
+              ]
             },
             "metadata": {
               "type": "object",
@@ -109711,10 +115707,22 @@ Analyze an image, audio file, video artifact, or document through the unified mu
               "type": "string"
             },
             "acquisitionMode": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "inline-data",
+                "local-path",
+                "remote-fetch",
+                "unknown"
+              ]
             },
             "fetchMode": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "not-applicable",
+                "public-only",
+                "allow-private-hosts",
+                "unknown"
+              ]
             },
             "metadata": {
               "type": "object",
@@ -109859,10 +115867,22 @@ Build a token-efficient packet from an existing multimodal analysis result.
               "type": "string"
             },
             "acquisitionMode": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "inline-data",
+                "local-path",
+                "remote-fetch",
+                "unknown"
+              ]
             },
             "fetchMode": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "not-applicable",
+                "public-only",
+                "allow-private-hosts",
+                "unknown"
+              ]
             },
             "metadata": {
               "type": "object",
@@ -109897,7 +115917,6 @@ Build a token-efficient packet from an existing multimodal analysis result.
             "kind",
             "mimeType",
             "sizeBytes",
-            "sha256",
             "createdAt",
             "metadata"
           ],
@@ -110361,10 +116380,22 @@ Persist a multimodal analysis result as an artifact and ingest it into the struc
               "type": "string"
             },
             "acquisitionMode": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "inline-data",
+                "local-path",
+                "remote-fetch",
+                "unknown"
+              ]
             },
             "fetchMode": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "not-applicable",
+                "public-only",
+                "allow-private-hosts",
+                "unknown"
+              ]
             },
             "metadata": {
               "type": "object",
@@ -110399,7 +116430,6 @@ Persist a multimodal analysis result as an artifact and ingest it into the struc
             "kind",
             "mimeType",
             "sizeBytes",
-            "sha256",
             "createdAt",
             "metadata"
           ],
@@ -110617,10 +116647,22 @@ Persist a multimodal analysis result as an artifact and ingest it into the struc
               "type": "string"
             },
             "acquisitionMode": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "inline-data",
+                "local-path",
+                "remote-fetch",
+                "unknown"
+              ]
             },
             "fetchMode": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "not-applicable",
+                "public-only",
+                "allow-private-hosts",
+                "unknown"
+              ]
             },
             "metadata": {
               "type": "object",
@@ -110706,6 +116748,112 @@ Persist a multimodal analysis result as an artifact and ingest it into the struc
 ```
 
 ### memory
+
+#### `memory.consolidation.decide`
+
+Answer one pending consolidation proposal (memory.consolidation.receipts lists them with their `id`). The actions each kind accepts, `first`/`second` being the proposal's ids in order: contradiction keep-first | keep-second | both-stand; cross-scope-duplicate keep-first | keep-second | keep-both; stale-delete delete | keep. Keeping one record marks the other stale (recoverable); delete removes the record; both-stand and keep-both mark the records reviewed and record the decision, so the proposal is not raised again. Answers decided:true with the records changed and removed, or decided:false with a refusal (code, state, reason, next) and nothing changed. ws-only invoke verb.
+
+- Title: `Decide a Memory Consolidation Proposal`
+- Source: `builtin`
+- Access: `admin`
+- Transport: `ws`
+- HTTP: none
+- Scopes: `write:memory`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "proposalId": {
+      "type": "string"
+    },
+    "action": {
+      "type": "string",
+      "enum": [
+        "keep-first",
+        "keep-second",
+        "both-stand",
+        "keep-both",
+        "delete",
+        "keep"
+      ]
+    }
+  },
+  "required": [
+    "proposalId",
+    "action"
+  ],
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "decided": {
+      "type": "boolean"
+    },
+    "proposalId": {
+      "type": "string"
+    },
+    "action": {
+      "type": "string"
+    },
+    "changed": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "removed": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "refusal": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "next": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "code",
+        "state",
+        "reason",
+        "next"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "decided",
+    "proposalId"
+  ],
+  "additionalProperties": false
+}
+```
 
 #### `memory.consolidation.receipts`
 
@@ -111536,7 +117684,7 @@ Return the live projection of standing (project/team-scope) memory records, one 
 
 #### `memory.records.add`
 
-Add a memory record to the daemon-owned canonical store. The daemon is the single writer for its store; a client surface routes its writes here instead of opening the store file, so two processes never write the same sql.js file. New records default to confidence 60 (the recall floor) and reviewState fresh unless the review block overrides them.
+Add a memory record to the daemon-owned canonical store. The daemon is the single writer for its store; a client surface routes its writes here instead of opening the store file, so two processes never write the same sql.js file. New records default to confidence 60 (the recall floor) and reviewState fresh unless the review block overrides them. An optional caller-generated id (mem_<base36 time>_<8 hex>) makes the add safe to resend: the same id with the same record returns the stored row, the same id with a different record is refused.
 
 - Title: `Add Memory Record`
 - Source: `builtin`
@@ -111554,6 +117702,9 @@ Add a memory record to the daemon-owned canonical store. The daemon is the singl
 {
   "type": "object",
   "properties": {
+    "id": {
+      "type": "string"
+    },
     "cls": {
       "type": "string",
       "enum": [
@@ -114026,11 +120177,11 @@ Return the current sqlite-vec vector-store posture.
 
 #### `occasions.acknowledge`
 
-Record that the owner has one occurrence in hand, so nothing is pushed at them about it again. This is not a yes and not a no: the open item STAYS OPEN and stays enumerable, so occasions.pending still lists it, under acknowledged[] rather than in the nudge, and asking what is coming up still answers with it. Only the push stops. The record expires with its occurrence, so next year asks fresh. source names how it was recorded: conversation when the owner said so in a reply, explicit when a surface offered the action, gift-flow when the owner is already answering gift questions about it.
+Record that the owner has one occurrence in hand, so nothing is pushed at them about it again. This is not a yes and not a no: the open item STAYS OPEN and stays enumerable, so occasions.pending still lists it, under acknowledged[] rather than in the nudge, and asking what is coming up still answers with it. Only the push stops. The record expires with its occurrence, so next year asks fresh. An occurrence already answered yes or no is left as it is: changed is false and reply says so. source names how it was recorded: conversation when the owner said so in a reply, explicit when a surface offered the action, gift-flow when the owner is already answering gift questions about it.
 
 - Title: `Acknowledge An Occasion`
 - Source: `builtin`
-- Access: `authenticated`
+- Access: `admin`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/occasions/acknowledge`
 - Scopes: `write:occasions`
@@ -114093,12 +120244,16 @@ Record that the owner has one occurrence in hand, so nothing is pushed at them a
     },
     "reply": {
       "type": "string"
+    },
+    "changed": {
+      "type": "boolean"
     }
   },
   "required": [
     "ok",
     "reason",
-    "reply"
+    "reply",
+    "changed"
   ],
   "additionalProperties": false
 }
@@ -114106,11 +120261,11 @@ Record that the owner has one occurrence in hand, so nothing is pushed at them a
 
 #### `occasions.answer`
 
-Record yes, no, later or acknowledged for one occurrence. A no goes silent for the rest of this cycle and expires with the date, so next year asks fresh carrying no memory of the refusal. A later is NOT a decline, it comes back roughly halfway to the date. A yes on a gift-giving occasion opens the short interview and returns its first question. A yes or a no RESOLVES the open item and removes it. A later keeps the item open and moves it to its return date with its pushes available again. An answer of acknowledged leaves the item standing and quiet (the same as occasions.acknowledge).
+Record yes, no, later or acknowledged for one occurrence. A no goes silent for the rest of this cycle and expires with the date, so next year asks fresh carrying no memory of the refusal. A later is NOT a decline, it comes back roughly halfway to the date. A yes on a gift-giving occasion opens the short interview and returns its first question. A yes or a no RESOLVES the open item and removes it. A later keeps the item open and moves it to its return date with its pushes available again. An answer of acknowledged leaves the item standing and quiet (the same as occasions.acknowledge); on an occurrence already answered yes or no it changes nothing and ok is false with the reason.
 
 - Title: `Answer An Occasion Nudge`
 - Source: `builtin`
-- Access: `authenticated`
+- Access: `admin`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/occasions/answer`
 - Scopes: `write:occasions`
@@ -114279,11 +120434,11 @@ Record yes, no, later or acknowledged for one occurrence. A no goes silent for t
 
 #### `occasions.confirm`
 
-Write the confirmed occasion as one line in the owner profile, under Important dates, carrying its provenance. This is the ONE confirmation: nothing re-confirms at nudge time, because for an annual date a silent write means the mistake surfaces up to eleven months later. Refused without a kind rather than defaulting one. Goes through the owner-profile write gate, so authority, surface and a verbatim quote of what the owner said are all required.
+Write the confirmed occasion as one line in the owner profile, under Important dates, carrying its provenance. self:true marks the owner's own date (written as for me), so a remember-only one is never pushed at them. This is the ONE confirmation: nothing re-confirms at nudge time, because for an annual date a silent write means the mistake surfaces up to eleven months later. Refused without a kind rather than defaulting one. Goes through the owner-profile write gate, so authority, surface and a verbatim quote of what the owner said are all required.
 
 - Title: `Record A Confirmed Important Date`
 - Source: `builtin`
-- Access: `authenticated`
+- Access: `admin`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/occasions/confirm`
 - Scopes: `write:occasions`
@@ -114329,6 +120484,10 @@ Write the confirmed occasion as one line in the owner profile, under Important d
     },
     "leadDays": {
       "type": "number"
+    },
+    "self": {
+      "type": "boolean",
+      "description": "True when the date is the owner's own (their birthday). Written as `for me`; a remember-only date of the owner's is kept and listed but never pushed at them."
     },
     "surface": {
       "type": "string"
@@ -114394,11 +120553,11 @@ Write the confirmed occasion as one line in the owner profile, under Important d
 
 #### `occasions.conflict.resolve`
 
-Stop re-raising a conflict the owner has dealt with. The conflict itself is never resolved automatically, two different dates for one thing means only the owner knows which was right, and silently taking the newer value is the behaviour this exists to prevent.
+Apply the owner's answer to "which date is right?": keep names the date to keep, the other lines for that title are removed from the owner profile through the profile write gate (so authority is required with keep), answers and gift history stay, and the conflict is not raised again. Without keep nothing changes and dates lists what is recorded, to put to the owner. A conflict is never resolved automatically: only the owner knows which date was right. When the file already holds one date (the owner fixed it by hand) the reminder is closed and resolved is true.
 
-- Title: `Close A Date Conflict`
+- Title: `Resolve A Date Conflict`
 - Source: `builtin`
-- Access: `authenticated`
+- Access: `admin`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/occasions/conflict/resolve`
 - Scopes: `write:occasions`
@@ -114420,6 +120579,13 @@ Stop re-raising a conflict the owner has dealt with. The conflict itself is neve
     },
     "occasionId": {
       "type": "string"
+    },
+    "keep": {
+      "type": "string",
+      "description": "The date to keep, as recorded (MM-DD or YYYY-MM-DD). Omit to get the recorded dates back without changing anything."
+    },
+    "authority": {
+      "type": "string"
     }
   },
   "required": [
@@ -114440,11 +120606,40 @@ Stop re-raising a conflict the owner has dealt with. The conflict itself is neve
     },
     "resolved": {
       "type": "boolean"
+    },
+    "reason": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "dates": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "removed": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "disclosure": {
+      "type": "string"
     }
   },
   "required": [
     "occasionId",
-    "resolved"
+    "resolved",
+    "reason",
+    "dates",
+    "removed",
+    "disclosure"
   ],
   "additionalProperties": false
 }
@@ -114535,7 +120730,7 @@ Record one answer and return the next question, if there is one. The interview g
 
 - Title: `Answer A Gift Interview Question`
 - Source: `builtin`
-- Access: `authenticated`
+- Access: `admin`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/occasions/interview/answer`
 - Scopes: `write:occasions`
@@ -114835,7 +121030,7 @@ Close the interview with what the owner settled on and write it to the gift hist
 
 - Title: `Record What The Owner Landed On`
 - Source: `builtin`
-- Access: `authenticated`
+- Access: `admin`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/occasions/interview/record`
 - Scopes: `write:occasions`
@@ -115271,7 +121466,7 @@ Return every occasion declared in the owner profile, with its next occurrence, h
 
 #### `occasions.pending`
 
-Return everything unresolved, without delivering anything: the batched nudge, any date conflict still open, and any interview left mid-thread. This is how a surface that is not a push destination receives a nudge, it pulls at the start of a turn rather than being pushed at, and a stored date is the prior scheduling that permits raising something unprompted. A nudge a push has already landed on the agent is left out while the agent is a configured push destination, so the push and the pull cannot raise the same thing twice; an item no push has ever landed there is still returned, so a missing sender or a failed send loses nothing. The nudge names the occasion and the person and NEVER the date: proximity is a word, not a count of days.
+Return everything unresolved, without delivering anything: the batched nudge, any date conflict still open, and any interview left mid-thread. This is how a surface that is not a push destination receives a nudge, it pulls at the start of a turn rather than being pushed at, and a stored date is the prior scheduling that permits raising something unprompted. A nudge a push has already landed on the agent is left out while the agent is a configured push destination, so the push and the pull cannot raise the same thing twice; an item no push has ever landed there is still returned, so a missing sender or a failed send loses nothing. An occurrence inside its window is listed even before any sweep has opened it, so a machine that was just started still answers. Composed in code, the same with or without a decision model. The nudge names the occasion and the person and NEVER the date: proximity is a word, not a count of days.
 
 - Title: `Pull Outstanding Occasions`
 - Source: `builtin`
@@ -115631,11 +121826,11 @@ Return everything unresolved, without delivering anything: the batched nudge, an
 
 #### `occasions.plans.confirm`
 
-Write the confirmed plan as one line in the owner profile, under Plans, carrying its provenance. Same one-confirmation rule and the same owner-profile write gate as an occasion.
+Write the confirmed plan as one line in the owner profile, under Plans, carrying its provenance and every entry of details (a confirmation number, flights and times, who is travelling), which occasions.plans.list returns in extras. Same one-confirmation rule and the same owner-profile write gate as an occasion.
 
 - Title: `Record A Confirmed Plan`
 - Source: `builtin`
-- Access: `authenticated`
+- Access: `admin`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/occasions/plans/confirm`
 - Scopes: `write:occasions`
@@ -115669,6 +121864,13 @@ Write the confirmed plan as one line in the owner profile, under Plans, carrying
     },
     "destination": {
       "type": "string"
+    },
+    "details": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Everything else the owner gave about the plan, one detail per entry: a confirmation number, a flight and its times, who is travelling, why. Stored on the line exactly; a detail the line cannot hold unchanged refuses the write."
     },
     "surface": {
       "type": "string"
@@ -115937,6 +122139,13 @@ Work out what would be written for a plan heard in conversation, and return the 
     },
     "destination": {
       "type": "string"
+    },
+    "details": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Everything else the owner gave about the plan, one detail per entry: a confirmation number, a flight and its times, who is travelling, why. Stored on the line exactly; a detail the line cannot hold unchanged refuses the write."
     }
   },
   "required": [
@@ -115995,6 +122204,258 @@ Work out what would be written for a plan heard in conversation, and return the 
 }
 ```
 
+#### `occasions.plans.remove`
+
+Remove one plan from the owner profile, chosen by planId (its normalised title) and planFrom when two plans share a name. One confirmation: confirmed:false returns the sentence to put to the owner and removes nothing. Goes through the owner-profile write gate, so authority is required.
+
+- Title: `Remove A Plan`
+- Source: `builtin`
+- Access: `admin`
+- Transport: `http`, `ws`
+- HTTP: `POST /api/occasions/plans/remove`
+- Scopes: `write:occasions`
+- Emits events: none
+- Dangerous: `yes`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "admission": {
+      "type": "string",
+      "enum": [
+        "autonomous"
+      ]
+    },
+    "planId": {
+      "type": "string"
+    },
+    "planFrom": {
+      "type": "string",
+      "description": "The start date (YYYY-MM-DD) of the plan meant, needed only when two plans share a name."
+    },
+    "confirmed": {
+      "type": "boolean"
+    },
+    "authority": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "planId",
+    "confirmed",
+    "authority"
+  ],
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "ok": {
+      "type": "boolean"
+    },
+    "reason": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "occasionId": {
+      "type": "string"
+    },
+    "disclosure": {
+      "type": "string"
+    },
+    "droppedRecords": {
+      "type": "number"
+    }
+  },
+  "required": [
+    "ok",
+    "reason",
+    "occasionId",
+    "disclosure",
+    "droppedRecords"
+  ],
+  "additionalProperties": false
+}
+```
+
+#### `occasions.plans.update`
+
+Change one recorded plan in place, chosen by planId (its normalised title) and planFrom when two plans share a name: any of title, from, to, away, destination and details (details replaces the list); a field left out keeps its value. With confirmed:false nothing is written and proposal carries the exact line and the sentence to put to the owner; with confirmed:true the new line is written and the old one removed, through the owner-profile write gate (authority, surface and said required).
+
+- Title: `Change A Plan`
+- Source: `builtin`
+- Access: `admin`
+- Transport: `http`, `ws`
+- HTTP: `POST /api/occasions/plans/update`
+- Scopes: `write:occasions`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "admission": {
+      "type": "string",
+      "enum": [
+        "autonomous"
+      ]
+    },
+    "planId": {
+      "type": "string"
+    },
+    "planFrom": {
+      "type": "string",
+      "description": "The start date (YYYY-MM-DD) of the plan meant, needed only when two plans share a name."
+    },
+    "title": {
+      "type": "string"
+    },
+    "from": {
+      "type": "string"
+    },
+    "to": {
+      "type": "string"
+    },
+    "away": {
+      "type": "boolean"
+    },
+    "destination": {
+      "type": "string"
+    },
+    "details": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Everything else the owner gave about the plan, one detail per entry: a confirmation number, a flight and its times, who is travelling, why. Stored on the line exactly; a detail the line cannot hold unchanged refuses the write."
+    },
+    "confirmed": {
+      "type": "boolean"
+    },
+    "surface": {
+      "type": "string"
+    },
+    "said": {
+      "type": "string"
+    },
+    "authority": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "planId",
+    "confirmed",
+    "surface",
+    "said",
+    "authority"
+  ],
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "ok": {
+      "type": "boolean"
+    },
+    "reason": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "occasionId": {
+      "type": "string"
+    },
+    "disclosure": {
+      "type": "string"
+    },
+    "droppedRecords": {
+      "type": "number"
+    },
+    "written": {
+      "type": "boolean"
+    },
+    "proposal": {
+      "type": "object",
+      "properties": {
+        "ok": {
+          "type": "boolean"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "line": {
+          "type": "string"
+        },
+        "replaces": {
+          "type": "string"
+        },
+        "confirmation": {
+          "type": "string"
+        },
+        "unchanged": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "ok",
+        "reason",
+        "line",
+        "replaces",
+        "confirmation",
+        "unchanged"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "ok",
+    "reason",
+    "occasionId",
+    "disclosure",
+    "droppedRecords",
+    "written",
+    "proposal"
+  ],
+  "additionalProperties": false
+}
+```
+
 #### `occasions.propose`
 
 Work out what would be written for a date heard in conversation, and return the one-line confirmation to put to the owner. WRITES NOTHING. When no kind was given, needsKind is true and the confirmation asks for it in the same breath, the kind is the owner's choice and is never inferred, because no rule that reads a label tells a birthday from a death anniversary. Any date already recorded for the same name that disagrees comes back in conflictsWith.
@@ -116041,6 +122502,10 @@ Work out what would be written for a date heard in conversation, and return the 
     },
     "leadDays": {
       "type": "number"
+    },
+    "self": {
+      "type": "boolean",
+      "description": "True when the date is the owner's own (their birthday). Written as `for me`; a remember-only date of the owner's is kept and listed but never pushed at them."
     }
   },
   "required": [
@@ -116104,7 +122569,7 @@ Remove one occasion and every record the machine kept against it, answers, gift 
 
 - Title: `Remove An Important Date`
 - Source: `builtin`
-- Access: `authenticated`
+- Access: `admin`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/occasions/remove`
 - Scopes: `write:occasions`
@@ -116231,6 +122696,9 @@ What the machine-owned store is holding, counts of answers, gift records, open i
     "mirrors": {
       "type": "number"
     },
+    "attributions": {
+      "type": "number"
+    },
     "lastSweep": {
       "anyOf": [
         {
@@ -116295,6 +122763,7 @@ What the machine-owned store is holding, counts of answers, gift records, open i
     "openItems",
     "interviews",
     "mirrors",
+    "attributions",
     "lastSweep",
     "reconciledOpenItems",
     "corruption"
@@ -116305,11 +122774,11 @@ What the machine-owned store is holding, counts of answers, gift records, open i
 
 #### `occasions.sweep`
 
-Run one pass immediately: reap expired and orphaned state, find the occasions entering their lead window, batch them into a single message, mirror to the calendar if that is on, and deliver. Delivery goes to every destination in occasions.nudgeChannel, a comma-separated list, so Telegram and the agent both get it, and each is attempted independently, with deliveries[] naming per destination what landed and what did not. Housekeeping runs first and unconditionally, so a machine with nudging turned off still reaps. Returns hold:"quiet-hours" or hold:"disabled" when it deliberately said nothing, nothing is dropped, it waits.
+Run one pass immediately: reap expired and orphaned state, find the occasions entering their lead window, batch them into a single message, mirror to the calendar if that is on, and deliver. Delivery goes to every destination in occasions.nudgeChannel, a comma-separated list, so Telegram and the agent both get it, and each is attempted independently, with deliveries[] naming per destination what landed and what did not. Housekeeping runs first and unconditionally, so a machine with nudging turned off still reaps. Returns hold:"quiet-hours" or hold:"disabled" when it deliberately said nothing, nothing is dropped, it waits. It runs the same with or without a decision model; with decision models off, provenance:"classic" says who each date is about was taken from the line's own for-me marker only. A push a destination accepted is recorded as sent even if settings or the profile changed during the send, so it is not pushed again next pass.
 
 - Title: `Run The Approach Sweep Now`
 - Source: `builtin`
-- Access: `authenticated`
+- Access: `admin`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/occasions/sweep`
 - Scopes: `write:occasions`
@@ -116617,6 +123086,181 @@ Run one pass immediately: reap expired and orphaned state, find the occasions en
       "additionalProperties": false
     }
   ]
+}
+```
+
+#### `occasions.update`
+
+Change one recorded occasion in place: any of date, kind, person, recurrence, leadDays (null returns to the default) and self; a field left out keeps its value. The occasion keeps its id, so its answers, gift history and calendar mirrors stay attached. A new title is accepted only when it names the same occasion (spelling or case); a different name is refused, add it as a new occasion and remove this one. With confirmed:false nothing is written and proposal carries the exact line and the sentence to put to the owner; with confirmed:true the new line is written and the old one removed, through the owner-profile write gate (authority, surface and said required). An occasion recorded with two dates is refused until occasions.conflict.resolve settles it.
+
+- Title: `Change An Important Date`
+- Source: `builtin`
+- Access: `admin`
+- Transport: `http`, `ws`
+- HTTP: `POST /api/occasions/update`
+- Scopes: `write:occasions`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "admission": {
+      "type": "string",
+      "enum": [
+        "autonomous"
+      ]
+    },
+    "occasionId": {
+      "type": "string"
+    },
+    "title": {
+      "type": "string"
+    },
+    "date": {
+      "type": "string"
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "gift-giving",
+        "remember-only",
+        "neither"
+      ]
+    },
+    "person": {
+      "type": "string"
+    },
+    "recurrence": {
+      "type": "string",
+      "enum": [
+        "annual",
+        "once"
+      ]
+    },
+    "leadDays": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "self": {
+      "type": "boolean",
+      "description": "True when the date is the owner's own (their birthday). Written as `for me`; a remember-only date of the owner's is kept and listed but never pushed at them."
+    },
+    "confirmed": {
+      "type": "boolean"
+    },
+    "surface": {
+      "type": "string"
+    },
+    "said": {
+      "type": "string"
+    },
+    "authority": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "occasionId",
+    "confirmed",
+    "surface",
+    "said",
+    "authority"
+  ],
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "ok": {
+      "type": "boolean"
+    },
+    "reason": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "occasionId": {
+      "type": "string"
+    },
+    "disclosure": {
+      "type": "string"
+    },
+    "droppedRecords": {
+      "type": "number"
+    },
+    "written": {
+      "type": "boolean"
+    },
+    "proposal": {
+      "type": "object",
+      "properties": {
+        "ok": {
+          "type": "boolean"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "line": {
+          "type": "string"
+        },
+        "replaces": {
+          "type": "string"
+        },
+        "confirmation": {
+          "type": "string"
+        },
+        "unchanged": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "ok",
+        "reason",
+        "line",
+        "replaces",
+        "confirmation",
+        "unchanged"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "ok",
+    "reason",
+    "occasionId",
+    "disclosure",
+    "droppedRecords",
+    "written",
+    "proposal"
+  ],
+  "additionalProperties": false
 }
 ```
 
@@ -116997,7 +123641,7 @@ The honest TLS/capability posture of a web origin, pass your surface's current o
 
 #### `pairing.tokens.create`
 
-Mint a new named per-device operator token and return its plaintext secret EXACTLY ONCE (for a QR / pairing hand-off). Only a hash is persisted; the secret is never listed or returned again. The name is user-visible and editable.
+Mint a new named per-device operator token and return its plaintext secret EXACTLY ONCE (for a QR / pairing hand-off). Only a hash is persisted; the secret is never listed or returned again. The name is user-visible and editable. When a paired device asks, the new token records that device (mintedBy) and is revoked with it; a device whose own pairing is gone is refused with 403 PAIRING_TOKEN_NOT_FOUND.
 
 - Title: `Mint Paired Device Token`
 - Source: `builtin`
@@ -117066,7 +123710,7 @@ Mint a new named per-device operator token and return its plaintext secret EXACT
 
 #### `pairing.tokens.delete`
 
-Revoke (permanently delete) one paired device token. Revocation is immediate: the token fails the very next request with a 401, and every OTHER paired device keeps working. An unknown id is a 404 PAIRING_TOKEN_NOT_FOUND, never a 200-noop.
+Revoke (permanently delete) one paired device token. Revocation is immediate: the token fails the very next request with a 401, and every token this device minted is revoked with it (listed in alsoRevoked); every other paired device keeps working. An unknown id is a 404 PAIRING_TOKEN_NOT_FOUND, never a 200-noop.
 
 - Title: `Revoke Paired Device Token`
 - Source: `builtin`
@@ -117106,11 +123750,18 @@ Revoke (permanently delete) one paired device token. Revocation is immediate: th
     },
     "revoked": {
       "type": "boolean"
+    },
+    "alsoRevoked": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
     }
   },
   "required": [
     "id",
-    "revoked"
+    "revoked",
+    "alsoRevoked"
   ],
   "additionalProperties": false
 }
@@ -117118,7 +123769,7 @@ Revoke (permanently delete) one paired device token. Revocation is immediate: th
 
 #### `pairing.tokens.list`
 
-List the per-pairing operator tokens (paired devices/browsers) as redacted views: id, user-visible name, created timestamp, and last-seen timestamp. The token secret is never stored in listable form and is never returned.
+List the per-pairing operator tokens (paired devices/browsers) as redacted views: id, user-visible name, created timestamp, last-seen timestamp, and mintedBy (the paired device that minted it, when one did). The token secret is never stored in listable form and is never returned.
 
 - Title: `List Paired Device Tokens`
 - Source: `builtin`
@@ -117156,6 +123807,9 @@ none
           },
           "lastSeenAt": {
             "type": "number"
+          },
+          "mintedBy": {
+            "type": "string"
           }
         },
         "required": [
@@ -117180,7 +123834,7 @@ none
 
 #### `pairing.tokens.migrate`
 
-A client currently authenticated with the legacy single shared token mints its OWN named per-device token and receives the plaintext secret once, the honest migration path. This does NOT revoke the shared token; that is a separate explicit step (pairing.tokens.revokeShared).
+A client currently authenticated with the legacy single shared token mints its OWN named per-device token and receives the plaintext secret once, the honest migration path. Send an attemptId and send the same one again when a reply is lost: while the token that attempt produced is unused, the repeat returns that token (same id) under a new secret instead of minting a second one. This does NOT revoke the shared token; that is a separate explicit step (pairing.tokens.revokeShared).
 
 - Title: `Migrate Off The Shared Token`
 - Source: `builtin`
@@ -117199,6 +123853,9 @@ A client currently authenticated with the legacy single shared token mints its O
   "type": "object",
   "properties": {
     "name": {
+      "type": "string"
+    },
+    "attemptId": {
       "type": "string"
     }
   },
@@ -117593,6 +124250,30 @@ Today's spending pools: the daily item budget, the separate overage budget that 
     },
     "isPaymentsLeader": {
       "type": "boolean"
+    },
+    "stopped": {
+      "type": "object",
+      "properties": {
+        "store": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string",
+          "description": "Which store stopped, why, that nothing recorded was lost, and the step: restart the daemon."
+        }
+      },
+      "required": [
+        "store",
+        "reason",
+        "message"
+      ],
+      "additionalProperties": false
     }
   },
   "required": [
@@ -117914,13 +124595,13 @@ Configured cards, as METADATA ONLY: id, label, brand, last four digits, whether 
 
 #### `payments.checkout.approve`
 
-Record that a human approves one specific purchase, out of band from the conversation that will run it: the merchant's registrable domain, the item, and the amount (the same string a later begin call passes as requestedMax). Mints a persisted, single-use approval bound to exactly those fields, expiring in five minutes; payments.checkout.begin consumes it and refuses without one. Requires confirm: true and the explicit-user-request context, the same confirmation gate every destructive verb on this daemon uses. The response never carries card material; this verb never touches a card at all. ws-only invoke verb with no REST binding.
+The owner approves one purchase in advance, out of band from the conversation that will run it: the merchant's registrable domain, the item, and the most it may cost. Optional unless payments.confirmEveryPurchase is on. The amount is read in the budget currency ("25" and "25.00" are the same amount) and an amount no purchase could match is refused before anything is recorded. Mints a persisted, single-use approval bound to those fields, expiring in five minutes; a matching payments.checkout.begin spends it, and it answers that purchase's approval window for a total up to its amount. Requires confirm: true and the explicit-user-request context, the same confirmation gate every destructive verb on this daemon uses; /payments approve and the web UI send both. The response never carries card material; this verb never touches a card at all.
 
 - Title: `Approve One Purchase`
 - Source: `builtin`
 - Access: `admin`
-- Transport: `ws`
-- HTTP: none
+- Transport: `http`, `ws`
+- HTTP: `POST /api/payments/checkout/approve`
 - Scopes: `write:payments`
 - Emits events: none
 - Dangerous: `yes`
@@ -117994,7 +124675,7 @@ Record that a human approves one specific purchase, out of band from the convers
 
 #### `payments.checkout.begin`
 
-Admit one checkout against an open browser page and return a durable accepted acknowledgement before its approval/veto wait. Supply a stable requestId saved before sending; after a lost response, query payments.purchase.status with that ID. Reusing an admitted ID never starts another execution, even with changed input. The paired owner must have authorized the exact merchant/item/amount through payments.checkout.approve. The daemon parses amounts, checks cart/merchant/taint/recurrence and budget, runs the shipping ladder and owner window, fills stored addresses/card and submits once. Accepted does not mean purchased. Status retains processing, refusal, cancellation, verification and uncertain-submission outcomes. Disconnecting the caller does not cancel the operation; stopping or shutdown drains its actual work. An uncertain merchant submission is never retried automatically.
+Admit one checkout against an open browser page and return a durable accepted acknowledgement before its approval/veto wait. Supply a stable requestId saved before sending; after a lost response, query payments.purchase.status with that ID. Reusing an admitted ID never starts another execution, even with changed input. Inside the owner's limits no prior approval is needed; with payments.confirmEveryPurchase on, a begin must state requestedMax and spend a matching payments.checkout.approve. cardId may be omitted to pay with payments.defaultCardId, and merchantDiscovered is read as sent. The daemon parses amounts, checks cart/merchant/taint/recurrence and budget, runs the shipping ladder and owner window, fills stored addresses/card and submits once. Accepted does not mean purchased. Status retains processing, refusal, cancellation, verification and uncertain-submission outcomes. Disconnecting the caller does not cancel the operation; stopping or shutdown drains its actual work. An uncertain merchant submission is never retried automatically.
 
 - Title: `Buy What Is In This Checkout`
 - Source: `builtin`
@@ -118032,7 +124713,11 @@ Admit one checkout against an open browser page and return a durable accepted ac
       "type": "string"
     },
     "cardId": {
-      "type": "string"
+      "type": "string",
+      "description": "A card id from payments.cards.list. Omitted, the purchase is paid with payments.defaultCardId."
+    },
+    "merchantDiscovered": {
+      "type": "boolean"
     },
     "requestedLines": {
       "type": "array",
@@ -118082,6 +124767,25 @@ Admit one checkout against an open browser page and return a durable accepted ac
       "type": "string"
     },
     "fees": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "amount": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "label",
+          "amount"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "discounts": {
       "type": "array",
       "items": {
         "type": "object",
@@ -118219,7 +124923,7 @@ Admit one checkout against an open browser page and return a durable accepted ac
     "requestedMax": {
       "type": "string",
       "pattern": "^\\d+(?:\\.\\d{1,3})?$",
-      "description": "Owner-requested maximum for the entire purchase, including tax, mandatory fees and delivery. Supply one non-negative decimal amount in the configured budget currency, such as 20.00, without grouping, currency symbols or prose. Precision must fit that currency. Exceeding it requires a new explicit approval; silence never raises it."
+      "description": "Owner-requested maximum for the entire purchase, including tax, mandatory fees and delivery. Supply one non-negative decimal amount in the configured budget currency, such as 20.00, without grouping, currency symbols or prose. Precision must fit that currency. Exceeding it requires a new explicit approval; silence never raises it. Required while payments.confirmEveryPurchase is on: it is the amount the owner approved."
     }
   },
   "required": [
@@ -118229,7 +124933,6 @@ Admit one checkout against an open browser page and return a durable accepted ac
     "merchantDomain",
     "checkoutUrl",
     "item",
-    "cardId",
     "requestedLines",
     "lines",
     "shippingOptions",
@@ -118333,122 +125036,6 @@ Admit one checkout against an open browser page and return a durable accepted ac
     "shippingTierUsed",
     "steppedDown",
     "challengeStep"
-  ],
-  "additionalProperties": false
-}
-```
-
-#### `payments.checkout.fillCard`
-
-Have the daemon type the stored card into the payment fields of an open browser page. Takes the browser session, the page, and a list of {field, ref} targets naming where each part of the card goes, the caller identifies the fields on whatever checkout it is looking at, so the daemon needs no knowledge of any merchant. The response is the list of field NAMES that were filled plus a boolean; it never carries the value, its length, or a masked form, and a failure names the field that did not accept input rather than what was typed into it. Refused unless a purchase decision is already in flight on that exact page and the page is still on the registrable domain the purchase was decided against, so the card is typed as part of an approved checkout or not at all. Also refused when the browser has no card-material redaction installed, because a snapshot taken afterwards would otherwise hand back what was just typed.
-
-- Title: `Fill the Card into a Checkout`
-- Source: `builtin`
-- Access: `admin`
-- Transport: `http`, `ws`
-- HTTP: `POST /api/payments/checkout/fill-card`
-- Scopes: `write:payments`
-- Emits events: none
-- Dangerous: `no`
-- Invokable: `yes`
-
-##### Input schema
-
-```json
-{
-  "type": "object",
-  "properties": {
-    "sessionId": {
-      "type": "string"
-    },
-    "pageId": {
-      "type": "string"
-    },
-    "targets": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "properties": {
-          "field": {
-            "type": "string",
-            "enum": [
-              "number",
-              "expiry",
-              "expiryMonth",
-              "expiryYear",
-              "cvv",
-              "cardholderName"
-            ]
-          },
-          "ref": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "field",
-          "ref"
-        ],
-        "additionalProperties": false
-      },
-      "minItems": 1
-    },
-    "expirySeparator": {
-      "type": "string"
-    },
-    "twoDigitYear": {
-      "type": "boolean"
-    }
-  },
-  "required": [
-    "sessionId",
-    "pageId",
-    "targets"
-  ],
-  "additionalProperties": false
-}
-```
-
-##### Output schema
-
-```json
-{
-  "type": "object",
-  "properties": {
-    "ok": {
-      "type": "boolean"
-    },
-    "filled": {
-      "type": "array",
-      "items": {
-        "type": "string"
-      }
-    },
-    "failedField": {
-      "anyOf": [
-        {
-          "type": "string"
-        },
-        {
-          "type": "null"
-        }
-      ]
-    },
-    "reason": {
-      "anyOf": [
-        {
-          "type": "string"
-        },
-        {
-          "type": "null"
-        }
-      ]
-    }
-  },
-  "required": [
-    "ok",
-    "filled",
-    "failedField",
-    "reason"
   ],
   "additionalProperties": false
 }
@@ -118867,6 +125454,76 @@ After inspecting the merchant’s order history, explicitly record whether this 
           "type": "null"
         }
       ]
+    },
+    "reason": {
+      "anyOf": [
+        {
+          "type": "string",
+          "maxLength": 4000
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "challengeStep": {
+      "anyOf": [
+        {
+          "type": "string",
+          "maxLength": 4000
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "exceeded": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "limit": {
+              "type": "string",
+              "enum": [
+                "daily-item-budget",
+                "per-purchase-ceiling",
+                "requested-maximum",
+                "daily-overage-budget",
+                "card-limit"
+              ]
+            },
+            "setting": {
+              "type": "string"
+            },
+            "availableMinorUnits": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "neededMinorUnits": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "excessMinorUnits": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "unset": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "limit",
+            "availableMinorUnits",
+            "neededMinorUnits",
+            "excessMinorUnits",
+            "unset"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "null"
+        }
+      ]
     }
   },
   "required": [
@@ -118884,9 +125541,80 @@ After inspecting the merchant’s order history, explicitly record whether this 
 }
 ```
 
+#### `payments.purchase.securityCode`
+
+Under payments.cvvHandling prompt, hand the card security code the owner typed to the one approved purchase waiting for it, by its exact purchaseId and windowId from payments.purchase.status. Requires an explicit owner action, confirm: true and current paired admin authority with write:payments. The code is used for that purchase's card entry and kept nowhere. A closed or replaced request refuses; this never submits directly or overrides any budget, merchant, page or address check.
+
+- Title: `Type the Card Security Code`
+- Source: `builtin`
+- Access: `admin`
+- Transport: `http`, `ws`
+- HTTP: `POST /api/payments/purchase/security-code`
+- Scopes: `write:payments`
+- Emits events: none
+- Dangerous: `yes`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "purchaseId": {
+      "type": "string"
+    },
+    "windowId": {
+      "type": "string"
+    },
+    "code": {
+      "type": "string",
+      "maxLength": 16,
+      "description": "The three or four digits of the card security code, typed by the owner for this one purchase. Never stored."
+    },
+    "confirm": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "purchaseId",
+    "windowId",
+    "code",
+    "confirm"
+  ],
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "purchaseId": {
+      "type": "string"
+    },
+    "windowId": {
+      "type": "string"
+    },
+    "accepted": {
+      "const": true,
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "purchaseId",
+    "windowId",
+    "accepted"
+  ],
+  "additionalProperties": false
+}
+```
+
 #### `payments.purchase.status`
 
-Read durable checkout operation status and actual live approval/veto windows. Optionally select one purchase, including after reconnect or restart. An accepted operation is not a completed purchase; uncertain submissions must be checked with the merchant and are never automatically retried. Reading does not extend a deadline or resume execution. Complete purchase records are available through payments.purchases.list.
+Read durable checkout operation status and actual live approval/veto windows, and any approved purchase waiting for its card security code (securityCodes, under payments.cvvHandling prompt). Optionally select one purchase, including after reconnect or restart. An accepted operation is not a completed purchase; uncertain submissions must be checked with the merchant and are never automatically retried. Reading does not extend a deadline or resume execution. Complete purchase records are available through payments.purchases.list.
 
 - Title: `Purchase Operations and Windows`
 - Source: `builtin`
@@ -119038,6 +125766,76 @@ Read durable checkout operation status and actual live approval/veto windows. Op
                 "type": "null"
               }
             ]
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 4000
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "challengeStep": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 4000
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "exceeded": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "limit": {
+                    "type": "string",
+                    "enum": [
+                      "daily-item-budget",
+                      "per-purchase-ceiling",
+                      "requested-maximum",
+                      "daily-overage-budget",
+                      "card-limit"
+                    ]
+                  },
+                  "setting": {
+                    "type": "string"
+                  },
+                  "availableMinorUnits": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "neededMinorUnits": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "excessMinorUnits": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "unset": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "limit",
+                  "availableMinorUnits",
+                  "neededMinorUnits",
+                  "excessMinorUnits",
+                  "unset"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -119074,6 +125872,62 @@ Read durable checkout operation status and actual live approval/veto windows. Op
         "additionalProperties": false
       },
       "maxItems": 356
+    },
+    "securityCodes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "purchaseId": {
+            "type": "string"
+          },
+          "windowId": {
+            "type": "string"
+          },
+          "merchantDomain": {
+            "type": "string"
+          },
+          "cardLast4": {
+            "type": "string"
+          },
+          "deadlineMs": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "purchaseId",
+          "windowId",
+          "merchantDomain",
+          "cardLast4",
+          "deadlineMs"
+        ],
+        "additionalProperties": false
+      },
+      "maxItems": 256
+    },
+    "stopped": {
+      "type": "object",
+      "properties": {
+        "store": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string",
+          "description": "Which store stopped, why, that nothing recorded was lost, and the step: restart the daemon."
+        }
+      },
+      "required": [
+        "store",
+        "reason",
+        "message"
+      ],
+      "additionalProperties": false
     }
   },
   "required": [
@@ -119086,7 +125940,7 @@ Read durable checkout operation status and actual live approval/veto windows. Op
 
 #### `payments.purchases.list`
 
-The purchase audit ledger: what was bought, from which merchant registrable domain, how much (item, tax, fees and delivery separately), which budget pool each part drew on, which delivery tier was requested and which was actually used, whether the shipping ladder stepped it down, which window ran and how it ended, which command-authority channel answered, and the outcome. Reconcilable against a card statement. Never contains a card number, expiry or CVV. Refunds are not recorded yet: a returned order still reads as a purchase and `refundedAt` stays empty, so reconcile refunds against the card statement by hand. When refunds are recorded they will credit no pool, a refund on day five refilling day five would be permission to buy again that nobody granted.
+The purchase audit ledger: what was bought, from which merchant registrable domain, how much (item, tax, fees and delivery separately), which budget pool each part drew on, which delivery tier was requested and which was actually used, whether the shipping ladder stepped it down, which window ran and how it ended, which command-authority channel answered, and the outcome. Reconcilable against a card statement. Never contains a card number, expiry or CVV. When the shop mails that a purchase was refunded, the time is recorded as `refundedAt` on that purchase and the owner is told; check the card statement for the credit. A refund credits no pool: a refund on day five refilling day five would be permission to buy again that nobody granted.
 
 - Title: `List Purchases`
 - Source: `builtin`
@@ -119358,7 +126212,7 @@ Delete one durable user-origin permission rule by id. The matching asks prompt a
 - Access: `authenticated`
 - Transport: `ws`
 - HTTP: none
-- Scopes: `write:sessions`
+- Scopes: `write:approvals`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -119406,7 +126260,7 @@ List the durable user-origin permission rules written by remembered approval dec
 - Access: `authenticated`
 - Transport: `ws`
 - HTTP: none
-- Scopes: `read:sessions`
+- Scopes: `read:approvals`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -120289,7 +127143,7 @@ Add one prose bullet to a section, carrying its provenance suffix. Same three-la
 
 - Title: `Append Profile Note`
 - Source: `builtin`
-- Access: `authenticated`
+- Access: `admin`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/profile/append`
 - Scopes: `write:profile`
@@ -120411,7 +127265,7 @@ Delete a mechanical field and every retained history comment for it, or one pros
 
 - Title: `Forget Profile Line`
 - Source: `builtin`
-- Access: `authenticated`
+- Access: `admin`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/profile/forget`
 - Scopes: `write:profile`
@@ -121238,7 +128092,7 @@ Record or correct one mechanical field, moving any previous value into a retaine
 
 - Title: `Set Profile Field`
 - Source: `builtin`
-- Access: `authenticated`
+- Access: `admin`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/profile/set`
 - Scopes: `write:profile`
@@ -121445,7 +128299,7 @@ Promote a field's most recent superseded value back to the active line, so a wro
 
 - Title: `Undo Profile Correction`
 - Source: `builtin`
-- Access: `authenticated`
+- Access: `admin`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/profile/undo`
 - Scopes: `write:profile`
@@ -123273,7 +130127,7 @@ Permanently remove one of the authenticated operator's push subscriptions: the s
 
 #### `push.subscriptions.list`
 
-List the authenticated operator's registered push devices as redacted subscription views (id, deviceId when the record has one, endpoint origin, timestamps, last delivery outcome; two records on the same push service share an origin, so tell them apart by id or deviceId). The capability URL and key material are never included.
+List the authenticated operator's registered push devices as redacted subscription views (id, deviceId when the record has one, endpoint origin, timestamps, last delivery outcome; two records on the same push service share an origin, so tell them apart by id or deviceId), plus lastRemoval: the most recent device the daemon removed and why (reason gone: the push service answered 404/410; failure-threshold: the push service rejected the endpoint push.subscriptions.failureThreshold times in a row; unusable or malformed: the stored record could never receive a push). Network errors, timeouts, rate limits and push-service outages never remove a device. The capability URL and key material are never included.
 
 - Title: `List Web Push Subscriptions`
 - Source: `builtin`
@@ -123333,6 +130187,38 @@ none
         ],
         "additionalProperties": false
       }
+    },
+    "lastRemoval": {
+      "type": "object",
+      "properties": {
+        "subscriptionId": {
+          "type": "string"
+        },
+        "principalId": {
+          "type": "string"
+        },
+        "endpointOrigin": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "evidence": {
+          "type": "string"
+        },
+        "removedAt": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "subscriptionId",
+        "principalId",
+        "endpointOrigin",
+        "reason",
+        "evidence",
+        "removedAt"
+      ],
+      "additionalProperties": false
     }
   },
   "required": [
@@ -123450,7 +130336,7 @@ Reconcile-on-open: the client presents its device identity (deviceId) and its CU
 
 #### `push.subscriptions.verify`
 
-Send a live test notification to one of the authenticated operator's subscriptions and return an honest delivery receipt (delivered / pruned / failed). A subscription whose endpoint reports 404/410 gone is pruned as part of the attempt and the receipt says so. An unknown id, or one owned by another principal, is a 404 SUBSCRIPTION_NOT_FOUND.
+Send a live test notification to one of the authenticated operator's subscriptions and return an honest delivery receipt (delivered / pruned / failed). A subscription whose endpoint reports 404/410 gone, or that the push service has now rejected push.subscriptions.failureThreshold times in a row, is pruned as part of the attempt and the receipt says so; a network error, timeout, 408, 413, 429 or 5xx is reported as failed and never counts against the device. An unknown id, or one owned by another principal, is a 404 SUBSCRIPTION_NOT_FOUND.
 
 - Title: `Send Test Web Push`
 - Source: `builtin`
@@ -127830,7 +134716,7 @@ Return queued and leased remote work items.
 
 #### `tailscale.get`
 
-READ-ONLY detection of a usable tailscale environment: binary present, logged-in status, MagicDNS name, and the https URL `tailscale serve` would yield. Never invokes a state-changing tailscale command. Where tailscale is absent the result says so once, surfaces offer the auto-wire affordance only when this reports a usable environment; nothing nags. Includes the most recent serve receipt, if any.
+READ-ONLY detection of a usable tailscale environment: binary present, logged-in status, MagicDNS name, and the https URL `tailscale serve` would yield. Never invokes a state-changing tailscale command. Where tailscale is absent the result says so once, surfaces offer the auto-wire affordance only when this reports a usable environment; nothing nags. Includes the most recent serve or stop receipt (lastServe), and activeServe: the serve this daemon started and has not stopped, which tailscale keeps on until tailscale.serve.stop runs.
 
 - Title: `Detect Tailscale Environment`
 - Source: `builtin`
@@ -127879,6 +134765,13 @@ READ-ONLY detection of a usable tailscale environment: binary present, logged-in
         "at": {
           "type": "number"
         },
+        "action": {
+          "type": "string",
+          "enum": [
+            "serve",
+            "stop"
+          ]
+        },
         "command": {
           "type": "string"
         },
@@ -127886,6 +134779,58 @@ READ-ONLY detection of a usable tailscale environment: binary present, logged-in
           "type": "boolean"
         },
         "url": {
+          "type": "string"
+        },
+        "port": {
+          "type": "number"
+        },
+        "previousPublicBaseUrl": {
+          "type": "string"
+        },
+        "enableUrl": {
+          "type": "string"
+        },
+        "detail": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "at",
+        "command",
+        "ok",
+        "detail"
+      ],
+      "additionalProperties": false
+    },
+    "activeServe": {
+      "type": "object",
+      "properties": {
+        "at": {
+          "type": "number"
+        },
+        "action": {
+          "type": "string",
+          "enum": [
+            "serve",
+            "stop"
+          ]
+        },
+        "command": {
+          "type": "string"
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "url": {
+          "type": "string"
+        },
+        "port": {
+          "type": "number"
+        },
+        "previousPublicBaseUrl": {
+          "type": "string"
+        },
+        "enableUrl": {
           "type": "string"
         },
         "detail": {
@@ -127912,7 +134857,7 @@ READ-ONLY detection of a usable tailscale environment: binary present, logged-in
 
 #### `tailscale.serve.run`
 
-The one-action https affordance: run `tailscale serve --bg <web port>` so tailscale fronts the daemon's web surface at its https MagicDNS URL. This is the ONLY state-changing tailscale command the daemon ever runs, and only from this explicit user-initiated verb. The attempt is recorded with an honest receipt either way; on success web.publicBaseUrl is updated to the https URL from the same resolution. The daemon never mints certificates, TLS is terminated by tailscale.
+The one-action https affordance: run `tailscale serve --bg <web port>` so tailscale fronts the daemon's web surface at its https MagicDNS URL. Run only from this explicit user-initiated verb. The serve persists in tailscaled, also after the daemon stops or restarts, until tailscale.serve.stop runs. The attempt is recorded with an honest receipt either way (when tailscale prints a link to turn Serve on for the tailnet, the receipt carries it as enableUrl); on success web.publicBaseUrl is updated to the https URL from the same resolution and the value it replaced is kept for the stop. The daemon never mints certificates, TLS is terminated by tailscale.
 
 - Title: `Set Up Tailscale Serve For The Daemon`
 - Source: `builtin`
@@ -127946,6 +134891,13 @@ The one-action https affordance: run `tailscale serve --bg <web port>` so tailsc
         "at": {
           "type": "number"
         },
+        "action": {
+          "type": "string",
+          "enum": [
+            "serve",
+            "stop"
+          ]
+        },
         "command": {
           "type": "string"
         },
@@ -127953,6 +134905,15 @@ The one-action https affordance: run `tailscale serve --bg <web port>` so tailsc
           "type": "boolean"
         },
         "url": {
+          "type": "string"
+        },
+        "port": {
+          "type": "number"
+        },
+        "previousPublicBaseUrl": {
+          "type": "string"
+        },
+        "enableUrl": {
           "type": "string"
         },
         "detail": {
@@ -127976,7 +134937,101 @@ The one-action https affordance: run `tailscale serve --bg <web port>` so tailsc
   },
   "required": [
     "receipt",
-    "publicBaseUrlUpdated"
+    "publicBaseUrlUpdated",
+    "receiptRecorded"
+  ],
+  "additionalProperties": false
+}
+```
+
+#### `tailscale.serve.stop`
+
+Stop publishing the daemon to the tailnet: run `tailscale serve --https=443 off`, which removes what tailscale.serve.run started. The attempt is recorded with an honest receipt either way. On success, when web.publicBaseUrl still names the tailnet URL, it is put back to the value it had before the serve (cleared when none was recorded); publicBaseUrlDetail says what happened to it.
+
+- Title: `Stop Tailscale Serve For The Daemon`
+- Source: `builtin`
+- Access: `admin`
+- Transport: `ws`
+- HTTP: none
+- Scopes: `write:control-plane`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {},
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "receipt": {
+      "type": "object",
+      "properties": {
+        "at": {
+          "type": "number"
+        },
+        "action": {
+          "type": "string",
+          "enum": [
+            "serve",
+            "stop"
+          ]
+        },
+        "command": {
+          "type": "string"
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "url": {
+          "type": "string"
+        },
+        "port": {
+          "type": "number"
+        },
+        "previousPublicBaseUrl": {
+          "type": "string"
+        },
+        "enableUrl": {
+          "type": "string"
+        },
+        "detail": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "at",
+        "command",
+        "ok",
+        "detail"
+      ],
+      "additionalProperties": false
+    },
+    "publicBaseUrlRestored": {
+      "type": "boolean"
+    },
+    "publicBaseUrlDetail": {
+      "type": "string"
+    },
+    "receiptRecorded": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "receipt",
+    "publicBaseUrlRestored",
+    "publicBaseUrlDetail",
+    "receiptRecorded"
   ],
   "additionalProperties": false
 }
@@ -128059,7 +135114,7 @@ Return the integration review snapshot used by external helpers.
 
 #### `rewind.apply`
 
-Apply a unified rewind to a session turn anchor, restoring files and/or conversation. DESTRUCTIVE: requires confirmation, either the confirmToken minted by rewind.plan (single-use, ~2 min) or confirm:true. Called without either, it returns a non-error refusal (refused:true) naming rewind.plan, never a silent no-op; a bad token is a 400. Every apply records an undo point (the workspace restore takes a pre-restore safety checkpoint; the conversation store captures its pre-rewind snapshot) so the rewind is itself reversible, and returns a receipt whose `undo` block carries how to reverse it. Emits a REWIND_APPLIED receipt event.
+Apply a unified rewind to a session turn anchor, restoring files and/or conversation. DESTRUCTIVE: requires the confirmToken minted by rewind.plan (single-use, ~2 min), which is bound to the session, turn, scope and previewed checkpoint. Called without it, confirm:true included, it returns a non-error refusal (refused:true) naming rewind.plan, never a silent no-op; a bad token is a 400. Every apply records an undo point (the workspace restore takes a pre-restore safety checkpoint; the conversation store captures its pre-rewind snapshot) so the rewind is itself reversible, and returns a receipt whose `undo` block carries how to reverse it: checkpoints.restore with undo.files.restoreCheckpointId for the files, rewind.undo with undo.conversation.undoSnapshotId for the conversation. undo.conversation.expiresAfter states how long that undo point lasts, as the process holding the conversation keeps it (the newest 32 rewinds; on disk where that process keeps its sessions). Emits a REWIND_APPLIED receipt event.
 
 - Title: `Apply a Unified Rewind`
 - Source: `builtin`
@@ -128253,10 +135308,14 @@ Apply a unified rewind to a session turn anchor, restoring files and/or conversa
                       "properties": {
                         "undoSnapshotId": {
                           "type": "string"
+                        },
+                        "expiresAfter": {
+                          "type": "string"
                         }
                       },
                       "required": [
-                        "undoSnapshotId"
+                        "undoSnapshotId",
+                        "expiresAfter"
                       ],
                       "additionalProperties": false
                     },
@@ -128589,7 +135648,7 @@ Which sessions have a surface offering their live conversation right now, how ea
 
 #### `rewind.conversation.requests.answer`
 
-Report what this surface found or did. Which fields are expected follows from the REQUEST, which already says whether it was a preview or a rewind, an answer that restated that could only disagree with it, silently. For a preview: messagesToDrop and messagesRemaining. For a rewind: droppedMessages and the undoSnapshotId that restores them. For either, a non-empty unavailableReason instead, which is the honest answer when the conversation is gone or this surface cannot serve it, and saying so beats staying silent, because silence becomes a timeout and a timed-out rewind cannot tell whether the messages were dropped. Only the surface a request was put to may answer it.
+Report what this surface found or did. Which fields are expected follows from the REQUEST, which already says whether it was a preview, a rewind or an undo, an answer that restated that could only disagree with it, silently. For a preview: messagesToDrop and messagesRemaining. For a rewind: droppedMessages and the undoSnapshotId that restores them, optionally undoExpiresAfter saying how long this surface keeps it. For an undo: undone:true once the pre-rewind conversation is back. For any kind, a non-empty unavailableReason instead, which is the honest answer when the conversation is gone or this surface cannot serve it, and saying so beats staying silent, because silence becomes a timeout and a timed-out rewind cannot tell whether the messages were dropped; an undo refusal adds unavailableCode UNDO_POINT_GONE or CONVERSATION_CHANGED. Only the surface a request was put to may answer it.
 
 - Title: `Answer a Conversation Rewind Request`
 - Source: `builtin`
@@ -128625,8 +135684,21 @@ Report what this surface found or did. Which fields are expected follows from th
     "undoSnapshotId": {
       "type": "string"
     },
+    "undoExpiresAfter": {
+      "type": "string"
+    },
+    "undone": {
+      "type": "boolean"
+    },
     "unavailableReason": {
       "type": "string"
+    },
+    "unavailableCode": {
+      "type": "string",
+      "enum": [
+        "UNDO_POINT_GONE",
+        "CONVERSATION_CHANGED"
+      ]
     }
   },
   "required": [
@@ -128669,8 +135741,12 @@ Report what this surface found or did. Which fields are expected follows from th
           "type": "string",
           "enum": [
             "preview",
-            "rewind"
+            "rewind",
+            "undo"
           ]
+        },
+        "undoSnapshotId": {
+          "type": "string"
         },
         "expiresAt": {
           "type": "number"
@@ -128696,7 +135772,7 @@ Report what this surface found or did. Which fields are expected follows from th
 
 #### `rewind.conversation.requests.take`
 
-Collect the conversation questions waiting for this host, how many messages a rewind to an anchor would drop, or a request to actually drop them, and renew its lease, because a surface that is polling is a surface that is alive. With nothing waiting, pass waitMs to hold the call open until something arrives; an empty result is a normal answer, not an error. Answer each request with rewind.conversation.requests.answer before its expiresAt, or the caller waiting on it is told, honestly, that this surface did not answer in time.
+Collect the conversation questions waiting for this host, how many messages a rewind to an anchor would drop, a request to actually drop them, or a request to undo a rewind from its undoSnapshotId, and renew its lease, because a surface that is polling is a surface that is alive. With nothing waiting, pass waitMs to hold the call open until something arrives; an empty result is a normal answer, not an error. Answer each request with rewind.conversation.requests.answer before its expiresAt, or the caller waiting on it is told, honestly, that this surface did not answer in time.
 
 - Title: `Take Conversation Rewind Requests`
 - Source: `builtin`
@@ -128762,8 +135838,12 @@ Collect the conversation questions waiting for this host, how many messages a re
             "type": "string",
             "enum": [
               "preview",
-              "rewind"
+              "rewind",
+              "undo"
             ]
+          },
+          "undoSnapshotId": {
+            "type": "string"
           },
           "expiresAt": {
             "type": "number"
@@ -128980,6 +136060,101 @@ Dry-run preview of a unified rewind to a session turn anchor: exactly what resto
     "files",
     "conversation",
     "warnings"
+  ],
+  "additionalProperties": false
+}
+```
+
+#### `rewind.undo`
+
+Put a session's conversation back to how it was before a rewind, from the undo.conversation.undoSnapshotId of the rewind.apply receipt. The pre-rewind copy replaces the whole conversation, so the undo is refused while the conversation has newer messages than the rewind left it with. Answers undone:true, or undone:false with a refusal (code, state, reason, next) and nothing changed: the snapshot is gone (see the receipt's undo.conversation.expiresAfter), the conversation changed since, or the surface holding the conversation did not answer. A conversation a surface is hosting is restored by that surface, asked over its rewind.conversation.requests channel; one this daemon holds is restored here. Files are reversed separately with checkpoints.restore.
+
+- Title: `Undo a Conversation Rewind`
+- Source: `builtin`
+- Access: `authenticated`
+- Transport: `ws`
+- HTTP: none
+- Scopes: `write:checkpoints`
+- Emits events: none
+- Dangerous: `yes`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "sessionId": {
+      "type": "string"
+    },
+    "undoSnapshotId": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "sessionId",
+    "undoSnapshotId"
+  ],
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "undone": {
+      "type": "boolean"
+    },
+    "sessionId": {
+      "type": "string"
+    },
+    "undoSnapshotId": {
+      "type": "string"
+    },
+    "refusal": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "code": {
+              "type": "string"
+            },
+            "state": {
+              "type": "string"
+            },
+            "reason": {
+              "type": "string"
+            },
+            "next": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "code",
+            "state",
+            "reason",
+            "next"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "required": [
+    "undone",
+    "sessionId",
+    "undoSnapshotId",
+    "refusal"
   ],
   "additionalProperties": false
 }
@@ -129869,7 +137044,7 @@ Return the route and binding integration snapshot.
 
 #### `surfaces.list`
 
-Return registered channel and control surfaces.
+Return registered channel and control surfaces. Stay current by subscribing to the surfaces event domain: SURFACE_ENABLED and SURFACE_DISABLED when a surface is switched on or off, SURFACE_CAPABILITY_CHANGED when a capability is added or removed, SURFACE_ACCOUNT_CONNECTED and SURFACE_ACCOUNT_DEGRADED when a channel starts working or starts failing.
 
 - Title: `List Surfaces`
 - Source: `builtin`
@@ -133247,7 +140422,7 @@ Mark a shared session as closed.
 
 #### `sessions.contextUsage.get`
 
-Return the live context-window usage for a session: estimatedContextTokens (the runtime's current estimate, not a fresh preflight count), a source-supported contextWindow or configured cap, and the derived contextUsagePct and contextRemainingTokens (all three null when capacity is unknown). Typed source, origin and accepted-input floor metadata remain separate from the known ceiling. `estimated` is always true, marking the token figure as an estimate rather than a fact. Only the daemon's live local runtime session is resolvable; any other session id is a 404 SESSION_NOT_LOCAL.
+Return the live context-window usage for a session: estimatedContextTokens (the runtime's current estimate, not a fresh preflight count), a source-supported contextWindow or configured cap, and the derived contextUsagePct and contextRemainingTokens (all three null when capacity is unknown). Typed source, origin and accepted-input floor metadata remain separate from the known ceiling. `estimated` is always true, marking the token figure as an estimate rather than a fact. Answers for the daemon's own runtime session and every session it hosts; a session it runs but keeps no figure for (an active channel session) is a 409 CONTEXT_USAGE_UNAVAILABLE, and any other session id is a 404 SESSION_NOT_LOCAL.
 
 - Title: `Get Session Context Usage`
 - Source: `builtin`
@@ -134980,6 +142155,9 @@ Join a hosted session and receive its transcript so far, so a client that was ne
           "items": {
             "type": "string"
           }
+        },
+        "saveError": {
+          "type": "string"
         }
       },
       "required": [
@@ -135041,7 +142219,7 @@ Join a hosted session and receive its transcript so far, so a client that was ne
 
 #### `sessions.hosted.create`
 
-Compose a full conversation loop INSIDE the daemon for a workspace: the same orchestrator, tool registry and permission gate a terminal runs, hosted here so the conversation does not depend on the client that started it staying open. `workspaceRoot` must be absolute, a relative path would resolve against the daemon's own directory, which is never what the caller meant. `modelId` is resolved against this daemon's live model registry when given, so an unknown or ambiguous id is refused here rather than at the first turn; omitted, the session follows the daemon's current selection. `detachPolicy` overrides the `hostedSessions.detachPolicy` setting for this session alone. `initialPrompt` is submitted as the first user message and the call does NOT wait for that turn, watch the `turn` and `tools` event domains filtered on the returned session id. Refused with the live count and the setting named when `hostedSessions.maxSessions` is already reached. ws-only invoke verb; no REST binding.
+Compose a full conversation loop INSIDE the daemon for a workspace: the same orchestrator, tool registry and permission gate a terminal runs, hosted here so the conversation does not depend on the client that started it staying open. `workspaceRoot` must be absolute, a relative path would resolve against the daemon's own directory, which is never what the caller meant, and must be the daemon's working directory or a registered workspace (or inside one); anything else is refused with the allowed folders named (sessions.hosted.workspaces lists them). `modelId` is resolved against this daemon's live model registry when given, so an unknown or ambiguous id is refused here rather than at the first turn; omitted, the session follows the daemon's current selection. `detachPolicy` overrides the `hostedSessions.detachPolicy` setting for this session alone. `initialPrompt` is submitted as the first user message and the call does NOT wait for that turn, watch the `turn` and `tools` event domains filtered on the returned session id. Refused with the live count and the setting named when `hostedSessions.maxSessions` is already reached. ws-only invoke verb; no REST binding.
 
 - Title: `Create a Daemon-Hosted Session`
 - Source: `builtin`
@@ -135196,6 +142374,9 @@ Compose a full conversation loop INSIDE the daemon for a workspace: the same orc
           "items": {
             "type": "string"
           }
+        },
+        "saveError": {
+          "type": "string"
         }
       },
       "required": [
@@ -135362,6 +142543,9 @@ Leave a hosted session. When other clients are still attached, nothing else happ
           "items": {
             "type": "string"
           }
+        },
+        "saveError": {
+          "type": "string"
         }
       },
       "required": [
@@ -135524,6 +142708,9 @@ End a hosted session regardless of who is attached or what its detach policy say
           "items": {
             "type": "string"
           }
+        },
+        "saveError": {
+          "type": "string"
         }
       },
       "required": [
@@ -135685,6 +142872,9 @@ Every session this daemon hosts, most recently updated first. Terminated session
             "items": {
               "type": "string"
             }
+          },
+          "saveError": {
+            "type": "string"
           }
         },
         "required": [
@@ -135708,6 +142898,50 @@ Every session this daemon hosts, most recently updated first. Terminated session
   },
   "required": [
     "sessions"
+  ],
+  "additionalProperties": false
+}
+```
+
+#### `sessions.hosted.workspaces`
+
+The folders sessions.hosted.create accepts as workspaceRoot: the daemon's working directory and every registered workspace (a path inside one is accepted too). The same list contract work dispatched into a hosted session is held to. ws-only invoke verb; no REST binding.
+
+- Title: `Folders a Hosted Session May Use`
+- Source: `builtin`
+- Access: `authenticated`
+- Transport: `ws`
+- HTTP: none
+- Scopes: `read:sessions`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {},
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "roots": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "roots"
   ],
   "additionalProperties": false
 }
@@ -137970,7 +145204,7 @@ Return a page of retained session messages. Offset counts backward from the newe
 
 #### `sessions.permissionMode.get`
 
-Return the effective session execution mode: safe-owner, safe-jev, yolo, or the read-only plan posture. Only the daemon's live local runtime session is resolvable; any other session id is a 404 SESSION_NOT_LOCAL.
+Return the effective session execution mode: safe-owner, safe-jev, yolo, or the read-only plan posture. Answers for the local runtime session (addressable as `runtime`), every session the daemon hosts, and a channel session with its own mode; other session ids answer 404 SESSION_NOT_LOCAL.
 
 - Title: `Get Session Permission Mode`
 - Source: `builtin`
@@ -138028,7 +145262,7 @@ Return the effective session execution mode: safe-owner, safe-jev, yolo, or the 
 
 #### `sessions.permissionMode.set`
 
-Set safe-owner, safe-jev, or yolo execution, or enter the read-only plan posture. Admin only: yolo runs every action without safety denials, and for a session with no hosted or channel mode of its own this also rewrites the daemon-wide permissions.mode. Emits runtime.gate (PRESET_CHANGED) so every surface stays in sync. Only the daemon's live local runtime session is settable; any other session id is a 404 SESSION_NOT_LOCAL.
+Set safe-owner, safe-jev, or yolo execution, or enter the read-only plan posture. Admin only, because it can loosen security: yolo runs every action without safety denials, and for the local runtime session (no hosted or channel mode of its own) it rewrites the daemon-wide permissions.mode. A hosted session and a channel session with its own mode change only that session. Emits runtime.gate (PRESET_CHANGED) so every surface stays in sync. Other session ids answer 404 SESSION_NOT_LOCAL.
 
 - Title: `Set Session Permission Mode`
 - Source: `builtin`
@@ -138106,7 +145340,7 @@ Set safe-owner, safe-jev, or yolo execution, or enter the read-only plan posture
 
 #### `sessions.queuedMessages.delete`
 
-Remove a message still waiting in the mid-turn queue so it is never delivered. A message already delivered to the model cannot be removed, deleting it is a 404 MESSAGE_NOT_QUEUED. Only the daemon's live local runtime session is controllable; any other session id is a 404 SESSION_NOT_LOCAL.
+Remove a message still waiting in the mid-turn queue so it is never delivered. A message already delivered to the model cannot be removed, deleting it is a 404 MESSAGE_NOT_QUEUED. Any session with a live runtime on this daemon (the local runtime, addressable as `runtime`, and every session the daemon hosts) is controllable; other session ids answer 404 SESSION_NOT_LOCAL.
 
 - Title: `Delete a Queued Mid-Turn Message`
 - Source: `builtin`
@@ -138166,7 +145400,7 @@ Remove a message still waiting in the mid-turn queue so it is never delivered. A
 
 #### `sessions.queuedMessages.edit`
 
-Replace the text of a message still waiting in the mid-turn queue. A message already delivered to the model is immutable, editing it is a 404 MESSAGE_NOT_QUEUED. Editing replaces any multimodal content with the new plain text. Only the daemon's live local runtime session is controllable; any other session id is a 404 SESSION_NOT_LOCAL.
+Replace the text of a message still waiting in the mid-turn queue. A message already delivered to the model is immutable, editing it is a 404 MESSAGE_NOT_QUEUED. Editing replaces any multimodal content with the new plain text. Any session with a live runtime on this daemon (the local runtime, addressable as `runtime`, and every session the daemon hosts) is controllable; other session ids answer 404 SESSION_NOT_LOCAL.
 
 - Title: `Edit a Queued Mid-Turn Message`
 - Source: `builtin`
@@ -138230,7 +145464,7 @@ Replace the text of a message still waiting in the mid-turn queue. A message alr
 
 #### `sessions.queuedMessages.list`
 
-List the messages queued behind the current turn (submitted while the model was thinking), in delivery order. Queued messages remain editable and deletable until they are delivered; a delivered message no longer appears here. Only the daemon's live local runtime session is resolvable; any other session id is a 404 SESSION_NOT_LOCAL.
+List the messages queued behind the current turn (submitted while the model was thinking), in delivery order. Queued messages remain editable and deletable until they are delivered; a delivered message no longer appears here. Any session with a live runtime on this daemon (the local runtime, addressable as `runtime`, and every session the daemon hosts) is resolvable; other session ids answer 404 SESSION_NOT_LOCAL.
 
 - Title: `List Queued Mid-Turn Messages`
 - Source: `builtin`
@@ -139670,7 +146904,7 @@ Deliver a live steering message to the active agent for a shared session, option
 
 #### `sessions.toolCalls.cancel`
 
-Cancel a single running tool call by its callId, leaving the turn and any other running calls untouched. The cancelled call settles as a structured "cancelled by user" tool result the model adapts to in the same turn, distinct from a whole-turn interrupt. Only the daemon's live local runtime session is controllable; any other session id is a 404 SESSION_NOT_LOCAL, and an unknown or already-settled callId is a 404 TOOL_CALL_NOT_RUNNING.
+Cancel a single running tool call by its callId, leaving the turn and any other running calls untouched. The cancelled call settles as a structured "cancelled by user" tool result the model adapts to in the same turn, distinct from a whole-turn interrupt. Any session with a live runtime on this daemon (the local runtime, addressable as `runtime`, and every session the daemon hosts) is controllable; other session ids answer 404 SESSION_NOT_LOCAL, and an unknown or already-settled callId is a 404 TOOL_CALL_NOT_RUNNING.
 
 - Title: `Cancel One In-Flight Tool Call`
 - Source: `builtin`
@@ -139730,7 +146964,7 @@ Cancel a single running tool call by its callId, leaving the turn and any other 
 
 #### `sessions.turns.cancel`
 
-Atomically compare expectedTurnId and request cancellation of that live turn, preserving the session and future queued work. Acceptance does not establish settlement: observe the existing runtime turn terminal event for the same sessionId and turnId. Settlement covers this turn's owned provider, tool, hook and hook-Agent work; independent workflow-trigger automations and already-committed external effects are excluded. Repeated requests are idempotent. Known recently ended IDs report already-ended; unknown or expired IDs report stale-turn when another turn is active, otherwise turn-not-found. Missing local sessions return SESSION_NOT_LOCAL. Requires write:sessions.
+Atomically compare expectedTurnId and request cancellation of that live turn, preserving the session and future queued work. Acceptance does not establish settlement: observe the existing runtime turn terminal event for the same sessionId and turnId. Settlement covers this turn's owned provider, tool, hook and hook-Agent work; independent workflow-trigger automations and already-committed external effects are excluded. Repeated requests are idempotent. Known recently ended IDs report already-ended; unknown or expired IDs report stale-turn when another turn is active, otherwise turn-not-found. Works for any session with a live runtime on this daemon (the local runtime, addressable as `runtime`, and every session the daemon hosts); other session ids answer 404 SESSION_NOT_LOCAL. Requires write:sessions.
 
 - Title: `Request Cancellation of an Expected Turn`
 - Source: `builtin`
@@ -140273,7 +147507,7 @@ Return the settings integration snapshot.
 
 #### `skills.create`
 
-Create a new skill from a name, one-line description, and Markdown body (plus optional frontmatter metadata). Fails with a conflict when a skill of that name already exists, use skills.update to change an existing one.
+Create a new skill as ~/.goodvibes/skills/<name>.md from a name, one-line description, and Markdown body (plus optional frontmatter metadata). Fails with a conflict when any listed skill already has that name, use skills.update to change an existing one.
 
 - Title: `Create Skill`
 - Source: `builtin`
@@ -140382,6 +147616,17 @@ Create a new skill from a name, one-line description, and Markdown body (plus op
         "updatedAt": {
           "type": "number"
         },
+        "origin": {
+          "type": "string",
+          "enum": [
+            "project-local",
+            "global",
+            "custom"
+          ]
+        },
+        "path": {
+          "type": "string"
+        },
         "body": {
           "type": "string"
         }
@@ -140404,7 +147649,7 @@ Create a new skill from a name, one-line description, and Markdown body (plus op
 
 #### `skills.delete`
 
-Permanently delete a skill. Delete means delete: the document is removed, not tombstoned. Returns { deleted: false } when no skill with that name existed, an honest boolean, never a 200 that pretends a phantom skill was removed.
+Permanently delete a skill. Delete means delete: a <name>.md document is removed, and a folder skill is removed with its folder, not tombstoned; path names what was removed. Returns { deleted: false } when no skill with that name existed, an honest boolean, never a 200 that pretends a phantom skill was removed.
 
 - Title: `Delete Skill`
 - Source: `builtin`
@@ -140444,6 +147689,9 @@ Permanently delete a skill. Delete means delete: the document is removed, not to
     },
     "deleted": {
       "type": "boolean"
+    },
+    "path": {
+      "type": "string"
     }
   },
   "required": [
@@ -140456,7 +147704,7 @@ Permanently delete a skill. Delete means delete: the document is removed, not to
 
 #### `skills.get`
 
-Return one skill in full, including its Markdown body. Returns 404 when no skill with that name exists.
+Return one skill in full, including its Markdown body, by the name skills.list shows (case does not matter). Returns 404 when no skill with that name exists.
 
 - Title: `Get Skill`
 - Source: `builtin`
@@ -140530,6 +147778,17 @@ Return one skill in full, including its Markdown body. Returns 404 when no skill
         "updatedAt": {
           "type": "number"
         },
+        "origin": {
+          "type": "string",
+          "enum": [
+            "project-local",
+            "global",
+            "custom"
+          ]
+        },
+        "path": {
+          "type": "string"
+        },
         "body": {
           "type": "string"
         }
@@ -140552,7 +147811,7 @@ Return one skill in full, including its Markdown body. Returns 404 when no skill
 
 #### `skills.list`
 
-Return the index line (name, description, metadata) of every skill in the canonical store. Progressive disclosure: bodies are never returned here, call skills.get for the one skill you decide to open.
+Return the index line (name, description, metadata, origin, path) of every skill a session loads: the project and home skill directories, flat <name>.md files and <folder>/SKILL.md folders, project skills first. A name a project skill uses hides the home skill of that name. Progressive disclosure: bodies are never returned here, call skills.get for the one skill you decide to open.
 
 - Title: `List Skills`
 - Source: `builtin`
@@ -140620,6 +147879,17 @@ Return the index line (name, description, metadata) of every skill in the canoni
           },
           "updatedAt": {
             "type": "number"
+          },
+          "origin": {
+            "type": "string",
+            "enum": [
+              "project-local",
+              "global",
+              "custom"
+            ]
+          },
+          "path": {
+            "type": "string"
           }
         },
         "required": [
@@ -140640,7 +147910,7 @@ Return the index line (name, description, metadata) of every skill in the canoni
 
 #### `skills.update`
 
-Update an existing skill's description, body, and/or frontmatter metadata. Absent fields are left unchanged. Returns 404 when no skill with that name exists.
+Update an existing skill's description, body, and/or frontmatter metadata in the file skills.list names. Absent fields are left unchanged; a body-only change keeps the frontmatter exactly as written. Changing the description or metadata of a skill whose frontmatter uses YAML beyond one key: value per line is refused (400) so nothing the author wrote is lost. Returns 404 when no skill with that name exists.
 
 - Title: `Update Skill`
 - Source: `builtin`
@@ -140746,6 +148016,17 @@ Update an existing skill's description, body, and/or frontmatter metadata. Absen
         },
         "updatedAt": {
           "type": "number"
+        },
+        "origin": {
+          "type": "string",
+          "enum": [
+            "project-local",
+            "global",
+            "custom"
+          ]
+        },
+        "path": {
+          "type": "string"
         },
         "body": {
           "type": "string"
@@ -148141,9 +155422,13 @@ Persist cancellation for the selected existing attempt, including a pending init
             "reason": {
               "type": "string",
               "enum": [
-                "evidence-over-capacity",
+                "artifact-outside-tree",
+                "artifact-not-regular",
+                "artifact-too-large",
                 "artifact-access-restricted",
+                "artifact-access-revoked",
                 "artifact-budget-exceeded",
+                "not-applied",
                 "review-not-genuine",
                 "changed-during-verification",
                 "cancelled",
@@ -149084,9 +156369,13 @@ Explicitly resume an interrupted/refused intent with a fresh evaluation or recov
             "reason": {
               "type": "string",
               "enum": [
-                "evidence-over-capacity",
+                "artifact-outside-tree",
+                "artifact-not-regular",
+                "artifact-too-large",
                 "artifact-access-restricted",
+                "artifact-access-revoked",
                 "artifact-budget-exceeded",
+                "not-applied",
                 "review-not-genuine",
                 "changed-during-verification",
                 "cancelled",
@@ -150027,9 +157316,13 @@ Start one existing complete native work attempt using host-owned source and pair
             "reason": {
               "type": "string",
               "enum": [
-                "evidence-over-capacity",
+                "artifact-outside-tree",
+                "artifact-not-regular",
+                "artifact-too-large",
                 "artifact-access-restricted",
+                "artifact-access-revoked",
                 "artifact-budget-exceeded",
+                "not-applied",
                 "review-not-genuine",
                 "changed-during-verification",
                 "cancelled",
@@ -150970,9 +158263,13 @@ Inspect a bounded execution or admission-intent projection for an existing nativ
             "reason": {
               "type": "string",
               "enum": [
-                "evidence-over-capacity",
+                "artifact-outside-tree",
+                "artifact-not-regular",
+                "artifact-too-large",
                 "artifact-access-restricted",
+                "artifact-access-revoked",
                 "artifact-budget-exceeded",
+                "not-applied",
                 "review-not-genuine",
                 "changed-during-verification",
                 "cancelled",
@@ -167512,6 +174809,7 @@ Persist cancellation of the exact native hosted dispatch and drain its owned tur
             "running",
             "cancelling",
             "completed",
+            "failed",
             "cancelled",
             "recovery-required"
           ]
@@ -167551,6 +174849,23 @@ Persist cancellation of the exact native hosted dispatch and drain its owned tur
               "type": "null"
             }
           ]
+        },
+        "failure": {
+          "type": "object",
+          "properties": {
+            "summary": {
+              "type": "string",
+              "maxLength": 1000
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "summary",
+            "retryable"
+          ],
+          "additionalProperties": false
         }
       },
       "required": [
@@ -167590,7 +174905,7 @@ Read authoritative native session ownership. Only an explicit legacy result perm
 
 - Title: `Inspect Native Hosted Session`
 - Source: `builtin`
-- Access: `authenticated`
+- Access: `admin`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/work-ledger/turn/session`
 - Scopes: `read:sessions`
@@ -167766,6 +175081,7 @@ Deliver an already admitted native conversation input at most once through a hos
             "running",
             "cancelling",
             "completed",
+            "failed",
             "cancelled",
             "recovery-required"
           ]
@@ -167805,6 +175121,23 @@ Deliver an already admitted native conversation input at most once through a hos
               "type": "null"
             }
           ]
+        },
+        "failure": {
+          "type": "object",
+          "properties": {
+            "summary": {
+              "type": "string",
+              "maxLength": 1000
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "summary",
+            "retryable"
+          ],
+          "additionalProperties": false
         }
       },
       "required": [
@@ -167930,6 +175263,7 @@ Deliver an already admitted native conversation input at most once through a hos
             "running",
             "cancelling",
             "completed",
+            "failed",
             "cancelled",
             "recovery-required"
           ]
@@ -167969,6 +175303,23 @@ Deliver an already admitted native conversation input at most once through a hos
               "type": "null"
             }
           ]
+        },
+        "failure": {
+          "type": "object",
+          "properties": {
+            "summary": {
+              "type": "string",
+              "maxLength": 1000
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "summary",
+            "retryable"
+          ],
+          "additionalProperties": false
         }
       },
       "required": [
@@ -168085,6 +175436,7 @@ Read native hosted dispatch status. Does not admit, claim, retry or execute.
             "running",
             "cancelling",
             "completed",
+            "failed",
             "cancelled",
             "recovery-required"
           ]
@@ -168124,6 +175476,23 @@ Read native hosted dispatch status. Does not admit, claim, retry or execute.
               "type": "null"
             }
           ]
+        },
+        "failure": {
+          "type": "object",
+          "properties": {
+            "summary": {
+              "type": "string",
+              "maxLength": 1000
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "summary",
+            "retryable"
+          ],
+          "additionalProperties": false
         }
       },
       "required": [
@@ -169858,7 +177227,7 @@ Turn submission and completion events.
 
 #### `runtime.ui`
 
-UI-focused state and operational events.
+Terminal app panel and view changes: UI_PANEL_OPEN, UI_PANEL_CLOSE, UI_PANEL_FOCUS (panelId) and UI_VIEW_CHANGED (from, to: main, agent:<id> or process:<id>), published by the TUI and the Agent as they happen.
 
 - Title: `ui Domain Events`
 - Source: `builtin`
@@ -169980,7 +177349,7 @@ Workspace swap lifecycle events (start, complete, refuse).
 
 #### `control.approval_update`
 
-Every approval record transition, pushed the moment the broker records it: an ask RAISED (status pending, this is the prompt arriving), claimed by a surface, approved, denied, cancelled, or expired. The payload is the whole `approval` record plus the `createdAt` of the notice, so a subscriber renders the prompt from the event and never needs a follow-up read to draw it. This is the channel that makes approvals.raise usable from a surface that is not in the daemon process: raise returns the pending record and the DECISION arrives here, so a client gets keystroke-fast prompt delivery instead of polling approvals.list on a timer. Domain-tagged `permissions` (gateway-scope-enforcement.ts EVENT_DOMAIN), so a client that opened the stream with ?domains=… must include `permissions` to receive it; a client that opted into no domain narrowing receives it as before. The record is the daemon's, not the subscriber's: several surfaces see the same transition and the daemon remains the single source of the applied result, a surface renders what the record says rather than what it locally decided.
+Every approval record transition, pushed the moment the broker records it: an ask RAISED (status pending, this is the prompt arriving), claimed by a surface, approved, denied, cancelled, or expired. The payload is the whole `approval` record plus the `createdAt` of the notice, so a subscriber renders the prompt from the event and never needs a follow-up read to draw it. This is the channel that makes approvals.raise usable from a surface that is not in the daemon process: raise returns the pending record and the DECISION arrives here, so a client gets keystroke-fast prompt delivery instead of polling approvals.list on a timer. Domain-tagged `gate` (gateway-scope-enforcement.ts EVENT_DOMAIN), so a client that opened the stream with ?domains=… must include `gate` to receive it; a client that opted into no domain narrowing receives it as before. The record is the daemon's, not the subscriber's: several surfaces see the same transition and the daemon remains the single source of the applied result, a surface renders what the record says rather than what it locally decided.
 
 - Title: `Approval Record Update`
 - Source: `builtin`
@@ -170598,6 +177967,9 @@ Every lifecycle transition of a session whose loop runs INSIDE the daemon: creat
           "items": {
             "type": "string"
           }
+        },
+        "saveError": {
+          "type": "string"
         }
       },
       "required": [
@@ -170630,6 +178002,160 @@ Every lifecycle transition of a session whose loop runs INSIDE the daemon: creat
   "required": [
     "event",
     "session",
+    "createdAt"
+  ],
+  "additionalProperties": false
+}
+```
+
+#### `control.owner_inbox_update`
+
+A question, claim, purchase window or queued action in the owner inbox was posted, answered or withdrawn. The payload is the whole `item` plus the `createdAt` of the notice, so a surface renders the change and an agent waiting on its question reads the answer without a follow-up inbox.list. Approvals are not repeated here; they arrive on control.approval_update. Domain-tagged `gate`, like approvals: a client narrowing with ?domains=… must include `gate`.
+
+- Title: `Owner Inbox Update`
+- Source: `builtin`
+- Transport: `sse`, `ws`
+- Scopes: `read:events`
+- Domains: `gate`
+- Wire events: `owner-inbox-update`
+
+##### Payload schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "item": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "approval",
+            "question",
+            "claim",
+            "purchase",
+            "queued-action"
+          ]
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "open",
+            "answered",
+            "withdrawn",
+            "expired"
+          ]
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "detail": {
+          "type": "string"
+        },
+        "options": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "askedBy": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "number"
+        },
+        "expiresAt": {
+          "type": "number"
+        },
+        "answer": {
+          "type": "object",
+          "properties": {
+            "option": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "answeredBy": {
+          "type": "object",
+          "properties": {
+            "actor": {
+              "type": "string"
+            },
+            "surface": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "actor",
+            "surface"
+          ],
+          "additionalProperties": false
+        },
+        "closedAt": {
+          "type": "number"
+        },
+        "withdrawnReason": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string"
+        },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              },
+              {
+                "type": "object",
+                "additionalProperties": {}
+              },
+              {
+                "type": "array",
+                "items": {}
+              }
+            ]
+          }
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "status",
+        "title",
+        "detail",
+        "options",
+        "createdAt"
+      ],
+      "additionalProperties": false
+    },
+    "createdAt": {
+      "type": "number"
+    }
+  },
+  "required": [
+    "item",
     "createdAt"
   ],
   "additionalProperties": false
@@ -170672,6 +178198,46 @@ Initial SSE/WebSocket handshake event emitted after a control-plane subscription
     "transport"
   ],
   "additionalProperties": false
+}
+```
+
+#### `control.remote_update`
+
+Distributed-runtime notices about paired peers and the work they run: a pair request and its approval, rejection or verification, a peer connecting, its heartbeat and disconnect, a peer token rotated or revoked, and remote work queued, claimed, settled or cancelled. The wire event name is the notice; the payload carries the sanitized peer and, for work, the work record. Requires read:remote, the scope remote.peers.list and remote.work.list require.
+
+- Title: `Remote Peer and Work Update`
+- Source: `builtin`
+- Transport: `sse`, `ws`
+- Scopes: `read:events`, `read:remote`
+- Domains: none
+- Wire events: `remote-pair-requested`, `remote-pair-approved`, `remote-pair-rejected`, `remote-pair-verified`, `remote-peer`, `remote-peer-heartbeat`, `remote-peer-disconnected`, `remote-token-rotated`, `remote-token-revoked`, `remote-work-queued`, `remote-work-claimed`, `remote-work-settled`, `remote-work-cancelled`
+
+##### Payload schema
+
+```json
+{
+  "type": "object",
+  "additionalProperties": {
+    "anyOf": [
+      {
+        "type": "string"
+      },
+      {
+        "type": "number"
+      },
+      {
+        "type": "boolean"
+      },
+      {
+        "type": "null"
+      },
+      {},
+      {
+        "type": "array",
+        "items": {}
+      }
+    ]
+  }
 }
 ```
 

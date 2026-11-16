@@ -105,16 +105,19 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "title": "sample",
         "binaryPath": "sample",
         "cwd": "sample",
-        "state": "sample",
+        "state": "starting",
         "startedAt": 0,
         "completedAt": 0,
         "sessionId": "sample",
         "progress": "sample",
-        "pendingPermission": "sample",
         "error": {
           "binary": "sample",
-          "stage": "sample",
+          "stage": "spawn",
           "message": "sample"
+        },
+        "lastRefusal": {
+          "at": 0,
+          "reason": "sample"
         },
         "promptCount": 0
       },
@@ -479,10 +482,10 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "callId": "sample",
         "toolName": "sample",
         "category": "read",
-        "machineState": "collect_rules",
+        "machineState": "check_boundary",
         "outcome": "approved",
-        "reason": "config_allow",
-        "sourceLayer": "config_policy",
+        "reason": "boundary_judgment_input",
+        "sourceLayer": "boundary",
         "persisted": false,
         "classification": "sample",
         "riskLevel": "low",
@@ -643,6 +646,166 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "holdId": "sample"
     }
   },
+  "inbox.answer": {
+    "methodId": "inbox.answer",
+    "http": null,
+    "status": 200,
+    "body": {
+      "applied": false,
+      "item": {
+        "id": "sample",
+        "kind": "approval",
+        "status": "open",
+        "sessionId": "sample",
+        "title": "sample",
+        "detail": "sample",
+        "options": [
+          "sample"
+        ],
+        "askedBy": "sample",
+        "createdAt": 0,
+        "expiresAt": 0,
+        "answer": {
+          "option": "sample",
+          "text": "sample"
+        },
+        "answeredBy": {
+          "actor": "sample",
+          "surface": "sample"
+        },
+        "closedAt": 0,
+        "withdrawnReason": "sample",
+        "key": "sample",
+        "metadata": {}
+      },
+      "refusal": {
+        "code": "sample",
+        "state": "sample",
+        "reason": "sample",
+        "next": [
+          "sample"
+        ],
+        "retryable": false,
+        "retryAfterMs": 0,
+        "status": 0
+      }
+    }
+  },
+  "inbox.list": {
+    "methodId": "inbox.list",
+    "http": null,
+    "status": 200,
+    "body": {
+      "items": [
+        {
+          "id": "sample",
+          "kind": "approval",
+          "status": "open",
+          "sessionId": "sample",
+          "title": "sample",
+          "detail": "sample",
+          "options": [
+            "sample"
+          ],
+          "askedBy": "sample",
+          "createdAt": 0,
+          "expiresAt": 0,
+          "answer": {
+            "option": "sample",
+            "text": "sample"
+          },
+          "answeredBy": {
+            "actor": "sample",
+            "surface": "sample"
+          },
+          "closedAt": 0,
+          "withdrawnReason": "sample",
+          "key": "sample",
+          "metadata": {}
+        }
+      ],
+      "revision": 0
+    }
+  },
+  "inbox.post": {
+    "methodId": "inbox.post",
+    "http": null,
+    "status": 200,
+    "body": {
+      "created": false,
+      "item": {
+        "id": "sample",
+        "kind": "approval",
+        "status": "open",
+        "sessionId": "sample",
+        "title": "sample",
+        "detail": "sample",
+        "options": [
+          "sample"
+        ],
+        "askedBy": "sample",
+        "createdAt": 0,
+        "expiresAt": 0,
+        "answer": {
+          "option": "sample",
+          "text": "sample"
+        },
+        "answeredBy": {
+          "actor": "sample",
+          "surface": "sample"
+        },
+        "closedAt": 0,
+        "withdrawnReason": "sample",
+        "key": "sample",
+        "metadata": {}
+      }
+    }
+  },
+  "inbox.withdraw": {
+    "methodId": "inbox.withdraw",
+    "http": null,
+    "status": 200,
+    "body": {
+      "applied": false,
+      "item": {
+        "id": "sample",
+        "kind": "approval",
+        "status": "open",
+        "sessionId": "sample",
+        "title": "sample",
+        "detail": "sample",
+        "options": [
+          "sample"
+        ],
+        "askedBy": "sample",
+        "createdAt": 0,
+        "expiresAt": 0,
+        "answer": {
+          "option": "sample",
+          "text": "sample"
+        },
+        "answeredBy": {
+          "actor": "sample",
+          "surface": "sample"
+        },
+        "closedAt": 0,
+        "withdrawnReason": "sample",
+        "key": "sample",
+        "metadata": {}
+      },
+      "refusal": {
+        "code": "sample",
+        "state": "sample",
+        "reason": "sample",
+        "next": [
+          "sample"
+        ],
+        "retryable": false,
+        "retryAfterMs": 0,
+        "status": 0
+      }
+    }
+  },
   "artifacts.content.get": {
     "methodId": "artifacts.content.get",
     "http": {
@@ -673,8 +836,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "createdAt": 0,
         "expiresAt": 0,
         "sourceUri": "sample",
-        "acquisitionMode": "sample",
-        "fetchMode": "sample",
+        "acquisitionMode": "inline-data",
+        "fetchMode": "not-applicable",
         "metadata": {}
       }
     }
@@ -697,8 +860,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "createdAt": 0,
         "expiresAt": 0,
         "sourceUri": "sample",
-        "acquisitionMode": "sample",
-        "fetchMode": "sample",
+        "acquisitionMode": "inline-data",
+        "fetchMode": "not-applicable",
         "metadata": {}
       }
     }
@@ -722,8 +885,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "createdAt": 0,
           "expiresAt": 0,
           "sourceUri": "sample",
-          "acquisitionMode": "sample",
-          "fetchMode": "sample",
+          "acquisitionMode": "inline-data",
+          "fetchMode": "not-applicable",
           "metadata": {}
         }
       ]
@@ -3381,6 +3544,22 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "found": false
     }
   },
+  "calendar.calendars.list": {
+    "methodId": "calendar.calendars.list",
+    "http": {
+      "method": "GET",
+      "path": "/api/calendar/calendars"
+    },
+    "status": 200,
+    "body": {
+      "calendars": [
+        {
+          "calendarId": "sample",
+          "displayName": "sample"
+        }
+      ]
+    }
+  },
   "calendar.events.create": {
     "methodId": "calendar.events.create",
     "http": {
@@ -3392,6 +3571,18 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "eventId": "sample",
       "uid": "sample",
       "createdAt": "sample"
+    }
+  },
+  "calendar.events.delete": {
+    "methodId": "calendar.events.delete",
+    "http": {
+      "method": "DELETE",
+      "path": "/api/calendar/events/{eventId}"
+    },
+    "status": 200,
+    "body": {
+      "eventId": "sample",
+      "deleted": false
     }
   },
   "calendar.events.get": {
@@ -3407,6 +3598,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "title": "sample",
       "start": "sample",
       "end": "sample",
+      "allDay": false,
       "location": "sample",
       "description": "sample",
       "attendees": [
@@ -3429,6 +3621,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "title": "sample",
           "start": "sample",
           "end": "sample",
+          "allDay": false,
           "location": "sample",
           "description": "sample",
           "attendees": [
@@ -3436,6 +3629,18 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           ]
         }
       ]
+    }
+  },
+  "calendar.events.update": {
+    "methodId": "calendar.events.update",
+    "http": {
+      "method": "PATCH",
+      "path": "/api/calendar/events/{eventId}"
+    },
+    "status": 200,
+    "body": {
+      "eventId": "sample",
+      "updatedAt": "sample"
     }
   },
   "calendar.ics.export": {
@@ -3464,6 +3669,16 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       ],
       "errors": [
         "sample"
+      ],
+      "attendeesLeftOff": [
+        {
+          "eventId": "sample",
+          "title": "sample",
+          "attendees": [
+            "sample"
+          ],
+          "next": "sample"
+        }
       ]
     }
   },
@@ -4789,6 +5004,10 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "cadence": "sample",
         "deliveryChannel": "sample",
         "quietHours": "sample"
+      },
+      "schedule": {
+        "state": "scheduled",
+        "reason": "sample"
       }
     }
   },
@@ -5238,7 +5457,10 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "error": "sample"
         }
       },
-      "generatedSecrets": {}
+      "generatedSecrets": {},
+      "warnings": [
+        "sample"
+      ]
     }
   },
   "cloudflare.resources.list": {
@@ -5308,7 +5530,14 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "config": {},
       "warnings": [
         "sample"
-      ]
+      ],
+      "tunnelConnector": {
+        "state": "not-configured",
+        "detail": "sample",
+        "next": [
+          "sample"
+        ]
+      }
     }
   },
   "cloudflare.token.create": {
@@ -5323,6 +5552,12 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "tokenId": "sample",
       "tokenName": "sample",
       "tokenSource": "sample",
+      "reused": false,
+      "replaced": {
+        "tokenId": "sample",
+        "revoked": false,
+        "reason": "sample"
+      },
       "apiTokenRef": "sample",
       "generatedToken": "sample",
       "accountId": "sample",
@@ -5493,6 +5728,30 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "sample"
       ],
       "turnStarted": false
+    }
+  },
+  "companion.chat.messages.search": {
+    "methodId": "companion.chat.messages.search",
+    "http": {
+      "method": "GET",
+      "path": "/api/companion/chat/messages/search"
+    },
+    "status": 200,
+    "body": {
+      "query": "sample",
+      "items": [
+        {
+          "sessionId": "sample",
+          "sessionTitle": "sample",
+          "messageId": "sample",
+          "role": "sample",
+          "snippet": "sample",
+          "createdAt": 0
+        }
+      ],
+      "total": 0,
+      "hasMore": false,
+      "nextCursor": "sample"
     }
   },
   "companion.chat.messages.steer": {
@@ -5844,6 +6103,1204 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
     "status": 200,
     "body": {
       "cancelled": false
+    }
+  },
+  "contracts.dispatch": {
+    "methodId": "contracts.dispatch",
+    "http": null,
+    "status": 200,
+    "body": {
+      "contract": {
+        "originalSource": {
+          "goal": "sample",
+          "criteria": [
+            "sample"
+          ],
+          "conversationContext": [
+            {
+              "role": "user",
+              "content": "sample"
+            }
+          ],
+          "selectedDiffContext": {
+            "kind": "session",
+            "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "fileIndex": 0,
+            "hunkIndex": 0,
+            "unifiedDiff": "sample",
+            "provenance": {
+              "kind": "session",
+              "sessionId": "sample",
+              "baselineCheckpointId": "sample",
+              "latestCheckpointId": "sample"
+            }
+          }
+        },
+        "taskEvidence": "sample",
+        "reviewInventory": {
+          "paths": [
+            "sample"
+          ],
+          "source": "git",
+          "errors": [
+            "sample"
+          ]
+        },
+        "reviewExclusions": [
+          {
+            "files": [
+              "sample"
+            ],
+            "reason": "sample"
+          }
+        ],
+        "nativeSource": {
+          "sourceId": "sample",
+          "sourceRevision": "sample",
+          "inputRevision": "sample",
+          "criteriaId": "sample",
+          "criteriaRevision": "sample",
+          "goal": "sample",
+          "criteria": [
+            "sample"
+          ]
+        },
+        "nativeDecisions": {
+          "schemaVersion": 1,
+          "history": [
+            {
+              "schemaVersion": 1,
+              "stage": "shape",
+              "targetId": "sample",
+              "decision": {
+                "schemaVersion": 1,
+                "decisionId": "sample",
+                "binding": {
+                  "sourceId": "sample",
+                  "inputRevision": "sample",
+                  "actionId": "sample",
+                  "actionRevision": "sample",
+                  "authorityId": "sample",
+                  "authorityRevision": "sample",
+                  "scopeId": "sample",
+                  "scopeRevision": "sample"
+                },
+                "judgmentDecisionIds": [
+                  "sample"
+                ],
+                "evidence": [
+                  {
+                    "id": "sample",
+                    "revision": "sample"
+                  }
+                ],
+                "summary": "sample",
+                "outcome": "act"
+              },
+              "operationRevision": "sample"
+            }
+          ],
+          "pending": {},
+          "spent": {},
+          "plannerOutputs": {},
+          "attemptChoices": {},
+          "attemptedChoices": {}
+        },
+        "nativeProgress": {
+          "schemaVersion": 1,
+          "state": "deciding",
+          "stage": "sample",
+          "targetId": "sample",
+          "until": {
+            "id": "sample",
+            "revision": "sample"
+          }
+        },
+        "nativeWaiting": {
+          "schemaVersion": 1,
+          "requests": [
+            {
+              "logicalRequestId": "sample",
+              "attempt": {
+                "attempt": 0,
+                "endpointIndex": 0,
+                "dispatched": false,
+                "endpointKind": "hosted",
+                "requestedModel": "sample",
+                "latencyMs": 0,
+                "outcome": "answered",
+                "requestId": "sample",
+                "status": 0
+              },
+              "elapsedMs": 0,
+              "nextDelayMs": 0
+            }
+          ]
+        },
+        "durableAdmission": {
+          "schemaVersion": 1,
+          "key": {
+            "workId": "sample",
+            "criteriaId": "sample",
+            "criteriaRevision": "sample",
+            "attemptId": "sample"
+          },
+          "binding": {
+            "sourceId": "sample",
+            "inputRevision": "sample",
+            "actionId": "sample",
+            "actionRevision": "sample",
+            "authorityId": "sample",
+            "authorityRevision": "sample",
+            "scopeId": "sample",
+            "scopeRevision": "sample"
+          },
+          "input": {
+            "ask": "sample",
+            "sessionId": "sample",
+            "origin": "turn",
+            "projectRoot": "sample",
+            "nativeSource": {
+              "sourceId": "sample",
+              "sourceRevision": "sample",
+              "inputRevision": "sample",
+              "criteriaId": "sample",
+              "criteriaRevision": "sample",
+              "goal": "sample",
+              "criteria": [
+                "sample"
+              ]
+            },
+            "proposedUnits": [
+              {
+                "task": "sample",
+                "template": "sample"
+              }
+            ],
+            "parentAgentId": "sample",
+            "budget": {
+              "maxTokens": 0,
+              "maxCostUsd": 0
+            },
+            "isolation": "auto",
+            "selectedModel": {
+              "id": "sample",
+              "provider": "sample",
+              "registryKey": "sample",
+              "displayName": "sample"
+            },
+            "taskEvidence": "sample"
+          },
+          "contractId": "sample",
+          "ownerAgentId": "sample",
+          "payloadRevision": "sample"
+        },
+        "durableLaunchState": "prepared",
+        "inputSnapshot": {
+          "version": 1,
+          "id": "sample",
+          "sourceRoot": "sample",
+          "sourceIdentity": "sample",
+          "gitIdentity": "sample",
+          "ownerHead": "sample",
+          "ownerRef": "sample",
+          "indexFingerprint": "sample",
+          "inputTree": "sample",
+          "inputCommit": "sample",
+          "capturedAt": 0,
+          "dirty": false,
+          "exclusions": [
+            "sample"
+          ],
+          "files": [
+            {
+              "path": "sample",
+              "kind": "file",
+              "mode": "100644",
+              "oid": "sample",
+              "identity": "sample",
+              "digest": "sample"
+            }
+          ]
+        },
+        "id": "sample",
+        "schemaVersion": 0,
+        "sessionId": "sample",
+        "origin": "turn",
+        "ask": "sample",
+        "selectedModel": {
+          "id": "sample",
+          "provider": "sample",
+          "registryKey": "sample",
+          "displayName": "sample"
+        },
+        "ownerAgentId": "sample",
+        "parentAgentId": "sample",
+        "projectRoot": "sample",
+        "isolation": "worktree",
+        "branch": "sample",
+        "worktreePath": "sample",
+        "baseBranch": "sample",
+        "baseline": {
+          "version": 2,
+          "head": "sample",
+          "dirty": {}
+        },
+        "sessionMode": false,
+        "proposedUnits": [
+          {
+            "task": "sample",
+            "template": "sample"
+          }
+        ],
+        "draftPlan": {
+          "goal": "sample",
+          "units": [
+            {
+              "id": "sample",
+              "title": "sample",
+              "brief": "sample",
+              "dependsOn": [
+                "sample"
+              ],
+              "files": [
+                "sample"
+              ],
+              "attempts": 0
+            }
+          ]
+        },
+        "budget": {
+          "maxTokens": 0,
+          "maxCostUsd": 0
+        },
+        "goal": "sample",
+        "criteria": [
+          {
+            "id": "sample",
+            "text": "sample",
+            "origin": "stated",
+            "quote": "sample",
+            "serves": [
+              "sample"
+            ],
+            "contribution": {
+              "kind": "outcome",
+              "reason": "sample",
+              "verification": "sample"
+            },
+            "disposition": "judged",
+            "dispositionReason": "sample",
+            "status": "unread",
+            "readings": [
+              {
+                "checkId": "sample",
+                "at": 0,
+                "probabilityUnmet": 0,
+                "verdict": "met",
+                "outcome": "act",
+                "severity": "critical",
+                "decisionId": "sample",
+                "severityDecisionId": "sample",
+                "rationale": "sample"
+              }
+            ]
+          }
+        ],
+        "groups": [
+          {
+            "id": "sample",
+            "title": "sample",
+            "goal": "sample",
+            "kind": "work",
+            "repairs": {
+              "scope": "unit",
+              "targetId": "sample",
+              "criterionIds": [
+                "sample"
+              ]
+            },
+            "dependsOn": [
+              "sample"
+            ],
+            "criteria": [
+              {
+                "id": "sample",
+                "text": "sample",
+                "origin": "stated",
+                "quote": "sample",
+                "serves": [
+                  "sample"
+                ],
+                "contribution": {
+                  "kind": "outcome",
+                  "reason": "sample",
+                  "verification": "sample"
+                },
+                "disposition": "judged",
+                "dispositionReason": "sample",
+                "status": "unread",
+                "readings": [
+                  {
+                    "checkId": "sample",
+                    "at": 0,
+                    "probabilityUnmet": 0,
+                    "verdict": "met",
+                    "outcome": "act",
+                    "severity": "critical",
+                    "decisionId": "sample",
+                    "severityDecisionId": "sample",
+                    "rationale": "sample"
+                  }
+                ]
+              }
+            ],
+            "unitIds": [
+              "sample"
+            ],
+            "status": "pending",
+            "checks": [
+              {
+                "id": "sample",
+                "at": 0,
+                "trigger": "turn-end",
+                "claims": {
+                  "kind": "files_verified",
+                  "summary": "sample"
+                },
+                "gates": [
+                  {
+                    "gate": "sample",
+                    "passed": false,
+                    "output": "sample",
+                    "durationMs": 0,
+                    "skipped": false,
+                    "outcome": "passed",
+                    "required": false,
+                    "reason": "sample",
+                    "completion": {
+                      "kind": "command-exit",
+                      "exitCode": 0
+                    },
+                    "provenance": {
+                      "sourceBefore": "sample",
+                      "sourceAfter": "sample",
+                      "definitionBefore": "sample",
+                      "definitionAfter": "sample"
+                    }
+                  }
+                ],
+                "goal": {
+                  "probabilityUnmet": 0,
+                  "verdict": "met",
+                  "outcome": "act"
+                },
+                "quality": {
+                  "placeholder": {
+                    "verdict": "yes",
+                    "outcome": "act"
+                  },
+                  "tests_weakened": {
+                    "verdict": "yes",
+                    "outcome": "act"
+                  },
+                  "breaks_existing": {
+                    "verdict": "yes",
+                    "outcome": "act"
+                  },
+                  "out_of_scope": {
+                    "verdict": "yes",
+                    "outcome": "act"
+                  },
+                  "hidden_failure": {
+                    "verdict": "yes",
+                    "outcome": "act"
+                  },
+                  "unsupported_claims": {
+                    "verdict": "yes",
+                    "outcome": "act"
+                  }
+                },
+                "result": "pass",
+                "problems": [
+                  "unmet"
+                ],
+                "qualityProblems": [
+                  "placeholder"
+                ],
+                "decisionIds": [
+                  "sample"
+                ],
+                "evidenceDigest": "sample",
+                "reviewedFiles": [
+                  {
+                    "path": "sample",
+                    "sha256": "sample"
+                  }
+                ]
+              }
+            ],
+            "fixRounds": 0,
+            "baseline": {
+              "version": 2,
+              "head": "sample",
+              "dirty": {}
+            },
+            "usage": {
+              "inputTokens": 0,
+              "outputTokens": 0,
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 0,
+              "reasoningTokens": 0,
+              "llmCallCount": 0,
+              "turnCount": 0,
+              "toolCallCount": 0,
+              "costUsd": 0,
+              "costState": "priced",
+              "costSource": "user",
+              "pricingAsOf": "sample"
+            }
+          }
+        ],
+        "units": [
+          {
+            "id": "sample",
+            "groupId": "sample",
+            "title": "sample",
+            "goal": "sample",
+            "brief": "sample",
+            "role": "implement",
+            "dependsOn": [
+              "sample"
+            ],
+            "files": [
+              "sample"
+            ],
+            "attempts": 0,
+            "criteria": [
+              {
+                "id": "sample",
+                "text": "sample",
+                "origin": "stated",
+                "quote": "sample",
+                "serves": [
+                  "sample"
+                ],
+                "contribution": {
+                  "kind": "outcome",
+                  "reason": "sample",
+                  "verification": "sample"
+                },
+                "disposition": "judged",
+                "dispositionReason": "sample",
+                "status": "unread",
+                "readings": [
+                  {
+                    "checkId": "sample",
+                    "at": 0,
+                    "probabilityUnmet": 0,
+                    "verdict": "met",
+                    "outcome": "act",
+                    "severity": "critical",
+                    "decisionId": "sample",
+                    "severityDecisionId": "sample",
+                    "rationale": "sample"
+                  }
+                ]
+              }
+            ],
+            "status": "pending",
+            "agentIds": [
+              "sample"
+            ],
+            "activeAgentId": "sample",
+            "route": {
+              "model": "sample",
+              "provider": "sample",
+              "fallbackModels": [
+                "sample"
+              ],
+              "routing": {
+                "providerSelection": "inherit-current",
+                "providerFailurePolicy": "ordered-fallbacks",
+                "fallbackModels": [
+                  "sample"
+                ]
+              },
+              "reasoningEffort": "sample",
+              "reason": "sample"
+            },
+            "checks": [
+              {
+                "id": "sample",
+                "at": 0,
+                "trigger": "turn-end",
+                "claims": {
+                  "kind": "files_verified",
+                  "summary": "sample"
+                },
+                "gates": [
+                  {
+                    "gate": "sample",
+                    "passed": false,
+                    "output": "sample",
+                    "durationMs": 0,
+                    "skipped": false,
+                    "outcome": "passed",
+                    "required": false,
+                    "reason": "sample",
+                    "completion": {
+                      "kind": "command-exit",
+                      "exitCode": 0
+                    },
+                    "provenance": {
+                      "sourceBefore": "sample",
+                      "sourceAfter": "sample",
+                      "definitionBefore": "sample",
+                      "definitionAfter": "sample"
+                    }
+                  }
+                ],
+                "goal": {
+                  "probabilityUnmet": 0,
+                  "verdict": "met",
+                  "outcome": "act"
+                },
+                "quality": {
+                  "placeholder": {
+                    "verdict": "yes",
+                    "outcome": "act"
+                  },
+                  "tests_weakened": {
+                    "verdict": "yes",
+                    "outcome": "act"
+                  },
+                  "breaks_existing": {
+                    "verdict": "yes",
+                    "outcome": "act"
+                  },
+                  "out_of_scope": {
+                    "verdict": "yes",
+                    "outcome": "act"
+                  },
+                  "hidden_failure": {
+                    "verdict": "yes",
+                    "outcome": "act"
+                  },
+                  "unsupported_claims": {
+                    "verdict": "yes",
+                    "outcome": "act"
+                  }
+                },
+                "result": "pass",
+                "problems": [
+                  "unmet"
+                ],
+                "qualityProblems": [
+                  "placeholder"
+                ],
+                "decisionIds": [
+                  "sample"
+                ],
+                "evidenceDigest": "sample",
+                "reviewedFiles": [
+                  {
+                    "path": "sample",
+                    "sha256": "sample"
+                  }
+                ]
+              }
+            ],
+            "nudges": [
+              {
+                "id": "sample",
+                "checkId": "sample",
+                "at": 0,
+                "kinds": [
+                  "unmet"
+                ],
+                "criterionIds": [
+                  "sample"
+                ],
+                "text": "sample",
+                "delivery": "hold",
+                "agentId": "sample",
+                "consumedAt": 0
+              }
+            ],
+            "fixRounds": 0,
+            "freshAgents": 0,
+            "transportRetries": 0,
+            "touchedPaths": [
+              "sample"
+            ],
+            "baseline": {
+              "version": 2,
+              "head": "sample",
+              "dirty": {}
+            },
+            "usage": {
+              "inputTokens": 0,
+              "outputTokens": 0,
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 0,
+              "reasoningTokens": 0,
+              "llmCallCount": 0,
+              "turnCount": 0,
+              "toolCallCount": 0,
+              "costUsd": 0,
+              "costState": "priced",
+              "costSource": "user",
+              "pricingAsOf": "sample"
+            },
+            "answer": "sample",
+            "lastOutput": "sample",
+            "readEvidence": [
+              {
+                "path": "sample",
+                "returnedRanges": [
+                  "sample"
+                ],
+                "returnedLines": 0,
+                "returnedContent": "sample",
+                "contentKind": "declared-reference"
+              }
+            ],
+            "commandEvidence": [
+              {
+                "agentId": "sample",
+                "callId": "sample",
+                "turn": 0,
+                "callIndex": 0,
+                "command": "sample",
+                "success": false,
+                "head": "sample"
+              }
+            ],
+            "lastReport": {
+              "version": 1,
+              "summary": "sample",
+              "filesCreated": [
+                "sample"
+              ],
+              "filesModified": [
+                "sample"
+              ],
+              "filesDeleted": [
+                "sample"
+              ],
+              "archetype": "engineer",
+              "gatheredContext": [
+                "sample"
+              ],
+              "plannedActions": [
+                "sample"
+              ],
+              "appliedChanges": [
+                "sample"
+              ],
+              "decisions": [
+                {
+                  "what": "sample",
+                  "why": "sample"
+                }
+              ],
+              "issues": [
+                "sample"
+              ],
+              "uncertainties": [
+                "sample"
+              ]
+            },
+            "failureReason": "sample",
+            "attemptOf": "sample",
+            "attemptIndex": 0,
+            "attemptSelection": {
+              "engineGroupId": "sample",
+              "candidateIds": [
+                "sample"
+              ],
+              "proposedId": "sample",
+              "outcome": "act",
+              "reasons": "sample",
+              "decisionId": "sample",
+              "pickedId": "sample"
+            },
+            "attemptUnits": [
+              {
+                "id": "sample",
+                "groupId": "sample",
+                "title": "sample",
+                "goal": "sample",
+                "brief": "sample",
+                "role": "implement",
+                "dependsOn": [
+                  "sample"
+                ],
+                "files": [
+                  "sample"
+                ],
+                "attempts": 0,
+                "criteria": [
+                  {
+                    "id": "sample",
+                    "text": "sample",
+                    "origin": "stated",
+                    "quote": "sample",
+                    "serves": [
+                      "sample"
+                    ],
+                    "contribution": {
+                      "kind": "outcome",
+                      "reason": "sample",
+                      "verification": "sample"
+                    },
+                    "disposition": "judged",
+                    "dispositionReason": "sample",
+                    "status": "unread",
+                    "readings": [
+                      {
+                        "checkId": "sample",
+                        "at": 0,
+                        "probabilityUnmet": 0,
+                        "verdict": "met",
+                        "outcome": "act",
+                        "severity": "critical",
+                        "decisionId": "sample",
+                        "severityDecisionId": "sample",
+                        "rationale": "sample"
+                      }
+                    ]
+                  }
+                ],
+                "status": "pending",
+                "agentIds": [
+                  "sample"
+                ],
+                "activeAgentId": "sample",
+                "route": {
+                  "model": "sample",
+                  "provider": "sample",
+                  "fallbackModels": [
+                    "sample"
+                  ],
+                  "routing": {
+                    "providerSelection": "inherit-current",
+                    "providerFailurePolicy": "ordered-fallbacks",
+                    "fallbackModels": [
+                      "sample"
+                    ]
+                  },
+                  "reasoningEffort": "sample",
+                  "reason": "sample"
+                },
+                "checks": [
+                  {
+                    "id": "sample",
+                    "at": 0,
+                    "trigger": "turn-end",
+                    "claims": {
+                      "kind": "files_verified",
+                      "summary": "sample"
+                    },
+                    "gates": [
+                      {
+                        "gate": "sample",
+                        "passed": false,
+                        "output": "sample",
+                        "durationMs": 0,
+                        "skipped": false,
+                        "outcome": "passed",
+                        "required": false,
+                        "reason": "sample",
+                        "completion": {
+                          "kind": "command-exit",
+                          "exitCode": 0
+                        },
+                        "provenance": {
+                          "sourceBefore": "sample",
+                          "sourceAfter": "sample",
+                          "definitionBefore": "sample",
+                          "definitionAfter": "sample"
+                        }
+                      }
+                    ],
+                    "goal": {
+                      "probabilityUnmet": 0,
+                      "verdict": "met",
+                      "outcome": "act"
+                    },
+                    "quality": {
+                      "placeholder": {
+                        "verdict": "yes",
+                        "outcome": "act"
+                      },
+                      "tests_weakened": {
+                        "verdict": "yes",
+                        "outcome": "act"
+                      },
+                      "breaks_existing": {
+                        "verdict": "yes",
+                        "outcome": "act"
+                      },
+                      "out_of_scope": {
+                        "verdict": "yes",
+                        "outcome": "act"
+                      },
+                      "hidden_failure": {
+                        "verdict": "yes",
+                        "outcome": "act"
+                      },
+                      "unsupported_claims": {
+                        "verdict": "yes",
+                        "outcome": "act"
+                      }
+                    },
+                    "result": "pass",
+                    "problems": [
+                      "unmet"
+                    ],
+                    "qualityProblems": [
+                      "placeholder"
+                    ],
+                    "decisionIds": [
+                      "sample"
+                    ],
+                    "evidenceDigest": "sample",
+                    "reviewedFiles": [
+                      {
+                        "path": "sample",
+                        "sha256": "sample"
+                      }
+                    ]
+                  }
+                ],
+                "nudges": [
+                  {
+                    "id": "sample",
+                    "checkId": "sample",
+                    "at": 0,
+                    "kinds": [
+                      "unmet"
+                    ],
+                    "criterionIds": [
+                      "sample"
+                    ],
+                    "text": "sample",
+                    "delivery": "hold",
+                    "agentId": "sample",
+                    "consumedAt": 0
+                  }
+                ],
+                "fixRounds": 0,
+                "freshAgents": 0,
+                "transportRetries": 0,
+                "touchedPaths": [
+                  "sample"
+                ],
+                "baseline": {
+                  "version": 2,
+                  "head": "sample",
+                  "dirty": {}
+                },
+                "usage": {
+                  "inputTokens": 0,
+                  "outputTokens": 0,
+                  "cacheReadTokens": 0,
+                  "cacheWriteTokens": 0,
+                  "reasoningTokens": 0,
+                  "llmCallCount": 0,
+                  "turnCount": 0,
+                  "toolCallCount": 0,
+                  "costUsd": 0,
+                  "costState": "priced",
+                  "costSource": "user",
+                  "pricingAsOf": "sample"
+                },
+                "answer": "sample",
+                "lastOutput": "sample",
+                "readEvidence": [
+                  {
+                    "path": "sample",
+                    "returnedRanges": [
+                      "sample"
+                    ],
+                    "returnedLines": 0,
+                    "returnedContent": "sample",
+                    "contentKind": "declared-reference"
+                  }
+                ],
+                "commandEvidence": [
+                  {
+                    "agentId": "sample",
+                    "callId": "sample",
+                    "turn": 0,
+                    "callIndex": 0,
+                    "command": "sample",
+                    "success": false,
+                    "head": "sample"
+                  }
+                ],
+                "lastReport": {
+                  "version": 1,
+                  "summary": "sample",
+                  "filesCreated": [
+                    "sample"
+                  ],
+                  "filesModified": [
+                    "sample"
+                  ],
+                  "filesDeleted": [
+                    "sample"
+                  ],
+                  "archetype": "engineer",
+                  "gatheredContext": [
+                    "sample"
+                  ],
+                  "plannedActions": [
+                    "sample"
+                  ],
+                  "appliedChanges": [
+                    "sample"
+                  ],
+                  "decisions": [
+                    {
+                      "what": "sample",
+                      "why": "sample"
+                    }
+                  ],
+                  "issues": [
+                    "sample"
+                  ],
+                  "uncertainties": [
+                    "sample"
+                  ]
+                },
+                "failureReason": "sample",
+                "attemptOf": "sample",
+                "attemptIndex": 0,
+                "attemptSelection": {
+                  "engineGroupId": "sample",
+                  "candidateIds": [
+                    "sample"
+                  ],
+                  "proposedId": "sample",
+                  "outcome": "act",
+                  "reasons": "sample",
+                  "decisionId": "sample",
+                  "pickedId": "sample"
+                }
+              }
+            ]
+          }
+        ],
+        "shape": {
+          "forbids_delegation": {
+            "verdict": "yes",
+            "probability": 0,
+            "outcome": "act"
+          },
+          "requests_parallel_agents": {
+            "verdict": "yes",
+            "probability": 0,
+            "outcome": "act"
+          },
+          "forbids_writing": {
+            "verdict": "yes",
+            "probability": 0,
+            "outcome": "act"
+          },
+          "asks_for_attempts": {
+            "verdict": "yes",
+            "probability": 0,
+            "outcome": "act"
+          },
+          "project_review": {
+            "verdict": "yes",
+            "probability": 0,
+            "outcome": "act"
+          },
+          "decisionIds": [
+            "sample"
+          ]
+        },
+        "status": "queued",
+        "statusBeforeOwner": "queued",
+        "resumeFrom": "queued",
+        "checks": [
+          {
+            "id": "sample",
+            "at": 0,
+            "trigger": "turn-end",
+            "claims": {
+              "kind": "files_verified",
+              "summary": "sample"
+            },
+            "gates": [
+              {
+                "gate": "sample",
+                "passed": false,
+                "output": "sample",
+                "durationMs": 0,
+                "skipped": false,
+                "outcome": "passed",
+                "required": false,
+                "reason": "sample",
+                "completion": {
+                  "kind": "command-exit",
+                  "exitCode": 0
+                },
+                "provenance": {
+                  "sourceBefore": "sample",
+                  "sourceAfter": "sample",
+                  "definitionBefore": "sample",
+                  "definitionAfter": "sample"
+                }
+              }
+            ],
+            "goal": {
+              "probabilityUnmet": 0,
+              "verdict": "met",
+              "outcome": "act"
+            },
+            "quality": {
+              "placeholder": {
+                "verdict": "yes",
+                "outcome": "act"
+              },
+              "tests_weakened": {
+                "verdict": "yes",
+                "outcome": "act"
+              },
+              "breaks_existing": {
+                "verdict": "yes",
+                "outcome": "act"
+              },
+              "out_of_scope": {
+                "verdict": "yes",
+                "outcome": "act"
+              },
+              "hidden_failure": {
+                "verdict": "yes",
+                "outcome": "act"
+              },
+              "unsupported_claims": {
+                "verdict": "yes",
+                "outcome": "act"
+              }
+            },
+            "result": "pass",
+            "problems": [
+              "unmet"
+            ],
+            "qualityProblems": [
+              "placeholder"
+            ],
+            "decisionIds": [
+              "sample"
+            ],
+            "evidenceDigest": "sample",
+            "reviewedFiles": [
+              {
+                "path": "sample",
+                "sha256": "sample"
+              }
+            ]
+          }
+        ],
+        "fixRounds": 0,
+        "escalations": [
+          {
+            "id": "sample",
+            "at": 0,
+            "scope": "plan",
+            "targetId": "sample",
+            "reason": "plan-unresolved",
+            "question": "sample",
+            "unmetCriterionIds": [
+              "sample"
+            ],
+            "decisionIds": [
+              "sample"
+            ],
+            "failurePause": true,
+            "resolvedAt": 0,
+            "reply": {
+              "text": "sample",
+              "reading": "approve",
+              "outcome": "act",
+              "decisionId": "sample"
+            }
+          }
+        ],
+        "decisions": [
+          {
+            "id": "sample",
+            "at": 0,
+            "action": "created",
+            "targetId": "sample",
+            "reason": "sample",
+            "decisionIds": [
+              "sample"
+            ],
+            "route": {
+              "model": "sample",
+              "provider": "sample",
+              "fallbackModels": [
+                "sample"
+              ],
+              "routing": {
+                "providerSelection": "inherit-current",
+                "providerFailurePolicy": "ordered-fallbacks",
+                "fallbackModels": [
+                  "sample"
+                ]
+              },
+              "reasoningEffort": "sample",
+              "reason": "sample"
+            },
+            "record": {
+              "kind": "fix-scheduled"
+            }
+          }
+        ],
+        "usage": {
+          "inputTokens": 0,
+          "outputTokens": 0,
+          "cacheReadTokens": 0,
+          "cacheWriteTokens": 0,
+          "reasoningTokens": 0,
+          "llmCallCount": 0,
+          "turnCount": 0,
+          "toolCallCount": 0,
+          "costUsd": 0,
+          "costState": "priced",
+          "costSource": "user",
+          "pricingAsOf": "sample"
+        },
+        "judgmentUsage": {
+          "calls": 0,
+          "inputTokens": 0,
+          "outputTokens": 0
+        },
+        "plannerAgentIds": [
+          "sample"
+        ],
+        "agentUsage": {},
+        "answer": "sample",
+        "statusLine": "sample",
+        "commit": {
+          "status": "committed",
+          "hash": "sample",
+          "note": "sample"
+        },
+        "failureKind": "transport",
+        "error": "sample",
+        "createdAt": 0,
+        "completedAt": 0
+      },
+      "ownerAgentId": "sample",
+      "replayed": false
     }
   },
   "contracts.get": {
@@ -7001,6 +8458,9 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
             },
             "reasoningEffort": "sample",
             "reason": "sample"
+          },
+          "record": {
+            "kind": "fix-scheduled"
           }
         }
       ],
@@ -7026,6 +8486,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "plannerAgentIds": [
         "sample"
       ],
+      "agentUsage": {},
       "answer": "sample",
       "statusLine": "sample",
       "commit": {
@@ -8196,6 +9657,9 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
                 },
                 "reasoningEffort": "sample",
                 "reason": "sample"
+              },
+              "record": {
+                "kind": "fix-scheduled"
               }
             }
           ],
@@ -8221,6 +9685,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "plannerAgentIds": [
             "sample"
           ],
+          "agentUsage": {},
           "answer": "sample",
           "statusLine": "sample",
           "commit": {
@@ -8234,6 +9699,14 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "completedAt": 0
         }
       ]
+    }
+  },
+  "contracts.remove": {
+    "methodId": "contracts.remove",
+    "http": null,
+    "status": 200,
+    "body": {
+      "removed": false
     }
   },
   "contracts.reply": {
@@ -9407,6 +10880,9 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
               },
               "reasoningEffort": "sample",
               "reason": "sample"
+            },
+            "record": {
+              "kind": "fix-scheduled"
             }
           }
         ],
@@ -9432,6 +10908,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "plannerAgentIds": [
           "sample"
         ],
+        "agentUsage": {},
         "answer": "sample",
         "statusLine": "sample",
         "commit": {
@@ -9444,7 +10921,106 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "createdAt": 0,
         "completedAt": 0
       },
-      "ownerAgentId": "sample"
+      "ownerAgentId": "sample",
+      "replayed": false
+    }
+  },
+  "contracts.status": {
+    "methodId": "contracts.status",
+    "http": null,
+    "status": 200,
+    "body": {
+      "id": "sample",
+      "sessionId": "sample",
+      "ownerAgentId": "sample",
+      "origin": "turn",
+      "ask": "sample",
+      "goal": "sample",
+      "status": "queued",
+      "statusLine": "sample",
+      "failureKind": "transport",
+      "error": "sample",
+      "groupCount": 0,
+      "unitCount": 0,
+      "unitsPassed": 0,
+      "unitsFailed": 0,
+      "openEscalationIds": [
+        "sample"
+      ],
+      "openEscalation": {
+        "id": "sample",
+        "at": 0,
+        "question": "sample"
+      },
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0,
+        "reasoningTokens": 0,
+        "llmCallCount": 0,
+        "turnCount": 0,
+        "toolCallCount": 0,
+        "costUsd": 0,
+        "costState": "priced",
+        "costSource": "user",
+        "pricingAsOf": "sample"
+      },
+      "createdAt": 0,
+      "completedAt": 0,
+      "updatedAt": 0,
+      "revision": "sample"
+    }
+  },
+  "contracts.summaries": {
+    "methodId": "contracts.summaries",
+    "http": null,
+    "status": 200,
+    "body": {
+      "contracts": [
+        {
+          "id": "sample",
+          "sessionId": "sample",
+          "ownerAgentId": "sample",
+          "origin": "turn",
+          "ask": "sample",
+          "goal": "sample",
+          "status": "queued",
+          "statusLine": "sample",
+          "failureKind": "transport",
+          "error": "sample",
+          "groupCount": 0,
+          "unitCount": 0,
+          "unitsPassed": 0,
+          "unitsFailed": 0,
+          "openEscalationIds": [
+            "sample"
+          ],
+          "openEscalation": {
+            "id": "sample",
+            "at": 0,
+            "question": "sample"
+          },
+          "usage": {
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0,
+            "reasoningTokens": 0,
+            "llmCallCount": 0,
+            "turnCount": 0,
+            "toolCallCount": 0,
+            "costUsd": 0,
+            "costState": "priced",
+            "costSource": "user",
+            "pricingAsOf": "sample"
+          },
+          "createdAt": 0,
+          "completedAt": 0,
+          "updatedAt": 0,
+          "revision": "sample"
+        }
+      ]
     }
   },
   "control.auth.current": {
@@ -9462,6 +11038,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "sessionCookiePresent": false,
       "principalId": "sample",
       "principalKind": "user",
+      "credential": "local",
       "admin": false,
       "scopes": [
         "sample"
@@ -9552,6 +11129,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
               "sessionCookiePresent": false,
               "principalId": "sample",
               "principalKind": "user",
+              "credential": "local",
               "admin": false,
               "scopes": [
                 "sample"
@@ -9632,7 +11210,21 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
               "outputSchema": {},
               "pluginId": "sample",
               "dangerous": false,
+              "effect": "read",
+              "ownerOnly": false,
               "invokable": false,
+              "replay": {
+                "in": "sample",
+                "name": "sample",
+                "behavior": "sample"
+              },
+              "errorCodes": [
+                {
+                  "code": "sample",
+                  "status": 0,
+                  "meaning": "sample"
+                }
+              ],
               "metadata": {}
             }
           ],
@@ -9809,7 +11401,21 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "outputSchema": {},
         "pluginId": "sample",
         "dangerous": false,
+        "effect": "read",
+        "ownerOnly": false,
         "invokable": false,
+        "replay": {
+          "in": "sample",
+          "name": "sample",
+          "behavior": "sample"
+        },
+        "errorCodes": [
+          {
+            "code": "sample",
+            "status": 0,
+            "meaning": "sample"
+          }
+        ],
         "metadata": {}
       }
     }
@@ -9847,7 +11453,21 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "outputSchema": {},
           "pluginId": "sample",
           "dangerous": false,
+          "effect": "read",
+          "ownerOnly": false,
           "invokable": false,
+          "replay": {
+            "in": "sample",
+            "name": "sample",
+            "behavior": "sample"
+          },
+          "errorCodes": [
+            {
+              "code": "sample",
+              "status": 0,
+              "meaning": "sample"
+            }
+          ],
           "metadata": {}
         }
       ]
@@ -10003,6 +11623,10 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "failedCheckCount": 0,
       "lastCheckFailure": "sample",
       "pendingVersion": "sample",
+      "pendingSince": 0,
+      "pendingBlockedBy": [
+        "sample"
+      ],
       "rejectedVersion": "sample",
       "recoveryRequired": true,
       "transactionRecovery": {
@@ -10037,6 +11661,10 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "failedCheckCount": 0,
       "lastCheckFailure": "sample",
       "pendingVersion": "sample",
+      "pendingSince": 0,
+      "pendingBlockedBy": [
+        "sample"
+      ],
       "rejectedVersion": "sample",
       "recoveryRequired": true,
       "transactionRecovery": {
@@ -10158,6 +11786,56 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       ]
     }
   },
+  "notifications.deadLetters.list": {
+    "methodId": "notifications.deadLetters.list",
+    "http": null,
+    "status": 200,
+    "body": {
+      "entries": [
+        {
+          "id": "sample",
+          "channel": "sample",
+          "event": "sample",
+          "summary": "sample",
+          "createdAt": 0,
+          "deadAt": 0,
+          "attempts": 0,
+          "finalError": "sample",
+          "failureClass": "retryable",
+          "status": 0
+        }
+      ],
+      "total": 0
+    }
+  },
+  "notifications.deadLetters.replay": {
+    "methodId": "notifications.deadLetters.replay",
+    "http": null,
+    "status": 200,
+    "body": {
+      "results": [
+        {
+          "id": "sample",
+          "outcome": "delivered"
+        }
+      ],
+      "delivered": 0,
+      "retrying": 0,
+      "failed": 0,
+      "notFound": 0
+    }
+  },
+  "email.attachment.get": {
+    "methodId": "email.attachment.get",
+    "http": null,
+    "status": 200,
+    "body": {
+      "filename": "sample",
+      "contentType": "sample",
+      "sizeBytes": 0,
+      "contentBase64": "sample"
+    }
+  },
   "email.draft.create": {
     "methodId": "email.draft.create",
     "http": {
@@ -10168,6 +11846,25 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
     "body": {
       "draftId": "sample",
       "uid": 0,
+      "mailbox": "sample"
+    }
+  },
+  "email.drafts.list": {
+    "methodId": "email.drafts.list",
+    "http": null,
+    "status": 200,
+    "body": {
+      "drafts": [
+        {
+          "uid": 0,
+          "to": "sample",
+          "subject": "sample",
+          "date": "sample",
+          "inReplyTo": "sample",
+          "body": "sample"
+        }
+      ],
+      "total": 0,
       "mailbox": "sample"
     }
   },
@@ -10378,8 +12075,17 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "contentType": "sample",
           "sizeBytes": 0
         }
-      ],
-      "replySubjectRef": "sample"
+      ]
+    }
+  },
+  "email.inbox.update": {
+    "methodId": "email.inbox.update",
+    "http": null,
+    "status": 200,
+    "body": {
+      "uid": 0,
+      "action": "sample",
+      "movedTo": "sample"
     }
   },
   "email.send": {
@@ -10434,6 +12140,20 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       },
       "releaseBlockers": [
         "sample"
+      ]
+    }
+  },
+  "flags.status": {
+    "methodId": "flags.status",
+    "http": null,
+    "status": 200,
+    "body": {
+      "pendingRestart": [
+        {
+          "featureId": "sample",
+          "running": "enabled",
+          "saved": "enabled"
+        }
       ]
     }
   },
@@ -10729,6 +12449,15 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "files": [
         "sample"
       ]
+    }
+  },
+  "fleet.conflicts.retry": {
+    "methodId": "fleet.conflicts.retry",
+    "http": null,
+    "status": 200,
+    "body": {
+      "itemId": "sample",
+      "outcome": "merged"
     }
   },
   "fleet.graph.get": {
@@ -11093,6 +12822,17 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "elevatedPct": 0,
         "highPct": 0,
         "criticalPct": 0
+      },
+      "hardLimit": {
+        "pct": 0,
+        "mb": 0,
+        "ceilingMb": 0
+      },
+      "configFallback": {
+        "settings": [
+          "sample"
+        ],
+        "reason": "sample"
       }
     }
   },
@@ -11182,69 +12922,9 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
     },
     "status": 200,
     "body": {
-      "operationProvenance": "classic",
-      "semanticAssessment": "not-evaluated",
-      "proof": {
-        "proved": false,
-        "stage": "synthesize",
-        "phrase": "sample",
-        "transcript": "sample",
-        "wordOverlap": 0,
-        "comparison": "yes",
-        "operationProvenance": "classic",
-        "semanticAssessment": "not-evaluated",
-        "proofBasis": "native-word-sequence",
-        "error": "sample",
-        "summary": "sample"
-      },
-      "notes": [
-        "sample"
-      ],
-      "provisioned": false,
-      "platform": "sample",
-      "tts": {
-        "engine": "sample",
-        "state": "provisioned",
-        "binaryPath": "sample",
-        "modelPath": "sample",
-        "reason": "sample"
-      },
-      "stt": {
-        "engine": "sample",
-        "state": "provisioned",
-        "binaryPath": "sample",
-        "modelPath": "sample",
-        "reason": "sample"
-      },
-      "components": [
-        {
-          "id": "sample",
-          "state": "installed",
-          "bytes": 0,
-          "error": "sample"
-        }
-      ],
-      "configured": {
-        "set": [
-          {
-            "key": "sample",
-            "value": "sample"
-          }
-        ],
-        "skipped": [
-          {
-            "key": "sample",
-            "reason": "sample"
-          }
-        ],
-        "superseded": [
-          {
-            "key": "sample",
-            "previousValue": "sample",
-            "value": "sample"
-          }
-        ]
-      }
+      "state": "running",
+      "startedAt": 0,
+      "joined": false
     }
   },
   "voice.local.status": {
@@ -11286,6 +12966,76 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
             "bytesDone": 0
           }
         ]
+      },
+      "lastInstall": {
+        "startedAt": 0,
+        "finishedAt": 0,
+        "receipt": {
+          "operationProvenance": "classic",
+          "semanticAssessment": "not-evaluated",
+          "proof": {
+            "proved": false,
+            "stage": "synthesize",
+            "phrase": "sample",
+            "transcript": "sample",
+            "wordOverlap": 0,
+            "comparison": "yes",
+            "operationProvenance": "classic",
+            "semanticAssessment": "not-evaluated",
+            "proofBasis": "native-word-sequence",
+            "error": "sample",
+            "summary": "sample"
+          },
+          "notes": [
+            "sample"
+          ],
+          "provisioned": false,
+          "platform": "sample",
+          "tts": {
+            "engine": "sample",
+            "state": "provisioned",
+            "binaryPath": "sample",
+            "modelPath": "sample",
+            "reason": "sample"
+          },
+          "stt": {
+            "engine": "sample",
+            "state": "provisioned",
+            "binaryPath": "sample",
+            "modelPath": "sample",
+            "reason": "sample"
+          },
+          "components": [
+            {
+              "id": "sample",
+              "state": "installed",
+              "bytes": 0,
+              "error": "sample"
+            }
+          ],
+          "configured": {
+            "set": [
+              {
+                "key": "sample",
+                "value": "sample"
+              }
+            ],
+            "skipped": [
+              {
+                "key": "sample",
+                "reason": "sample"
+              }
+            ],
+            "superseded": [
+              {
+                "key": "sample",
+                "previousValue": "sample",
+                "value": "sample"
+              }
+            ]
+          }
+        },
+        "error": "sample"
       }
     }
   },
@@ -11398,145 +13148,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
     },
     "status": 200,
     "body": {
-      "accountIdentity": {
-        "id": "sample",
-        "username": "sample",
-        "revision": "sample"
-      },
-      "outcome": "sample",
-      "reason": "sample",
-      "ref": {
-        "sessionId": "sample",
-        "inputId": "sample",
-        "sourceId": "sample",
-        "sourceRevision": "sample",
-        "requestId": "sample"
-      },
-      "configurationId": "sample",
-      "expiresAt": 0,
-      "pendingRetentionMs": 0,
-      "processing": "sample",
-      "restart": "sample",
-      "route": "sample",
-      "execution": "not-started",
-      "approvalId": "sample",
-      "source": "sample",
-      "recovery": "sample",
-      "record": {
-        "id": "sample",
-        "ref": {
-          "sessionId": "sample",
-          "inputId": "sample",
-          "sourceId": "sample",
-          "sourceRevision": "sample",
-          "requestId": "sample"
-        },
-        "origin": {
-          "kind": "external-original",
-          "accountId": "sample",
-          "accountRevision": "sample",
-          "routeId": "sample",
-          "routeRevision": "sample"
-        },
-        "configurationId": "sample",
-        "ownerRevision": "sample",
-        "owner": {
-          "kind": "pairing-token",
-          "principalId": "sample",
-          "tokenId": "sample",
-          "authorityId": "sample",
-          "authorityRevision": "sample",
-          "scopes": [
-            "sample"
-          ]
-        },
-        "workspaceRevision": "sample",
-        "approvalId": "sample",
-        "choices": {
-          "processingPurpose": "accept-external-message-for-owner-review",
-          "sourceRetention": "memory-only-until-review-close-or-deadline",
-          "sourceRetentionMs": 0,
-          "derivedRecord": "external-source-reference-only-v1",
-          "derivedRecordRetentionMs": 0,
-          "execution": "none",
-          "ownerMayReadOriginal": true
-        },
-        "acceptedAt": 0,
-        "sourceExpiresAt": 0,
-        "recordExpiresAt": 0,
-        "state": "accepted-for-review",
-        "execution": "not-started"
-      },
-      "records": [
-        {
-          "id": "sample",
-          "ref": {
-            "sessionId": "sample",
-            "inputId": "sample",
-            "sourceId": "sample",
-            "sourceRevision": "sample",
-            "requestId": "sample"
-          },
-          "origin": {
-            "kind": "external-original",
-            "accountId": "sample",
-            "accountRevision": "sample",
-            "routeId": "sample",
-            "routeRevision": "sample"
-          },
-          "configurationId": "sample",
-          "ownerRevision": "sample",
-          "owner": {
-            "kind": "pairing-token",
-            "principalId": "sample",
-            "tokenId": "sample",
-            "authorityId": "sample",
-            "authorityRevision": "sample",
-            "scopes": [
-              "sample"
-            ]
-          },
-          "workspaceRevision": "sample",
-          "approvalId": "sample",
-          "choices": {
-            "processingPurpose": "accept-external-message-for-owner-review",
-            "sourceRetention": "memory-only-until-review-close-or-deadline",
-            "sourceRetentionMs": 0,
-            "derivedRecord": "external-source-reference-only-v1",
-            "derivedRecordRetentionMs": 0,
-            "execution": "none",
-            "ownerMayReadOriginal": true
-          },
-          "acceptedAt": 0,
-          "sourceExpiresAt": 0,
-          "recordExpiresAt": 0,
-          "state": "accepted-for-review",
-          "execution": "not-started"
-        }
-      ],
-      "pending": [
-        {
-          "ref": {
-            "sessionId": "sample",
-            "inputId": "sample",
-            "sourceId": "sample",
-            "sourceRevision": "sample",
-            "requestId": "sample"
-          },
-          "approvalId": "sample",
-          "sourceExpiresAt": 0,
-          "outcome": "sample"
-        }
-      ],
-      "original": {
-        "text": "sample",
-        "unsupportedSources": [
-          {
-            "kind": "sample",
-            "label": "sample"
-          }
-        ]
-      }
+      "outcome": "cancelled",
+      "execution": "not-started"
     }
   },
   "inbound.telegram.configure": {
@@ -11547,145 +13160,17 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
     },
     "status": 200,
     "body": {
+      "outcome": "configured",
+      "configurationId": "sample",
       "accountIdentity": {
         "id": "sample",
         "username": "sample",
         "revision": "sample"
       },
-      "outcome": "sample",
-      "reason": "sample",
-      "ref": {
-        "sessionId": "sample",
-        "inputId": "sample",
-        "sourceId": "sample",
-        "sourceRevision": "sample",
-        "requestId": "sample"
-      },
-      "configurationId": "sample",
       "expiresAt": 0,
       "pendingRetentionMs": 0,
-      "processing": "sample",
-      "restart": "sample",
-      "route": "sample",
-      "execution": "not-started",
-      "approvalId": "sample",
-      "source": "sample",
-      "recovery": "sample",
-      "record": {
-        "id": "sample",
-        "ref": {
-          "sessionId": "sample",
-          "inputId": "sample",
-          "sourceId": "sample",
-          "sourceRevision": "sample",
-          "requestId": "sample"
-        },
-        "origin": {
-          "kind": "external-original",
-          "accountId": "sample",
-          "accountRevision": "sample",
-          "routeId": "sample",
-          "routeRevision": "sample"
-        },
-        "configurationId": "sample",
-        "ownerRevision": "sample",
-        "owner": {
-          "kind": "pairing-token",
-          "principalId": "sample",
-          "tokenId": "sample",
-          "authorityId": "sample",
-          "authorityRevision": "sample",
-          "scopes": [
-            "sample"
-          ]
-        },
-        "workspaceRevision": "sample",
-        "approvalId": "sample",
-        "choices": {
-          "processingPurpose": "accept-external-message-for-owner-review",
-          "sourceRetention": "memory-only-until-review-close-or-deadline",
-          "sourceRetentionMs": 0,
-          "derivedRecord": "external-source-reference-only-v1",
-          "derivedRecordRetentionMs": 0,
-          "execution": "none",
-          "ownerMayReadOriginal": true
-        },
-        "acceptedAt": 0,
-        "sourceExpiresAt": 0,
-        "recordExpiresAt": 0,
-        "state": "accepted-for-review",
-        "execution": "not-started"
-      },
-      "records": [
-        {
-          "id": "sample",
-          "ref": {
-            "sessionId": "sample",
-            "inputId": "sample",
-            "sourceId": "sample",
-            "sourceRevision": "sample",
-            "requestId": "sample"
-          },
-          "origin": {
-            "kind": "external-original",
-            "accountId": "sample",
-            "accountRevision": "sample",
-            "routeId": "sample",
-            "routeRevision": "sample"
-          },
-          "configurationId": "sample",
-          "ownerRevision": "sample",
-          "owner": {
-            "kind": "pairing-token",
-            "principalId": "sample",
-            "tokenId": "sample",
-            "authorityId": "sample",
-            "authorityRevision": "sample",
-            "scopes": [
-              "sample"
-            ]
-          },
-          "workspaceRevision": "sample",
-          "approvalId": "sample",
-          "choices": {
-            "processingPurpose": "accept-external-message-for-owner-review",
-            "sourceRetention": "memory-only-until-review-close-or-deadline",
-            "sourceRetentionMs": 0,
-            "derivedRecord": "external-source-reference-only-v1",
-            "derivedRecordRetentionMs": 0,
-            "execution": "none",
-            "ownerMayReadOriginal": true
-          },
-          "acceptedAt": 0,
-          "sourceExpiresAt": 0,
-          "recordExpiresAt": 0,
-          "state": "accepted-for-review",
-          "execution": "not-started"
-        }
-      ],
-      "pending": [
-        {
-          "ref": {
-            "sessionId": "sample",
-            "inputId": "sample",
-            "sourceId": "sample",
-            "sourceRevision": "sample",
-            "requestId": "sample"
-          },
-          "approvalId": "sample",
-          "sourceExpiresAt": 0,
-          "outcome": "sample"
-        }
-      ],
-      "original": {
-        "text": "sample",
-        "unsupportedSources": [
-          {
-            "kind": "sample",
-            "label": "sample"
-          }
-        ]
-      }
+      "processing": "requires-per-message-approval",
+      "restart": "selected-route-held-without-original-or-grant"
     }
   },
   "inbound.telegram.decide": {
@@ -11696,13 +13181,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
     },
     "status": 200,
     "body": {
-      "accountIdentity": {
-        "id": "sample",
-        "username": "sample",
-        "revision": "sample"
-      },
-      "outcome": "sample",
-      "reason": "sample",
+      "outcome": "transferred",
       "ref": {
         "sessionId": "sample",
         "inputId": "sample",
@@ -11710,131 +13189,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "sourceRevision": "sample",
         "requestId": "sample"
       },
-      "configurationId": "sample",
-      "expiresAt": 0,
-      "pendingRetentionMs": 0,
-      "processing": "sample",
-      "restart": "sample",
-      "route": "sample",
-      "execution": "not-started",
-      "approvalId": "sample",
-      "source": "sample",
-      "recovery": "sample",
-      "record": {
-        "id": "sample",
-        "ref": {
-          "sessionId": "sample",
-          "inputId": "sample",
-          "sourceId": "sample",
-          "sourceRevision": "sample",
-          "requestId": "sample"
-        },
-        "origin": {
-          "kind": "external-original",
-          "accountId": "sample",
-          "accountRevision": "sample",
-          "routeId": "sample",
-          "routeRevision": "sample"
-        },
-        "configurationId": "sample",
-        "ownerRevision": "sample",
-        "owner": {
-          "kind": "pairing-token",
-          "principalId": "sample",
-          "tokenId": "sample",
-          "authorityId": "sample",
-          "authorityRevision": "sample",
-          "scopes": [
-            "sample"
-          ]
-        },
-        "workspaceRevision": "sample",
-        "approvalId": "sample",
-        "choices": {
-          "processingPurpose": "accept-external-message-for-owner-review",
-          "sourceRetention": "memory-only-until-review-close-or-deadline",
-          "sourceRetentionMs": 0,
-          "derivedRecord": "external-source-reference-only-v1",
-          "derivedRecordRetentionMs": 0,
-          "execution": "none",
-          "ownerMayReadOriginal": true
-        },
-        "acceptedAt": 0,
-        "sourceExpiresAt": 0,
-        "recordExpiresAt": 0,
-        "state": "accepted-for-review",
-        "execution": "not-started"
-      },
-      "records": [
-        {
-          "id": "sample",
-          "ref": {
-            "sessionId": "sample",
-            "inputId": "sample",
-            "sourceId": "sample",
-            "sourceRevision": "sample",
-            "requestId": "sample"
-          },
-          "origin": {
-            "kind": "external-original",
-            "accountId": "sample",
-            "accountRevision": "sample",
-            "routeId": "sample",
-            "routeRevision": "sample"
-          },
-          "configurationId": "sample",
-          "ownerRevision": "sample",
-          "owner": {
-            "kind": "pairing-token",
-            "principalId": "sample",
-            "tokenId": "sample",
-            "authorityId": "sample",
-            "authorityRevision": "sample",
-            "scopes": [
-              "sample"
-            ]
-          },
-          "workspaceRevision": "sample",
-          "approvalId": "sample",
-          "choices": {
-            "processingPurpose": "accept-external-message-for-owner-review",
-            "sourceRetention": "memory-only-until-review-close-or-deadline",
-            "sourceRetentionMs": 0,
-            "derivedRecord": "external-source-reference-only-v1",
-            "derivedRecordRetentionMs": 0,
-            "execution": "none",
-            "ownerMayReadOriginal": true
-          },
-          "acceptedAt": 0,
-          "sourceExpiresAt": 0,
-          "recordExpiresAt": 0,
-          "state": "accepted-for-review",
-          "execution": "not-started"
-        }
-      ],
-      "pending": [
-        {
-          "ref": {
-            "sessionId": "sample",
-            "inputId": "sample",
-            "sourceId": "sample",
-            "sourceRevision": "sample",
-            "requestId": "sample"
-          },
-          "approvalId": "sample",
-          "sourceExpiresAt": 0,
-          "outcome": "sample"
-        }
-      ],
-      "original": {
-        "text": "sample",
-        "unsupportedSources": [
-          {
-            "kind": "sample",
-            "label": "sample"
-          }
-        ]
-      }
+      "execution": "not-started"
     }
   },
   "inbound.telegram.list": {
@@ -11845,75 +13200,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
     },
     "status": 200,
     "body": {
-      "accountIdentity": {
-        "id": "sample",
-        "username": "sample",
-        "revision": "sample"
-      },
-      "outcome": "sample",
-      "reason": "sample",
-      "ref": {
-        "sessionId": "sample",
-        "inputId": "sample",
-        "sourceId": "sample",
-        "sourceRevision": "sample",
-        "requestId": "sample"
-      },
-      "configurationId": "sample",
-      "expiresAt": 0,
-      "pendingRetentionMs": 0,
-      "processing": "sample",
-      "restart": "sample",
-      "route": "sample",
-      "execution": "not-started",
-      "approvalId": "sample",
-      "source": "sample",
-      "recovery": "sample",
-      "record": {
-        "id": "sample",
-        "ref": {
-          "sessionId": "sample",
-          "inputId": "sample",
-          "sourceId": "sample",
-          "sourceRevision": "sample",
-          "requestId": "sample"
-        },
-        "origin": {
-          "kind": "external-original",
-          "accountId": "sample",
-          "accountRevision": "sample",
-          "routeId": "sample",
-          "routeRevision": "sample"
-        },
-        "configurationId": "sample",
-        "ownerRevision": "sample",
-        "owner": {
-          "kind": "pairing-token",
-          "principalId": "sample",
-          "tokenId": "sample",
-          "authorityId": "sample",
-          "authorityRevision": "sample",
-          "scopes": [
-            "sample"
-          ]
-        },
-        "workspaceRevision": "sample",
-        "approvalId": "sample",
-        "choices": {
-          "processingPurpose": "accept-external-message-for-owner-review",
-          "sourceRetention": "memory-only-until-review-close-or-deadline",
-          "sourceRetentionMs": 0,
-          "derivedRecord": "external-source-reference-only-v1",
-          "derivedRecordRetentionMs": 0,
-          "execution": "none",
-          "ownerMayReadOriginal": true
-        },
-        "acceptedAt": 0,
-        "sourceExpiresAt": 0,
-        "recordExpiresAt": 0,
-        "state": "accepted-for-review",
-        "execution": "not-started"
-      },
+      "outcome": "listed",
       "records": [
         {
           "id": "sample",
@@ -11972,18 +13259,9 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           },
           "approvalId": "sample",
           "sourceExpiresAt": 0,
-          "outcome": "sample"
+          "outcome": "awaiting-owner"
         }
-      ],
-      "original": {
-        "text": "sample",
-        "unsupportedSources": [
-          {
-            "kind": "sample",
-            "label": "sample"
-          }
-        ]
-      }
+      ]
     }
   },
   "inbound.telegram.read": {
@@ -11994,30 +13272,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
     },
     "status": 200,
     "body": {
-      "accountIdentity": {
-        "id": "sample",
-        "username": "sample",
-        "revision": "sample"
-      },
-      "outcome": "sample",
-      "reason": "sample",
-      "ref": {
-        "sessionId": "sample",
-        "inputId": "sample",
-        "sourceId": "sample",
-        "sourceRevision": "sample",
-        "requestId": "sample"
-      },
-      "configurationId": "sample",
-      "expiresAt": 0,
-      "pendingRetentionMs": 0,
-      "processing": "sample",
-      "restart": "sample",
-      "route": "sample",
-      "execution": "not-started",
-      "approvalId": "sample",
-      "source": "sample",
-      "recovery": "sample",
+      "outcome": "recorded",
       "record": {
         "id": "sample",
         "ref": {
@@ -12063,67 +13318,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "state": "accepted-for-review",
         "execution": "not-started"
       },
-      "records": [
-        {
-          "id": "sample",
-          "ref": {
-            "sessionId": "sample",
-            "inputId": "sample",
-            "sourceId": "sample",
-            "sourceRevision": "sample",
-            "requestId": "sample"
-          },
-          "origin": {
-            "kind": "external-original",
-            "accountId": "sample",
-            "accountRevision": "sample",
-            "routeId": "sample",
-            "routeRevision": "sample"
-          },
-          "configurationId": "sample",
-          "ownerRevision": "sample",
-          "owner": {
-            "kind": "pairing-token",
-            "principalId": "sample",
-            "tokenId": "sample",
-            "authorityId": "sample",
-            "authorityRevision": "sample",
-            "scopes": [
-              "sample"
-            ]
-          },
-          "workspaceRevision": "sample",
-          "approvalId": "sample",
-          "choices": {
-            "processingPurpose": "accept-external-message-for-owner-review",
-            "sourceRetention": "memory-only-until-review-close-or-deadline",
-            "sourceRetentionMs": 0,
-            "derivedRecord": "external-source-reference-only-v1",
-            "derivedRecordRetentionMs": 0,
-            "execution": "none",
-            "ownerMayReadOriginal": true
-          },
-          "acceptedAt": 0,
-          "sourceExpiresAt": 0,
-          "recordExpiresAt": 0,
-          "state": "accepted-for-review",
-          "execution": "not-started"
-        }
-      ],
-      "pending": [
-        {
-          "ref": {
-            "sessionId": "sample",
-            "inputId": "sample",
-            "sourceId": "sample",
-            "sourceRevision": "sample",
-            "requestId": "sample"
-          },
-          "approvalId": "sample",
-          "sourceExpiresAt": 0,
-          "outcome": "sample"
-        }
-      ],
+      "source": "available-in-memory",
+      "recovery": "owner-review-available",
       "original": {
         "text": "sample",
         "unsupportedSources": [
@@ -12143,145 +13339,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
     },
     "status": 200,
     "body": {
-      "accountIdentity": {
-        "id": "sample",
-        "username": "sample",
-        "revision": "sample"
-      },
-      "outcome": "sample",
-      "reason": "sample",
-      "ref": {
-        "sessionId": "sample",
-        "inputId": "sample",
-        "sourceId": "sample",
-        "sourceRevision": "sample",
-        "requestId": "sample"
-      },
-      "configurationId": "sample",
-      "expiresAt": 0,
-      "pendingRetentionMs": 0,
-      "processing": "sample",
-      "restart": "sample",
-      "route": "sample",
-      "execution": "not-started",
-      "approvalId": "sample",
-      "source": "sample",
-      "recovery": "sample",
-      "record": {
-        "id": "sample",
-        "ref": {
-          "sessionId": "sample",
-          "inputId": "sample",
-          "sourceId": "sample",
-          "sourceRevision": "sample",
-          "requestId": "sample"
-        },
-        "origin": {
-          "kind": "external-original",
-          "accountId": "sample",
-          "accountRevision": "sample",
-          "routeId": "sample",
-          "routeRevision": "sample"
-        },
-        "configurationId": "sample",
-        "ownerRevision": "sample",
-        "owner": {
-          "kind": "pairing-token",
-          "principalId": "sample",
-          "tokenId": "sample",
-          "authorityId": "sample",
-          "authorityRevision": "sample",
-          "scopes": [
-            "sample"
-          ]
-        },
-        "workspaceRevision": "sample",
-        "approvalId": "sample",
-        "choices": {
-          "processingPurpose": "accept-external-message-for-owner-review",
-          "sourceRetention": "memory-only-until-review-close-or-deadline",
-          "sourceRetentionMs": 0,
-          "derivedRecord": "external-source-reference-only-v1",
-          "derivedRecordRetentionMs": 0,
-          "execution": "none",
-          "ownerMayReadOriginal": true
-        },
-        "acceptedAt": 0,
-        "sourceExpiresAt": 0,
-        "recordExpiresAt": 0,
-        "state": "accepted-for-review",
-        "execution": "not-started"
-      },
-      "records": [
-        {
-          "id": "sample",
-          "ref": {
-            "sessionId": "sample",
-            "inputId": "sample",
-            "sourceId": "sample",
-            "sourceRevision": "sample",
-            "requestId": "sample"
-          },
-          "origin": {
-            "kind": "external-original",
-            "accountId": "sample",
-            "accountRevision": "sample",
-            "routeId": "sample",
-            "routeRevision": "sample"
-          },
-          "configurationId": "sample",
-          "ownerRevision": "sample",
-          "owner": {
-            "kind": "pairing-token",
-            "principalId": "sample",
-            "tokenId": "sample",
-            "authorityId": "sample",
-            "authorityRevision": "sample",
-            "scopes": [
-              "sample"
-            ]
-          },
-          "workspaceRevision": "sample",
-          "approvalId": "sample",
-          "choices": {
-            "processingPurpose": "accept-external-message-for-owner-review",
-            "sourceRetention": "memory-only-until-review-close-or-deadline",
-            "sourceRetentionMs": 0,
-            "derivedRecord": "external-source-reference-only-v1",
-            "derivedRecordRetentionMs": 0,
-            "execution": "none",
-            "ownerMayReadOriginal": true
-          },
-          "acceptedAt": 0,
-          "sourceExpiresAt": 0,
-          "recordExpiresAt": 0,
-          "state": "accepted-for-review",
-          "execution": "not-started"
-        }
-      ],
-      "pending": [
-        {
-          "ref": {
-            "sessionId": "sample",
-            "inputId": "sample",
-            "sourceId": "sample",
-            "sourceRevision": "sample",
-            "requestId": "sample"
-          },
-          "approvalId": "sample",
-          "sourceExpiresAt": 0,
-          "outcome": "sample"
-        }
-      ],
-      "original": {
-        "text": "sample",
-        "unsupportedSources": [
-          {
-            "kind": "sample",
-            "label": "sample"
-          }
-        ]
-      }
+      "outcome": "released",
+      "route": "normal-handling-resumes"
     }
   },
   "inbound.telegram.revoke": {
@@ -12292,145 +13351,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
     },
     "status": 200,
     "body": {
-      "accountIdentity": {
-        "id": "sample",
-        "username": "sample",
-        "revision": "sample"
-      },
-      "outcome": "sample",
-      "reason": "sample",
-      "ref": {
-        "sessionId": "sample",
-        "inputId": "sample",
-        "sourceId": "sample",
-        "sourceRevision": "sample",
-        "requestId": "sample"
-      },
-      "configurationId": "sample",
-      "expiresAt": 0,
-      "pendingRetentionMs": 0,
-      "processing": "sample",
-      "restart": "sample",
-      "route": "sample",
-      "execution": "not-started",
-      "approvalId": "sample",
-      "source": "sample",
-      "recovery": "sample",
-      "record": {
-        "id": "sample",
-        "ref": {
-          "sessionId": "sample",
-          "inputId": "sample",
-          "sourceId": "sample",
-          "sourceRevision": "sample",
-          "requestId": "sample"
-        },
-        "origin": {
-          "kind": "external-original",
-          "accountId": "sample",
-          "accountRevision": "sample",
-          "routeId": "sample",
-          "routeRevision": "sample"
-        },
-        "configurationId": "sample",
-        "ownerRevision": "sample",
-        "owner": {
-          "kind": "pairing-token",
-          "principalId": "sample",
-          "tokenId": "sample",
-          "authorityId": "sample",
-          "authorityRevision": "sample",
-          "scopes": [
-            "sample"
-          ]
-        },
-        "workspaceRevision": "sample",
-        "approvalId": "sample",
-        "choices": {
-          "processingPurpose": "accept-external-message-for-owner-review",
-          "sourceRetention": "memory-only-until-review-close-or-deadline",
-          "sourceRetentionMs": 0,
-          "derivedRecord": "external-source-reference-only-v1",
-          "derivedRecordRetentionMs": 0,
-          "execution": "none",
-          "ownerMayReadOriginal": true
-        },
-        "acceptedAt": 0,
-        "sourceExpiresAt": 0,
-        "recordExpiresAt": 0,
-        "state": "accepted-for-review",
-        "execution": "not-started"
-      },
-      "records": [
-        {
-          "id": "sample",
-          "ref": {
-            "sessionId": "sample",
-            "inputId": "sample",
-            "sourceId": "sample",
-            "sourceRevision": "sample",
-            "requestId": "sample"
-          },
-          "origin": {
-            "kind": "external-original",
-            "accountId": "sample",
-            "accountRevision": "sample",
-            "routeId": "sample",
-            "routeRevision": "sample"
-          },
-          "configurationId": "sample",
-          "ownerRevision": "sample",
-          "owner": {
-            "kind": "pairing-token",
-            "principalId": "sample",
-            "tokenId": "sample",
-            "authorityId": "sample",
-            "authorityRevision": "sample",
-            "scopes": [
-              "sample"
-            ]
-          },
-          "workspaceRevision": "sample",
-          "approvalId": "sample",
-          "choices": {
-            "processingPurpose": "accept-external-message-for-owner-review",
-            "sourceRetention": "memory-only-until-review-close-or-deadline",
-            "sourceRetentionMs": 0,
-            "derivedRecord": "external-source-reference-only-v1",
-            "derivedRecordRetentionMs": 0,
-            "execution": "none",
-            "ownerMayReadOriginal": true
-          },
-          "acceptedAt": 0,
-          "sourceExpiresAt": 0,
-          "recordExpiresAt": 0,
-          "state": "accepted-for-review",
-          "execution": "not-started"
-        }
-      ],
-      "pending": [
-        {
-          "ref": {
-            "sessionId": "sample",
-            "inputId": "sample",
-            "sourceId": "sample",
-            "sourceRevision": "sample",
-            "requestId": "sample"
-          },
-          "approvalId": "sample",
-          "sourceExpiresAt": 0,
-          "outcome": "sample"
-        }
-      ],
-      "original": {
-        "text": "sample",
-        "unsupportedSources": [
-          {
-            "kind": "sample",
-            "label": "sample"
-          }
-        ]
-      }
+      "outcome": "revoked",
+      "route": "remains-selected-and-held"
     }
   },
   "inbound.telegram.status": {
@@ -12441,30 +13363,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
     },
     "status": 200,
     "body": {
-      "accountIdentity": {
-        "id": "sample",
-        "username": "sample",
-        "revision": "sample"
-      },
-      "outcome": "sample",
-      "reason": "sample",
-      "ref": {
-        "sessionId": "sample",
-        "inputId": "sample",
-        "sourceId": "sample",
-        "sourceRevision": "sample",
-        "requestId": "sample"
-      },
-      "configurationId": "sample",
-      "expiresAt": 0,
-      "pendingRetentionMs": 0,
-      "processing": "sample",
-      "restart": "sample",
-      "route": "sample",
-      "execution": "not-started",
-      "approvalId": "sample",
-      "source": "sample",
-      "recovery": "sample",
+      "outcome": "recorded",
       "record": {
         "id": "sample",
         "ref": {
@@ -12510,67 +13409,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "state": "accepted-for-review",
         "execution": "not-started"
       },
-      "records": [
-        {
-          "id": "sample",
-          "ref": {
-            "sessionId": "sample",
-            "inputId": "sample",
-            "sourceId": "sample",
-            "sourceRevision": "sample",
-            "requestId": "sample"
-          },
-          "origin": {
-            "kind": "external-original",
-            "accountId": "sample",
-            "accountRevision": "sample",
-            "routeId": "sample",
-            "routeRevision": "sample"
-          },
-          "configurationId": "sample",
-          "ownerRevision": "sample",
-          "owner": {
-            "kind": "pairing-token",
-            "principalId": "sample",
-            "tokenId": "sample",
-            "authorityId": "sample",
-            "authorityRevision": "sample",
-            "scopes": [
-              "sample"
-            ]
-          },
-          "workspaceRevision": "sample",
-          "approvalId": "sample",
-          "choices": {
-            "processingPurpose": "accept-external-message-for-owner-review",
-            "sourceRetention": "memory-only-until-review-close-or-deadline",
-            "sourceRetentionMs": 0,
-            "derivedRecord": "external-source-reference-only-v1",
-            "derivedRecordRetentionMs": 0,
-            "execution": "none",
-            "ownerMayReadOriginal": true
-          },
-          "acceptedAt": 0,
-          "sourceExpiresAt": 0,
-          "recordExpiresAt": 0,
-          "state": "accepted-for-review",
-          "execution": "not-started"
-        }
-      ],
-      "pending": [
-        {
-          "ref": {
-            "sessionId": "sample",
-            "inputId": "sample",
-            "sourceId": "sample",
-            "sourceRevision": "sample",
-            "requestId": "sample"
-          },
-          "approvalId": "sample",
-          "sourceExpiresAt": 0,
-          "outcome": "sample"
-        }
-      ],
+      "source": "available-in-memory",
+      "recovery": "owner-review-available",
       "original": {
         "text": "sample",
         "unsupportedSources": [
@@ -15315,8 +16155,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "createdAt": 0,
         "expiresAt": 0,
         "sourceUri": "sample",
-        "acquisitionMode": "sample",
-        "fetchMode": "sample",
+        "acquisitionMode": "inline-data",
+        "fetchMode": "not-applicable",
         "metadata": {}
       },
       "source": {
@@ -16060,164 +16900,6 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       }
     }
   },
-  "projectPlanning.evaluate": {
-    "methodId": "projectPlanning.evaluate",
-    "http": {
-      "method": "POST",
-      "path": "/api/projects/planning/evaluate"
-    },
-    "status": 200,
-    "body": {
-      "operationProvenance": "classic",
-      "semanticAssessment": "not-evaluated",
-      "readinessAssessment": {
-        "basis": "native-structure-and-owner-approval",
-        "semanticAssessment": "specified"
-      },
-      "ok": false,
-      "projectId": "sample",
-      "knowledgeSpaceId": "sample",
-      "readiness": "sample",
-      "gaps": [
-        {
-          "id": "sample",
-          "kind": "sample",
-          "severity": "sample",
-          "message": "sample",
-          "question": {
-            "id": "sample",
-            "prompt": "sample",
-            "whyItMatters": "sample",
-            "recommendedAnswer": "sample",
-            "consequence": "sample",
-            "status": "sample",
-            "answer": "sample",
-            "answeredAt": 0,
-            "metadata": {}
-          },
-          "relatedTaskIds": [
-            "sample"
-          ],
-          "metadata": {}
-        }
-      ],
-      "nextQuestion": {
-        "id": "sample",
-        "prompt": "sample",
-        "whyItMatters": "sample",
-        "recommendedAnswer": "sample",
-        "consequence": "sample",
-        "status": "sample",
-        "answer": "sample",
-        "answeredAt": 0,
-        "metadata": {}
-      },
-      "state": {
-        "id": "sample",
-        "projectId": "sample",
-        "knowledgeSpaceId": "sample",
-        "goal": "sample",
-        "scope": "sample",
-        "knownContext": [
-          "sample"
-        ],
-        "openQuestions": [
-          {
-            "id": "sample",
-            "prompt": "sample",
-            "whyItMatters": "sample",
-            "recommendedAnswer": "sample",
-            "consequence": "sample",
-            "status": "sample",
-            "answer": "sample",
-            "answeredAt": 0,
-            "metadata": {}
-          }
-        ],
-        "answeredQuestions": [
-          {
-            "id": "sample",
-            "prompt": "sample",
-            "whyItMatters": "sample",
-            "recommendedAnswer": "sample",
-            "consequence": "sample",
-            "status": "sample",
-            "answer": "sample",
-            "answeredAt": 0,
-            "metadata": {}
-          }
-        ],
-        "decisions": [
-          {
-            "id": "sample",
-            "title": "sample",
-            "context": "sample",
-            "decision": "sample",
-            "alternatives": [
-              "sample"
-            ],
-            "reasoning": "sample",
-            "consequences": [
-              "sample"
-            ],
-            "status": "sample",
-            "createdAt": 0,
-            "updatedAt": 0,
-            "metadata": {}
-          }
-        ],
-        "assumptions": [
-          "sample"
-        ],
-        "constraints": [
-          "sample"
-        ],
-        "risks": [
-          "sample"
-        ],
-        "tasks": [
-          {
-            "id": "sample",
-            "title": "sample",
-            "why": "sample",
-            "status": "sample",
-            "dependencies": [
-              "sample"
-            ],
-            "likelyFiles": [
-              "sample"
-            ],
-            "verification": [
-              "sample"
-            ],
-            "canRunConcurrently": false,
-            "needsReview": false,
-            "blockedOnUserInput": false,
-            "recommendedAgent": "sample",
-            "metadata": {}
-          }
-        ],
-        "dependencies": [
-          "sample"
-        ],
-        "verificationGates": [
-          "sample"
-        ],
-        "agentAssignments": [
-          "sample"
-        ],
-        "readiness": "sample",
-        "readinessAssessment": {
-          "basis": "native-structure-and-owner-approval",
-          "semanticAssessment": "specified"
-        },
-        "executionApproved": false,
-        "createdAt": 0,
-        "updatedAt": 0,
-        "metadata": {}
-      }
-    }
-  },
   "projectPlanning.language.get": {
     "methodId": "projectPlanning.language.get",
     "http": {
@@ -16269,205 +16951,10 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       }
     }
   },
-  "projectPlanning.language.upsert": {
-    "methodId": "projectPlanning.language.upsert",
-    "http": {
-      "method": "POST",
-      "path": "/api/projects/planning/language"
-    },
-    "status": 200,
-    "body": {
-      "ok": false,
-      "projectId": "sample",
-      "knowledgeSpaceId": "sample",
-      "language": {
-        "projectId": "sample",
-        "knowledgeSpaceId": "sample",
-        "terms": [
-          "sample"
-        ],
-        "ambiguities": [
-          "sample"
-        ],
-        "examples": [
-          "sample"
-        ],
-        "updatedAt": 0,
-        "metadata": {}
-      },
-      "source": {
-        "id": "sample",
-        "connectorId": "sample",
-        "sourceType": "url",
-        "title": "sample",
-        "sourceUri": "sample",
-        "canonicalUri": "sample",
-        "summary": "sample",
-        "description": "sample",
-        "tags": [
-          "sample"
-        ],
-        "folderPath": "sample",
-        "status": "sample",
-        "artifactId": "sample",
-        "contentHash": "sample",
-        "lastCrawledAt": 0,
-        "crawlError": "sample",
-        "sessionId": "sample",
-        "metadata": {},
-        "createdAt": 0,
-        "updatedAt": 0
-      }
-    }
-  },
   "projectPlanning.state.get": {
     "methodId": "projectPlanning.state.get",
     "http": {
       "method": "GET",
-      "path": "/api/projects/planning/state"
-    },
-    "status": 200,
-    "body": {
-      "ok": false,
-      "projectId": "sample",
-      "knowledgeSpaceId": "sample",
-      "state": {
-        "id": "sample",
-        "projectId": "sample",
-        "knowledgeSpaceId": "sample",
-        "goal": "sample",
-        "scope": "sample",
-        "knownContext": [
-          "sample"
-        ],
-        "openQuestions": [
-          {
-            "id": "sample",
-            "prompt": "sample",
-            "whyItMatters": "sample",
-            "recommendedAnswer": "sample",
-            "consequence": "sample",
-            "status": "sample",
-            "answer": "sample",
-            "answeredAt": 0,
-            "metadata": {}
-          }
-        ],
-        "answeredQuestions": [
-          {
-            "id": "sample",
-            "prompt": "sample",
-            "whyItMatters": "sample",
-            "recommendedAnswer": "sample",
-            "consequence": "sample",
-            "status": "sample",
-            "answer": "sample",
-            "answeredAt": 0,
-            "metadata": {}
-          }
-        ],
-        "decisions": [
-          {
-            "id": "sample",
-            "title": "sample",
-            "context": "sample",
-            "decision": "sample",
-            "alternatives": [
-              "sample"
-            ],
-            "reasoning": "sample",
-            "consequences": [
-              "sample"
-            ],
-            "status": "sample",
-            "createdAt": 0,
-            "updatedAt": 0,
-            "metadata": {}
-          }
-        ],
-        "assumptions": [
-          "sample"
-        ],
-        "constraints": [
-          "sample"
-        ],
-        "risks": [
-          "sample"
-        ],
-        "tasks": [
-          {
-            "id": "sample",
-            "title": "sample",
-            "why": "sample",
-            "status": "sample",
-            "dependencies": [
-              "sample"
-            ],
-            "likelyFiles": [
-              "sample"
-            ],
-            "verification": [
-              "sample"
-            ],
-            "canRunConcurrently": false,
-            "needsReview": false,
-            "blockedOnUserInput": false,
-            "recommendedAgent": "sample",
-            "metadata": {}
-          }
-        ],
-        "dependencies": [
-          "sample"
-        ],
-        "verificationGates": [
-          "sample"
-        ],
-        "agentAssignments": [
-          "sample"
-        ],
-        "readiness": "sample",
-        "readinessAssessment": {
-          "basis": "native-structure-and-owner-approval",
-          "semanticAssessment": "specified"
-        },
-        "executionApproved": false,
-        "createdAt": 0,
-        "updatedAt": 0,
-        "metadata": {}
-      },
-      "revision": {
-        "sourceId": "sample",
-        "generation": "sample"
-      },
-      "source": {
-        "id": "sample",
-        "connectorId": "sample",
-        "sourceType": "url",
-        "title": "sample",
-        "sourceUri": "sample",
-        "canonicalUri": "sample",
-        "summary": "sample",
-        "description": "sample",
-        "tags": [
-          "sample"
-        ],
-        "folderPath": "sample",
-        "status": "sample",
-        "artifactId": "sample",
-        "contentHash": "sample",
-        "lastCrawledAt": 0,
-        "crawlError": "sample",
-        "sessionId": "sample",
-        "metadata": {},
-        "createdAt": 0,
-        "updatedAt": 0
-      }
-    }
-  },
-  "projectPlanning.state.upsert": {
-    "methodId": "projectPlanning.state.upsert",
-    "http": {
-      "method": "POST",
       "path": "/api/projects/planning/state"
     },
     "status": 200,
@@ -17932,7 +18419,14 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "protocolVersion": "sample",
           "protocolEra": "modern",
           "phase": "idle",
-          "lastError": "sample"
+          "lastError": "sample",
+          "reconnect": {
+            "state": "configured",
+            "attempt": 0,
+            "maxAttempts": 0,
+            "nextAttemptAt": 0,
+            "stoppedReason": "sample"
+          }
         }
       ],
       "security": [
@@ -18242,8 +18736,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "createdAt": 0,
           "expiresAt": 0,
           "sourceUri": "sample",
-          "acquisitionMode": "sample",
-          "fetchMode": "sample",
+          "acquisitionMode": "inline-data",
+          "fetchMode": "not-applicable",
           "metadata": {}
         },
         "providerIds": [
@@ -18290,8 +18784,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "createdAt": 0,
           "expiresAt": 0,
           "sourceUri": "sample",
-          "acquisitionMode": "sample",
-          "fetchMode": "sample",
+          "acquisitionMode": "inline-data",
+          "fetchMode": "not-applicable",
           "metadata": {}
         },
         "knowledgeSourceId": "sample",
@@ -18384,12 +18878,36 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "createdAt": 0,
           "expiresAt": 0,
           "sourceUri": "sample",
-          "acquisitionMode": "sample",
-          "fetchMode": "sample",
+          "acquisitionMode": "inline-data",
+          "fetchMode": "not-applicable",
           "metadata": {}
         },
         "knowledgeSourceId": "sample",
         "metadata": {}
+      }
+    }
+  },
+  "memory.consolidation.decide": {
+    "methodId": "memory.consolidation.decide",
+    "http": null,
+    "status": 200,
+    "body": {
+      "decided": false,
+      "proposalId": "sample",
+      "action": "sample",
+      "changed": [
+        "sample"
+      ],
+      "removed": [
+        "sample"
+      ],
+      "refusal": {
+        "code": "sample",
+        "state": "sample",
+        "reason": "sample",
+        "next": [
+          "sample"
+        ]
       }
     }
   },
@@ -19027,7 +19545,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
     "body": {
       "ok": false,
       "reason": "sample",
-      "reply": "sample"
+      "reply": "sample",
+      "changed": false
     }
   },
   "occasions.answer": {
@@ -19085,7 +19604,15 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
     "status": 200,
     "body": {
       "occasionId": "sample",
-      "resolved": false
+      "resolved": false,
+      "reason": "sample",
+      "dates": [
+        "sample"
+      ],
+      "removed": [
+        "sample"
+      ],
+      "disclosure": "sample"
     }
   },
   "occasions.gifts": {
@@ -19421,6 +19948,45 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       ]
     }
   },
+  "occasions.plans.remove": {
+    "methodId": "occasions.plans.remove",
+    "http": {
+      "method": "POST",
+      "path": "/api/occasions/plans/remove"
+    },
+    "status": 200,
+    "body": {
+      "ok": false,
+      "reason": "sample",
+      "occasionId": "sample",
+      "disclosure": "sample",
+      "droppedRecords": 0
+    }
+  },
+  "occasions.plans.update": {
+    "methodId": "occasions.plans.update",
+    "http": {
+      "method": "POST",
+      "path": "/api/occasions/plans/update"
+    },
+    "status": 200,
+    "body": {
+      "ok": false,
+      "reason": "sample",
+      "occasionId": "sample",
+      "disclosure": "sample",
+      "droppedRecords": 0,
+      "written": false,
+      "proposal": {
+        "ok": false,
+        "reason": "sample",
+        "line": "sample",
+        "replaces": "sample",
+        "confirmation": "sample",
+        "unchanged": false
+      }
+    }
+  },
   "occasions.propose": {
     "methodId": "occasions.propose",
     "http": {
@@ -19468,6 +20034,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "openItems": 0,
       "interviews": 0,
       "mirrors": 0,
+      "attributions": 0,
       "lastSweep": {
         "sweptAt": 0,
         "expiredAcknowledgements": 0,
@@ -19537,6 +20104,30 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "agedGiftRecords": 0,
         "droppedInterviews": 0,
         "staleMirrors": 0
+      }
+    }
+  },
+  "occasions.update": {
+    "methodId": "occasions.update",
+    "http": {
+      "method": "POST",
+      "path": "/api/occasions/update"
+    },
+    "status": 200,
+    "body": {
+      "ok": false,
+      "reason": "sample",
+      "occasionId": "sample",
+      "disclosure": "sample",
+      "droppedRecords": 0,
+      "written": false,
+      "proposal": {
+        "ok": false,
+        "reason": "sample",
+        "line": "sample",
+        "replaces": "sample",
+        "confirmation": "sample",
+        "unchanged": false
       }
     }
   },
@@ -19630,7 +20221,10 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
     "status": 200,
     "body": {
       "id": "sample",
-      "revoked": false
+      "revoked": false,
+      "alsoRevoked": [
+        "sample"
+      ]
     }
   },
   "pairing.tokens.list": {
@@ -19643,7 +20237,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "id": "sample",
           "name": "sample",
           "createdAt": 0,
-          "lastSeenAt": 0
+          "lastSeenAt": 0,
+          "mintedBy": "sample"
         }
       ],
       "legacySharedRevoked": false
@@ -19742,7 +20337,13 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "remaining": 0
       },
       "reservationCount": 0,
-      "isPaymentsLeader": false
+      "isPaymentsLeader": false,
+      "stopped": {
+        "store": "sample",
+        "reason": "sample",
+        "path": "sample",
+        "message": "sample"
+      }
     }
   },
   "payments.cards.create": {
@@ -19807,7 +20408,10 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
   },
   "payments.checkout.approve": {
     "methodId": "payments.checkout.approve",
-    "http": null,
+    "http": {
+      "method": "POST",
+      "path": "/api/payments/checkout/approve"
+    },
     "status": 200,
     "body": {
       "approved": false,
@@ -19835,22 +20439,6 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "shippingTierUsed": "sample",
       "steppedDown": false,
       "challengeStep": "sample"
-    }
-  },
-  "payments.checkout.fillCard": {
-    "methodId": "payments.checkout.fillCard",
-    "http": {
-      "method": "POST",
-      "path": "/api/payments/checkout/fill-card"
-    },
-    "status": 200,
-    "body": {
-      "ok": false,
-      "filled": [
-        "sample"
-      ],
-      "failedField": "sample",
-      "reason": "sample"
     }
   },
   "payments.purchase.approve": {
@@ -19911,7 +20499,30 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "updatedAtMs": 0,
       "outcome": "sample",
       "totalMinorUnits": 0,
-      "currency": "AAA"
+      "currency": "AAA",
+      "reason": "sample",
+      "challengeStep": "sample",
+      "exceeded": {
+        "limit": "daily-item-budget",
+        "setting": "sample",
+        "availableMinorUnits": 0,
+        "neededMinorUnits": 0,
+        "excessMinorUnits": 0,
+        "unset": false
+      }
+    }
+  },
+  "payments.purchase.securityCode": {
+    "methodId": "payments.purchase.securityCode",
+    "http": {
+      "method": "POST",
+      "path": "/api/payments/purchase/security-code"
+    },
+    "status": 200,
+    "body": {
+      "purchaseId": "sample",
+      "windowId": "sample",
+      "accepted": true
     }
   },
   "payments.purchase.status": {
@@ -19941,7 +20552,17 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "updatedAtMs": 0,
           "outcome": "sample",
           "totalMinorUnits": 0,
-          "currency": "AAA"
+          "currency": "AAA",
+          "reason": "sample",
+          "challengeStep": "sample",
+          "exceeded": {
+            "limit": "daily-item-budget",
+            "setting": "sample",
+            "availableMinorUnits": 0,
+            "neededMinorUnits": 0,
+            "excessMinorUnits": 0,
+            "unset": false
+          }
         }
       ],
       "unreadable": [
@@ -19949,7 +20570,22 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "purchaseId": "sample",
           "reason": "sample"
         }
-      ]
+      ],
+      "securityCodes": [
+        {
+          "purchaseId": "sample",
+          "windowId": "sample",
+          "merchantDomain": "sample",
+          "cardLast4": "sample",
+          "deadlineMs": 0
+        }
+      ],
+      "stopped": {
+        "store": "sample",
+        "reason": "sample",
+        "path": "sample",
+        "message": "sample"
+      }
     }
   },
   "payments.purchases.list": {
@@ -20933,7 +21569,15 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "lastOutcome": "sample",
           "consecutiveFailures": 0
         }
-      ]
+      ],
+      "lastRemoval": {
+        "subscriptionId": "sample",
+        "principalId": "sample",
+        "endpointOrigin": "sample",
+        "reason": "sample",
+        "evidence": "sample",
+        "removedAt": 0
+      }
     }
   },
   "push.subscriptions.reconcile": {
@@ -21866,9 +22510,24 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "detail": "sample",
       "lastServe": {
         "at": 0,
+        "action": "serve",
         "command": "sample",
         "ok": false,
         "url": "sample",
+        "port": 0,
+        "previousPublicBaseUrl": "sample",
+        "enableUrl": "sample",
+        "detail": "sample"
+      },
+      "activeServe": {
+        "at": 0,
+        "action": "serve",
+        "command": "sample",
+        "ok": false,
+        "url": "sample",
+        "port": 0,
+        "previousPublicBaseUrl": "sample",
+        "enableUrl": "sample",
         "detail": "sample"
       }
     }
@@ -21880,12 +22539,37 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
     "body": {
       "receipt": {
         "at": 0,
+        "action": "serve",
         "command": "sample",
         "ok": false,
         "url": "sample",
+        "port": 0,
+        "previousPublicBaseUrl": "sample",
+        "enableUrl": "sample",
         "detail": "sample"
       },
       "publicBaseUrlUpdated": false,
+      "receiptRecorded": false
+    }
+  },
+  "tailscale.serve.stop": {
+    "methodId": "tailscale.serve.stop",
+    "http": null,
+    "status": 200,
+    "body": {
+      "receipt": {
+        "at": 0,
+        "action": "serve",
+        "command": "sample",
+        "ok": false,
+        "url": "sample",
+        "port": 0,
+        "previousPublicBaseUrl": "sample",
+        "enableUrl": "sample",
+        "detail": "sample"
+      },
+      "publicBaseUrlRestored": false,
+      "publicBaseUrlDetail": "sample",
       "receiptRecorded": false
     }
   },
@@ -21937,7 +22621,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
             "restoreCheckpointId": "sample"
           },
           "conversation": {
-            "undoSnapshotId": "sample"
+            "undoSnapshotId": "sample",
+            "expiresAfter": "sample"
           }
         },
         "warnings": [
@@ -22014,6 +22699,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "sessionId": "sample",
         "turnId": "sample",
         "kind": "preview",
+        "undoSnapshotId": "sample",
         "expiresAt": 0
       }
     }
@@ -22029,6 +22715,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "sessionId": "sample",
           "turnId": "sample",
           "kind": "preview",
+          "undoSnapshotId": "sample",
           "expiresAt": 0
         }
       ],
@@ -22065,6 +22752,24 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "warnings": [
         "sample"
       ]
+    }
+  },
+  "rewind.undo": {
+    "methodId": "rewind.undo",
+    "http": null,
+    "status": 200,
+    "body": {
+      "undone": false,
+      "sessionId": "sample",
+      "undoSnapshotId": "sample",
+      "refusal": {
+        "code": "sample",
+        "state": "sample",
+        "reason": "sample",
+        "next": [
+          "sample"
+        ]
+      }
     }
   },
   "routes.bindings.create": {
@@ -23356,7 +24061,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "permissionMode": "safe-owner",
         "contractIds": [
           "sample"
-        ]
+        ],
+        "saveError": "sample"
       },
       "history": [
         {
@@ -23398,7 +24104,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "permissionMode": "safe-owner",
         "contractIds": [
           "sample"
-        ]
+        ],
+        "saveError": "sample"
       }
     }
   },
@@ -23432,7 +24139,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "permissionMode": "safe-owner",
         "contractIds": [
           "sample"
-        ]
+        ],
+        "saveError": "sample"
       }
     }
   },
@@ -23466,7 +24174,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "permissionMode": "safe-owner",
         "contractIds": [
           "sample"
-        ]
+        ],
+        "saveError": "sample"
       }
     }
   },
@@ -23501,8 +24210,19 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "permissionMode": "safe-owner",
           "contractIds": [
             "sample"
-          ]
+          ],
+          "saveError": "sample"
         }
+      ]
+    }
+  },
+  "sessions.hosted.workspaces": {
+    "methodId": "sessions.hosted.workspaces",
+    "http": null,
+    "status": 200,
+    "body": {
+      "roots": [
+        "sample"
       ]
     }
   },
@@ -24273,6 +24993,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "description": "sample",
         "metadata": {},
         "updatedAt": 0,
+        "origin": "project-local",
+        "path": "sample",
         "body": "sample"
       }
     }
@@ -24286,7 +25008,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
     "status": 200,
     "body": {
       "name": "sample",
-      "deleted": false
+      "deleted": false,
+      "path": "sample"
     }
   },
   "skills.get": {
@@ -24302,6 +25025,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "description": "sample",
         "metadata": {},
         "updatedAt": 0,
+        "origin": "project-local",
+        "path": "sample",
         "body": "sample"
       }
     }
@@ -24319,7 +25044,9 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "name": "sample",
           "description": "sample",
           "metadata": {},
-          "updatedAt": 0
+          "updatedAt": 0,
+          "origin": "project-local",
+          "path": "sample"
         }
       ]
     }
@@ -24337,6 +25064,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "description": "sample",
         "metadata": {},
         "updatedAt": 0,
+        "origin": "project-local",
+        "path": "sample",
         "body": "sample"
       }
     }
@@ -25604,7 +26333,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "evidenceId": "sample",
         "reportSequence": 0,
         "evidenceSequence": 0,
-        "reason": "evidence-over-capacity"
+        "reason": "artifact-outside-tree"
       },
       "progress": {
         "status": "queued",
@@ -25694,7 +26423,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "evidenceId": "sample",
         "reportSequence": 0,
         "evidenceSequence": 0,
-        "reason": "evidence-over-capacity"
+        "reason": "artifact-outside-tree"
       },
       "progress": {
         "status": "queued",
@@ -25784,7 +26513,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "evidenceId": "sample",
         "reportSequence": 0,
         "evidenceSequence": 0,
-        "reason": "evidence-over-capacity"
+        "reason": "artifact-outside-tree"
       },
       "progress": {
         "status": "queued",
@@ -25874,7 +26603,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "evidenceId": "sample",
         "reportSequence": 0,
         "evidenceSequence": 0,
-        "reason": "evidence-over-capacity"
+        "reason": "artifact-outside-tree"
       },
       "progress": {
         "status": "queued",
@@ -26457,7 +27186,11 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "state": "preparing",
       "sessionId": "sample",
       "brokerInputId": "sample",
-      "correlationId": "sample"
+      "correlationId": "sample",
+      "failure": {
+        "summary": "sample",
+        "retryable": false
+      }
     }
   },
   "workLedger.turn.session": {
@@ -26486,7 +27219,11 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "state": "preparing",
       "sessionId": "sample",
       "brokerInputId": "sample",
-      "correlationId": "sample"
+      "correlationId": "sample",
+      "failure": {
+        "summary": "sample",
+        "retryable": false
+      }
     }
   },
   "workLedger.turn.startAgent": {
@@ -26504,7 +27241,11 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "state": "preparing",
       "sessionId": "sample",
       "brokerInputId": "sample",
-      "correlationId": "sample"
+      "correlationId": "sample",
+      "failure": {
+        "summary": "sample",
+        "retryable": false
+      }
     }
   },
   "workLedger.turn.status": {
@@ -26522,7 +27263,11 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "state": "preparing",
       "sessionId": "sample",
       "brokerInputId": "sample",
-      "correlationId": "sample"
+      "correlationId": "sample",
+      "failure": {
+        "summary": "sample",
+        "retryable": false
+      }
     }
   },
   "workspaces.registrations.add": {

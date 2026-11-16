@@ -10,7 +10,7 @@ import type { OperatorMethodId } from './operator-method-ids.js';
  * call sites) hand-written on top of these generated primitives.
  *
  * Contract product version: 3.3.0
- * Methods: 572 total, 497 REST-routed, 75 ws-only invoke.
+ * Methods: 595 total, 502 REST-routed, 93 ws-only invoke.
  */
 
 export type WebuiHttpMethod = 'GET' | 'POST' | 'PATCH' | 'DELETE';
@@ -300,9 +300,17 @@ export const WEBUI_METHOD_ROUTES: Readonly<Record<string, WebuiRouteDefinition>>
     "method": "POST",
     "path": "/api/browser/wait-for"
   },
+  "calendar.calendars.list": {
+    "method": "GET",
+    "path": "/api/calendar/calendars"
+  },
   "calendar.events.create": {
     "method": "POST",
     "path": "/api/calendar/events"
+  },
+  "calendar.events.delete": {
+    "method": "DELETE",
+    "path": "/api/calendar/events/{eventId}"
   },
   "calendar.events.get": {
     "method": "GET",
@@ -311,6 +319,10 @@ export const WEBUI_METHOD_ROUTES: Readonly<Record<string, WebuiRouteDefinition>>
   "calendar.events.list": {
     "method": "GET",
     "path": "/api/calendar/events"
+  },
+  "calendar.events.update": {
+    "method": "PATCH",
+    "path": "/api/calendar/events/{eventId}"
   },
   "calendar.ics.export": {
     "method": "GET",
@@ -583,6 +595,10 @@ export const WEBUI_METHOD_ROUTES: Readonly<Record<string, WebuiRouteDefinition>>
   "companion.chat.messages.retry": {
     "method": "POST",
     "path": "/api/companion/chat/sessions/{sessionId}/messages/retry"
+  },
+  "companion.chat.messages.search": {
+    "method": "GET",
+    "path": "/api/companion/chat/messages/search"
   },
   "companion.chat.messages.steer": {
     "method": "POST",
@@ -1108,24 +1124,12 @@ export const WEBUI_METHOD_ROUTES: Readonly<Record<string, WebuiRouteDefinition>>
     "method": "POST",
     "path": "/api/projects/planning/decisions"
   },
-  "projectPlanning.evaluate": {
-    "method": "POST",
-    "path": "/api/projects/planning/evaluate"
-  },
   "projectPlanning.language.get": {
     "method": "GET",
     "path": "/api/projects/planning/language"
   },
-  "projectPlanning.language.upsert": {
-    "method": "POST",
-    "path": "/api/projects/planning/language"
-  },
   "projectPlanning.state.get": {
     "method": "GET",
-    "path": "/api/projects/planning/state"
-  },
-  "projectPlanning.state.upsert": {
-    "method": "POST",
     "path": "/api/projects/planning/state"
   },
   "projectPlanning.status": {
@@ -1364,6 +1368,14 @@ export const WEBUI_METHOD_ROUTES: Readonly<Record<string, WebuiRouteDefinition>>
     "method": "POST",
     "path": "/api/occasions/plans/propose"
   },
+  "occasions.plans.remove": {
+    "method": "POST",
+    "path": "/api/occasions/plans/remove"
+  },
+  "occasions.plans.update": {
+    "method": "POST",
+    "path": "/api/occasions/plans/update"
+  },
   "occasions.propose": {
     "method": "POST",
     "path": "/api/occasions/propose"
@@ -1379,6 +1391,10 @@ export const WEBUI_METHOD_ROUTES: Readonly<Record<string, WebuiRouteDefinition>>
   "occasions.sweep": {
     "method": "POST",
     "path": "/api/occasions/sweep"
+  },
+  "occasions.update": {
+    "method": "POST",
+    "path": "/api/occasions/update"
   },
   "panels.list": {
     "method": "GET",
@@ -1404,13 +1420,13 @@ export const WEBUI_METHOD_ROUTES: Readonly<Record<string, WebuiRouteDefinition>>
     "method": "GET",
     "path": "/api/payments/cards"
   },
+  "payments.checkout.approve": {
+    "method": "POST",
+    "path": "/api/payments/checkout/approve"
+  },
   "payments.checkout.begin": {
     "method": "POST",
     "path": "/api/payments/checkout/begin"
-  },
-  "payments.checkout.fillCard": {
-    "method": "POST",
-    "path": "/api/payments/checkout/fill-card"
   },
   "payments.purchase.approve": {
     "method": "POST",
@@ -1427,6 +1443,10 @@ export const WEBUI_METHOD_ROUTES: Readonly<Record<string, WebuiRouteDefinition>>
   "payments.purchase.reconcile": {
     "method": "POST",
     "path": "/api/payments/purchase/reconcile"
+  },
+  "payments.purchase.securityCode": {
+    "method": "POST",
+    "path": "/api/payments/purchase/security-code"
   },
   "payments.purchase.status": {
     "method": "GET",
@@ -2035,6 +2055,10 @@ export const WEBUI_WS_INVOKE_METHOD_IDS: readonly string[] = [
   "acp.agents.list",
   "acp.sessions.create",
   "approvals.raise",
+  "inbox.answer",
+  "inbox.list",
+  "inbox.post",
+  "inbox.withdraw",
   "channels.test.send",
   "checkpoints.create",
   "checkpoints.diff",
@@ -2045,16 +2069,26 @@ export const WEBUI_WS_INVOKE_METHOD_IDS: readonly string[] = [
   "checkpoints.revertHunkPreview",
   "credentials.delete",
   "credentials.set",
+  "contracts.dispatch",
+  "contracts.remove",
+  "contracts.status",
+  "contracts.summaries",
   "relay.pairing.mint",
   "relay.reachability.get",
   "update.check",
   "update.status",
   "cost.attribution.get",
+  "notifications.deadLetters.list",
+  "notifications.deadLetters.replay",
+  "email.attachment.get",
+  "email.drafts.list",
   "email.expectation.cancel",
   "email.expectation.list",
   "email.expectation.open",
   "email.inbound.status",
+  "email.inbox.update",
   "flags.graduation.report",
+  "flags.status",
   "fleet.archive",
   "fleet.archived.list",
   "fleet.archiveFinished",
@@ -2063,10 +2097,12 @@ export const WEBUI_WS_INVOKE_METHOD_IDS: readonly string[] = [
   "fleet.attempts.pick",
   "fleet.conflicts.list",
   "fleet.conflicts.resolve",
+  "fleet.conflicts.retry",
   "fleet.list",
   "fleet.observed.steer",
   "fleet.snapshot",
   "fleet.unarchive",
+  "memory.consolidation.decide",
   "pairing.handoff.complete",
   "pairing.handoff.create",
   "pairing.posture.get",
@@ -2076,7 +2112,6 @@ export const WEBUI_WS_INVOKE_METHOD_IDS: readonly string[] = [
   "pairing.tokens.migrate",
   "pairing.tokens.rename",
   "pairing.tokens.revokeShared",
-  "payments.checkout.approve",
   "permissions.rules.delete",
   "permissions.rules.list",
   "push.subscriptions.create",
@@ -2089,6 +2124,7 @@ export const WEBUI_WS_INVOKE_METHOD_IDS: readonly string[] = [
   "quota.snapshot.get",
   "tailscale.get",
   "tailscale.serve.run",
+  "tailscale.serve.stop",
   "rewind.apply",
   "rewind.conversation.host.register",
   "rewind.conversation.host.release",
@@ -2096,12 +2132,14 @@ export const WEBUI_WS_INVOKE_METHOD_IDS: readonly string[] = [
   "rewind.conversation.requests.answer",
   "rewind.conversation.requests.take",
   "rewind.plan",
+  "rewind.undo",
   "sessions.changes.get",
   "sessions.hosted.attach",
   "sessions.hosted.create",
   "sessions.hosted.detach",
   "sessions.hosted.kill",
   "sessions.hosted.list",
+  "sessions.hosted.workspaces",
   "sessions.search",
   "watchers.triggers.migrate",
   "watchers.triggers.status",
@@ -2120,6 +2158,10 @@ export const WEBUI_METHOD_DISPOSITION: Readonly<Record<string, WebuiMethodDispos
   "approvals.deny": "rest",
   "approvals.list": "rest",
   "approvals.raise": "ws-invoke",
+  "inbox.answer": "ws-invoke",
+  "inbox.list": "ws-invoke",
+  "inbox.post": "ws-invoke",
+  "inbox.withdraw": "ws-invoke",
   "artifacts.content.get": "rest",
   "artifacts.create": "rest",
   "artifacts.get": "rest",
@@ -2180,9 +2222,12 @@ export const WEBUI_METHOD_DISPOSITION: Readonly<Record<string, WebuiMethodDispos
   "browser.tabs.switch": "rest",
   "browser.type": "rest",
   "browser.waitFor": "rest",
+  "calendar.calendars.list": "rest",
   "calendar.events.create": "rest",
+  "calendar.events.delete": "rest",
   "calendar.events.get": "rest",
   "calendar.events.list": "rest",
+  "calendar.events.update": "rest",
   "calendar.ics.export": "rest",
   "calendar.ics.import": "rest",
   "channels.accounts.action.default": "rest",
@@ -2259,6 +2304,7 @@ export const WEBUI_METHOD_DISPOSITION: Readonly<Record<string, WebuiMethodDispos
   "companion.chat.messages.edit": "rest",
   "companion.chat.messages.list": "rest",
   "companion.chat.messages.retry": "rest",
+  "companion.chat.messages.search": "rest",
   "companion.chat.messages.steer": "rest",
   "companion.chat.sessions.close": "rest",
   "companion.chat.sessions.create": "rest",
@@ -2275,10 +2321,14 @@ export const WEBUI_METHOD_DISPOSITION: Readonly<Record<string, WebuiMethodDispos
   "credentials.set": "ws-invoke",
   "continuity.snapshot": "rest",
   "contracts.cancel": "rest",
+  "contracts.dispatch": "ws-invoke",
   "contracts.get": "rest",
   "contracts.list": "rest",
+  "contracts.remove": "ws-invoke",
   "contracts.reply": "rest",
   "contracts.start": "rest",
+  "contracts.status": "ws-invoke",
+  "contracts.summaries": "ws-invoke",
   "control.auth.current": "rest",
   "control.auth.login": "rest",
   "control.clients.list": "rest",
@@ -2298,15 +2348,21 @@ export const WEBUI_METHOD_DISPOSITION: Readonly<Record<string, WebuiMethodDispos
   "cost.attribution.get": "ws-invoke",
   "deliveries.get": "rest",
   "deliveries.list": "rest",
+  "notifications.deadLetters.list": "ws-invoke",
+  "notifications.deadLetters.replay": "ws-invoke",
+  "email.attachment.get": "ws-invoke",
   "email.draft.create": "rest",
+  "email.drafts.list": "ws-invoke",
   "email.expectation.cancel": "ws-invoke",
   "email.expectation.list": "ws-invoke",
   "email.expectation.open": "ws-invoke",
   "email.inbound.status": "ws-invoke",
   "email.inbox.list": "rest",
   "email.inbox.read": "rest",
+  "email.inbox.update": "ws-invoke",
   "email.send": "rest",
   "flags.graduation.report": "ws-invoke",
+  "flags.status": "ws-invoke",
   "fleet.archive": "ws-invoke",
   "fleet.archived.list": "ws-invoke",
   "fleet.archiveFinished": "ws-invoke",
@@ -2315,6 +2371,7 @@ export const WEBUI_METHOD_DISPOSITION: Readonly<Record<string, WebuiMethodDispos
   "fleet.attempts.pick": "ws-invoke",
   "fleet.conflicts.list": "ws-invoke",
   "fleet.conflicts.resolve": "ws-invoke",
+  "fleet.conflicts.retry": "ws-invoke",
   "fleet.graph.get": "rest",
   "fleet.list": "ws-invoke",
   "fleet.observed.steer": "ws-invoke",
@@ -2414,11 +2471,8 @@ export const WEBUI_METHOD_DISPOSITION: Readonly<Record<string, WebuiMethodDispos
   "knowledge.usage.list": "rest",
   "projectPlanning.decisions.list": "rest",
   "projectPlanning.decisions.record": "rest",
-  "projectPlanning.evaluate": "rest",
   "projectPlanning.language.get": "rest",
-  "projectPlanning.language.upsert": "rest",
   "projectPlanning.state.get": "rest",
-  "projectPlanning.state.upsert": "rest",
   "projectPlanning.status": "rest",
   "projectPlanning.workPlan.clearCompleted": "rest",
   "projectPlanning.workPlan.snapshot": "rest",
@@ -2445,6 +2499,7 @@ export const WEBUI_METHOD_DISPOSITION: Readonly<Record<string, WebuiMethodDispos
   "multimodal.providers.list": "rest",
   "multimodal.status": "rest",
   "multimodal.writeback": "rest",
+  "memory.consolidation.decide": "ws-invoke",
   "memory.consolidation.receipts": "rest",
   "memory.doctor": "rest",
   "memory.embeddings.default.set": "rest",
@@ -2478,10 +2533,13 @@ export const WEBUI_METHOD_DISPOSITION: Readonly<Record<string, WebuiMethodDispos
   "occasions.plans.confirm": "rest",
   "occasions.plans.list": "rest",
   "occasions.plans.propose": "rest",
+  "occasions.plans.remove": "rest",
+  "occasions.plans.update": "rest",
   "occasions.propose": "rest",
   "occasions.remove": "rest",
   "occasions.state": "rest",
   "occasions.sweep": "rest",
+  "occasions.update": "rest",
   "pairing.handoff.complete": "ws-invoke",
   "pairing.handoff.create": "ws-invoke",
   "pairing.posture.get": "ws-invoke",
@@ -2497,13 +2555,13 @@ export const WEBUI_METHOD_DISPOSITION: Readonly<Record<string, WebuiMethodDispos
   "payments.cards.create": "rest",
   "payments.cards.delete": "rest",
   "payments.cards.list": "rest",
-  "payments.checkout.approve": "ws-invoke",
+  "payments.checkout.approve": "rest",
   "payments.checkout.begin": "rest",
-  "payments.checkout.fillCard": "rest",
   "payments.purchase.approve": "rest",
   "payments.purchase.cancel": "rest",
   "payments.purchase.deny": "rest",
   "payments.purchase.reconcile": "rest",
+  "payments.purchase.securityCode": "rest",
   "payments.purchase.status": "rest",
   "payments.purchases.list": "rest",
   "permissions.rules.delete": "ws-invoke",
@@ -2555,6 +2613,7 @@ export const WEBUI_METHOD_DISPOSITION: Readonly<Record<string, WebuiMethodDispos
   "remote.work.list": "rest",
   "tailscale.get": "ws-invoke",
   "tailscale.serve.run": "ws-invoke",
+  "tailscale.serve.stop": "ws-invoke",
   "review.snapshot": "rest",
   "rewind.apply": "ws-invoke",
   "rewind.conversation.host.register": "ws-invoke",
@@ -2563,6 +2622,7 @@ export const WEBUI_METHOD_DISPOSITION: Readonly<Record<string, WebuiMethodDispos
   "rewind.conversation.requests.answer": "ws-invoke",
   "rewind.conversation.requests.take": "ws-invoke",
   "rewind.plan": "ws-invoke",
+  "rewind.undo": "ws-invoke",
   "routes.bindings.create": "rest",
   "routes.bindings.delete": "rest",
   "routes.bindings.list": "rest",
@@ -2597,6 +2657,7 @@ export const WEBUI_METHOD_DISPOSITION: Readonly<Record<string, WebuiMethodDispos
   "sessions.hosted.detach": "ws-invoke",
   "sessions.hosted.kill": "ws-invoke",
   "sessions.hosted.list": "ws-invoke",
+  "sessions.hosted.workspaces": "ws-invoke",
   "sessions.inputs.cancel": "rest",
   "sessions.inputs.deliver": "rest",
   "sessions.inputs.list": "rest",
@@ -2783,16 +2844,19 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "title": "sample",
         "binaryPath": "sample",
         "cwd": "sample",
-        "state": "sample",
+        "state": "starting",
         "startedAt": 0,
         "completedAt": 0,
         "sessionId": "sample",
         "progress": "sample",
-        "pendingPermission": "sample",
         "error": {
           "binary": "sample",
-          "stage": "sample",
+          "stage": "spawn",
           "message": "sample"
+        },
+        "lastRefusal": {
+          "at": 0,
+          "reason": "sample"
         },
         "promptCount": 0
       },
@@ -3160,10 +3224,10 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "callId": "sample",
         "toolName": "sample",
         "category": "read",
-        "machineState": "collect_rules",
+        "machineState": "check_boundary",
         "outcome": "approved",
-        "reason": "config_allow",
-        "sourceLayer": "config_policy",
+        "reason": "boundary_judgment_input",
+        "sourceLayer": "boundary",
         "persisted": false,
         "classification": "sample",
         "riskLevel": "low",
@@ -3363,6 +3427,185 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "holdId": "sample"
     }
   },
+  "inbox.answer": {
+    "input": {
+      "itemId": "sample",
+      "option": "sample",
+      "text": "sample"
+    },
+    "output": {
+      "applied": false,
+      "item": {
+        "id": "sample",
+        "kind": "approval",
+        "status": "open",
+        "sessionId": "sample",
+        "title": "sample",
+        "detail": "sample",
+        "options": [
+          "sample"
+        ],
+        "askedBy": "sample",
+        "createdAt": 0,
+        "expiresAt": 0,
+        "answer": {
+          "option": "sample",
+          "text": "sample"
+        },
+        "answeredBy": {
+          "actor": "sample",
+          "surface": "sample"
+        },
+        "closedAt": 0,
+        "withdrawnReason": "sample",
+        "key": "sample",
+        "metadata": {}
+      },
+      "refusal": {
+        "code": "sample",
+        "state": "sample",
+        "reason": "sample",
+        "next": [
+          "sample"
+        ],
+        "retryable": false,
+        "retryAfterMs": 0,
+        "status": 0
+      }
+    }
+  },
+  "inbox.list": {
+    "input": {
+      "itemId": "sample",
+      "status": "open",
+      "kinds": [
+        "approval"
+      ],
+      "sessionId": "sample",
+      "limit": 0
+    },
+    "output": {
+      "items": [
+        {
+          "id": "sample",
+          "kind": "approval",
+          "status": "open",
+          "sessionId": "sample",
+          "title": "sample",
+          "detail": "sample",
+          "options": [
+            "sample"
+          ],
+          "askedBy": "sample",
+          "createdAt": 0,
+          "expiresAt": 0,
+          "answer": {
+            "option": "sample",
+            "text": "sample"
+          },
+          "answeredBy": {
+            "actor": "sample",
+            "surface": "sample"
+          },
+          "closedAt": 0,
+          "withdrawnReason": "sample",
+          "key": "sample",
+          "metadata": {}
+        }
+      ],
+      "revision": 0
+    }
+  },
+  "inbox.post": {
+    "input": {
+      "kind": "question",
+      "title": "sample",
+      "detail": "sample",
+      "options": [
+        "sample"
+      ],
+      "sessionId": "sample",
+      "askedBy": "sample",
+      "key": "sample",
+      "expiresAt": 0,
+      "metadata": {}
+    },
+    "output": {
+      "created": false,
+      "item": {
+        "id": "sample",
+        "kind": "approval",
+        "status": "open",
+        "sessionId": "sample",
+        "title": "sample",
+        "detail": "sample",
+        "options": [
+          "sample"
+        ],
+        "askedBy": "sample",
+        "createdAt": 0,
+        "expiresAt": 0,
+        "answer": {
+          "option": "sample",
+          "text": "sample"
+        },
+        "answeredBy": {
+          "actor": "sample",
+          "surface": "sample"
+        },
+        "closedAt": 0,
+        "withdrawnReason": "sample",
+        "key": "sample",
+        "metadata": {}
+      }
+    }
+  },
+  "inbox.withdraw": {
+    "input": {
+      "itemId": "sample",
+      "reason": "sample"
+    },
+    "output": {
+      "applied": false,
+      "item": {
+        "id": "sample",
+        "kind": "approval",
+        "status": "open",
+        "sessionId": "sample",
+        "title": "sample",
+        "detail": "sample",
+        "options": [
+          "sample"
+        ],
+        "askedBy": "sample",
+        "createdAt": 0,
+        "expiresAt": 0,
+        "answer": {
+          "option": "sample",
+          "text": "sample"
+        },
+        "answeredBy": {
+          "actor": "sample",
+          "surface": "sample"
+        },
+        "closedAt": 0,
+        "withdrawnReason": "sample",
+        "key": "sample",
+        "metadata": {}
+      },
+      "refusal": {
+        "code": "sample",
+        "state": "sample",
+        "reason": "sample",
+        "next": [
+          "sample"
+        ],
+        "retryable": false,
+        "retryAfterMs": 0,
+        "status": 0
+      }
+    }
+  },
   "artifacts.content.get": {
     "input": {
       "artifactId": "sample",
@@ -3388,8 +3631,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "createdAt": 0,
         "expiresAt": 0,
         "sourceUri": "sample",
-        "acquisitionMode": "sample",
-        "fetchMode": "sample",
+        "acquisitionMode": "inline-data",
+        "fetchMode": "not-applicable",
         "metadata": {}
       }
     }
@@ -3409,8 +3652,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "createdAt": 0,
         "expiresAt": 0,
         "sourceUri": "sample",
-        "acquisitionMode": "sample",
-        "fetchMode": "sample",
+        "acquisitionMode": "inline-data",
+        "fetchMode": "not-applicable",
         "metadata": {}
       }
     }
@@ -3429,8 +3672,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "createdAt": 0,
           "expiresAt": 0,
           "sourceUri": "sample",
-          "acquisitionMode": "sample",
-          "fetchMode": "sample",
+          "acquisitionMode": "inline-data",
+          "fetchMode": "not-applicable",
           "metadata": {}
         }
       ]
@@ -3499,6 +3742,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
   },
   "local_auth.users.password.rotate": {
     "input": {
+      "username": "sample",
       "password": "sample"
     },
     "output": {
@@ -6088,6 +6332,17 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "found": false
     }
   },
+  "calendar.calendars.list": {
+    "input": {},
+    "output": {
+      "calendars": [
+        {
+          "calendarId": "sample",
+          "displayName": "sample"
+        }
+      ]
+    }
+  },
   "calendar.events.create": {
     "input": {
       "title": "sample",
@@ -6107,6 +6362,17 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "createdAt": "sample"
     }
   },
+  "calendar.events.delete": {
+    "input": {
+      "eventId": "sample",
+      "calendarId": "sample",
+      "confirm": false
+    },
+    "output": {
+      "eventId": "sample",
+      "deleted": false
+    }
+  },
   "calendar.events.get": {
     "input": {
       "eventId": "sample",
@@ -6118,6 +6384,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "title": "sample",
       "start": "sample",
       "end": "sample",
+      "allDay": false,
       "location": "sample",
       "description": "sample",
       "attendees": [
@@ -6140,6 +6407,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "title": "sample",
           "start": "sample",
           "end": "sample",
+          "allDay": false,
           "location": "sample",
           "description": "sample",
           "attendees": [
@@ -6147,6 +6415,25 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           ]
         }
       ]
+    }
+  },
+  "calendar.events.update": {
+    "input": {
+      "eventId": "sample",
+      "title": "sample",
+      "start": "sample",
+      "end": "sample",
+      "description": "sample",
+      "attendees": [
+        "sample"
+      ],
+      "location": "sample",
+      "calendarId": "sample",
+      "confirm": false
+    },
+    "output": {
+      "eventId": "sample",
+      "updatedAt": "sample"
     }
   },
   "calendar.ics.export": {
@@ -6164,6 +6451,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
     "input": {
       "icsContent": "sample",
       "calendarId": "sample",
+      "replace": false,
       "confirm": false
     },
     "output": {
@@ -6173,6 +6461,16 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       ],
       "errors": [
         "sample"
+      ],
+      "attendeesLeftOff": [
+        {
+          "eventId": "sample",
+          "title": "sample",
+          "attendees": [
+            "sample"
+          ],
+          "next": "sample"
+        }
       ]
     }
   },
@@ -7489,6 +7787,10 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "cadence": "sample",
         "deliveryChannel": "sample",
         "quietHours": "sample"
+      },
+      "schedule": {
+        "state": "scheduled",
+        "reason": "sample"
       }
     }
   },
@@ -7882,6 +8184,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "accountId": "sample",
       "apiToken": "sample",
       "apiTokenRef": "sample",
+      "bootstrapToken": "sample",
       "workerName": "sample",
       "disableWorkerSubdomain": false,
       "disableCron": false,
@@ -7937,7 +8240,6 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "kvNamespaceName": "sample",
       "kvNamespaceId": "sample",
       "durableObjectNamespaceName": "sample",
-      "durableObjectNamespaceId": "sample",
       "r2BucketName": "sample",
       "secretsStoreName": "sample",
       "secretsStoreId": "sample",
@@ -7993,7 +8295,10 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "error": "sample"
         }
       },
-      "generatedSecrets": {}
+      "generatedSecrets": {},
+      "warnings": [
+        "sample"
+      ]
     }
   },
   "cloudflare.resources.list": {
@@ -8071,7 +8376,14 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "config": {},
       "warnings": [
         "sample"
-      ]
+      ],
+      "tunnelConnector": {
+        "state": "not-configured",
+        "detail": "sample",
+        "next": [
+          "sample"
+        ]
+      }
     }
   },
   "cloudflare.token.create": {
@@ -8096,13 +8408,20 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "expiresOn": "sample",
       "persistConfig": false,
       "storeApiToken": false,
-      "returnGeneratedToken": false
+      "returnGeneratedToken": false,
+      "reuse": false
     },
     "output": {
       "ok": false,
       "tokenId": "sample",
       "tokenName": "sample",
       "tokenSource": "sample",
+      "reused": false,
+      "replaced": {
+        "tokenId": "sample",
+        "revoked": false,
+        "reason": "sample"
+      },
       "apiTokenRef": "sample",
       "generatedToken": "sample",
       "accountId": "sample",
@@ -8266,6 +8585,30 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "sample"
       ],
       "turnStarted": false
+    }
+  },
+  "companion.chat.messages.search": {
+    "input": {
+      "query": "sample",
+      "limit": 0,
+      "cursor": "sample",
+      "includeClosed": false
+    },
+    "output": {
+      "query": "sample",
+      "items": [
+        {
+          "sessionId": "sample",
+          "sessionTitle": "sample",
+          "messageId": "sample",
+          "role": "sample",
+          "snippet": "sample",
+          "createdAt": 0
+        }
+      ],
+      "total": 0,
+      "hasMore": false,
+      "nextCursor": "sample"
     }
   },
   "companion.chat.messages.steer": {
@@ -8469,7 +8812,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
   },
   "config.set": {
     "input": {
-      "key": "sample"
+      "key": "sample",
+      "value": "sample"
     },
     "output": {
       "success": false,
@@ -8581,9 +8925,1210 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "cancelled": false
     }
   },
+  "contracts.dispatch": {
+    "input": {
+      "ask": "sample",
+      "workspaceRoot": "sample",
+      "idempotencyKey": "sample"
+    },
+    "output": {
+      "contract": {
+        "originalSource": {
+          "goal": "sample",
+          "criteria": [
+            "sample"
+          ],
+          "conversationContext": [
+            {
+              "role": "user",
+              "content": "sample"
+            }
+          ],
+          "selectedDiffContext": {
+            "kind": "session",
+            "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "fileIndex": 0,
+            "hunkIndex": 0,
+            "unifiedDiff": "sample",
+            "provenance": {
+              "kind": "session",
+              "sessionId": "sample",
+              "baselineCheckpointId": "sample",
+              "latestCheckpointId": "sample"
+            }
+          }
+        },
+        "taskEvidence": "sample",
+        "reviewInventory": {
+          "paths": [
+            "sample"
+          ],
+          "source": "git",
+          "errors": [
+            "sample"
+          ]
+        },
+        "reviewExclusions": [
+          {
+            "files": [
+              "sample"
+            ],
+            "reason": "sample"
+          }
+        ],
+        "nativeSource": {
+          "sourceId": "sample",
+          "sourceRevision": "sample",
+          "inputRevision": "sample",
+          "criteriaId": "sample",
+          "criteriaRevision": "sample",
+          "goal": "sample",
+          "criteria": [
+            "sample"
+          ]
+        },
+        "nativeDecisions": {
+          "schemaVersion": 1,
+          "history": [
+            {
+              "schemaVersion": 1,
+              "stage": "shape",
+              "targetId": "sample",
+              "decision": {
+                "schemaVersion": 1,
+                "decisionId": "sample",
+                "binding": {
+                  "sourceId": "sample",
+                  "inputRevision": "sample",
+                  "actionId": "sample",
+                  "actionRevision": "sample",
+                  "authorityId": "sample",
+                  "authorityRevision": "sample",
+                  "scopeId": "sample",
+                  "scopeRevision": "sample"
+                },
+                "judgmentDecisionIds": [
+                  "sample"
+                ],
+                "evidence": [
+                  {
+                    "id": "sample",
+                    "revision": "sample"
+                  }
+                ],
+                "summary": "sample",
+                "outcome": "act"
+              },
+              "operationRevision": "sample"
+            }
+          ],
+          "pending": {},
+          "spent": {},
+          "plannerOutputs": {},
+          "attemptChoices": {},
+          "attemptedChoices": {}
+        },
+        "nativeProgress": {
+          "schemaVersion": 1,
+          "state": "deciding",
+          "stage": "sample",
+          "targetId": "sample",
+          "until": {
+            "id": "sample",
+            "revision": "sample"
+          }
+        },
+        "nativeWaiting": {
+          "schemaVersion": 1,
+          "requests": [
+            {
+              "logicalRequestId": "sample",
+              "attempt": {
+                "attempt": 0,
+                "endpointIndex": 0,
+                "dispatched": false,
+                "endpointKind": "hosted",
+                "requestedModel": "sample",
+                "latencyMs": 0,
+                "outcome": "answered",
+                "requestId": "sample",
+                "status": 0
+              },
+              "elapsedMs": 0,
+              "nextDelayMs": 0
+            }
+          ]
+        },
+        "durableAdmission": {
+          "schemaVersion": 1,
+          "key": {
+            "workId": "sample",
+            "criteriaId": "sample",
+            "criteriaRevision": "sample",
+            "attemptId": "sample"
+          },
+          "binding": {
+            "sourceId": "sample",
+            "inputRevision": "sample",
+            "actionId": "sample",
+            "actionRevision": "sample",
+            "authorityId": "sample",
+            "authorityRevision": "sample",
+            "scopeId": "sample",
+            "scopeRevision": "sample"
+          },
+          "input": {
+            "ask": "sample",
+            "sessionId": "sample",
+            "origin": "turn",
+            "projectRoot": "sample",
+            "nativeSource": {
+              "sourceId": "sample",
+              "sourceRevision": "sample",
+              "inputRevision": "sample",
+              "criteriaId": "sample",
+              "criteriaRevision": "sample",
+              "goal": "sample",
+              "criteria": [
+                "sample"
+              ]
+            },
+            "proposedUnits": [
+              {
+                "task": "sample",
+                "template": "sample"
+              }
+            ],
+            "parentAgentId": "sample",
+            "budget": {
+              "maxTokens": 0,
+              "maxCostUsd": 0
+            },
+            "isolation": "auto",
+            "selectedModel": {
+              "id": "sample",
+              "provider": "sample",
+              "registryKey": "sample",
+              "displayName": "sample"
+            },
+            "taskEvidence": "sample"
+          },
+          "contractId": "sample",
+          "ownerAgentId": "sample",
+          "payloadRevision": "sample"
+        },
+        "durableLaunchState": "prepared",
+        "inputSnapshot": {
+          "version": 1,
+          "id": "sample",
+          "sourceRoot": "sample",
+          "sourceIdentity": "sample",
+          "gitIdentity": "sample",
+          "ownerHead": "sample",
+          "ownerRef": "sample",
+          "indexFingerprint": "sample",
+          "inputTree": "sample",
+          "inputCommit": "sample",
+          "capturedAt": 0,
+          "dirty": false,
+          "exclusions": [
+            "sample"
+          ],
+          "files": [
+            {
+              "path": "sample",
+              "kind": "file",
+              "mode": "100644",
+              "oid": "sample",
+              "identity": "sample",
+              "digest": "sample"
+            }
+          ]
+        },
+        "id": "sample",
+        "schemaVersion": 0,
+        "sessionId": "sample",
+        "origin": "turn",
+        "ask": "sample",
+        "selectedModel": {
+          "id": "sample",
+          "provider": "sample",
+          "registryKey": "sample",
+          "displayName": "sample"
+        },
+        "ownerAgentId": "sample",
+        "parentAgentId": "sample",
+        "projectRoot": "sample",
+        "isolation": "worktree",
+        "branch": "sample",
+        "worktreePath": "sample",
+        "baseBranch": "sample",
+        "baseline": {
+          "version": 2,
+          "head": "sample",
+          "dirty": {}
+        },
+        "sessionMode": false,
+        "proposedUnits": [
+          {
+            "task": "sample",
+            "template": "sample"
+          }
+        ],
+        "draftPlan": {
+          "goal": "sample",
+          "units": [
+            {
+              "id": "sample",
+              "title": "sample",
+              "brief": "sample",
+              "dependsOn": [
+                "sample"
+              ],
+              "files": [
+                "sample"
+              ],
+              "attempts": 0
+            }
+          ]
+        },
+        "budget": {
+          "maxTokens": 0,
+          "maxCostUsd": 0
+        },
+        "goal": "sample",
+        "criteria": [
+          {
+            "id": "sample",
+            "text": "sample",
+            "origin": "stated",
+            "quote": "sample",
+            "serves": [
+              "sample"
+            ],
+            "contribution": {
+              "kind": "outcome",
+              "reason": "sample",
+              "verification": "sample"
+            },
+            "disposition": "judged",
+            "dispositionReason": "sample",
+            "status": "unread",
+            "readings": [
+              {
+                "checkId": "sample",
+                "at": 0,
+                "probabilityUnmet": 0,
+                "verdict": "met",
+                "outcome": "act",
+                "severity": "critical",
+                "decisionId": "sample",
+                "severityDecisionId": "sample",
+                "rationale": "sample"
+              }
+            ]
+          }
+        ],
+        "groups": [
+          {
+            "id": "sample",
+            "title": "sample",
+            "goal": "sample",
+            "kind": "work",
+            "repairs": {
+              "scope": "unit",
+              "targetId": "sample",
+              "criterionIds": [
+                "sample"
+              ]
+            },
+            "dependsOn": [
+              "sample"
+            ],
+            "criteria": [
+              {
+                "id": "sample",
+                "text": "sample",
+                "origin": "stated",
+                "quote": "sample",
+                "serves": [
+                  "sample"
+                ],
+                "contribution": {
+                  "kind": "outcome",
+                  "reason": "sample",
+                  "verification": "sample"
+                },
+                "disposition": "judged",
+                "dispositionReason": "sample",
+                "status": "unread",
+                "readings": [
+                  {
+                    "checkId": "sample",
+                    "at": 0,
+                    "probabilityUnmet": 0,
+                    "verdict": "met",
+                    "outcome": "act",
+                    "severity": "critical",
+                    "decisionId": "sample",
+                    "severityDecisionId": "sample",
+                    "rationale": "sample"
+                  }
+                ]
+              }
+            ],
+            "unitIds": [
+              "sample"
+            ],
+            "status": "pending",
+            "checks": [
+              {
+                "id": "sample",
+                "at": 0,
+                "trigger": "turn-end",
+                "claims": {
+                  "kind": "files_verified",
+                  "summary": "sample"
+                },
+                "gates": [
+                  {
+                    "gate": "sample",
+                    "passed": false,
+                    "output": "sample",
+                    "durationMs": 0,
+                    "skipped": false,
+                    "outcome": "passed",
+                    "required": false,
+                    "reason": "sample",
+                    "completion": {
+                      "kind": "command-exit",
+                      "exitCode": 0
+                    },
+                    "provenance": {
+                      "sourceBefore": "sample",
+                      "sourceAfter": "sample",
+                      "definitionBefore": "sample",
+                      "definitionAfter": "sample"
+                    }
+                  }
+                ],
+                "goal": {
+                  "probabilityUnmet": 0,
+                  "verdict": "met",
+                  "outcome": "act"
+                },
+                "quality": {
+                  "placeholder": {
+                    "verdict": "yes",
+                    "outcome": "act"
+                  },
+                  "tests_weakened": {
+                    "verdict": "yes",
+                    "outcome": "act"
+                  },
+                  "breaks_existing": {
+                    "verdict": "yes",
+                    "outcome": "act"
+                  },
+                  "out_of_scope": {
+                    "verdict": "yes",
+                    "outcome": "act"
+                  },
+                  "hidden_failure": {
+                    "verdict": "yes",
+                    "outcome": "act"
+                  },
+                  "unsupported_claims": {
+                    "verdict": "yes",
+                    "outcome": "act"
+                  }
+                },
+                "result": "pass",
+                "problems": [
+                  "unmet"
+                ],
+                "qualityProblems": [
+                  "placeholder"
+                ],
+                "decisionIds": [
+                  "sample"
+                ],
+                "evidenceDigest": "sample",
+                "reviewedFiles": [
+                  {
+                    "path": "sample",
+                    "sha256": "sample"
+                  }
+                ]
+              }
+            ],
+            "fixRounds": 0,
+            "baseline": {
+              "version": 2,
+              "head": "sample",
+              "dirty": {}
+            },
+            "usage": {
+              "inputTokens": 0,
+              "outputTokens": 0,
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 0,
+              "reasoningTokens": 0,
+              "llmCallCount": 0,
+              "turnCount": 0,
+              "toolCallCount": 0,
+              "costUsd": 0,
+              "costState": "priced",
+              "costSource": "user",
+              "pricingAsOf": "sample"
+            }
+          }
+        ],
+        "units": [
+          {
+            "id": "sample",
+            "groupId": "sample",
+            "title": "sample",
+            "goal": "sample",
+            "brief": "sample",
+            "role": "implement",
+            "dependsOn": [
+              "sample"
+            ],
+            "files": [
+              "sample"
+            ],
+            "attempts": 0,
+            "criteria": [
+              {
+                "id": "sample",
+                "text": "sample",
+                "origin": "stated",
+                "quote": "sample",
+                "serves": [
+                  "sample"
+                ],
+                "contribution": {
+                  "kind": "outcome",
+                  "reason": "sample",
+                  "verification": "sample"
+                },
+                "disposition": "judged",
+                "dispositionReason": "sample",
+                "status": "unread",
+                "readings": [
+                  {
+                    "checkId": "sample",
+                    "at": 0,
+                    "probabilityUnmet": 0,
+                    "verdict": "met",
+                    "outcome": "act",
+                    "severity": "critical",
+                    "decisionId": "sample",
+                    "severityDecisionId": "sample",
+                    "rationale": "sample"
+                  }
+                ]
+              }
+            ],
+            "status": "pending",
+            "agentIds": [
+              "sample"
+            ],
+            "activeAgentId": "sample",
+            "route": {
+              "model": "sample",
+              "provider": "sample",
+              "fallbackModels": [
+                "sample"
+              ],
+              "routing": {
+                "providerSelection": "inherit-current",
+                "providerFailurePolicy": "ordered-fallbacks",
+                "fallbackModels": [
+                  "sample"
+                ]
+              },
+              "reasoningEffort": "sample",
+              "reason": "sample"
+            },
+            "checks": [
+              {
+                "id": "sample",
+                "at": 0,
+                "trigger": "turn-end",
+                "claims": {
+                  "kind": "files_verified",
+                  "summary": "sample"
+                },
+                "gates": [
+                  {
+                    "gate": "sample",
+                    "passed": false,
+                    "output": "sample",
+                    "durationMs": 0,
+                    "skipped": false,
+                    "outcome": "passed",
+                    "required": false,
+                    "reason": "sample",
+                    "completion": {
+                      "kind": "command-exit",
+                      "exitCode": 0
+                    },
+                    "provenance": {
+                      "sourceBefore": "sample",
+                      "sourceAfter": "sample",
+                      "definitionBefore": "sample",
+                      "definitionAfter": "sample"
+                    }
+                  }
+                ],
+                "goal": {
+                  "probabilityUnmet": 0,
+                  "verdict": "met",
+                  "outcome": "act"
+                },
+                "quality": {
+                  "placeholder": {
+                    "verdict": "yes",
+                    "outcome": "act"
+                  },
+                  "tests_weakened": {
+                    "verdict": "yes",
+                    "outcome": "act"
+                  },
+                  "breaks_existing": {
+                    "verdict": "yes",
+                    "outcome": "act"
+                  },
+                  "out_of_scope": {
+                    "verdict": "yes",
+                    "outcome": "act"
+                  },
+                  "hidden_failure": {
+                    "verdict": "yes",
+                    "outcome": "act"
+                  },
+                  "unsupported_claims": {
+                    "verdict": "yes",
+                    "outcome": "act"
+                  }
+                },
+                "result": "pass",
+                "problems": [
+                  "unmet"
+                ],
+                "qualityProblems": [
+                  "placeholder"
+                ],
+                "decisionIds": [
+                  "sample"
+                ],
+                "evidenceDigest": "sample",
+                "reviewedFiles": [
+                  {
+                    "path": "sample",
+                    "sha256": "sample"
+                  }
+                ]
+              }
+            ],
+            "nudges": [
+              {
+                "id": "sample",
+                "checkId": "sample",
+                "at": 0,
+                "kinds": [
+                  "unmet"
+                ],
+                "criterionIds": [
+                  "sample"
+                ],
+                "text": "sample",
+                "delivery": "hold",
+                "agentId": "sample",
+                "consumedAt": 0
+              }
+            ],
+            "fixRounds": 0,
+            "freshAgents": 0,
+            "transportRetries": 0,
+            "touchedPaths": [
+              "sample"
+            ],
+            "baseline": {
+              "version": 2,
+              "head": "sample",
+              "dirty": {}
+            },
+            "usage": {
+              "inputTokens": 0,
+              "outputTokens": 0,
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 0,
+              "reasoningTokens": 0,
+              "llmCallCount": 0,
+              "turnCount": 0,
+              "toolCallCount": 0,
+              "costUsd": 0,
+              "costState": "priced",
+              "costSource": "user",
+              "pricingAsOf": "sample"
+            },
+            "answer": "sample",
+            "lastOutput": "sample",
+            "readEvidence": [
+              {
+                "path": "sample",
+                "returnedRanges": [
+                  "sample"
+                ],
+                "returnedLines": 0,
+                "returnedContent": "sample",
+                "contentKind": "declared-reference"
+              }
+            ],
+            "commandEvidence": [
+              {
+                "agentId": "sample",
+                "callId": "sample",
+                "turn": 0,
+                "callIndex": 0,
+                "command": "sample",
+                "success": false,
+                "head": "sample"
+              }
+            ],
+            "lastReport": {
+              "version": 1,
+              "summary": "sample",
+              "filesCreated": [
+                "sample"
+              ],
+              "filesModified": [
+                "sample"
+              ],
+              "filesDeleted": [
+                "sample"
+              ],
+              "archetype": "engineer",
+              "gatheredContext": [
+                "sample"
+              ],
+              "plannedActions": [
+                "sample"
+              ],
+              "appliedChanges": [
+                "sample"
+              ],
+              "decisions": [
+                {
+                  "what": "sample",
+                  "why": "sample"
+                }
+              ],
+              "issues": [
+                "sample"
+              ],
+              "uncertainties": [
+                "sample"
+              ]
+            },
+            "failureReason": "sample",
+            "attemptOf": "sample",
+            "attemptIndex": 0,
+            "attemptSelection": {
+              "engineGroupId": "sample",
+              "candidateIds": [
+                "sample"
+              ],
+              "proposedId": "sample",
+              "outcome": "act",
+              "reasons": "sample",
+              "decisionId": "sample",
+              "pickedId": "sample"
+            },
+            "attemptUnits": [
+              {
+                "id": "sample",
+                "groupId": "sample",
+                "title": "sample",
+                "goal": "sample",
+                "brief": "sample",
+                "role": "implement",
+                "dependsOn": [
+                  "sample"
+                ],
+                "files": [
+                  "sample"
+                ],
+                "attempts": 0,
+                "criteria": [
+                  {
+                    "id": "sample",
+                    "text": "sample",
+                    "origin": "stated",
+                    "quote": "sample",
+                    "serves": [
+                      "sample"
+                    ],
+                    "contribution": {
+                      "kind": "outcome",
+                      "reason": "sample",
+                      "verification": "sample"
+                    },
+                    "disposition": "judged",
+                    "dispositionReason": "sample",
+                    "status": "unread",
+                    "readings": [
+                      {
+                        "checkId": "sample",
+                        "at": 0,
+                        "probabilityUnmet": 0,
+                        "verdict": "met",
+                        "outcome": "act",
+                        "severity": "critical",
+                        "decisionId": "sample",
+                        "severityDecisionId": "sample",
+                        "rationale": "sample"
+                      }
+                    ]
+                  }
+                ],
+                "status": "pending",
+                "agentIds": [
+                  "sample"
+                ],
+                "activeAgentId": "sample",
+                "route": {
+                  "model": "sample",
+                  "provider": "sample",
+                  "fallbackModels": [
+                    "sample"
+                  ],
+                  "routing": {
+                    "providerSelection": "inherit-current",
+                    "providerFailurePolicy": "ordered-fallbacks",
+                    "fallbackModels": [
+                      "sample"
+                    ]
+                  },
+                  "reasoningEffort": "sample",
+                  "reason": "sample"
+                },
+                "checks": [
+                  {
+                    "id": "sample",
+                    "at": 0,
+                    "trigger": "turn-end",
+                    "claims": {
+                      "kind": "files_verified",
+                      "summary": "sample"
+                    },
+                    "gates": [
+                      {
+                        "gate": "sample",
+                        "passed": false,
+                        "output": "sample",
+                        "durationMs": 0,
+                        "skipped": false,
+                        "outcome": "passed",
+                        "required": false,
+                        "reason": "sample",
+                        "completion": {
+                          "kind": "command-exit",
+                          "exitCode": 0
+                        },
+                        "provenance": {
+                          "sourceBefore": "sample",
+                          "sourceAfter": "sample",
+                          "definitionBefore": "sample",
+                          "definitionAfter": "sample"
+                        }
+                      }
+                    ],
+                    "goal": {
+                      "probabilityUnmet": 0,
+                      "verdict": "met",
+                      "outcome": "act"
+                    },
+                    "quality": {
+                      "placeholder": {
+                        "verdict": "yes",
+                        "outcome": "act"
+                      },
+                      "tests_weakened": {
+                        "verdict": "yes",
+                        "outcome": "act"
+                      },
+                      "breaks_existing": {
+                        "verdict": "yes",
+                        "outcome": "act"
+                      },
+                      "out_of_scope": {
+                        "verdict": "yes",
+                        "outcome": "act"
+                      },
+                      "hidden_failure": {
+                        "verdict": "yes",
+                        "outcome": "act"
+                      },
+                      "unsupported_claims": {
+                        "verdict": "yes",
+                        "outcome": "act"
+                      }
+                    },
+                    "result": "pass",
+                    "problems": [
+                      "unmet"
+                    ],
+                    "qualityProblems": [
+                      "placeholder"
+                    ],
+                    "decisionIds": [
+                      "sample"
+                    ],
+                    "evidenceDigest": "sample",
+                    "reviewedFiles": [
+                      {
+                        "path": "sample",
+                        "sha256": "sample"
+                      }
+                    ]
+                  }
+                ],
+                "nudges": [
+                  {
+                    "id": "sample",
+                    "checkId": "sample",
+                    "at": 0,
+                    "kinds": [
+                      "unmet"
+                    ],
+                    "criterionIds": [
+                      "sample"
+                    ],
+                    "text": "sample",
+                    "delivery": "hold",
+                    "agentId": "sample",
+                    "consumedAt": 0
+                  }
+                ],
+                "fixRounds": 0,
+                "freshAgents": 0,
+                "transportRetries": 0,
+                "touchedPaths": [
+                  "sample"
+                ],
+                "baseline": {
+                  "version": 2,
+                  "head": "sample",
+                  "dirty": {}
+                },
+                "usage": {
+                  "inputTokens": 0,
+                  "outputTokens": 0,
+                  "cacheReadTokens": 0,
+                  "cacheWriteTokens": 0,
+                  "reasoningTokens": 0,
+                  "llmCallCount": 0,
+                  "turnCount": 0,
+                  "toolCallCount": 0,
+                  "costUsd": 0,
+                  "costState": "priced",
+                  "costSource": "user",
+                  "pricingAsOf": "sample"
+                },
+                "answer": "sample",
+                "lastOutput": "sample",
+                "readEvidence": [
+                  {
+                    "path": "sample",
+                    "returnedRanges": [
+                      "sample"
+                    ],
+                    "returnedLines": 0,
+                    "returnedContent": "sample",
+                    "contentKind": "declared-reference"
+                  }
+                ],
+                "commandEvidence": [
+                  {
+                    "agentId": "sample",
+                    "callId": "sample",
+                    "turn": 0,
+                    "callIndex": 0,
+                    "command": "sample",
+                    "success": false,
+                    "head": "sample"
+                  }
+                ],
+                "lastReport": {
+                  "version": 1,
+                  "summary": "sample",
+                  "filesCreated": [
+                    "sample"
+                  ],
+                  "filesModified": [
+                    "sample"
+                  ],
+                  "filesDeleted": [
+                    "sample"
+                  ],
+                  "archetype": "engineer",
+                  "gatheredContext": [
+                    "sample"
+                  ],
+                  "plannedActions": [
+                    "sample"
+                  ],
+                  "appliedChanges": [
+                    "sample"
+                  ],
+                  "decisions": [
+                    {
+                      "what": "sample",
+                      "why": "sample"
+                    }
+                  ],
+                  "issues": [
+                    "sample"
+                  ],
+                  "uncertainties": [
+                    "sample"
+                  ]
+                },
+                "failureReason": "sample",
+                "attemptOf": "sample",
+                "attemptIndex": 0,
+                "attemptSelection": {
+                  "engineGroupId": "sample",
+                  "candidateIds": [
+                    "sample"
+                  ],
+                  "proposedId": "sample",
+                  "outcome": "act",
+                  "reasons": "sample",
+                  "decisionId": "sample",
+                  "pickedId": "sample"
+                }
+              }
+            ]
+          }
+        ],
+        "shape": {
+          "forbids_delegation": {
+            "verdict": "yes",
+            "probability": 0,
+            "outcome": "act"
+          },
+          "requests_parallel_agents": {
+            "verdict": "yes",
+            "probability": 0,
+            "outcome": "act"
+          },
+          "forbids_writing": {
+            "verdict": "yes",
+            "probability": 0,
+            "outcome": "act"
+          },
+          "asks_for_attempts": {
+            "verdict": "yes",
+            "probability": 0,
+            "outcome": "act"
+          },
+          "project_review": {
+            "verdict": "yes",
+            "probability": 0,
+            "outcome": "act"
+          },
+          "decisionIds": [
+            "sample"
+          ]
+        },
+        "status": "queued",
+        "statusBeforeOwner": "queued",
+        "resumeFrom": "queued",
+        "checks": [
+          {
+            "id": "sample",
+            "at": 0,
+            "trigger": "turn-end",
+            "claims": {
+              "kind": "files_verified",
+              "summary": "sample"
+            },
+            "gates": [
+              {
+                "gate": "sample",
+                "passed": false,
+                "output": "sample",
+                "durationMs": 0,
+                "skipped": false,
+                "outcome": "passed",
+                "required": false,
+                "reason": "sample",
+                "completion": {
+                  "kind": "command-exit",
+                  "exitCode": 0
+                },
+                "provenance": {
+                  "sourceBefore": "sample",
+                  "sourceAfter": "sample",
+                  "definitionBefore": "sample",
+                  "definitionAfter": "sample"
+                }
+              }
+            ],
+            "goal": {
+              "probabilityUnmet": 0,
+              "verdict": "met",
+              "outcome": "act"
+            },
+            "quality": {
+              "placeholder": {
+                "verdict": "yes",
+                "outcome": "act"
+              },
+              "tests_weakened": {
+                "verdict": "yes",
+                "outcome": "act"
+              },
+              "breaks_existing": {
+                "verdict": "yes",
+                "outcome": "act"
+              },
+              "out_of_scope": {
+                "verdict": "yes",
+                "outcome": "act"
+              },
+              "hidden_failure": {
+                "verdict": "yes",
+                "outcome": "act"
+              },
+              "unsupported_claims": {
+                "verdict": "yes",
+                "outcome": "act"
+              }
+            },
+            "result": "pass",
+            "problems": [
+              "unmet"
+            ],
+            "qualityProblems": [
+              "placeholder"
+            ],
+            "decisionIds": [
+              "sample"
+            ],
+            "evidenceDigest": "sample",
+            "reviewedFiles": [
+              {
+                "path": "sample",
+                "sha256": "sample"
+              }
+            ]
+          }
+        ],
+        "fixRounds": 0,
+        "escalations": [
+          {
+            "id": "sample",
+            "at": 0,
+            "scope": "plan",
+            "targetId": "sample",
+            "reason": "plan-unresolved",
+            "question": "sample",
+            "unmetCriterionIds": [
+              "sample"
+            ],
+            "decisionIds": [
+              "sample"
+            ],
+            "failurePause": true,
+            "resolvedAt": 0,
+            "reply": {
+              "text": "sample",
+              "reading": "approve",
+              "outcome": "act",
+              "decisionId": "sample"
+            }
+          }
+        ],
+        "decisions": [
+          {
+            "id": "sample",
+            "at": 0,
+            "action": "created",
+            "targetId": "sample",
+            "reason": "sample",
+            "decisionIds": [
+              "sample"
+            ],
+            "route": {
+              "model": "sample",
+              "provider": "sample",
+              "fallbackModels": [
+                "sample"
+              ],
+              "routing": {
+                "providerSelection": "inherit-current",
+                "providerFailurePolicy": "ordered-fallbacks",
+                "fallbackModels": [
+                  "sample"
+                ]
+              },
+              "reasoningEffort": "sample",
+              "reason": "sample"
+            },
+            "record": {
+              "kind": "fix-scheduled"
+            }
+          }
+        ],
+        "usage": {
+          "inputTokens": 0,
+          "outputTokens": 0,
+          "cacheReadTokens": 0,
+          "cacheWriteTokens": 0,
+          "reasoningTokens": 0,
+          "llmCallCount": 0,
+          "turnCount": 0,
+          "toolCallCount": 0,
+          "costUsd": 0,
+          "costState": "priced",
+          "costSource": "user",
+          "pricingAsOf": "sample"
+        },
+        "judgmentUsage": {
+          "calls": 0,
+          "inputTokens": 0,
+          "outputTokens": 0
+        },
+        "plannerAgentIds": [
+          "sample"
+        ],
+        "agentUsage": {},
+        "answer": "sample",
+        "statusLine": "sample",
+        "commit": {
+          "status": "committed",
+          "hash": "sample",
+          "note": "sample"
+        },
+        "failureKind": "transport",
+        "error": "sample",
+        "createdAt": 0,
+        "completedAt": 0
+      },
+      "ownerAgentId": "sample",
+      "replayed": false
+    }
+  },
   "contracts.get": {
     "input": {
-      "contractId": "sample"
+      "contractId": "sample",
+      "includeInputFiles": false
     },
     "output": {
       "originalSource": {
@@ -9733,6 +11278,9 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
             },
             "reasoningEffort": "sample",
             "reason": "sample"
+          },
+          "record": {
+            "kind": "fix-scheduled"
           }
         }
       ],
@@ -9758,6 +11306,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "plannerAgentIds": [
         "sample"
       ],
+      "agentUsage": {},
       "answer": "sample",
       "statusLine": "sample",
       "commit": {
@@ -10926,6 +12475,9 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
                 },
                 "reasoningEffort": "sample",
                 "reason": "sample"
+              },
+              "record": {
+                "kind": "fix-scheduled"
               }
             }
           ],
@@ -10951,6 +12503,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "plannerAgentIds": [
             "sample"
           ],
+          "agentUsage": {},
           "answer": "sample",
           "statusLine": "sample",
           "commit": {
@@ -10964,6 +12517,14 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "completedAt": 0
         }
       ]
+    }
+  },
+  "contracts.remove": {
+    "input": {
+      "contractId": "sample"
+    },
+    "output": {
+      "removed": false
     }
   },
   "contracts.reply": {
@@ -10985,7 +12546,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "ask": "sample",
       "sessionId": "sample",
       "workspaceRoot": "sample",
-      "isolation": "auto"
+      "isolation": "auto",
+      "idempotencyKey": "sample"
     },
     "output": {
       "contract": {
@@ -12136,6 +13698,9 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
               },
               "reasoningEffort": "sample",
               "reason": "sample"
+            },
+            "record": {
+              "kind": "fix-scheduled"
             }
           }
         ],
@@ -12161,6 +13726,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "plannerAgentIds": [
           "sample"
         ],
+        "agentUsage": {},
         "answer": "sample",
         "statusLine": "sample",
         "commit": {
@@ -12173,7 +13739,108 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "createdAt": 0,
         "completedAt": 0
       },
-      "ownerAgentId": "sample"
+      "ownerAgentId": "sample",
+      "replayed": false
+    }
+  },
+  "contracts.status": {
+    "input": {
+      "contractId": "sample",
+      "ifRevision": "sample"
+    },
+    "output": {
+      "id": "sample",
+      "sessionId": "sample",
+      "ownerAgentId": "sample",
+      "origin": "turn",
+      "ask": "sample",
+      "goal": "sample",
+      "status": "queued",
+      "statusLine": "sample",
+      "failureKind": "transport",
+      "error": "sample",
+      "groupCount": 0,
+      "unitCount": 0,
+      "unitsPassed": 0,
+      "unitsFailed": 0,
+      "openEscalationIds": [
+        "sample"
+      ],
+      "openEscalation": {
+        "id": "sample",
+        "at": 0,
+        "question": "sample"
+      },
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0,
+        "reasoningTokens": 0,
+        "llmCallCount": 0,
+        "turnCount": 0,
+        "toolCallCount": 0,
+        "costUsd": 0,
+        "costState": "priced",
+        "costSource": "user",
+        "pricingAsOf": "sample"
+      },
+      "createdAt": 0,
+      "completedAt": 0,
+      "updatedAt": 0,
+      "revision": "sample"
+    }
+  },
+  "contracts.summaries": {
+    "input": {
+      "sessionId": "sample",
+      "includeTerminal": false
+    },
+    "output": {
+      "contracts": [
+        {
+          "id": "sample",
+          "sessionId": "sample",
+          "ownerAgentId": "sample",
+          "origin": "turn",
+          "ask": "sample",
+          "goal": "sample",
+          "status": "queued",
+          "statusLine": "sample",
+          "failureKind": "transport",
+          "error": "sample",
+          "groupCount": 0,
+          "unitCount": 0,
+          "unitsPassed": 0,
+          "unitsFailed": 0,
+          "openEscalationIds": [
+            "sample"
+          ],
+          "openEscalation": {
+            "id": "sample",
+            "at": 0,
+            "question": "sample"
+          },
+          "usage": {
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0,
+            "reasoningTokens": 0,
+            "llmCallCount": 0,
+            "turnCount": 0,
+            "toolCallCount": 0,
+            "costUsd": 0,
+            "costState": "priced",
+            "costSource": "user",
+            "pricingAsOf": "sample"
+          },
+          "createdAt": 0,
+          "completedAt": 0,
+          "updatedAt": 0,
+          "revision": "sample"
+        }
+      ]
     }
   },
   "control.auth.current": {
@@ -12186,6 +13853,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "sessionCookiePresent": false,
       "principalId": "sample",
       "principalKind": "user",
+      "credential": "local",
       "admin": false,
       "scopes": [
         "sample"
@@ -12264,6 +13932,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
               "sessionCookiePresent": false,
               "principalId": "sample",
               "principalKind": "user",
+              "credential": "local",
               "admin": false,
               "scopes": [
                 "sample"
@@ -12344,7 +14013,21 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
               "outputSchema": {},
               "pluginId": "sample",
               "dangerous": false,
+              "effect": "read",
+              "ownerOnly": false,
               "invokable": false,
+              "replay": {
+                "in": "sample",
+                "name": "sample",
+                "behavior": "sample"
+              },
+              "errorCodes": [
+                {
+                  "code": "sample",
+                  "status": 0,
+                  "meaning": "sample"
+                }
+              ],
               "metadata": {}
             }
           ],
@@ -12508,7 +14191,21 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "outputSchema": {},
         "pluginId": "sample",
         "dangerous": false,
+        "effect": "read",
+        "ownerOnly": false,
         "invokable": false,
+        "replay": {
+          "in": "sample",
+          "name": "sample",
+          "behavior": "sample"
+        },
+        "errorCodes": [
+          {
+            "code": "sample",
+            "status": 0,
+            "meaning": "sample"
+          }
+        ],
         "metadata": {}
       }
     }
@@ -12544,7 +14241,21 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "outputSchema": {},
           "pluginId": "sample",
           "dangerous": false,
+          "effect": "read",
+          "ownerOnly": false,
           "invokable": false,
+          "replay": {
+            "in": "sample",
+            "name": "sample",
+            "behavior": "sample"
+          },
+          "errorCodes": [
+            {
+              "code": "sample",
+              "status": 0,
+              "meaning": "sample"
+            }
+          ],
           "metadata": {}
         }
       ]
@@ -12682,6 +14393,10 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "failedCheckCount": 0,
       "lastCheckFailure": "sample",
       "pendingVersion": "sample",
+      "pendingSince": 0,
+      "pendingBlockedBy": [
+        "sample"
+      ],
       "rejectedVersion": "sample",
       "recoveryRequired": true,
       "transactionRecovery": {
@@ -12714,6 +14429,10 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "failedCheckCount": 0,
       "lastCheckFailure": "sample",
       "pendingVersion": "sample",
+      "pendingSince": 0,
+      "pendingBlockedBy": [
+        "sample"
+      ],
       "rejectedVersion": "sample",
       "recoveryRequired": true,
       "transactionRecovery": {
@@ -12828,6 +14547,59 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       ]
     }
   },
+  "notifications.deadLetters.list": {
+    "input": {
+      "channel": "sample"
+    },
+    "output": {
+      "entries": [
+        {
+          "id": "sample",
+          "channel": "sample",
+          "event": "sample",
+          "summary": "sample",
+          "createdAt": 0,
+          "deadAt": 0,
+          "attempts": 0,
+          "finalError": "sample",
+          "failureClass": "retryable",
+          "status": 0
+        }
+      ],
+      "total": 0
+    }
+  },
+  "notifications.deadLetters.replay": {
+    "input": {
+      "ids": [
+        "sample"
+      ]
+    },
+    "output": {
+      "results": [
+        {
+          "id": "sample",
+          "outcome": "delivered"
+        }
+      ],
+      "delivered": 0,
+      "retrying": 0,
+      "failed": 0,
+      "notFound": 0
+    }
+  },
+  "email.attachment.get": {
+    "input": {
+      "uid": 0,
+      "index": 0
+    },
+    "output": {
+      "filename": "sample",
+      "contentType": "sample",
+      "sizeBytes": 0,
+      "contentBase64": "sample"
+    }
+  },
   "email.draft.create": {
     "input": {
       "to": "sample",
@@ -12839,6 +14611,25 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
     "output": {
       "draftId": "sample",
       "uid": 0,
+      "mailbox": "sample"
+    }
+  },
+  "email.drafts.list": {
+    "input": {
+      "limit": 0
+    },
+    "output": {
+      "drafts": [
+        {
+          "uid": 0,
+          "to": "sample",
+          "subject": "sample",
+          "date": "sample",
+          "inReplyTo": "sample",
+          "body": "sample"
+        }
+      ],
+      "total": 0,
       "mailbox": "sample"
     }
   },
@@ -13004,7 +14795,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
     "input": {
       "limit": 0,
       "since": "sample",
-      "unreadOnly": false
+      "unreadOnly": false,
+      "before": 0
     },
     "output": {
       "messages": [
@@ -13045,8 +14837,19 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "contentType": "sample",
           "sizeBytes": 0
         }
-      ],
-      "replySubjectRef": "sample"
+      ]
+    }
+  },
+  "email.inbox.update": {
+    "input": {
+      "uid": 0,
+      "action": "seen",
+      "uidValidity": 0
+    },
+    "output": {
+      "uid": 0,
+      "action": "sample",
+      "movedTo": "sample"
     }
   },
   "email.send": {
@@ -13055,7 +14858,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "subject": "sample",
       "body": "sample",
       "inReplyTo": "sample",
-      "confirm": false
+      "confirm": false,
+      "clientSendId": "sample"
     },
     "output": {
       "messageId": "sample",
@@ -13100,6 +14904,18 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       },
       "releaseBlockers": [
         "sample"
+      ]
+    }
+  },
+  "flags.status": {
+    "input": {},
+    "output": {
+      "pendingRestart": [
+        {
+          "featureId": "sample",
+          "running": "enabled",
+          "saved": "enabled"
+        }
       ]
     }
   },
@@ -13395,6 +15211,15 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       ]
     }
   },
+  "fleet.conflicts.retry": {
+    "input": {
+      "itemId": "sample"
+    },
+    "output": {
+      "itemId": "sample",
+      "outcome": "merged"
+    }
+  },
   "fleet.graph.get": {
     "input": {
       "workstreamId": "sample"
@@ -13537,7 +15362,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
   "fleet.observed.steer": {
     "input": {
       "id": "sample",
-      "text": "sample"
+      "text": "sample",
+      "submit": false
     },
     "output": {
       "queued": false,
@@ -13750,6 +15576,17 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "elevatedPct": 0,
         "highPct": 0,
         "criticalPct": 0
+      },
+      "hardLimit": {
+        "pct": 0,
+        "mb": 0,
+        "ceilingMb": 0
+      },
+      "configFallback": {
+        "settings": [
+          "sample"
+        ],
+        "reason": "sample"
       }
     }
   },
@@ -13826,69 +15663,9 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
   "voice.local.install": {
     "input": {},
     "output": {
-      "operationProvenance": "classic",
-      "semanticAssessment": "not-evaluated",
-      "proof": {
-        "proved": false,
-        "stage": "synthesize",
-        "phrase": "sample",
-        "transcript": "sample",
-        "wordOverlap": 0,
-        "comparison": "yes",
-        "operationProvenance": "classic",
-        "semanticAssessment": "not-evaluated",
-        "proofBasis": "native-word-sequence",
-        "error": "sample",
-        "summary": "sample"
-      },
-      "notes": [
-        "sample"
-      ],
-      "provisioned": false,
-      "platform": "sample",
-      "tts": {
-        "engine": "sample",
-        "state": "provisioned",
-        "binaryPath": "sample",
-        "modelPath": "sample",
-        "reason": "sample"
-      },
-      "stt": {
-        "engine": "sample",
-        "state": "provisioned",
-        "binaryPath": "sample",
-        "modelPath": "sample",
-        "reason": "sample"
-      },
-      "components": [
-        {
-          "id": "sample",
-          "state": "installed",
-          "bytes": 0,
-          "error": "sample"
-        }
-      ],
-      "configured": {
-        "set": [
-          {
-            "key": "sample",
-            "value": "sample"
-          }
-        ],
-        "skipped": [
-          {
-            "key": "sample",
-            "reason": "sample"
-          }
-        ],
-        "superseded": [
-          {
-            "key": "sample",
-            "previousValue": "sample",
-            "value": "sample"
-          }
-        ]
-      }
+      "state": "running",
+      "startedAt": 0,
+      "joined": false
     }
   },
   "voice.local.status": {
@@ -13925,6 +15702,76 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
             "bytesDone": 0
           }
         ]
+      },
+      "lastInstall": {
+        "startedAt": 0,
+        "finishedAt": 0,
+        "receipt": {
+          "operationProvenance": "classic",
+          "semanticAssessment": "not-evaluated",
+          "proof": {
+            "proved": false,
+            "stage": "synthesize",
+            "phrase": "sample",
+            "transcript": "sample",
+            "wordOverlap": 0,
+            "comparison": "yes",
+            "operationProvenance": "classic",
+            "semanticAssessment": "not-evaluated",
+            "proofBasis": "native-word-sequence",
+            "error": "sample",
+            "summary": "sample"
+          },
+          "notes": [
+            "sample"
+          ],
+          "provisioned": false,
+          "platform": "sample",
+          "tts": {
+            "engine": "sample",
+            "state": "provisioned",
+            "binaryPath": "sample",
+            "modelPath": "sample",
+            "reason": "sample"
+          },
+          "stt": {
+            "engine": "sample",
+            "state": "provisioned",
+            "binaryPath": "sample",
+            "modelPath": "sample",
+            "reason": "sample"
+          },
+          "components": [
+            {
+              "id": "sample",
+              "state": "installed",
+              "bytes": 0,
+              "error": "sample"
+            }
+          ],
+          "configured": {
+            "set": [
+              {
+                "key": "sample",
+                "value": "sample"
+              }
+            ],
+            "skipped": [
+              {
+                "key": "sample",
+                "reason": "sample"
+              }
+            ],
+            "superseded": [
+              {
+                "key": "sample",
+                "previousValue": "sample",
+                "value": "sample"
+              }
+            ]
+          }
+        },
+        "error": "sample"
       }
     }
   },
@@ -14029,145 +15876,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       }
     },
     "output": {
-      "accountIdentity": {
-        "id": "sample",
-        "username": "sample",
-        "revision": "sample"
-      },
-      "outcome": "sample",
-      "reason": "sample",
-      "ref": {
-        "sessionId": "sample",
-        "inputId": "sample",
-        "sourceId": "sample",
-        "sourceRevision": "sample",
-        "requestId": "sample"
-      },
-      "configurationId": "sample",
-      "expiresAt": 0,
-      "pendingRetentionMs": 0,
-      "processing": "sample",
-      "restart": "sample",
-      "route": "sample",
-      "execution": "not-started",
-      "approvalId": "sample",
-      "source": "sample",
-      "recovery": "sample",
-      "record": {
-        "id": "sample",
-        "ref": {
-          "sessionId": "sample",
-          "inputId": "sample",
-          "sourceId": "sample",
-          "sourceRevision": "sample",
-          "requestId": "sample"
-        },
-        "origin": {
-          "kind": "external-original",
-          "accountId": "sample",
-          "accountRevision": "sample",
-          "routeId": "sample",
-          "routeRevision": "sample"
-        },
-        "configurationId": "sample",
-        "ownerRevision": "sample",
-        "owner": {
-          "kind": "pairing-token",
-          "principalId": "sample",
-          "tokenId": "sample",
-          "authorityId": "sample",
-          "authorityRevision": "sample",
-          "scopes": [
-            "sample"
-          ]
-        },
-        "workspaceRevision": "sample",
-        "approvalId": "sample",
-        "choices": {
-          "processingPurpose": "accept-external-message-for-owner-review",
-          "sourceRetention": "memory-only-until-review-close-or-deadline",
-          "sourceRetentionMs": 0,
-          "derivedRecord": "external-source-reference-only-v1",
-          "derivedRecordRetentionMs": 0,
-          "execution": "none",
-          "ownerMayReadOriginal": true
-        },
-        "acceptedAt": 0,
-        "sourceExpiresAt": 0,
-        "recordExpiresAt": 0,
-        "state": "accepted-for-review",
-        "execution": "not-started"
-      },
-      "records": [
-        {
-          "id": "sample",
-          "ref": {
-            "sessionId": "sample",
-            "inputId": "sample",
-            "sourceId": "sample",
-            "sourceRevision": "sample",
-            "requestId": "sample"
-          },
-          "origin": {
-            "kind": "external-original",
-            "accountId": "sample",
-            "accountRevision": "sample",
-            "routeId": "sample",
-            "routeRevision": "sample"
-          },
-          "configurationId": "sample",
-          "ownerRevision": "sample",
-          "owner": {
-            "kind": "pairing-token",
-            "principalId": "sample",
-            "tokenId": "sample",
-            "authorityId": "sample",
-            "authorityRevision": "sample",
-            "scopes": [
-              "sample"
-            ]
-          },
-          "workspaceRevision": "sample",
-          "approvalId": "sample",
-          "choices": {
-            "processingPurpose": "accept-external-message-for-owner-review",
-            "sourceRetention": "memory-only-until-review-close-or-deadline",
-            "sourceRetentionMs": 0,
-            "derivedRecord": "external-source-reference-only-v1",
-            "derivedRecordRetentionMs": 0,
-            "execution": "none",
-            "ownerMayReadOriginal": true
-          },
-          "acceptedAt": 0,
-          "sourceExpiresAt": 0,
-          "recordExpiresAt": 0,
-          "state": "accepted-for-review",
-          "execution": "not-started"
-        }
-      ],
-      "pending": [
-        {
-          "ref": {
-            "sessionId": "sample",
-            "inputId": "sample",
-            "sourceId": "sample",
-            "sourceRevision": "sample",
-            "requestId": "sample"
-          },
-          "approvalId": "sample",
-          "sourceExpiresAt": 0,
-          "outcome": "sample"
-        }
-      ],
-      "original": {
-        "text": "sample",
-        "unsupportedSources": [
-          {
-            "kind": "sample",
-            "label": "sample"
-          }
-        ]
-      }
+      "outcome": "cancelled",
+      "execution": "not-started"
     }
   },
   "inbound.telegram.configure": {
@@ -14181,145 +15891,17 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "onExpiry": "release-original-and-hold"
     },
     "output": {
+      "outcome": "configured",
+      "configurationId": "sample",
       "accountIdentity": {
         "id": "sample",
         "username": "sample",
         "revision": "sample"
       },
-      "outcome": "sample",
-      "reason": "sample",
-      "ref": {
-        "sessionId": "sample",
-        "inputId": "sample",
-        "sourceId": "sample",
-        "sourceRevision": "sample",
-        "requestId": "sample"
-      },
-      "configurationId": "sample",
       "expiresAt": 0,
       "pendingRetentionMs": 0,
-      "processing": "sample",
-      "restart": "sample",
-      "route": "sample",
-      "execution": "not-started",
-      "approvalId": "sample",
-      "source": "sample",
-      "recovery": "sample",
-      "record": {
-        "id": "sample",
-        "ref": {
-          "sessionId": "sample",
-          "inputId": "sample",
-          "sourceId": "sample",
-          "sourceRevision": "sample",
-          "requestId": "sample"
-        },
-        "origin": {
-          "kind": "external-original",
-          "accountId": "sample",
-          "accountRevision": "sample",
-          "routeId": "sample",
-          "routeRevision": "sample"
-        },
-        "configurationId": "sample",
-        "ownerRevision": "sample",
-        "owner": {
-          "kind": "pairing-token",
-          "principalId": "sample",
-          "tokenId": "sample",
-          "authorityId": "sample",
-          "authorityRevision": "sample",
-          "scopes": [
-            "sample"
-          ]
-        },
-        "workspaceRevision": "sample",
-        "approvalId": "sample",
-        "choices": {
-          "processingPurpose": "accept-external-message-for-owner-review",
-          "sourceRetention": "memory-only-until-review-close-or-deadline",
-          "sourceRetentionMs": 0,
-          "derivedRecord": "external-source-reference-only-v1",
-          "derivedRecordRetentionMs": 0,
-          "execution": "none",
-          "ownerMayReadOriginal": true
-        },
-        "acceptedAt": 0,
-        "sourceExpiresAt": 0,
-        "recordExpiresAt": 0,
-        "state": "accepted-for-review",
-        "execution": "not-started"
-      },
-      "records": [
-        {
-          "id": "sample",
-          "ref": {
-            "sessionId": "sample",
-            "inputId": "sample",
-            "sourceId": "sample",
-            "sourceRevision": "sample",
-            "requestId": "sample"
-          },
-          "origin": {
-            "kind": "external-original",
-            "accountId": "sample",
-            "accountRevision": "sample",
-            "routeId": "sample",
-            "routeRevision": "sample"
-          },
-          "configurationId": "sample",
-          "ownerRevision": "sample",
-          "owner": {
-            "kind": "pairing-token",
-            "principalId": "sample",
-            "tokenId": "sample",
-            "authorityId": "sample",
-            "authorityRevision": "sample",
-            "scopes": [
-              "sample"
-            ]
-          },
-          "workspaceRevision": "sample",
-          "approvalId": "sample",
-          "choices": {
-            "processingPurpose": "accept-external-message-for-owner-review",
-            "sourceRetention": "memory-only-until-review-close-or-deadline",
-            "sourceRetentionMs": 0,
-            "derivedRecord": "external-source-reference-only-v1",
-            "derivedRecordRetentionMs": 0,
-            "execution": "none",
-            "ownerMayReadOriginal": true
-          },
-          "acceptedAt": 0,
-          "sourceExpiresAt": 0,
-          "recordExpiresAt": 0,
-          "state": "accepted-for-review",
-          "execution": "not-started"
-        }
-      ],
-      "pending": [
-        {
-          "ref": {
-            "sessionId": "sample",
-            "inputId": "sample",
-            "sourceId": "sample",
-            "sourceRevision": "sample",
-            "requestId": "sample"
-          },
-          "approvalId": "sample",
-          "sourceExpiresAt": 0,
-          "outcome": "sample"
-        }
-      ],
-      "original": {
-        "text": "sample",
-        "unsupportedSources": [
-          {
-            "kind": "sample",
-            "label": "sample"
-          }
-        ]
-      }
+      "processing": "requires-per-message-approval",
+      "restart": "selected-route-held-without-original-or-grant"
     }
   },
   "inbound.telegram.decide": {
@@ -14344,13 +15926,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       }
     },
     "output": {
-      "accountIdentity": {
-        "id": "sample",
-        "username": "sample",
-        "revision": "sample"
-      },
-      "outcome": "sample",
-      "reason": "sample",
+      "outcome": "transferred",
       "ref": {
         "sessionId": "sample",
         "inputId": "sample",
@@ -14358,205 +15934,13 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "sourceRevision": "sample",
         "requestId": "sample"
       },
-      "configurationId": "sample",
-      "expiresAt": 0,
-      "pendingRetentionMs": 0,
-      "processing": "sample",
-      "restart": "sample",
-      "route": "sample",
-      "execution": "not-started",
-      "approvalId": "sample",
-      "source": "sample",
-      "recovery": "sample",
-      "record": {
-        "id": "sample",
-        "ref": {
-          "sessionId": "sample",
-          "inputId": "sample",
-          "sourceId": "sample",
-          "sourceRevision": "sample",
-          "requestId": "sample"
-        },
-        "origin": {
-          "kind": "external-original",
-          "accountId": "sample",
-          "accountRevision": "sample",
-          "routeId": "sample",
-          "routeRevision": "sample"
-        },
-        "configurationId": "sample",
-        "ownerRevision": "sample",
-        "owner": {
-          "kind": "pairing-token",
-          "principalId": "sample",
-          "tokenId": "sample",
-          "authorityId": "sample",
-          "authorityRevision": "sample",
-          "scopes": [
-            "sample"
-          ]
-        },
-        "workspaceRevision": "sample",
-        "approvalId": "sample",
-        "choices": {
-          "processingPurpose": "accept-external-message-for-owner-review",
-          "sourceRetention": "memory-only-until-review-close-or-deadline",
-          "sourceRetentionMs": 0,
-          "derivedRecord": "external-source-reference-only-v1",
-          "derivedRecordRetentionMs": 0,
-          "execution": "none",
-          "ownerMayReadOriginal": true
-        },
-        "acceptedAt": 0,
-        "sourceExpiresAt": 0,
-        "recordExpiresAt": 0,
-        "state": "accepted-for-review",
-        "execution": "not-started"
-      },
-      "records": [
-        {
-          "id": "sample",
-          "ref": {
-            "sessionId": "sample",
-            "inputId": "sample",
-            "sourceId": "sample",
-            "sourceRevision": "sample",
-            "requestId": "sample"
-          },
-          "origin": {
-            "kind": "external-original",
-            "accountId": "sample",
-            "accountRevision": "sample",
-            "routeId": "sample",
-            "routeRevision": "sample"
-          },
-          "configurationId": "sample",
-          "ownerRevision": "sample",
-          "owner": {
-            "kind": "pairing-token",
-            "principalId": "sample",
-            "tokenId": "sample",
-            "authorityId": "sample",
-            "authorityRevision": "sample",
-            "scopes": [
-              "sample"
-            ]
-          },
-          "workspaceRevision": "sample",
-          "approvalId": "sample",
-          "choices": {
-            "processingPurpose": "accept-external-message-for-owner-review",
-            "sourceRetention": "memory-only-until-review-close-or-deadline",
-            "sourceRetentionMs": 0,
-            "derivedRecord": "external-source-reference-only-v1",
-            "derivedRecordRetentionMs": 0,
-            "execution": "none",
-            "ownerMayReadOriginal": true
-          },
-          "acceptedAt": 0,
-          "sourceExpiresAt": 0,
-          "recordExpiresAt": 0,
-          "state": "accepted-for-review",
-          "execution": "not-started"
-        }
-      ],
-      "pending": [
-        {
-          "ref": {
-            "sessionId": "sample",
-            "inputId": "sample",
-            "sourceId": "sample",
-            "sourceRevision": "sample",
-            "requestId": "sample"
-          },
-          "approvalId": "sample",
-          "sourceExpiresAt": 0,
-          "outcome": "sample"
-        }
-      ],
-      "original": {
-        "text": "sample",
-        "unsupportedSources": [
-          {
-            "kind": "sample",
-            "label": "sample"
-          }
-        ]
-      }
+      "execution": "not-started"
     }
   },
   "inbound.telegram.list": {
     "input": {},
     "output": {
-      "accountIdentity": {
-        "id": "sample",
-        "username": "sample",
-        "revision": "sample"
-      },
-      "outcome": "sample",
-      "reason": "sample",
-      "ref": {
-        "sessionId": "sample",
-        "inputId": "sample",
-        "sourceId": "sample",
-        "sourceRevision": "sample",
-        "requestId": "sample"
-      },
-      "configurationId": "sample",
-      "expiresAt": 0,
-      "pendingRetentionMs": 0,
-      "processing": "sample",
-      "restart": "sample",
-      "route": "sample",
-      "execution": "not-started",
-      "approvalId": "sample",
-      "source": "sample",
-      "recovery": "sample",
-      "record": {
-        "id": "sample",
-        "ref": {
-          "sessionId": "sample",
-          "inputId": "sample",
-          "sourceId": "sample",
-          "sourceRevision": "sample",
-          "requestId": "sample"
-        },
-        "origin": {
-          "kind": "external-original",
-          "accountId": "sample",
-          "accountRevision": "sample",
-          "routeId": "sample",
-          "routeRevision": "sample"
-        },
-        "configurationId": "sample",
-        "ownerRevision": "sample",
-        "owner": {
-          "kind": "pairing-token",
-          "principalId": "sample",
-          "tokenId": "sample",
-          "authorityId": "sample",
-          "authorityRevision": "sample",
-          "scopes": [
-            "sample"
-          ]
-        },
-        "workspaceRevision": "sample",
-        "approvalId": "sample",
-        "choices": {
-          "processingPurpose": "accept-external-message-for-owner-review",
-          "sourceRetention": "memory-only-until-review-close-or-deadline",
-          "sourceRetentionMs": 0,
-          "derivedRecord": "external-source-reference-only-v1",
-          "derivedRecordRetentionMs": 0,
-          "execution": "none",
-          "ownerMayReadOriginal": true
-        },
-        "acceptedAt": 0,
-        "sourceExpiresAt": 0,
-        "recordExpiresAt": 0,
-        "state": "accepted-for-review",
-        "execution": "not-started"
-      },
+      "outcome": "listed",
       "records": [
         {
           "id": "sample",
@@ -14615,18 +15999,9 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           },
           "approvalId": "sample",
           "sourceExpiresAt": 0,
-          "outcome": "sample"
+          "outcome": "awaiting-owner"
         }
-      ],
-      "original": {
-        "text": "sample",
-        "unsupportedSources": [
-          {
-            "kind": "sample",
-            "label": "sample"
-          }
-        ]
-      }
+      ]
     }
   },
   "inbound.telegram.read": {
@@ -14640,30 +16015,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       }
     },
     "output": {
-      "accountIdentity": {
-        "id": "sample",
-        "username": "sample",
-        "revision": "sample"
-      },
-      "outcome": "sample",
-      "reason": "sample",
-      "ref": {
-        "sessionId": "sample",
-        "inputId": "sample",
-        "sourceId": "sample",
-        "sourceRevision": "sample",
-        "requestId": "sample"
-      },
-      "configurationId": "sample",
-      "expiresAt": 0,
-      "pendingRetentionMs": 0,
-      "processing": "sample",
-      "restart": "sample",
-      "route": "sample",
-      "execution": "not-started",
-      "approvalId": "sample",
-      "source": "sample",
-      "recovery": "sample",
+      "outcome": "recorded",
       "record": {
         "id": "sample",
         "ref": {
@@ -14709,67 +16061,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "state": "accepted-for-review",
         "execution": "not-started"
       },
-      "records": [
-        {
-          "id": "sample",
-          "ref": {
-            "sessionId": "sample",
-            "inputId": "sample",
-            "sourceId": "sample",
-            "sourceRevision": "sample",
-            "requestId": "sample"
-          },
-          "origin": {
-            "kind": "external-original",
-            "accountId": "sample",
-            "accountRevision": "sample",
-            "routeId": "sample",
-            "routeRevision": "sample"
-          },
-          "configurationId": "sample",
-          "ownerRevision": "sample",
-          "owner": {
-            "kind": "pairing-token",
-            "principalId": "sample",
-            "tokenId": "sample",
-            "authorityId": "sample",
-            "authorityRevision": "sample",
-            "scopes": [
-              "sample"
-            ]
-          },
-          "workspaceRevision": "sample",
-          "approvalId": "sample",
-          "choices": {
-            "processingPurpose": "accept-external-message-for-owner-review",
-            "sourceRetention": "memory-only-until-review-close-or-deadline",
-            "sourceRetentionMs": 0,
-            "derivedRecord": "external-source-reference-only-v1",
-            "derivedRecordRetentionMs": 0,
-            "execution": "none",
-            "ownerMayReadOriginal": true
-          },
-          "acceptedAt": 0,
-          "sourceExpiresAt": 0,
-          "recordExpiresAt": 0,
-          "state": "accepted-for-review",
-          "execution": "not-started"
-        }
-      ],
-      "pending": [
-        {
-          "ref": {
-            "sessionId": "sample",
-            "inputId": "sample",
-            "sourceId": "sample",
-            "sourceRevision": "sample",
-            "requestId": "sample"
-          },
-          "approvalId": "sample",
-          "sourceExpiresAt": 0,
-          "outcome": "sample"
-        }
-      ],
+      "source": "available-in-memory",
+      "recovery": "owner-review-available",
       "original": {
         "text": "sample",
         "unsupportedSources": [
@@ -14786,145 +16079,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "configurationId": "sample"
     },
     "output": {
-      "accountIdentity": {
-        "id": "sample",
-        "username": "sample",
-        "revision": "sample"
-      },
-      "outcome": "sample",
-      "reason": "sample",
-      "ref": {
-        "sessionId": "sample",
-        "inputId": "sample",
-        "sourceId": "sample",
-        "sourceRevision": "sample",
-        "requestId": "sample"
-      },
-      "configurationId": "sample",
-      "expiresAt": 0,
-      "pendingRetentionMs": 0,
-      "processing": "sample",
-      "restart": "sample",
-      "route": "sample",
-      "execution": "not-started",
-      "approvalId": "sample",
-      "source": "sample",
-      "recovery": "sample",
-      "record": {
-        "id": "sample",
-        "ref": {
-          "sessionId": "sample",
-          "inputId": "sample",
-          "sourceId": "sample",
-          "sourceRevision": "sample",
-          "requestId": "sample"
-        },
-        "origin": {
-          "kind": "external-original",
-          "accountId": "sample",
-          "accountRevision": "sample",
-          "routeId": "sample",
-          "routeRevision": "sample"
-        },
-        "configurationId": "sample",
-        "ownerRevision": "sample",
-        "owner": {
-          "kind": "pairing-token",
-          "principalId": "sample",
-          "tokenId": "sample",
-          "authorityId": "sample",
-          "authorityRevision": "sample",
-          "scopes": [
-            "sample"
-          ]
-        },
-        "workspaceRevision": "sample",
-        "approvalId": "sample",
-        "choices": {
-          "processingPurpose": "accept-external-message-for-owner-review",
-          "sourceRetention": "memory-only-until-review-close-or-deadline",
-          "sourceRetentionMs": 0,
-          "derivedRecord": "external-source-reference-only-v1",
-          "derivedRecordRetentionMs": 0,
-          "execution": "none",
-          "ownerMayReadOriginal": true
-        },
-        "acceptedAt": 0,
-        "sourceExpiresAt": 0,
-        "recordExpiresAt": 0,
-        "state": "accepted-for-review",
-        "execution": "not-started"
-      },
-      "records": [
-        {
-          "id": "sample",
-          "ref": {
-            "sessionId": "sample",
-            "inputId": "sample",
-            "sourceId": "sample",
-            "sourceRevision": "sample",
-            "requestId": "sample"
-          },
-          "origin": {
-            "kind": "external-original",
-            "accountId": "sample",
-            "accountRevision": "sample",
-            "routeId": "sample",
-            "routeRevision": "sample"
-          },
-          "configurationId": "sample",
-          "ownerRevision": "sample",
-          "owner": {
-            "kind": "pairing-token",
-            "principalId": "sample",
-            "tokenId": "sample",
-            "authorityId": "sample",
-            "authorityRevision": "sample",
-            "scopes": [
-              "sample"
-            ]
-          },
-          "workspaceRevision": "sample",
-          "approvalId": "sample",
-          "choices": {
-            "processingPurpose": "accept-external-message-for-owner-review",
-            "sourceRetention": "memory-only-until-review-close-or-deadline",
-            "sourceRetentionMs": 0,
-            "derivedRecord": "external-source-reference-only-v1",
-            "derivedRecordRetentionMs": 0,
-            "execution": "none",
-            "ownerMayReadOriginal": true
-          },
-          "acceptedAt": 0,
-          "sourceExpiresAt": 0,
-          "recordExpiresAt": 0,
-          "state": "accepted-for-review",
-          "execution": "not-started"
-        }
-      ],
-      "pending": [
-        {
-          "ref": {
-            "sessionId": "sample",
-            "inputId": "sample",
-            "sourceId": "sample",
-            "sourceRevision": "sample",
-            "requestId": "sample"
-          },
-          "approvalId": "sample",
-          "sourceExpiresAt": 0,
-          "outcome": "sample"
-        }
-      ],
-      "original": {
-        "text": "sample",
-        "unsupportedSources": [
-          {
-            "kind": "sample",
-            "label": "sample"
-          }
-        ]
-      }
+      "outcome": "released",
+      "route": "normal-handling-resumes"
     }
   },
   "inbound.telegram.revoke": {
@@ -14932,145 +16088,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "configurationId": "sample"
     },
     "output": {
-      "accountIdentity": {
-        "id": "sample",
-        "username": "sample",
-        "revision": "sample"
-      },
-      "outcome": "sample",
-      "reason": "sample",
-      "ref": {
-        "sessionId": "sample",
-        "inputId": "sample",
-        "sourceId": "sample",
-        "sourceRevision": "sample",
-        "requestId": "sample"
-      },
-      "configurationId": "sample",
-      "expiresAt": 0,
-      "pendingRetentionMs": 0,
-      "processing": "sample",
-      "restart": "sample",
-      "route": "sample",
-      "execution": "not-started",
-      "approvalId": "sample",
-      "source": "sample",
-      "recovery": "sample",
-      "record": {
-        "id": "sample",
-        "ref": {
-          "sessionId": "sample",
-          "inputId": "sample",
-          "sourceId": "sample",
-          "sourceRevision": "sample",
-          "requestId": "sample"
-        },
-        "origin": {
-          "kind": "external-original",
-          "accountId": "sample",
-          "accountRevision": "sample",
-          "routeId": "sample",
-          "routeRevision": "sample"
-        },
-        "configurationId": "sample",
-        "ownerRevision": "sample",
-        "owner": {
-          "kind": "pairing-token",
-          "principalId": "sample",
-          "tokenId": "sample",
-          "authorityId": "sample",
-          "authorityRevision": "sample",
-          "scopes": [
-            "sample"
-          ]
-        },
-        "workspaceRevision": "sample",
-        "approvalId": "sample",
-        "choices": {
-          "processingPurpose": "accept-external-message-for-owner-review",
-          "sourceRetention": "memory-only-until-review-close-or-deadline",
-          "sourceRetentionMs": 0,
-          "derivedRecord": "external-source-reference-only-v1",
-          "derivedRecordRetentionMs": 0,
-          "execution": "none",
-          "ownerMayReadOriginal": true
-        },
-        "acceptedAt": 0,
-        "sourceExpiresAt": 0,
-        "recordExpiresAt": 0,
-        "state": "accepted-for-review",
-        "execution": "not-started"
-      },
-      "records": [
-        {
-          "id": "sample",
-          "ref": {
-            "sessionId": "sample",
-            "inputId": "sample",
-            "sourceId": "sample",
-            "sourceRevision": "sample",
-            "requestId": "sample"
-          },
-          "origin": {
-            "kind": "external-original",
-            "accountId": "sample",
-            "accountRevision": "sample",
-            "routeId": "sample",
-            "routeRevision": "sample"
-          },
-          "configurationId": "sample",
-          "ownerRevision": "sample",
-          "owner": {
-            "kind": "pairing-token",
-            "principalId": "sample",
-            "tokenId": "sample",
-            "authorityId": "sample",
-            "authorityRevision": "sample",
-            "scopes": [
-              "sample"
-            ]
-          },
-          "workspaceRevision": "sample",
-          "approvalId": "sample",
-          "choices": {
-            "processingPurpose": "accept-external-message-for-owner-review",
-            "sourceRetention": "memory-only-until-review-close-or-deadline",
-            "sourceRetentionMs": 0,
-            "derivedRecord": "external-source-reference-only-v1",
-            "derivedRecordRetentionMs": 0,
-            "execution": "none",
-            "ownerMayReadOriginal": true
-          },
-          "acceptedAt": 0,
-          "sourceExpiresAt": 0,
-          "recordExpiresAt": 0,
-          "state": "accepted-for-review",
-          "execution": "not-started"
-        }
-      ],
-      "pending": [
-        {
-          "ref": {
-            "sessionId": "sample",
-            "inputId": "sample",
-            "sourceId": "sample",
-            "sourceRevision": "sample",
-            "requestId": "sample"
-          },
-          "approvalId": "sample",
-          "sourceExpiresAt": 0,
-          "outcome": "sample"
-        }
-      ],
-      "original": {
-        "text": "sample",
-        "unsupportedSources": [
-          {
-            "kind": "sample",
-            "label": "sample"
-          }
-        ]
-      }
+      "outcome": "revoked",
+      "route": "remains-selected-and-held"
     }
   },
   "inbound.telegram.status": {
@@ -15084,30 +16103,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       }
     },
     "output": {
-      "accountIdentity": {
-        "id": "sample",
-        "username": "sample",
-        "revision": "sample"
-      },
-      "outcome": "sample",
-      "reason": "sample",
-      "ref": {
-        "sessionId": "sample",
-        "inputId": "sample",
-        "sourceId": "sample",
-        "sourceRevision": "sample",
-        "requestId": "sample"
-      },
-      "configurationId": "sample",
-      "expiresAt": 0,
-      "pendingRetentionMs": 0,
-      "processing": "sample",
-      "restart": "sample",
-      "route": "sample",
-      "execution": "not-started",
-      "approvalId": "sample",
-      "source": "sample",
-      "recovery": "sample",
+      "outcome": "recorded",
       "record": {
         "id": "sample",
         "ref": {
@@ -15153,67 +16149,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "state": "accepted-for-review",
         "execution": "not-started"
       },
-      "records": [
-        {
-          "id": "sample",
-          "ref": {
-            "sessionId": "sample",
-            "inputId": "sample",
-            "sourceId": "sample",
-            "sourceRevision": "sample",
-            "requestId": "sample"
-          },
-          "origin": {
-            "kind": "external-original",
-            "accountId": "sample",
-            "accountRevision": "sample",
-            "routeId": "sample",
-            "routeRevision": "sample"
-          },
-          "configurationId": "sample",
-          "ownerRevision": "sample",
-          "owner": {
-            "kind": "pairing-token",
-            "principalId": "sample",
-            "tokenId": "sample",
-            "authorityId": "sample",
-            "authorityRevision": "sample",
-            "scopes": [
-              "sample"
-            ]
-          },
-          "workspaceRevision": "sample",
-          "approvalId": "sample",
-          "choices": {
-            "processingPurpose": "accept-external-message-for-owner-review",
-            "sourceRetention": "memory-only-until-review-close-or-deadline",
-            "sourceRetentionMs": 0,
-            "derivedRecord": "external-source-reference-only-v1",
-            "derivedRecordRetentionMs": 0,
-            "execution": "none",
-            "ownerMayReadOriginal": true
-          },
-          "acceptedAt": 0,
-          "sourceExpiresAt": 0,
-          "recordExpiresAt": 0,
-          "state": "accepted-for-review",
-          "execution": "not-started"
-        }
-      ],
-      "pending": [
-        {
-          "ref": {
-            "sessionId": "sample",
-            "inputId": "sample",
-            "sourceId": "sample",
-            "sourceRevision": "sample",
-            "requestId": "sample"
-          },
-          "approvalId": "sample",
-          "sourceExpiresAt": 0,
-          "outcome": "sample"
-        }
-      ],
+      "source": "available-in-memory",
+      "recovery": "owner-review-available",
       "original": {
         "text": "sample",
         "unsupportedSources": [
@@ -18145,8 +19082,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "createdAt": 0,
         "expiresAt": 0,
         "sourceUri": "sample",
-        "acquisitionMode": "sample",
-        "fetchMode": "sample",
+        "acquisitionMode": "inline-data",
+        "fetchMode": "not-applicable",
         "metadata": {}
       },
       "source": {
@@ -18882,218 +19819,10 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       }
     }
   },
-  "projectPlanning.evaluate": {
-    "input": {
-      "projectId": "sample",
-      "knowledgeSpaceId": "sample",
-      "planningId": "sample",
-      "state": {}
-    },
-    "output": {
-      "operationProvenance": "classic",
-      "semanticAssessment": "not-evaluated",
-      "readinessAssessment": {
-        "basis": "native-structure-and-owner-approval",
-        "semanticAssessment": "specified"
-      },
-      "ok": false,
-      "projectId": "sample",
-      "knowledgeSpaceId": "sample",
-      "readiness": "sample",
-      "gaps": [
-        {
-          "id": "sample",
-          "kind": "sample",
-          "severity": "sample",
-          "message": "sample",
-          "question": {
-            "id": "sample",
-            "prompt": "sample",
-            "whyItMatters": "sample",
-            "recommendedAnswer": "sample",
-            "consequence": "sample",
-            "status": "sample",
-            "answer": "sample",
-            "answeredAt": 0,
-            "metadata": {}
-          },
-          "relatedTaskIds": [
-            "sample"
-          ],
-          "metadata": {}
-        }
-      ],
-      "nextQuestion": {
-        "id": "sample",
-        "prompt": "sample",
-        "whyItMatters": "sample",
-        "recommendedAnswer": "sample",
-        "consequence": "sample",
-        "status": "sample",
-        "answer": "sample",
-        "answeredAt": 0,
-        "metadata": {}
-      },
-      "state": {
-        "id": "sample",
-        "projectId": "sample",
-        "knowledgeSpaceId": "sample",
-        "goal": "sample",
-        "scope": "sample",
-        "knownContext": [
-          "sample"
-        ],
-        "openQuestions": [
-          {
-            "id": "sample",
-            "prompt": "sample",
-            "whyItMatters": "sample",
-            "recommendedAnswer": "sample",
-            "consequence": "sample",
-            "status": "sample",
-            "answer": "sample",
-            "answeredAt": 0,
-            "metadata": {}
-          }
-        ],
-        "answeredQuestions": [
-          {
-            "id": "sample",
-            "prompt": "sample",
-            "whyItMatters": "sample",
-            "recommendedAnswer": "sample",
-            "consequence": "sample",
-            "status": "sample",
-            "answer": "sample",
-            "answeredAt": 0,
-            "metadata": {}
-          }
-        ],
-        "decisions": [
-          {
-            "id": "sample",
-            "title": "sample",
-            "context": "sample",
-            "decision": "sample",
-            "alternatives": [
-              "sample"
-            ],
-            "reasoning": "sample",
-            "consequences": [
-              "sample"
-            ],
-            "status": "sample",
-            "createdAt": 0,
-            "updatedAt": 0,
-            "metadata": {}
-          }
-        ],
-        "assumptions": [
-          "sample"
-        ],
-        "constraints": [
-          "sample"
-        ],
-        "risks": [
-          "sample"
-        ],
-        "tasks": [
-          {
-            "id": "sample",
-            "title": "sample",
-            "why": "sample",
-            "status": "sample",
-            "dependencies": [
-              "sample"
-            ],
-            "likelyFiles": [
-              "sample"
-            ],
-            "verification": [
-              "sample"
-            ],
-            "canRunConcurrently": false,
-            "needsReview": false,
-            "blockedOnUserInput": false,
-            "recommendedAgent": "sample",
-            "metadata": {}
-          }
-        ],
-        "dependencies": [
-          "sample"
-        ],
-        "verificationGates": [
-          "sample"
-        ],
-        "agentAssignments": [
-          "sample"
-        ],
-        "readiness": "sample",
-        "readinessAssessment": {
-          "basis": "native-structure-and-owner-approval",
-          "semanticAssessment": "specified"
-        },
-        "executionApproved": false,
-        "createdAt": 0,
-        "updatedAt": 0,
-        "metadata": {}
-      }
-    }
-  },
   "projectPlanning.language.get": {
     "input": {
       "projectId": "sample",
       "knowledgeSpaceId": "sample"
-    },
-    "output": {
-      "ok": false,
-      "projectId": "sample",
-      "knowledgeSpaceId": "sample",
-      "language": {
-        "projectId": "sample",
-        "knowledgeSpaceId": "sample",
-        "terms": [
-          "sample"
-        ],
-        "ambiguities": [
-          "sample"
-        ],
-        "examples": [
-          "sample"
-        ],
-        "updatedAt": 0,
-        "metadata": {}
-      },
-      "source": {
-        "id": "sample",
-        "connectorId": "sample",
-        "sourceType": "url",
-        "title": "sample",
-        "sourceUri": "sample",
-        "canonicalUri": "sample",
-        "summary": "sample",
-        "description": "sample",
-        "tags": [
-          "sample"
-        ],
-        "folderPath": "sample",
-        "status": "sample",
-        "artifactId": "sample",
-        "contentHash": "sample",
-        "lastCrawledAt": 0,
-        "crawlError": "sample",
-        "sessionId": "sample",
-        "metadata": {},
-        "createdAt": 0,
-        "updatedAt": 0
-      }
-    }
-  },
-  "projectPlanning.language.upsert": {
-    "input": {
-      "projectId": "sample",
-      "knowledgeSpaceId": "sample",
-      "language": {}
     },
     "output": {
       "ok": false,
@@ -19144,149 +19873,6 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "projectId": "sample",
       "knowledgeSpaceId": "sample",
       "planningId": "sample"
-    },
-    "output": {
-      "ok": false,
-      "projectId": "sample",
-      "knowledgeSpaceId": "sample",
-      "state": {
-        "id": "sample",
-        "projectId": "sample",
-        "knowledgeSpaceId": "sample",
-        "goal": "sample",
-        "scope": "sample",
-        "knownContext": [
-          "sample"
-        ],
-        "openQuestions": [
-          {
-            "id": "sample",
-            "prompt": "sample",
-            "whyItMatters": "sample",
-            "recommendedAnswer": "sample",
-            "consequence": "sample",
-            "status": "sample",
-            "answer": "sample",
-            "answeredAt": 0,
-            "metadata": {}
-          }
-        ],
-        "answeredQuestions": [
-          {
-            "id": "sample",
-            "prompt": "sample",
-            "whyItMatters": "sample",
-            "recommendedAnswer": "sample",
-            "consequence": "sample",
-            "status": "sample",
-            "answer": "sample",
-            "answeredAt": 0,
-            "metadata": {}
-          }
-        ],
-        "decisions": [
-          {
-            "id": "sample",
-            "title": "sample",
-            "context": "sample",
-            "decision": "sample",
-            "alternatives": [
-              "sample"
-            ],
-            "reasoning": "sample",
-            "consequences": [
-              "sample"
-            ],
-            "status": "sample",
-            "createdAt": 0,
-            "updatedAt": 0,
-            "metadata": {}
-          }
-        ],
-        "assumptions": [
-          "sample"
-        ],
-        "constraints": [
-          "sample"
-        ],
-        "risks": [
-          "sample"
-        ],
-        "tasks": [
-          {
-            "id": "sample",
-            "title": "sample",
-            "why": "sample",
-            "status": "sample",
-            "dependencies": [
-              "sample"
-            ],
-            "likelyFiles": [
-              "sample"
-            ],
-            "verification": [
-              "sample"
-            ],
-            "canRunConcurrently": false,
-            "needsReview": false,
-            "blockedOnUserInput": false,
-            "recommendedAgent": "sample",
-            "metadata": {}
-          }
-        ],
-        "dependencies": [
-          "sample"
-        ],
-        "verificationGates": [
-          "sample"
-        ],
-        "agentAssignments": [
-          "sample"
-        ],
-        "readiness": "sample",
-        "readinessAssessment": {
-          "basis": "native-structure-and-owner-approval",
-          "semanticAssessment": "specified"
-        },
-        "executionApproved": false,
-        "createdAt": 0,
-        "updatedAt": 0,
-        "metadata": {}
-      },
-      "revision": {
-        "sourceId": "sample",
-        "generation": "sample"
-      },
-      "source": {
-        "id": "sample",
-        "connectorId": "sample",
-        "sourceType": "url",
-        "title": "sample",
-        "sourceUri": "sample",
-        "canonicalUri": "sample",
-        "summary": "sample",
-        "description": "sample",
-        "tags": [
-          "sample"
-        ],
-        "folderPath": "sample",
-        "status": "sample",
-        "artifactId": "sample",
-        "contentHash": "sample",
-        "lastCrawledAt": 0,
-        "crawlError": "sample",
-        "sessionId": "sample",
-        "metadata": {},
-        "createdAt": 0,
-        "updatedAt": 0
-      }
-    }
-  },
-  "projectPlanning.state.upsert": {
-    "input": {
-      "projectId": "sample",
-      "knowledgeSpaceId": "sample",
-      "state": {}
     },
     "output": {
       "ok": false,
@@ -20778,7 +21364,14 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "protocolVersion": "sample",
           "protocolEra": "modern",
           "phase": "idle",
-          "lastError": "sample"
+          "lastError": "sample",
+          "reconnect": {
+            "state": "configured",
+            "attempt": 0,
+            "maxAttempts": 0,
+            "nextAttemptAt": 0,
+            "stoppedReason": "sample"
+          }
         }
       ],
       "security": [
@@ -21073,7 +21666,6 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
   },
   "multimodal.analyze": {
     "input": {
-      "artifactId": "sample",
       "artifact": {
         "artifactId": "sample",
         "mimeType": "sample",
@@ -21082,26 +21674,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "allowPrivateHosts": false,
         "filename": "sample",
         "metadata": {}
-      },
-      "prompt": "sample",
-      "imageProviderId": "sample",
-      "audioProviderId": "sample",
-      "modelId": "sample",
-      "language": "sample",
-      "detail": "compact",
-      "allowPrivateHosts": false,
-      "includePacket": false,
-      "writeback": {
-        "sessionId": "sample",
-        "title": "sample",
-        "tags": [
-          "sample"
-        ],
-        "folderPath": "sample",
-        "metadata": {}
-      },
-      "sessionId": "sample",
-      "metadata": {}
+      }
     },
     "output": {
       "analysis": {
@@ -21117,8 +21690,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "createdAt": 0,
           "expiresAt": 0,
           "sourceUri": "sample",
-          "acquisitionMode": "sample",
-          "fetchMode": "sample",
+          "acquisitionMode": "inline-data",
+          "fetchMode": "not-applicable",
           "metadata": {}
         },
         "providerIds": [
@@ -21165,8 +21738,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "createdAt": 0,
           "expiresAt": 0,
           "sourceUri": "sample",
-          "acquisitionMode": "sample",
-          "fetchMode": "sample",
+          "acquisitionMode": "inline-data",
+          "fetchMode": "not-applicable",
           "metadata": {}
         },
         "knowledgeSourceId": "sample",
@@ -21189,8 +21762,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "createdAt": 0,
           "expiresAt": 0,
           "sourceUri": "sample",
-          "acquisitionMode": "sample",
-          "fetchMode": "sample",
+          "acquisitionMode": "inline-data",
+          "fetchMode": "not-applicable",
           "metadata": {}
         },
         "providerIds": [
@@ -21284,8 +21857,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "createdAt": 0,
           "expiresAt": 0,
           "sourceUri": "sample",
-          "acquisitionMode": "sample",
-          "fetchMode": "sample",
+          "acquisitionMode": "inline-data",
+          "fetchMode": "not-applicable",
           "metadata": {}
         },
         "providerIds": [
@@ -21332,12 +21905,37 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "createdAt": 0,
           "expiresAt": 0,
           "sourceUri": "sample",
-          "acquisitionMode": "sample",
-          "fetchMode": "sample",
+          "acquisitionMode": "inline-data",
+          "fetchMode": "not-applicable",
           "metadata": {}
         },
         "knowledgeSourceId": "sample",
         "metadata": {}
+      }
+    }
+  },
+  "memory.consolidation.decide": {
+    "input": {
+      "proposalId": "sample",
+      "action": "keep-first"
+    },
+    "output": {
+      "decided": false,
+      "proposalId": "sample",
+      "action": "sample",
+      "changed": [
+        "sample"
+      ],
+      "removed": [
+        "sample"
+      ],
+      "refusal": {
+        "code": "sample",
+        "state": "sample",
+        "reason": "sample",
+        "next": [
+          "sample"
+        ]
       }
     }
   },
@@ -21519,6 +22117,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
   },
   "memory.records.add": {
     "input": {
+      "id": "sample",
       "cls": "decision",
       "summary": "sample",
       "scope": "session",
@@ -22044,7 +22643,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
     "output": {
       "ok": false,
       "reason": "sample",
-      "reply": "sample"
+      "reply": "sample",
+      "changed": false
     }
   },
   "occasions.answer": {
@@ -22087,6 +22687,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "person": "sample",
       "recurrence": "annual",
       "leadDays": 0,
+      "self": false,
       "surface": "sample",
       "said": "sample",
       "authority": "sample"
@@ -22102,11 +22703,21 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
   "occasions.conflict.resolve": {
     "input": {
       "admission": "autonomous",
-      "occasionId": "sample"
+      "occasionId": "sample",
+      "keep": "sample",
+      "authority": "sample"
     },
     "output": {
       "occasionId": "sample",
-      "resolved": false
+      "resolved": false,
+      "reason": "sample",
+      "dates": [
+        "sample"
+      ],
+      "removed": [
+        "sample"
+      ],
+      "disclosure": "sample"
     }
   },
   "occasions.gifts": {
@@ -22354,6 +22965,9 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "to": "sample",
       "away": false,
       "destination": "sample",
+      "details": [
+        "sample"
+      ],
       "surface": "sample",
       "said": "sample",
       "authority": "sample"
@@ -22413,7 +23027,10 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "from": "sample",
       "to": "sample",
       "away": false,
-      "destination": "sample"
+      "destination": "sample",
+      "details": [
+        "sample"
+      ]
     },
     "output": {
       "ok": false,
@@ -22426,6 +23043,57 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       ]
     }
   },
+  "occasions.plans.remove": {
+    "input": {
+      "admission": "autonomous",
+      "planId": "sample",
+      "planFrom": "sample",
+      "confirmed": false,
+      "authority": "sample"
+    },
+    "output": {
+      "ok": false,
+      "reason": "sample",
+      "occasionId": "sample",
+      "disclosure": "sample",
+      "droppedRecords": 0
+    }
+  },
+  "occasions.plans.update": {
+    "input": {
+      "admission": "autonomous",
+      "planId": "sample",
+      "planFrom": "sample",
+      "title": "sample",
+      "from": "sample",
+      "to": "sample",
+      "away": false,
+      "destination": "sample",
+      "details": [
+        "sample"
+      ],
+      "confirmed": false,
+      "surface": "sample",
+      "said": "sample",
+      "authority": "sample"
+    },
+    "output": {
+      "ok": false,
+      "reason": "sample",
+      "occasionId": "sample",
+      "disclosure": "sample",
+      "droppedRecords": 0,
+      "written": false,
+      "proposal": {
+        "ok": false,
+        "reason": "sample",
+        "line": "sample",
+        "replaces": "sample",
+        "confirmation": "sample",
+        "unchanged": false
+      }
+    }
+  },
   "occasions.propose": {
     "input": {
       "title": "sample",
@@ -22433,7 +23101,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "kind": "gift-giving",
       "person": "sample",
       "recurrence": "annual",
-      "leadDays": 0
+      "leadDays": 0,
+      "self": false
     },
     "output": {
       "ok": false,
@@ -22470,6 +23139,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "openItems": 0,
       "interviews": 0,
       "mirrors": 0,
+      "attributions": 0,
       "lastSweep": {
         "sweptAt": 0,
         "expiredAcknowledgements": 0,
@@ -22536,6 +23206,39 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "agedGiftRecords": 0,
         "droppedInterviews": 0,
         "staleMirrors": 0
+      }
+    }
+  },
+  "occasions.update": {
+    "input": {
+      "admission": "autonomous",
+      "occasionId": "sample",
+      "title": "sample",
+      "date": "sample",
+      "kind": "gift-giving",
+      "person": "sample",
+      "recurrence": "annual",
+      "leadDays": 0,
+      "self": false,
+      "confirmed": false,
+      "surface": "sample",
+      "said": "sample",
+      "authority": "sample"
+    },
+    "output": {
+      "ok": false,
+      "reason": "sample",
+      "occasionId": "sample",
+      "disclosure": "sample",
+      "droppedRecords": 0,
+      "written": false,
+      "proposal": {
+        "ok": false,
+        "reason": "sample",
+        "line": "sample",
+        "replaces": "sample",
+        "confirmation": "sample",
+        "unchanged": false
       }
     }
   },
@@ -22648,7 +23351,10 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
     },
     "output": {
       "id": "sample",
-      "revoked": false
+      "revoked": false,
+      "alsoRevoked": [
+        "sample"
+      ]
     }
   },
   "pairing.tokens.list": {
@@ -22659,7 +23365,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "id": "sample",
           "name": "sample",
           "createdAt": 0,
-          "lastSeenAt": 0
+          "lastSeenAt": 0,
+          "mintedBy": "sample"
         }
       ],
       "legacySharedRevoked": false
@@ -22667,7 +23374,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
   },
   "pairing.tokens.migrate": {
     "input": {
-      "name": "sample"
+      "name": "sample",
+      "attemptId": "sample"
     },
     "output": {
       "token": {
@@ -22745,7 +23453,13 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "remaining": 0
       },
       "reservationCount": 0,
-      "isPaymentsLeader": false
+      "isPaymentsLeader": false,
+      "stopped": {
+        "store": "sample",
+        "reason": "sample",
+        "path": "sample",
+        "message": "sample"
+      }
     }
   },
   "payments.cards.create": {
@@ -22829,6 +23543,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "checkoutUrl": "sample",
       "item": "sample",
       "cardId": "sample",
+      "merchantDiscovered": false,
       "requestedLines": [
         {
           "label": "sample",
@@ -22844,6 +23559,12 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       ],
       "tax": "sample",
       "fees": [
+        {
+          "label": "sample",
+          "amount": "sample"
+        }
+      ],
+      "discounts": [
         {
           "label": "sample",
           "amount": "sample"
@@ -22890,28 +23611,6 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "shippingTierUsed": "sample",
       "steppedDown": false,
       "challengeStep": "sample"
-    }
-  },
-  "payments.checkout.fillCard": {
-    "input": {
-      "sessionId": "sample",
-      "pageId": "sample",
-      "targets": [
-        {
-          "field": "number",
-          "ref": "sample"
-        }
-      ],
-      "expirySeparator": "sample",
-      "twoDigitYear": false
-    },
-    "output": {
-      "ok": false,
-      "filled": [
-        "sample"
-      ],
-      "failedField": "sample",
-      "reason": "sample"
     }
   },
   "payments.purchase.approve": {
@@ -22970,7 +23669,30 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "updatedAtMs": 0,
       "outcome": "sample",
       "totalMinorUnits": 0,
-      "currency": "AAA"
+      "currency": "AAA",
+      "reason": "sample",
+      "challengeStep": "sample",
+      "exceeded": {
+        "limit": "daily-item-budget",
+        "setting": "sample",
+        "availableMinorUnits": 0,
+        "neededMinorUnits": 0,
+        "excessMinorUnits": 0,
+        "unset": false
+      }
+    }
+  },
+  "payments.purchase.securityCode": {
+    "input": {
+      "purchaseId": "sample",
+      "windowId": "sample",
+      "code": "sample",
+      "confirm": false
+    },
+    "output": {
+      "purchaseId": "sample",
+      "windowId": "sample",
+      "accepted": true
     }
   },
   "payments.purchase.status": {
@@ -22997,7 +23719,17 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "updatedAtMs": 0,
           "outcome": "sample",
           "totalMinorUnits": 0,
-          "currency": "AAA"
+          "currency": "AAA",
+          "reason": "sample",
+          "challengeStep": "sample",
+          "exceeded": {
+            "limit": "daily-item-budget",
+            "setting": "sample",
+            "availableMinorUnits": 0,
+            "neededMinorUnits": 0,
+            "excessMinorUnits": 0,
+            "unset": false
+          }
         }
       ],
       "unreadable": [
@@ -23005,7 +23737,22 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "purchaseId": "sample",
           "reason": "sample"
         }
-      ]
+      ],
+      "securityCodes": [
+        {
+          "purchaseId": "sample",
+          "windowId": "sample",
+          "merchantDomain": "sample",
+          "cardLast4": "sample",
+          "deadlineMs": 0
+        }
+      ],
+      "stopped": {
+        "store": "sample",
+        "reason": "sample",
+        "path": "sample",
+        "message": "sample"
+      }
     }
   },
   "payments.purchases.list": {
@@ -23948,7 +24695,15 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "lastOutcome": "sample",
           "consecutiveFailures": 0
         }
-      ]
+      ],
+      "lastRemoval": {
+        "subscriptionId": "sample",
+        "principalId": "sample",
+        "endpointOrigin": "sample",
+        "reason": "sample",
+        "evidence": "sample",
+        "removedAt": 0
+      }
     }
   },
   "push.subscriptions.reconcile": {
@@ -24862,9 +25617,24 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "detail": "sample",
       "lastServe": {
         "at": 0,
+        "action": "serve",
         "command": "sample",
         "ok": false,
         "url": "sample",
+        "port": 0,
+        "previousPublicBaseUrl": "sample",
+        "enableUrl": "sample",
+        "detail": "sample"
+      },
+      "activeServe": {
+        "at": 0,
+        "action": "serve",
+        "command": "sample",
+        "ok": false,
+        "url": "sample",
+        "port": 0,
+        "previousPublicBaseUrl": "sample",
+        "enableUrl": "sample",
         "detail": "sample"
       }
     }
@@ -24874,12 +25644,35 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
     "output": {
       "receipt": {
         "at": 0,
+        "action": "serve",
         "command": "sample",
         "ok": false,
         "url": "sample",
+        "port": 0,
+        "previousPublicBaseUrl": "sample",
+        "enableUrl": "sample",
         "detail": "sample"
       },
       "publicBaseUrlUpdated": false,
+      "receiptRecorded": false
+    }
+  },
+  "tailscale.serve.stop": {
+    "input": {},
+    "output": {
+      "receipt": {
+        "at": 0,
+        "action": "serve",
+        "command": "sample",
+        "ok": false,
+        "url": "sample",
+        "port": 0,
+        "previousPublicBaseUrl": "sample",
+        "enableUrl": "sample",
+        "detail": "sample"
+      },
+      "publicBaseUrlRestored": false,
+      "publicBaseUrlDetail": "sample",
       "receiptRecorded": false
     }
   },
@@ -24930,7 +25723,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
             "restoreCheckpointId": "sample"
           },
           "conversation": {
-            "undoSnapshotId": "sample"
+            "undoSnapshotId": "sample",
+            "expiresAfter": "sample"
           }
         },
         "warnings": [
@@ -25006,7 +25800,10 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "messagesRemaining": 0,
       "droppedMessages": 0,
       "undoSnapshotId": "sample",
-      "unavailableReason": "sample"
+      "undoExpiresAfter": "sample",
+      "undone": false,
+      "unavailableReason": "sample",
+      "unavailableCode": "UNDO_POINT_GONE"
     },
     "output": {
       "accepted": false,
@@ -25015,6 +25812,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "sessionId": "sample",
         "turnId": "sample",
         "kind": "preview",
+        "undoSnapshotId": "sample",
         "expiresAt": 0
       }
     }
@@ -25032,6 +25830,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "sessionId": "sample",
           "turnId": "sample",
           "kind": "preview",
+          "undoSnapshotId": "sample",
           "expiresAt": 0
         }
       ],
@@ -25070,6 +25869,25 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "warnings": [
         "sample"
       ]
+    }
+  },
+  "rewind.undo": {
+    "input": {
+      "sessionId": "sample",
+      "undoSnapshotId": "sample"
+    },
+    "output": {
+      "undone": false,
+      "sessionId": "sample",
+      "undoSnapshotId": "sample",
+      "refusal": {
+        "code": "sample",
+        "state": "sample",
+        "reason": "sample",
+        "next": [
+          "sample"
+        ]
+      }
     }
   },
   "routes.bindings.create": {
@@ -26316,7 +27134,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "permissionMode": "safe-owner",
         "contractIds": [
           "sample"
-        ]
+        ],
+        "saveError": "sample"
       },
       "history": [
         {
@@ -26364,7 +27183,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "permissionMode": "safe-owner",
         "contractIds": [
           "sample"
-        ]
+        ],
+        "saveError": "sample"
       }
     }
   },
@@ -26399,7 +27219,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "permissionMode": "safe-owner",
         "contractIds": [
           "sample"
-        ]
+        ],
+        "saveError": "sample"
       }
     }
   },
@@ -26433,7 +27254,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "permissionMode": "safe-owner",
         "contractIds": [
           "sample"
-        ]
+        ],
+        "saveError": "sample"
       }
     }
   },
@@ -26468,8 +27290,17 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "permissionMode": "safe-owner",
           "contractIds": [
             "sample"
-          ]
+          ],
+          "saveError": "sample"
         }
+      ]
+    }
+  },
+  "sessions.hosted.workspaces": {
+    "input": {},
+    "output": {
+      "roots": [
+        "sample"
       ]
     }
   },
@@ -27268,6 +28099,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "description": "sample",
         "metadata": {},
         "updatedAt": 0,
+        "origin": "project-local",
+        "path": "sample",
         "body": "sample"
       }
     }
@@ -27278,7 +28111,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
     },
     "output": {
       "name": "sample",
-      "deleted": false
+      "deleted": false,
+      "path": "sample"
     }
   },
   "skills.get": {
@@ -27291,6 +28125,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "description": "sample",
         "metadata": {},
         "updatedAt": 0,
+        "origin": "project-local",
+        "path": "sample",
         "body": "sample"
       }
     }
@@ -27303,7 +28139,9 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "name": "sample",
           "description": "sample",
           "metadata": {},
-          "updatedAt": 0
+          "updatedAt": 0,
+          "origin": "project-local",
+          "path": "sample"
         }
       ]
     }
@@ -27321,6 +28159,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "description": "sample",
         "metadata": {},
         "updatedAt": 0,
+        "origin": "project-local",
+        "path": "sample",
         "body": "sample"
       }
     }
@@ -28702,7 +29542,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "evidenceId": "sample",
         "reportSequence": 0,
         "evidenceSequence": 0,
-        "reason": "evidence-over-capacity"
+        "reason": "artifact-outside-tree"
       },
       "progress": {
         "status": "queued",
@@ -28796,7 +29636,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "evidenceId": "sample",
         "reportSequence": 0,
         "evidenceSequence": 0,
-        "reason": "evidence-over-capacity"
+        "reason": "artifact-outside-tree"
       },
       "progress": {
         "status": "queued",
@@ -28890,7 +29730,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "evidenceId": "sample",
         "reportSequence": 0,
         "evidenceSequence": 0,
-        "reason": "evidence-over-capacity"
+        "reason": "artifact-outside-tree"
       },
       "progress": {
         "status": "queued",
@@ -28984,7 +29824,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "evidenceId": "sample",
         "reportSequence": 0,
         "evidenceSequence": 0,
-        "reason": "evidence-over-capacity"
+        "reason": "artifact-outside-tree"
       },
       "progress": {
         "status": "queued",
@@ -29562,7 +30402,11 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "state": "preparing",
       "sessionId": "sample",
       "brokerInputId": "sample",
-      "correlationId": "sample"
+      "correlationId": "sample",
+      "failure": {
+        "summary": "sample",
+        "retryable": false
+      }
     }
   },
   "workLedger.turn.session": {
@@ -29588,7 +30432,11 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "state": "preparing",
       "sessionId": "sample",
       "brokerInputId": "sample",
-      "correlationId": "sample"
+      "correlationId": "sample",
+      "failure": {
+        "summary": "sample",
+        "retryable": false
+      }
     }
   },
   "workLedger.turn.startAgent": {
@@ -29606,7 +30454,11 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "state": "preparing",
       "sessionId": "sample",
       "brokerInputId": "sample",
-      "correlationId": "sample"
+      "correlationId": "sample",
+      "failure": {
+        "summary": "sample",
+        "retryable": false
+      }
     }
   },
   "workLedger.turn.status": {
@@ -29623,7 +30475,11 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "state": "preparing",
       "sessionId": "sample",
       "brokerInputId": "sample",
-      "correlationId": "sample"
+      "correlationId": "sample",
+      "failure": {
+        "summary": "sample",
+        "retryable": false
+      }
     }
   },
   "workspaces.registrations.add": {

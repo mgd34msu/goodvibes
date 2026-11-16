@@ -464,11 +464,7 @@
             "safe-owner",
             "safe-jev",
             "yolo",
-            "default",
-            "plan",
-            "allow-all",
-            "custom",
-            "background-restricted"
+            "plan"
            ]
           },
           "lastDecision": {
@@ -492,12 +488,14 @@
             "machineState": {
              "type": "string",
              "enum": [
+              "check_boundary",
               "collect_rules",
               "normalize_input",
               "evaluate_policy",
-              "evaluate_runtime_mode",
               "evaluate_session_override",
-              "final_safety_checks",
+              "read_stakes",
+              "evaluate_preset",
+              "awaiting_owner",
               "decision_emitted"
              ]
             },
@@ -512,33 +510,49 @@
             "reason": {
              "type": "string",
              "enum": [
+              "boundary_judgment_input",
+              "boundary_catastrophic",
+              "boundary_surface_authority",
+              "boundary_card_details",
+              "boundary_outward_effect",
+              "preset_allow",
+              "preset_deny",
+              "owner_approved_outward",
               "config_allow",
               "config_deny",
               "managed_policy_allow",
               "managed_policy_deny",
-              "mode_allow_all",
-              "mode_denied",
-              "mode_plan_deny",
-              "mode_background_restricted",
-              "session_cached_approval",
-              "session_cached_denial",
               "safety_guardrail",
+              "mode_allow_all",
+              "invocation_already_admitted",
+              "mode_denied",
+              "plan_mode",
+              "session_cached_allow",
+              "session_cached_deny",
               "user_rule_allow",
               "user_rule_deny",
               "user_approved",
-              "user_denied"
+              "user_denied",
+              "jev_act",
+              "jev_revise",
+              "jev_defer",
+              "jev_reject"
              ]
             },
             "sourceLayer": {
              "type": "string",
              "enum": [
+              "boundary",
+              "stakes_preset",
               "config_policy",
               "managed_policy",
-              "runtime_mode",
-              "session_override",
               "safety_check",
+              "runtime_mode",
+              "invocation_admission",
+              "session_override",
               "user_rule",
-              "user_prompt"
+              "user_prompt",
+              "jev_decision"
              ]
             },
             "persisted": {
@@ -687,6 +701,23 @@
     "x-scopes": [
      "write:fleet"
     ],
+    "x-error-codes": [
+     {
+      "code": "CONTRACT_NOT_FOUND",
+      "status": 404,
+      "meaning": "No runner on this daemon holds that contract id."
+     },
+     {
+      "code": "CONTRACT_NATIVE",
+      "status": 409,
+      "meaning": "Native work stops through its own execution, or by answering its open question with cancel."
+     },
+     {
+      "code": "CONTRACT_NOT_RUNNING",
+      "status": 409,
+      "meaning": "This runner holds the contract only for inspection."
+     }
+    ],
     "requestBody": {
      "required": true,
      "content": {
@@ -715,7 +746,7 @@
    "get": {
     "operationId": "contracts.get",
     "summary": "Get a Contract",
-    "description": "One contract with its whole tree, running or ended. 404 with CONTRACT_NOT_FOUND when no runner on this daemon holds the id.",
+    "description": "One contract with its whole tree, running or ended. The captured input's per-file list, which only contracts captured before the input was recorded as a git tree carry, is left out unless `includeInputFiles` is true. To poll for progress, use `contracts.status`. 404 with CONTRACT_NOT_FOUND when no runner on this daemon holds the id.",
     "tags": [
      "contracts"
     ],
@@ -726,6 +757,14 @@
       "required": true,
       "schema": {
        "type": "string"
+      }
+     },
+     {
+      "name": "includeInputFiles",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "boolean"
       }
      }
     ],
@@ -758,6 +797,13 @@
     },
     "x-scopes": [
      "read:fleet"
+    ],
+    "x-error-codes": [
+     {
+      "code": "CONTRACT_NOT_FOUND",
+      "status": 404,
+      "meaning": "No runner on this daemon holds that contract id."
+     }
     ]
    }
   },
@@ -765,7 +811,7 @@
    "get": {
     "operationId": "contracts.list",
     "summary": "List Contracts",
-    "description": "Every contract this daemon holds, newest first, each with its whole tree: the ask, the goal, the acceptance criteria with every Jev reading, the groups and units with their checks and nudges, open and answered owner escalations, decisions, usage, and the answer or status line once it ends. `sessionId` narrows the list to one session's contracts (a hosted session's, or a shared session's); ended contracts are left out unless `includeTerminal` is set.",
+    "description": "Every contract this daemon holds, newest first, each with its whole tree: the ask, the goal, the acceptance criteria with every Jev reading, the groups and units with their checks and nudges, open and answered owner escalations, decisions, usage, and the answer or status line once it ends. `sessionId` narrows the list to one session's contracts (a hosted session's, or a shared session's); ended contracts are left out unless `includeTerminal` is set. For a list view, `contracts.summaries` returns the same contracts as small summaries.",
     "tags": [
      "contracts"
     ],
@@ -830,7 +876,7 @@
    "post": {
     "operationId": "contracts.start",
     "summary": "Start a Contract",
-    "description": "Start a contract for `ask`, the person's words verbatim, which every stated acceptance criterion must trace to. Returns at once with the new contract and its owner agent id; the contract shapes, plans and runs on its own, and its progress arrives on the `contracts` event domain. When `sessionId` names a live session this daemon hosts, the contract starts in that session (origin `hosted`): its turns receive the contract's questions and a following turn answers them. Otherwise it starts on the daemon's own runner (origin `external`) under `sessionId`, or the `operator` session when none is given, in `workspaceRoot` (absolute), or the daemon's working directory. `isolation` overrides `contract.isolation` for this contract. 400 with INVALID_ARGUMENT when `ask` is empty, `workspaceRoot` is relative or outside the daemon's workspace, or differs from the hosted session's; 403 with SESSION_NOT_OWNED when the session belongs to another caller; 409 with SESSION_NOT_LIVE when `sessionId` names a hosted session that is no longer live.",
+    "description": "Start a contract for `ask`, the person's words verbatim, which every stated acceptance criterion must trace to. Returns at once with the new contract and its owner agent id; the contract shapes, plans and runs on its own, and its progress arrives on the `contracts` event domain. When `sessionId` names a live session this daemon hosts, the contract starts in that session (origin `hosted`): its turns receive the contract's questions and a following turn answers them. Otherwise it starts on the daemon's own runner (origin `external`) under `sessionId`, or the `operator` session when none is given, in `workspaceRoot` (absolute), or the daemon's working directory. `isolation` overrides `contract.isolation` for this contract. 400 with INVALID_ARGUMENT when `ask` is empty, `workspaceRoot` is relative or outside the daemon's workspace, or differs from the hosted session's; 403 with SESSION_NOT_OWNED when the session belongs to another caller; 409 with SESSION_NOT_LIVE when `sessionId` names a hosted session that is no longer live.\n\nReplay key: request header `Idempotency-Key`. A retry with the same key and the same body returns the first contract (with the Idempotent-Replayed: true response header) instead of starting a second one; the same key with a different body is refused with IDEMPOTENCY_KEY_REUSED. Keys are kept with the contract store per caller, so a retry after a daemon restart still returns the first contract; the body is compared field by field, in any order. The key may also be sent as `idempotencyKey` in the body; the header wins when both are given. A replayed result carries `replayed: true`.",
     "tags": [
      "contracts"
     ],
@@ -847,6 +893,9 @@
           },
           "ownerAgentId": {
            "type": "string"
+          },
+          "replayed": {
+           "type": "boolean"
           }
          },
          "required": [
@@ -874,6 +923,33 @@
     "x-scopes": [
      "write:fleet"
     ],
+    "x-replay-key": {
+     "in": "header",
+     "name": "Idempotency-Key",
+     "behavior": "A retry with the same key and the same body returns the first contract (with the Idempotent-Replayed: true response header) instead of starting a second one; the same key with a different body is refused with IDEMPOTENCY_KEY_REUSED. Keys are kept with the contract store per caller, so a retry after a daemon restart still returns the first contract; the body is compared field by field, in any order. The key may also be sent as `idempotencyKey` in the body; the header wins when both are given. A replayed result carries `replayed: true`."
+    },
+    "x-error-codes": [
+     {
+      "code": "INVALID_ARGUMENT",
+      "status": 400,
+      "meaning": "An input is not one the method accepts; the error names it and nothing was changed."
+     },
+     {
+      "code": "SESSION_NOT_OWNED",
+      "status": 403,
+      "meaning": "The session belongs to another caller."
+     },
+     {
+      "code": "SESSION_NOT_LIVE",
+      "status": 409,
+      "meaning": "sessionId names a hosted session that is no longer live."
+     },
+     {
+      "code": "IDEMPOTENCY_KEY_REUSED",
+      "status": 409,
+      "meaning": "This Idempotency-Key was already used for a different request; use a new key."
+     }
+    ],
     "requestBody": {
      "required": true,
      "content": {
@@ -897,6 +973,9 @@
            "worktree",
            "shared"
           ]
+         },
+         "idempotencyKey": {
+          "type": "string"
          }
         },
         "required": [
@@ -1001,6 +1080,33 @@
     },
     "x-scopes": [
      "write:fleet"
+    ],
+    "x-error-codes": [
+     {
+      "code": "CONTRACT_NOT_FOUND",
+      "status": 404,
+      "meaning": "No runner on this daemon holds that contract id."
+     },
+     {
+      "code": "CONTRACT_NOT_RUNNING",
+      "status": 409,
+      "meaning": "This runner holds the contract only for inspection."
+     },
+     {
+      "code": "CONTRACT_ENDED",
+      "status": 409,
+      "meaning": "The contract has ended."
+     },
+     {
+      "code": "ESCALATION_NOT_OPEN",
+      "status": 409,
+      "meaning": "The escalation is already answered, or another reply to it is being read."
+     },
+     {
+      "code": "INVALID_ARGUMENT",
+      "status": 400,
+      "meaning": "An input is not one the method accepts; the error names it and nothing was changed."
+     }
     ],
     "requestBody": {
      "required": true,
@@ -1309,6 +1415,18 @@
     "x-scopes": [
      "write:sessions"
     ],
+    "x-error-codes": [
+     {
+      "code": "SESSION_NOT_FOUND",
+      "status": 404,
+      "meaning": "No shared session has that id."
+     },
+     {
+      "code": "HOSTED_SESSION_STILL_RUNNING",
+      "status": 409,
+      "meaning": "A daemon-hosted session is still running; end it with sessions.hosted.kill, which also closes the record. Nothing was changed."
+     }
+    ],
     "requestBody": {
      "required": true,
      "content": {
@@ -1334,7 +1452,7 @@
    "get": {
     "operationId": "sessions.contextUsage.get",
     "summary": "Get Session Context Usage",
-    "description": "Return the live context-window usage for a session: estimatedContextTokens (the runtime's current estimate, not a fresh preflight count), a source-supported contextWindow or configured cap, and the derived contextUsagePct and contextRemainingTokens (all three null when capacity is unknown). Typed source, origin and accepted-input floor metadata remain separate from the known ceiling. `estimated` is always true, marking the token figure as an estimate rather than a fact. Only the daemon's live local runtime session is resolvable; any other session id is a 404 SESSION_NOT_LOCAL.",
+    "description": "Return the live context-window usage for a session: estimatedContextTokens (the runtime's current estimate, not a fresh preflight count), a source-supported contextWindow or configured cap, and the derived contextUsagePct and contextRemainingTokens (all three null when capacity is unknown). Typed source, origin and accepted-input floor metadata remain separate from the known ceiling. `estimated` is always true, marking the token figure as an estimate rather than a fact. Answers for the daemon's own runtime session and every session it hosts; a session it runs but keeps no figure for (an active channel session) is a 409 CONTEXT_USAGE_UNAVAILABLE, and any other session id is a 404 SESSION_NOT_LOCAL.",
     "tags": [
      "sessions"
     ],
@@ -1721,6 +1839,18 @@
     },
     "x-scopes": [
      "write:sessions"
+    ],
+    "x-error-codes": [
+     {
+      "code": "SESSION_NOT_FOUND",
+      "status": 404,
+      "meaning": "No shared session has that id."
+     },
+     {
+      "code": "SESSION_ACTIVE",
+      "status": 409,
+      "meaning": "The session is still active; close it, then delete it."
+     }
     ]
    },
    "get": {
@@ -1769,6 +1899,13 @@
     },
     "x-scopes": [
      "read:sessions"
+    ],
+    "x-error-codes": [
+     {
+      "code": "SESSION_NOT_FOUND",
+      "status": 404,
+      "meaning": "No shared session has that id."
+     }
     ]
    }
   },
@@ -1831,6 +1968,13 @@
     },
     "x-scopes": [
      "write:sessions"
+    ],
+    "x-error-codes": [
+     {
+      "code": "SESSION_NOT_FOUND",
+      "status": 404,
+      "meaning": "No shared session has that id."
+     }
     ],
     "requestBody": {
      "required": true,
@@ -1907,6 +2051,28 @@
     },
     "x-scopes": [
      "write:sessions"
+    ],
+    "x-error-codes": [
+     {
+      "code": "SESSION_NOT_FOUND",
+      "status": 404,
+      "meaning": "No shared session has that id."
+     },
+     {
+      "code": "SESSION_CLOSED",
+      "status": 409,
+      "meaning": "The session is closed; reopen it (sessions.reopen) before sending to it."
+     },
+     {
+      "code": "WORKSPACE_BUSY",
+      "status": 409,
+      "meaning": "A workspace swap is in progress; retry after retryAfterMs."
+     },
+     {
+      "code": "SESSION_AGENT_BIND_FAILED",
+      "status": 500,
+      "meaning": "The input was accepted but the agent started for it could not be bound; the input was released to the queue."
+     }
     ],
     "requestBody": {
      "required": true,
@@ -2010,6 +2176,13 @@
     "x-scopes": [
      "write:sessions"
     ],
+    "x-error-codes": [
+     {
+      "code": "CANCEL_NOT_ALLOWED",
+      "status": 409,
+      "meaning": "Only a queued input can be cancelled; the body says whether it is running or ended."
+     }
+    ],
     "requestBody": {
      "required": true,
      "content": {
@@ -2102,6 +2275,18 @@
     },
     "x-scopes": [
      "write:sessions"
+    ],
+    "x-error-codes": [
+     {
+      "code": "INPUT_NOT_CLAIMABLE",
+      "status": 409,
+      "meaning": "Another surface holds the input or it has ended; the body returns the input. Nothing was changed."
+     },
+     {
+      "code": "INPUT_NOT_DELIVERABLE",
+      "status": 409,
+      "meaning": "The input is not in a state a surface may report on; the body returns the input and its state."
+     }
     ],
     "requestBody": {
      "required": true,
@@ -2230,6 +2415,13 @@
     },
     "x-scopes": [
      "read:sessions"
+    ],
+    "x-error-codes": [
+     {
+      "code": "SESSION_NOT_FOUND",
+      "status": 404,
+      "meaning": "No shared session has that id."
+     }
     ]
    }
   },
@@ -2391,6 +2583,38 @@
     "x-scopes": [
      "write:sessions"
     ],
+    "x-error-codes": [
+     {
+      "code": "INVALID_KIND",
+      "status": 400,
+      "meaning": "Unknown message kind (task, message or followup); nothing was changed."
+     },
+     {
+      "code": "INVALID_MESSAGE_ID",
+      "status": 400,
+      "meaning": "messageId is not 1 to 128 letters, digits, \".\", \"_\", \":\" or \"-\"; nothing was changed."
+     },
+     {
+      "code": "SESSION_NOT_FOUND",
+      "status": 404,
+      "meaning": "No shared session has that id."
+     },
+     {
+      "code": "SESSION_CLOSED",
+      "status": 409,
+      "meaning": "The session is closed; reopen it (sessions.reopen) before sending to it."
+     },
+     {
+      "code": "WORKSPACE_BUSY",
+      "status": 409,
+      "meaning": "A workspace swap is in progress; retry after retryAfterMs."
+     },
+     {
+      "code": "SESSION_AGENT_BIND_FAILED",
+      "status": 500,
+      "meaning": "The input was accepted but the agent started for it could not be bound; the input was released to the queue."
+     }
+    ],
     "requestBody": {
      "required": true,
      "content": {
@@ -2497,6 +2721,13 @@
     },
     "x-scopes": [
      "read:sessions"
+    ],
+    "x-error-codes": [
+     {
+      "code": "SESSION_NOT_FOUND",
+      "status": 404,
+      "meaning": "No shared session has that id."
+     }
     ]
    }
   },
@@ -2504,7 +2735,7 @@
    "get": {
     "operationId": "sessions.permissionMode.get",
     "summary": "Get Session Permission Mode",
-    "description": "Return the effective session execution mode: safe-owner, safe-jev, yolo, or the read-only plan posture. Only the daemon's live local runtime session is resolvable; any other session id is a 404 SESSION_NOT_LOCAL.",
+    "description": "Return the effective session execution mode: safe-owner, safe-jev, yolo, or the read-only plan posture. Answers for the local runtime session (addressable as `runtime`), every session the daemon hosts, and a channel session with its own mode; other session ids answer 404 SESSION_NOT_LOCAL.",
     "tags": [
      "sessions"
     ],
@@ -2571,7 +2802,7 @@
    "post": {
     "operationId": "sessions.permissionMode.set",
     "summary": "Set Session Permission Mode",
-    "description": "Set safe-owner, safe-jev, or yolo execution, or enter the read-only plan posture. Admin only: yolo runs every action without safety denials, and for a session with no hosted or channel mode of its own this also rewrites the daemon-wide permissions.mode. Emits runtime.gate (PRESET_CHANGED) so every surface stays in sync. Only the daemon's live local runtime session is settable; any other session id is a 404 SESSION_NOT_LOCAL.",
+    "description": "Set safe-owner, safe-jev, or yolo execution, or enter the read-only plan posture. Admin only, because it can loosen security: yolo runs every action without safety denials, and for the local runtime session (no hosted or channel mode of its own) it rewrites the daemon-wide permissions.mode. A hosted session and a channel session with its own mode change only that session. Emits runtime.gate (PRESET_CHANGED) so every surface stays in sync. Other session ids answer 404 SESSION_NOT_LOCAL.",
     "tags": [
      "sessions"
     ],
@@ -2682,7 +2913,7 @@
    "delete": {
     "operationId": "sessions.queuedMessages.delete",
     "summary": "Delete a Queued Mid-Turn Message",
-    "description": "Remove a message still waiting in the mid-turn queue so it is never delivered. A message already delivered to the model cannot be removed, deleting it is a 404 MESSAGE_NOT_QUEUED. Only the daemon's live local runtime session is controllable; any other session id is a 404 SESSION_NOT_LOCAL.",
+    "description": "Remove a message still waiting in the mid-turn queue so it is never delivered. A message already delivered to the model cannot be removed, deleting it is a 404 MESSAGE_NOT_QUEUED. Any session with a live runtime on this daemon (the local runtime, addressable as `runtime`, and every session the daemon hosts) is controllable; other session ids answer 404 SESSION_NOT_LOCAL.",
     "tags": [
      "sessions"
     ],
@@ -2758,7 +2989,7 @@
    "post": {
     "operationId": "sessions.queuedMessages.edit",
     "summary": "Edit a Queued Mid-Turn Message",
-    "description": "Replace the text of a message still waiting in the mid-turn queue. A message already delivered to the model is immutable, editing it is a 404 MESSAGE_NOT_QUEUED. Editing replaces any multimodal content with the new plain text. Only the daemon's live local runtime session is controllable; any other session id is a 404 SESSION_NOT_LOCAL.",
+    "description": "Replace the text of a message still waiting in the mid-turn queue. A message already delivered to the model is immutable, editing it is a 404 MESSAGE_NOT_QUEUED. Editing replaces any multimodal content with the new plain text. Any session with a live runtime on this daemon (the local runtime, addressable as `runtime`, and every session the daemon hosts) is controllable; other session ids answer 404 SESSION_NOT_LOCAL.",
     "tags": [
      "sessions"
     ],
@@ -2863,7 +3094,7 @@
    "get": {
     "operationId": "sessions.queuedMessages.list",
     "summary": "List Queued Mid-Turn Messages",
-    "description": "List the messages queued behind the current turn (submitted while the model was thinking), in delivery order. Queued messages remain editable and deletable until they are delivered; a delivered message no longer appears here. Only the daemon's live local runtime session is resolvable; any other session id is a 404 SESSION_NOT_LOCAL.",
+    "description": "List the messages queued behind the current turn (submitted while the model was thinking), in delivery order. Queued messages remain editable and deletable until they are delivered; a delivered message no longer appears here. Any session with a live runtime on this daemon (the local runtime, addressable as `runtime`, and every session the daemon hosts) is resolvable; other session ids answer 404 SESSION_NOT_LOCAL.",
     "tags": [
      "sessions"
     ],
@@ -2946,7 +3177,7 @@
    "post": {
     "operationId": "sessions.register",
     "summary": "Register Shared Session",
-    "description": "Idempotently register (or heartbeat) a session keyed on a caller-supplied id, carrying its kind, project, and participant identity. Re-calling with the same id advances the participant lastSeenAt (heartbeat). Registering against a CLOSED session does NOT silently reopen it, the heartbeat is recorded and the still-closed record is returned with reopened=false and conflict={status:closed}; pass reopen=true to reopen. A titled session is never renamed by the heartbeat. An unknown kind is rejected (400), not coerced. Prefer this over sessions.create for external runtimes that own their session id.\n\nReplay key: body field `sessionId` (there is no Idempotency-Key header). Registering the same sessionId again is a heartbeat, not a second session; it returns the existing record.",
+    "description": "Idempotently register (or heartbeat) a session keyed on a caller-supplied id, carrying its kind, project, and participant identity. Re-calling with the same id advances the participant lastSeenAt (heartbeat). Registering against a CLOSED session does NOT silently reopen it, the heartbeat is recorded and the still-closed record is returned with reopened=false and conflict={status:closed}; pass reopen=true to reopen. A titled session is never renamed by the heartbeat. An unknown kind is rejected (400), not coerced. Prefer this over sessions.create for external runtimes that own their session id.\n\nReplay key: body field `sessionId`. Registering the same sessionId again is a heartbeat, not a second session; it returns the existing record.",
     "tags": [
      "sessions"
     ],
@@ -3118,6 +3349,13 @@
     "x-scopes": [
      "write:sessions"
     ],
+    "x-error-codes": [
+     {
+      "code": "SESSION_NOT_FOUND",
+      "status": 404,
+      "meaning": "No shared session has that id."
+     }
+    ],
     "requestBody": {
      "required": true,
      "content": {
@@ -3190,6 +3428,28 @@
     "x-scopes": [
      "write:sessions"
     ],
+    "x-error-codes": [
+     {
+      "code": "SESSION_NOT_FOUND",
+      "status": 404,
+      "meaning": "No shared session has that id."
+     },
+     {
+      "code": "SESSION_CLOSED",
+      "status": 409,
+      "meaning": "The session is closed; reopen it (sessions.reopen) before sending to it."
+     },
+     {
+      "code": "WORKSPACE_BUSY",
+      "status": 409,
+      "meaning": "A workspace swap is in progress; retry after retryAfterMs."
+     },
+     {
+      "code": "SESSION_AGENT_BIND_FAILED",
+      "status": 500,
+      "meaning": "The input was accepted but the agent started for it could not be bound; the input was released to the queue."
+     }
+    ],
     "requestBody": {
      "required": true,
      "content": {
@@ -3231,7 +3491,7 @@
    "post": {
     "operationId": "sessions.toolCalls.cancel",
     "summary": "Cancel One In-Flight Tool Call",
-    "description": "Cancel a single running tool call by its callId, leaving the turn and any other running calls untouched. The cancelled call settles as a structured \"cancelled by user\" tool result the model adapts to in the same turn, distinct from a whole-turn interrupt. Only the daemon's live local runtime session is controllable; any other session id is a 404 SESSION_NOT_LOCAL, and an unknown or already-settled callId is a 404 TOOL_CALL_NOT_RUNNING.",
+    "description": "Cancel a single running tool call by its callId, leaving the turn and any other running calls untouched. The cancelled call settles as a structured \"cancelled by user\" tool result the model adapts to in the same turn, distinct from a whole-turn interrupt. Any session with a live runtime on this daemon (the local runtime, addressable as `runtime`, and every session the daemon hosts) is controllable; other session ids answer 404 SESSION_NOT_LOCAL, and an unknown or already-settled callId is a 404 TOOL_CALL_NOT_RUNNING.",
     "tags": [
      "sessions"
     ],
@@ -3332,7 +3592,7 @@
    "post": {
     "operationId": "sessions.turns.cancel",
     "summary": "Request Cancellation of an Expected Turn",
-    "description": "Atomically compare expectedTurnId and request cancellation of that live turn, preserving the session and future queued work. Acceptance does not establish settlement: observe the existing runtime turn terminal event for the same sessionId and turnId. Settlement covers this turn's owned provider, tool, hook and hook-Agent work; independent workflow-trigger automations and already-committed external effects are excluded. Repeated requests are idempotent. Known recently ended IDs report already-ended; unknown or expired IDs report stale-turn when another turn is active, otherwise turn-not-found. Missing local sessions return SESSION_NOT_LOCAL. Requires write:sessions.",
+    "description": "Atomically compare expectedTurnId and request cancellation of that live turn, preserving the session and future queued work. Acceptance does not establish settlement: observe the existing runtime turn terminal event for the same sessionId and turnId. Settlement covers this turn's owned provider, tool, hook and hook-Agent work; independent workflow-trigger automations and already-committed external effects are excluded. Repeated requests are idempotent. Known recently ended IDs report already-ended; unknown or expired IDs report stale-turn when another turn is active, otherwise turn-not-found. Works for any session with a live runtime on this daemon (the local runtime, addressable as `runtime`, and every session the daemon hosts); other session ids answer 404 SESSION_NOT_LOCAL. Requires write:sessions.",
     "tags": [
      "sessions"
     ],
@@ -3579,6 +3839,28 @@
     },
     "x-scopes": [
      "write:tasks"
+    ],
+    "x-error-codes": [
+     {
+      "code": "SESSION_NOT_FOUND",
+      "status": 404,
+      "meaning": "No shared session has that id."
+     },
+     {
+      "code": "SESSION_CLOSED",
+      "status": 409,
+      "meaning": "The session is closed; reopen it (sessions.reopen) before sending to it."
+     },
+     {
+      "code": "WORKSPACE_BUSY",
+      "status": 409,
+      "meaning": "A workspace swap is in progress; retry after retryAfterMs."
+     },
+     {
+      "code": "SESSION_AGENT_BIND_FAILED",
+      "status": 500,
+      "meaning": "The input was accepted but the agent started for it could not be bound; the input was released to the queue."
+     }
     ],
     "requestBody": {
      "required": true,
@@ -4019,12 +4301,21 @@
        "type": "string",
        "enum": [
         "approvals.raise",
+        "contracts.dispatch",
+        "contracts.remove",
+        "contracts.status",
+        "contracts.summaries",
+        "inbox.answer",
+        "inbox.list",
+        "inbox.post",
+        "inbox.withdraw",
         "sessions.changes.get",
         "sessions.hosted.attach",
         "sessions.hosted.create",
         "sessions.hosted.detach",
         "sessions.hosted.kill",
         "sessions.hosted.list",
+        "sessions.hosted.workspaces",
         "sessions.search"
        ]
       }
@@ -4058,12 +4349,21 @@
     },
     "x-invoke-only-methods": [
      "approvals.raise",
+     "contracts.dispatch",
+     "contracts.remove",
+     "contracts.status",
+     "contracts.summaries",
+     "inbox.answer",
+     "inbox.list",
+     "inbox.post",
+     "inbox.withdraw",
      "sessions.changes.get",
      "sessions.hosted.attach",
      "sessions.hosted.create",
      "sessions.hosted.detach",
      "sessions.hosted.kill",
      "sessions.hosted.list",
+     "sessions.hosted.workspaces",
      "sessions.search"
     ]
    }
@@ -4095,7 +4395,7 @@
     }
    },
    "BadRequest": {
-    "description": "The request was malformed or failed validation; nothing was changed. `code` may be INVALID_KIND or INVALID_ARGUMENT.",
+    "description": "The request was malformed or failed validation; nothing was changed. Codes declared: INVALID_ARGUMENT, INVALID_KIND, INVALID_MESSAGE_ID.",
     "content": {
      "application/json": {
       "schema": {
@@ -4135,7 +4435,7 @@
     }
    },
    "Conflict": {
-    "description": "The target is in a state that cannot take this action; the body names the state and what is allowed. Codes seen: SESSION_CLOSED, SESSION_ACTIVE, INPUT_NOT_DELIVERABLE, CANCEL_NOT_ALLOWED.",
+    "description": "The target is in a state that cannot take this action; the body names the state and what is allowed. Codes declared: CONTRACT_NATIVE, CONTRACT_NOT_RUNNING, NOT_HOSTING, CONTRACT_NOT_ENDED, CONTRACT_ENDED, ESCALATION_NOT_OPEN, SESSION_NOT_LIVE, IDEMPOTENCY_KEY_REUSED, HOSTED_SESSION_STILL_RUNNING, SESSION_ACTIVE, SESSION_CLOSED, WORKSPACE_BUSY, CANCEL_NOT_ALLOWED, INPUT_NOT_CLAIMABLE, INPUT_NOT_DELIVERABLE.",
     "content": {
      "application/json": {
       "schema": {
@@ -4154,43 +4454,74 @@
     "properties": {
      "error": {
       "type": "string",
-      "description": "What went wrong, naming the current state and the allowed next step where there is one."
+      "description": "Why the request was not carried out."
+     },
+     "state": {
+      "type": "string",
+      "description": "What is true now, when the daemon refused rather than failed."
+     },
+     "next": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "description": "Steps that would get past the refusal, most useful first."
+     },
+     "hint": {
+      "type": "string",
+      "description": "`next[0]` when `next` is present."
      },
      "code": {
       "type": "string",
-      "description": "A stable code. Known values are listed in `x-known-codes`; unknown codes must be treated as opaque.",
+      "description": "A stable code. Known values are listed in `x-known-codes`; treat any other as opaque.",
       "x-known-codes": [
-       "AUTH_REQUIRED",
-       "TOKEN_EXPIRED",
-       "PERMISSION_DENIED",
-       "PAYMENT_REQUIRED",
-       "RATE_LIMITED",
-       "NETWORK_UNREACHABLE",
-       "TIMEOUT",
-       "CANCELLED",
-       "NOT_FOUND",
-       "CONFLICT",
-       "SESSION_CLOSED",
-       "NOT_INVOKABLE",
-       "METHOD_NOT_FOUND",
-       "VALIDATION_FAILED",
-       "AGENT_TIMEOUT",
        "AGENT_FAILED",
-       "TOOL_EXEC_FAILED",
-       "SERVICE_UNAVAILABLE",
+       "AGENT_TIMEOUT",
+       "AUTH_REQUIRED",
+       "CANCELLED",
+       "CANCEL_NOT_ALLOWED",
+       "CONFLICT",
+       "CONTRACT_ENDED",
        "CONTRACT_MISMATCH",
-       "PROTOCOL_ERROR",
-       "INTERNAL_ERROR",
+       "CONTRACT_NATIVE",
+       "CONTRACT_NOT_ENDED",
+       "CONTRACT_NOT_FOUND",
+       "CONTRACT_NOT_RUNNING",
        "ENGINE_CONFIGURATION_ERROR",
        "ENGINE_CONTRACT_ERROR",
        "ENGINE_HTTP_STATUS_ERROR",
-       "UNKNOWN",
-       "SESSION_NOT_FOUND",
-       "SESSION_ACTIVE",
+       "ESCALATION_NOT_OPEN",
+       "HOSTED_SESSION_STILL_RUNNING",
+       "IDEMPOTENCY_KEY_REUSED",
+       "INPUT_NOT_CLAIMABLE",
        "INPUT_NOT_DELIVERABLE",
-       "CANCEL_NOT_ALLOWED",
+       "INTERNAL_ERROR",
+       "INVALID_ARGUMENT",
        "INVALID_KIND",
-       "INVALID_ARGUMENT"
+       "INVALID_MESSAGE_ID",
+       "METHOD_NOT_FOUND",
+       "MISSING_SCOPE",
+       "NETWORK_UNREACHABLE",
+       "NOT_FOUND",
+       "NOT_HOSTING",
+       "NOT_INVOKABLE",
+       "PAYMENT_REQUIRED",
+       "PERMISSION_DENIED",
+       "PROTOCOL_ERROR",
+       "RATE_LIMITED",
+       "SERVICE_UNAVAILABLE",
+       "SESSION_ACTIVE",
+       "SESSION_AGENT_BIND_FAILED",
+       "SESSION_CLOSED",
+       "SESSION_NOT_FOUND",
+       "SESSION_NOT_LIVE",
+       "SESSION_NOT_OWNED",
+       "TIMEOUT",
+       "TOKEN_EXPIRED",
+       "TOOL_EXEC_FAILED",
+       "UNKNOWN",
+       "VALIDATION_FAILED",
+       "WORKSPACE_BUSY"
       ]
      },
      "category": {
@@ -4216,16 +4547,32 @@
      "source": {
       "type": "string"
      },
-     "hint": {
-      "type": "string"
-     },
      "recoverable": {
       "type": "boolean"
      },
      "status": {
       "type": "integer"
      },
+     "provider": {
+      "type": "string"
+     },
+     "operation": {
+      "type": "string"
+     },
+     "phase": {
+      "type": "string"
+     },
      "requestId": {
+      "type": "string"
+     },
+     "errorRef": {
+      "type": "string",
+      "description": "Opaque server-owned failure receipt."
+     },
+     "providerCode": {
+      "type": "string"
+     },
+     "providerType": {
       "type": "string"
      },
      "retryAfterMs": {
@@ -6503,6 +6850,22 @@
         },
         "route": {
          "$ref": "#/components/schemas/Route"
+        },
+        "record": {
+         "type": "object",
+         "required": [
+          "kind"
+         ],
+         "properties": {
+          "kind": {
+           "type": "string",
+           "enum": [
+            "fix-scheduled",
+            "amended",
+            "receipt"
+           ]
+          }
+         }
         }
        },
        "required": [
@@ -6543,6 +6906,49 @@
       "type": "array",
       "items": {
        "type": "string"
+      }
+     },
+     "agentUsage": {
+      "type": "object",
+      "additionalProperties": {
+       "type": "object",
+       "properties": {
+        "usage": {
+         "$ref": "#/components/schemas/Usage"
+        },
+        "agent": {
+         "anyOf": [
+          {
+           "type": "string"
+          },
+          {
+           "type": "number"
+          },
+          {
+           "type": "boolean"
+          },
+          {
+           "type": "null"
+          },
+          {
+           "type": "object",
+           "additionalProperties": {}
+          },
+          {
+           "type": "array",
+           "items": {}
+          }
+         ]
+        },
+        "toolCallCount": {
+         "type": "number"
+        }
+       },
+       "required": [
+        "usage",
+        "toolCallCount"
+       ],
+       "additionalProperties": false
       }
      },
      "answer": {
@@ -7320,7 +7726,9 @@
      "version": {
       "type": "number",
       "enum": [
-       2
+       2,
+       3,
+       4
       ]
      },
      "head": {
@@ -9416,7 +9824,16 @@
    ]
   },
   {
+   "id": "control.owner_inbox_update",
+   "domains": [
+    "gate"
+   ]
+  },
+  {
    "id": "control.ready"
+  },
+  {
+   "id": "control.remote_update"
   },
   {
    "id": "control.session_update",

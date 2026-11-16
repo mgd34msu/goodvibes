@@ -2965,7 +2965,9 @@
         "version": {
           "type": "number",
           "enum": [
-            2
+            2,
+            3,
+            4
           ]
         },
         "head": {
@@ -3937,7 +3939,9 @@
               "version": {
                 "type": "number",
                 "enum": [
-                  2
+                  2,
+                  3,
+                  4
                 ]
               },
               "head": {
@@ -4889,7 +4893,9 @@
               "version": {
                 "type": "number",
                 "enum": [
-                  2
+                  2,
+                  3,
+                  4
                 ]
               },
               "head": {
@@ -6179,7 +6185,9 @@
                     "version": {
                       "type": "number",
                       "enum": [
-                        2
+                        2,
+                        3,
+                        4
                       ]
                     },
                     "head": {
@@ -7600,6 +7608,22 @@
               "reason"
             ],
             "additionalProperties": false
+          },
+          "record": {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "fix-scheduled",
+                  "amended",
+                  "receipt"
+                ]
+              }
+            }
           }
         },
         "required": [
@@ -7708,6 +7732,117 @@
       "type": "array",
       "items": {
         "type": "string"
+      }
+    },
+    "agentUsage": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "usage": {
+            "type": "object",
+            "properties": {
+              "inputTokens": {
+                "type": "number"
+              },
+              "outputTokens": {
+                "type": "number"
+              },
+              "cacheReadTokens": {
+                "type": "number"
+              },
+              "cacheWriteTokens": {
+                "type": "number"
+              },
+              "reasoningTokens": {
+                "type": "number"
+              },
+              "llmCallCount": {
+                "type": "number"
+              },
+              "turnCount": {
+                "type": "number"
+              },
+              "toolCallCount": {
+                "type": "number"
+              },
+              "costUsd": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "costState": {
+                "type": "string",
+                "enum": [
+                  "priced",
+                  "unpriced",
+                  "estimated"
+                ]
+              },
+              "costSource": {
+                "type": "string",
+                "enum": [
+                  "user",
+                  "provider",
+                  "catalog",
+                  "mixed"
+                ]
+              },
+              "pricingAsOf": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "inputTokens",
+              "outputTokens",
+              "cacheReadTokens",
+              "cacheWriteTokens",
+              "llmCallCount",
+              "turnCount",
+              "toolCallCount",
+              "costUsd",
+              "costState"
+            ],
+            "additionalProperties": false
+          },
+          "agent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              },
+              {
+                "type": "object",
+                "additionalProperties": {}
+              },
+              {
+                "type": "array",
+                "items": {}
+              }
+            ]
+          },
+          "toolCallCount": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "usage",
+          "toolCallCount"
+        ],
+        "additionalProperties": false
       }
     },
     "answer": {

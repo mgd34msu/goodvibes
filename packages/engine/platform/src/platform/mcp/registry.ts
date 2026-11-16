@@ -18,6 +18,11 @@ import { currentExternalOperationSource } from '../permissions/external-operatio
  * the caller and a default deadline. It is checked before admission and
  * immediately before the request is sent; the abort reason says what changed.
  *
+ * Connection state: one McpLifecycleManager owns it. A server whose connect
+ * fails or whose process exits is reconnected with exponential back-off
+ * (bounded attempts, then a refusal naming why it stopped) while the
+ * `runtime.mcpLifecycle` setting is on; a reload starts a fresh cycle.
+ *
  * Tool namespace: mcp:<server-name>:<tool-name>
  */
 import { logger } from '../utils/logger.js';
@@ -51,12 +56,18 @@ import type { HookDispatcher } from '../hooks/dispatcher.js';
 import type { HookEvent } from '../hooks/types.js';
 import { McpPermissionManager, captureMcpDecisionHistoryReadSource } from '../runtime/mcp/permissions.js';
 import { McpSchemaFreshnessTracker } from '../runtime/mcp/schema-freshness.js';
-import type { McpDecisionRecord, McpServerRole, McpTrustMode, QuarantineReason, SchemaFreshness } from '../runtime/mcp/types.js';
+import { McpLifecycleManager } from '../runtime/mcp/manager.js';
+import type { McpDecisionRecord, McpReconnectStatus, McpServerRole, McpTrustMode, QuarantineReason, SchemaFreshness } from '../runtime/mcp/types.js';
+import type { McpEvent } from '../../events/mcp.js';
 import type { RuntimeEventBus } from '../runtime/events/index.js';
 import {
   emitMcpConfigured,
+  emitMcpConnected,
+  emitMcpConnecting,
+  emitMcpDegraded,
   emitMcpDisconnected,
   emitMcpPolicyUpdated,
+  emitMcpReconnecting,
   emitMcpSchemaQuarantineApproved,
   emitMcpSchemaQuarantined,
 } from '../runtime/emitters/mcp.js';
@@ -170,6 +181,18 @@ export class McpRegistry {
     this.policyLifetimes.set(serverName, new AbortController());
   }
   private freshness = new McpSchemaFreshnessTracker();
+  /**
+   * The one owner of each server's connection state and of reconnecting a
+   * server that dropped: every connect outcome below is reported to it, and its
+   * attempts come back through `_connectServer`, so a reconnect passes the same
+   * checks as the first connect. Whether to reconnect is the
+   * `runtime.mcpLifecycle` setting, read when a server drops.
+   */
+  readonly #lifecycle = new McpLifecycleManager({
+    connector: (name) => this.#reconnect(name),
+    enabled: () => this.sandboxConfigManager?.get('runtime.mcpLifecycle') ?? true,
+    onEvent: (event) => this.#publishLifecycleEvent(event),
+  });
   private runtimeBus: RuntimeEventBus | null = null;
   private sandboxConfigManager: ConfigManager | null = null;
   private sandboxSessions: SandboxSessionRegistry;
@@ -180,6 +203,10 @@ export class McpRegistry {
     for (const pending of this.pendingConnections.values()) pending.lifetime.abort();
     for (const [name, client] of this.clients) { this.executionByClient.get(client)?.close(); this.invalidatePolicyLifetime(name, 'the permission owner was replaced'); }
     this.permissionHost = host;
+    // A revoked owner ends every scheduled reconnect; a replaced one no longer speaks for this registry.
+    const revoked = () => { if (this.permissionHost === host) this.#lifecycle.stopAll('the MCP connection owner was revoked'); };
+    if (host.signal.aborted) revoked();
+    else host.signal.addEventListener('abort', revoked, { once: true });
   }
   private elicitationHandler: McpElicitationHandler | null = null;
 
@@ -363,13 +390,16 @@ export class McpRegistry {
   async #loadCatalog<T>(serverName: string, client: McpClient, load: () => Promise<T>, signal?: AbortSignal): Promise<T> {
     try {
       const value = await load();
-      if (!this.freshness.isQuarantined(serverName) && this.freshness.getFreshness(serverName) !== 'fresh') this.freshness.markFresh(serverName);
+      if (!this.freshness.isQuarantined(serverName) && this.freshness.getFreshness(serverName) !== 'fresh') {
+        this.freshness.markFresh(serverName); this.#lifecycle.recovered(serverName);
+      }
       return value;
     } catch (error) {
       if (!signal?.aborted && !isAbortLike(error) && client.isConnected) {
         const wasQuarantined = this.freshness.isQuarantined(serverName);
         this.freshness.markFailed(serverName, summarizeError(error));
         if (!wasQuarantined && this.freshness.isQuarantined(serverName)) this.invalidatePolicyLifetime(serverName, 'it was quarantined after its tool list failed to load repeatedly');
+        else this.#lifecycle.degraded(serverName, `its tool list could not be read: ${summarizeError(error)}`);
       }
       throw error;
     }
@@ -579,7 +609,9 @@ export class McpRegistry {
         // The tool has already run: a policy, configuration or caller change after
         // dispatch must not turn a completed call into a failure the caller would
         // retry. A quarantine that landed meanwhile is kept, not cleared as fresh.
-        if (!this.freshness.isQuarantined(serverName) && this.freshness.getFreshness(serverName) !== 'fresh') this.freshness.markFresh(serverName);
+        if (!this.freshness.isQuarantined(serverName) && this.freshness.getFreshness(serverName) !== 'fresh') {
+          this.freshness.markFresh(serverName); this.#lifecycle.recovered(serverName);
+        }
         // Post:mcp:call hook (fire-and-forget)
         const postEvent: HookEvent = {
           path: 'Post:mcp:call',
@@ -599,7 +631,7 @@ export class McpRegistry {
           const health = await this.checkServerHealth(serverName).catch(() => null);
           failure = new Error(`${summarizeError(err)} ${health?.responsive
             ? `The server still answers a health check (${health.elapsedMs} ms), so the tool itself is slow; call it again with less work, or raise the deadline.`
-            : 'The server did not answer a health check either; reload the MCP configuration to restart it.'}`);
+            : 'The server did not answer a health check either; run /mcp reload (or reload the MCP configuration) to restart it.'}`);
         }
         // Fail:mcp:call hook (fire-and-forget)
         const failEvent: HookEvent = {
@@ -620,6 +652,8 @@ export class McpRegistry {
    * disconnectAll, Stop all connected MCP server processes.
    */
   async disconnectAll(): Promise<void> {
+    // A server waiting for a reconnect has no client or pending connect to stop; its timer is ended here.
+    this.#lifecycle.stopAll('the MCP servers were disconnected');
     const names = new Set([...this.clients.keys(), ...this.pendingConnections.keys()]);
     // Each disconnect synchronously revokes admission, then owns both the
     // published transport and any still-negotiating transport until cleanup.
@@ -631,6 +665,7 @@ export class McpRegistry {
   async disconnectServer(serverName: string, reason = 'manual'): Promise<boolean> {
     const pending = this.pendingConnections.get(serverName);
     const client = this.clients.get(serverName);
+    this.#lifecycle.stop(serverName, reason);
     this.invalidatePolicyLifetime(serverName, 'it was disconnected');
     const outcomes = await Promise.allSettled([
       pending?.done.catch(() => {}),
@@ -645,6 +680,7 @@ export class McpRegistry {
   private forgetServer(name: string): void {
     if (this.serverConfigs.has(name) || this.clients.has(name) || this.pendingConnections.has(name)) return;
     this.permissions.removeServer(name);
+    this.#lifecycle.forget(name);
     this.sessionPolicy.delete(name);
     this.freshness.removeServer(name);
     this.connectFailures.delete(name);
@@ -665,7 +701,7 @@ export class McpRegistry {
         sessionId: 'mcp-registry',
         traceId: `mcp-registry:${serverName}:disconnected`,
         source: 'mcp-registry',
-      }, { serverId: serverName, reason, willRetry: false });
+      }, { serverId: serverName, reason, willRetry: reason === 'reconnect' });
     }
     const disconnectedEvent: HookEvent = {
       path: 'Lifecycle:mcp:disconnected',
@@ -706,12 +742,14 @@ export class McpRegistry {
     protocolEra?: 'modern' | 'legacy' | undefined;
     phase: McpClientPhase;
     lastError?: string | undefined;
+    reconnect?: McpReconnectStatus | undefined;
     excludedTools?: readonly McpExcludedTool[] | undefined;
   }> {
     return this.serverNames.map((name) => {
       const client = this.clients.get(name);
       const negotiated = client?.protocolInfo ?? null;
       const excludedTools = client?.excludedTools ?? [];
+      const reconnect = this.#lifecycle.reconnectStatus(name);
       return {
         name,
         connected: client?.isConnected ?? false,
@@ -719,7 +757,8 @@ export class McpRegistry {
         protocolVersion: negotiated?.version,
         protocolEra: negotiated?.era,
         phase: this.serverPhase(name),
-        lastError: client?.lastError ?? this.connectFailures.get(name),
+        lastError: this.serverLastError(name),
+        ...(reconnect ? { reconnect } : {}),
         ...(excludedTools.length > 0 ? { excludedTools } : {}),
       };
     });
@@ -727,18 +766,34 @@ export class McpRegistry {
 
   private serverPhase(name: string): McpClientPhase {
     const client = this.clients.get(name);
-    if (client) return client.phase;
+    if (client?.isConnected) return client.phase;
+    // A reconnect scheduled by the lifecycle owner comes back on its own, like a client restart.
+    if (this.#lifecycle.isReconnecting(name)) return 'restart-wait';
     if (this.pendingConnections.has(name)) return 'starting';
+    if (client) return client.phase;
     return this.connectFailures.has(name) ? 'gave-up' : 'idle';
+  }
+
+  private serverLastError(name: string): string | undefined {
+    const client = this.clients.get(name);
+    if (client?.isConnected) return client.lastError ?? undefined;
+    return this.#lifecycle.getServer(name)?.lastError ?? client?.lastError ?? this.connectFailures.get(name);
   }
 
   /** A refusal that names the state, why, and what gets the server back. */
   private notConnectedMessage(name: string): string {
     const phase = this.serverPhase(name);
-    const why = this.clients.get(name)?.lastError ?? this.connectFailures.get(name);
-    const next = phase === 'restart-wait' || phase === 'starting' || phase === 'negotiating'
-      ? 'it is being restarted; retry in a few seconds'
-      : 'fix the server or its entry in mcp.json, then reload the MCP configuration to reconnect it';
+    const why = this.serverLastError(name);
+    const reconnect = this.#lifecycle.reconnectStatus(name);
+    let next: string;
+    if (phase === 'restart-wait' && reconnect?.nextAttemptAt !== undefined) {
+      const seconds = Math.max(1, Math.ceil((reconnect.nextAttemptAt - Date.now()) / 1000));
+      next = `reconnect attempt ${reconnect.attempt} of ${reconnect.maxAttempts} starts in ${seconds} s; call the tool again after that`;
+    } else if (phase === 'restart-wait' || phase === 'starting' || phase === 'negotiating') {
+      next = 'it is being restarted; retry in a few seconds';
+    } else {
+      next = `${reconnect?.stoppedReason ? `${reconnect.stoppedReason}; ` : ''}fix the server or its entry in mcp.json, then run /mcp reload (or reload the MCP configuration) to reconnect it`;
+    }
     return `McpRegistry: server '${name}' is not connected (${phase}${why ? `: ${why}` : ''}); ${next}`;
   }
 
@@ -760,6 +815,9 @@ export class McpRegistry {
     sessionRole?: McpServerRole | undefined;
     configuredTrustMode: McpTrustMode;
     configuredRole: McpServerRole;
+    phase: McpClientPhase;
+    lastError?: string | undefined;
+    reconnect?: McpReconnectStatus | undefined;
   }> {
     return this.listServers().map((server) => {
       const permissions = this.permissions.getServerPermissions(server.name);
@@ -773,6 +831,9 @@ export class McpRegistry {
         configuredRole: config?.role ?? 'general',
         name: server.name,
         connected: server.connected,
+        phase: server.phase,
+        ...(server.lastError !== undefined ? { lastError: server.lastError } : {}),
+        ...(server.reconnect ? { reconnect: server.reconnect } : {}),
         transport: server.transport,
         protocolVersion: server.protocolVersion,
         protocolEra: server.protocolEra,
@@ -904,8 +965,10 @@ export class McpRegistry {
   // Private helpers
   // ---------------------------------------------------------------------------
 
-  private _connectServer(serverConfig: McpServerConfig): Promise<void> {
+  /** One connect attempt. `reconnect` marks an attempt the lifecycle owner scheduled, which continues its cycle instead of starting a new one. */
+  private _connectServer(serverConfig: McpServerConfig, reconnect = false): Promise<void> {
     if (this.serverConfigs.get(serverConfig.name) !== serverConfig) return Promise.reject(new Error('MCP configuration intent changed'));
+    if (!reconnect) this.#lifecycle.requested(serverConfig.name);
     const previous = this.pendingConnections.get(serverConfig.name);
     previous?.lifetime.abort();
     const pending: PendingMcpConnection = { lifetime: new AbortController(), done: Promise.resolve(), cleanupErrors: [] };
@@ -945,9 +1008,13 @@ export class McpRegistry {
     };
     assertHostCurrent();
     const { name } = serverConfig;
+    // Whether this attempt still speaks for the configuration; a cancelled attempt reports no outcome.
+    const stillWanted = (): boolean => !signal.aborted && this.permissionHost === host
+      && this.serverConfigs.get(name) === serverConfig && this.pendingConnections.get(name) === pending;
     const existing = this.clients.get(name);
     if (existing?.isConnected) {
       logger.info('McpRegistry: server already registered', { name });
+      this.#lifecycle.connected(name);
       return;
     }
     if (existing) {
@@ -994,8 +1061,11 @@ export class McpRegistry {
         throw new Error('MCP process owner or configuration changed');
     };
     const elicitationHandler = this.elicitationHandler;
-    const client = new McpClient(serverConfig, {
+    const client: McpClient = new McpClient(serverConfig, {
       ...(processSpec ? { processSpec } : {}),
+      // Reconnecting is the lifecycle owner's job, so a crash is reported here instead of restarted in place.
+      restartAttempts: 0,
+      onUnexpectedExit: (reason) => this.#clientDropped(name, client, reason),
       ...(host && serverConfig.command ? { beforeProcessStart: assertProcessCurrent } : {}),
       onNotification: (notification) => this._handleClientNotification(notification),
       onServerRequest: (request) => this._handleClientServerRequest(request),
@@ -1049,6 +1119,9 @@ export class McpRegistry {
           allowedHosts: policy.allowedHosts,
         });
       }
+      this.#lifecycle.connected(name);
+      // A process that exited between the handshake and registration was reported to no one.
+      if (!client.isConnected) this.#clientDropped(name, client, client.lastError ?? 'the server process exited unexpectedly');
       // Lifecycle:mcp:connected hook (fire-and-forget)
       const connectedEvent: HookEvent = {
         path: 'Lifecycle:mcp:connected',
@@ -1075,6 +1148,7 @@ export class McpRegistry {
       if (this.serverConfigs.get(name) === serverConfig) {
         this.freshness.markFailed(name, summarizeError(err));
         this.connectFailures.set(name, summarizeError(err));
+        if (stillWanted()) this.#lifecycle.failed(name, summarizeError(err));
       }
       logger.error('McpRegistry: failed to connect server', { name, err: summarizeError(err) });
       if (pending.cleanupErrors.length) throw new AggregateError([err, ...pending.cleanupErrors], 'MCP connection cleanup failed');
@@ -1083,6 +1157,40 @@ export class McpRegistry {
       assertHostCurrent(); assertProcessCurrent();
     }
     } finally { releaseConfiguration(); }
+  }
+
+  /** The lifecycle owner's attempt: connect a configured server again, unless something else already is. */
+  async #reconnect(name: string): Promise<boolean> {
+    const serverConfig = this.serverConfigs.get(name);
+    if (!serverConfig) return false;
+    if (this.clients.get(name)?.isConnected) { this.#lifecycle.connected(name); return true; }
+    const pending = this.pendingConnections.get(name);
+    if (pending) { await pending.done.catch(() => {}); return true; }
+    await this._connectServer(serverConfig, true);
+    return true;
+  }
+
+  /** A registered client's server stopped without being asked; its calls already ended with its connection. */
+  #clientDropped(name: string, client: McpClient, reason: string): void {
+    if (this.clients.get(name) !== client) return;
+    this.#revision++;
+    this.#lifecycle.failed(name, reason);
+  }
+
+  #publishLifecycleEvent(event: McpEvent): void {
+    const bus = this.runtimeBus;
+    if (!bus) return;
+    const ctx = { sessionId: 'mcp-registry', traceId: `mcp-registry:${event.serverId}:${event.type.toLowerCase()}`, source: 'mcp-registry' };
+    switch (event.type) {
+      case 'MCP_CONNECTING': emitMcpConnecting(bus, ctx, { serverId: event.serverId }); return;
+      case 'MCP_CONNECTED': emitMcpConnected(bus, ctx, { serverId: event.serverId, toolCount: event.toolCount, resourceCount: event.resourceCount }); return;
+      case 'MCP_DEGRADED': emitMcpDegraded(bus, ctx, { serverId: event.serverId, reason: event.reason, availableTools: event.availableTools }); return;
+      case 'MCP_RECONNECTING': emitMcpReconnecting(bus, ctx, { serverId: event.serverId, attempt: event.attempt, maxAttempts: event.maxAttempts }); return;
+      case 'MCP_DISCONNECTED':
+        emitMcpDisconnected(bus, ctx, { serverId: event.serverId, willRetry: event.willRetry, ...(event.reason !== undefined ? { reason: event.reason } : {}) });
+        return;
+      default: return;
+    }
   }
 
   private async _resolveSandboxProcessSpec(

@@ -93,6 +93,9 @@ function describeServer(
   return {
     name: server.name,
     connected: server.connected,
+    ...(server.phase ? { phase: server.phase } : {}),
+    ...(!server.connected && server.lastError ? { lastError: previewHarnessText(server.lastError, SERVER_TEXT_LIMIT) } : {}),
+    ...(server.reconnect ? { reconnect: server.reconnect } : {}),
     trustMode: server.trustMode,
     role: server.role,
     schemaFreshness: server.schemaFreshness,

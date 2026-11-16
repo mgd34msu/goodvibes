@@ -2,7 +2,7 @@
  * MCP schema freshness tracking.
  *
  * Tracks per-server schema cache freshness with TTL-based staleness detection.
- * Used by McpLifecycleManager to decide when to trigger background re-fetches.
+ * Held by the MCP registry; a failed listing counts toward quarantine and marks the server degraded.
  */
 import type { SchemaFreshness, McpSchemaRecord, QuarantineReason } from './types.js';
 import { logger } from '../../utils/logger.js';

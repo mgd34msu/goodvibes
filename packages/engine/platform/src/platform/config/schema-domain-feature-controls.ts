@@ -102,9 +102,9 @@ export const featureControlSettings: ConfigSetting[] = [
   {
     key: 'runtime.mcpLifecycle',
     type: 'boolean',
-    default: false,
+    default: true,
     description:
-      'Structured MCP server lifecycle with connect/disconnect phases and health integration. Restart to apply. Default off until the plugin catalog work lands.',
+      'Reconnect an MCP server automatically when its connect fails or its process exits: exponential back-off from 1 s to 30 s, at most 5 attempts, then the server stays disconnected and a call to it says why and to run /mcp reload. Each server\'s state (connecting, connected, degraded, reconnecting, disconnected) shows in /mcp servers, the MCP workspace, the mcp tool and the health view. Read each time a server drops, so a change applies to the next drop. Default on. Off: a server that drops stays disconnected until /mcp reload.',
   },
   {
     key: 'runtime.toolBudget.enforced',

@@ -100,9 +100,10 @@ export type McpElicitationResolver = (input: {
 }) => Promise<{ action: 'accept' | 'decline' | 'cancel'; content?: Record<string, unknown> | undefined }>;
 
 /**
- * Where a client's connection is in its life. `restart-wait` means a crashed
- * stdio server will be respawned on a timer; `gave-up` means it will not be
- * respawned without a reconnect (configuration reload).
+ * Where a client's connection is in its life. `restart-wait` means the server
+ * will be started again on a timer (by the client itself, or by the registry's
+ * automatic reconnect); `gave-up` means nothing will start it again until a
+ * reconnect is asked for (configuration reload).
  */
 export type McpClientPhase = 'idle' | 'starting' | 'negotiating' | 'ready' | 'restart-wait' | 'gave-up' | 'closed';
 
@@ -120,6 +121,13 @@ export interface McpClientOptions {
   initializeTimeoutMs?: number | undefined;
   /** Base delay before a crashed stdio server is restarted; attempt N waits N times this. Defaults to 2 s. */
   restartDelayMs?: number | undefined;
+  /**
+   * How many times this client restarts a crashed stdio server itself. Defaults to 3;
+   * 0 leaves reconnecting to the owner of the connection (the MCP registry's lifecycle).
+   */
+  restartAttempts?: number | undefined;
+  /** Called when the server stopped without being asked and this client will not restart it, with the reason. */
+  onUnexpectedExit?: ((reason: string) => void) | undefined;
   processSpec?: McpProcessSpec | undefined;
   onNotification?: ((notification: McpClientNotification) => void) | undefined;
   onServerRequest?: ((request: McpClientServerRequest) => void) | undefined;

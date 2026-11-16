@@ -136,7 +136,7 @@ export function createMcpWorkspaceRenderer(policy: {
           desc: serverOriginLabel(row.server.source),
           mark: row.server.connected ? '●' : '○',
           markFg: row.server.connected ? t.success : t.warning,
-          right: row.server.quarantineReason ? 'quarantined' : row.server.connected ? '' : 'offline',
+          right: row.server.quarantineReason ? 'quarantined' : row.server.connected ? '' : row.server.connectionState ?? 'offline',
           rightFg: row.server.quarantineReason ? t.error : t.textFaint,
           selected,
         });
@@ -166,9 +166,10 @@ export function createMcpWorkspaceRenderer(policy: {
       lines.push(
         title(server.name),
         {
-          text: `${server.connected ? 'connected' : 'offline'} · ${serverOriginLabel(server.source)} · ${policy.freshnessLabel} ${server.freshness}`,
+          text: `${server.connected ? 'connected' : server.connectionState ?? 'offline'} · ${serverOriginLabel(server.source)} · ${policy.freshnessLabel} ${server.freshness}`,
           style: { fg: server.connected ? t.success : t.warning },
         },
+        ...(server.connectionDetail ? [body(server.connectionDetail)] : []),
         { text: '' },
         body(`Role ${server.role} · trust ${server.trustMode}`),
         body(

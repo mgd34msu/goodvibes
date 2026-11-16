@@ -102,14 +102,13 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     id: 'mcp-lifecycle',
     name: 'MCP Lifecycle',
     description:
-      'Enables the MCP server lifecycle with structured connect/disconnect phases and health integration.',
-    defaultState: 'disabled',
+      'Reconnects an MCP server that failed to connect or whose process exited, with exponential back-off (1 s doubling to 30 s, at most 5 attempts), '
+      + 'and reports each server\'s connecting, connected, degraded, reconnecting and disconnected state to /mcp servers, the MCP workspace, '
+      + 'the mcp tool and the health view. When the attempts run out the server stays disconnected and a call to it says why and to run /mcp reload. '
+      + 'Read each time a server drops, so a change applies to the next drop. Off: a server that drops stays disconnected until /mcp reload.',
+    defaultState: 'enabled',
     tier: 4,
-    runtimeToggleable: false,
-    notOperable: {
-      reason: 'no-runtime-wiring',
-      detail: 'No GoodVibes product starts the structured MCP lifecycle yet, so this setting changes nothing. MCP servers connect through the standard MCP registry.',
-    },
+    runtimeToggleable: true,
   },
   {
     id: 'otel-foundation',

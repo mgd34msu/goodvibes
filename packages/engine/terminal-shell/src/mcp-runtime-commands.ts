@@ -272,7 +272,7 @@ export function createMcpRuntimeCommands<Context extends McpCommandContext>(
               `  auth or repair attention: ${authRequired.length}`,
               ...servers.map(
                 (server) =>
-                  `  ${server.name}  trust=${formatMcpTrustMode(server.trustMode)}  role=${formatMcpRole(server.role)}  status=${formatMcpFreshness(server.schemaFreshness)}  connected=${server.connected ? 'yes' : 'no'}`,
+                  `  ${server.name}  trust=${formatMcpTrustMode(server.trustMode)}  role=${formatMcpRole(server.role)}  status=${formatMcpFreshness(server.schemaFreshness)}  connected=${server.connected ? 'yes' : server.phase === 'restart-wait' ? 'reconnecting' : 'no'}`,
               ),
               '  next: /mcp auth-review',
               '  next: /mcp repair <server>',
@@ -647,17 +647,38 @@ export function createMcpRuntimeCommands<Context extends McpCommandContext>(
     return configured === undefined ? ' (this session)' : ` (this session; config: ${format(configured)})`;
   }
 
+  /** The bracketed state of one server and, when it is not connected, what is happening to it. */
+  function formatMcpConnection(s: McpSecurityServer): { readonly label: string; readonly detail: readonly string[] } {
+    if (s.connected) return { label: '[connected]   ', detail: [] };
+    const detail: string[] = [];
+    if (s.lastError) detail.push(`      last error: ${s.lastError}`);
+    if (s.phase === 'restart-wait') {
+      const reconnect = s.reconnect;
+      const wait = reconnect?.nextAttemptAt !== undefined ? ` in ${Math.max(1, Math.ceil((reconnect.nextAttemptAt - Date.now()) / 1000))} s` : '';
+      detail.push(reconnect
+        ? `      reconnecting on its own: attempt ${reconnect.attempt} of ${reconnect.maxAttempts}${wait}`
+        : '      restarting on its own');
+      return { label: '[reconnecting]', detail };
+    }
+    if (s.phase === 'starting' || s.phase === 'negotiating') return { label: '[starting]    ', detail };
+    if (s.reconnect?.stoppedReason) detail.push(`      ${s.reconnect.stoppedReason}; fix the server or its entry, then run /mcp reload`);
+    return { label: '[disconnected]', detail };
+  }
+
   function formatMcpServerList(servers: readonly McpSecurityServer[]): string {
     const connected = servers.filter((s) => s.connected);
-    const disconnected = servers.filter((s) => !s.connected);
+    const recovering = servers.filter((s) => !s.connected && (s.phase === 'restart-wait' || s.phase === 'starting' || s.phase === 'negotiating'));
+    const disconnected = servers.filter((s) => !s.connected && !recovering.includes(s));
     const lines: string[] = [`MCP Servers (${connected.length}/${servers.length} connected):`];
     for (const s of servers) {
       const pathScope = s.allowedPaths.length > 0 ? ` paths ${s.allowedPaths.length}` : '';
       const hostScope = s.allowedHosts.length > 0 ? ` hosts ${s.allowedHosts.length}` : '';
       const freshness = ` status ${formatMcpFreshness(s.schemaFreshness)}`;
       const quarantine = s.schemaFreshness === 'quarantined' ? ` review reason ${s.quarantineReason ?? 'unknown'}` : '';
+      const connection = formatMcpConnection(s);
       lines.push(
-        `  ${s.connected ? '[connected]   ' : '[disconnected]'}  ${s.name}  trust=${formatMcpTrustMode(s.trustMode)}${sessionNote(s.sessionTrustMode, s.configuredTrustMode, formatMcpTrustMode)}  role=${formatMcpRole(s.role)}${sessionNote(s.sessionRole, s.configuredRole, formatMcpRole)}${freshness}${quarantine}${pathScope}${hostScope}`,
+        `  ${connection.label}  ${s.name}  trust=${formatMcpTrustMode(s.trustMode)}${sessionNote(s.sessionTrustMode, s.configuredTrustMode, formatMcpTrustMode)}  role=${formatMcpRole(s.role)}${sessionNote(s.sessionRole, s.configuredRole, formatMcpRole)}${freshness}${quarantine}${pathScope}${hostScope}`,
+        ...connection.detail,
       );
     }
     if (connected.length > 0) {
@@ -671,9 +692,13 @@ export function createMcpRuntimeCommands<Context extends McpCommandContext>(
       );
       lines.push('Use /settings -> MCP to explicitly enable allow-all for a server.');
     }
+    if (recovering.length > 0) {
+      lines.push('');
+      lines.push(`${recovering.length} server(s) starting or reconnecting on their own; run /mcp servers again to follow them.`);
+    }
     if (disconnected.length > 0) {
       lines.push('');
-      lines.push(`${disconnected.length} server(s) failed to connect. Check server command and args in your config.`);
+      lines.push(`${disconnected.length} server(s) not connected. Check the server command and args in your config, then run /mcp reload.`);
     }
     return lines.join('\n');
   }

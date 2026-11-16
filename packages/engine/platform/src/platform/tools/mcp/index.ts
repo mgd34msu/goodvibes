@@ -10,6 +10,9 @@ function summarizeServer(server: McpServerSecurity) {
   return {
     name: server.name,
     connected: server.connected,
+    phase: server.phase,
+    ...(server.connected || server.lastError === undefined ? {} : { lastError: server.lastError }),
+    ...(server.reconnect ? { reconnect: server.reconnect } : {}),
     transport: server.transport,
     protocolVersion: server.protocolVersion,
     protocolEra: server.protocolEra,
@@ -138,11 +141,21 @@ export function createMcpTool(mcpRegistry: McpRegistry): Tool {
         description: tool.description,
       }));
       // A server still starting has no tools listed yet; say so rather than let the list read as complete.
-      const starting = mcpRegistry.listServers()
-        .filter((server) => (server.phase === 'starting' || server.phase === 'negotiating') && (!input.serverName || server.name === input.serverName))
-        .map((server) => server.name);
+      const pendingServers = mcpRegistry.listServers().filter((server) => !input.serverName || server.name === input.serverName);
+      const starting = pendingServers.filter((server) => server.phase === 'starting' || server.phase === 'negotiating').map((server) => server.name);
+      // A server waiting for an automatic reconnect also has no tools listed until it is back.
+      const reconnecting = pendingServers.filter((server) => server.phase === 'restart-wait').map((server) => ({
+        name: server.name,
+        ...(server.reconnect ? { attempt: server.reconnect.attempt, maxAttempts: server.reconnect.maxAttempts, ...(server.reconnect.nextAttemptAt !== undefined ? { nextAttemptAt: server.reconnect.nextAttemptAt } : {}) } : {}),
+        ...(server.lastError ? { lastError: server.lastError } : {}),
+      }));
+      const partial = starting.length > 0 || reconnecting.length > 0;
       return { success: true, output: JSON.stringify({ view, count: summarized.length, tools: summarized,
-        ...(starting.length > 0 ? { starting, partial: true, next: 'These servers are still starting; list the tools again in a few seconds.' } : {}) }) };
+        ...(starting.length > 0 ? { starting } : {}),
+        ...(reconnecting.length > 0 ? { reconnecting } : {}),
+        ...(partial ? { partial: true, next: reconnecting.length > 0
+          ? 'Some servers are starting or reconnecting on their own; list the tools again after their next attempt.'
+          : 'These servers are still starting; list the tools again in a few seconds.' } : {}) }) };
     }
 
     if (input.mode === 'schema') {

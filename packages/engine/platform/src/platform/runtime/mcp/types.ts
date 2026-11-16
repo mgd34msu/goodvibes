@@ -4,7 +4,6 @@
  * Referenced by: lifecycle.ts, permissions.ts, schema-freshness.ts, manager.ts
  * Spec: server state machine and MCP evolution.
  */
-import type { McpServerConfig } from '../../mcp/config.js';
 import type { McpServerRole, McpTrustMode, QuarantineReason } from '../../../events/mcp.js';
 
 export type { McpServerRole, McpTrustMode, QuarantineReason };
@@ -269,37 +268,42 @@ export interface McpServerPermissions {
 // ── Server entry ──────────────────────────────────────────────────────────────
 
 /**
- * Full runtime entry for a managed MCP server.
+ * Connection state of one MCP server.
  *
- * Held by McpLifecycleManager; drives UI, store, and event emission.
+ * Held by McpLifecycleManager, which the MCP registry composes; drives the
+ * lifecycle events, the server status surfaces and the not-connected refusal.
  */
 export interface McpServerEntry {
   /** Server name (matches McpServerConfig.name). */
   name: string;
-  /** Original server configuration. */
-  config: McpServerConfig;
   /** Current lifecycle state. */
   state: McpServerState;
   /** Number of reconnect attempts in the current reconnection cycle. */
   reconnectAttempts: number;
+  /** Whether a reconnect timer is currently scheduled. */
+  reconnectPending: boolean;
+  /** Epoch ms of the next reconnect attempt while one is scheduled. */
+  nextReconnectAt?: number | undefined;
   /** Epoch ms of the most recent successful connection. */
   connectedAt?: number | undefined;
   /** Epoch ms of the most recent disconnection. */
   disconnectedAt?: number | undefined;
-  /** Reason for the most recent disconnection or failure. */
+  /** Reason for the most recent drop or failed attempt. */
   lastError?: string | undefined;
-  /** Whether a reconnect timer is currently scheduled. */
-  reconnectPending: boolean;
-  /** Auth challenge type if state is auth_required. */
-  authType?: string | undefined;
-  /** Tools available from this server (populated on connect). */
-  availableTools: string[];
-  /** Resources available from this server (populated on connect). */
-  availableResources: string[];
-  /** Number of tool calls made to this server this session. */
-  callCount: number;
-  /** Number of tool call failures this session. */
-  errorCount: number;
+  /** Why automatic reconnect stopped (attempts used up, turned off, cancelled); cleared by the next connect request. */
+  stoppedReason?: string | undefined;
+}
+
+/** What one server's reconnect is doing, for status surfaces and refusals. */
+export interface McpReconnectStatus {
+  readonly state: McpServerState;
+  /** Attempts made in the current cycle. */
+  readonly attempt: number;
+  readonly maxAttempts: number;
+  /** Epoch ms of the next attempt while one is scheduled. */
+  readonly nextAttemptAt?: number | undefined;
+  /** Why automatic reconnect stopped, once it did. */
+  readonly stoppedReason?: string | undefined;
 }
 
 // ── Reconnect config ─────────────────────────────────────────────────────────

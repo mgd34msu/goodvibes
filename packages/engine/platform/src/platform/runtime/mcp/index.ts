@@ -1,9 +1,11 @@
 /**
  * src/runtime/mcp, MCP lifecycle barrel.
  *
- * For embedders: no GoodVibes product composes this manager, so the `mcp-lifecycle` gate
- * (runtime.mcpLifecycle) is marked not operable and changes nothing; MCP servers connect through
- * the standard MCP registry. Call `createMcpLifecycleManager()` yourself to use it.
+ * The MCP registry composes one `McpLifecycleManager` as the owner of each
+ * server's connection state and of reconnecting a server that dropped
+ * (automatic reconnect is the `runtime.mcpLifecycle` setting). Embedders that
+ * own their own connections can create one with `createMcpLifecycleManager()`
+ * and a connector.
  *
  * Public API:
  *   - `createMcpLifecycleManager()`, factory function
@@ -14,7 +16,7 @@
  *   - Manager from manager.ts
  */
 
-export { McpLifecycleManager, type McpEventHandler, type McpLifecycleManagerOptions } from './manager.js';
+export { McpLifecycleManager, type McpEventHandler, type McpLifecycleConnector, type McpLifecycleManagerOptions } from './manager.js';
 export { McpPermissionManager, buildMcpAttackPathReview } from './permissions.js';
 export { McpSchemaFreshnessTracker } from './schema-freshness.js';
 export {
@@ -49,6 +51,7 @@ export type {
   McpServerPermissions,
   McpServerEntry,
   McpReconnectConfig,
+  McpReconnectStatus,
 } from './types.js';
 export { DEFAULT_RECONNECT_CONFIG } from './types.js';
 
@@ -59,17 +62,16 @@ import type { FeatureFlagManager } from '../feature-flags/index.js';
 /**
  * Factory function for creating a `McpLifecycleManager`.
  *
- * Check the `mcp-lifecycle` gate (runtime.mcpLifecycle) before calling this, when the
- * flag is disabled, the caller should use the standard MCP registry path.
+ * With a flag manager, automatic reconnect also follows the `mcp-lifecycle`
+ * gate (runtime.mcpLifecycle), read each time a server drops.
  *
- * @param options - Optional configuration overrides
+ * @param options - The connector and optional configuration overrides
  */
 export function createMcpLifecycleManager(
-  options?: McpLifecycleManagerOptions,
+  options: McpLifecycleManagerOptions,
   flagManager?: Pick<FeatureFlagManager, 'isEnabled'> | null,
 ): McpLifecycleManager {
-  if (flagManager && !flagManager.isEnabled('mcp-lifecycle')) {
-    throw new Error('The structured MCP lifecycle is turned off; set runtime.mcpLifecycle to true (restart required), or use the standard MCP registry path.');
-  }
-  return new McpLifecycleManager(options);
+  if (!flagManager) return new McpLifecycleManager(options);
+  const enabled = options.enabled;
+  return new McpLifecycleManager({ ...options, enabled: () => flagManager.isEnabled('mcp-lifecycle') && (enabled?.() ?? true) });
 }

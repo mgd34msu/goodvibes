@@ -411,7 +411,7 @@ export const FEATURE_ONBOARDING_SECTIONS: readonly FeatureSection[] = [
     units: [
       { flagId: 'unified-runtime-task', label: 'Unified RuntimeTask', hint: 'Replace ad-hoc task tracking with the unified RuntimeTask interface. Startup-only.' },
       { flagId: 'plugin-lifecycle', label: 'Plugin lifecycle', hint: 'Structured plugin init/teardown phases with health integration. Startup-only.' },
-      { flagId: 'mcp-lifecycle', label: 'MCP lifecycle', hint: 'Structured MCP connect/disconnect phases with health integration. Startup-only.' },
+      { flagId: 'mcp-lifecycle', label: 'MCP lifecycle', hint: 'Reconnect a dropped MCP server automatically with back-off (at most 5 attempts) and show its state in /mcp servers. Applies to the next drop.' },
       { flagId: 'permissions-simulation', label: 'Permissions simulation mode', hint: 'Dual-evaluator simulation that tracks divergence without changing enforcement. Startup-only.' },
       { flagId: 'policy-signing', label: 'Policy bundle signing', hint: 'HMAC-SHA256 signature validation on policy bundle load. Startup-only.' },
     ],

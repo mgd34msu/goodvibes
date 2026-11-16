@@ -109,6 +109,14 @@ export const MCP_SERVER_STATUS_SCHEMA = objectSchema({
   phase: enumSchema(['idle', 'starting', 'negotiating', 'ready', 'restart-wait', 'gave-up', 'closed']),
   /** The last connect or runtime failure, while it still describes the server. */
   lastError: STRING_SCHEMA,
+  /** The automatic reconnect cycle; absent while none ran. `stoppedReason` says why reconnecting stopped. */
+  reconnect: objectSchema({
+    state: enumSchema(['configured', 'connecting', 'connected', 'degraded', 'auth_required', 'reconnecting', 'disconnected']),
+    attempt: NUMBER_SCHEMA,
+    maxAttempts: NUMBER_SCHEMA,
+    nextAttemptAt: NUMBER_SCHEMA,
+    stoppedReason: STRING_SCHEMA,
+  }, ['state', 'attempt', 'maxAttempts']),
 }, ['name', 'connected']);
 export const MCP_SERVERS_RESPONSE_SCHEMA = objectSchema({
   servers: arraySchema(MCP_SERVER_STATUS_SCHEMA),

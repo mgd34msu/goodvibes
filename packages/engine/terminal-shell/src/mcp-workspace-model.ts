@@ -22,6 +22,10 @@ export interface McpWorkspaceServerRow {
   readonly allowedHosts: readonly string[];
   readonly quarantineReason?: string | undefined;
   readonly quarantineDetail?: string | undefined;
+  /** Short connection state for a server that is not connected: `starting`, `reconnecting 2/5`, `offline`. */
+  readonly connectionState?: string | undefined;
+  /** Why it is not connected and what happens next (the last error, the next attempt, or why reconnecting stopped). */
+  readonly connectionDetail?: string | undefined;
 }
 export interface McpWorkspaceActionRow {
   readonly type: 'action';
@@ -212,8 +216,26 @@ export function mergeServers(
         allowedHosts: runtime?.allowedHosts ?? config?.allowedHosts ?? [],
         quarantineReason: runtime?.quarantineReason,
         quarantineDetail: runtime?.quarantineDetail,
+        ...describeConnection(runtime),
       };
     });
+}
+
+/** The connection state the workspace shows for a server that is not connected, from the runtime's own record. */
+function describeConnection(runtime: McpServerSecurityRecord | undefined): { connectionState?: string; connectionDetail?: string } {
+  if (!runtime || runtime.connected) return {};
+  const reconnect = runtime.reconnect;
+  const parts: string[] = [];
+  if (runtime.lastError) parts.push(runtime.lastError);
+  if (runtime.phase === 'restart-wait') {
+    if (reconnect?.nextAttemptAt !== undefined) {
+      parts.push(`reconnect attempt ${reconnect.attempt} of ${reconnect.maxAttempts} in ${Math.max(1, Math.ceil((reconnect.nextAttemptAt - Date.now()) / 1000))} s`);
+    }
+    return { connectionState: reconnect ? `reconnecting ${reconnect.attempt}/${reconnect.maxAttempts}` : 'restarting', connectionDetail: parts.join(' · ') };
+  }
+  if (runtime.phase === 'starting' || runtime.phase === 'negotiating') return { connectionState: 'starting', ...(parts.length ? { connectionDetail: parts.join(' · ') } : {}) };
+  if (reconnect?.stoppedReason) parts.push(`${reconnect.stoppedReason}; fix the server, then reload`);
+  return { connectionState: 'offline', ...(parts.length ? { connectionDetail: parts.join(' · ') } : {}) };
 }
 
 export interface McpWorkspaceFormField<Extra extends string = never> {

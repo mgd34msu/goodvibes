@@ -43,7 +43,7 @@ export const runtimeConfigDefaults = {
     maxParallelToolCalls: 8,
     unifiedTasks: true,
     pluginLifecycle: false,
-    mcpLifecycle: false,
+    mcpLifecycle: true,
     toolBudget: {
       enforced: false,
       maxMs: 0,

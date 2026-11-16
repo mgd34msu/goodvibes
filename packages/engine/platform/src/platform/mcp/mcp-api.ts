@@ -3,7 +3,7 @@ import type { McpClientPhase, McpExcludedTool, McpToolCallOptions } from './clie
 import type { McpServerHealth, RegisteredTool } from './registry.js';
 import type { McpConfigRoots, McpConfigScope, McpEffectiveConfig, McpServerConfig } from './config.js';
 import type { McpReloadResult } from './registry.js';
-import type { McpDecisionRecord, McpServerRole, McpTrustMode, QuarantineReason, SchemaFreshness } from '../runtime/mcp/types.js';
+import type { McpDecisionRecord, McpReconnectStatus, McpServerRole, McpTrustMode, QuarantineReason, SchemaFreshness } from '../runtime/mcp/types.js';
 
 export interface McpServerRecord {
   readonly name: string;
@@ -15,6 +15,8 @@ export interface McpServerRecord {
   readonly phase?: McpClientPhase | undefined;
   /** Why the last connect, handshake or restart failed, when it did. */
   readonly lastError?: string | undefined;
+  /** The automatic reconnect cycle: attempt, limit, when the next one starts, or why it stopped. */
+  readonly reconnect?: McpReconnectStatus | undefined;
   /** Tools the server listed that cannot be called, each with the reason. */
   readonly excludedTools?: readonly McpExcludedTool[] | undefined;
 }
@@ -22,6 +24,12 @@ export interface McpServerRecord {
 export interface McpServerSecurityRecord {
   readonly name: string;
   readonly connected: boolean;
+  /** Where the connection is: `restart-wait` comes back on its own, `gave-up` needs a configuration reload. */
+  readonly phase?: McpClientPhase | undefined;
+  /** Why the last connect, handshake, restart or reconnect failed, when it did. */
+  readonly lastError?: string | undefined;
+  /** The automatic reconnect cycle: attempt, limit, when the next one starts, or why it stopped. */
+  readonly reconnect?: McpReconnectStatus | undefined;
   readonly transport?: 'stdio' | 'http' | undefined;
   readonly protocolVersion?: string | undefined;
   readonly protocolEra?: 'modern' | 'legacy' | undefined;

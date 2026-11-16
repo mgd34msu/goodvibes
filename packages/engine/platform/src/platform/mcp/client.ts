@@ -816,15 +816,26 @@ export class McpClient {
     }
     // Keep a more specific failure (a timed-out restart handshake) when there is one.
     this.#lastError ??= 'the server process exited unexpectedly';
-    if (this.restartCount < MAX_RESTART_ATTEMPTS) {
+    if (this.restartCount < this.#restartAttempts()) {
       this._scheduleRestart();
     } else {
       this.#phase = 'gave-up';
       // The exit status can land after stdout closes; a client that gave up holds no process.
       this.proc = null;
       this.buffer = '';
-      logger.info('McpClient: exceeded max restart attempts', { server: this.config.name });
+      logger.info('McpClient: not restarting the server', { server: this.config.name, restarts: this.restartCount });
+      this.#reportUnexpectedExit();
     }
+  }
+
+  /** Restarts this client makes itself; an owner that reconnects servers sets 0. */
+  #restartAttempts(): number {
+    return this.options?.restartAttempts ?? MAX_RESTART_ATTEMPTS;
+  }
+
+  #reportUnexpectedExit(): void {
+    const reason = this.#lastError ?? 'the server process exited unexpectedly';
+    this._callObserver('exit', () => this.options?.onUnexpectedExit?.(reason));
   }
 
   private _processBuffer(): void {
@@ -1089,11 +1100,12 @@ export class McpClient {
       try { proc.kill(); } catch { /* already gone; the read loop reports the exit */ }
       return;
     }
-    if (this.restartCount < MAX_RESTART_ATTEMPTS) {
+    if (this.restartCount < this.#restartAttempts()) {
       this._scheduleRestart();
     } else {
       this.#phase = 'gave-up';
       logger.info('McpClient: exceeded max restart attempts', { server: this.config.name });
+      this.#reportUnexpectedExit();
     }
   }
 

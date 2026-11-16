@@ -1,4 +1,5 @@
 import type { Contract, ContractGroup, ContractUnit } from './types.js';
+import { isAmendment, scheduledFix } from './decision-records.js';
 
 /** Older amendments appended an unchanged structural criterion twice. Only
  * byte-identical nonjudged duplicates can be removed without choosing a verdict. */
@@ -77,12 +78,10 @@ export function recoverPendingFixIdentities(contract: Contract): void {
  * its identity from a retry budget that an owner amendment can reset. */
 export function hasScheduledFix(contract: Pick<Contract, 'groups' | 'decisions'>, targetId: string, round: number): boolean {
   if (contract.groups.some(group => group.repairs?.targetId === targetId && ['pending', 'running', 'judging', 'fixing'].includes(group.status))) return true;
-  const amendment = contract.decisions.findLastIndex(decision => decision.targetId === targetId
-    && decision.action === 'owner-replied' && decision.reason.startsWith('amended as the owner instructed:'));
-  const scheduled = contract.decisions.findLastIndex(decision => decision.targetId === targetId
-    && decision.action === 'fix-planned' && decision.reason.startsWith(`round ${round}: group `));
+  const amendment = contract.decisions.findLastIndex(decision => decision.targetId === targetId && isAmendment(decision));
+  const scheduled = contract.decisions.findLastIndex(decision => decision.targetId === targetId && scheduledFix(decision)?.round === round);
   if (scheduled > amendment) {
-    const groupId = /^round \d+: group (\S+) with /.exec(contract.decisions[scheduled]!.reason)?.[1];
+    const groupId = scheduledFix(contract.decisions[scheduled]!)?.groupId;
     if (groupId) return contract.groups.some(group => group.id === groupId);
   }
   return amendment < 0 && contract.groups.some(group => group.id === `${targetId}.f${round}`);

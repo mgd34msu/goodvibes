@@ -47,7 +47,7 @@ import type { DecompositionRunner } from '../core/plan-decomposition.js';
 import type { OrchestrationEngine } from '../orchestration/engine.js';
 import type { FleetCapacityFn } from '../orchestration/elastic-pool.js';
 import type { ContractPreSpawn, ContractUnitOutcome, ContractUnitSettlement } from '../orchestration/phase-runner.js';
-import { emptyWorkItemUsage, type PriceProvenanceFn } from '../orchestration/types.js';
+import { emptyWorkItemUsage, type PriceProvenanceFn, type WorkItem } from '../orchestration/types.js';
 import { emitAgentCancelled, emitAgentCompleted, emitAgentFailed } from '../runtime/emitters/index.js';
 import type { RuntimeEventBus } from '../runtime/events/index.js';
 import type { AgentManager, AgentRecord } from '../tools/agent/index.js';
@@ -57,7 +57,8 @@ import { createUnitCheckLoop, queueSessionNudge, type ContractSessionHooks } fro
 import { contractGateProblems, readContractConfig, type ContractConfigReader } from './config.js';
 import { emitContractEvent } from './events.js';
 import { OwnerReplyRefusedError, type FailurePauseInput, type OwnerReplyOutcome } from './escalation.js';
-import { createGroupRunner, takeBaseline, type ContractEngineInput } from './group-runner.js';
+import { createGroupRunner, type ContractEngineInput } from './group-runner.js';
+import { takeSharedTreeForGroup } from './workstreams.js';
 import { CONTRACT_RUNNER_AGENT_ID } from './nudge.js';
 import { captureContractInput, contractInputPath, materializeContractInput, assertContractInputView, assertContractExecutionView, prepareContractInputParent, restoreContractInputDevice } from './input-snapshot.js';
 import { planContract, shapeContract, type ContractPlannerDeps, type PlanningOutcome, type ShapeOutcome } from './planner.js';
@@ -75,7 +76,7 @@ import { ContractRun, failureFromError, type RunEnv } from './run-context.js';
 import { createContractSteps, type ContractSteps, type ContractStepsWithReplies } from './steps.js';
 import { deserializeContract, deserializeOwnedContractCheckpoint, serializeContract, type ContractCreationReservation, type ContractRemoval, type ContractStore } from './store.js';
 import { retainOriginalReviewDescriptors } from './review-file-observations.js';
-import { releaseTreeBaselineBytes, retainOriginalTreeBaselines } from './tree-baseline.js';
+import { captureTreeBaseline, retainOriginalTreeBaselines } from './tree-baseline.js';
 import {
   CURRENT_CONTRACT_SCHEMA_VERSION,
   isOpaqueContractId,
@@ -89,12 +90,15 @@ import {
   type StartFromPlanInput,
 } from './types.js';
 import { createUnitFailureHandling } from './unit-failures.js';
-import { contractAgentIds, ownerRecordUsage, rollUpContractUsage, type PriceUsageFn } from './usage.js';
+import { contractAgentIds, noteAgentUsage, ownerRecordUsage, rollUpContractUsage, type PriceUsageFn } from './usage.js';
 import { createUnitWatchdog, type WatchedAgent } from './watchdog.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 import { nativeContractActionSource, nativeContractPort } from './native-decisions.js';
 import type { DurableContractExecution } from './durable-admission.js';
+
+/** The key a session-mode contract's shared-tree lock is held under (a group id otherwise). */
+const SESSION_TREE_HOLDER = 'session';
 
 export interface ContractRunnerDeps {
   readonly judgmentLog?: Pick<import('@goodvibes-jev/judgment').DecisionLog, 'get'> | undefined;
@@ -423,12 +427,6 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
       // Engine phases independently join unit executors before their cleanup.
       await Promise.all(contractAgentIds(run.contract).map((id) => deps.agentManager.join?.(id)));
       await run.work.join();
-      // Terminal history can retain Contract objects indefinitely. Actual
-      // executor drainage, rather than a terminal status event, ends private
-      // dirty-byte ownership; durable commitments/provenance remain intact.
-      releaseTreeBaselineBytes(run.contract);
-      const disposal = disposalCheckpoints.get(run.id);
-      if (disposal) releaseTreeBaselineBytes(disposal);
       let checkpointed = false;
       try {
         if (deps.store.get(run.id) !== run.contract) throw new Error('Contract settlement checkpoint owner changed');
@@ -574,46 +572,61 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
         // Independent of the silence watchdog (off by default): once the
         // agent's execution drained, an end that published no event still settles the unit.
         void deps.agentManager.join?.(agentId).then(() => {
+          // The contract keeps what the agent used, whatever later happens to its record.
+          noteAgentUsage(run.contract, agentId, getStatus, pricing);
           setTimeout(() => { if (!run.terminal) failures.reconcile(agentId); }, 0).unref?.();
         });
       });
     },
-    beforeSpawn(item, signal) {
+    async beforeSpawn(item, signal) {
+      const decision = await decideSpawn(item, signal);
+      if (decision.kind !== 'spawn') return decision;
+      // The unit's diff is measured from here: taken before its first agent can write.
       const run = item.contractId === undefined ? undefined : runs.get(item.contractId);
       const unit = item.contractUnitId === undefined ? undefined : run?.unit(item.contractUnitId);
-      const cancelled: ContractPreSpawn = { kind: 'settled', outcome: 'cancelled' };
-      if (run === undefined || unit === undefined || run.terminal || signal.aborted) return Promise.resolve(cancelled);
-      requireDecisionFeature('autonomous contract worker execution');
-      const runtime = run.runtime(unit);
-      const decided = runtime.preSpawn;
-      if (decided === null) {
-        const group = run.group(unit.groupId);
-        if (group === undefined) return Promise.resolve(cancelled);
-        // Items can wait behind peers, or survive a restart, with an old task.
-        // Bind current accepted results when the worker is actually admitted.
-        return Promise.resolve({ kind: 'spawn', task: briefWithPreviousChecks(buildUnitBrief(run.contract, group, unit, deps.readOwnerEvidence?.(run.contract, '')), unit) });
+      if (run !== undefined && unit !== undefined && unit.baseline === undefined && !run.terminal) {
+        unit.baseline = await captureTreeBaseline(item.worktreePath ?? run.contract.worktreePath ?? run.contract.projectRoot);
       }
-      if (decided !== 'wait') {
-        runtime.preSpawn = null;
-        return Promise.resolve(decided);
-      }
-      // After a restart: the phase waits until a check, a respawn or the owner decides.
-      return new Promise<ContractPreSpawn>((resolve) => {
-        const entry = {
-          resolve: (decision: ContractPreSpawn) => {
-            signal.removeEventListener('abort', onAbort);
-            resolve(decision);
-          },
-        };
-        function onAbort(): void {
-          if (runtime.spawnGate === entry) runtime.spawnGate = null;
-          resolve(cancelled);
-        }
-        signal.addEventListener('abort', onAbort, { once: true });
-        runtime.spawnGate = entry;
-      });
+      return decision;
     },
   };
+
+  /** What a contract unit's phase does before it spawns: spawn (with the current brief), wait for the runner after a restart, or settle. */
+  function decideSpawn(item: WorkItem, signal: AbortSignal): Promise<ContractPreSpawn> {
+    const run = item.contractId === undefined ? undefined : runs.get(item.contractId);
+    const unit = item.contractUnitId === undefined ? undefined : run?.unit(item.contractUnitId);
+    const cancelled: ContractPreSpawn = { kind: 'settled', outcome: 'cancelled' };
+    if (run === undefined || unit === undefined || run.terminal || signal.aborted) return Promise.resolve(cancelled);
+    requireDecisionFeature('autonomous contract worker execution');
+    const runtime = run.runtime(unit);
+    const decided = runtime.preSpawn;
+    if (decided === null) {
+      const group = run.group(unit.groupId);
+      if (group === undefined) return Promise.resolve(cancelled);
+      // Items can wait behind peers, or survive a restart, with an old task.
+      // Bind current accepted results when the worker is actually admitted.
+      return Promise.resolve({ kind: 'spawn', task: briefWithPreviousChecks(buildUnitBrief(run.contract, group, unit, deps.readOwnerEvidence?.(run.contract, '')), unit) });
+    }
+    if (decided !== 'wait') {
+      runtime.preSpawn = null;
+      return Promise.resolve(decided);
+    }
+    // After a restart: the phase waits until a check, a respawn or the owner decides.
+    return new Promise<ContractPreSpawn>((resolve) => {
+      const entry = {
+        resolve: (decision: ContractPreSpawn) => {
+          signal.removeEventListener('abort', onAbort);
+          resolve(decision);
+        },
+      };
+      function onAbort(): void {
+        if (runtime.spawnGate === entry) runtime.spawnGate = null;
+        resolve(cancelled);
+      }
+      signal.addEventListener('abort', onAbort, { once: true });
+      runtime.spawnGate = entry;
+    });
+  }
 
   function watched(): WatchedAgent[] {
     const agents: WatchedAgent[] = [];
@@ -751,8 +764,17 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
     };
   }
 
+  /**
+   * A native contract's latest saved state: its own checkpoint file. The copy
+   * in the admission receipt is the first checkpoint, read only when that file
+   * was never published (a crash between the two writes at creation).
+   */
+  function durableCheckpoint(admission: DurableContractAdmission): Contract | null {
+    return deps.store.load(admission.contractId) ?? deserializeOwnedContractCheckpoint(durableAdmissions.checkpointRead(admission.key));
+  }
+
   function durableResult(admission: DurableContractAdmission): DurableStartedContract {
-    const contract = runs.get(admission.contractId)?.contract ?? deserializeOwnedContractCheckpoint(durableAdmissions.checkpointRead(admission.key));
+    const contract = runs.get(admission.contractId)?.contract ?? durableCheckpoint(admission);
     if (contract === null || contract.durableAdmission?.payloadRevision !== admission.payloadRevision
       || contract.ownerAgentId !== admission.ownerAgentId) throw new DurableContractAdmissionError('checkpoint');
     assertDurableCheckpoint(contract, admission);
@@ -940,7 +962,7 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
       durableLeases.set(admission.contractId, lease);
       let contract: Contract;
       try {
-        const restored = deserializeOwnedContractCheckpoint(durableAdmissions.checkpointRead(admission.key));
+        const restored = durableCheckpoint(admission);
         if (restored === null) throw new DurableContractAdmissionError('checkpoint');
         contract = restored;
         assertDurableCheckpoint(contract, admission);
@@ -1380,7 +1402,7 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
     }
     if (!proceed(run, outcome)) return;
     if (contract.sessionMode === true) {
-      startSession(run);
+      await startSession(run);
       updateOwnerProgress(run);
       return;
     }
@@ -1391,11 +1413,21 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
 
   // ── Session mode ───────────────────────────────────────────────
 
-  /** A session-mode contract runs: its one unit waits for the session's next turn. */
-  function startSession(run: ContractRun): void {
+  /**
+   * A session-mode contract runs: its one unit waits for the session's next
+   * turn. The session's turns write in the shared tree, so the contract holds
+   * the same shared-tree lock a shared-mode group takes, until it settles
+   * (waiting for another holder is recorded). Its baseline is taken once and
+   * is also each unit's, so a session turn finds it set.
+   */
+  async function startSession(run: ContractRun): Promise<void> {
     requireDecisionFeature('autonomous contract session acceptance');
     const { contract } = run;
-    contract.baseline ??= takeBaseline(contract.projectRoot);
+    await takeSharedTreeForGroup(run, SESSION_TREE_HOLDER);
+    if (run.terminal) return;
+    contract.baseline ??= await captureTreeBaseline(contract.projectRoot);
+    if (run.terminal) return;
+    for (const unit of contract.units) unit.baseline ??= contract.baseline;
     run.moveContract('running');
     for (const group of contract.groups) run.moveGroup(group, 'running');
     for (const unit of contract.units) run.moveUnit(unit, 'running');

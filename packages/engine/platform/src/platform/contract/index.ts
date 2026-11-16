@@ -24,7 +24,6 @@ export {
   isTerminalGroupStatus,
   isTerminalUnitStatus,
   newContractId,
-  reopenFailedRepairPlanning,
   transitionContract,
   transitionGroup,
   transitionUnit,
@@ -361,11 +360,12 @@ export type {
   ContractWorkFields,
 } from './external.js';
 // The contracts operator surface (section 10.2): the contracts.* methods, their REST paths and the external adapters act through it.
-export { ContractOperatorError, OPERATOR_SESSION_ID, createContractOperatorService } from './operator-service.js';
+export { ContractOperatorError, OPERATOR_SESSION_ID, createContractOperatorService, summarizeContract } from './operator-service.js';
 export type {
   ContractOperatorErrorCode,
   ContractOperatorService,
   ContractOperatorServiceDeps,
+  ContractSummary,
   HostedContractRunners,
   HostedSessionContracts,
   OperatorContractRunner,

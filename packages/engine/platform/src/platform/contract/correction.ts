@@ -50,8 +50,14 @@ import { describeStall, detectStall, standingOf, type StallReason } from './prog
 import { failureFromError, isAbortError, type ContractRun } from './run-context.js';
 import { buildPublicationPauseQuestion, isPublicationPause, type Escalations, type PublicationPauseInput, type Rejudge } from './escalation.js';
 import type { StepContext } from './steps.js';
-import type { ContractGroup, ContractUnit, Criterion, UnitCheck } from './types.js';
+import type { ContractDecision, ContractGroup, ContractUnit, Criterion, UnitCheck } from './types.js';
 import { addJudgmentUsage } from './usage.js';
+import { decideRecorded, decisionReceipt, decisionReceiptText, receiptRecord } from './decision-records.js';
+
+/** A final-answer review as the text a planner reads; null when there is none. */
+function reviewText(review: ContractDecision | undefined): string | null {
+  return review === undefined ? null : decisionReceiptText(review);
+}
 
 /** The decision site stall routes are logged under. */
 export const STALL_ROUTE_SITE = 'contract.stall-route';
@@ -273,14 +279,14 @@ export function createCorrection(context: StepContext, escalations: Pick<Escalat
     const binding = input.resultRevision === undefined ? undefined : hashState(JSON.stringify({ ask: contract.ask, inputId: contract.inputSnapshot?.id ?? null,
       resultRevision: input.resultRevision ?? null, target,
       output: brief.scope === 'deliverable' ? renderContractAnswer(contract) : priorEvidence,
-      finalAnswerReview: brief.scope === 'deliverable' ? contract.decisions.findLast(decision => decision.targetId === `${contract.id}.final-answer-review`)?.reason ?? null : null,
+      finalAnswerReview: brief.scope === 'deliverable' ? reviewText(contract.decisions.findLast(decision => decision.targetId === `${contract.id}.final-answer-review`)) : null,
       work: workReceiptIdentity(contractWorkReceipts(contract, { readObservations: true, ownerEvidence: context.readOwnerEvidence?.(contract, '') })),
     }));
     let retained: string | undefined;
     if (input.resultRevision !== undefined) {
       const saved = contract.decisions.findLast(decision => decision.action === 'planned' && decision.targetId === candidateId);
       try {
-        const candidate = saved === undefined ? undefined : JSON.parse(saved.reason) as { version?: unknown; binding?: unknown; output?: unknown };
+        const candidate = saved === undefined ? undefined : decisionReceipt(saved) as { version?: unknown; binding?: unknown; output?: unknown } | undefined;
         if (candidate?.version === 1 && candidate.binding === binding && typeof candidate.output === 'string') retained = candidate.output;
       } catch { /* Invalid candidate records grant no authority and cannot skip planning. */ }
     }
@@ -307,7 +313,7 @@ export function createCorrection(context: StepContext, escalations: Pick<Escalat
           return;
         }
         output = result.output;
-        run.decide('planned', candidateId, JSON.stringify({ version: 1, binding, output }));
+        decideRecorded(run, 'planned', candidateId, `the fix planner wrote a plan for round ${round}`, receiptRecord({ version: 1, ...(binding === undefined ? {} : { binding }), output }));
         context.checkpoint?.(run);
       }
       const checked = await checkFixPlan(run, brief, output);
@@ -404,7 +410,8 @@ export function createCorrection(context: StepContext, escalations: Pick<Escalat
     run.contract.groups.push(group);
     run.contract.units.push(...units);
     preserveDeclaredReadReceipts(run.contract);
-    run.decide('fix-planned', brief.targetId, `round ${round}: group ${group.id} with ${units.length} unit${units.length === 1 ? '' : 's'} (${units.map((unit) => unit.id).join(', ')})`, decisionIds, route);
+    decideRecorded(run, 'fix-planned', brief.targetId, `round ${round}: group ${group.id} with ${units.length} unit${units.length === 1 ? '' : 's'} (${units.map((unit) => unit.id).join(', ')})`,
+      { kind: 'fix-scheduled', round, groupId: group.id }, decisionIds, route);
     run.emit({ type: 'CONTRACT_FIX_PLANNED', contractId: run.id, scope: brief.scope, targetId: brief.targetId, groupId: group.id, unitIds: units.map((unit) => unit.id), round });
     context.groups().startGroupNow(run, group.id);
   }
@@ -748,7 +755,7 @@ export function createCorrection(context: StepContext, escalations: Pick<Escalat
           : contract.units.filter(unit => unit.groupId === target.targetId).map(unit => unit.answer ?? unit.lastOutput ?? '').join('\n\n');
         const finding: TargetFinding = { unmet: criteria.filter(c => c.disposition === 'judged' && c.status === 'unmet').map(c => c.id),
           unshown: criteria.filter(c => c.disposition === 'judged' && (c.status === 'unshown' || c.status === 'unread')).map(c => c.id),
-          gates: check?.gates ?? [], output: review ? `${output}\n\nNative final-answer review findings (not approval):\n${review.reason}` : output,
+          gates: check?.gates ?? [], output: review ? `${output}\n\nNative final-answer review findings (not approval):\n${decisionReceiptText(review)}` : output,
           decisionIds: check?.decisionIds ?? [] };
         await planFix(run, targetBrief(run, target.scope, target.targetId, finding), target.round);
       }

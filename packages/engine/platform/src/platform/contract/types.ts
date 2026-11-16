@@ -19,7 +19,7 @@ import type { ContractInputSnapshot } from './input-snapshot.js';
 
 import type { NativeContractDecisionState, NativeContractProgress, NativeContractTransportProgress } from './native-decisions.js';
 import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
-import type { Outcome, ReplyReadingName } from '@goodvibes-jev/judgment';
+import type { JsonValue, Outcome, ReplyReadingName } from '@goodvibes-jev/judgment';
 import type {
   CheckResult,
   CheckTrigger,
@@ -310,10 +310,15 @@ export interface Nudge {
 
 // ── The tree ──────────────────────────────────────────────────────────────────
 
-/** HEAD and saved original dirty-file observations. Version three stores only
- * physical source facts; original bytes remain private to the live owner. */
+/**
+ * HEAD and what each uncommitted path held when the baseline was taken.
+ * Version 4 (written now) stores git object ids: `file:<oid>`,
+ * `executable:<oid>`, `symlink:<sha256 of the target>`, `other` (cannot be
+ * named) or null (absent). Versions 2 and earlier store sha256 commitments of
+ * the bytes, version 3 physical facts only; both are still read.
+ */
 export interface TreeBaseline {
-  readonly version?: 2 | 3;
+  readonly version?: 2 | 3 | 4;
   readonly head: string | null;
   readonly dirty: Readonly<Record<string, string | null>>;
 }
@@ -446,15 +451,37 @@ export interface Escalation {
 }
 
 
+/**
+ * What the runner reads back from a decision after a restart, stored beside
+ * its sentence and never recovered from it: a scheduled repair round, an
+ * owner amendment, or a receipt (acceptance, final-answer review, obligation
+ * proofs, publication readings, a saved planner candidate).
+ */
+export type ContractDecisionRecord =
+  | { readonly kind: 'fix-scheduled'; readonly round: number; readonly groupId: string }
+  | { readonly kind: 'amended' }
+  | { readonly kind: 'receipt'; readonly value: JsonValue };
+
 /** One runner decision, with the decision-log ids of the Jev readings behind it. */
 export interface ContractDecision {
   readonly id: string;
   readonly at: number;
   readonly action: ContractDecisionAction;
   readonly targetId: string;
+  /** One short sentence for people; nothing reads it back. */
   readonly reason: string;
   readonly decisionIds: readonly string[];
   readonly route?: UnitRoute | undefined;
+  readonly record?: ContractDecisionRecord | undefined;
+}
+
+/** One agent's usage as its contract last saw it. */
+export interface KnownAgentUsage {
+  /** Priced, as a unit's usage merges it. */
+  readonly usage: WorkItemUsage;
+  /** The agent's own counts, as the owner record sums them. */
+  readonly agent?: NonNullable<AgentRecord['usage']> | undefined;
+  readonly toolCallCount: number;
 }
 
 export interface JudgmentUsage {
@@ -534,6 +561,12 @@ export interface Contract {
   usage: WorkItemUsage;
   judgmentUsage: JudgmentUsage;
   plannerAgentIds: string[];
+  /**
+   * What the contract last saw of each agent's usage, by agent id (usage.ts).
+   * The roll-ups read this, refreshed from an agent's live record while it
+   * exists, so a record pruned or lost in a crash changes no total.
+   */
+  agentUsage?: Record<string, KnownAgentUsage> | undefined;
   answer?: string | undefined;
   statusLine?: string | undefined;
   commit?: { readonly status: 'committed' | 'applied' | 'skipped' | 'failed'; readonly hash?: string | undefined; readonly note: string } | undefined;
@@ -664,25 +697,6 @@ function move<S extends string>(
 /** Moves a contract to `to`, or throws IllegalContractTransitionError. */
 export function transitionContract(contract: Contract, to: ContractStatus): StatusChange<ContractStatus> {
   return move(CONTRACT_TRANSITIONS, 'contract', contract, to);
-}
-
-/**
- * The one move outside CONTRACT_TRANSITIONS: a contract that failed while its
- * repair round was being planned, with every unit and group already passed,
- * goes back to `fixing` so that same unstarted round can be planned again.
- * `failed` stays terminal for every other purpose; only startup recovery
- * (resume.ts), after it has established that exact history, may call this.
- * Declared here so the exception is visible beside the table it bypasses and
- * cannot be applied from any other status.
- */
-export function reopenFailedRepairPlanning(contract: Contract): StatusChange<ContractStatus> {
-  if (contract.status !== 'failed') throw new IllegalContractTransitionError('contract', contract.id, contract.status, 'fixing');
-  contract.status = 'fixing';
-  contract.failureKind = undefined;
-  contract.error = undefined;
-  contract.completedAt = undefined;
-  contract.statusLine = undefined;
-  return { from: 'failed', to: 'fixing' };
 }
 
 /** Moves a group to `to`, or throws IllegalContractTransitionError. */

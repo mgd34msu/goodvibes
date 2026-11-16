@@ -8,7 +8,12 @@ import { contractCreationPathAbsent, publishInitialContractCheckpoint } from './
  * original flat directory remains a read fallback for schema1–5. Old running
  * readers must not discover and quarantine a new checkpoint. Original durable
  * admission keys and execution leases stay in their existing directory.
- * Writes use an atomic temp-file/fsync/rename. Unsupported future versions
+ * Writes use an atomic temp-file/fsync/rename; a native work contract's
+ * checkpoint write is durable (file and directory synced) because its launch
+ * claim and semantic decisions must survive a crash. Its admission is not part
+ * of the checkpoint: it was written once in its receipt file (durable-admission.ts)
+ * and the checkpoint names it by payload revision. The record is validated when
+ * it is loaded, not on every save. Unsupported future versions
  * remain at their original path and refuse replacement; malformed known
  * versions are quarantined.
  *
@@ -24,7 +29,7 @@ import { contractCreationPathAbsent, publishInitialContractCheckpoint } from './
  *
  * Modeled on orchestration/persistence.ts.
  */
-import { DurableContractAdmissions, parseDurableAdmission, syncContractDirectory } from './durable-admission.js';
+import { DurableContractAdmissions, isStoredAdmissionReference, parseDurableAdmission, storedAdmissionReference } from './durable-admission.js';
 import { existsSync, readFileSync, readdirSync, statSync, unlinkSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -38,10 +43,10 @@ import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { contractWithStoredReviewObservations, hydrateStoredReviewObservations } from './review-file-observations.js';
 import { ownedContractCheckpointText, readOwnedContractCheckpoint, type OwnedContractCheckpointRead } from './owned-checkpoint-read.js';
 import { storedCurrentFileLabels, restoreCurrentFileLabels } from './current-file-observations.js';
-import { storedTreeBaselineOrigins, hydrateTreeBaselines, releaseTreeBaselineBytes } from './tree-baseline.js';
+import { storedTreeBaselineOrigins, hydrateTreeBaselines } from './tree-baseline.js';
 import { isContractInputSnapshot } from './input-snapshot.js';
 import { validateNativeDecisionState } from './native-decisions.js';
-import { assertNativeContractSource, bindNativeContractSource } from './native-source.js';
+import { bindNativeContractSource } from './native-source.js';
 import { CURRENT_CONTRACT_SCHEMA_VERSION, isContractId, isOpaqueContractId, isTerminalContractStatus, type Contract } from './types.js';
 import { recoverPendingFixIdentities, recoverRepeatedStructuralCriteria } from './fix-identity.js';
 
@@ -150,13 +155,16 @@ function historicalContractPath(projectRoot: string, contractId: string): string
   return join(contractsDir(projectRoot), `${contractId}${JSON_SUFFIX}`);
 }
 
-/** The envelope as JSON; null when the contract cannot be serialized. */
+/**
+ * The envelope as JSON; null when the contract cannot be serialized. A native
+ * contract's admission is stored as a reference to its receipt file.
+ */
 export function serializeContract(contract: Contract, writtenAt: number): string | null {
   try {
-    assertNativeContractSource(contract);
-    validateNativeDecisionState(contract);
     const labels = storedCurrentFileLabels(contract);
-    const snapshot = { schemaVersion: CURRENT_CONTRACT_SCHEMA_VERSION, writtenAt, contract: contractWithStoredReviewObservations(contract),
+    const stored = contractWithStoredReviewObservations(contract);
+    const body = stored.durableAdmission === undefined ? stored : { ...stored, durableAdmission: storedAdmissionReference(stored.durableAdmission) };
+    const snapshot = { schemaVersion: CURRENT_CONTRACT_SCHEMA_VERSION, writtenAt, contract: body,
       ...(labels === undefined ? {} : { nativeFileLabels: labels }), treeBaselineOrigins: storedTreeBaselineOrigins(contract) };
     return JSON.stringify(snapshot);
   } catch (error) {
@@ -174,7 +182,12 @@ function isContractShape(value: unknown): value is Contract {
   if (!isRecord(value)) return false;
   if (value['durableAdmission'] !== undefined) {
     try {
-      const admission = parseDurableAdmission(value['durableAdmission']);
+      const stored = value['durableAdmission'];
+      // A reference is resolved from the receipt file of this contract id, which must carry the same payload.
+      const admission = isStoredAdmissionReference(stored)
+        ? new DurableContractAdmissions(String(value['projectRoot'])).findByContractId(String(value['id']))
+        : parseDurableAdmission(stored);
+      if (admission === null || (isStoredAdmissionReference(stored) && admission.payloadRevision !== stored.payloadRevision)) return false;
       if (admission.contractId !== value['id'] || admission.ownerAgentId !== value['ownerAgentId']
         || (value['durableLaunchState'] !== 'prepared' && value['durableLaunchState'] !== 'launch-claimed')) return false;
       value['durableAdmission'] = admission;
@@ -223,7 +236,6 @@ function parseContractSnapshot(json: string, receipt?: OwnedContractCheckpointRe
   try {
     hydrateStoredReviewObservations(raw['contract'], raw['schemaVersion'], json, receipt);
     hydrateTreeBaselines(raw['contract'], json, receipt);
-    if (isTerminalContractStatus(raw['contract'].status)) releaseTreeBaselineBytes(raw['contract']);
     if (receipt !== undefined && raw['schemaVersion'] >= 6) restoreCurrentFileLabels(raw['contract'], receipt);
   }
   catch { return { rejected: 'invalid-contract' }; }
@@ -499,9 +511,8 @@ export class ContractStore {
     try {
       this.assertStoredVersion(contract.id);
       this.prepareCheckpointWrite(contract);
-      if (contract.durableAdmission !== undefined) new DurableContractAdmissions(this.projectRoot).update(contract.durableAdmission, json);
       let publishedIdentity: string | undefined;
-      writeFileAtomic(path, json, { onEffect: published => {
+      writeFileAtomic(path, json, { durable: contract.durableAdmission !== undefined, onEffect: published => {
         // The atomic writer fences this callback with the original staged
         // descriptor and published pathname, including nanosecond clocks.
         if (published) publishedIdentity = fileObservationIdentity(path);
@@ -509,10 +520,6 @@ export class ContractStore {
       // Reuse only our successfully published schema, never a replacement
       // observed after the write. The next version check still stats the leaf.
       if (publishedIdentity !== undefined) this.supportedStoredVersions.set(path, publishedIdentity);
-      if (contract.durableAdmission !== undefined) {
-        syncContractDirectory(contractCheckpointsDir(this.projectRoot));
-        syncContractDirectory(contractsDir(this.projectRoot));
-      }
       this.writeFailures.delete(contract.id);
       this.recordEnded(contract);
       return true;

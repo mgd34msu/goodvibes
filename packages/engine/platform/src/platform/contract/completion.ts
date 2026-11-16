@@ -54,6 +54,7 @@ import { recordedJudgmentInputHash, hashState, JudgmentContextLimitError, Judgme
 import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { AgentWorktree, IsolatedWorktree } from '../agents/worktree.js';
 import { assertBaselineExecutionRootCurrent, partitionBaselinePaths } from './tree-baseline.js';
+import { decideRecorded, decisionReceipt, decisionReceiptText, receiptRecord } from './decision-records.js';
 import { GitService } from '../git/service.js';
 import { summarizeError } from '../utils/error-display.js';
 import { logger } from '../utils/logger.js';
@@ -245,11 +246,9 @@ interface AcceptanceRecord {
 function readAcceptance(contract: Pick<Contract, 'id' | 'decisions'>): AcceptanceRecord | undefined {
   const saved = contract.decisions.findLast((decision) => decision.action === 'checked' && decision.targetId === acceptanceTarget(contract.id));
   if (saved === undefined) return undefined;
-  try {
-    const parsed = JSON.parse(saved.reason) as Partial<AcceptanceRecord>;
-    return parsed.version === 1 && typeof parsed.checkId === 'string' && typeof parsed.tree === 'string' && typeof parsed.fixRounds === 'number'
-      ? parsed as AcceptanceRecord : undefined;
-  } catch { return undefined; }
+  const parsed = decisionReceipt(saved) as Partial<AcceptanceRecord> | null | undefined;
+  return parsed !== undefined && parsed !== null && parsed.version === 1 && typeof parsed.checkId === 'string' && typeof parsed.tree === 'string' && typeof parsed.fixRounds === 'number'
+    ? parsed as AcceptanceRecord : undefined;
 }
 
 function abortableDelay(run: ContractRun, ms: number): Promise<void> {
@@ -475,7 +474,7 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
       if (review) {
         let receipt: FinalAnswerReviewReceipt;
         try {
-          const parsed: unknown = JSON.parse(review.reason);
+          const parsed: unknown = decisionReceipt(review);
           if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('Invalid retained review');
           receipt = parsed as FinalAnswerReviewReceipt;
         }
@@ -505,7 +504,7 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
               return typeof id === 'string' && digest(expected) && entry?.status === 'answered' && entry.context.site === 'contract.check.final-answer-review' && entry.stateHash === expected;
             })) throw new JudgmentError('unrecorded', 'The retained native refusal lacks its original recorded input.');
         }
-        if (receipt.passed === false) refusedReview = review.reason;
+        if (receipt.passed === false) refusedReview = decisionReceiptText(review);
       }
       assertOwnedContractSource(contract);
       if (source !== undefined && captureGateInput(tree, source, scope).source !== source.source)
@@ -685,7 +684,8 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
               ...(claimReviews ? { overviewUnsupported: { probability: overviewUnsupported.probability, verdict: overviewUnsupported.verdict, outcome: overviewUnsupported.outcome }, claimReviews } : {}),
               decisionIds: [...reviews.flatMap(review => review.result.decisionId ? [review.result.decisionId] : []), ...(claimReviews?.map(review => review.decisionId) ?? [])],
             };
-            run.decide('checked', targetId, JSON.stringify(receipt), [...receipt.decisionIds]);
+            decideRecorded(run, 'checked', targetId, `final answer review: ${passed ? 'passed' : `refused${findings.length ? ` (${findings.length} finding${findings.length === 1 ? '' : 's'})` : ''}`}`,
+              receiptRecord(receipt), [...receipt.decisionIds]);
             return receipt;
           };
           if (!passed && bindNativeInput) {
@@ -796,7 +796,8 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
         goalProof = { schemaVersion: 1, policy: { name: battery.name, version: battery.version }, literalSourceDigest, outputDigest: outputDigestForCurrentAnswer(), ...(stateHash === undefined ? {} : { stateHash }),
           sourceJudgmentDecisionIds: [...judgment.decisionIds], sourceGoal: { probability: judgment.goal.probability, verdict: judgment.goal.verdict, outcome: judgment.goal.outcome },
           reading: { probability, verdict, outcome }, decisionIds: result.result.decisionId ? [result.result.decisionId] : [], passed };
-        run.decide('checked', `${contract.id}.goal-obligations`, JSON.stringify(goalProof), [...goalProof.decisionIds]);
+        decideRecorded(run, 'checked', `${contract.id}.goal-obligations`, `original goal obligations: ${passed ? 'covered by the criteria' : 'not established by the criteria'}`,
+          receiptRecord(goalProof), [...goalProof.decisionIds]);
         result.recordAction(passed ? 'The literal criteria cover the complete original goal; completion also requires their actual current checks, content approval, gates and successful publication.' : 'The literal criteria do not establish the whole original goal; retain the original goal hold.');
         if (passed) effectiveGoal = [result.readings.omitted, ...judgment.criteria]
           .reduce((worst, reading) => reading.probability > worst.probability ? reading : worst);
@@ -860,7 +861,8 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
           decisionIds: [result.result.decisionId],
           passed: verdict === 'no',
         };
-        run.decide('checked', `${input.targetId}.original-obligations`, JSON.stringify(originalObligations), [...originalObligations.decisionIds]);
+        decideRecorded(run, 'checked', `${input.targetId}.original-obligations`, `original obligations: ${originalObligations.passed ? 'supported by the result' : 'unmet or unverified'}`,
+          receiptRecord(originalObligations), [...originalObligations.decisionIds]);
         result.recordAction(originalObligations.passed
           ? 'Original obligations supported by the staged result; actual artifact application and answer delivery remain mandatory host stages.'
           : 'Original obligations unmet or unverified; retain staged work and withhold publication.');
@@ -931,7 +933,7 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
         const treeId = source.source.startsWith('tree:') ? source.source.slice('tree:'.length) : workingTreeIdentity(tree);
         if (treeId !== null) {
           const record: AcceptanceRecord = { version: 1, checkId, tree: treeId, fixRounds: contract.fixRounds };
-          run.decide('checked', acceptanceTarget(contract.id), JSON.stringify(record), check.decisionIds);
+          decideRecorded(run, 'checked', acceptanceTarget(contract.id), `accepted result recorded (check ${checkId}, tree ${treeId.slice(0, 12)})`, receiptRecord(record), check.decisionIds);
         }
       }
       judgment.recordAction(`${input.scope} check ${checkId}: ${passed ? 'pass' : 'to correction'}`);
@@ -1190,8 +1192,8 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
             owner.assertCurrent();
             const accepted = Object.values(checked.readings).every(reading => reading.verdict === 'no' && reading.outcome === 'act');
             const decisionIds = checked.result.decisionId ? [checked.result.decisionId] : [];
-            run.decide('checked', `${contract.id}.publication-owner`, JSON.stringify({ policy: { name: publicationOwner.name, version: publicationOwner.version },
-              readings: checked.readings, passed: accepted }), decisionIds);
+            decideRecorded(run, 'checked', `${contract.id}.publication-owner`, `publication over newer owner changes: ${accepted ? 'compatible' : 'not yet compatible'}`,
+              receiptRecord({ policy: { name: publicationOwner.name, version: publicationOwner.version }, readings: checked.readings, passed: accepted }), decisionIds);
             checked.recordAction(accepted ? 'Later owner changes preserve the original requested result; actual permissions, exact current owner/result identities and clean patch application still gate publication.'
               : 'Retain accepted work and newer owner edits; resolve the specific integration/evidence gap instead of repeating the unchanged publication.');
             if (!accepted) {
@@ -1278,7 +1280,7 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
     }
     const touched = [...new Set(contract.units.flatMap((unit) => unit.touchedPaths))];
     if (!contract.baseline) return { status: 'skipped', note: 'Scoped commit withheld: no original Git baseline was captured; preserve existing owner edits' };
-    const { included, uncertain } = partitionBaselinePaths(root, touched, contract.baseline);
+    const { included, uncertain } = await partitionBaselinePaths(root, touched, contract.baseline);
     if (uncertain.length) return { status: 'skipped', note: 'Scoped commit withheld: original dirty owner edits could not be verified; preserve them and inspect or re-establish the original work baseline' };
     if (included.length === 0) return { status: 'skipped', note: describeCommitOutcome(null, [], true) };
     const baseline = contract.baseline;

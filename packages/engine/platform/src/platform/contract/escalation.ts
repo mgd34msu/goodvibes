@@ -44,6 +44,7 @@ import {
   type UnitCheck,
 } from './types.js';
 import { addJudgmentUsage } from './usage.js';
+import { releaseSharedTreeForOwner, retakeSharedTreeAfterOwner } from './workstreams.js';
 
 /** The decision site owner replies are logged under. */
 export const OWNER_REPLY_SITE = 'contract.owner-reply';
@@ -379,10 +380,15 @@ export function createEscalations(context: StepContext, rejudge: Rejudge): Escal
       if (unit !== undefined) {
         run.releaseHold(unit);
         run.moveUnit(unit, 'awaiting-owner');
+        // Other contracts are not held behind a question nobody may be looking at; the reply takes the tree again.
+        releaseSharedTreeForOwner(run, unit.groupId);
       }
     } else if (input.scope === 'group') {
       const group = run.group(input.targetId);
-      if (group !== undefined) run.moveGroup(group, 'awaiting-owner');
+      if (group !== undefined) {
+        run.moveGroup(group, 'awaiting-owner');
+        releaseSharedTreeForOwner(run, group.id);
+      }
     }
     contract.escalations.push(escalation);
     run.decide('escalated', input.targetId, `${input.reason}: asked the owner`, input.decisionIds);
@@ -665,6 +671,10 @@ export function createEscalations(context: StepContext, rejudge: Rejudge): Escal
     if (run.replying.has(escalationId)) throw new OwnerReplyRefusedError(`a reply to ${escalationId} is already being read; wait for its result`, 'already-reading');
     run.replying.add(escalationId);
     try {
+      // The waiting group gave the shared tree up; it takes it again before the reply acts.
+      const waitingGroup = escalation.scope === 'unit' ? run.unit(escalation.targetId)?.groupId
+        : escalation.scope === 'group' ? escalation.targetId : undefined;
+      if (waitingGroup !== undefined) await retakeSharedTreeAfterOwner(run, waitingGroup);
       return escalation.failurePause === true ? replyToFailurePause(run, escalation, text) : await replyClaimed(run, escalation, text);
     } finally {
       run.replying.delete(escalationId);

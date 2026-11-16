@@ -33,22 +33,20 @@ import { isClassicOperation, requireDecisionFeature, withConfiguredDecisionModel
 
 import { existsSync } from 'node:fs';
 import { selectBaselineExecutionRoot } from './tree-baseline.js';
-import { hasScheduledFix } from './fix-identity.js';
 import { loadWorkstreamSnapshot } from '../orchestration/persistence.js';
 import { awaitNativeResumeConditions, nativeDecisionState } from './native-decisions.js';
 import { logger } from '../utils/logger.js';
-import { findCardNumberShapes } from '../security/card-shapes.js';
 import { queueSessionNudge, type UnitCheckLoop } from './agent-hooks.js';
 import { engineItem, type GroupRunner } from './group-runner.js';
 import type { ContractRun } from './run-context.js';
 import type { ContractStepsWithReplies } from './steps.js';
 import type { ContractStore } from './store.js';
-import { acquireSharedTree } from './workstreams.js';
+import { groupTakesSharedTree, takeSharedTreeForGroup } from './workstreams.js';
 import { preserveDeclaredReadReceipts } from './private-read-receipts.js';
 import { changedFinalAcceptancePolicy } from './acceptance-policy.js';
 import { isPublicationPause, retryPublicationPause } from './escalation.js';
 import { rebindOwnedContractSource } from './owned-source.js';
-import { isTerminalContractStatus, isTerminalUnitStatus, reopenFailedRepairPlanning, type Contract, type ContractFailureKind, type ContractStatus, type ContractUnit } from './types.js';
+import { isTerminalContractStatus, isTerminalUnitStatus, type Contract, type ContractFailureKind, type ContractStatus, type ContractUnit } from './types.js';
 
 /** The step a resumed contract takes up. */
 export type ResumeStep = 'start' | 'shape' | 'plan' | 'run' | 'judge' | 'commit' | 'await-owner';
@@ -190,9 +188,7 @@ export function createContractResume(deps: ContractResumeDeps): ContractResume {
         continue;
       }
       // An ended contract is known from its small summary and stays on disk: its checkpoint is not read.
-      // Only a failed planning contract may need the historical repair migration below.
-      const ended = deps.store.endedSummary(contractId);
-      if (ended !== undefined && !(ended.status === 'failed' && ended.failureKind === 'planning')) continue;
+      if (deps.store.endedSummary(contractId) !== undefined) continue;
       const contract = deps.store.load(contractId);
       if (contract === null) continue;
       if (isClassicOperation()) {
@@ -209,17 +205,7 @@ export function createContractResume(deps: ContractResumeDeps): ContractResume {
       if (contract.durableAdmission !== undefined) { deps.store.hold(contract); skipped.push(contractId); continue; }
       // A terminal verifier failure has already exhausted its operation. Never
       // restart it during startup; recovery requires explicit owner action.
-      // Keep the independent migration for a historical planner privacy refusal.
-      const acceptedWork = contract.nativeSource === undefined && contract.status === 'failed' && contract.commit === undefined
-        && contract.units.length > 0 && contract.units.every(unit => unit.status === 'passed')
-        && contract.groups.length > 0 && contract.groups.every(group => group.status === 'passed')
-        && contract.escalations.every(item => item.resolvedAt !== undefined);
-      const pendingRepair = acceptedWork && contract.failureKind === 'planning' && contract.fixRounds > 0
-        && !hasScheduledFix(contract, contract.id, contract.fixRounds)
-        && contract.error?.startsWith(`the fix for deliverable ${contract.id} could not be planned:`) === true
-        && contract.error.includes('Refused before judgment:')
-        && contract.units.some(unit => unit.commandEvidence?.some(command => findCardNumberShapes(command.head, 1).length > 0));
-      if (isTerminalContractStatus(contract.status) && !pendingRepair) {
+      if (isTerminalContractStatus(contract.status)) {
         deps.store.noteEnded(contract);
         continue;
       }
@@ -242,10 +228,7 @@ export function createContractResume(deps: ContractResumeDeps): ContractResume {
         logger.info('contract runner: contract is run by another process, left to it', { contractId });
         continue;
       }
-      if (pendingRepair) reopenFailedRepairPlanning(contract);
       const run = deps.adopt(contract);
-      if (pendingRepair) run.decide('resumed', contract.id, 'Recovered a historical repair-planner input refusal with card-shaped observational output. Resume the same unstarted repair round with projected command observations; original request screening and fresh plan, unit and final checks remain required.');
-      if (pendingRepair) deps.store.put(contract);
       try {
         prepareResume(run);
       } catch (error) {
@@ -345,7 +328,8 @@ export function createContractResume(deps: ContractResumeDeps): ContractResume {
     const plan = old.find(item => item.scope === 'plan');
     if (plan !== undefined) {
       state.plannerOutputs.plan ??= plan.question;
-      state.spent.plan = Math.max(state.spent.plan ?? 0, contract.decisions.filter(item => item.action === 'planned').length);
+      // The planner's own runs; a fix planner's saved candidates are planned decisions under their own targets.
+      state.spent.plan = Math.max(state.spent.plan ?? 0, contract.decisions.filter(item => item.action === 'planned' && item.targetId === contract.id).length);
     }
     // awaiting-owner cannot return to shaping; the plan step shapes again when no shape was settled.
     const next = old.some(item => item.scope === 'shape' || item.scope === 'plan') ? 'planning' : contract.statusBeforeOwner ?? 'running';
@@ -410,8 +394,12 @@ export function createContractResume(deps: ContractResumeDeps): ContractResume {
       deps.ownerProgress(run);
       return;
     }
-    if (contract.sessionMode === true) resumeSession(run);
-    else await resumeEngine(run);
+    if (contract.sessionMode === true) {
+      // The session's turns write in the shared tree: take its lock again before they can.
+      await takeSharedTreeForGroup(run, 'session');
+      if (run.terminal) return;
+      resumeSession(run);
+    } else await resumeEngine(run);
     if (run.terminal) return;
     await deps.steps.resumeNative(run);
     if (run.terminal) return;
@@ -435,17 +423,10 @@ export function createContractResume(deps: ContractResumeDeps): ContractResume {
   async function resumeEngine(run: ContractRun): Promise<void> {
     const { contract } = run;
     // Shared mode: a group that was running held the shared tree; it takes the tree again before anything runs in it.
-    if (contract.isolation === 'shared') {
-      for (const group of contract.groups) {
-        if (group.status !== 'running' && group.status !== 'fixing') continue;
-        if (group.kind === 'fix' && group.repairs?.scope === 'unit') continue;
-        const release = await acquireSharedTree(contract.projectRoot, run.abort.signal);
-        if (run.terminal) {
-          release();
-          return;
-        }
-        run.sharedTreeReleases.set(group.id, release);
-      }
+    for (const group of contract.groups) {
+      if ((group.status !== 'running' && group.status !== 'fixing') || !groupTakesSharedTree(contract, group)) continue;
+      await takeSharedTreeForGroup(run, group.id);
+      if (run.terminal) return;
     }
     // Before the engine can claim anything: every unit whose item was in its phase waits for the runner,
     // and a unit whose check passed before the restart settles its phase without a fresh agent.

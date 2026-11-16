@@ -292,13 +292,35 @@ export function assertDurableCheckpoint(contract: ContractView, admission: Durab
   }
 }
 
+/**
+ * What a contract checkpoint stores in place of its admission. The admission
+ * cannot change, so it is written once, in its receipt file, when the contract
+ * is admitted; a checkpoint names it by its payload revision and loading puts
+ * the receipt's admission back (store.ts `isContractShape`).
+ */
+export interface StoredAdmissionReference {
+  readonly stored: 'admission-receipt';
+  readonly payloadRevision: string;
+}
+
+export function storedAdmissionReference(admission: DurableContractAdmission): StoredAdmissionReference {
+  return { stored: 'admission-receipt', payloadRevision: admission.payloadRevision };
+}
+
+export function isStoredAdmissionReference(value: unknown): value is StoredAdmissionReference {
+  return record(value) && value['stored'] === 'admission-receipt' && typeof value['payloadRevision'] === 'string' && Object.keys(value).length === 2;
+}
+
 /** Flush the renamed entry as well as the file; admission cannot acknowledge a merely buffered directory entry. */
 export function syncContractDirectory(path: string): void {
   const fd = openSync(path, 'r');
   try { fsyncSync(fd); } finally { closeSync(fd); }
 }
 
-/** Immutable key-to-runner receipts. No semantic journal, outbox, retry loop, or automatic garbage collection. */
+/**
+ * Immutable key-to-runner receipts, each written once with the contract's first
+ * checkpoint. No semantic journal, outbox, retry loop, or automatic garbage collection.
+ */
 export class DurableContractAdmissions {
   private readonly directory: string;
   constructor(projectRoot: string) {
@@ -449,7 +471,11 @@ export class DurableContractAdmissions {
     return keys;
   }
 
-  /** The authoritative checkpoint lives in the same atomic envelope as its immutable key binding. */
+  /**
+   * The first checkpoint, published in the same atomic envelope as the key
+   * binding. Later saves go to the contract's own checkpoint file only (the
+   * envelope is never rewritten), so this is read only when that file is missing.
+   */
   checkpoint(key: DurableContractKey): string {
     const envelope = this.envelope(key);
     if (envelope === null) throw new DurableContractAdmissionError('missing');
@@ -480,14 +506,6 @@ export class DurableContractAdmissions {
     if (!isOpaqueContractId(admission.contractId) && this.indexedKey(admission.contractId) === null && this.findUnindexedContract(admission.contractId) !== null)
       throw new DurableContractAdmissionError('conflict');
     this.reserveIndex(admission, true);
-    this.persist(admission, checkpoint);
-  }
-
-  /** Only the execution-lease holder may update a checkpoint; the receipt itself cannot change. */
-  update(admission: DurableContractAdmission, checkpoint: string): void {
-    const existing = this.envelope(admission.key);
-    if (existing === null || canonical(existing.admission) !== canonical(admission)) throw new DurableContractAdmissionError('checkpoint');
-    if (!existing.indexed) this.reserveIndex(admission);
     this.persist(admission, checkpoint);
   }
 }

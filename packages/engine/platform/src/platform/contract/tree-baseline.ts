@@ -1,152 +1,163 @@
-/** Dirty baselines preserve exact owner edits across checkpoints without
- * persisting private file bodies. Live originals compare bytes directly; an
- * owned cold checkpoint verifies its independent saved content pin. Compact
- * pins are dictionary-recoverable, not anonymization. */
-import { createHash } from 'node:crypto';
+/**
+ * Tree baselines: what the working tree held when a contract, a group or a
+ * unit started, so its diff and its shared-tree commit leave out the owner's
+ * own uncommitted edits. A baseline is HEAD plus the git object id of every
+ * path that was uncommitted then (orchestration/dirty-guard.ts): one
+ * `git status` and one `git hash-object`, run as child processes, with no file
+ * bytes read into or held by this process. Comparing later hashes the
+ * candidate paths again and compares ids.
+ *
+ * Provenance: only a baseline this process captured, or one read back from an
+ * owned checkpoint file that recorded it as captured, can certify that a path
+ * is unchanged. A baseline from an imported snapshot cannot: its paths read as
+ * uncertain, so they are kept out of commits and the evidence step refuses.
+ */
 import { resolve } from 'node:path';
-import { captureDirtyFile, captureDirtyTreeRoot, equalDirtyFiles, type CapturedDirtyFile, type DirtyTreeRoot } from '../orchestration/dirty-file-observation.js';
-import { nativeDirtySnapshotEntries, nativeDirtySnapshotRoot, snapshotDirtyTreeWithin, type ScopedCommitExclusion } from '../orchestration/dirty-guard.js';
+import { spawn, spawnSync } from 'node:child_process';
+import { captureDirtyTreeIds, captureDirtyTreeIdsSync, type DirtyTreeIds, type ScopedCommitExclusion } from '../orchestration/dirty-guard.js';
+import { dirtyPathIds, legacyPathCommitment, sameDirtyPathId, type DirtyPathId } from '../orchestration/dirty-file-observation.js';
 import { ownedContractCheckpointText, type OwnedContractCheckpointRead } from './owned-checkpoint-read.js';
 import type { Contract, TreeBaseline } from './types.js';
 
-type Comparable = Exclude<CapturedDirtyFile, { readonly kind: 'unavailable' }>;
 interface BaselineOwner {
+  /** The working tree comparisons run in: where it was taken, or the tree the work moved to. */
   root: string;
-  selection: DirtyTreeRoot | undefined;
+  /** Captured here, or read back from an owned checkpoint that recorded it as captured. */
   readonly native: boolean;
-  retainBytes: boolean;
+  /** A unit baseline from before units recorded their root: comparable once its execution root is selected. */
   historicalUnitRootPending: boolean;
-  readonly initial: Map<string, CapturedDirtyFile>;
-  readonly latest: Map<string, { readonly file: Comparable; readonly equal?: boolean }>;
-  readonly settledComparisons: Map<string, { readonly assertCurrent: () => void; readonly equal: boolean }>;
 }
 const owners = new WeakMap<TreeBaseline, BaselineOwner>();
 const record = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value);
-/** Actual durable baseline bytes, not a local cache identity. The saved pin is
- * independently consumed after restart, including equal-byte replacement and
- * reversion where inode/timestamp observations cannot recover the original. */
-function bytePin(file: Exclude<Comparable, { readonly kind: 'missing' }>): string {
-  return createHash('sha256').update(file.bytes).digest('hex');
+const UNAVAILABLE = 'Original dirty baseline cannot be verified; preserve owner edits and inspect or re-establish the original work baseline before continuing';
+
+function runGit(cwd: string, args: readonly string[]): Promise<{ readonly code: number; readonly stdout: string }> {
+  return new Promise((resolveRun) => {
+    const child = spawn('git', ['-C', cwd, ...args], { stdio: ['ignore', 'pipe', 'ignore'] });
+    let stdout = '';
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', (chunk: string) => { stdout += chunk; });
+    child.on('error', () => resolveRun({ code: -1, stdout: '' }));
+    child.on('close', (code) => resolveRun({ code: code ?? -1, stdout }));
+  });
 }
-function commitment(file: Comparable): string | null {
-  if (file.kind === 'missing') return null;
-  return (file.kind === 'file' && file.executable ? 'executable' : file.kind) + ':' + bytePin(file);
+
+/**
+ * HEAD and the ids of every uncommitted path of `cwd`; undefined outside a git
+ * repository. Taken off the event loop; a capture already running for the
+ * same tree (the engine's launch capture) is shared.
+ */
+export async function captureTreeBaseline(cwd: string): Promise<TreeBaseline | undefined> {
+  const repository = await runGit(cwd, ['rev-parse', '--git-dir']);
+  if (repository.code !== 0) return undefined;
+  const head = await runGit(cwd, ['rev-parse', '--verify', '--quiet', 'HEAD']);
+  return baselineOf(cwd, head, await captureDirtyTreeIds(cwd));
 }
-const PHYSICAL_BASELINE = 'dirty-file-v3:';
-function savedObservation(file: Comparable, root: DirtyTreeRoot): string {
-  file.assertCurrent(); root.assertCurrent();
-  return PHYSICAL_BASELINE + JSON.stringify([file.kind, file.kind === 'file' && file.executable, root.revision, file.revision]);
+
+/**
+ * The same baseline taken synchronously, for a caller that cannot wait (a
+ * session turn that found none). Still no file bytes: git hashes them.
+ */
+export function captureTreeBaselineSync(cwd: string): TreeBaseline | undefined {
+  if (spawnSync('git', ['-C', cwd, 'rev-parse', '--git-dir'], { stdio: 'ignore' }).status !== 0) return undefined;
+  const head = spawnSync('git', ['-C', cwd, 'rev-parse', '--verify', '--quiet', 'HEAD'], { encoding: 'utf-8' });
+  return baselineOf(cwd, { code: head.status ?? -1, stdout: head.stdout ?? '' }, captureDirtyTreeIdsSync(cwd));
 }
-function isSavedObservation(value: string): boolean {
-  if (!value.startsWith(PHYSICAL_BASELINE)) return false;
-  try {
-    const text = value.slice(PHYSICAL_BASELINE.length), fields: unknown = JSON.parse(text);
-    return Array.isArray(fields) && fields.length === 4 && ['file', 'symlink', 'missing'].includes(fields[0])
-      && typeof fields[1] === 'boolean' && typeof fields[2] === 'string' && typeof fields[3] === 'string' && JSON.stringify(fields) === text;
-  } catch { return false; }
+
+function baselineOf(cwd: string, head: { readonly code: number; readonly stdout: string }, tree: DirtyTreeIds): TreeBaseline {
+  const value = head.code === 0 ? head.stdout.trim() : null;
+  if ((head.code !== 0 && head.code !== 1) || value !== null && !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(value)) throw new Error('Original Git baseline HEAD could not be read');
+  if (!tree.available) throw new Error('The uncommitted files could not be listed for the baseline; owner edits remain uncommitted');
+  const dirty: Record<string, string | null> = Object.create(null) as Record<string, string | null>;
+  for (const [path, id] of tree.ids) dirty[path] = id;
+  const baseline: TreeBaseline = Object.freeze({ version: 4, head: value, dirty: Object.freeze(dirty) });
+  owners.set(baseline, { root: resolve(cwd), native: true, historicalUnitRootPending: false });
+  return baseline;
 }
-export function createTreeBaseline(cwd: string, head: string | null): TreeBaseline {
-  // A contract baseline must hold every owner edit exactly, so it is not bounded like the engine's launch snapshot.
-  const snapshot = snapshotDirtyTreeWithin(cwd, { perFileBytes: Number.MAX_SAFE_INTEGER, totalBytes: Number.MAX_SAFE_INTEGER }), entries = nativeDirtySnapshotEntries(snapshot, cwd), selection = nativeDirtySnapshotRoot(snapshot, cwd), dirty: Record<string, string | null> = Object.create(null) as Record<string, string | null>;
-  for (const [path, file] of entries) {
-    if (file.kind === 'unavailable') throw new Error('Original dirty baseline is unavailable; owner edits remain uncommitted');
-    file.assertCurrent(); dirty[path] = commitment(file); file.assertCurrent();
-  }
-  const baseline: TreeBaseline = Object.freeze({ version: 2, head, dirty: Object.freeze(dirty) });
-  owners.set(baseline, { root: resolve(cwd), selection, native: true, retainBytes: true, historicalUnitRootPending: false, initial: new Map(entries), latest: new Map(), settledComparisons: new Map() }); return baseline;
-}
-function current(owner: BaselineOwner, path: string): CapturedDirtyFile {
-  if (!owner.retainBytes) return owner.selection ? captureDirtyFile(owner.root, path, owner.selection) : { kind: 'unavailable', revision: null };
-  const initial = owner.initial.get(path);
-  let previous = owner.latest.get(path)?.file;
-  if (!previous && initial && initial.kind !== 'unavailable' && initial.root === owner.root) previous = initial;
-  if (previous) { try { previous.assertCurrent(); return previous; } catch { /* Read the new actual source, never adopt its old physical identity. */ } }
-  const file = owner.selection ? captureDirtyFile(owner.root, path, owner.selection) : { kind: 'unavailable' as const, revision: null };
-  if (file.kind !== 'unavailable') owner.latest.set(path, { file });
-  return file;
-}
+
 function comparisonOwner(cwd: string, baseline: TreeBaseline): BaselineOwner | undefined {
   const owner = owners.get(baseline);
-  if (!owner?.native || owner.historicalUnitRootPending || owner.root !== resolve(cwd) || !owner.selection) return undefined;
-  try { owner.selection.assertCurrent(); return owner; } catch { return undefined; }
+  return owner?.native && !owner.historicalUnitRootPending && owner.root === resolve(cwd) ? owner : undefined;
 }
-/** Retain the already selected comparison-root guard for a real Git commit.
- * It remains separate from accepted output/source checks and issues no bytes. */
+
+/** A real Git commit compares against this baseline in `cwd`: refused when the baseline cannot certify it. */
 export function assertBaselineExecutionRootCurrent(cwd: string, baseline: TreeBaseline): void {
   if (!comparisonOwner(cwd, baseline)) throw new Error('Original tree baseline comparison root is unavailable');
 }
-/** True/false compare content; undefined preserves uncertainty. A copied public
- * baseline has no private originals and cannot certify source equality. */
-export function baselinePathUnchanged(cwd: string, baseline: TreeBaseline, path: string): boolean | undefined {
-  const owner = comparisonOwner(cwd, baseline);
-  if (!owner) return undefined;
-  if (!Object.hasOwn(baseline.dirty, path)) return false;
-  if (!owner.retainBytes) {
-    const previous = owner.settledComparisons.get(path);
-    if (previous) { try { previous.assertCurrent(); return previous.equal; } catch { owner.settledComparisons.delete(path); } }
+
+/** Whether each saved path is unchanged now: true or false compare content, undefined is uncertain. */
+async function unchangedPaths(cwd: string, baseline: TreeBaseline, paths: readonly string[]): Promise<Map<string, boolean | undefined>> {
+  const result = new Map<string, boolean | undefined>();
+  if (baseline.version === 4) {
+    const now = await dirtyPathIds(cwd, paths);
+    for (const path of paths) result.set(path, sameDirtyPathId(baseline.dirty[path] as DirtyPathId, now.get(path)));
+    return result;
   }
-  const now = current(owner, path);
-  if (now.kind === 'unavailable') return undefined;
-  const initial = owner.initial.get(path);
-  if (initial !== undefined) {
-    if (baseline.version === undefined && initial.kind === 'file' && now.kind === 'file') return initial.bytes.equals(now.bytes);
-    return equalDirtyFiles(initial, now);
+  // Older baselines saved sha256 commitments of the bytes (version 2, or bare
+  // digests before versions); version 3 saved physical facts that cannot
+  // prove content after a restart, so its paths stay uncertain.
+  for (const path of paths) {
+    const saved = baseline.dirty[path];
+    if (baseline.version === 3) { result.set(path, undefined); continue; }
+    const now = await legacyPathCommitment(cwd, path);
+    if (now === undefined) { result.set(path, undefined); continue; }
+    if (baseline.version === 2) { result.set(path, saved === null ? now === null : now !== null && now === saved); continue; }
+    // Unversioned: null conflated deletion with a failed read, and symlinks were digested through their target.
+    if (saved === null || saved === undefined || now?.startsWith('symlink:') === true) { result.set(path, undefined); continue; }
+    result.set(path, now !== null && now.slice(now.indexOf(':') + 1) === saved);
   }
-  const cached = owner.latest.get(path);
-  if (cached?.file === now && cached.equal !== undefined) return cached.equal;
-  const saved = baseline.dirty[path];
-  let equal: boolean;
-  if (baseline.version === 2) {
-    if (saved === null) equal = now.kind === 'missing';
-    else if (now.kind === 'missing') equal = false;
-    else if (!saved?.startsWith((now.kind === 'file' && now.executable ? 'executable' : now.kind) + ':')) equal = false;
-    else equal = commitment(now) === saved;
-  } else if (baseline.version === 3) {
-    // Unreleased physical-only checkpoints remain readable. They omitted the
-    // original bytes/pin, so changed facts cannot be promoted into byte proof.
-    if (typeof saved !== 'string' || !owner.selection || savedObservation(now, owner.selection) !== saved) return undefined;
-    equal = true;
-  } else {
-    // Old null conflated deletion with failed reads; old symlink digests came
-    // from external targets. Neither can prove an original source on restart.
-    if (saved === null || now.kind === 'symlink') return undefined;
-    equal = now.kind !== 'missing' && bytePin(now) === saved;
-  }
-  if (owner.retainBytes) owner.latest.set(path, { file: now, equal });
-  else owner.settledComparisons.set(path, { assertCurrent: now.assertCurrent, equal }); // Metadata-only; the closure captures no leaf-byte scope.
-  if (equal && owner.retainBytes) owner.initial.set(path, now); // Actual verified adoption once, not a raw-content global cache.
-  return equal;
+  return result;
 }
-export function partitionBaselinePaths(cwd: string, candidatePaths: readonly string[], baseline: TreeBaseline | undefined): ScopedCommitExclusion {
+
+/** Splits candidate paths into the work's changes (included) and owner edits the work left as they were (excluded). */
+export async function partitionBaselinePaths(cwd: string, candidatePaths: readonly string[], baseline: TreeBaseline | undefined): Promise<ScopedCommitExclusion> {
   const included: string[] = [], excluded: string[] = [], uncertain: string[] = [];
-  const verified = baseline === undefined || comparisonOwner(cwd, baseline) !== undefined;
+  if (baseline !== undefined && comparisonOwner(cwd, baseline) === undefined) return { included, excluded: [...candidatePaths], uncertain: [...candidatePaths] };
+  const saved = baseline === undefined ? [] : candidatePaths.filter((path) => Object.hasOwn(baseline.dirty, path));
+  const unchanged = baseline === undefined ? new Map<string, boolean | undefined>() : await unchangedPaths(cwd, baseline, saved);
   for (const path of candidatePaths) {
-    if (!verified) { excluded.push(path); uncertain.push(path); continue; }
-    if (!baseline || !Object.hasOwn(baseline.dirty, path)) { included.push(path); continue; }
-    const equal = baselinePathUnchanged(cwd, baseline, path);
+    if (!unchanged.has(path)) { included.push(path); continue; }
+    const equal = unchanged.get(path);
     if (equal === false) included.push(path);
     else { excluded.push(path); if (equal === undefined) uncertain.push(path); }
   }
   return { included, excluded, uncertain };
 }
-export function baselineChangedPaths(cwd: string, paths: readonly string[], baseline: TreeBaseline | undefined): readonly string[] {
-  if (baseline !== undefined && !comparisonOwner(cwd, baseline)) throw new Error('Original dirty baseline cannot be verified; preserve owner edits and inspect or re-establish the original work baseline before continuing');
+
+/** The paths the work changed since the baseline: the given ones and every saved one, less the unchanged owner edits. */
+export async function baselineChangedPaths(cwd: string, paths: readonly string[], baseline: TreeBaseline | undefined): Promise<readonly string[]> {
+  if (baseline !== undefined && !comparisonOwner(cwd, baseline)) throw new Error(UNAVAILABLE);
   const candidates = [...new Set([...paths, ...Object.keys(baseline?.dirty ?? {})])];
-  const result = partitionBaselinePaths(cwd, candidates, baseline);
-  if (result.uncertain.length) throw new Error('Original dirty baseline cannot be verified; preserve owner edits and inspect or re-establish the original work baseline before continuing');
+  const result = await partitionBaselinePaths(cwd, candidates, baseline);
+  if (result.uncertain.length) throw new Error(UNAVAILABLE);
   return result.included;
 }
+
+const SAVED_V4 = /^(?:(?:file|executable):[a-f0-9]{40}(?:[a-f0-9]{24})?|symlink:[a-f0-9]{64}|other)$/;
+const SAVED_V3 = 'dirty-file-v3:';
+
+function savedValueValid(version: unknown, saved: unknown): boolean {
+  if (saved === null) return true;
+  if (typeof saved !== 'string') return false;
+  if (version === 4) return SAVED_V4.test(saved);
+  if (version === 3) return saved.startsWith(SAVED_V3);
+  if (version === 2) return /^(?:file|executable|symlink):[a-f0-9]{64}$/.test(saved);
+  return /^[a-f0-9]{64}$/.test(saved);
+}
+
 function parsed(value: unknown): TreeBaseline {
   if (!record(value) || !Object.keys(value).every(key => key === 'head' || key === 'dirty' || key === 'version')
-    || !(value['head'] === null || typeof value['head'] === 'string') || !record(value['dirty']) || !(value['version'] === undefined || value['version'] === 2 || value['version'] === 3)) throw new Error('Invalid original tree baseline');
+    || !(value['head'] === null || typeof value['head'] === 'string') || !record(value['dirty'])
+    || !(value['version'] === undefined || value['version'] === 2 || value['version'] === 3 || value['version'] === 4)) throw new Error('Invalid original tree baseline');
   const dirty: Record<string, string | null> = Object.create(null) as Record<string, string | null>;
   for (const [path, saved] of Object.entries(value['dirty'])) {
     if (!path || path.startsWith('/') || path.includes('\0') || path.split('/').some(part => part === '' || part === '.' || part === '..' || part === '.git' || part === '.goodvibes')
-      || !(saved === null || typeof saved === 'string' && (value['version'] === 3 ? isSavedObservation(saved) : (value['version'] === 2 ? /^(?:file|executable|symlink):[a-f0-9]{64}$/ : /^[a-f0-9]{64}$/).test(saved)))) throw new Error('Invalid original tree baseline');
-    dirty[path] = saved;
+      || !savedValueValid(value['version'], saved)) throw new Error('Invalid original tree baseline');
+    dirty[path] = saved as string | null;
   }
-  return Object.freeze({ head: value['head'], dirty: Object.freeze(dirty), ...(value['version'] === undefined ? {} : { version: value['version'] as 2 | 3 }) });
+  return Object.freeze({ head: value['head'], dirty: Object.freeze(dirty), ...(value['version'] === undefined ? {} : { version: value['version'] as 2 | 3 | 4 }) });
 }
+
 function locations(contract: Contract): Array<{ readonly key: string; readonly root: string; readonly get: () => TreeBaseline | undefined; readonly set: (baseline: TreeBaseline) => void }> {
   const contractRoot = contract.worktreePath ?? contract.projectRoot;
   const units = [...contract.units], ids = new Set<string>();
@@ -158,15 +169,16 @@ function locations(contract: Contract): Array<{ readonly key: string; readonly r
     ...contract.groups.map(group => ({ key: 'group:' + group.id, root: contractRoot, get: () => group.baseline, set: (baseline: TreeBaseline) => { group.baseline = baseline; } })),
     ...units.map(unit => ({ key: 'unit:' + unit.id, root: contractRoot, get: () => unit.baseline, set: (baseline: TreeBaseline) => { unit.baseline = baseline; } }))];
 }
-/** Checkpoint-only provenance. It contains no file bytes or source facts. */
+
+/** Checkpoint-only provenance: where each baseline compares and whether it was captured here. */
 export function storedTreeBaselineOrigins(contract: Contract) {
   return { version: 1, entries: locations(contract).flatMap(location => {
     const baseline = location.get(); if (!baseline) return [];
-    parsed(baseline);
     const owner = owners.get(baseline);
     return [{ location: location.key, root: owner?.root ?? resolve(location.root), origin: owner?.native ? owner.historicalUnitRootPending ? 'owned-historical-unbound-unit' : 'native-snapshot' : 'unverified-import' }];
   }) };
 }
+
 export function hydrateTreeBaselines(contract: Contract, serialized: string, receipt?: OwnedContractCheckpointRead): void {
   const envelope: unknown = JSON.parse(serialized);
   if (!record(envelope)) throw new Error('Invalid tree baseline checkpoint');
@@ -189,33 +201,25 @@ export function hydrateTreeBaselines(contract: Contract, serialized: string, rec
       && (table === undefined || origin?.origin === 'owned-historical-unbound-unit');
     if (origin?.origin === 'owned-historical-unbound-unit' && !historicalUnitRootPending) throw new Error('Invalid historical unit baseline provenance');
     const eligible = native && (origin?.origin === 'native-snapshot' || historicalUnitRootPending || table === undefined && baseline.version === undefined);
-    const root = origin?.root ?? resolve(location.root);
-    let selection: DirtyTreeRoot | undefined;
-    if (eligible) { try { selection = captureDirtyTreeRoot(root); } catch { /* Unavailable current roots cannot become file deletions or native byte proof. */ } }
-    owners.set(baseline, { root, selection, native: eligible, retainBytes: true, historicalUnitRootPending: eligible && historicalUnitRootPending, initial: new Map(), latest: new Map(), settledComparisons: new Map() });
+    owners.set(baseline, { root: origin?.root ?? resolve(location.root), native: eligible, historicalUnitRootPending: eligible && historicalUnitRootPending });
   }
   if (origins.size) throw new Error('Tree baseline provenance names an unknown original');
-  if (receipt !== undefined && ownedContractCheckpointText(receipt) !== serialized) throw new Error('Original tree baseline checkpoint changed');
 }
-/** Actual executor/correction lifecycle only: select the current comparison
- * tree, including an integrated item's contract branch. Original bytes and
- * saved commitments stay unchanged; another tree is not promoted to original
- * physical ownership, and JSON/import cannot acquire native provenance. */
+
+/**
+ * The work moved to another tree (an item worktree, or the contract branch it
+ * integrated into): later comparisons run there. A baseline that cannot
+ * certify anything stays that way.
+ */
 export function selectBaselineExecutionRoot(baseline: TreeBaseline | undefined, cwd: string): void {
   if (!baseline) return;
   const owner = owners.get(baseline);
   if (!owner?.native) return;
-  const selected = resolve(cwd);
-  if (owner.root === selected && owner.selection) {
-    owner.selection.assertCurrent(); owner.historicalUnitRootPending = false; return;
-  }
-  if (owner.root === selected && !owner.historicalUnitRootPending) throw new Error('Original tree baseline comparison root is unavailable');
-  const selection = captureDirtyTreeRoot(selected);
-  owner.latest.clear(); owner.settledComparisons.clear(); owner.root = selected; owner.selection = selection; owner.historicalUnitRootPending = false;
+  owner.root = resolve(cwd);
+  owner.historicalUnitRootPending = false;
 }
-/** An actual runtime owner's disposal clone retains original immutable byte
- * observations with an independent comparison-context/cache map. Arbitrary
- * structuredClone/JSON cannot inherit native byte originals. */
+
+/** A copy of a live contract (for disposal) keeps its baselines' provenance; a JSON copy does not. */
 export function retainOriginalTreeBaselines(original: Contract, copy: Contract): void {
   const targets = new Map(locations(copy).map(location => [location.key, location]));
   for (const location of locations(original)) {
@@ -224,21 +228,8 @@ export function retainOriginalTreeBaselines(original: Contract, copy: Contract):
     if (baseline) {
       const copied: TreeBaseline = Object.freeze({ head: baseline.head, dirty: baseline.dirty, ...(baseline.version === undefined ? {} : { version: baseline.version }) });
       const owner = owners.get(baseline);
-      if (owner) owners.set(copied, { ...owner, initial: new Map(owner.initial), latest: new Map(owner.latest), settledComparisons: new Map(owner.settledComparisons) });
+      if (owner) owners.set(copied, { ...owner });
       target.set(copied);
     }
-  }
-}
-
-/** Executor settlement ends private byte/cache retention, even though terminal
- * history keeps the public Contract. Saved commitments and native provenance
- * remain available for an explicit later read. Its temporary bytes are not
- * cached on terminal history; cleanup itself performs no I/O. */
-export function releaseTreeBaselineBytes(contract: Contract): void {
-  const released = new Set<BaselineOwner>();
-  for (const location of locations(contract)) {
-    const baseline = location.get(), owner = baseline && owners.get(baseline);
-    if (!owner || released.has(owner)) continue;
-    owner.initial.clear(); owner.latest.clear(); owner.settledComparisons.clear(); owner.retainBytes = false; released.add(owner);
   }
 }

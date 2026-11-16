@@ -10,19 +10,27 @@
  * all contracts are bounded by the fleet ceiling and a dependent unit starts
  * only after its dependency passed and merged.
  *
- * Shared mode also takes a lock per project root for the time a group runs,
- * so one unit at a time changes a shared working tree across every contract in
- * the process: a unit's diff against its baseline is exactly its own, and its
- * gates never see another unit's half-finished edits.
+ * Shared mode also takes one lock per working tree for the time a group works
+ * (and a session-mode contract for its whole run), so one contract at a time
+ * changes a shared working tree, across every process on the machine: a unit's
+ * diff against its baseline is exactly its own, and its gates never see
+ * another unit's half-finished edits. The lock is a kernel-released lock file
+ * (utils/process-lock.ts) under `.goodvibes/contracts/`; its holder writes who
+ * it is beside it, so a waiting contract can say what it waits for. A group
+ * that waits for its owner's answer gives the tree up and takes it again when
+ * the answer comes.
  */
-import { realpathSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { readFileSync, realpathSync, unlinkSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+import { acquireProcessLock, holdProcessLock, ProcessLockBusyError, type HeldProcessLock } from '../utils/process-lock.js';
+import { writeDocument } from '../utils/atomic-json-store.js';
 import type { CreateWorkstreamInput } from '../orchestration/engine.js';
 import type { BudgetCeiling, PhaseSpec, WorkItemSpec, WorkItemUsage } from '../orchestration/types.js';
 import { briefWithPreviousChecks, buildUnitBrief } from './brief.js';
 import type { ContractConfig } from './config.js';
 import { unitToolContract } from './plan-schema.js';
 import { UNIT_SELF_CHECK_TOOL } from './self-check.js';
+import type { ContractRun } from './run-context.js';
 import type { Contract, ContractGroup, ContractUnit, UnitRole } from './types.js';
 
 /** The agent archetype for a unit's role. A design unit runs as a general agent held read-only by its tool contract. */
@@ -113,8 +121,13 @@ export function groupWorkstreamInput(
 
 // ── The shared-tree lock (design 6.1) ─────────────────────────────────────────
 
-/** Waiters per shared working tree, first in first out; the head holds the lock. */
-const sharedTreeQueues = new Map<string, Array<() => void>>();
+/** Who holds a shared working tree: written beside the lock by its holder. */
+export interface SharedTreeHolder {
+  readonly contractId: string;
+  /** The group working in the tree, or `session` for a session-mode contract. */
+  readonly groupId: string;
+  readonly pid: number;
+}
 
 function treeKey(root: string): string {
   try {
@@ -124,46 +137,150 @@ function treeKey(root: string): string {
   }
 }
 
-/**
- * Takes the lock on a shared working tree for every contract in this process.
- * Resolves with the release function once the caller holds it; release is
- * idempotent. `signal` withdraws a caller still waiting (the promise then
- * rejects with the signal's reason).
- */
-export function acquireSharedTree(root: string, signal?: AbortSignal): Promise<() => void> {
-  const key = treeKey(root);
-  const queue = sharedTreeQueues.get(key) ?? [];
-  sharedTreeQueues.set(key, queue);
-  return new Promise<() => void>((resolveLock, rejectLock) => {
-    let released = false;
-    const release = (): void => {
-      if (released) return;
-      released = true;
-      const index = queue.indexOf(grant);
-      if (index !== -1) queue.splice(index, 1);
-      if (index === 0) queue[0]?.();
-      if (queue.length === 0) sharedTreeQueues.delete(key);
-    };
-    const grant = (): void => {
-      signal?.removeEventListener('abort', onAbort);
-      resolveLock(release);
-    };
-    const onAbort = (): void => {
-      release();
-      rejectLock(signal?.reason instanceof Error ? signal.reason : new Error('stopped while waiting for the shared working tree'));
-    };
-    if (signal?.aborted) {
-      rejectLock(signal.reason instanceof Error ? signal.reason : new Error('stopped while waiting for the shared working tree'));
-      if (queue.length === 0) sharedTreeQueues.delete(key);
-      return;
-    }
-    signal?.addEventListener('abort', onAbort, { once: true });
-    queue.push(grant);
-    if (queue.length === 1) grant();
-  });
+function sharedTreeLockPath(root: string): string {
+  return join(treeKey(root), '.goodvibes', 'contracts', '.shared-tree.writer.sqlite');
 }
 
-/** How many callers hold or wait for a shared tree (tests and status). */
+function holderPath(root: string): string {
+  return join(treeKey(root), '.goodvibes', 'contracts', '.shared-tree.holder.json');
+}
+
+function parseHolder(value: unknown): SharedTreeHolder {
+  const record = value as Partial<SharedTreeHolder> | null;
+  if (record === null || typeof record !== 'object' || typeof record.contractId !== 'string' || typeof record.groupId !== 'string' || typeof record.pid !== 'number') throw new Error('not a holder record');
+  return { contractId: record.contractId, groupId: record.groupId, pid: record.pid };
+}
+
+/** Who holds the tree now, as its holder recorded it; undefined when nothing says. */
+export function sharedTreeHolder(root: string): SharedTreeHolder | undefined {
+  try {
+    return parseHolder(JSON.parse(readFileSync(holderPath(root), 'utf8')));
+  } catch {
+    return undefined;
+  }
+}
+
+/** The longest one wait timer can run; a waiter whose turn has not come by then simply waits again. */
+const LONGEST_WAIT_MS = 2_147_483_647;
+
+/** Holders and waiters per tree in this process, for status. */
+const inProcess = new Map<string, number>();
+
+function count(key: string, by: number): void {
+  const next = (inProcess.get(key) ?? 0) + by;
+  if (next <= 0) inProcess.delete(key); else inProcess.set(key, next);
+}
+
+/** What a waiting caller is told: who holds the tree, when that is known. */
+export function describeSharedTreeWait(holder: SharedTreeHolder | undefined): string {
+  if (holder === undefined) return 'waiting for the shared working tree, which another contract is changing';
+  const by = holder.groupId === 'session' ? `contract ${holder.contractId} (session mode)` : `contract ${holder.contractId} group ${holder.groupId}`;
+  return `waiting for the shared working tree, held by ${by}${holder.pid === process.pid ? '' : ` in process ${holder.pid}`}`;
+}
+
+async function takeTreeLock(path: string, root: string, options: { readonly signal?: AbortSignal | undefined; readonly onWait?: ((heldBy: SharedTreeHolder | undefined) => void) | undefined }): Promise<HeldProcessLock> {
+  const free = holdProcessLock(path);
+  if (free !== null) return free;
+  options.onWait?.(sharedTreeHolder(root));
+  for (;;) {
+    try { return await acquireProcessLock(path, { waitMs: LONGEST_WAIT_MS, ...(options.signal === undefined ? {} : { signal: options.signal }) }); }
+    catch (error) { if (!(error instanceof ProcessLockBusyError)) throw error; }
+  }
+}
+
+/**
+ * Takes the lock on a shared working tree, for every process on the machine.
+ * Resolves with the release function once the caller holds it; release is
+ * idempotent. When the tree is held, `onWait` is called once with the holder
+ * before the wait starts. `signal` withdraws a caller still waiting (the
+ * promise then rejects with the signal's reason). Cost: one open and two
+ * statements when free, one small holder write per acquisition.
+ */
+export async function acquireSharedTree(root: string, holder: { readonly contractId: string; readonly groupId: string }, options: {
+  readonly signal?: AbortSignal | undefined;
+  readonly onWait?: ((heldBy: SharedTreeHolder | undefined) => void) | undefined;
+} = {}): Promise<() => void> {
+  const key = treeKey(root);
+  const path = sharedTreeLockPath(root);
+  options.signal?.throwIfAborted();
+  count(key, 1);
+  let held: HeldProcessLock;
+  try {
+    held = await takeTreeLock(path, root, options);
+  } catch (error) {
+    count(key, -1);
+    throw error;
+  }
+  try { writeDocument(holderPath(root), { contractId: holder.contractId, groupId: holder.groupId, pid: process.pid }); }
+  catch { /* The holder note only names the holder for waiters; the lock is what excludes them. */ }
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    // The note goes before the lock, so it never removes the next holder's.
+    try { unlinkSync(holderPath(root)); } catch { /* already gone */ }
+    held.release();
+    count(key, -1);
+  };
+}
+
+/** How many callers in this process hold or wait for a shared tree (status). */
 export function sharedTreeWaiters(root: string): number {
-  return sharedTreeQueues.get(treeKey(root))?.length ?? 0;
+  return inProcess.get(treeKey(root)) ?? 0;
+}
+
+/** Records that a group waits for the tree: one decision and the contract's status line. */
+export function noteSharedTreeWait(run: ContractRun, groupId: string, holder: SharedTreeHolder | undefined): void {
+  const line = describeSharedTreeWait(holder);
+  run.decide('queued', groupId, line);
+  run.contract.statusLine = `Contract ${run.id}: ${line}`;
+}
+
+/** Clears the waiting line once the tree is held. */
+export function clearSharedTreeWait(run: ContractRun): void {
+  if (run.contract.statusLine?.includes('waiting for the shared working tree') === true) run.contract.statusLine = undefined;
+}
+
+/** Takes the tree for a group of a shared-mode contract, recording a wait when another holder has it. */
+export async function takeSharedTreeForGroup(run: ContractRun, groupId: string): Promise<void> {
+  const release = await acquireSharedTree(run.contract.projectRoot, { contractId: run.id, groupId }, {
+    signal: run.abort.signal,
+    onWait: (holder) => noteSharedTreeWait(run, groupId, holder),
+  });
+  if (run.terminal) { release(); return; }
+  run.sharedTreeReleases.get(groupId)?.();
+  run.sharedTreeReleases.set(groupId, release);
+  clearSharedTreeWait(run);
+}
+
+/** Whether a group takes the shared tree itself: a shared-mode group that is not a fix running inside the unit's own group. */
+export function groupTakesSharedTree(contract: Contract, group: ContractGroup): boolean {
+  return contract.isolation === 'shared' && contract.sessionMode !== true && !(group.kind === 'fix' && group.repairs?.scope === 'unit');
+}
+
+/** Unit states in which nothing of the unit can change the tree. */
+const IDLE_UNIT_STATUSES: ReadonlySet<ContractUnit['status']> = new Set(['pending', 'blocked', 'awaiting-owner', 'held-merge', 'passed', 'failed', 'cancelled']);
+
+/**
+ * A unit or group now waits for its owner: the group gives the shared tree up
+ * so other contracts are not held behind the question, unless another of its
+ * units is still working in the tree (it then keeps it until the group ends).
+ */
+export function releaseSharedTreeForOwner(run: ContractRun, groupId: string): void {
+  const release = run.sharedTreeReleases.get(groupId);
+  if (release === undefined) return;
+  if (run.contract.units.some((unit) => unit.groupId === groupId && !IDLE_UNIT_STATUSES.has(unit.status))) return;
+  run.sharedTreeReleases.delete(groupId);
+  release();
+}
+
+/**
+ * The owner answered a unit's question: its group takes the tree again before
+ * the unit works on (also after a restart, when the group never retook it).
+ */
+export async function retakeSharedTreeAfterOwner(run: ContractRun, groupId: string): Promise<void> {
+  const group = run.group(groupId);
+  if (group === undefined || run.terminal || !groupTakesSharedTree(run.contract, group) || run.sharedTreeReleases.has(groupId)) return;
+  if (group.status === 'passed' || group.status === 'failed' || group.status === 'cancelled' || group.status === 'pending' || group.status === 'blocked') return;
+  await takeSharedTreeForGroup(run, groupId);
 }

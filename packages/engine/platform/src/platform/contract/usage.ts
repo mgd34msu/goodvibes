@@ -6,7 +6,9 @@
  * - A unit's usage is the phase runner's per-agent usage record
  *   (`usageFromRecord`) merged with `mergeWorkItemUsage` across every agent
  *   the unit ever ran. An agent woken several times is one record whose
- *   counts already include every run, so each agent counts once.
+ *   counts already include every run, so each agent counts once. The
+ *   contract keeps each agent's last seen usage (`contract.agentUsage`), so
+ *   an agent record that is pruned or lost does not shrink any total.
  * - A group's usage is the merge of its units; the contract's is the merge of
  *   its groups plus its planner agents.
  * - The owner record's `usage` and `toolCallCount` are the sums over the same
@@ -54,20 +56,47 @@ export function contractAgentIds(contract: Pick<Contract, 'plannerAgentIds' | 'u
 }
 
 /**
- * Recomputes the usage of every unit, every group and the contract from the
- * agent records. Idempotent: it sums from the records, never adds to what was
- * recorded before.
+ * Records what one agent has used, from its live record, on the contract that
+ * ran it; nothing changes when the record is gone. Called when the agent
+ * finishes and by every roll-up.
+ */
+export function noteAgentUsage(contract: Pick<Contract, 'agentUsage'>, agentId: string, getStatus: AgentLookup, pricing: UsagePricing): void {
+  const record = getStatus(agentId);
+  if (record === null) return;
+  (contract.agentUsage ??= {})[agentId] = {
+    usage: usageFromRecord(record, pricing.priceUsage, pricing.priceProvenance),
+    ...(record.usage === undefined ? {} : { agent: { ...record.usage } }),
+    toolCallCount: record.toolCallCount,
+  };
+}
+
+/** The merged usage of the given agents as the contract last saw them. */
+function knownUsage(contract: Pick<Contract, 'agentUsage'>, agentIds: readonly string[]): WorkItemUsage {
+  const records: WorkItemUsage[] = [];
+  for (const agentId of new Set(agentIds)) {
+    const known = contract.agentUsage?.[agentId];
+    if (known !== undefined) records.push(known.usage);
+  }
+  return mergeAll(records);
+}
+
+/**
+ * Recomputes the usage of every unit, every group and the contract. The
+ * contract owns its usage: each agent's entry is refreshed from its live
+ * record when that exists, and the totals are summed from the entries, so an
+ * agent whose record was pruned or lost keeps what it was last seen to use.
  */
 export function rollUpContractUsage(contract: Contract, getStatus: AgentLookup, pricing: UsagePricing): void {
+  for (const agentId of contractAgentIds(contract)) noteAgentUsage(contract, agentId, getStatus, pricing);
   for (const unit of contract.units) {
     // A best-of-N unit's agents are its attempts' agents (group-runner records both), so each counts once.
-    unit.usage = agentsUsage(unit.agentIds, getStatus, pricing);
-    for (const attempt of unit.attemptUnits ?? []) attempt.usage = agentsUsage(attempt.agentIds, getStatus, pricing);
+    unit.usage = knownUsage(contract, unit.agentIds);
+    for (const attempt of unit.attemptUnits ?? []) attempt.usage = knownUsage(contract, attempt.agentIds);
   }
   for (const group of contract.groups) {
-    group.usage = agentsUsage(contract.units.filter((unit) => unit.groupId === group.id).flatMap((unit) => unit.agentIds), getStatus, pricing);
+    group.usage = knownUsage(contract, contract.units.filter((unit) => unit.groupId === group.id).flatMap((unit) => unit.agentIds));
   }
-  contract.usage = agentsUsage(contractAgentIds(contract), getStatus, pricing);
+  contract.usage = knownUsage(contract, contractAgentIds(contract));
 }
 
 type AgentUsage = NonNullable<AgentRecord['usage']>;
@@ -76,16 +105,18 @@ type AgentUsage = NonNullable<AgentRecord['usage']>;
  * The owner record's usage and tool-call count: the sums over every agent the
  * contract ran. Optional counts appear only when some agent reported them.
  */
-export function ownerRecordUsage(contract: Pick<Contract, 'plannerAgentIds' | 'units'>, getStatus: AgentLookup): { readonly usage: AgentUsage; readonly toolCallCount: number } {
+export function ownerRecordUsage(contract: Pick<Contract, 'plannerAgentIds' | 'units' | 'agentUsage'>, getStatus: AgentLookup): { readonly usage: AgentUsage; readonly toolCallCount: number } {
   const usage: AgentUsage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, llmCallCount: 0, turnCount: 0 };
   let reasoningTokens: number | undefined;
   let reasoningSummaryCount: number | undefined;
   let toolCallCount = 0;
   for (const agentId of contractAgentIds(contract)) {
+    // The live record when it exists; otherwise what the contract last saw of the agent.
     const record = getStatus(agentId);
-    if (record === null) continue;
-    toolCallCount += record.toolCallCount;
-    const agent = record.usage;
+    const known = record === null ? contract.agentUsage?.[agentId] : { agent: record.usage, toolCallCount: record.toolCallCount };
+    if (known === undefined) continue;
+    toolCallCount += known.toolCallCount;
+    const agent = known.agent;
     if (agent === undefined) continue;
     usage.inputTokens += agent.inputTokens;
     usage.outputTokens += agent.outputTokens;

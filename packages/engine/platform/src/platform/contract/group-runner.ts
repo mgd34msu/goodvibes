@@ -8,9 +8,12 @@ import { nativeContractRoute } from './native-decisions.js';
  * - Before a group's workstream exists, every unit in it gets its route from
  *   the route selector (there is no default model), and in shared mode the
  *   group takes the shared-tree lock.
+ * - Baselines (tree-baseline.ts) are git object ids taken in child processes:
+ *   the contract's when it starts (shared with the engine's launch capture),
+ *   a group's before its workstream exists, a unit's before its first agent
+ *   spawns (the runner's `beforeSpawn`). Nothing waits on the event loop.
  * - When the engine spawns a unit's agent (`item-agent-spawned`), the unit
- *   records the agent, takes its baseline (the first time), and the spawn is
- *   reported with its route and purpose.
+ *   records the agent and the spawn is reported with its route and purpose.
  * - A contract unit's phase waits on the runner's settlement, so a unit
  *   agent's failure is read by the runner, never by the phase runner.
  * - When every unit of a group passed (and, in worktree mode, merged into the
@@ -25,13 +28,11 @@ import { nativeContractRoute } from './native-decisions.js';
 import { initializeContractMemberWorktree } from './input-snapshot.js';
 import { mapLimit } from '@goodvibes-jev/judgment';
 
-import { spawnSync } from 'node:child_process';
 import type { CreateWorkstreamInput, OrchestrationEngine } from '../orchestration/engine.js';
 import type { FleetCapacityFn } from '../orchestration/elastic-pool.js';
 import type { ContractUnitSettlement } from '../orchestration/phase-runner.js';
-import { selectBaselineExecutionRoot, createTreeBaseline } from './tree-baseline.js';
+import { captureTreeBaseline, captureTreeBaselineSync, selectBaselineExecutionRoot } from './tree-baseline.js';
 import type { AttemptJudge, OrchestrationEvent, WorkItem } from '../orchestration/types.js';
-import { GitService } from '../git/service.js';
 import type { AgentRecord } from '../tools/agent/index.js';
 import { attemptUnitsFor, createContractAttemptJudge, selectAttempts, type AttemptSteps } from './best-of-n.js';
 import { briefWithPreviousChecks, buildUnitBrief } from './brief.js';
@@ -39,7 +40,7 @@ import { failureFromError, isAbortError, type ContractRun, type SpawnPurpose } f
 import { IllegalContractTransitionError, isTerminalUnitStatus, type ContractFailureKind, type ContractGroup, type ContractRouteSelector, type ContractUnit } from './types.js';
 import { rollUpContractUsage, type UsagePricing } from './usage.js';
 import type { UnitWatchdog } from './watchdog.js';
-import { acquireSharedTree, groupWorkstreamInput } from './workstreams.js';
+import { groupTakesSharedTree, groupWorkstreamInput, takeSharedTreeForGroup } from './workstreams.js';
 
 /** What the runner hands `createEngine` for one contract. */
 export interface ContractEngineInput {
@@ -110,14 +111,16 @@ export interface GroupRunner {
 /** Route picks of one group in flight at once. */
 const GROUP_ROUTE_CONCURRENCY = 8;
 
-/** HEAD plus the actual original baseline; only restart commitments are saved. */
+/**
+ * A baseline taken synchronously, for a caller that cannot wait (a session
+ * turn that found none). Everything this module starts uses `captureTreeBaseline`.
+ */
 export function takeBaseline(cwd: string): ContractUnit['baseline'] {
-  if (!GitService.isGitRepo(cwd)) return undefined;
-  const head = spawnSync('git', ['-C', cwd, 'rev-parse', '--verify', '--quiet', 'HEAD'], { encoding: 'utf-8' });
-  const value = head.status === 0 ? head.stdout.trim() : null;
-  if ((head.status !== 0 && head.status !== 1) || value !== null && !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(value)) throw new Error('Original Git baseline HEAD could not be read');
-  return createTreeBaseline(cwd, value);
+  return captureTreeBaselineSync(cwd);
 }
+
+/** The contract baseline each running contract is taking, so its groups start only once it is recorded. */
+const contractBaselines = new WeakMap<ContractRun, Promise<void>>();
 
 /** The engine item whose state is the unit's: its own, or for a best-of-N unit the attempt it took. */
 function unitItemId(unit: ContractUnit): string | undefined {
@@ -171,8 +174,14 @@ export function createGroupRunner(deps: GroupRunnerDeps): GroupRunner {
   function startRun(run: ContractRun): void {
     const { contract } = run;
     attachEngine(run);
-    // The deliverable's diff and the shared-mode commit are measured from here.
-    contract.baseline ??= takeBaseline(contract.worktreePath ?? contract.projectRoot);
+    // The deliverable's diff and the shared-mode commit are measured from here;
+    // the capture overlaps the engine's own launch capture of the same tree and shares it.
+    if (contract.baseline === undefined) {
+      const taking = captureTreeBaseline(contract.worktreePath ?? contract.projectRoot).then((baseline) => { contract.baseline ??= baseline; });
+      // A failure is reported by the first group that waits for it.
+      taking.catch(() => undefined);
+      contractBaselines.set(run, taking);
+    }
     run.moveContract('running');
     startReadyGroups(run);
   }
@@ -193,15 +202,13 @@ export function createGroupRunner(deps: GroupRunnerDeps): GroupRunner {
     try {
       const units = contract.units.filter((unit) => unit.groupId === group.id);
       // A fix group for a unit runs inside the unit's group, which already holds the shared tree.
-      const inheritsTree = group.kind === 'fix' && group.repairs?.scope === 'unit';
-      if (contract.isolation === 'shared' && !inheritsTree) {
-        const release = await acquireSharedTree(contract.projectRoot, run.abort.signal);
-        if (run.terminal) {
-          release();
-          return;
-        }
-        run.sharedTreeReleases.set(group.id, release);
+      // Waiting for another holder is recorded on the contract (a decision and its status line).
+      if (groupTakesSharedTree(contract, group)) {
+        await takeSharedTreeForGroup(run, group.id);
+        if (run.terminal) return;
       }
+      await contractBaselines.get(run);
+      if (run.terminal) return;
       for (const unit of units) expandAttempts(run, unit);
       // Every unit that runs an agent is routed before it spawns: a unit on its
       // own, or each attempt of a best-of-N unit (each its own pick). A plan
@@ -216,7 +223,8 @@ export function createGroupRunner(deps: GroupRunnerDeps): GroupRunner {
       if (run.terminal) return;
       rollUpContractUsage(contract, deps.getStatus, deps.pricing);
       // The group check's diff is measured from here (6.4).
-      group.baseline ??= takeBaseline(contract.worktreePath ?? contract.projectRoot);
+      group.baseline ??= await captureTreeBaseline(contract.worktreePath ?? contract.projectRoot);
+      if (run.terminal) return;
       const input: CreateWorkstreamInput = groupWorkstreamInput(contract, group, run.env.config(), contract.usage);
       const engine = run.engine;
       if (engine === null) throw new Error(`contract ${contract.id} has no engine`);
@@ -257,7 +265,7 @@ export function createGroupRunner(deps: GroupRunnerDeps): GroupRunner {
     const route = unit.route;
     if (route === undefined) throw new Error(`unit ${unit.id} spawned without a route`);
     const cwd = item?.worktreePath ?? run.contract.worktreePath ?? run.contract.projectRoot;
-    unit.baseline ??= takeBaseline(cwd);
+    // The baseline was taken before the spawn (the runner's beforeSpawn).
     selectBaselineExecutionRoot(unit.baseline, cwd);
     runtime.cwd = cwd;
     unit.agentIds.push(agentId);

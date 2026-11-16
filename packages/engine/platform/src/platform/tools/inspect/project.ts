@@ -1,11 +1,10 @@
-import { assertCapturedToolAccessCurrent, assertCapturedToolReadAccess } from '../shared/captured-input-tools.js';
-import { existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from 'node:fs';
-import { dirname, extname, isAbsolute, join, relative } from 'node:path';
-import { safeRead, scanRead, resolvePath, SKIPPED_DIRS } from './shared.js';
+import { assertCapturedToolAccessCurrent } from '../shared/captured-input-tools.js';
+import { existsSync, readdirSync, statSync } from 'node:fs';
+import { extname, isAbsolute, join, relative } from 'node:path';
+import { safeRead, scanRead, SKIPPED_DIRS } from './shared.js';
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
 import { declaredTestRunner, isDeclaredPackageManager, PACKAGE_MANAGER_LOCKFILES, type DeclaredPackageManager } from '../../utils/project-test-runner.js';
 import { mapWithConcurrency } from '../../utils/concurrency.js';
-import { summarizeError } from '../../utils/error-display.js';
 import { entryPointView, projectTooling } from '../batteries/project-tooling.js';
 import { inspectApi, walkSourceFiles } from './project-routes.js';
 import { decisionOrClassic, isClassicOperation, withConfiguredDecisionModelPolicy } from '../../runtime/decision-policy.js';
@@ -357,7 +356,8 @@ function normalizeScaffoldModuleName(moduleName: string): { kebab: string; pasca
   return { kebab, pascal: identifier };
 }
 
-export async function buildScaffold(moduleName: string, projectRoot: string, dryRun: boolean): Promise<ScaffoldPlan> {
+/** The files a scaffold creates. Writing them is the write tool's job (see executor.ts). */
+export function buildScaffold(moduleName: string, dryRun: boolean): ScaffoldPlan {
   const { kebab, pascal } = normalizeScaffoldModuleName(moduleName);
 
   const files: ScaffoldFile[] = [
@@ -378,27 +378,6 @@ export async function buildScaffold(moduleName: string, projectRoot: string, dry
       content: `import { describe, test, expect } from 'bun:test';\nimport { create${pascal} } from './${kebab}.js';\n\ndescribe('${pascal}', () => {\n  test('creates a ${pascal} object with id and input fields', () => {\n    const result = create${pascal}({ name: 'test' });\n    expect(result).toHaveProperty('id');\n    expect(result.name).toBe('test');\n  });\n});\n`,
     },
   ];
-
-  if (!dryRun) {
-    // A scaffold only creates: an existing module file is never replaced.
-    const existing = files.filter((f) => existsSync(resolvePath(projectRoot, f.path))).map((f) => f.path);
-    if (existing.length > 0) {
-      throw new Error(`scaffold refused: ${existing.join(', ')} already exist(s); nothing was written. Choose another moduleName or edit the existing files.`);
-    }
-    const written: string[] = [];
-    for (const f of files) {
-      const absPath = resolvePath(projectRoot, f.path);
-      try {
-        await assertCapturedToolReadAccess(absPath);
-        mkdirSync(dirname(absPath), { recursive: true });
-        writeFileSync(absPath, f.content, { encoding: 'utf-8', flag: 'wx' });
-      } catch (error) {
-        const done = written.length > 0 ? `; already written: ${written.join(', ')}` : '; nothing was written';
-        throw new Error(`scaffold stopped at ${f.path}: ${summarizeError(error)}${done}`);
-      }
-      written.push(f.path);
-    }
-  }
 
   return { moduleName, dryRun, files };
 }

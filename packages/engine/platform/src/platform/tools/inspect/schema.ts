@@ -36,7 +36,7 @@ export const INSPECT_TOOL_SCHEMA = {
     projectRoot: {
       type: 'string',
       description:
-        'Root directory for the analysis. Defaults to the current working directory. Must be inside the working directory unless access outside the project is allowed; scaffold writes only inside it.',
+        'Root directory for the analysis. Defaults to the current working directory. Must be inside the working directory unless access outside the project is allowed; scaffold files are written under it by the write tool, which keeps its own rule for where it may write.',
     },
     file: {
       type: 'string',
@@ -66,7 +66,9 @@ export const INSPECT_TOOL_SCHEMA = {
     dryRun: {
       type: 'boolean',
       description:
-        'scaffold mode: return file plan without writing. Default true.',
+        'scaffold mode: true (default) returns the file plan without writing. false creates the files through the write tool:'
+        + ' asked and recorded as a write (undo, changed files), only new files (nothing is written when one exists),'
+        + ' refused for an agent that has no write tool.',
     },
     output: {
       type: 'object',
@@ -201,6 +203,8 @@ export interface ScaffoldPlan {
   moduleName: string;
   dryRun: boolean;
   files: ScaffoldFile[];
+  /** With dryRun false: the write tool's report of the files it created. */
+  written?: string | undefined;
 }
 
 // ---------------------------------------------------------------------------

@@ -1,6 +1,5 @@
 import type { ApiFramework, InspectInput } from './schema.js';
-import { realpathSync } from 'node:fs';
-import { relative, sep } from 'node:path';
+import { resolve } from 'node:path';
 import { summarizeError } from '../../utils/error-display.js';
 import {
   createInspectFailure,
@@ -49,21 +48,21 @@ function coverage(unavailable: readonly string[], notes: readonly string[]): Rec
   };
 }
 
-/** Whether `target` is `root` or inside it, comparing the root as written and as resolved (a symlinked working directory). */
-function insideWriteRoot(root: string, target: string): boolean {
-  const inside = (base: string): boolean => !relative(base, target).split(sep).includes('..');
-  let resolved = root;
-  try { resolved = realpathSync(root); } catch { /* an unresolvable root is compared as written */ }
-  return inside(root) || inside(resolved);
-}
+/**
+ * Creates scaffold files through the write tool of the registry running this
+ * call. `ok: false` carries the reason; with an atomic write nothing was
+ * written then.
+ */
+export type ScaffoldWriter = (files: readonly { readonly path: string; readonly content: string }[]) =>
+  Promise<{ readonly ok: true; readonly output?: string | undefined } | { readonly ok: false; readonly error: string }>;
 
 export async function executeInspectMode(
   input: InspectInput,
   projectRoot: string,
   format: string,
   current?: () => void,
-  /** Where scaffold may write: the working directory the tool was configured with. */
-  writeRoot?: string | null,
+  /** How scaffold creates its files: the write tool, so the files are approved, recorded and undoable as any write. */
+  writeFiles?: ScaffoldWriter,
   /** The call's signal: a cancelled call stops the decision-model requests it started. */
   signal?: AbortSignal,
 ): Promise<InspectToolResult> {
@@ -148,10 +147,12 @@ export async function executeInspectMode(
           return createInspectFailure('moduleName is required for scaffold mode');
         }
         const dryRun = input.dryRun !== false;
-        if (!dryRun && writeRoot && !insideWriteRoot(writeRoot, projectRoot)) {
-          return createInspectFailure(`scaffold writes only inside the working directory (${writeRoot}); ${projectRoot} is outside it. Nothing was written. Use dryRun:true for the plan.`);
-        }
-        return createInspectSuccess(await buildScaffold(input.moduleName, projectRoot, dryRun), format, input.mode);
+        const plan = buildScaffold(input.moduleName, dryRun);
+        if (dryRun) return createInspectSuccess(plan, format, input.mode);
+        if (!writeFiles) return createInspectFailure('scaffold with dryRun:false creates its files through the write tool, which this call cannot reach. Nothing was written. Use dryRun:true for the plan and create the files with write.');
+        const written = await writeFiles(plan.files.map((file) => ({ path: resolve(projectRoot, file.path), content: file.content })));
+        if (!written.ok) return createInspectFailure(`scaffold did not create ${input.moduleName}: ${written.error}`);
+        return createInspectSuccess({ ...plan, ...(written.output ? { written: written.output } : {}) }, format, input.mode);
       }
 
       case 'component_state': {

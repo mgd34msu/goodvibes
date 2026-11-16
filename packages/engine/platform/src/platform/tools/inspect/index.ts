@@ -2,12 +2,14 @@ import type { Tool, ToolDefinition, ToolExecuteOptions } from '../../types/tools
 import { resolveAndValidatePath } from '../../utils/path-safety.js';
 import { summarizeError } from '../../utils/error-display.js';
 import { resolve } from 'node:path';
+import { randomUUID } from 'node:crypto';
+import { runRegisteredTool } from '../registry.js';
 import { INSPECT_TOOL_SCHEMA } from './schema.js';
 import { DEFAULT_CEILING_TOKENS, capToolText } from '../../runtime/tools/output-policy.js';
 import { appendSchemaFingerprint } from '../shared/schema-fingerprint.js';
 import type { InspectInput } from './schema.js';
 import { VALID_MODES, JSON_OUTPUT_INDENT, type InspectToolResult } from './shared.js';
-import { executeInspectMode } from './executor.js';
+import { executeInspectMode, type ScaffoldWriter } from './executor.js';
 import type { FeatureFlagManager } from '../../runtime/feature-flags/index.js';
 
 export class InspectTool implements Tool {
@@ -75,7 +77,16 @@ export class InspectTool implements Tool {
     }
     const current = () => { options?.signal?.throwIfAborted(); };
     const format = input.output?.format ?? 'detailed';
-    const rawResult = await executeInspectMode(input, projectRoot, format, current, this.projectRoot);
+    // scaffold creates files only through the write tool of the registry running this call, so they
+    // are approved, recorded for undo and in the changed files as any write, and an agent without
+    // write cannot create them.
+    const writeFiles: ScaffoldWriter = async (files) => {
+      const written = await runRegisteredTool(`inspect-scaffold-${randomUUID()}`, 'write',
+        { files: files.map((file) => ({ path: file.path, content: file.content, mode: 'fail_if_exists' })), transaction: { mode: 'atomic' } }, options);
+      if (!written) return { ok: false, error: 'this agent has no write tool, so scaffold cannot create files. Nothing was written. Use dryRun:true for the plan.' };
+      return written.success ? { ok: true, output: written.output } : { ok: false, error: written.error ?? 'the write tool refused the files; nothing was written' };
+    };
+    const rawResult = await executeInspectMode(input, projectRoot, format, current, writeFiles, options?.signal);
     const shaped = this._fingerprintResult(rawResult, input.mode, format);
     if (!shaped.success || shaped.output === undefined) return shaped;
     // The schema advertises output.max_tokens; without one the shared default ceiling still applies.

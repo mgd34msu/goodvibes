@@ -633,9 +633,8 @@ export function createAgentProfileTool(deps: AgentProfileToolDeps): Tool {
             'It may have been recorded. Read the profile (action:"read" or action:"get") before repeating it; do not append the same note twice.',
           ]);
         }
-        if (options?.signal?.aborted === true || error instanceof ToolInputProjectionError) {
-          return fail(['Profile operation held: current admitted authority or source is unavailable.']);
-        }
+        // Held or cancelled before anything was sent: the tool runtime words it once, for every tool.
+        if (options?.signal?.aborted === true || error instanceof ToolInputProjectionError) throw error;
         return fail([`Profile operation failed before anything was recorded: ${cause}`]);
       }
     },

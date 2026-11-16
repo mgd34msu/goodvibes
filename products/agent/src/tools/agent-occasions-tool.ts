@@ -581,7 +581,11 @@ async function handleSweep(deps: AgentOccasionsToolDeps): Promise<ToolOutcome> {
 
 // ── Tool ───────────────────────────────────────────────────────────────────
 
-/** A throw is "held" only when authority or source moved before anything was sent; after a write left, the outcome is unknown. */
+/**
+ * After a write left, the outcome is unknown and says where to check. Before
+ * that, a held or cancelled call propagates: the tool runtime words it once,
+ * with its cause and next step, the same way for every tool.
+ */
 function failedOperation(error: unknown, requestSent: boolean, aborted: boolean): ToolOutcome {
   const cause = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
   if (requestSent) {
@@ -590,9 +594,7 @@ function failedOperation(error: unknown, requestSent: boolean, aborted: boolean)
       'The daemon may have applied it. Check with action:"pending" or action:"list" before repeating it.',
     ]);
   }
-  if (aborted || error instanceof ToolInputProjectionError) {
-    return fail(['Occasion operation held: current admitted authority or source is unavailable.']);
-  }
+  if (aborted || error instanceof ToolInputProjectionError) throw error;
   return fail([`Occasion operation failed before anything was sent: ${cause}`]);
 }
 

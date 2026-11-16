@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import type { ClientLifetime } from '../../lib/client-lifetime';
 import { useContractCancellation } from '../../hooks/useContractCancellation';
 import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
@@ -16,17 +16,21 @@ export function ContractDetail({ id, lifetime, live, onClose, onOpenProcess }: {
   onClose: () => void;
   onOpenProcess?: () => void;
 }) {
-  const query = useContractDetail(lifetime, id, live);
+  // The tree is read without an older receipt's per-file input list until it is asked for.
+  const [showInputFiles, setShowInputFiles] = useState(false);
+  useEffect(() => setShowInputFiles(false), [id]);
+  const { query, reload } = useContractDetail(lifetime, id, live, { includeInputFiles: showInputFiles });
   const cancellation = useContractCancellation(lifetime, id);
   // Errors take precedence over a previously cached tree. Failed refreshes must
   // not make stale evidence look like the daemon's current judgment.
-  const contract = query.isError ? undefined : query.data;
+  const contract = query.isError ? undefined : query.data?.contract;
   const cancellable = contract && !['passed', 'failed', 'cancelled'].includes(contract.status);
   // A failed read or a newly terminal record withdraws an unsubmitted intent.
   const { dismiss } = cancellation;
   useEffect(() => { if (!cancellable) dismiss(); }, [cancellable, dismiss]);
+  // A manual refresh reads the whole tree, whatever the revision says.
   const refresh = () => cancellation.phase === 'idle' || cancellation.phase === 'confirming'
-    ? query.refetch() : cancellation.refresh();
+    ? reload() : cancellation.refresh();
   return (
     <>
       <ConfirmDialog
@@ -67,7 +71,7 @@ export function ContractDetail({ id, lifetime, live, onClose, onOpenProcess }: {
             {' '}<Button size="sm" variant="ghost" onClick={() => void refresh()}>Retry contract</Button>
           </p>
         )}
-        {contract && <ContractTree contract={contract} />}
+        {contract && <ContractTree contract={contract} onShowInputFiles={() => setShowInputFiles(true)} />}
       </DetailPane>
     </>
   );

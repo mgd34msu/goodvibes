@@ -196,7 +196,11 @@ function Escalations({ escalations }: { escalations: ContractRecord['escalations
     </ol>}
   </DetailSection>;
 }
-export function ContractTree({ contract }: { contract: ContractRecord }) {
+export function ContractTree({ contract, onShowInputFiles }: {
+  contract: ContractRecord;
+  /** Reads the captured per-file list an older input receipt keeps; the tree is read without it. */
+  onShowInputFiles?: () => void;
+}) {
   const prefix = useId();
   const index = new Map<string, string[]>();
   const referencedUnits = new Set(contract.groups.flatMap((group) => group.unitIds));
@@ -218,7 +222,7 @@ export function ContractTree({ contract }: { contract: ContractRecord }) {
   });
   ungroupedUnits.forEach((unit, i) => indexUnit(unit, `${prefix}-ungrouped-${i}`));
   return <div className="contract-tree">
-    <NativeContractDetails contract={contract} />
+    <NativeContractDetails contract={contract} onShowInputFiles={onShowInputFiles} />
     <DetailSection title="Goal">{contract.goal ? <Text>{contract.goal}</Text> : <Empty>No goal recorded.</Empty>}</DetailSection>
     <Disclosure summary="Original ask" defaultOpen>{contract.ask ? <Text>{contract.ask}</Text> : <Empty>No original ask recorded.</Empty>}</Disclosure>
     <Criteria criteria={contract.criteria} index={index} /><Checks checks={contract.checks} scope={prefix} />

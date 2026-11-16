@@ -29,8 +29,10 @@ import type {
   RuntimeEventDomain,
 } from '@goodvibes-jev/engine/contracts';
 import type {
-  ContractsListInput,
-  ContractsListResult,
+  ContractsSummariesInput,
+  ContractsSummariesResult,
+  ContractSummaryRecord,
+  ContractsStatusResult,
   ContractRecord,
   CheckpointsCreateInput,
   CheckpointsCreateResult,
@@ -95,8 +97,10 @@ import type {
 // every wire type from './goodvibes'. Definitions live in contract-bridge-types.ts, as
 // aliases of the generated contract.
 export type {
-  ContractsListInput,
-  ContractsListResult,
+  ContractsSummariesInput,
+  ContractsSummariesResult,
+  ContractSummaryRecord,
+  ContractsStatusResult,
   ContractRecord,
   CheckpointsCreateInput,
   CheckpointsCreateResult,
@@ -644,15 +648,17 @@ void PROFILE_FORGET_BODY_IS_ACCEPTED;
 async function invokeGatewayMethod<TMethodId extends OperatorMethodId, TOutput = OperatorMethodOutput<TMethodId>>(
   methodId: TMethodId,
   body?: OperatorMethodInput<TMethodId>,
+  signal?: AbortSignal,
 ): Promise<TOutput> {
   return requestJson<TOutput>(`/api/control-plane/methods/${methodId}/invoke`, {
     method: 'POST',
     body: { body: body ?? {} },
+    signal,
   });
 }
 
 /** Read-only, cancellable contract requests use the generated REST binding. */
-async function readContractMethod<M extends 'contracts.list' | 'contracts.get'>(
+async function readContractMethod<M extends 'contracts.get'>(
   methodId: M,
   input: OperatorMethodInput<M>,
   signal?: AbortSignal,
@@ -1368,14 +1374,19 @@ export const client = {
         receipts: () => invokeOperator('memory.consolidation.receipts', {}),
       },
     },
-    // Contract reads are REST-routed; fleet.*, checkpoints.*, rewind.* and
-    // sessions.search are ws-only and go through invokeGatewayMethod, typed by the
-    // contract-bridge-types.ts aliases.
+    // contracts.get is REST-routed; contracts.summaries/status, fleet.*, checkpoints.*,
+    // rewind.* and sessions.search are ws-only and go through invokeGatewayMethod,
+    // typed by the contract-bridge-types.ts aliases.
     contracts: {
-      list: (input: ContractsListInput = {}, signal?: AbortSignal): Promise<ContractsListResult> =>
-        readContractMethod('contracts.list', input, signal),
-      get: (contractId: string, signal?: AbortSignal): Promise<ContractRecord> =>
-        readContractMethod('contracts.get', { contractId }, signal),
+      // The list reads one summary per contract (counts, status, open question), never the tree.
+      summaries: (input: ContractsSummariesInput = {}, signal?: AbortSignal): Promise<ContractsSummariesResult> =>
+        invokeGatewayMethod('contracts.summaries', input, signal),
+      // With the last revision seen, an unchanged contract answers `{ id, revision, notModified: true }`.
+      status: (contractId: string, ifRevision: string | undefined, signal?: AbortSignal): Promise<ContractsStatusResult> =>
+        invokeGatewayMethod('contracts.status', ifRevision === undefined ? { contractId } : { contractId, ifRevision }, signal),
+      // The whole tree of one contract; the old per-file input list only when it is shown.
+      get: (contractId: string, signal?: AbortSignal, options: { includeInputFiles?: boolean } = {}): Promise<ContractRecord> =>
+        readContractMethod('contracts.get', options.includeInputFiles ? { contractId, includeInputFiles: true } : { contractId }, signal),
       cancel: async (contractId: string, signal: AbortSignal): Promise<OperatorMethodOutput<'contracts.cancel'>> => {
         const route = webuiRouteFor('contracts.cancel');
         if (route?.method !== 'POST') throw new Error('Contract cancellation is unavailable.');

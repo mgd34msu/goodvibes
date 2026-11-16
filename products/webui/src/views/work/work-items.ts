@@ -18,7 +18,7 @@ import { attemptGroupProgress } from './attempt-group-progress';
  */
 import type { StatusTone } from '../../components/ui/StatusDot';
 import type {
-  ContractRecord,
+  ContractSummaryRecord,
   ApprovalRecord,
   FleetAttemptGroup,
   FleetProcessNode,
@@ -91,7 +91,8 @@ export interface WorkItem {
 }
 
 export interface WorkSources {
-  readonly contracts?: readonly ContractRecord[];
+  /** One summary per contract (`contracts.summaries`); the tree is read only by the contract's detail. */
+  readonly contracts?: readonly ContractSummaryRecord[];
   readonly approvals: readonly ApprovalRecord[];
   readonly nodes: readonly FleetProcessNode[];
   readonly attemptGroups: readonly FleetAttemptGroup[];
@@ -397,7 +398,7 @@ export function visibleFleetNodes(
 }
 
 /** Fixed wire lifecycle projection only; this does not judge contract progress. */
-function contractItem(contract: ContractRecord): WorkItem {
+function contractItem(contract: ContractSummaryRecord): WorkItem {
   const terminal = contract.status === 'passed' || contract.status === 'failed' || contract.status === 'cancelled';
   return {
     key: `contract:${contract.id}`,
@@ -406,7 +407,7 @@ function contractItem(contract: ContractRecord): WorkItem {
     kind: 'processes',
     group: terminal ? 'finished' : 'running',
     title: contract.goal || contract.ask || contract.id,
-    meta: `Contract · ${contract.groups.length} groups · ${contract.units.length} units`,
+    meta: `Contract · ${contract.groupCount} groups · ${contract.unitCount} units`,
     status: sentenceCase(contract.status),
     tone: contract.status === 'passed' ? 'ok' : contract.status === 'failed' ? 'bad' : terminal ? 'idle' : 'live',
     depth: 0,

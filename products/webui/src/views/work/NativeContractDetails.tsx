@@ -1,6 +1,7 @@
 /** Native records are informational receipts, never executable instructions or permission. */
 import type { ReactNode } from 'react';
 import { DetailSection, Disclosure, Facts } from '../../components/data-view/DataView';
+import { Button } from '../../components/ui/Button';
 import type { ContractRecord } from './ContractTree';
 
 type Source = NonNullable<ContractRecord['nativeSource']>;
@@ -159,7 +160,10 @@ function DurableAdmission({ admission }: { admission: Admission }) {
     </Disclosure>
   </Disclosure>;
 }
-function InputSnapshot({ snapshot }: { snapshot: Snapshot }) {
+function InputSnapshot({ snapshot, onShowFiles }: { snapshot: Snapshot; onShowFiles?: (() => void) | undefined }) {
+  // Version 3 captures are the git tree alone. Older receipts keep a per-file
+  // list, which the contract read leaves out until it is asked for.
+  const files = 'files' in snapshot ? snapshot.files : undefined;
   return <Disclosure summary="Captured input provenance">
     <Empty>Captured paths, digests, and object ids identify recorded input. They grant no read or transmission permission.</Empty>
     <Facts items={[
@@ -171,9 +175,13 @@ function InputSnapshot({ snapshot }: { snapshot: Snapshot }) {
       { label: 'Input commit', value: snapshot.inputCommit }, { label: 'Dirty at capture', value: String(snapshot.dirty) },
       { label: 'Exclusions', value: <Ids values={snapshot.exclusions} /> },
     ]} />
-    <Disclosure summary={`Captured files (${snapshot.files.length})`}>
-      {snapshot.files.length === 0 ? <Empty>No captured files recorded.</Empty> : <ul className="contract-tree__list" aria-label="Captured files">
-        {snapshot.files.map((file, i) => <li key={`${file.path}-${i}`}>
+    {snapshot.version !== 3 && files === undefined && <DetailSection title="Captured files">
+      <Empty>This older receipt also lists each captured file; the list is not loaded.</Empty>
+      {onShowFiles && <Button size="sm" variant="ghost" onClick={onShowFiles}>Show captured files</Button>}
+    </DetailSection>}
+    {files !== undefined && <Disclosure summary={`Captured files (${files.length})`}>
+      {files.length === 0 ? <Empty>No captured files recorded.</Empty> : <ul className="contract-tree__list" aria-label="Captured files">
+        {files.map((file, i) => <li key={`${file.path}-${i}`}>
           <Facts items={[
             { label: 'Path', value: file.path }, { label: 'Kind', value: file.kind }, { label: 'Mode', value: file.mode },
           ]} />
@@ -186,7 +194,7 @@ function InputSnapshot({ snapshot }: { snapshot: Snapshot }) {
   </Disclosure>;
 }
 
-export function NativeContractDetails({ contract }: { contract: ContractRecord }) {
+export function NativeContractDetails({ contract, onShowInputFiles }: { contract: ContractRecord; onShowInputFiles?: (() => void) | undefined }) {
   const { nativeSource, nativeProgress, nativeWaiting, nativeDecisions, durableAdmission, durableLaunchState, inputSnapshot } = contract;
   return <>
     {nativeSource && <DetailSection title="Native source"><SourceDetails source={nativeSource} /></DetailSection>}
@@ -203,6 +211,6 @@ export function NativeContractDetails({ contract }: { contract: ContractRecord }
       {durableLaunchState === 'launch-claimed' && <Empty>A persisted launch claim does not establish whether execution began.</Empty>}
     </DetailSection>}
     {durableAdmission && <DurableAdmission admission={durableAdmission} />}
-    {inputSnapshot && <InputSnapshot snapshot={inputSnapshot} />}
+    {inputSnapshot && <InputSnapshot snapshot={inputSnapshot} onShowFiles={onShowInputFiles} />}
   </>;
 }

@@ -199,7 +199,9 @@ describe('runDaemonServiceCli (systemd path, real PlatformServiceManager, stubbe
     const unitPath = join(dir, '.config', 'systemd', 'user', 'goodvibes.service');
     expect(existsSync(unitPath)).toBe(true);
     const contents = readFileSync(unitPath, 'utf-8');
-    expect(contents).toContain('ExecStart=/usr/local/bin/goodvibes-daemon --daemon-home');
+    // The default daemon home is implied: an explicit --daemon-home would mark
+    // the serviced daemon relocated, which turns off its automatic updates.
+    expect(contents).toContain('ExecStart=/usr/local/bin/goodvibes-daemon\n');
     // No endpoint flags are baked into ExecStart: the daemon resolves
     // controlPlane.hostMode/host/port from settings at boot, so a config
     // change (or a non-default endpoint) never requires a unit rewrite and
@@ -1455,27 +1457,15 @@ describe('reconcileRedundantLegacyUnit: auto-retire a redundant install-script u
 
 /**
  * Unit-content parity (installer vs product) on a NON-DEFAULT config fixture:
- * both writers must produce the same ExecStart shape, the daemon binary plus
- * `--daemon-home <home>` and NOTHING else. Neither may bake the configured
- * endpoint into the unit: the daemon resolves controlPlane at boot, which is
- * exactly how a hostMode=network / port-3500 host keeps its endpoint across
- * upgrades instead of being silently re-pinned to installer constants.
+ * both writers must produce the same ExecStart, the daemon binary and NOTHING
+ * else (scripts/install.sh writes `ExecStart="<bin>/goodvibes-daemon"`). Neither
+ * may bake the configured endpoint into the unit: the daemon resolves
+ * controlPlane at boot, which is exactly how a hostMode=network / port-3500 host
+ * keeps its endpoint across upgrades instead of being silently re-pinned to
+ * installer constants; nor the default daemon home, which would mark the
+ * serviced daemon relocated and turn off its automatic updates.
  */
 describe('canonical unit content parity: installer and product agree, endpoint comes from config at boot', () => {
-  function assertDaemonHomeOnly(args: readonly string[], daemonHome: string): void {
-    deepStrictEqual(args, ['--daemon-home', daemonHome]);
-  }
-
-  test('argument contract rejects real endpoint flags while allowing endpoint text inside the state path', () => {
-    const daemonHome = '/tmp/gv-unit-parity-13500-0.0.0.0/.goodvibes/daemon';
-    const valid = ['--daemon-home', daemonHome];
-    expect(() => assertDaemonHomeOnly(valid, daemonHome)).not.toThrow();
-    for (const forbidden of [['--port', '3500'], ['--hostname', '0.0.0.0'], ['--port=3500'], ['--hostname=0.0.0.0']]) {
-      expect(() => assertDaemonHomeOnly([...valid, ...forbidden], daemonHome)).toThrow();
-      expect(() => assertDaemonHomeOnly([...forbidden, ...valid], daemonHome)).toThrow();
-    }
-  });
-
   test('product-written unit on a hostMode=network/port-3500 fixture bakes no endpoint; boot-time resolution yields the configured endpoint', () => {
     const dir = makeOwnedTempDir('gv-unit-parity-13500-0.0.0.0');
     try {
@@ -1500,10 +1490,7 @@ describe('canonical unit content parity: installer and product agree, endpoint c
       // Check command arguments, not endpoint substrings in arbitrary paths.
       // The path deliberately includes the old false-positive PID text 13500.
       const productArgs = productExec.replace('ExecStart=', '').split(/\s+/).slice(1);
-      // The flag's value is the daemon's STATE directory, not the home above
-      // it: that is what the platform's goodvibes-home resolves it as, and what
-      // holds operator-tokens.json and the daemon tier's settings.json.
-      assertDaemonHomeOnly(productArgs, join(dir, '.goodvibes', 'daemon'));
+      deepStrictEqual(productArgs, []);
 
       // The endpoint LIVES in config, resolved by the daemon at boot: the
       // boot-time resolution on this fixture is the configured endpoint, for

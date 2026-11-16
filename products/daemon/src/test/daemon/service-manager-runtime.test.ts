@@ -47,7 +47,7 @@ describe('canonical service lifecycle and product command composition', () => {
     expect(service.uninstall().installed).toBe(false);
   });
 
-  test('product manager installs the supplied executable and daemon state home, without legacy source or endpoint flags', () => {
+  test('product manager installs the supplied executable with the default daemon home implied, without legacy source or endpoint flags', () => {
     const value = config('systemd', 'gv-product');
     const binaryPath = new URL('../../../bin/goodvibes-daemon', import.meta.url).pathname;
     expect(existsSync(binaryPath)).toBe(true);
@@ -59,8 +59,9 @@ describe('canonical service lifecycle and product command composition', () => {
     const installed = service.install();
     expect(installed.path).toBe(join(root, '.config', 'systemd', 'user', 'gv-product.service'));
     expect(installed.contents).toContain(binaryPath);
-    expect(installed.contents).toContain('--daemon-home');
-    expect(installed.contents).toContain(join(root, '.goodvibes', 'daemon'));
+    // The default state directory is what the daemon resolves with no flag; an
+    // explicit --daemon-home would mark it relocated and stop its self-updates.
+    expect(installed.contents).not.toContain('--daemon-home');
     expect(installed.contents).not.toContain('src/daemon/cli.ts');
     expect(installed.contents).not.toContain('--hostname');
     expect(installed.contents).not.toContain('--port');

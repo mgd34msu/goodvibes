@@ -764,6 +764,28 @@ export function skillStoreUnreadableNotice(storePath: string, error: unknown): s
   ].join('\n');
 }
 
+/** How many reviewed, ready skills one prompt carries in full; the receipt counts against the same number. */
+export const ENABLED_SKILLS_PROMPT_LIMIT = 8;
+/** How many reviewed, ready skill bundles one prompt carries in full. */
+export const ENABLED_SKILL_BUNDLES_PROMPT_LIMIT = 4;
+
+/**
+ * The line that tells the model which enabled skills the prompt left out, so it
+ * can read one by name instead of not knowing it exists. Empty when none were cut.
+ */
+export function skillsBeyondPromptLimitLine(skills: readonly AgentSkillRecord[], bundles: readonly AgentSkillBundleRecord[]): string {
+  const cut = skills.slice(ENABLED_SKILLS_PROMPT_LIMIT);
+  const cutBundles = bundles.slice(ENABLED_SKILL_BUNDLES_PROMPT_LIMIT);
+  if (cut.length === 0 && cutBundles.length === 0) return '';
+  const names = [
+    ...cutBundles.map((bundle) => `${bundle.name} (bundle ${bundle.id})`),
+    ...cut.map((skill) => `${skill.name} (${skill.id})`),
+  ];
+  const shown = names.slice(0, 20).join(', ');
+  const more = names.length > 20 ? `, and ${names.length - 20} more` : '';
+  return `${names.length} more enabled skill${names.length === 1 ? '' : 's'} not shown here: ${shown}${more}. When one fits, read it with agent_local_registry domain:"skill" action:"get" id:<id> (domain:"skill_bundle" for a bundle).`;
+}
+
 export function buildEnabledSkillsPrompt(shellPaths: ShellPathService, preread?: AgentSkillSnapshot): string | null {
   const registry = AgentSkillRegistry.fromShellPaths(shellPaths);
   let snapshot: AgentSkillSnapshot;
@@ -820,11 +842,12 @@ export function buildEnabledSkillsPrompt(shellPaths: ShellPathService, preread?:
       return `- ${bundle.name}: ${[review, setup, memberReview].filter(Boolean).join('; ')}`;
     });
   if (active.length === 0 && enabledBundles.length === 0 && suppressedSkills.length === 0 && suppressedBundles.length === 0) return null;
+  const beyondLimit = skillsBeyondPromptLimitLine(active, enabledBundles);
   return [
     '## Enabled GoodVibes Agent Skills',
     'Use only reviewed, setup-ready local reusable procedures inside the same serial assistant conversation when they fit the user request.',
     '',
-    ...enabledBundles.slice(0, 4).flatMap((bundle) => {
+    ...enabledBundles.slice(0, ENABLED_SKILL_BUNDLES_PROMPT_LIMIT).flatMap((bundle) => {
       const readiness = evaluateAgentSkillBundleReadiness(bundle, snapshot.skills);
       const missing = [
         ...readiness.missingRequirements.map(formatAgentSkillRequirement),
@@ -839,7 +862,7 @@ export function buildEnabledSkillsPrompt(shellPaths: ShellPathService, preread?:
         '',
       ];
     }),
-    ...active.slice(0, 8).flatMap((skill) => [
+    ...active.slice(0, ENABLED_SKILLS_PROMPT_LIMIT).flatMap((skill) => [
       `### ${skill.name}`,
       `Description: ${skill.description}`,
       `Review: ${formatAgentRecordReviewState(skill.reviewState)}`,
@@ -848,6 +871,7 @@ export function buildEnabledSkillsPrompt(shellPaths: ShellPathService, preread?:
       skill.procedure,
       '',
     ]),
+    ...(beyondLimit ? [beyondLimit, ''] : []),
     ...(suppressedBundles.length > 0 || suppressedSkills.length > 0 ? [
       '### Suppressed Skills Pending Review Or Setup',
       'Do not apply these skills until the user reviews them or resolves setup through the learning curator.',

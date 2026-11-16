@@ -29,6 +29,8 @@ import { buildProjectContextPrompt, discoverProjectContextFiles, type AgentProje
 import { AgentRoutineRegistry, type AgentRoutineSnapshot, ENABLED_ROUTINES_PROMPT_LIMIT, buildEnabledRoutinesPrompt, evaluateAgentRoutineReadiness } from './routine-registry.ts';
 import {
   AgentSkillRegistry,
+  ENABLED_SKILLS_PROMPT_LIMIT,
+  ENABLED_SKILL_BUNDLES_PROMPT_LIMIT,
   buildEnabledSkillsPrompt,
   skillStorePath,
   skillStoreUnreadableNotice,
@@ -307,18 +309,22 @@ function buildRuntimePromptReceiptSegments(
     };
     skillStoreProblem = skillStoreUnreadableNotice(skillSnapshot.path, error).split('\n')[1];
   }
-  const activeBundles = skillSnapshot.enabledBundles.filter((bundle) => {
+  const readyBundles = skillSnapshot.enabledBundles.filter((bundle) => {
     if (bundle.reviewState !== 'reviewed') return false;
     const readiness = evaluateAgentSkillBundleReadiness(bundle, skillSnapshot.skills);
     return readiness.ready && readiness.includedSkills.every((skill) => skill.reviewState === 'reviewed');
   });
-  const activeSkillIds = new Set([
+  const readySkillIds = new Set([
     ...skillSnapshot.enabledSkills.map((skill) => skill.id),
-    ...activeBundles.flatMap((bundle) => bundle.skillIds),
+    ...readyBundles.flatMap((bundle) => bundle.skillIds),
   ]);
-  const activeSkills = skillSnapshot.skills.filter(
-    (skill) => activeSkillIds.has(skill.id) && skill.reviewState === 'reviewed' && evaluateAgentSkillReadiness(skill).ready,
+  const readySkills = skillSnapshot.skills.filter(
+    (skill) => readySkillIds.has(skill.id) && skill.reviewState === 'reviewed' && evaluateAgentSkillReadiness(skill).ready,
   );
+  // As with routines, the prompt carries only the first few in full; the
+  // receipt counts those and reports the rest as suppressed, not applied.
+  const activeBundles = readyBundles.slice(0, ENABLED_SKILL_BUNDLES_PROMPT_LIMIT);
+  const activeSkills = readySkills.slice(0, ENABLED_SKILLS_PROMPT_LIMIT);
   const candidateSkillIds = new Set([
     ...skillSnapshot.enabledSkills.map((skill) => skill.id),
     ...skillSnapshot.enabledBundles.flatMap((bundle) => bundle.skillIds),
@@ -474,12 +480,18 @@ function buildRuntimePromptReceiptSegments(
         ...activeSkills.map((skill) => ({ id: skill.id, domain: 'skill', name: skill.name })),
       ],
       suppressed: [
-        ...suppressedBundles.slice(0, 6).map((bundle) => ({ id: bundle.id, domain: 'skill_bundle', reviewState: bundle.reviewState })),
+        ...suppressedBundles.slice(0, 6).map((bundle) => ({
+          id: bundle.id,
+          domain: 'skill_bundle',
+          reviewState: bundle.reviewState,
+          ...(readyBundles.includes(bundle) ? { reason: `ready, but outside the first ${ENABLED_SKILL_BUNDLES_PROMPT_LIMIT} bundles the prompt carries` } : {}),
+        })),
         ...suppressedSkills.slice(0, 12).map((skill) => ({
           id: skill.id,
           domain: 'skill',
           reviewState: skill.reviewState,
           missingRequirements: evaluateAgentSkillReadiness(skill).missing.length,
+          ...(readySkills.includes(skill) ? { reason: `ready, but outside the first ${ENABLED_SKILLS_PROMPT_LIMIT} skills the prompt carries; the prompt names it` } : {}),
         })),
       ],
     }),

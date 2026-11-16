@@ -1,6 +1,9 @@
-import type { ConfigModalActionContext, ConfigModalSurface, ConfigModalView } from '../../input/config-modal-types.ts';
+import type { ConfigModalActionContext, ConfigModalRow, ConfigModalSurface, ConfigModalView } from '../../input/config-modal-types.ts';
 import type { UiReadModel, UiRemoteSnapshot } from '../../runtime/ui-read-models.ts';
 import { toneStyle, statusGlyph, pad, postureLine, kv, runModalCommand, type Tone } from './modal-surface-helpers.ts';
+
+const RUNNER_ROW = 'runner:';
+const STEP_ROW = 'step:';
 
 function stateTone(state: string): Tone {
   switch (state) {
@@ -22,11 +25,12 @@ function stateTone(state: string): Tone {
 /**
  * Remote config-modal surface (migrated from the `remote` view). The read-model
  * snapshot is synchronous; a subscribe() keeps live transport/heartbeat values
- * refreshing between key presses. The earlier view's `Tab` connections/contracts browse
- * toggle becomes two real tabs. `r`/Enter dispatch `/remote recover` for the
- * selected runner, the earlier view's only corrective keybinding; the richer
- * `/remote` command set (show/supervisor/cancel/dispatch/artifact/…) stays on
- * the command front-door.
+ * refreshing between key presses. Connections and Contracts list the runners,
+ * keyed by the runner id `/remote` accepts (a connection's runner id is its
+ * agent id). The Recovery tab shows each tracked runner's suggested steps in the
+ * modal; Enter on a runner jumps to its steps, and Enter on a step closes the
+ * modal and runs that command so its output is in view. Nothing here changes a
+ * transport by itself: every step is a command the user chose.
  */
 class RemoteModalSurface implements ConfigModalSurface {
   readonly name = 'remote-modal';
@@ -36,9 +40,12 @@ class RemoteModalSurface implements ConfigModalSurface {
 
   constructor(private readonly readModel?: UiReadModel<UiRemoteSnapshot>) {}
 
+  // One Enter: on a runner row it shows that runner's steps, on a step row it runs it.
   readonly actions = [
-    { key: 'r', id: 'recover', label: 'recover' },
-    { key: 'enter', id: 'recover', label: 'recover' },
+    {
+      key: 'enter', id: 'activate', label: 'recovery steps / run step',
+      enabledFor: (row: ConfigModalRow | null, tabId: string) => tabId === 'recovery' ? Boolean(row?.id.startsWith(STEP_ROW)) : Boolean(row?.id.startsWith(RUNNER_ROW)),
+    },
   ];
 
   onOpen(requestRender: () => void): void {
@@ -80,32 +87,68 @@ class RemoteModalSurface implements ConfigModalSurface {
     ];
 
     const connectionRows = acp.activeConnections.map((c) => ({
-      id: `conn:${c.agentId}`,
+      id: `${RUNNER_ROW}${c.agentId}`,
       label: `${statusGlyph(stateTone(c.transportState))} ${pad(c.agentId, 20)} ${pad(c.transportState.toUpperCase(), 14)} msgs=${c.messageCount} errs=${c.errorCount}  ${c.label ?? ''}`,
       style: toneStyle(stateTone(c.transportState)),
     }));
 
     const contractRows = contracts.map((ct) => ({
-      id: `contract:${ct.runnerId}`,
+      id: `${RUNNER_ROW}${ct.runnerId}`,
       label: `${statusGlyph(stateTone(ct.transport.state))} ${pad(ct.runnerId, 20)} ${pad(ct.transport.state.toUpperCase(), 14)} ${ct.template ?? ''}`,
       style: toneStyle(stateTone(ct.transport.state)),
     }));
 
+    // Runners that need attention first; each runner's steps are selectable rows.
+    const sessions = [...supervisor.sessions].sort((a, b) => Number(b.recovery.length > 0) - Number(a.recovery.length > 0));
+    const recoveryRows: ConfigModalRow[] = sessions.flatMap((session): ConfigModalRow[] => [
+      {
+        id: `${RUNNER_ROW}${session.runnerId}`,
+        label: `${statusGlyph(stateTone(session.transportState))} ${pad(session.label, 20)} ${pad(session.transportState.toUpperCase(), 14)} heartbeat=${session.heartbeat.status}${session.lastError ? `  last error: ${session.lastError}` : ''}`,
+        style: toneStyle(stateTone(session.transportState)),
+        selectable: false,
+        header: true,
+      },
+      ...(session.recovery.length === 0
+        ? [{ id: `none:${session.runnerId}`, label: `  nothing to do: ${session.heartbeat.detail}`, selectable: false }]
+        : session.recovery.map((step, index): ConfigModalRow => ({ id: `${STEP_ROW}${session.runnerId}:${index}`, label: `  ${step.command}  ${step.reason}` }))),
+    ]);
+
     return {
       title: 'Remote',
       tabs: [
-        { id: 'connections', label: 'Connections', header, rows: connectionRows, emptyText: 'No active ACP or remote subagent connections.', hints: ['r recover'] },
-        { id: 'contracts', label: 'Contracts', header, rows: contractRows, emptyText: 'No registered remote runner contracts.', hints: ['r recover'] },
+        { id: 'connections', label: 'Connections', header, rows: connectionRows, emptyText: 'No active ACP or remote subagent connections.', hints: ['Enter recovery steps'] },
+        { id: 'contracts', label: 'Contracts', header, rows: contractRows, emptyText: 'No registered remote runner contracts.', hints: ['Enter recovery steps'] },
+        { id: 'recovery', label: 'Recovery', header, rows: recoveryRows, emptyText: 'No remote runners are tracked.', hints: ['Enter run the step (closes this view to show its output)'] },
       ],
     };
   }
 
   onAction(id: string, ctx: ConfigModalActionContext): void {
-    if (id !== 'recover') return;
+    if (id !== 'activate') return;
     const rowId = ctx.row?.id ?? '';
-    const runner = rowId.includes(':') ? rowId.slice(rowId.indexOf(':') + 1) : '';
-    runModalCommand(ctx, 'remote', runner ? ['recover', runner] : ['recover'], runner ? `/remote recover ${runner}` : '/remote recover', { pending: runner ? `Recovering ${runner}…` : 'Recovering…' });
-    this.requestRender();
+    if (rowId.startsWith(RUNNER_ROW)) {
+      const runnerId = rowId.slice(RUNNER_ROW.length);
+      const session = this.readModel?.getSnapshot().supervisor.sessions.find((entry) => entry.runnerId === runnerId);
+      if (!session || session.recovery.length === 0) {
+        ctx.setStatus(session ? `${session.label}: no recovery steps; ${session.heartbeat.detail}` : `${runnerId} is not tracked by the remote supervisor.`);
+        return;
+      }
+      ctx.jumpToRow?.('recovery', `${STEP_ROW}${runnerId}:0`);
+      ctx.setStatus(`${session.recovery.length} step(s) for ${session.label}; Enter runs the selected one.`);
+      this.requestRender();
+      return;
+    }
+    if (rowId.startsWith(STEP_ROW)) {
+      const match = /^step:(.+):(\d+)$/.exec(rowId);
+      const session = match ? this.readModel?.getSnapshot().supervisor.sessions.find((entry) => entry.runnerId === match[1]) : undefined;
+      const step = match && session ? session.recovery[Number(match[2])] : undefined;
+      const parts = step?.command.trim().replace(/^\//, '').split(/\s+/) ?? [];
+      const [name, ...args] = parts;
+      if (!step || !name) { ctx.setStatus('That step is no longer suggested; the list has been refreshed.'); this.requestRender(); return; }
+      // The step's output is printed to the conversation; close first so it is visible.
+      ctx.close();
+      runModalCommand(ctx, name, args, step.command);
+    }
   }
 }
 

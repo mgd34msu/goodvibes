@@ -16,9 +16,6 @@ import {
 } from '@/runtime/index.ts';
 import type { UiMarketplaceSnapshot, UiReadModel } from '../../runtime/ui-read-models.ts';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 
 /** Live deps the marketplace modal captures (mirrors the earlier view factory). */
 export interface MarketplaceModalDeps {
@@ -223,25 +220,4 @@ class MarketplaceModalSurface implements ConfigModalSurface {
 
 export function createMarketplaceModalSurface(deps: MarketplaceModalDeps): ConfigModalSurface {
   return new MarketplaceModalSurface(deps);
-}
-
-/**
- * Deterministic golden fixture: catalog roots wired at a fresh tmp path that is
- * removed immediately (loadEcosystemCatalog/listInstalledEcosystemEntries guard
- * missing paths with existsSync → [], so refresh() finds nothing and renders the
- * honest empty-state copy). The random tmp path never appears in the
- * rendered lines (the empty-state copy is static), so the golden is byte-stable.
- *
- * This is production code (ships in the real binary), not test scratch, so
- * it stays rooted at the real OS temp dir rather than the test-only
- * makeProjectTempDir helper. Created and removed synchronously in the same
- * call, so the on-disk window is negligible.
- */
-export function marketplaceModalGoldenSurface(): ConfigModalSurface {
-  const root = mkdtempSync(join(tmpdir(), 'gv-marketplace-golden-'));
-  const surface = createMarketplaceModalSurface({
-    ecosystemPaths: { cwd: root, homeDir: root, projectCatalogRoot: join(root, 'ecosystem') },
-  });
-  rmSync(root, { recursive: true, force: true });
-  return surface;
 }

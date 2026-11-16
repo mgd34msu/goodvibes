@@ -21,12 +21,11 @@ import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { isViewSearchBackspace, isViewSearchCancel, isViewSearchCommit, isViewSearchPrintable } from './search-focus.ts';
 import { appendSteerText } from './fleet-session-tabs.ts';
 import { isObservedExternalNode, observedKindLabel, type ObservedNode } from './fleet-observed-render.ts';
-import { formatAgentCost } from './agent-inspector-shared.ts';
+import { formatAgentCost } from './fleet-format.ts';
 import { rootContractFromNode } from './fleet-contract-targets.ts';
 import { fleetNodeAttention } from './fleet-read-model.ts';
+import { contractGroupNodeId, contractUnitNodeId } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
 import {
-  workItemIdFromNodeId,
-  workstreamIdFromNodeId,
   type FleetAttemptCandidate,
   type FleetGateway,
   type FleetGatewayResolution,
@@ -101,8 +100,16 @@ function contractUnitData(node: ProcessNode): { contract: ContractView; unit: Co
   if (node.kind !== 'contract-unit') return null;
   const raw = node.raw as { contract?: ContractView; unit?: ContractUnitView } | undefined;
   if (!raw?.contract || !raw.unit || !raw.contract.id || !raw.unit.id || !raw.unit.groupId) return null;
-  if (workItemIdFromNodeId(node.id) !== `${raw.contract.id}:${raw.unit.id}`) return null;
+  if (node.id !== contractUnitNodeId(raw.contract.id, raw.unit.id)) return null;
   return { contract: raw.contract, unit: raw.unit };
+}
+
+/** What the task graph of a workstream row depends on: the node's state and the statuses of its group's units. */
+function graphStateKey(node: ProcessNode): string {
+  const raw = node.raw as { contract?: ContractView; unit?: ContractUnitView; group?: { id?: string } } | undefined;
+  const groupId = raw?.unit?.groupId ?? raw?.group?.id;
+  const units = raw?.contract?.units.filter((unit) => unit.groupId === groupId).map((unit) => `${unit.id}=${unit.status}`).join(',') ?? '';
+  return `${node.state}|${units}`;
 }
 
 function contractGroupTarget(node: ProcessNode): string | null {
@@ -110,16 +117,14 @@ function contractGroupTarget(node: ProcessNode): string | null {
   if (unit) return `${unit.contract.id}:${unit.unit.groupId}`;
   if (node.kind !== 'contract-group') return null;
   const raw = node.raw as { contract?: ContractView; group?: { id?: string } } | undefined;
-  const target = workstreamIdFromNodeId(node.id);
-  return raw?.contract?.id && raw.group?.id && target === `${raw.contract.id}:${raw.group.id}` ? target : null;
+  return raw?.contract?.id && raw.group?.id && node.id === contractGroupNodeId(raw.contract.id, raw.group.id)
+    ? `${raw.contract.id}:${raw.group.id}` : null;
 }
 
 
 export class FleetActs {
   private pick: PickMode | null = null;
   private pickRequest: { readonly nodeId: string } | null = null;
-  /** Conflict rows whose resolution session is still being started, so a second Enter cannot start another agent in the same kept tree. */
-  private readonly conflictRequests = new Set<string>();
   private pickBusy = false;
   private pickPreviewOpen = false;
 
@@ -143,10 +148,16 @@ export class FleetActs {
       ? { data, selection } : null;
   }
   /** Live observed-agent steer composer: the row being steered + its draft. Drill-in only. */
-  private observedSteer: { readonly nodeId: string; draft: string } | null = null;
-  /** Per-workstream-node graph snapshot cache (null = fetched, unavailable). undefined = not fetched. */
-  private readonly graphCache = new Map<string, FleetGraphSnapshot | null>();
-  private readonly graphInFlight = new Set<string>();
+  private observedSteer: { readonly nodeId: string; draft: string; failure?: string } | null = null;
+  private observedSteerSending = false;
+  /**
+   * Per-workstream-node graph snapshot, with the group state it was fetched for
+   * (`key`): a node whose group moved is fetched again. `snapshot: null` is a
+   * call that failed for that state; an unreachable daemon stores nothing, so
+   * the next paint after it comes up fetches.
+   */
+  private readonly graphCache = new Map<string, { readonly key: string; readonly snapshot: FleetGraphSnapshot | null }>();
+  private readonly graphInFlight = new Map<string, string>();
 
   public constructor(private readonly deps: FleetActsDeps) {}
 
@@ -190,6 +201,11 @@ export class FleetActs {
     return this.observedSteer && this.observedSteer.nodeId === nodeId ? this.observedSteer.draft : null;
   }
 
+  /** Why the last send from the open observed-steer composer did not go out, or null. */
+  public observedSteerFailure(): string | null {
+    return this.observedSteer?.failure ?? null;
+  }
+
   /**
    * Open the drill-in steer composer for an observed foreign-agent row. A row
    * with a live tmux channel opens an input; a channel-less row keeps NO input
@@ -221,51 +237,81 @@ export class FleetActs {
     return true; // absorb every other key while composing
   }
 
-  /** Drive fleet.observed.steer over the daemon; the row's own channel routes the send-keys server-side. */
+  /**
+   * Drive fleet.observed.steer over the daemon; the row's own channel routes the
+   * send-keys server-side. The composer closes only once the steer was queued:
+   * an unreachable daemon, a refusal or a failed call keeps the draft with the
+   * reason, so Enter sends it again and Esc abandons it.
+   */
   private async submitObservedSteer(): Promise<void> {
-    if (!this.observedSteer) return;
-    const { nodeId, draft } = this.observedSteer;
-    const text = draft.trim();
-    this.observedSteer = null;
-    this.deps.markDirty();
-    if (text.length === 0) return; // empty submit just closes the composer
-    const gateway = this.requireGateway();
-    if (!gateway) return;
-    try {
-      const result = await gateway.steerObserved({ id: nodeId, text });
-      this.deps.notify(result.queued
-        ? '[Fleet] Steer delivered to the foreign session (tmux send-keys).'
-        : `[Fleet] Steer refused: ${result.reason ?? 'the foreign session exposes no channel'}.`);
-    } catch (err) {
-      this.deps.notify(`Observed steer failed: ${summarizeError(err)}`);
+    const steer = this.observedSteer;
+    if (!steer || this.observedSteerSending) return;
+    const text = steer.draft.trim();
+    if (text.length === 0) { this.observedSteer = null; this.deps.markDirty(); return; } // empty submit just closes the composer
+    delete steer.failure;
+    const resolution = this.deps.resolveGateway();
+    if (!resolution.available) {
+      steer.failure = `Steer not sent: ${resolution.reason}. Enter sends it again, Esc drops it.`;
+      this.deps.markDirty();
+      return;
     }
+    const gateway = resolution.gateway;
+    this.observedSteerSending = true;
+    let failure: string | null;
+    try {
+      const result = await gateway.steerObserved({ id: steer.nodeId, text });
+      failure = result.queued ? null : `Steer not sent: the foreign session refused it (${result.reason ?? 'it exposes no channel'}). Enter sends it again, Esc drops it.`;
+    } catch (err) {
+      failure = `Steer not sent: ${summarizeError(err)}. Enter sends it again, Esc drops it.`;
+    } finally {
+      this.observedSteerSending = false;
+    }
+    if (failure !== null) {
+      if (this.observedSteer === steer) steer.failure = failure;
+      else this.deps.notify(failure);
+      this.deps.markDirty();
+      return;
+    }
+    if (this.observedSteer === steer) this.observedSteer = null;
+    this.deps.notify('[Fleet] Steer delivered to the foreign session (tmux send-keys).');
+    this.deps.markDirty();
   }
 
   // ── Task-graph posture (in-view edges/pool under a workstream) ───────────
 
   /**
-   * Lazily fetch the task graph (fleet.graph.get) for a selected workstream row
-   * so the in-view detail can render its edges/pool posture WITHOUT opening
-   * /graph. Idempotent: fetches once per node (cache + in-flight guard), quiet
-   * on an unavailable daemon (caches null rather than nagging every frame). A
-   * no-op for any non-workstream node.
+   * Fetch the task graph (fleet.graph.get) for a selected workstream row so the
+   * in-view detail can render its edges/pool posture WITHOUT opening /graph.
+   * One fetch per change of the group's state (the node's state and its units'
+   * statuses), never one per frame; an unreachable daemon is not remembered, so
+   * the row fetches once it comes up. A no-op for any non-workstream node.
    */
   public ensureGraphFor(node: ProcessNode): void {
     const workstreamId = contractGroupTarget(node);
     if (workstreamId === null) return;
-    if (this.graphCache.has(node.id) || this.graphInFlight.has(node.id)) return;
+    const key = graphStateKey(node);
+    if (this.graphCache.get(node.id)?.key === key || this.graphInFlight.get(node.id) === key) return;
     const resolution = this.deps.resolveGateway();
-    if (!resolution.available) { this.graphCache.set(node.id, null); return; }
-    this.graphInFlight.add(node.id);
+    if (!resolution.available) return;
+    this.graphInFlight.set(node.id, key);
     void resolution.gateway.getGraph(workstreamId)
-      .then((snapshot) => { this.graphCache.set(node.id, snapshot); })
-      .catch(() => { this.graphCache.set(node.id, null); })
-      .finally(() => { this.graphInFlight.delete(node.id); this.deps.markDirty(); });
+      .then((snapshot) => snapshot, () => null)
+      .then((snapshot) => {
+        if (this.graphInFlight.get(node.id) !== key) return;
+        this.graphInFlight.delete(node.id);
+        this.graphCache.set(node.id, { key, snapshot });
+        this.deps.markDirty();
+      });
   }
 
-  /** The cached graph for a node (null = fetched/unavailable, undefined = not yet fetched). */
+  /** The graph for a node (null = the fetch failed, undefined = not fetched yet). */
   public graphFor(nodeId: string): FleetGraphSnapshot | null | undefined {
-    return this.graphCache.get(nodeId);
+    return this.graphCache.get(nodeId)?.snapshot;
+  }
+
+  /** Forget graphs of nodes that are no longer listed (called when the Agents modal closes). */
+  public forgetGraphsExcept(liveNodeIds: ReadonlySet<string>): void {
+    for (const id of this.graphCache.keys()) if (!liveNodeIds.has(id)) this.graphCache.delete(id);
   }
 
   // ── Pick (STEP 3) ─────────────────────────────────────────────────────────
@@ -411,12 +457,12 @@ export class FleetActs {
   /** Run fleet.conflicts.resolve on a flagged conflict row; on success arm the shared jump/attach on the stamped session. */
   public async resolveConflict(node: ProcessNode): Promise<void> {
     const data = contractUnitData(node);
-    const itemId = data ? workItemIdFromNodeId(node.id) : null;
+    const itemId = data ? `${data.contract.id}:${data.unit.id}` : null;
     if (itemId === null) { this.deps.notify('This row is not a recorded contract unit.'); return; }
-    if (this.conflictRequests.has(itemId)) { this.deps.notify(`A resolution session for ${shortId(itemId)} is already starting.`); return; }
     const gateway = this.requireGateway();
     if (!gateway) return;
-    this.conflictRequests.add(itemId);
+    // The daemon owns "a resolution session is already starting or live" and
+    // refuses a second start with that reason, which is shown as it came.
     try {
       const result = await gateway.resolveConflict(itemId);
       const files = result.files.length > 0 ? ` over ${result.files.length} conflicted file(s)` : '';
@@ -426,9 +472,7 @@ export class FleetActs {
       // a successful re-merge, and the flagged row clears on the next snapshot.
       gateway.armFixSessionAttach(result.sessionId);
     } catch (err) {
-      this.deps.notify(`Conflict resolution failed: ${summarizeError(err)}`);
-    } finally {
-      this.conflictRequests.delete(itemId);
+      this.deps.notify(`Conflict resolution not started: ${summarizeError(err)}`);
     }
   }
 

@@ -23,10 +23,10 @@ import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 
 type KnowledgeReadOptions = Parameters<KnowledgeService['listNodes']>[1];
 
-interface KnowledgeNodeLike { readonly id: string; readonly kind: string; readonly title: string; readonly summary?: string | undefined; }
-interface KnowledgeSourceLike { readonly id: string; readonly sourceType: string; readonly status: string; readonly title?: string | undefined; readonly canonicalUri?: string | undefined; readonly sourceUri?: string | undefined; readonly summary?: string | undefined; }
-interface KnowledgeIssueLike { readonly id: string; readonly severity: 'info' | 'warning' | 'error'; readonly code: string; readonly message: string; readonly status: 'open' | 'resolved'; readonly sourceId?: string | undefined; readonly nodeId?: string | undefined; }
-interface KnowledgeScheduleLike { readonly id: string; readonly label: string; readonly enabled: boolean; }
+export interface KnowledgeNodeLike { readonly id: string; readonly kind: string; readonly title: string; readonly summary?: string | undefined; }
+export interface KnowledgeSourceLike { readonly id: string; readonly sourceType: string; readonly status: string; readonly title?: string | undefined; readonly canonicalUri?: string | undefined; readonly sourceUri?: string | undefined; readonly summary?: string | undefined; }
+export interface KnowledgeIssueLike { readonly id: string; readonly severity: 'info' | 'warning' | 'error'; readonly code: string; readonly message: string; readonly status: 'open' | 'resolved'; readonly sourceId?: string | undefined; readonly nodeId?: string | undefined; }
+export interface KnowledgeScheduleLike { readonly id: string; readonly label: string; readonly enabled: boolean; }
 
 export interface KnowledgeModalDeps {
   readonly knowledgeApi: {
@@ -209,22 +209,4 @@ class KnowledgeModalSurface implements KnowledgeModalReadSurface {
 
 export function createKnowledgeModalSurface(deps: KnowledgeModalDeps): KnowledgeModalReadSurface {
   return new KnowledgeModalSurface(deps);
-}
-
-/**
- * Deterministic golden fixture: fixed node/source/issue/schedule records,
- * no live platform calls, no random ids, no wall-clock reads.
- */
-export function knowledgeModalGoldenSurface(): ConfigModalSurface {
-  const nodes: readonly KnowledgeNodeLike[] = [{ id: 'node-1', kind: 'topic', title: 'Release cadence', summary: 'Batched internal releases, no per-change tags.' }];
-  const sources: readonly KnowledgeSourceLike[] = [{ id: 'source-1', sourceType: 'repo', status: 'indexed', title: 'goodvibes-tui', canonicalUri: 'repo://goodvibes-tui', summary: 'Primary TUI repository.' }];
-  const issues: readonly KnowledgeIssueLike[] = [{ id: 'issue-1', severity: 'warning', code: 'stale-source', message: 'Source has not been recrawled in 30 days.', status: 'open', sourceId: 'source-1' }];
-  const schedules: readonly KnowledgeScheduleLike[] = [{ id: 'sched-1', label: 'Nightly reindex', enabled: true }];
-  return createKnowledgeModalSurface({
-    knowledgeApi: {
-      graph: { nodes: { list: async () => nodes }, issues: { list: async () => issues } },
-      sources: { list: async () => sources },
-      jobs: { schedules: { list: () => schedules } },
-    },
-  });
 }

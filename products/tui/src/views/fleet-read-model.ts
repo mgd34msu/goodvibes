@@ -21,10 +21,10 @@
 //     and ordered by startedAt (ProcessNode
 //     has no role concept, parentId alone expresses the hierarchy, and the
 //     platform guarantees every parentId either resolves or the node is a root).
-//   - Cost/token honesty mirrors agent-inspector-shared.ts's
-//     hasReportedUsage convention: an all-zero-but-present usage object is
-//     treated as "no data" (never a fabricated 0/$0.00), and aggregates are
-//     null only when NO node in the snapshot has real data.
+//   - Cost/token honesty: an all-zero-but-present usage object is treated
+//     as "no data" (never a fabricated 0/$0.00), and aggregates are null
+//     only when NO node in the snapshot has real data. This file is the one
+//     statement of that rule (hasFleetUsage / hasFleetCost below).
 //   - Two-factory shape (live/static) mirrors cockpit-read-model.ts.
 // ---------------------------------------------------------------------------
 
@@ -263,13 +263,12 @@ export function fleetStallMarker(node: ProcessNode): string | null {
 }
 
 // ---------------------------------------------------------------------------
-// Honest usage/cost helpers (convention, ported from agent-inspector-shared.ts)
+// Honest usage/cost helpers
 // ---------------------------------------------------------------------------
 
 /**
  * True when a ProcessUsage carries real reported token data rather than
- * being present-but-all-zero. Mirrors hasReportedUsage() in
- * agent-inspector-shared.ts, applied to the platform's ProcessUsage shape.
+ * being present-but-all-zero.
  */
 export function hasFleetUsage(usage: ProcessUsage | undefined): usage is ProcessUsage {
   if (!usage) return false;

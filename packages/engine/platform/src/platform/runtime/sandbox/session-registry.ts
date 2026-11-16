@@ -139,22 +139,22 @@ export class SandboxSessionRegistry {
   /**
    * Stops a session. A shared session that several starters hold (for example
    * two MCP servers using one profile) is released by one of them and keeps
-   * running until the last holder stops it.
+   * running until the last holder stops it. The last release removes the session
+   * from the registry and returns its final, stopped record; a later stop or
+   * command for that id finds nothing.
    */
   public stop(sessionId: string): SandboxSession | null {
     const existing = this.sessions.get(sessionId);
     if (!existing) return null;
-    if (existing.state === 'stopped') return existing;
     const holders = this.sharedHolders.get(sessionId) ?? 1;
-    if (holders > 1) {
+    if (existing.state !== 'stopped' && holders > 1) {
       this.sharedHolders.set(sessionId, holders - 1);
       return existing;
     }
     this.sharedHolders.delete(sessionId);
-    return this.updateSession(sessionId, (session) => ({
-      ...session,
-      state: 'stopped',
-    }));
+    this.sessions.delete(sessionId);
+    const stopped: SandboxSession = { ...existing, state: 'stopped' };
+    return Object.freeze(stopped);
   }
 
   public get(sessionId: string): SandboxSession | null {
@@ -194,7 +194,8 @@ export class SandboxSessionRegistry {
     // happens to exit 0 does not verify it, and its startupDetail still explains why.
     const exitState: SandboxSession['state'] = result.status === 0 && session.startupStatus !== 'failed' ? 'running' : 'failed';
 
-    this.updateSession(sessionId, (current) => ({
+    // A session stopped while the command ran is gone from the registry; its result is still returned.
+    if (this.sessions.has(sessionId)) this.updateSession(sessionId, (current) => ({
       ...current,
       // A session stopped while the command ran stays stopped; a late exit cannot revive or fail it.
       state: current.state === exitState || sandboxSessionLifecycle.can(current.state, exitState) ? exitState : current.state,

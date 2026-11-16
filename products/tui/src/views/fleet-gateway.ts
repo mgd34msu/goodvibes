@@ -65,27 +65,6 @@ export interface FleetGateway {
   armFixSessionAttach(sessionId: string): void;
 }
 
-const WORKSTREAM_NODE_PREFIX = 'group:';
-const WORK_ITEM_NODE_PREFIX = 'unit:';
-
-/** Contract-qualified group ID required by the public fleet verbs, or null. */
-function qualifiedNodeId(nodeId: string, prefix: string): string | null {
-  if (!nodeId.startsWith(prefix)) return null;
-  const qualified = nodeId.slice(prefix.length);
-  const separator = qualified.indexOf(':');
-  return separator > 0 && separator < qualified.length - 1 ? qualified : null;
-}
-
-/** `group:<contract>:<group>` maps to the wire's `<contract>:<group>` workstream ID. */
-export function workstreamIdFromNodeId(nodeId: string): string | null {
-  return qualifiedNodeId(nodeId, WORKSTREAM_NODE_PREFIX);
-}
-
-/** `unit:<contract>:<unit>` maps to the wire's `<contract>:<unit>` item ID. */
-export function workItemIdFromNodeId(nodeId: string): string | null {
-  return qualifiedNodeId(nodeId, WORK_ITEM_NODE_PREFIX);
-}
-
 /**
  * Why the gateway could not be built (daemon disabled / no control-plane URL),
  * surfaced verbatim so an act can print an honest "not available" line rather

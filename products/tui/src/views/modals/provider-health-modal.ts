@@ -4,6 +4,7 @@ import type { ProviderRuntimeSnapshot } from '@goodvibes-jev/engine/platform/pla
 import { buildAccountPosture, isRouteUsable } from '../provider-health-routes.ts';
 import { buildProviderHealthDomainSummaries, type ProviderHealthDomainInputs } from '../provider-health-domains.ts';
 import { toneStyle, statusGlyph, pad, postureLine, kv, runModalCommand } from './modal-surface-helpers.ts';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 
 /** The slice of ProviderRuntimeInspectionQuery this surface consumes. */
 export interface ProviderRuntimeInspect {
@@ -13,11 +14,15 @@ export interface ProviderRuntimeInspect {
 
 /**
  * Provider-health config-modal surface (migrated from the `provider-health`
- * view, the charter's live-modal exemplar; also the target of the `providers`
- * and `accounts` redirects). providerRuntime.inspectAll() is async, so its
- * result is cached and refreshed on open, on `r`, and on a 3s live tick (the
- * view's display-tick cadence); buildView reads the cache synchronously so
- * live status/model-count values update in place with a stable layout.
+ * view; also the target of the `providers` and `accounts` redirects).
+ * providerRuntime.inspectAll() is async, so its result is cached; it is
+ * re-inspected on open, on `r`, after a repair and when the providers read
+ * model reports a change, never on a timer. buildView reads the cache
+ * synchronously so live values update in place with a stable layout.
+ *
+ * The Domains tab reads eight subsystem snapshots (the security one runs a token
+ * audit), so its rows are built once and kept until one of those read models
+ * reports a change or `r` is pressed, not on every render.
  *
  * Auth-route descriptors and the eight repair domains are presented through
  * the engine-owned pure posture builders. Credential-backed account commands
@@ -28,18 +33,21 @@ class ProviderHealthModalSurface implements ConfigModalSurface {
   readonly title = 'Providers';
   private requestRender: () => void = () => {};
   private cache = new Map<string, ProviderRuntimeSnapshot>();
-  private timer: ReturnType<typeof setInterval> | null = null;
-  private unsub: (() => void) | null = null;
+  private unsubs: Array<() => void> = [];
   private loaded = false;
-  private inspectionFailed = false;
+  private inspectionError: string | null = null;
   private inspectionGeneration = 0;
   private pendingInspection: number | null = null;
   private opened = false;
+  /** Domains tab rows as last built; null = build again on the next render. */
+  private domainRows: ConfigModalRow[] | null = null;
 
   constructor(
     private readonly providerRuntime: ProviderRuntimeInspect,
     private readonly providersReadModel?: UiReadModel<UiProvidersSnapshot>,
     private readonly domainInputs?: () => ProviderHealthDomainInputs,
+    /** Subscribe to the read models behind `domainInputs`; the listener marks the Domains rows stale. */
+    private readonly subscribeDomains?: (listener: () => void) => () => void,
   ) {}
 
   readonly actions = [
@@ -54,22 +62,22 @@ class ProviderHealthModalSurface implements ConfigModalSurface {
   onOpen(requestRender: () => void): void {
     this.opened = true;
     this.requestRender = requestRender;
+    this.domainRows = null;
     void this.reinspect();
-    if (this.providersReadModel && !this.unsub) this.unsub = this.providersReadModel.subscribe(() => this.requestRender());
-    if (this.timer === null) this.timer = setInterval(() => {
-      // Slow metadata must eventually publish. Only explicit refresh supersedes
-      // an in-flight inspection; automatic ticks coalesce until it completes.
-      if (this.pendingInspection === null) void this.reinspect();
-    }, 3_000);
+    if (this.unsubs.length === 0) {
+      // A provider change re-inspects; one already in flight answers it.
+      if (this.providersReadModel) this.unsubs.push(this.providersReadModel.subscribe(() => { if (this.pendingInspection === null) void this.reinspect(); }));
+      if (this.subscribeDomains) this.unsubs.push(this.subscribeDomains(() => { this.domainRows = null; this.requestRender(); }));
+    }
   }
 
   onClose(): void {
     this.opened = false;
     this.inspectionGeneration++;
     this.pendingInspection = null;
-    if (this.timer !== null) { clearInterval(this.timer); this.timer = null; }
-    this.unsub?.();
-    this.unsub = null;
+    this.domainRows = null;
+    for (const unsub of this.unsubs) unsub();
+    this.unsubs = [];
   }
 
   private providerIds(): string[] {
@@ -122,27 +130,14 @@ class ProviderHealthModalSurface implements ConfigModalSurface {
         ...posture.repairHints.map((hint, index): ConfigModalRow => ({ id: `auth:${id}:hint:${index}`, label: `  next: ${hint}`, selectable: false })),
       ];
     });
-    const domainRows: ConfigModalRow[] = [];
-    if (this.domainInputs) {
-      try {
-        for (const domain of buildProviderHealthDomainSummaries(this.domainInputs())) {
-          domainRows.push(
-            { id: `domain:${domain.name}`, label: `${statusGlyph(domain.level)} ${domain.name}: ${domain.summary}`, style: toneStyle(domain.level), selectable: false, header: true },
-            ...domain.details.map((detail, index): ConfigModalRow => ({ id: `domain:${domain.name}:detail:${index}`, label: `  ${detail}`, selectable: false })),
-            ...domain.nextSteps.map((step, index): ConfigModalRow => ({ id: `domain:${domain.name}:next:${index}`, label: `  next: ${step}`, selectable: false })),
-          );
-        }
-      } catch {
-        domainRows.push({ id: 'domains:unavailable', label: 'Health-domain posture unavailable', selectable: false, style: toneStyle('warn') });
-      }
-    }
+    const domainRows = this.domainInputs ? (this.domainRows ??= this.buildDomainRows(this.domainInputs)) : [];
     const emptyText = ids.length === 0
       ? (this.loaded ? 'No providers registered. Try /provider or /subscription.' : 'Inspecting providers…')
       : undefined;
 
     return {
       title: 'Providers',
-      ...(this.inspectionFailed ? { degraded: 'Provider inspection unavailable; showing last-known posture where available.' } : {}),
+      ...(this.inspectionError !== null ? { degraded: `Provider inspection unavailable (${this.inspectionError}); showing last-known posture where available.` } : {}),
       scrollInformationalLines: true,
       tabs: [
         { id: 'health', label: 'Health', header, rows, emptyText, hints: ['r refresh posture', '/health for latency & routes'] },
@@ -153,8 +148,25 @@ class ProviderHealthModalSurface implements ConfigModalSurface {
     };
   }
 
+  private buildDomainRows(read: () => ProviderHealthDomainInputs): ConfigModalRow[] {
+    const rows: ConfigModalRow[] = [];
+    try {
+      for (const domain of buildProviderHealthDomainSummaries(read())) {
+        rows.push(
+          { id: `domain:${domain.name}`, label: `${statusGlyph(domain.level)} ${domain.name}: ${domain.summary}`, style: toneStyle(domain.level), selectable: false, header: true },
+          ...domain.details.map((detail, index): ConfigModalRow => ({ id: `domain:${domain.name}:detail:${index}`, label: `  ${detail}`, selectable: false })),
+          ...domain.nextSteps.map((step, index): ConfigModalRow => ({ id: `domain:${domain.name}:next:${index}`, label: `  next: ${step}`, selectable: false })),
+        );
+      }
+    } catch (error) {
+      return [{ id: 'domains:unavailable', label: `Health-domain posture unavailable: ${summarizeError(error)}`, selectable: false, style: toneStyle('warn') }];
+    }
+    return rows;
+  }
+
   onAction(id: string, ctx: ConfigModalActionContext): void {
     if (id === 'refresh') {
+      this.domainRows = null;
       void this.reinspect();
       ctx.setStatus('Refreshing provider posture…');
       return;
@@ -176,10 +188,10 @@ class ProviderHealthModalSurface implements ConfigModalSurface {
       const next = new Map<string, ProviderRuntimeSnapshot>();
       for (const s of snapshots) next.set(s.providerId, s);
       this.cache = next;
-      this.inspectionFailed = false;
-    } catch {
+      this.inspectionError = null;
+    } catch (error) {
       if (!this.opened || generation !== this.inspectionGeneration) return;
-      this.inspectionFailed = true;
+      this.inspectionError = summarizeError(error);
       // Leave the last-known cache in place; a transient inspect failure should
       // not blank the live table (honest degraded behaviour).
     } finally {
@@ -195,6 +207,7 @@ export function createProviderHealthModalSurface(
   providerRuntime: ProviderRuntimeInspect,
   providersReadModel?: UiReadModel<UiProvidersSnapshot>,
   domainInputs?: () => ProviderHealthDomainInputs,
+  subscribeDomains?: (listener: () => void) => () => void,
 ): ConfigModalSurface {
-  return new ProviderHealthModalSurface(providerRuntime, providersReadModel, domainInputs);
+  return new ProviderHealthModalSurface(providerRuntime, providersReadModel, domainInputs, subscribeDomains);
 }

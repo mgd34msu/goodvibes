@@ -96,8 +96,11 @@ class KeybindingsModalSurface implements ConfigModalSurface {
     };
     category('Navigation', [['Up / Down', 'Scroll / history recall'], ['PageUp / PageDn', 'Scroll by full page'], ['Home / End', 'Jump to start / end of line'], [kb('search'), 'Search conversation'], ['n / N (search)', 'Next / previous match'], ['Mouse wheel', 'Scroll the conversation']]);
     category('Editing', [['Enter', 'Submit message'], ['Shift+Enter', 'Insert newline'], ['@', 'Open file picker'], ['/', 'Slash command mode'], [kb('paste'), 'Paste (image priority)'], [`${kb('undo')} / ${kb('redo')}`, 'Undo / redo'], [kb('clear-prompt'), 'Clear prompt'], [kb('delete-word'), 'Delete word backward'], [kb('kill-line'), 'Kill to end of line']]);
-    category('Actions', [['Tab', 'Collapse/expand block'], [kb('bookmark'), 'Bookmark block'], [kb('block-copy'), 'Copy block to clipboard'], [kb('block-save'), 'Save block to file'], [kb('copy-selection'), 'Copy selection'], ['F2', 'Agents'], ['?', 'Help overlay'], [`${kb('clear-cancel')} x2`, 'Exit']]);
+    category('Actions', [['Tab', 'Collapse/expand block'], [kb('bookmark'), 'Bookmark block'], [kb('block-copy'), 'Copy block to clipboard'], [kb('block-save'), 'Save block to file'], [kb('copy-selection'), 'Copy selection'], ['?', 'Help overlay'], [`${kb('clear-cancel')} x2`, 'Exit']]);
     category('Views', [[kb('command-palette'), 'Command palette: every command and view'], [`F2 / ${kb('open-agents')}`, 'Agents'], ['/usage', 'Usage: context, tokens and cost'], ['/changes', 'Changes: files, diff, review'], ['/notifications', 'Notification history'], ['Esc', 'Close the top modal (one level)']]);
+    // Named keys (Enter, Tab, F2, ?, Esc, arrows, n/N) are fixed in the input
+    // routes; every chord above comes from the live bindings, overrides included.
+    rows.push(infoRow(`sc:${n++}`, 'Named keys such as Enter, Tab, F2, ? and Esc are fixed; every other key above is your current binding.', { fg: MODAL_TONES.dim }));
     const allBindings = km.getAll().map((entry) => [entry.combos.length > 0 ? entry.combos.map((combo) => km.formatCombo(combo)).join(', ') : '(unbound)', entry.description] as const);
     category('All Bindings (live)', allBindings);
     return { id: 'shortcuts', label: 'Shortcuts', rows, emptyText: 'No shortcuts recorded.' };
@@ -131,27 +134,4 @@ class KeybindingsModalSurface implements ConfigModalSurface {
 
 export function createKeybindingsModalSurface(deps: KeybindingsModalDeps): ConfigModalSurface {
   return new KeybindingsModalSurface(deps);
-}
-
-/**
- * Deterministic golden fixture. KeybindingsManager is pointed at a nonexistent
- * config path so it always resolves to DEFAULT_KEYBINDINGS. Tool and model
- * fixtures are frozen literals, no disk, no live registry.
- */
-export function keybindingsModalGoldenSurface(): ConfigModalSurface {
-  const keybindingsManager = new KeybindingsManager({ configPath: '/nonexistent/golden-keybindings.json' });
-  const toolRegistry: KeybindingsModalToolRegistry = {
-    list: () => [
-      { definition: { name: 'read_file', description: 'Read a file from disk.', sideEffects: ['read_fs'], concurrency: 'parallel', supportsProgress: false, supportsStreamingOutput: false } },
-      { definition: { name: 'run_shell', description: 'Execute a shell command.', sideEffects: ['exec'], concurrency: 'serial', supportsProgress: true, supportsStreamingOutput: true } },
-    ],
-  };
-  const providerRegistry: KeybindingsModalProviderRegistry = {
-    listModels: () => [
-      { id: 'golden-a', provider: 'golden-provider', registryKey: 'golden-provider:golden-a', displayName: 'Golden Model A', contextWindow: 128000, selectable: true },
-      { id: 'golden-b', provider: 'golden-provider', registryKey: 'golden-provider:golden-b', displayName: 'Golden Model B', contextWindow: 32000, selectable: false },
-    ],
-    getCurrentModel: () => ({ registryKey: 'golden-provider:golden-a' }),
-  };
-  return createKeybindingsModalSurface({ toolRegistry, providerRegistry, keybindingsManager });
 }

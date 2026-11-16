@@ -31,7 +31,7 @@ import type {
 // timestamps are formatted (fmtTime/fmtRate), never read from the clock.
 // ---------------------------------------------------------------------------
 
-interface PolicyModalSnapshot {
+export interface PolicyModalSnapshot {
   readonly current: PolicyBundleVersion | null;
   readonly candidate: PolicyBundleVersion | null;
   readonly history: readonly PolicyBundleVersion[];
@@ -200,65 +200,4 @@ class PolicyModalSurface implements ConfigModalSurface {
 
 export function createPolicyModalSurface(deps: PolicyModalDeps): ConfigModalSurface {
   return new PolicyModalSurface(deps);
-}
-
-/**
- * Deterministic golden fixture. A fixed `PolicyModalSnapshot` literal covering
- * every rendered branch in one shot: an active current bundle, a simulating
- * candidate, a 3-rule diff, a blocked divergence gate with one command-prefix
- * and one tool-class breakdown row, one rolled-back history entry, one denied
- * permission-audit entry, one lint warning, one preflight review with one issue,
- * and one diverged simulation sample. No Date.now().
- */
-export function policyModalGoldenSurface(): ConfigModalSurface {
-  const currentBundle: PolicyBundleVersion = {
-    bundle: { bundleId: 'bundle-current-1', issuedAt: '2023-11-01T00:00:00.000Z', payload: { version: 1, rules: [] }, issuer: 'ops' },
-    provenance: { policyBundleId: 'bundle-current-1', signatureStatus: 'unsigned', provenanceSource: 'local-file', issuedAt: '2023-11-01T00:00:00.000Z', issuer: 'ops' },
-    rules: [{ id: 'rule-base-1', type: 'prefix', origin: 'managed', effect: 'allow', toolPattern: '*', commandPrefixes: [] }],
-    state: 'active', loadedAt: '2023-11-01T00:00:00.000Z', activatedAt: '2023-11-01T00:05:00.000Z',
-  };
-  const candidateBundle: PolicyBundleVersion = {
-    bundle: { bundleId: 'bundle-candidate-1', issuedAt: '2023-11-10T00:00:00.000Z', payload: { version: 1, rules: [] }, issuer: 'ops' },
-    provenance: { policyBundleId: 'bundle-candidate-1', signatureStatus: 'unsigned', provenanceSource: 'local-file', issuedAt: '2023-11-10T00:00:00.000Z', issuer: 'ops' },
-    rules: [
-      { id: 'rule-base-1', type: 'prefix', origin: 'managed', effect: 'allow', toolPattern: '*', commandPrefixes: [] },
-      { id: 'rule-added-1', type: 'network-scope', origin: 'user', effect: 'deny', toolPattern: 'Fetch', hostPatterns: ['*'] },
-    ],
-    state: 'simulating', loadedAt: '2023-11-10T00:00:00.000Z',
-  };
-  const historyBundle: PolicyBundleVersion = {
-    bundle: { bundleId: 'bundle-prev-1', issuedAt: '2023-10-01T00:00:00.000Z', payload: { version: 1, rules: [] } },
-    provenance: { policyBundleId: 'bundle-prev-1', signatureStatus: 'unsigned', provenanceSource: 'local-file', issuedAt: '2023-10-01T00:00:00.000Z' },
-    rules: [], state: 'rolled-back', loadedAt: '2023-10-01T00:00:00.000Z', activatedAt: '2023-10-01T00:05:00.000Z', rolledBackAt: '2023-11-01T00:00:00.000Z',
-  };
-  const removedRule = { id: 'rule-removed-1', type: 'path-scope' as const, origin: 'user' as const, effect: 'deny' as const, toolPattern: '*', pathPatterns: ['/tmp/**'] };
-  const addedRule = { id: 'rule-added-1', type: 'network-scope' as const, origin: 'user' as const, effect: 'deny' as const, toolPattern: 'Fetch', hostPatterns: ['*'] };
-  const changedFrom = { id: 'rule-base-1', type: 'prefix' as const, origin: 'managed' as const, effect: 'allow' as const, toolPattern: '*', commandPrefixes: [] };
-  const changedTo = { id: 'rule-base-1', type: 'prefix' as const, origin: 'managed' as const, effect: 'deny' as const, toolPattern: '*', commandPrefixes: [] };
-  const stats = (divergenceRate: number): DivergenceStats => ({ total: 1, byType: { 'allow-vs-deny': 1, 'deny-vs-allow': 0, 'reason-mismatch': 0 }, divergenceRate, totalEvaluations: 20 });
-  const decision = (allowed: boolean, reason: 'DEFAULT_ALLOW' | 'RULE_DENY_USER') => ({ allowed, reason, sourceLayer: 'policy' as const, toolName: 'Fetch', args: {}, timestamp: 1700000000000, evaluationTrace: [] });
-
-  const snapshot: PolicyModalSnapshot = {
-    current: currentBundle, candidate: candidateBundle, history: [historyBundle],
-    diff: { fromBundleId: 'bundle-current-1', toBundleId: 'bundle-candidate-1', removed: [removedRule], added: [addedRule], changed: [{ ruleId: 'rule-base-1', from: changedFrom, to: changedTo }], unchanged: [], totalChanges: 3 },
-    divergence: {
-      report: { overall: stats(0.1), byToolClass: { network: stats(0.1) }, byCommandPrefix: { 'fetch ': stats(0.1) }, byMode: {}, records: [] },
-      mode: 'warn-on-divergence',
-      gate: { status: 'blocked', divergenceRate: 0.1, threshold: 0.05, totalEvaluations: 20, message: 'divergence rate 10.0% exceeds 5.0% threshold' },
-      trend: [{ ts: 1700000000000, divergenceRate: 0.1, totalEvaluations: 20, totalDivergences: 2, gatePassing: false }],
-      capturedAt: 1700000000000,
-    },
-    recentPermissionAudit: [{ callId: 'call-1', tool: 'Bash', category: 'exec', approved: false, riskLevel: 'high', classification: 'destructive', summary: 'blocked rm -rf outside sandbox root', reasons: ['path escape'], requestedAt: 1700000000000, decidedAt: 1700000001000 }],
-    lintFindings: [{ severity: 'warn', ruleId: 'rule-added-1', message: 'toolPattern "Fetch" combined with a wildcard host pattern is broad; consider narrowing.' }],
-    lastSimulationSummary: {
-      simulatedAt: '2023-11-10T00:00:00.000Z', mode: 'warn-on-divergence', totalScenarios: 4, divergentScenarios: 1, allowedByActual: 3, allowedBySimulated: 2,
-      results: [{ scenario: { id: 'scenario-1', label: 'fetch external API', toolName: 'Fetch', args: {} }, actualDecision: decision(true, 'DEFAULT_ALLOW'), simulatedDecision: decision(false, 'RULE_DENY_USER'), authoritativeDecision: decision(true, 'DEFAULT_ALLOW'), diverged: true, divergenceType: 'allow-vs-deny' }],
-    },
-    lastPreflightReview: {
-      generatedAt: '2023-11-10T00:10:00.000Z', status: 'warn', summary: '1 candidate rule broadens network access beyond the current policy.', issueCount: 1,
-      issues: [{ severity: 'warn', source: 'policy', message: 'candidate rule rule-added-1 denies all outbound network access', detail: 'verify this is intentional before promotion' }],
-    },
-    capturedAt: '2023-11-10T00:15:00.000Z',
-  };
-  return createPolicyModalSurface({ policyRuntimeState: { getSnapshot: () => snapshot } });
 }

@@ -35,7 +35,7 @@ export interface HooksModalDeps {
   readonly hookActivityTracker: HooksModalActivityTracker;
 }
 
-type HookEntry = { pattern: string; hook: HookDefinition };
+export type HookEntry = { pattern: string; hook: HookDefinition };
 
 function rowId(entry: HookEntry, index: number): string {
   return `${entry.pattern}#${entry.hook.name ?? index}`;
@@ -137,14 +137,14 @@ class HooksModalSurface implements ConfigModalSurface {
     const name = entry.hook.name;
     switch (id) {
       case 'toggle':
-        if (!name) { ctx.print('This hook has no managed name to toggle.'); return; }
+        if (!name) { ctx.setStatus('This hook has no managed name, so it cannot be toggled here; edit it in the hooks file.'); return; }
         {
           const verb = entry.hook.enabled === false ? 'enable' : 'disable';
           runModalCommand(ctx, 'hooks', [verb, name], `/hooks ${verb} ${name}`);
         }
         break;
       case 'remove':
-        if (!name) { ctx.print('This hook has no managed name to remove.'); return; }
+        if (!name) { ctx.setStatus('This hook has no managed name, so it cannot be removed here; edit it in the hooks file.'); return; }
         runModalCommand(ctx, 'hooks', ['remove', name], `/hooks remove ${name}`);
         break;
       case 'simulate':
@@ -156,32 +156,4 @@ class HooksModalSurface implements ConfigModalSurface {
 
 export function createHooksModalSurface(deps: HooksModalDeps): ConfigModalSurface {
   return new HooksModalSurface(deps);
-}
-
-/**
- * Deterministic golden fixture: fixed dispatcher/workbench/activity-tracker
- * stand-ins with two managed hooks (one enabled, one disabled) and one recorded
- * activity entry. listHookPointContracts() reads the platform's static contract table
- * (no disk/wall-clock). All timestamps are fixed epoch numbers.
- */
-export function hooksModalGoldenSurface(): ConfigModalSurface {
-  const hooks: HookEntry[] = [
-    { pattern: 'Pre:tool:*', hook: { match: 'Pre:tool:*', type: 'command', command: 'echo pre', name: 'pre-tool-guard', enabled: true } },
-    { pattern: 'Post:file:write', hook: { match: 'Post:file:write', type: 'command', command: 'echo post', name: 'post-write-log', enabled: false } },
-  ];
-  const dispatcher: HooksModalDispatcher = { listHooks: () => hooks, getChains: () => [] };
-  const workbench: HooksModalWorkbench = {
-    getHooksFilePath: () => '/golden/hooks.json',
-    listManagedHooks: () => hooks,
-    listManagedChains: () => [],
-    listRecentActions: () => [{ kind: 'toggle', target: 'pre-tool-guard', timestamp: 0 }],
-    getLastSimulation: () => null,
-  };
-  const activityTracker: HooksModalActivityTracker = {
-    listRecent: () => [{
-      timestamp: 0, path: 'Pre:tool:*', specific: '*', pattern: 'Pre:tool:*',
-      hookName: 'pre-tool-guard', hookType: 'command', ok: true, decision: 'allow', durationMs: 1, async: false,
-    }],
-  };
-  return createHooksModalSurface({ hookDispatcher: dispatcher, hookWorkbench: workbench, hookActivityTracker: activityTracker });
 }

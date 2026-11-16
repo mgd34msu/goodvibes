@@ -9,7 +9,6 @@
 
 import type { ProcessCostState, ProcessNode, ProcessCheckSummary, ProcessUsage } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
 import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
-import { formatAgentCost } from './agent-inspector-shared.ts';
 import { buildViewLine, DEFAULT_VIEW_PALETTE, type ColumnSpec, type ViewPalette } from './polish.ts';
 import { fleetAttentionText, fleetNodeAttention, fleetStallMarker, fleetUsageTokens, hasFleetCost, type FleetStateTone } from './fleet-read-model.ts';
 import { fleetStateDisplay } from './fleet-stop.ts';
@@ -66,6 +65,14 @@ export function formatFleetTokens(usage: ProcessUsage | undefined): string {
   const total = fleetUsageTokens(usage);
   if (total === null) return 'n/a';
   return total >= 1000 ? `${(total / 1000).toFixed(1)}k` : String(total);
+}
+
+/** A dollar amount at the precision a per-agent cost needs: sub-cent amounts keep four places. */
+export function formatAgentCost(usd: number): string {
+  if (usd === 0) return '$0.00';
+  if (usd < 0.0001) return '<$0.0001';
+  if (usd < 0.01) return `$${usd.toFixed(4)}`;
+  return `$${usd.toFixed(3)}`;
 }
 
 /** Honest cost display: never a fabricated $0.00, 'unpriced' when costState says so. */
@@ -187,7 +194,8 @@ export function renderCheckLines(check: ProcessCheckSummary, width: number, pale
 /**
  * The task graph's edges + elastic-pool posture for a workstream row, rendered
  * IN the fleet detail (the tree shows nodes; edges/pool used to be reachable
- * only via /graph, /graph still works). Fetched lazily and cached by fleet-acts;
+ * only via /graph, /graph still works). Fetched lazily by fleet-acts and fetched
+ * again when the group's units change;
  * rendered only once a snapshot is in hand. An empty graph states so honestly.
  */
 export function renderGraphPostureLines(graph: WorkstreamGraphSnapshot, width: number, palette: ViewPalette = DEFAULT_VIEW_PALETTE): Line[] {
@@ -274,8 +282,6 @@ export function renderFleetDetailLines(
     [' activity ', C.label],
     [truncateDisplay(activityText, Math.max(0, width - 11)), C.dim],
   ]);
-  // Approval history attaches here once session tabs land.
-  const line4 = buildViewLine(width, [[' approvals ', C.label], ['—', C.dim]]);
   // The contract DTO carries its own workspace/application facts. Unit snapshots
   // do not expose an individual worktree/conflict list, so none is invented here.
   const raw = node.kind === 'contract' ? node.raw : (node.raw as { contract?: unknown } | undefined)?.contract;
@@ -296,5 +302,5 @@ export function renderFleetDetailLines(
   // The task graph's edges/pool posture for a workstream row (fetched + cached
   // by fleet-acts); rendered in-view under the chain, /graph still available.
   const graphLines = graphSnapshot ? renderGraphPostureLines(graphSnapshot, width, C) : [];
-  return [line1, line2, ...headlineLine, line3, line4, ...contractLines, ...checkLines, ...graphLines];
+  return [line1, line2, ...headlineLine, line3, ...contractLines, ...checkLines, ...graphLines];
 }

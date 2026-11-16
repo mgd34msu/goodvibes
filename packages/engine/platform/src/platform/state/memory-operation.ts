@@ -16,9 +16,6 @@ export function captureMemoryOperation(options: MemoryOperationOptions = {}): Me
     signal,
     assertCurrent: () => {
       signal?.throwIfAborted();
-      if (options.signal !== signal || options.assertCurrent !== current) {
-        throw new Error('Memory operation lifecycle changed');
-      }
       const result: unknown = current?.();
       if (result !== undefined) {
         if (result instanceof Promise) void result.catch(() => {});

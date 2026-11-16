@@ -202,23 +202,13 @@ export interface LocalMemoryStore {
 
 /** Wrap a local embedded store (e.g. a MemoryRegistry) as a full MemoryAccess. */
 export function createLocalMemoryAccess(store: LocalMemoryStore): MemoryAccess {
-  const run = <T>(options: MemoryOperationOptions | undefined, invoke: (operation: MemoryOperationOptions) => T | PromiseLike<T>) => {
-    const operation = captureMemoryOperation(options);
-    return awaitMemoryOperation(() => invoke(operation), operation);
-  };
+  // The caller's lifecycle goes straight to the store, which checks it at its
+  // own steps; the spine client above owns the route and the cancellation race.
+  const run = async <T>(options: MemoryOperationOptions | undefined, invoke: (operation: MemoryOperationOptions | undefined) => T | PromiseLike<T>): Promise<Awaited<T>> =>
+    await invoke(options);
+  const noScope = () => {};
   return {
-    captureOperationScope: () => {
-      const capture = store.captureOperationScope, current = capture?.call(store);
-      const names = ['add', 'honestSearch', 'get', 'review', 'delete', 'search', 'searchSemantic',
-        'update', 'link', 'linksFor', 'reviewQueue', 'exportBundle', 'importBundle', 'vectorStats', 'doctor'] as const;
-      const methods = names.map(name => store[name]);
-      return () => {
-        if (store.captureOperationScope !== capture || names.some((name, index) => store[name] !== methods[index])) {
-          throw new Error('Memory operation local backend changed');
-        }
-        current?.();
-      };
-    },
+    captureOperationScope: () => store.captureOperationScope?.() ?? noScope,
     add: (opts, operation) => run(operation, owned => store.add(opts, owned)),
     honestSearch: (filter, options, operation) => run(operation, owned => store.honestSearch(filter, options, owned)),
     get: (id, operation) => run(operation, owned => store.get(id, owned)),
@@ -237,6 +227,9 @@ export function createLocalMemoryAccess(store: LocalMemoryStore): MemoryAccess {
     ...(store.reloadIfChanged ? { reloadIfChanged: () => store.reloadIfChanged!() } : {}),
   };
 }
+
+/** How long a pre-turn recall refresh may take before the turn starts on the previous snapshot. */
+export const RECALL_REFRESH_TIMEOUT_MS = 1_500;
 
 /** Current access posture, honest, reportable, never guessed. */
 export type MemoryAccessMode = 'local' | 'client';
@@ -337,19 +330,18 @@ export class MemorySpineClient implements MemoryAccess {
     return pending ? pending.then(start) : start();
   }
 
-  /** Bind one prepared caller to its original route, including adoption ABA. */
+  /**
+   * Bind one prepared caller to its original route. The one fact that can move
+   * under it is the switch between local and wire (`activate`/`deactivate`),
+   * which the epoch carries as one integer; the route's own scope, when it has
+   * one, is chained after it.
+   */
   captureOperationScope(): () => void {
     const transport = this.transport, epoch = this.operationEpoch;
     const route = transport ?? this.local;
-    const names = ['add', 'honestSearch', 'get', 'updateReview', 'delete', 'list', 'searchSemantic',
-      'update', 'link', 'linksFor', 'reviewQueue', 'exportBundle', 'importBundle', 'vectorStats', 'doctor'] as const;
-    const methods = names.map(name => route[name]);
-    const capture = route.captureOperationScope;
-    const routeCurrent = capture?.call(route);
+    const routeCurrent = route.captureOperationScope?.();
     return () => {
-      if (this.transport !== transport || this.operationEpoch !== epoch
-        || names.some((name, index) => route[name] !== methods[index])
-        || route.captureOperationScope !== capture) {
+      if (this.transport !== transport || this.operationEpoch !== epoch) {
         throw new Error('Memory operation route changed');
       }
       routeCurrent?.();
@@ -476,14 +468,21 @@ export class MemorySpineClient implements MemoryAccess {
    * SYNCHRONOUS prompt builder can read the result via {@link recallSnapshot}
    * without awaiting the wire. Runs the honest recall search (recall-injection
    * contract ON by default), stamps the capture time and mode, and stores it.
+   *
+   * The refresh has its own short bound ({@link RECALL_REFRESH_TIMEOUT_MS}): a
+   * daemon that is slow to answer rejects the refresh instead of holding the turn,
+   * the request is cancelled, and the previous snapshot stays in place with its
+   * age and `stale` note, so a caller that waits on the refresh starts the turn
+   * on what it already had.
    */
   async refreshRecallSnapshot(
     filter: MemorySearchFilter = {},
-    options: MemoryRecallRefreshOptions = {},
+    options: MemoryRecallRefreshOptions & { readonly timeoutMs?: number | undefined } = {},
   ): Promise<MemoryRecallSnapshot> {
     const recall = options.recall ?? true;
     if (this.transport === null && this.localReload) await this.localReload;
-    const operation = this.operation(), mode = this.mode(), route = this.route();
+    const signal = AbortSignal.timeout(options.timeoutMs ?? RECALL_REFRESH_TIMEOUT_MS);
+    const operation = this.operation({ signal }), mode = this.mode(), route = this.route();
     // The snapshot describes memory as it was when the search began, and the
     // newest search to START wins: a slow earlier one that finishes last must not
     // replace what a later one already stored.

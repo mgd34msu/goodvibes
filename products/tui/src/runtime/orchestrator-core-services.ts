@@ -72,7 +72,9 @@ export function buildSharedOrchestratorCoreServices(input: {
  * up-to-date records instead of whatever the previous refresh captured.
  * Failures are swallowed, an honest stale/empty snapshot (with its own
  * degradation note, surfaced via `recallSnapshot().note`) is preferable to
- * blocking the user's turn on a memory-read failure.
+ * blocking the user's turn on a memory-read failure. The refresh carries its
+ * own short bound (`RECALL_REFRESH_TIMEOUT_MS`), so a daemon slow to answer
+ * delays the turn by at most that, never by its socket timeout.
  */
 export async function refreshMemoryRecallSnapshot(services: Pick<RuntimeServices, 'memorySpine'>): Promise<void> {
   await services.memorySpine.refreshRecallSnapshot().catch(() => {});

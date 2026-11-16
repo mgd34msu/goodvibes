@@ -114,19 +114,12 @@ export interface MemorySpineRestTransportOptions {
  * plus the ten 1.2.0 EXTENDED routes).
  */
 export function createMemorySpineRestTransport(options: MemorySpineRestTransportOptions): MemoryTransport {
+  // The connection is read once here; a new daemon or token is a new transport (the spine's epoch moves).
   const fetchImpl = options.fetchImpl ?? fetch;
-  const token = options.authToken, baseUrl = options.baseUrl, originalFetch = options.fetchImpl;
-  const current = () => {
-    if (options.baseUrl !== baseUrl || options.authToken !== token || options.fetchImpl !== originalFetch) {
-      throw new Error('Memory REST connection changed');
-    }
-  };
+  const token = options.authToken, baseUrl = options.baseUrl;
   const url = (path: string): string => buildUrl(baseUrl, path);
   const request = <T>(lifecycle: MemoryOperationOptions | undefined, target: string, init: RequestInit): Promise<T> => {
-    const caller = captureMemoryOperation(lifecycle);
-    const operation = captureMemoryOperation({ signal: caller.signal, assertCurrent: () => {
-      assertMemoryOperationCurrent(caller); current();
-    } });
+    const operation = captureMemoryOperation(lifecycle);
     const checkedFetch: Parameters<typeof requestJsonRaw>[0] = (input, requestInit) => {
       assertMemoryOperationCurrent(operation);
       return fetchImpl(input, requestInit);
@@ -137,7 +130,6 @@ export function createMemorySpineRestTransport(options: MemorySpineRestTransport
     }), operation);
   };
   return {
-    captureOperationScope: () => current,
     add: async (opts: MemoryAddOptions, operation?: MemoryOperationOptions): Promise<MemoryRecord> => {
       // The id travels with the add so the host treats a resend as the same add.
       const id = opts.id ?? newMemoryId();

@@ -50,7 +50,7 @@ export type { ExtraEdges, GraphTask, TaskSeverity } from './task-graph.js';
 export { addDependencyEdge, addConflictSerializationEdges, buildGraphSnapshot, detectOrphans, remainingDepths, wouldCreateCycle } from './graph-dynamics.js';
 export type { DependencyGraph, GraphNode } from './graph-dynamics.js';
 export type { EdgeAddResult, WorkstreamGraphSnapshot, GraphNodeSnapshot, GraphEdgeSnapshot, PoolStateSnapshot } from './graph-dynamics.js';
-export { gateClaimAgainstFleet, isElastic, poolState, retirementEvent } from './elastic-pool.js';
+export { gateClaimAgainstFleet, isElastic, poolState } from './elastic-pool.js';
 export type { FleetCapacityProbe, FleetCapacityFn } from './elastic-pool.js';
 
 export type { CancellationRegistry } from './cancellation.js';

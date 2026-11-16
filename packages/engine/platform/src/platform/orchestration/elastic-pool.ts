@@ -44,7 +44,7 @@ export interface PoolGateDecision {
   readonly allow: boolean;
   /** The visible reason stamped on the still-ready item when refused. */
   readonly reason?: string | undefined;
-  readonly event?: OrchestrationEvent | undefined;
+  readonly event?: Extract<OrchestrationEvent, { type: 'pool-spawn-refused' }> | undefined;
 }
 
 /**

@@ -829,12 +829,14 @@ export type OrchestrationEvent =
   | { readonly type: 'attempts-ready'; readonly workstreamId: string; readonly groupId: string; readonly candidateItemIds: readonly string[] }
   | { readonly type: 'attempt-judge-proposed'; readonly workstreamId: string; readonly groupId: string; readonly proposedWinnerItemId: string | null; readonly reasons: readonly string[] }
   | { readonly type: 'attempt-winner-picked'; readonly workstreamId: string; readonly groupId: string; readonly winnerItemId: string; readonly loserItemIds: readonly string[]; readonly auto: boolean }
-  /** Runtime-dynamic graph lifecycle: live edges, structured cycle/orphan outcomes, elastic-pool state. */
+  /**
+   * Runtime-dynamic graph lifecycle: live edges, structured cycle/orphan
+   * outcomes, and a policy refusal of a spawn. At cap is not an event: the
+   * ready item's `blockedReason` and the pool snapshot carry it.
+   */
   | { readonly type: 'item-edge-added'; readonly workstreamId: string; readonly itemId: string; readonly dependsOnId: string; readonly reason: string }
   | { readonly type: 'graph-cycle'; readonly workstreamId: string; readonly itemIds: readonly string[]; readonly cycle: readonly string[] }
   | { readonly type: 'item-orphaned'; readonly workstreamId: string; readonly itemId: string; readonly blockerItemId: string; readonly reason: string }
-  | { readonly type: 'pool-at-cap'; readonly workstreamId: string; readonly ready: number; readonly running: number; readonly capKey: string; readonly maxSize: number }
-  | { readonly type: 'pool-spawn-refused'; readonly workstreamId: string; readonly itemId: string; readonly reason: string }
-  | { readonly type: 'agent-retired'; readonly workstreamId: string; readonly agentId: string; readonly reason: string };
+  | { readonly type: 'pool-spawn-refused'; readonly workstreamId: string; readonly itemId: string; readonly reason: string };
 
 export type OrchestrationEventListener = (event: OrchestrationEvent) => void;

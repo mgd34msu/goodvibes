@@ -13,6 +13,7 @@ import { FINAL_ANSWER_REVIEWS } from '../../contract/batteries/final-answer-revi
 import { ORIGINAL_OBLIGATION_COVERAGE, originalObligationSource } from '../../contract/batteries/original-obligation-coverage.js';
 import { captureAnswerClaimOutput, completeAnswerClaimCoverage, scopedClaimQuestion, type AnswerClaimReview, type AnswerClaimOutput } from '../../contract/final-answer-claims.js';
 import { GOAL_OBLIGATIONS } from '../../contract/batteries/goal-obligations.js';
+import { decisionReceiptText } from '../../contract/decision-records.js';
 import { goalObligationSource, goalObligationQuestion } from '../../contract/goal-obligation-proof.js';
 import { UNIT_QUALITY_BAND } from '../../contract/batteries/unit-quality.js';
 import { CHECK_SITES, runUnitCheck, type CheckSettings } from '../../contract/check.js';
@@ -227,7 +228,7 @@ export async function verifyNativeWorkExecution(options: {
     const decision = [...contract.decisions].reverse().find(value => value.action === 'checked' && value.targetId === `${contract.id}.goal-obligations`
       && value.decisionIds.every(id => check.decisionIds.includes(id)));
     let proof: Record<string, unknown> | null = null;
-    try { proof = decision ? object(JSON.parse(decision.reason)) : null; } catch { return false; }
+    try { proof = decision ? object(JSON.parse(decisionReceiptText(decision))) : null; } catch { return false; }
     const ids = proof?.['decisionIds'];
     if (!decision || proof?.['schemaVersion'] !== 1 || proof['passed'] !== true || !Array.isArray(ids) || ids.length !== 1 || typeof ids[0] !== 'string'
       || !contract.criteria.some(criterion => criterion.disposition === 'judged')
@@ -284,7 +285,7 @@ export async function verifyNativeWorkExecution(options: {
     && decision.targetId === `${contract.id}.final-answer-review`
     && decision.decisionIds.every(id => deliverable.decisionIds.includes(id)));
   let content: Record<string, unknown> | null = null;
-  try { content = contentDecision ? object(JSON.parse(contentDecision.reason)) : null; } catch { /* Missing valid evidence fails below. */ }
+  try { content = contentDecision ? object(JSON.parse(decisionReceiptText(contentDecision))) : null; } catch { /* Missing valid evidence fails below. */ }
   const contentIds = content?.['decisionIds'];
   const fulfillmentIds = content?.['fulfillmentDecisionIds'];
   const claims = content?.['claimReviews'];
@@ -330,7 +331,7 @@ export async function verifyNativeWorkExecution(options: {
   const originalDecision = [...contract.decisions].reverse().find(decision => decision.action === 'checked'
     && decision.targetId === `${contract.id}.original-obligations`);
   let original: Record<string, unknown> | null = null;
-  try { original = originalDecision ? object(JSON.parse(originalDecision.reason)) : null; } catch { /* Invalid evidence fails below. */ }
+  try { original = originalDecision ? object(JSON.parse(decisionReceiptText(originalDecision))) : null; } catch { /* Invalid evidence fails below. */ }
   const originalIds = original?.['decisionIds'];
   const originalId = Array.isArray(originalIds) && originalIds.length === 1 && typeof originalIds[0] === 'string' ? originalIds[0] : undefined;
   const originalEntry = originalId ? options.decisionLog.get(originalId) : undefined;

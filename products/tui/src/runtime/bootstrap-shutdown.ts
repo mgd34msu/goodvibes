@@ -76,8 +76,10 @@ export function createBootstrapShutdown(deps: BootstrapShutdownDeps): BootstrapS
         deps.providerRegistry,
         deps.sessionOrchestration,
         deps.persistenceOptions,
+        // The save is durable before the session hooks are waited for; a slow
+        // hook that meets the exit deadline must not read as a failed save.
+        () => { durablySaved = true; },
       );
-      durablySaved = true;
     });
     // Take each registry before invoking its callbacks. Failed owners cannot
     // retain subscriptions or prevent their siblings from being released.

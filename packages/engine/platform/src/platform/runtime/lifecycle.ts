@@ -49,7 +49,7 @@ export function fireSessionStart(
  *
  * Sequence:
  * 1. Persist conversation to sessions store
- * 2. Fire session:end and session:save lifecycle hooks
+ * 2. Fire session:end and session:save lifecycle hooks and wait for them
  * 3. Destroy ScheduleManager (cancels pending scheduled tasks)
  * 4. Stop provider registry file-watcher
  *
@@ -73,10 +73,13 @@ export async function shutdownRuntime(
   providerRegistry?: Pick<ProviderRegistry, 'stopWatching'> | null,
   sessionOrchestration?: Pick<CrossSessionTaskRegistry, 'dispose'> | null,
   persistenceOptions?: SessionPersistenceOptions,
+  /** Called once the session is on disk, before the session hooks are waited for. */
+  onSessionSaved?: () => void,
 ): Promise<void> {
   let shutdownError: Error | null = null;
   try {
     saveSession(sessionId, sessionData, model, provider, title, persistenceOptions);
+    onSessionSaved?.();
   } catch (error) {
     const message = summarizeError(error);
     logger.warn('saveSession failed during shutdown', { error: message });
@@ -85,11 +88,14 @@ export async function shutdownRuntime(
     });
   }
 
-  // Lifecycle hooks are started without waiting for async handlers.
-  const fireHook = (specific: string): void => {
+  // The session hooks finish before the runtime is torn down, so a backup or
+  // sync hook acting on the saved session runs to its end. Each hook is bounded
+  // by its own timeout, and the shell's shutdown deadline bounds the whole step;
+  // a hook marked async still runs in the background without being waited on.
+  const fireHook = async (specific: string): Promise<void> => {
     if (!hookDispatcher) return;
     try {
-      hookDispatcher.fire({
+      await hookDispatcher.fire({
         path: `Lifecycle:session:${specific}` as HookEventPath,
         phase: 'Lifecycle' as HookPhase,
         category: 'session' as HookCategory,
@@ -97,24 +103,19 @@ export async function shutdownRuntime(
         sessionId,
         timestamp: Date.now(),
         payload: { sessionId },
-      }).catch((err: unknown) => {
-        logger.warn('shutdownRuntime lifecycle hook failed', {
-          specific,
-          error: summarizeError(err),
-        });
       });
     } catch (err) {
-      logger.warn('shutdownRuntime lifecycle hook dispatch failed', {
+      logger.warn('shutdownRuntime lifecycle hook failed', {
         specific,
         error: summarizeError(err),
       });
     }
   };
 
-  fireHook('end');
+  await fireHook('end');
   // `save` tells subscribers (backup and sync scripts) the session is on disk,
   // which is false when the write above failed.
-  if (!shutdownError) fireHook('save');
+  if (!shutdownError) await fireHook('save');
 
   try {
     scheduleManager?.destroy();

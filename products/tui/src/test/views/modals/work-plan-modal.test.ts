@@ -60,6 +60,8 @@ describe('work-plan modal surface', () => {
     check('remove', row, [['work-plan', ['remove', 'wpi-a']]]);
     check('clearCompleted', null, [['work-plan', ['clear-done']]]);
     check('add', null, [['work-plan', ['add']]]);
+    check('edit', row, [['work-plan', ['edit', 'wpi-a']]]);
+    check('export', null, [['work-plan', ['export']]]);
   });
 
   test('row-scoped actions against an empty plan are a no-op', () => {

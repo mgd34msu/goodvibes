@@ -7,21 +7,21 @@ import type {
 import type { WorkPlan, WorkPlanItem, WorkPlanItemStatus, WorkPlanLinkTargets } from '@goodvibes-jev/engine/platform/platform/workflow';
 import { runModalCommand } from './modal-surface-helpers.ts';
 import { contractNodeId } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { formatRefusal, readRefusal } from '@goodvibes-jev/engine/errors';
 
 // ---------------------------------------------------------------------------
-// Work Plan → config-modal surface (group-B port). Lists the active
-// persistent plan's checklist items with a progress summary + status counts.
-// All mutations (add/edit item, cycle/set status, remove, clear-completed)
-// route to the existing `/work-plan` command path (charter: no
-// destructive/interactive mutation direct-called from a modal; the earlier view's
-// inline add/edit draft form has no place in a read/navigate modal, the bare
-// `/work-plan add` subcommand is the honest stand-in). Selection-blind port:
-// the earlier view's selected-item owner/source/notes/linked detail is folded into
+// Work Plan modal. Lists the active persistent plan's checklist items with a
+// progress summary and status counts. Every change runs through the
+// `/work-plan` command. Status changes, delete and clear keep the modal open;
+// add and edit close it and leave the command in the composer to finish
+// (`/work-plan add `, `/work-plan edit <id> <title>`), and export closes it so
+// the written path is visible. Owner, source, notes and links are folded into
 // each row label.
 // ---------------------------------------------------------------------------
 
 const STATUS_LABEL: Record<WorkPlanItemStatus, string> = {
-  pending: '[ ]', in_progress: '[>]', blocked: '[!]', done: '[x]', failed: '[x]', cancelled: '[-]',
+  pending: '[ ]', in_progress: '[>]', blocked: '[!]', done: '[x]', failed: '[✕]', cancelled: '[-]',
 };
 
 /** `/work-plan <subcommand> <id>` for each status. */
@@ -31,7 +31,7 @@ const STATUS_COMMAND: Record<WorkPlanItemStatus, string> = {
 
 const STATUS_ORDER: readonly WorkPlanItemStatus[] = ['pending', 'in_progress', 'blocked', 'done', 'failed', 'cancelled'];
 
-type WorkPlanItemLike = Pick<WorkPlanItem, 'id' | 'title' | 'status' | 'owner' | 'source' | 'notes' | 'linked' | 'updatedAt'>;
+export type WorkPlanItemLike = Pick<WorkPlanItem, 'id' | 'title' | 'status' | 'owner' | 'source' | 'notes' | 'linked' | 'updatedAt'>;
 type WorkPlanLike = Pick<WorkPlan, 'projectRoot' | 'unassignedPlanPaths'> & { readonly items: readonly WorkPlanItemLike[] };
 
 export interface WorkPlanModalDeps {
@@ -53,6 +53,26 @@ function linkedSegments(linked: WorkPlanLinkTargets | undefined): string {
     linked.taskId ? `task:${linked.taskId}` : null,
     linked.sessionId ? `session:${linked.sessionId}` : null,
   ].filter((s): s is string => s !== null).join('  ');
+}
+
+/**
+ * Close the modal, then run `/work-plan <args>` so what it prints (or leaves in
+ * the composer) is in front of the user rather than behind the modal.
+ */
+function closeAndRun(ctx: ConfigModalActionContext, args: string[]): void {
+  const run = ctx.executeCommand;
+  const label = `/work-plan ${args.join(' ')}`;
+  if (!run) { ctx.setStatus(`Not run: ${label} (this session has no command runner).`); return; }
+  ctx.close();
+  let started: Promise<unknown>;
+  try { started = Promise.resolve(run('work-plan', args)); } catch (error) { started = Promise.reject(error); }
+  void started.then(
+    (found) => { if (found === false) ctx.print(`Not a command: /work-plan (${label} was not run).`); },
+    (error: unknown) => {
+      const refused = readRefusal(error);
+      ctx.print(`Failed: ${label}: ${refused ? formatRefusal(refused) : summarizeError(error)}`);
+    },
+  );
 }
 
 class WorkPlanModalSurface implements ConfigModalSurface {
@@ -81,9 +101,11 @@ class WorkPlanModalSurface implements ConfigModalSurface {
     { key: '4', id: 'setDone', label: 'done', enabledFor: this.hasRow },
     { key: '5', id: 'setFailed', label: 'fail', enabledFor: this.hasRow },
     { key: '6', id: 'setCancelled', label: 'cancel', enabledFor: this.hasRow },
-    { key: 'd', id: 'remove', label: 'delete', enabledFor: this.hasRow },
-    { key: 'c', id: 'clearCompleted', label: 'clear done' },
+    { key: 'd', id: 'remove', label: 'delete', confirm: true, enabledFor: this.hasRow },
+    { key: 'c', id: 'clearCompleted', label: 'clear done', confirm: true },
     { key: 'a', id: 'add', label: 'add' },
+    { key: 'e', id: 'edit', label: 'edit', enabledFor: this.hasRow },
+    { key: 'x', id: 'export', label: 'export' },
     { key: 'i', id: 'jumpAgent', label: 'jump agent', enabledFor: this.hasAgentLink },
     { key: 'w', id: 'jumpContract', label: 'jump contract', enabledFor: this.hasContractLink },
     { key: 'r', id: 'refresh', label: 'refresh' },
@@ -124,16 +146,18 @@ class WorkPlanModalSurface implements ConfigModalSurface {
       return { id: item.id, label: `${STATUS_LABEL[item.status]} ${item.title}${owner}${source}  updated ${compactDate(item.updatedAt)}${notes}${linkPart}` };
     });
 
-    return { title: 'Work Plan', tabs: [{ id: 'items', label: 'Items', header, rows, emptyText: 'No work plan items yet.', hints: ['enter cycle status', '1-6 set status', 'd delete', 'c clear done', 'a add'] }] };
+    return { title: 'Work Plan', tabs: [{ id: 'items', label: 'Items', header, rows, emptyText: 'No work plan items yet.', hints: ['enter cycle status', '1-6 set status', 'd delete', 'c clear done', 'a add', 'e edit', 'x export'] }] };
   }
 
   onAction(id: string, ctx: ConfigModalActionContext): void {
     if (id === 'refresh') { this.refresh(); ctx.setStatus('Reloaded work plan.'); return; }
     const reload = (): void => this.refresh();
     if (id === 'clearCompleted') { runModalCommand(ctx, 'work-plan', ['clear-done'], '/work-plan clear-done', { afterSettle: reload }); return; }
-    if (id === 'add') { runModalCommand(ctx, 'work-plan', ['add'], '/work-plan add', { pending: 'Type the rest on the command line: /work-plan add <title>.', done: 'Type the rest on the command line: /work-plan add <title>.', afterSettle: reload }); return; }
+    if (id === 'add') { closeAndRun(ctx, ['add']); return; }
+    if (id === 'export') { closeAndRun(ctx, ['export']); return; }
     const item = ctx.row ? this.itemFrom(ctx.row.id) : undefined;
     if (!item) return;
+    if (id === 'edit') { closeAndRun(ctx, ['edit', item.id]); return; }
     if (id === 'cycleStatus') { runModalCommand(ctx, 'work-plan', ['cycle', item.id], `/work-plan cycle ${item.id}`, { afterSettle: reload }); return; }
     if (id === 'remove') { runModalCommand(ctx, 'work-plan', ['remove', item.id], `/work-plan remove ${item.id}`, { afterSettle: reload }); return; }
     if (id === 'jumpAgent') {
@@ -160,17 +184,4 @@ class WorkPlanModalSurface implements ConfigModalSurface {
 
 export function createWorkPlanModalSurface(deps: WorkPlanModalDeps): ConfigModalSurface {
   return new WorkPlanModalSurface(deps);
-}
-
-/**
- * Deterministic golden fixture: fixed work-plan items with frozen updatedAt
- * epoch values, no live store, no wall-clock, no random ids.
- */
-export function workPlanModalGoldenSurface(): ConfigModalSurface {
-  const FIXED_UPDATED_AT = 1735693200000; // 2025-01-01T01:00:00.000Z
-  const items: readonly WorkPlanItemLike[] = [
-    { id: 'wpi-fixed001', title: 'Migrate KNOWLEDGE/MEMORY/WORK-PLAN panels to modals', status: 'in_progress', owner: 'wo-b', source: 'tui-panel', notes: 'Charter: read/navigate only; mutations route to the command path.', linked: { agentId: 'agent-fixed-1' }, updatedAt: FIXED_UPDATED_AT },
-    { id: 'wpi-fixed002', title: 'Wire modal host redirects', status: 'pending', updatedAt: FIXED_UPDATED_AT },
-  ];
-  return createWorkPlanModalSurface({ workPlanStore: { getActivePlan: () => ({ projectRoot: '/fixed/project', items }) } });
 }

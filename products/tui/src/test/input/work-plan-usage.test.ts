@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test';
 import { CommandRegistry, type CommandContext } from '../../input/command-registry.ts';
 import { registerWorkPlanRuntimeCommands } from '../../input/commands/work-plan-runtime.ts';
+import { readRefusal } from '@goodvibes-jev/engine/errors';
 
 test('every subcommand the help usage names is handled, and cycle and edit --source are named', async () => {
   const registry = new CommandRegistry();
@@ -18,9 +19,13 @@ test('every subcommand the help usage names is handled, and cycle and edit --sou
     renderRequest: () => {},
     openModal: () => {},
   } as unknown as CommandContext;
+  expect(words).toContain('in_progress');
   for (const word of words) {
     printed.length = 0;
-    await command.handler([word], ctx);
-    expect(printed.join('\n')).not.toContain('Unknown workplan subcommand');
+    // The fake store has no methods, so a handled word may still refuse; it must not refuse as unknown.
+    const reason = await (async () => command.handler([word], ctx))().then(() => '', (error: unknown) => readRefusal(error)?.reason ?? String(error));
+    expect(reason).not.toContain('Unknown work-plan subcommand');
   }
+  const unknown = await (async () => command.handler(['nonsense'], ctx))().then(() => undefined, (error: unknown) => readRefusal(error));
+  expect(unknown?.reason).toContain('Unknown work-plan subcommand');
 });

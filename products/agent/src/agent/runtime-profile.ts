@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import { AgentPersonaRegistry, assertNoSecretLikeText } from './persona-registry.ts';
@@ -54,6 +54,12 @@ export interface AgentRuntimeProfileTemplateApplication {
   readonly skillIds: readonly string[];
   readonly routineIds: readonly string[];
   readonly vibePath?: string;
+  /**
+   * A built-in starter's records are written reviewed (the text ships in this
+   * build). A local or discovered template's records start fresh; these are
+   * the commands that review each one. Empty when nothing waits for review.
+   */
+  readonly reviewCommands: readonly string[];
 }
 
 export interface CreateAgentRuntimeProfileOptions {
@@ -155,16 +161,31 @@ export function assertValidAgentRuntimeProfileId(value: string): string {
   return normalized;
 }
 
+/**
+ * The home that holds every profile, for any session's home. A profile
+ * session's home is `<base>/.goodvibes/agent/profile-homes/<id>`, a path this
+ * module builds, so the base is read from its shape; any other home is the
+ * base itself. Every profile path below goes through it, so list, create,
+ * default and delete reach the same profiles from inside a profile session as
+ * from a plain one.
+ */
+export function agentRuntimeProfileBaseHome(homeDirectory: string): string {
+  if (!homeDirectory) return homeDirectory;
+  const home = resolve(homeDirectory);
+  const base = resolve(home, '..', '..', '..', '..');
+  return dirname(home) === join(base, '.goodvibes', 'agent', 'profile-homes') && PROFILE_ID_PATTERN.test(basename(home)) ? base : homeDirectory;
+}
+
 export function getAgentRuntimeProfilesRoot(baseHomeDirectory: string): string {
-  return join(baseHomeDirectory, '.goodvibes', 'agent', 'profile-homes');
+  return join(agentRuntimeProfileBaseHome(baseHomeDirectory), '.goodvibes', 'agent', 'profile-homes');
 }
 
 export function getAgentRuntimeProfileTemplatesRoot(baseHomeDirectory: string): string {
-  return join(baseHomeDirectory, '.goodvibes', GOODVIBES_AGENT_SURFACE_ROOT, 'profile-starters');
+  return join(agentRuntimeProfileBaseHome(baseHomeDirectory), '.goodvibes', GOODVIBES_AGENT_SURFACE_ROOT, 'profile-starters');
 }
 
 export function getAgentRuntimeProfileSelectionPath(baseHomeDirectory: string): string {
-  return join(baseHomeDirectory, '.goodvibes', GOODVIBES_AGENT_SURFACE_ROOT, PROFILE_SELECTION_FILE);
+  return join(agentRuntimeProfileBaseHome(baseHomeDirectory), '.goodvibes', GOODVIBES_AGENT_SURFACE_ROOT, PROFILE_SELECTION_FILE);
 }
 
 /**
@@ -701,7 +722,7 @@ export async function createAgentRuntimeProfileFromDiscovered(
   return { profile, template };
 }
 
-function createMissingSkill(registry: AgentSkillRegistry, template: AgentRuntimeProfileStarterTemplate['skills'][number]): string {
+function createMissingSkill(registry: AgentSkillRegistry, template: AgentRuntimeProfileStarterTemplate['skills'][number], reviewed: boolean): string {
   const existing = registry.get(template.name);
   if (existing) return existing.id;
   return registry.create({
@@ -713,10 +734,10 @@ function createMissingSkill(registry: AgentSkillRegistry, template: AgentRuntime
     enabled: true,
     source: 'system',
     provenance: `goodvibes-agent starter:${template.name}`,
-  }).id;
+  }, { reviewed }).id;
 }
 
-function createMissingRoutine(registry: AgentRoutineRegistry, template: AgentRuntimeProfileStarterTemplate['routines'][number]): string {
+function createMissingRoutine(registry: AgentRoutineRegistry, template: AgentRuntimeProfileStarterTemplate['routines'][number], reviewed: boolean): string {
   const existing = registry.get(template.name);
   if (existing) return existing.id;
   return registry.create({
@@ -728,7 +749,7 @@ function createMissingRoutine(registry: AgentRoutineRegistry, template: AgentRun
     enabled: true,
     source: 'system',
     provenance: `goodvibes-agent starter:${template.name}`,
-  }).id;
+  }, { reviewed }).id;
 }
 
 function writeTemplateVibe(homeDirectory: string, template: AgentRuntimeProfileStarterTemplate): string | undefined {
@@ -745,6 +766,8 @@ export function applyAgentRuntimeProfileTemplate(homeDirectory: string, template
   const personaRegistry = new AgentPersonaRegistry(profileStorePath(homeDirectory, 'personas', 'personas.json'));
   const skillRegistry = new AgentSkillRegistry(profileStorePath(homeDirectory, 'skills', 'skills.json'));
   const routineRegistry = new AgentRoutineRegistry(profileStorePath(homeDirectory, 'routines', 'routines.json'));
+  // Text shipped in this build needs no review before it applies.
+  const reviewed = template.source === 'builtin';
   const existingPersona = personaRegistry.get(template.persona.name);
   const persona = existingPersona ?? personaRegistry.create({
     name: template.persona.name,
@@ -754,11 +777,17 @@ export function applyAgentRuntimeProfileTemplate(homeDirectory: string, template
     triggers: template.persona.triggers,
     source: 'system',
     provenance: `goodvibes-agent starter:${template.name}`,
-  });
+  }, { reviewed });
   personaRegistry.setActive(persona.id);
-  const skillIds = template.skills.map((skill) => createMissingSkill(skillRegistry, skill));
-  const routineIds = template.routines.map((routine) => createMissingRoutine(routineRegistry, routine));
+  const skillIds = template.skills.map((skill) => createMissingSkill(skillRegistry, skill, reviewed));
+  const routineIds = template.routines.map((routine) => createMissingRoutine(routineRegistry, routine, reviewed));
   const vibePath = writeTemplateVibe(homeDirectory, template);
+  const profile = `goodvibes-agent --agent-profile ${basename(homeDirectory)}`;
+  const reviewCommands = [
+    ...(personaRegistry.get(persona.id)?.reviewState === 'reviewed' ? [] : [`${profile} personas review ${persona.id}`]),
+    ...skillIds.filter((id) => skillRegistry.get(id)?.reviewState !== 'reviewed').map((id) => `${profile} skills review ${id}`),
+    ...routineIds.filter((id) => routineRegistry.get(id)?.reviewState !== 'reviewed').map((id) => `${profile} routines review ${id}`),
+  ];
   return {
     id: template.id,
     name: template.name,
@@ -768,6 +797,7 @@ export function applyAgentRuntimeProfileTemplate(homeDirectory: string, template
     skillIds,
     routineIds,
     ...(vibePath ? { vibePath } : {}),
+    reviewCommands,
   };
 }
 

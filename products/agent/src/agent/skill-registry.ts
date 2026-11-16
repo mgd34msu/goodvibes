@@ -1,12 +1,11 @@
 import { freshReviewPatch, parseAgentReviewState, reviewedReviewPatch, staleReviewPatch } from './review-state.ts';
 import {isExecutable as canExecute} from '@goodvibes-jev/engine/terminal-shell/cli-environment';
-import { existsSync, readFileSync } from 'node:fs';
 import { delimiter, join } from 'node:path';
 import type { ShellPathService } from '@/runtime/index.ts';
-import { runStoreFileUpdateSync, writeStoreFile } from '@/utils/store-file.ts';
+import { readJsonStore, runStoreFileUpdateSync, writeJsonStore, type JsonStoreContents, type JsonStoreSpec, type JsonStoreWriteReport, type writeStoreFile } from '@/utils/store-file.ts';
 import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
-import { assertNoSecretLikeText, assertStoreRewritable } from './persona-registry.ts';
+import { assertNoSecretLikeText } from './persona-registry.ts';
 import { parseSkillStandardMarkdown, writeSkillStandardFile } from './skill-standard.ts';
 import { formatAgentRecordReviewState } from './record-labels.ts';
 import type {
@@ -205,29 +204,26 @@ function parseBundle(value: unknown): AgentSkillBundleRecord | null {
   };
 }
 
-function parseStore(raw: string, forWrite = false): SkillStoreFile {
-  const parsed: unknown = JSON.parse(raw);
-  if (!isRecord(parsed)) {
-    if (forWrite) assertStoreRewritable(parsed, 'skills', 0, STORE_VERSION);
-    return { version: STORE_VERSION, skills: [], bundles: [] };
-  }
-  const skills = Array.isArray(parsed.skills)
-    ? parsed.skills.map(parseSkill).filter((entry): entry is AgentSkillRecord => entry !== null)
-    : [];
-  const bundles = Array.isArray(parsed.bundles)
-    ? parsed.bundles.map(parseBundle).filter((entry): entry is AgentSkillBundleRecord => entry !== null)
-    : [];
-  // A save rewrites the whole file, so one holding entries this release cannot
-  // read (or written by a newer release) is refused rather than shrunk.
-  if (forWrite) {
-    assertStoreRewritable(parsed, 'skills', skills.length, STORE_VERSION);
-    assertStoreRewritable(parsed, 'bundles', bundles.length, STORE_VERSION);
-  }
-  return { version: STORE_VERSION, skills, bundles };
-}
+const SKILL_STORE: JsonStoreSpec<AgentSkillRecord> = {
+  label: 'skill store',
+  entriesKey: 'skills',
+  version: STORE_VERSION,
+  parseEntry: parseSkill,
+};
 
-function formatStore(store: SkillStoreFile): string {
-  return `${JSON.stringify(store, null, 2)}\n`;
+/** Bundles live beside the skills; one this build cannot read is kept as found, like a skill. */
+function readBundles(contents: JsonStoreContents<AgentSkillRecord>): { readonly bundles: AgentSkillBundleRecord[]; readonly keptAsFound: unknown[] } {
+  const raw = contents.fields.bundles;
+  const bundles: AgentSkillBundleRecord[] = [];
+  const keptAsFound: unknown[] = [];
+  if (Array.isArray(raw)) {
+    for (const value of raw) {
+      const bundle = parseBundle(value);
+      if (bundle) bundles.push(bundle);
+      else keptAsFound.push(value);
+    }
+  }
+  return { bundles, keptAsFound };
 }
 
 type AgentLocalStorePaths = Pick<ShellPathService, 'resolveUserPath'>;
@@ -237,6 +233,9 @@ export function skillStorePath(shellPaths: AgentLocalStorePaths): string {
 }
 
 export class AgentSkillRegistry {
+  private held: JsonStoreContents<AgentSkillRecord> | null = null;
+  private lastWrite: JsonStoreWriteReport | undefined;
+
   public constructor(private readonly storePath: string, private readonly effects?: Parameters<typeof writeStoreFile>[2]) {}
 
   public static fromShellPaths(shellPaths: AgentLocalStorePaths, effects?: Parameters<typeof writeStoreFile>[2]): AgentSkillRegistry {
@@ -304,9 +303,13 @@ export class AgentSkillRegistry {
     return this.listBundles().find((bundle) => bundle.id.toLowerCase() === lookup || bundle.name.toLowerCase() === lookup) ?? null;
   }
 
-  public create(input: AgentSkillCreateInput): AgentSkillRecord {
-    return runStoreFileUpdateSync(this.storePath, () => {
-      const store = this.readStore(true);
+  /**
+   * `reviewed`: trusted callers only, for text shipped in this build (a
+   * built-in profile starter); everything else starts fresh and waits for review.
+   */
+  public create(input: AgentSkillCreateInput, options: { readonly reviewed?: boolean } = {}): AgentSkillRecord {
+    return this.locked(() => {
+      const store = this.readStore();
       const name = normalizeName(input.name);
       const description = normalizeDescription(input.description);
       const procedure = input.procedure.trim();
@@ -327,7 +330,7 @@ export class AgentSkillRegistry {
         enabled: input.enabled === true,
         source: input.source ?? 'user',
         provenance: input.provenance?.trim() || input.source || 'user',
-        reviewState: 'fresh',
+        ...(options.reviewed ? reviewedReviewPatch() : { reviewState: 'fresh' as const }),
         createdAt: timestamp,
         updatedAt: timestamp,
       };
@@ -337,8 +340,8 @@ export class AgentSkillRegistry {
   }
 
   public createBundle(input: AgentSkillBundleCreateInput): AgentSkillBundleRecord {
-    return runStoreFileUpdateSync(this.storePath, () => {
-      const store = this.readStore(true);
+    return this.locked(() => {
+      const store = this.readStore();
       const name = normalizeName(input.name);
       const description = input.description.trim();
       const skillIds = this.normalizeExistingSkillIds(store, input.skillIds);
@@ -365,8 +368,8 @@ export class AgentSkillRegistry {
   }
 
   public update(idOrName: string, input: AgentSkillUpdateInput): AgentSkillRecord {
-    return runStoreFileUpdateSync(this.storePath, () => {
-      const store = this.readStore(true);
+    return this.locked(() => {
+      const store = this.readStore();
       const existing = this.findInStore(store, idOrName);
       if (!existing) throw new Error(`Unknown skill ${idOrName}`);
       const name = input.name === undefined ? existing.name : normalizeName(input.name);
@@ -398,8 +401,8 @@ export class AgentSkillRegistry {
   }
 
   public updateBundle(idOrName: string, input: AgentSkillBundleUpdateInput): AgentSkillBundleRecord {
-    return runStoreFileUpdateSync(this.storePath, () => {
-      const store = this.readStore(true);
+    return this.locked(() => {
+      const store = this.readStore();
       const existing = this.findBundleInStore(store, idOrName);
       if (!existing) throw new Error(`Unknown skill bundle ${idOrName}`);
       const name = input.name === undefined ? existing.name : normalizeName(input.name);
@@ -427,8 +430,8 @@ export class AgentSkillRegistry {
   }
 
   public setEnabled(idOrName: string, enabled: boolean): AgentSkillRecord {
-    return runStoreFileUpdateSync(this.storePath, () => {
-      const store = this.readStore(true);
+    return this.locked(() => {
+      const store = this.readStore();
       const existing = this.findInStore(store, idOrName);
       if (!existing) throw new Error(`Unknown skill ${idOrName}`);
       const updated: AgentSkillRecord = { ...existing, enabled, updatedAt: nowIso() };
@@ -441,8 +444,8 @@ export class AgentSkillRegistry {
   }
 
   public setBundleEnabled(idOrName: string, enabled: boolean): AgentSkillBundleRecord {
-    return runStoreFileUpdateSync(this.storePath, () => {
-      const store = this.readStore(true);
+    return this.locked(() => {
+      const store = this.readStore();
       const existing = this.findBundleInStore(store, idOrName);
       if (!existing) throw new Error(`Unknown skill bundle ${idOrName}`);
       const updated: AgentSkillBundleRecord = { ...existing, enabled, updatedAt: nowIso() };
@@ -455,8 +458,8 @@ export class AgentSkillRegistry {
   }
 
   public markReviewed(idOrName: string): AgentSkillRecord {
-    return runStoreFileUpdateSync(this.storePath, () => {
-      const store = this.readStore(true);
+    return this.locked(() => {
+      const store = this.readStore();
       const existing = this.findInStore(store, idOrName);
       if (!existing) throw new Error(`Unknown skill ${idOrName}`);
       const updated: AgentSkillRecord = {
@@ -473,8 +476,8 @@ export class AgentSkillRegistry {
   }
 
   public markBundleReviewed(idOrName: string): AgentSkillBundleRecord {
-    return runStoreFileUpdateSync(this.storePath, () => {
-      const store = this.readStore(true);
+    return this.locked(() => {
+      const store = this.readStore();
       const existing = this.findBundleInStore(store, idOrName);
       if (!existing) throw new Error(`Unknown skill bundle ${idOrName}`);
       const updated: AgentSkillBundleRecord = {
@@ -491,8 +494,8 @@ export class AgentSkillRegistry {
   }
 
   public markStale(idOrName: string, reason: string): AgentSkillRecord {
-    return runStoreFileUpdateSync(this.storePath, () => {
-      const store = this.readStore(true);
+    return this.locked(() => {
+      const store = this.readStore();
       const existing = this.findInStore(store, idOrName);
       if (!existing) throw new Error(`Unknown skill ${idOrName}`);
       const updated: AgentSkillRecord = {
@@ -509,8 +512,8 @@ export class AgentSkillRegistry {
   }
 
   public markBundleStale(idOrName: string, reason: string): AgentSkillBundleRecord {
-    return runStoreFileUpdateSync(this.storePath, () => {
-      const store = this.readStore(true);
+    return this.locked(() => {
+      const store = this.readStore();
       const existing = this.findBundleInStore(store, idOrName);
       if (!existing) throw new Error(`Unknown skill bundle ${idOrName}`);
       const updated: AgentSkillBundleRecord = {
@@ -527,8 +530,8 @@ export class AgentSkillRegistry {
   }
 
   public deleteSkill(idOrName: string): AgentSkillRecord {
-    return runStoreFileUpdateSync(this.storePath, () => {
-      const store = this.readStore(true);
+    return this.locked(() => {
+      const store = this.readStore();
       const existing = this.findInStore(store, idOrName);
       if (!existing) throw new Error(`Unknown skill ${idOrName}`);
       this.writeStore({
@@ -543,8 +546,8 @@ export class AgentSkillRegistry {
   }
 
   public deleteBundle(idOrName: string): AgentSkillBundleRecord {
-    return runStoreFileUpdateSync(this.storePath, () => {
-      const store = this.readStore(true);
+    return this.locked(() => {
+      const store = this.readStore();
       const existing = this.findBundleInStore(store, idOrName);
       if (!existing) throw new Error(`Unknown skill bundle ${idOrName}`);
       this.writeStore({
@@ -639,17 +642,39 @@ export class AgentSkillRegistry {
     return normalized;
   }
 
-  private readStore(forWrite = false): SkillStoreFile {
-    if (!existsSync(this.storePath)) return { version: STORE_VERSION, skills: [], bundles: [] };
-    try {
-      return parseStore(readFileSync(this.storePath, 'utf-8'), forWrite);
-    } catch (error) {
-      throw new Error(`Could not read Agent skill store ${error instanceof Error ? error.message : String(error)}`);
+  /** What the last write reported: skills this version cannot read that were kept, or a copy of an unreadable file. */
+  public lastWriteReport(): JsonStoreWriteReport | undefined {
+    return this.lastWrite;
+  }
+
+  /** A file that is not JSON is reported on a read, never shown as no skills; a save copies it aside first. */
+  private readStore(): SkillStoreFile {
+    const contents = this.held ?? readJsonStore(this.storePath, SKILL_STORE);
+    if (!this.held && contents.unreadable !== undefined) {
+      throw new Error(`Could not read Agent skill store at ${this.storePath}: it is ${contents.unreadable}.`);
     }
+    return { version: STORE_VERSION, skills: contents.entries, bundles: readBundles(contents).bundles };
+  }
+
+  /** One locked read-modify-write; the file is read once and entries this version cannot read are written back as found. */
+  private locked<T>(update: () => T): T {
+    return runStoreFileUpdateSync(this.storePath, () => {
+      this.held = readJsonStore(this.storePath, SKILL_STORE);
+      try {
+        return update();
+      } finally {
+        this.held = null;
+      }
+    });
   }
 
   private writeStore(store: SkillStoreFile): void {
-    writeStoreFile(this.storePath, formatStore(store), this.effects);
+    const read = this.held ?? readJsonStore(this.storePath, SKILL_STORE);
+    const unreadBundles = readBundles(read).keptAsFound;
+    this.lastWrite = writeJsonStore(read, SKILL_STORE, {
+      entries: store.skills,
+      fields: { ...read.fields, bundles: [...store.bundles, ...unreadBundles] },
+    }, this.effects);
   }
 }
 

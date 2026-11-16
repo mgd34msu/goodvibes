@@ -1,10 +1,8 @@
-import { readErrorFailure } from '@goodvibes-jev/engine/platform/platform/types';
-import { existsSync, readFileSync, renameSync } from 'node:fs';
-import { runStoreFileUpdateSync, writeStoreFile } from '@/utils/store-file.ts';
-import { createBrowserGoodVibesPlatform } from '@goodvibes-jev/engine/platform/browser';
+import { readJsonStore, updateJsonStore, type JsonStoreSpec } from '@/utils/store-file.ts';
 import type { OperatorMethodOutput } from '@goodvibes-jev/engine/platform/contracts';
 import { formatEveryInterval } from '@goodvibes-jev/engine/platform/platform/automation';
 import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { createConnectedHost, isHostFailure } from './connected-host-client.ts';
 import type { ShellPathService } from '@/runtime/index.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import { isRoutineScheduleDeliverySurfaceKind } from './routine-schedule-args.ts';
@@ -30,23 +28,6 @@ import {
 type ScheduleCreateInput = RoutineSchedulePromotionPreview['payload'];
 type ScheduleDeliveryInput = NonNullable<ScheduleCreateInput['delivery']>;
 type ScheduleListOutput = OperatorMethodOutput<'automation.schedules.list'>;
-
-interface RoutineScheduleReceiptStoreFile {
-  readonly version: 1;
-  readonly receipts: readonly RoutineScheduleReceipt[];
-  /** Entries this build could not validate, written back untouched so a rewrite never drops them. */
-  readonly foreign: readonly unknown[];
-}
-
-/** A store read plus whether it is safe to write the result back. */
-interface RoutineScheduleReceiptStoreRead {
-  readonly file: RoutineScheduleReceiptStoreFile;
-  /** Why a write must be refused, or null. A refused write leaves the file exactly as it is. */
-  readonly writeBlock: string | null;
-}
-
-/** Bound on how long `/status` may take; a host that accepts the connection and never answers must not hang the command. */
-const CONNECTED_HOST_STATUS_TIMEOUT_MS = 10_000;
 
 const RECEIPT_STORE_VERSION = 1;
 
@@ -76,8 +57,8 @@ const ROUTINE_SCHEDULE_RECEIPT_REAP_GRACE_MS = 5 * 60 * 1000;
 /** What a store read/prune had to recover from or reclaim, the disclosure record. */
 export interface RoutineScheduleReceiptMaintenance {
   readonly path: string;
-  /** How the last read had to degrade, if at all. */
-  readonly recovered: 'none' | 'unreadable' | 'empty-file' | 'quarantined' | 'quarantine-failed';
+  /** `unreadable`: the file was not JSON; the next write copies it aside under a dated name before replacing it. */
+  readonly recovered: 'none' | 'unreadable';
   /** Receipts dropped because they aged past the TTL. */
   readonly expired: number;
   /** Receipts dropped because they fell outside the count cap. */
@@ -236,30 +217,21 @@ function readReceipt(value: unknown): RoutineScheduleReceipt | null {
   };
 }
 
-function parseReceiptStore(raw: string): RoutineScheduleReceiptStoreRead {
-  const parsed: unknown = JSON.parse(raw);
-  const empty: RoutineScheduleReceiptStoreFile = { version: RECEIPT_STORE_VERSION, receipts: [], foreign: [] };
-  if (!isRecord(parsed)) return { file: empty, writeBlock: null };
-  const entries: readonly unknown[] = Array.isArray(parsed.receipts) ? parsed.receipts : [];
-  const receipts: RoutineScheduleReceipt[] = [];
-  const foreign: unknown[] = [];
-  for (const entry of entries) {
-    const receipt = readReceipt(entry);
-    if (receipt) receipts.push(receipt);
-    else foreign.push(entry);
-  }
-  // A newer build may have added fields this reader would drop on rewrite.
-  const newer = typeof parsed.version === 'number' && parsed.version > RECEIPT_STORE_VERSION;
-  return {
-    file: { version: RECEIPT_STORE_VERSION, receipts, foreign },
-    writeBlock: newer
-      ? `it was written by a newer GoodVibes Agent (store version ${String(parsed.version)}, this build understands ${RECEIPT_STORE_VERSION}); update Agent before recording new receipts`
-      : null,
-  };
-}
+const RECEIPT_STORE: JsonStoreSpec<RoutineScheduleReceipt> = {
+  label: 'routine schedule receipt store',
+  entriesKey: 'receipts',
+  version: RECEIPT_STORE_VERSION,
+  parseEntry: readReceipt,
+};
 
-function formatReceiptStore(store: RoutineScheduleReceiptStoreFile): string {
-  return `${JSON.stringify({ version: store.version, receipts: [...store.receipts, ...store.foreign] }, null, 2)}\n`;
+/** One spelling of a host address, so `http://Host:3421/` and `http://host:3421` compare equal. */
+function normalizeHostUrl(value: string): string {
+  try {
+    const url = new URL(value);
+    return `${url.protocol}//${url.host}${url.pathname.replace(/\/+$/, '')}`.toLowerCase();
+  } catch {
+    return value.trim().replace(/\/+$/, '').toLowerCase();
+  }
 }
 
 function receiptId(createdAt: string, routineId: string, existing: readonly RoutineScheduleReceipt[]): string {
@@ -368,23 +340,16 @@ export class RoutineScheduleReceiptStore {
   }
 
   public snapshot(): RoutineScheduleReceiptSnapshot {
-    // Reading is the recovery point for this store: apply both bounds here and
-    // persist the result when anything was actually dropped, so housekeeping is
-    // not limited to the write path. A second call drops nothing and writes
-    // nothing, which keeps the sweep idempotent. The lock is taken only when a
-    // prune must be written, and the store is re-read under it so a receipt
-    // another process appended in between is not lost.
-    const read = this.readStore();
-    let prune = pruneReceipts(read.file.receipts, Date.now(), this.limit, this.maxAgeMs);
-    if ((prune.expired > 0 || prune.overflow > 0) && read.writeBlock === null) {
-      prune = runStoreFileUpdateSync(this.storePath, () => {
-        const current = this.readStore();
-        const pruned = pruneReceipts(current.file.receipts, Date.now(), this.limit, this.maxAgeMs);
-        if (current.writeBlock === null && (pruned.expired > 0 || pruned.overflow > 0)) {
-          this.writeStore(current, pruned.kept);
-        }
-        return pruned;
-      });
+    // Reading applies both bounds and writes the result only when something
+    // was dropped; the write re-reads under the lock so a receipt another
+    // process appended in between is kept. A second call drops nothing.
+    const read = readJsonStore(this.storePath, RECEIPT_STORE);
+    let prune = pruneReceipts(read.entries, Date.now(), this.limit, this.maxAgeMs);
+    if ((prune.expired > 0 || prune.overflow > 0) && read.newerVersion === undefined) {
+      prune = updateJsonStore(this.storePath, RECEIPT_STORE, (current) => {
+        const pruned = pruneReceipts(current.entries, Date.now(), this.limit, this.maxAgeMs);
+        return pruned.expired > 0 || pruned.overflow > 0 ? { value: pruned, entries: pruned.kept } : { value: pruned };
+      }).value;
       if (prune.expired > 0 || prune.overflow > 0) {
         logger.info('Agent routine schedule receipts pruned', {
           path: this.storePath,
@@ -396,7 +361,7 @@ export class RoutineScheduleReceiptStore {
     }
     this.lastMaintenanceSummary = {
       path: this.storePath,
-      recovered: this.lastMaintenanceSummary?.recovered ?? 'none',
+      recovered: read.unreadable === undefined ? 'none' : 'unreadable',
       expired: prune.expired,
       overflow: prune.overflow,
       kept: prune.kept.length,
@@ -413,12 +378,15 @@ export class RoutineScheduleReceiptStore {
     return this.snapshot().receipts.find((receipt) => receipt.id.toLowerCase() === normalized) ?? null;
   }
 
+  /**
+   * Record one promotion attempt. Entries this build cannot read stay in the
+   * file as they were; a file a newer build wrote is refused with a message;
+   * a file that is not JSON is copied aside under a dated name, then replaced.
+   */
   public append(connection: AgentConnectedHostConnection, preview: RoutineSchedulePromotionPreview, result: RoutineSchedulePromotionResult): RoutineScheduleReceipt {
-    return runStoreFileUpdateSync(this.storePath, () => {
-      const read = this.readStore();
-      const receipt = buildReceipt(read.file.receipts, connection, preview, result);
-      const prune = pruneReceipts([...read.file.receipts, receipt], Date.now(), this.limit, this.maxAgeMs);
-      this.writeStore(read, prune.kept);
+    return updateJsonStore(this.storePath, RECEIPT_STORE, (read) => {
+      const receipt = buildReceipt(read.entries, connection, preview, result);
+      const prune = pruneReceipts([...read.entries, receipt], Date.now(), this.limit, this.maxAgeMs);
       if (prune.expired > 0 || prune.overflow > 0) {
         logger.info('Agent routine schedule receipts pruned on append', {
           path: this.storePath,
@@ -427,8 +395,8 @@ export class RoutineScheduleReceiptStore {
           kept: prune.kept.length,
         });
       }
-      return receipt;
-    });
+      return { value: receipt, entries: prune.kept };
+    }).value;
   }
 
   /**
@@ -438,107 +406,11 @@ export class RoutineScheduleReceiptStore {
   public remove(receiptIds: readonly string[]): number {
     const ids = new Set(receiptIds.map((id) => id.trim().toLowerCase()).filter(Boolean));
     if (ids.size === 0) return 0;
-    return runStoreFileUpdateSync(this.storePath, () => {
-      const read = this.readStore();
-      const kept = read.file.receipts.filter((receipt) => !ids.has(receipt.id.toLowerCase()));
-      const removed = read.file.receipts.length - kept.length;
-      if (removed === 0) return 0;
-      this.writeStore(read, kept);
-      return removed;
-    });
-  }
-
-  /**
-   * Read the store, degrading to "no receipts" for anything a crash can leave
-   * behind: a zero-byte file, a truncated JSON body, a file that cannot be read.
-   * A corrupt body is preserved by renaming it aside rather than being silently
-   * discarded; the quarantine slot is a single fixed name that is overwritten,
-   * so it cannot itself accumulate. When the body is unreadable, could not be set
-   * aside, or was written by a newer build, the read carries a `writeBlock` so
-   * the next write refuses instead of replacing receipts this build cannot see.
-   */
-  private readStore(): RoutineScheduleReceiptStoreRead {
-    const empty: RoutineScheduleReceiptStoreRead = {
-      file: { version: RECEIPT_STORE_VERSION, receipts: [], foreign: [] },
-      writeBlock: null,
-    };
-    if (!existsSync(this.storePath)) return empty;
-    let raw = '';
-    try {
-      raw = readFileSync(this.storePath, 'utf-8');
-    } catch (error) {
-      // Left in place: a read that fails now may succeed later, and writing
-      // over it would replace receipts that are still there.
-      this.noteRecovery('unreadable');
-      logger.warn('Agent routine schedule receipt store could not be read; showing no receipts and refusing to overwrite it', {
-        path: this.storePath,
-        error: summarizeError(error),
-      });
-      return {
-        file: empty.file,
-        writeBlock: 'it could not be read, and writing would replace its contents; fix the file permissions, then retry',
-      };
-    }
-    if (!raw.trim()) {
-      this.noteRecovery('empty-file');
-      logger.warn('Agent routine schedule receipt store is empty (torn or interrupted write); continuing with no receipts', {
-        path: this.storePath,
-        bytes: Buffer.byteLength(raw, 'utf-8'),
-      });
-      return empty;
-    }
-    try {
-      return parseReceiptStore(raw);
-    } catch (error) {
-      return this.quarantinedEmpty(empty, Buffer.byteLength(raw, 'utf-8'), error);
-    }
-  }
-
-  private quarantinedEmpty(empty: RoutineScheduleReceiptStoreRead, bytes: number, error: unknown): RoutineScheduleReceiptStoreRead {
-    const preserved = this.quarantine(bytes, error);
-    return preserved
-      ? empty
-      : {
-        file: empty.file,
-        writeBlock: 'it is corrupt and could not be set aside, so writing would replace its contents; fix the file permissions, then retry',
-      };
-  }
-
-  private writeStore(read: RoutineScheduleReceiptStoreRead, receipts: readonly RoutineScheduleReceipt[]): void {
-    if (read.writeBlock !== null) {
-      throw new Error(`Agent routine schedule receipt store ${this.storePath} was left unchanged: ${read.writeBlock}.`);
-    }
-    writeStoreFile(this.storePath, formatReceiptStore({ ...read.file, receipts }));
-  }
-
-  private noteRecovery(recovered: RoutineScheduleReceiptMaintenance['recovered']): void {
-    this.lastMaintenanceSummary = {
-      path: this.storePath,
-      recovered,
-      expired: 0,
-      overflow: 0,
-      kept: 0,
-    };
-  }
-
-  private quarantine(bytes: number, error: unknown): boolean {
-    const quarantinePath = `${this.storePath}.corrupt`;
-    let preserved = false;
-    try {
-      renameSync(this.storePath, quarantinePath);
-      preserved = true;
-    } catch {
-      preserved = false;
-    }
-    this.noteRecovery(preserved ? 'quarantined' : 'quarantine-failed');
-    logger.error('Agent routine schedule receipt store was unreadable; continuing with no receipts', {
-      path: this.storePath,
-      bytes,
-      preserved,
-      ...(preserved ? { quarantinePath } : {}),
-      error: summarizeError(error),
-    });
-    return preserved;
+    return updateJsonStore(this.storePath, RECEIPT_STORE, (read) => {
+      const kept = read.entries.filter((receipt) => !ids.has(receipt.id.toLowerCase()));
+      const removed = read.entries.length - kept.length;
+      return removed === 0 ? { value: 0 } : { value: removed, entries: kept };
+    }).value;
   }
 }
 
@@ -703,80 +575,52 @@ function correlateReceipts(
   });
 }
 
-async function fetchConnectedHostStatus(connection: AgentConnectedHostConnection): Promise<{
-  readonly ok: boolean;
-  readonly status: number;
-  readonly body: unknown;
-}> {
-  try {
-    const response = await fetch(`${connection.baseUrl}/status`, {
-      headers: connection.token ? { authorization: `Bearer ${connection.token}` } : undefined,
-      signal: AbortSignal.timeout(CONNECTED_HOST_STATUS_TIMEOUT_MS),
-    });
-    const text = await response.text();
-    let body: unknown = text;
-    try {
-      body = text.trim() ? JSON.parse(text) as unknown : {};
-    } catch {
-      body = text;
-    }
-    return { ok: response.ok, status: response.status, body };
-  } catch (error) {
-    return { ok: false, status: 0, body: summarizeError(error) };
-  }
+/** The connected-host client over a connection the caller already resolved. */
+function scheduleHost(connection: AgentConnectedHostConnection) {
+  return createConnectedHost(() => ({ baseUrl: connection.baseUrl, token: connection.token, credential: connection.tokenPath }));
 }
 
-async function classifyScheduleListError(
-  error: unknown,
-  connection: AgentConnectedHostConnection,
-): Promise<RoutineScheduleCorrelationFailure> {
-  const message = summarizeError(error);
-  const rawStatus = error && typeof error === 'object' ? (error as { status?: unknown; statusCode?: unknown }).status ?? (error as { statusCode?: unknown }).statusCode : undefined;
-  const status = typeof rawStatus === 'number' ? rawStatus : undefined;
-  const known = status === 401 || status === 403 ? 'authentication' : status === 404 ? 'not_found' : undefined;
-  const reading = known ? undefined : await readErrorFailure(error instanceof Error ? error : new Error(message), 'agent.connected-host.failure');
-  if (reading?.readings && reading.readings.category.outcome !== 'act') throw new Error('Connected host failure classification remains unsettled.');
-  const category = known ?? reading?.category;
-  if (category === 'authentication' || category === 'authorization') {
-    return { ok: false, kind: 'auth_required', error: message, route: ROUTINE_SCHEDULE_ROUTE, baseUrl: connection.baseUrl };
-  }
-  if (category === 'not_found') {
-    const connectedHost = await fetchConnectedHostStatus(connection);
-    if (connectedHost.ok) {
-      return {
-        ok: false,
-        kind: 'connected_host_incompatible',
-        error: 'Connected GoodVibes host compatibility does not satisfy Agent schedule requirements; automation.schedules.list is unavailable.',
-        route: ROUTINE_SCHEDULE_ROUTE,
-        baseUrl: connection.baseUrl,
-      };
-    }
-    return { ok: false, kind: 'connected_host_route_unavailable', error: message, route: ROUTINE_SCHEDULE_ROUTE, baseUrl: connection.baseUrl };
-  }
-  if (category === 'network' || category === 'timeout') {
-    return { ok: false, kind: 'connected_host_unavailable', error: message, route: ROUTINE_SCHEDULE_ROUTE, baseUrl: connection.baseUrl };
-  }
-  return { ok: false, kind: 'connected_host_error', error: message, route: ROUTINE_SCHEDULE_ROUTE, baseUrl: connection.baseUrl };
+/** A failed list, from the client's own classification (status, errno, contract): no model reading, no extra probe. */
+function listFailure(error: unknown, connection: AgentConnectedHostConnection): RoutineScheduleCorrelationFailure {
+  const kind = isHostFailure(error) ? (error.kind === 'cancelled' ? 'connected_host_unavailable' : error.kind) : 'connected_host_error';
+  return { ok: false, kind, error: summarizeError(error), route: ROUTINE_SCHEDULE_ROUTE, baseUrl: connection.baseUrl };
+}
+
+/** A receipt created on a host other than the one connected now: listed, never checked or reaped against this host. */
+export interface RoutineScheduleReceiptOnOtherHost {
+  readonly receipt: RoutineScheduleReceipt;
+  /** Where it was created; empty when an older build did not record it. */
+  readonly host: string;
+}
+
+export type RoutineScheduleReconciliation =
+  | (RoutineScheduleCorrelationSuccess & { readonly notChecked: readonly RoutineScheduleReceiptOnOtherHost[] })
+  | RoutineScheduleCorrelationFailure;
+
+/** Lines naming receipts that belong to another host, or none. */
+export function formatReceiptsOnOtherHosts(result: RoutineScheduleReconciliation): readonly string[] {
+  if (!result.ok || result.notChecked.length === 0) return [];
+  return [
+    `  not checked: ${result.notChecked.length} receipt${result.notChecked.length === 1 ? '' : 's'} created on another host (connect to that host to check them)`,
+    ...result.notChecked.map(({ receipt, host }) => `  ${receipt.id}  created on ${host || 'an unrecorded host'}, not checked  routine ${receipt.routineId}`),
+  ];
 }
 
 /**
  * Correlate local receipts against the connected host's live schedules.
  *
- * This is the one place where receipt liveness against the host is actually
- * known, so it is where orphaned receipts retire: a successful list response
- * drives reapMissingRoutineScheduleReceipts. A failed response reaps nothing. The
- * store defaults to the one the snapshot came from (snapshot.path), so every
- * existing caller gets the housekeeping without passing anything; pass `store`
- * explicitly to point the reap somewhere else. The result carries the reaping
- * record and the correlations still describe what was found missing, so the
- * surface can name what was retired. Never rejects: a failure to classify the
- * list error is itself reported as `connected_host_error`.
+ * Only receipts created on the host connected now are compared and may be
+ * reaped; a receipt from another host (a laptop daemon and a home server, a
+ * changed port) is listed as not checked, because this host's list says
+ * nothing about it. A successful list drives reapMissingRoutineScheduleReceipts
+ * over the compared receipts; a failed list reaps nothing. The store defaults
+ * to the one the snapshot came from. Never rejects.
  */
 export async function reconcileRoutineScheduleReceipts(
   connection: AgentConnectedHostConnection,
   snapshot: RoutineScheduleReceiptSnapshot,
   store?: RoutineScheduleReceiptStore,
-): Promise<RoutineScheduleCorrelationResult> {
+): Promise<RoutineScheduleReconciliation> {
   if (!connection.token) {
     return {
       ok: false,
@@ -786,10 +630,14 @@ export async function reconcileRoutineScheduleReceipts(
       baseUrl: connection.baseUrl,
     };
   }
-  let result: RoutineScheduleCorrelationSuccess;
+  const here = normalizeHostUrl(connection.baseUrl);
+  const ours = snapshot.receipts.filter((receipt) => receipt.connectedHostBaseUrl && normalizeHostUrl(receipt.connectedHostBaseUrl) === here);
+  const notChecked = snapshot.receipts
+    .filter((receipt) => !ours.includes(receipt))
+    .map((receipt) => ({ receipt, host: receipt.connectedHostBaseUrl }));
+  let result: RoutineScheduleCorrelationSuccess & { readonly notChecked: readonly RoutineScheduleReceiptOnOtherHost[] };
   try {
-    const platformClient = createBrowserGoodVibesPlatform({ baseUrl: connection.baseUrl, authToken: connection.token });
-    const output = await platformClient.operator.invoke(ROUTINE_SCHEDULE_LIST_METHOD, {});
+    const output = await scheduleHost(connection).invoke(ROUTINE_SCHEDULE_LIST_METHOD, {});
     const schedules = readLiveSchedules(output);
     result = {
       ok: true,
@@ -797,21 +645,12 @@ export async function reconcileRoutineScheduleReceipts(
       route: ROUTINE_SCHEDULE_ROUTE,
       baseUrl: connection.baseUrl,
       scheduleCount: schedules.length,
-      receiptCount: snapshot.receipts.length,
-      correlations: correlateReceipts(snapshot.receipts, schedules),
+      receiptCount: ours.length,
+      correlations: correlateReceipts(ours, schedules),
+      notChecked,
     };
   } catch (error) {
-    try {
-      return await classifyScheduleListError(error, connection);
-    } catch {
-      return {
-        ok: false,
-        kind: 'connected_host_error',
-        error: summarizeError(error),
-        route: ROUTINE_SCHEDULE_ROUTE,
-        baseUrl: connection.baseUrl,
-      };
-    }
+    return listFailure(error, connection);
   }
   const reapTarget = store ?? (snapshot.path ? new RoutineScheduleReceiptStore(snapshot.path) : null);
   if (!reapTarget) return result;
@@ -844,8 +683,7 @@ export async function fetchLiveSchedules(connection: AgentConnectedHostConnectio
     return { ok: false, schedules: [], error: `No connected-host operator token found at ${connection.tokenPath}` };
   }
   try {
-    const platformClient = createBrowserGoodVibesPlatform({ baseUrl: connection.baseUrl, authToken: connection.token });
-    const output = await platformClient.operator.invoke(ROUTINE_SCHEDULE_LIST_METHOD, {});
+    const output = await scheduleHost(connection).invoke(ROUTINE_SCHEDULE_LIST_METHOD, {});
     return { ok: true, schedules: readLiveSchedules(output) };
   } catch (error) {
     return { ok: false, schedules: [], error: summarizeError(error) };

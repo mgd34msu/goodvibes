@@ -246,7 +246,11 @@ export class AgentPersonaRegistry {
     return this.list().find((persona) => persona.id.toLowerCase() === lookup || persona.name.toLowerCase() === lookup) ?? null;
   }
 
-  public create(input: AgentPersonaCreateInput): AgentPersonaRecord {
+  /**
+   * `reviewed`: trusted callers only, for text shipped in this build (a
+   * built-in profile starter); everything else starts fresh and waits for review.
+   */
+  public create(input: AgentPersonaCreateInput, options: { readonly reviewed?: boolean } = {}): AgentPersonaRecord {
     return this.locked(() => {
       const store = this.readStore();
       const name = normalizeName(input.name);
@@ -266,7 +270,7 @@ export class AgentPersonaRegistry {
         triggers: normalizeList(input.triggers),
         source: input.source ?? 'user',
         provenance: input.provenance?.trim() || input.source || 'user',
-        reviewState: 'fresh',
+        ...(options.reviewed ? reviewedReviewPatch() : { reviewState: 'fresh' as const }),
         createdAt: timestamp,
         updatedAt: timestamp,
       };

@@ -18,9 +18,9 @@
  * underlying detail can read the optional `error` field separately.
  */
 
-import { createBrowserGoodVibesPlatform } from '@goodvibes-jev/engine/platform/browser';
 import type { OperatorMethodInput } from '@goodvibes-jev/engine/platform/contracts';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { createConnectedHost } from './connected-host-client.ts';
 
 export const UNKNOWN_PRINCIPAL_LABEL = 'unknown principal';
 
@@ -69,19 +69,17 @@ export interface PrincipalAttributionOptions {
 /** Resolves channel identities through one platform client, each distinct identity once. */
 export type ChannelPrincipalAttributionResolver = (channel: string, value: string) => Promise<ResolvedPrincipalAttribution>;
 
+/**
+ * The connected-host client: one attempt, no retry, its deadline joined to the
+ * caller's signal. A display-only lookup must not stall triage or inbox
+ * rendering behind a hung host, so its deadline is short and a miss reads as
+ * "unknown principal".
+ */
 function createPrincipalClient(connection: PrincipalAttributionConnection & { readonly token: string }, options: PrincipalAttributionOptions) {
-  return createBrowserGoodVibesPlatform({
-    baseUrl: connection.baseUrl,
-    authToken: connection.token,
-    // A single attempt is enough for a display-only lookup, this must not
-    // stall triage/inbox rendering behind retry backoff.
-    retry: { maxAttempts: 1, baseDelayMs: 0, maxDelayMs: 0 },
-    // One attempt still waits as long as the host takes to answer; a hung host
-    // would stall rendering, so the lookup gives up and shows "unknown".
-    fetch: (input, init) => {
-      const signal = options.signal ?? AbortSignal.timeout(PRINCIPAL_RESOLVE_TIMEOUT_MS);
-      return (options.fetch ?? globalThis.fetch)(input, { ...init, signal: init?.signal ? AbortSignal.any([init.signal, signal]) : signal });
-    },
+  return createConnectedHost(() => ({ baseUrl: connection.baseUrl, token: connection.token, credential: 'connected-host operator token' }), {
+    ...(options.fetch ? { fetchImpl: options.fetch as typeof fetch } : {}),
+    writeDeadlineMs: PRINCIPAL_RESOLVE_TIMEOUT_MS,
+    readDeadlineMs: PRINCIPAL_RESOLVE_TIMEOUT_MS,
   });
 }
 
@@ -122,11 +120,7 @@ export function createChannelPrincipalAttributionResolver(
     try {
       client ??= createPrincipalClient({ baseUrl: connection.baseUrl, token }, options);
       const payload: PrincipalsResolveInput = { channel, value };
-      // No `as OperatorMethodOutput<'principals.resolve'>` here: the platform's typed
-      // overload already returns it, so the assertion would be redundant, and a
-      // redundant assertion is not free, because it keeps compiling if the
-      // contract's output changes underneath it.
-      const result = await client.operator.invoke('principals.resolve', payload);
+      const result = await client.invoke('principals.resolve', payload, options.signal ? { signal: options.signal } : {});
       if (!result.known || !result.principal) return UNKNOWN_ATTRIBUTION;
       const principal: ResolvedPrincipalSummary = {
         id: result.principal.id,

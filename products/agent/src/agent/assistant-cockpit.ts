@@ -233,7 +233,8 @@ export function buildAssistantCockpitFromWorkspaceSnapshot(snapshot: AgentWorksp
     enabledChannels > 0 && readyChannels === 0,
     snapshot.localRoutineCount > 0 && scheduleReadyRoutines === 0,
   ].filter(Boolean).length;
-  const runningWork = snapshot.researchRunRunningCount + snapshot.researchRunBlockedCount;
+  // Blocked runs wait for the owner; only running runs are background work.
+  const runningWork = snapshot.researchRunRunningCount;
   const securityFindings = [
     presetForMode(snapshot.permissionMode).name === 'yolo',
     snapshot.rawPromptTelemetry,

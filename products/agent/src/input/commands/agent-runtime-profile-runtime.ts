@@ -332,6 +332,9 @@ export function registerAgentRuntimeProfileRuntimeCommands(registry: CommandRegi
             `  home ${profile.homeDirectory}`,
             profile.starterTemplateId ? `  starter: ${profile.starterTemplateId}` : '',
             profile.starterTemplateApplication?.vibePath ? `  vibe ${profile.starterTemplateApplication.vibePath}` : '',
+            ...(profile.starterTemplateApplication?.reviewCommands.length
+              ? ['  review before they apply:', ...profile.starterTemplateApplication.reviewCommands.map((command) => `    ${command}`)]
+              : []),
             `  launch goodvibes-agent --agent-profile ${profile.id}`,
           ].filter(Boolean).join('\n'));
           return;

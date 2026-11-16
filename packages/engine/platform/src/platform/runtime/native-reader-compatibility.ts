@@ -75,6 +75,8 @@ const requirements: Readonly<Record<NativeDataFormat, string>> = {
   'inbox-triage-failed-bindings-v3': '3.1.2',
   'inbox-triage-account-bindings-v1': '3.1.2',
 };
+/** Every format this build can write, published together at a process's first data write. */
+const WRITABLE_FORMATS: readonly NativeDataFormat[] = Object.freeze(Object.keys(requirements) as NativeDataFormat[]);
 export interface NativeReaderCapabilities {
   readonly schema: 1;
   readonly version: string;
@@ -219,16 +221,23 @@ export function createNativeDataWriteOwner(publisher: AdmittedNativeDataPublishe
   // format in the file it stays there, so a second declaration of it is a set
   // lookup instead of a directory walk, a lock and three file reads.
   const declared = new Set<NativeDataFormat>();
+  // Every format this build can write is published together, once per process,
+  // at its first data write: one lock and at most one write carry every floor,
+  // and every later declaration is a set lookup. Construction stays read-only,
+  // so help, metadata and recovery commands publish nothing. If that one
+  // publication is refused because of the formats it names (an installed peer
+  // that cannot read one of them), declarations fall back to one format at a
+  // time, so a write is refused only for a format that cannot be published.
+  let publishAll = true;
   const current = () => {
     if (publisher.execPath !== execPath || publisher.version !== runningVersion || publisher.assertCurrent !== guard || publisher.readerCohort !== captureCohort) throw new NativeDataCompatibilityError('unavailable');
     const result: unknown = guard.call(publisher);
     if (result !== undefined) { drainOwned(result); throw new NativeDataCompatibilityError('unavailable'); }
   };
-  return Object.freeze({ declare(format: NativeDataFormat): void {
-    if (declared.has(format)) return;
+  const publish = (formats: readonly NativeDataFormat[]): void => {
     let release: (() => void) | null = null;
     try {
-      if (!Object.hasOwn(requirements, format)) throw new Error();
+      if (formats.length === 0 || formats.some(format => !Object.hasOwn(requirements, format))) throw new Error();
       physicalCurrent();
       // Another process starting at the same moment holds this for one short
       // write; wait for it rather than refusing to start.
@@ -252,13 +261,15 @@ export function createNativeDataWriteOwner(publisher: AdmittedNativeDataPublishe
       if (previous.value !== null) observedFile = true;
       // Every format already listed is settled for this process too: a later declaration of it is a set lookup.
       if (previous.value !== null) for (const listed of previous.value.formats) declared.add(listed);
-      const required = requirements[format];
-      const minimumReader = previous.value !== null && compareSemanticVersions(version(previous.value.minimumReader), version(required)) >= 0
-        ? previous.value.minimumReader : required;
+      let minimumReader = previous.value?.minimumReader ?? requirements[formats[0]!];
+      for (const format of formats) {
+        if (compareSemanticVersions(version(requirements[format]), version(minimumReader)) > 0) minimumReader = requirements[format];
+      }
       if (compareSemanticVersions(version(runningVersion), version(minimumReader)) < 0) throw new NativeDataCompatibilityError('incompatible', minimumReader);
-      if (!previous.value?.formats.includes(format) || previous.value.minimumReader !== minimumReader) {
+      const listed = previous.value?.formats ?? [];
+      if (formats.some(format => !listed.includes(format)) || previous.value?.minimumReader !== minimumReader) {
         current();
-        const next: Omit<ReaderRequirements, 'unknown'> = { schema: 1, minimumReader, formats: [...(previous.value?.formats ?? []), format].filter((value, index, all) => all.indexOf(value) === index) };
+        const next: Omit<ReaderRequirements, 'unknown'> = { schema: 1, minimumReader, formats: [...listed, ...formats].filter((value, index, all) => all.indexOf(value) === index) };
         const contents = `${JSON.stringify(next)}\n`;
         const cohort: unknown = captureCohort?.call(publisher, Object.freeze([...next.formats]));
         if (cohort !== undefined && typeof cohort !== 'function') { drainOwned(cohort); throw new NativeDataCompatibilityError('unconfirmed-reader'); }
@@ -281,19 +292,35 @@ export function createNativeDataWriteOwner(publisher: AdmittedNativeDataPublishe
       // An already established requirement is a retained data fact, not a
       // fresh execution grant. Final accounting may use it while the host
       // drains after cancellation; no new requirement is published there.
-      declared.add(format);
+      for (const format of formats) declared.add(format);
     } catch (error) {
-      // This declaration fails and the write that needed it fails with it. The
+      // This publication fails and the write that needed it fails with it. The
       // file is replaced atomically, so it holds either the old requirement or
       // the new one, and the next declaration re-reads it under the lock; a
       // transient error (a full disk, too many open files) does not outlive the
       // call that met it.
       throw error instanceof NativeDataCompatibilityError ? error : new NativeDataCompatibilityError('unavailable');
     } finally {
-      // The declaration's outcome is already settled; a lock this call could
+      // The publication's outcome is already settled; a lock this call could
       // not release is reclaimed by the lock's own stale-holder rule.
       try { release?.(); } catch { /* see above */ }
     }
+  };
+  return Object.freeze({ declare(format: NativeDataFormat): void {
+    if (declared.has(format)) return;
+    if (!Object.hasOwn(requirements, format)) throw new NativeDataCompatibilityError('unavailable');
+    if (publishAll) {
+      try { publish(WRITABLE_FORMATS); publishAll = false; return; }
+      catch (error) {
+        // A refusal that depends on which formats were asked for (a peer or a
+        // floor that one of them cannot meet) falls back to this one format.
+        // Any other refusal (busy, unavailable, mixed readers) is this write's
+        // too, and the next write tries the whole set again.
+        if (!(error instanceof NativeDataCompatibilityError) || (error.kind !== 'unconfirmed-reader' && error.kind !== 'incompatible')) throw error;
+        publishAll = false;
+      }
+    }
+    publish([format]);
   } });
 }
 

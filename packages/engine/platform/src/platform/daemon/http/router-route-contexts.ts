@@ -168,6 +168,9 @@ export function buildChannelRouteContext(input: {
   };
 }
 
+/** Whether the missing working-directory saver was already logged in this process. */
+let missingSwapManagerReported = false;
+
 export function buildSystemRouteContext(input: {
   readonly settingsPrecondition?: DaemonSystemRouteContext['settingsPrecondition'] | undefined;
   readonly settingsImportPrecondition?: DaemonSystemRouteContext['settingsImportPrecondition'] | undefined;
@@ -205,10 +208,10 @@ export function buildSystemRouteContext(input: {
 }): DaemonSystemRouteContext {
   const castWatcherRecord = (value: unknown): WatcherRecord | null => value as WatcherRecord | null;
 
-  if (!input.swapManager) {
-    logger.warn(
-      'DaemonSystemRouteContext: initialized without swapManager, POST /config runtime.workingDir will be rejected',
-    );
+  if (!input.swapManager && !missingSwapManagerReported) {
+    // The route context is rebuilt when the router's inputs change; the fact is said once per process.
+    missingSwapManagerReported = true;
+    logger.warn('This daemon was started without a place to save a working-directory change; POST /config runtime.workingDir is refused with the restart step');
   }
 
   return {

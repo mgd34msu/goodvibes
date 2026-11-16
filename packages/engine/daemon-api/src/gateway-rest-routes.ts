@@ -137,6 +137,7 @@ export const GATEWAY_REST_ROUTES: readonly GatewayRestRoute[] = [
   route('POST', '/api/occasions/propose', 'occasions.propose'),
   route('POST', '/api/occasions/confirm', 'occasions.confirm'),
   route('POST', '/api/occasions/remove', 'occasions.remove'),
+  route('POST', '/api/occasions/update', 'occasions.update'),
   route('POST', '/api/occasions/answer', 'occasions.answer'),
   route('POST', '/api/occasions/acknowledge', 'occasions.acknowledge'),
   route('POST', '/api/occasions/interview', 'occasions.interview.get'),
@@ -147,6 +148,8 @@ export const GATEWAY_REST_ROUTES: readonly GatewayRestRoute[] = [
   route('POST', '/api/occasions/conflict/resolve', 'occasions.conflict.resolve'),
   route('POST', '/api/occasions/plans/propose', 'occasions.plans.propose'),
   route('POST', '/api/occasions/plans/confirm', 'occasions.plans.confirm'),
+  route('POST', '/api/occasions/plans/update', 'occasions.plans.update'),
+  route('POST', '/api/occasions/plans/remove', 'occasions.plans.remove'),
   // checkin.*
   route('GET', '/api/checkin/config', 'checkin.config.get'),
   route('POST', '/api/checkin/config', 'checkin.config.set'),
@@ -159,10 +162,10 @@ export const GATEWAY_REST_ROUTES: readonly GatewayRestRoute[] = [
   route('DELETE', '/api/ci/watches/{watchId}', 'ci.watches.delete'),
   route('POST', '/api/ci/watches/{watchId}/run', 'ci.watches.run'),
   // channels.profiles.*
-  // channels.routing.* / channels.drafts.*, the daemon-mirrored routing table
-  // and draft store (platform platform/channel-sync). Both families advertised these
-  // paths long before anything served them and carried `invokable: false` to
-  // say so; the store and handlers exist now, so the paths resolve here.
+  // channels.routing.* / channels.drafts.*, the routing table and draft store
+  // the daemon host serves (platform channels/host-routing and
+  // channels/host-drafts). Both families advertised these paths long before
+  // anything served them; the host's handlers exist now, so the paths resolve here.
   // channels.inbox.list, the merged inbound feed, served by the host that
   // holds the provider credentials from its synced mirror. Same treatment as
   // its two siblings below: the advertised path dispatches to the same
@@ -290,7 +293,6 @@ export const GATEWAY_REST_ROUTES: readonly GatewayRestRoute[] = [
   // id and field targets, answers with field names and a boolean, no request
   // or response on this route carries card material in either direction.
   route('POST', '/api/payments/checkout/begin', 'payments.checkout.begin'),
-  route('POST', '/api/payments/checkout/fill-card', 'payments.checkout.fillCard'),
   route('GET', '/api/payments/purchases', 'payments.purchases.list'),
   route('GET', '/api/payments/purchase/status', 'payments.purchase.status'),
   route('POST', '/api/payments/purchase/approve', 'payments.purchase.approve'),

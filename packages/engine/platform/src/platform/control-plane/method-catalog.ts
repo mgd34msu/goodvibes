@@ -67,6 +67,7 @@ import type {
   GatewayMethodInvocation,
   GatewayMethodListOptions,
 } from './method-catalog-shared.js';
+import { OWNER_PRIVATE_READ_SCOPES } from './method-catalog-shared.js';
 import {
   builtinGatewayRuntimeMethodDescriptors,
 } from './method-catalog-runtime.js';
@@ -105,6 +106,9 @@ import {
 import {
   builtinGatewayFlagsMethodDescriptors,
 } from './method-catalog-flags.js';
+import {
+  builtinGatewayFlagsStatusMethodDescriptors,
+} from './method-catalog-flags-status.js';
 import {
   builtinGatewayRewindMethodDescriptors,
 } from './method-catalog-rewind.js';
@@ -186,6 +190,7 @@ export const BUILTIN_GATEWAY_METHODS: readonly GatewayMethodDescriptor[] = [
   ...builtinGatewayCheckinMethodDescriptors,
   ...builtinGatewayCiMethodDescriptors,
   ...builtinGatewayFlagsMethodDescriptors,
+  ...builtinGatewayFlagsStatusMethodDescriptors,
   ...builtinGatewayRewindMethodDescriptors,
   ...builtinGatewayWorkspacesMethodDescriptors,
   ...builtinGatewayStepUpMethodDescriptors,
@@ -221,20 +226,23 @@ function normalizeEventDescriptor(descriptor: GatewayEventDescriptor): GatewayEv
 /**
  * The actual grant ceiling used by authenticated transport and native recovery.
  *
- * The authorization model, stated once: scopes are not stored per token or
- * per user. A principal's scopes are derived from its role when it
- * authenticates: an admin (the owner's shared token, a paired device, an
- * admin user) holds every scope the catalog declares, read and write; any
- * other signed-in user holds every read scope and no write scope. What
+ * The authorization model, stated once: a principal's default scopes come
+ * from its role when it authenticates. An admin (the owner's shared token, a
+ * paired device, an admin user) holds every scope the catalog declares, read
+ * and write; any other signed-in user holds every read scope except those over
+ * the owner's private records (OWNER_PRIVATE_READ_SCOPES: mail, profile,
+ * purchases, dates, memory, transcripts, paired devices) and no write scope. A
+ * pairing or user that stores its own scope list is granted that list, never
+ * more than its role's default (daemon/control-plane.ts `principalFor`). What
  * restricts a non-admin beyond that is each method's and each event's
- * `access` (admin-only where it carries settings, approvals, conversation or
- * tool content, or other principals' credentials). The event stream applies
- * the same rule as the request path, derived from the event descriptors
- * (gateway-scope-enforcement.ts `resolveEventGrant`), so an event a non-admin
- * receives carries nothing that principal could not read through a method.
+ * `access`. The event stream applies the same rule as the request path,
+ * derived from the event descriptors (gateway-scope-enforcement.ts
+ * `resolveEventGrant`), so an event a non-admin receives carries nothing that
+ * principal could not read through a method.
  */
 export function grantedGatewayScopes(catalog: Pick<GatewayMethodCatalog, 'getAllScopes'>, includeWrite: boolean): string[] {
   const scopes = new Set(catalog.getAllScopes({ includeWrite }));
+  if (!includeWrite) for (const scope of OWNER_PRIVATE_READ_SCOPES) scopes.delete(scope);
   scopes.add('read:events'); scopes.add('read:control-plane'); scopes.add('read:telemetry');
   if (includeWrite) { scopes.add('read:telemetry-sensitive'); scopes.add('write:control-plane'); }
   return [...scopes].sort();

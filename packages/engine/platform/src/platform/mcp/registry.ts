@@ -1,11 +1,8 @@
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { assertSecurityReadSource, captureSecurityReadBindings } from '../security/read-source.js';
 import { getCorrelationContext } from '../runtime/correlation.js';
 import { prepareExternalExecution, prepareExternalWorkspaceRevision } from '../permissions/external-execution.js';
 import { captureExternalRequestEvidence } from '../permissions/external-request-evidence.js';
-import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { admitExternalRequest, type ExternalPermissionHost } from '../permissions/external-request.js';
-import { awaitPermission } from '../permissions/cancellation.js';
 import { executePolicyCheck } from '../gate/execute-policy-check.js';
 import { snapshotJudgmentInput } from '../gate/judgment-input.js';
 import { currentExternalOperationSource } from '../permissions/external-operation-scope.js';
@@ -495,9 +492,8 @@ export class McpRegistry {
       ...(host ? [host.signal] : []), ...(source?.signal ? [source.signal] : []), ...(options?.signal ? [options.signal] : [])]);
     const record = this.permissions.getServerPermissions(serverName);
     const serverPolicy = snapshotJudgmentInput(record ? {
-      trustLevel: record.trustLevel, profile: { role: record.profile.role, mode: record.profile.mode,
-        allowedPaths: record.profile.allowedPaths, allowedHosts: record.profile.allowedHosts,
-        allowedCapabilities: record.profile.allowedCapabilities }, toolOverrides: [...record.toolOverrides],
+      profile: { role: record.profile.role, mode: record.profile.mode,
+        allowedPaths: record.profile.allowedPaths, allowedHosts: record.profile.allowedHosts }, toolOverrides: [...record.toolOverrides],
     } : null) as Readonly<Record<string, unknown>>;
     const externalRequestEvidence = captureExternalRequestEvidence({ destination: transport.destination, serverPolicy });
     const execution = this.executionByClient.get(client);
@@ -519,16 +515,8 @@ export class McpRegistry {
       if (options?.expectedSchema !== undefined && schema !== options.expectedSchema) throw new Error(this.schemaChangedMessage(qualifiedName));
       if (host) assertWorkspaceCurrent = await prepareExternalWorkspaceRevision(host, signal);
 
-      const installed = host?.port;
-      const port: JudgmentPort | undefined = installed ? {
-        get model() { return installed.model; },
-        ...(installed.recorder ? { recorder: installed.recorder } : {}),
-        ask(request) {
-          signal.throwIfAborted(); const prior = request.beforeAttempt;
-          return awaitPermission(() => installed.ask({ ...request, signal, beforeAttempt() { signal.throwIfAborted(); assertSynchronousJudgmentGuard(() => prior?.()); } }), signal);
-        },
-      } : undefined;
-      const permission = await this.permissions.evaluateToolCall(serverName, parsed.toolName, args, { port, signal, externalRequestEvidence });
+      // The tool's own schema says which arguments are paths; it is already loaded for this call.
+      const permission = await this.permissions.evaluateToolCall(serverName, parsed.toolName, args, { externalRequestEvidence, inputSchema: schema.inputSchema });
       signal.throwIfAborted();
       if (permission.verdict === 'deny') {
         throw new Error(`MCP call '${qualifiedName}' denied: ${permission.reason}`);
@@ -540,7 +528,7 @@ export class McpRegistry {
       // canonical recorded admission of an actual autonomous caller's source.
       if (host && operation) {
         admission = await admitExternalRequest(host, { ...transport, signal, assertCurrent: () => signal.throwIfAborted() }, operation, {
-          tool: qualifiedName, args, serverPolicy, supportingDecisionIds: permission.judgmentDecisionIds ?? [],
+          tool: qualifiedName, args, serverPolicy, supportingDecisionIds: [],
         });
         signal.throwIfAborted();
         if (!admission.result.approved) throw new Error(`MCP call '${qualifiedName}' autonomous admission did not act`);
@@ -768,11 +756,21 @@ export class McpRegistry {
     quarantineReason?: QuarantineReason | undefined;
     quarantineDetail?: string | undefined;
     quarantineApprovedBy?: string | undefined;
+    sessionTrustMode?: McpTrustMode | undefined;
+    sessionRole?: McpServerRole | undefined;
+    configuredTrustMode: McpTrustMode;
+    configuredRole: McpServerRole;
   }> {
     return this.listServers().map((server) => {
       const permissions = this.permissions.getServerPermissions(server.name);
       const freshnessRecord = this.freshness.getRecord(server.name);
+      const config = this.serverConfigs.get(server.name);
+      const session = this.sessionPolicy.get(server.name);
       return {
+        ...(session?.trustMode !== undefined ? { sessionTrustMode: session.trustMode } : {}),
+        ...(session?.role !== undefined ? { sessionRole: session.role } : {}),
+        configuredTrustMode: config?.trustMode ?? MCP_DEFAULT_TRUST_MODE,
+        configuredRole: config?.role ?? 'general',
         name: server.name,
         connected: server.connected,
         transport: server.transport,
@@ -827,7 +825,7 @@ export class McpRegistry {
       throw new Error(`No MCP server named '${serverName}', so its ${change} was not changed. `
         + `Known servers: ${this.serverNames.join(', ') || '(none)'}. Run /mcp servers to list them.`);
     }
-    this.permissions.registerServer(serverName, 'standard', this.policyProfile(serverName, config));
+    this.permissions.registerServer(serverName, this.policyProfile(serverName, config));
   }
 
   setServerTrustMode(serverName: string, mode: McpTrustMode): void {
@@ -844,6 +842,27 @@ export class McpRegistry {
     this.permissions.setServerRole(serverName, role);
     this.sessionPolicy.set(serverName, { ...this.sessionPolicy.get(serverName), role });
     this._emitPolicyUpdate(serverName);
+  }
+
+  /**
+   * End this session's trust mode or role for a server, so it runs under its
+   * configured value again. False when the server had no such session value.
+   */
+  clearServerSessionPolicy(serverName: string, field: 'trustMode' | 'role'): boolean {
+    const session = this.sessionPolicy.get(serverName);
+    if (session?.[field] === undefined) return false;
+    const rest = { ...session };
+    delete rest[field];
+    if (rest.trustMode === undefined && rest.role === undefined) this.sessionPolicy.delete(serverName);
+    else this.sessionPolicy.set(serverName, rest);
+    const profile = this.policyProfile(serverName, this.serverConfigs.get(serverName));
+    if (this.permissions.getServerPermissions(serverName)) {
+      this.invalidatePolicyLifetime(serverName, field === 'trustMode' ? 'its trust mode was changed' : 'its role was changed');
+      if (field === 'trustMode') this.permissions.setTrustMode(serverName, profile.mode);
+      else this.permissions.setServerRole(serverName, profile.role);
+      this._emitPolicyUpdate(serverName);
+    }
+    return true;
   }
 
   captureSecurityDecisionReadSource(): () => void { return captureMcpSecurityDecisionReadSource(this); }
@@ -1001,7 +1020,7 @@ export class McpRegistry {
       assertHostCurrent();
       await executePolicyCheck(() => client.connect(), signal);
       assertHostCurrent(); assertProcessCurrent();
-      this.permissions.registerServer(name, 'standard', this.policyProfile(name, serverConfig));
+      this.permissions.registerServer(name, this.policyProfile(name, serverConfig));
       this.clients.set(name, client); this.#revision++;
       this.connectFailures.delete(name);
       established = true;

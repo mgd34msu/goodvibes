@@ -1,98 +1,46 @@
 import { assertSecurityReadSource, captureSecurityReadBindings, retainSecurityReadData } from '../../security/read-source.js';
-import { readExternalRequestEvidence, type ExternalRequestEvidence } from '../../permissions/external-request-evidence.js';
+import type { ExternalRequestEvidence } from '../../permissions/external-request-evidence.js';
 /**
- * MCP per-server permission and trust-level management.
- *
- * McpPermissionManager tracks trust levels and per-tool allow/deny overrides
- * for every registered MCP server.
+ * MCP per-server permissions: each registered server's trust mode, role,
+ * scopes and per-tool allow/deny overrides, and the one decision every live
+ * call goes through ({@link McpPermissionManager.evaluateToolCall}).
  */
 import type {
-  McpTrustLevel,
   McpTrustMode,
   McpServerRole,
-  McpCapabilityClass,
   McpAttackPathFinding,
   McpAttackPathReview,
   McpSecuritySnapshot,
-  McpCoherenceAssessment,
   McpDecisionRecord,
   McpPermission,
-  McpToolPermission,
   McpServerPermissions,
 } from './types.js';
 import { logger } from '../../utils/logger.js';
 import { summarizeError } from '../../utils/error-display.js';
-import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { hostOutsideScope, pathOutsideScope, readScopedValues, type ScopedValue } from './scope.js';
-import { assertJudgmentInput } from '../../gate/judgment-input.js';
-import { sideEffect, MCP_CAPABILITY_OPTIONS } from '../../gate/batteries/side-effect.js';
-import { judge } from '../judge.js';
 
 // ── Defaults ──────────────────────────────────────────────────────────────────
 
-/** Trust level assigned to newly registered servers. */
-const DEFAULT_TRUST_LEVEL: McpTrustLevel = 'standard';
 const DEFAULT_TRUST_MODE: McpTrustMode = 'ask-on-risk';
 const DEFAULT_SERVER_ROLE: McpServerRole = 'general';
 const MAX_DECISION_HISTORY = 50;
 
-function modeFromTrustLevel(level: McpTrustLevel): McpTrustMode {
-  switch (level) {
-    case 'trusted':
-      return 'allow-all';
-    case 'restricted':
-      return 'constrained';
-    case 'blocked':
-      return 'blocked';
-    case 'standard':
-    default:
-      return 'ask-on-risk';
-  }
-}
-
 /**
- * The trust level that matches a trust mode. `constrained` maps to `standard`
- * rather than `restricted`: `isToolAllowed` has no notion of scope, and
- * `restricted` there means "deny every tool without an allow override", while a
- * constrained server may call tools inside its configured scope.
- */
-function trustLevelFromMode(mode: McpTrustMode): McpTrustLevel {
-  switch (mode) {
-    case 'allow-all':
-      return 'trusted';
-    case 'blocked':
-      return 'blocked';
-    case 'ask-on-risk':
-    case 'constrained':
-    default:
-      return 'standard';
-  }
-}
-
-/**
- * What the caller knows about the call. `port` and `signal` reach the one
- * reading this manager may take (a tool's capability class, only when the
- * server's profile lists allowed capabilities); `workingDirectory` is where
- * the server resolves a relative path; `toolDescription` and
- * `toolSchemaRevision` describe the tool as the server listed it.
+ * What the caller knows about the call: `workingDirectory` is where the server
+ * resolves a relative path; `inputSchema` is the tool's input schema as the
+ * server listed it, which says which arguments are paths or URIs.
  */
 export interface McpReadingOwner {
   readonly externalRequestEvidence?: ExternalRequestEvidence | undefined;
-  readonly port?: JudgmentPort | undefined;
-  readonly signal?: AbortSignal | undefined;
   readonly workingDirectory?: string | undefined;
-  readonly toolDescription?: string | undefined;
-  readonly toolSchemaRevision?: string | undefined;
+  readonly inputSchema?: Readonly<Record<string, unknown>> | undefined;
 }
 
-const CAPABILITY_SITE = 'engine.mcp.tool-capability';
-const MCP_CAPABILITIES = Object.keys(MCP_CAPABILITY_OPTIONS) as McpCapabilityClass[];
-const isCapability = (value: unknown): value is McpCapabilityClass => MCP_CAPABILITIES.includes(value as McpCapabilityClass);
-
-/** One argument value for a refusal: the argument name and the value, shortened. */
-function describeScoped(entry: ScopedValue): string {
+/** One argument value for a refusal: the argument name, the value (shortened) and where it resolves. */
+function describeScoped(entry: ScopedValue & { readonly resolved?: string }): string {
   const value = entry.value.length > 120 ? `${entry.value.slice(0, 117)}...` : entry.value;
-  return `argument '${entry.argument || '(value)'}' = '${value}'`;
+  const resolved = entry.resolved !== undefined && entry.resolved !== entry.value ? ` (resolves to ${entry.resolved})` : '';
+  return `argument '${entry.argument || '(value)'}' = '${value}'${resolved}`;
 }
 
 function scopeLabel(items: readonly string[]): string {
@@ -195,10 +143,10 @@ function sortFindings(a: McpAttackPathFinding, b: McpAttackPathFinding): number 
  * Manages per-server permission state.
  *
  * Lifecycle:
- *   1. `registerServer(name)`, called when a server transitions to configured/connecting.
- *   2. `setTrustLevel(name, level)`, adjust trust at runtime.
+ *   1. `registerServer(name, profile)`, called when a server transitions to configured/connecting.
+ *   2. `setTrustMode(name, mode)` / `setServerRole(name, role)`, adjust policy at runtime.
  *   3. `allowTool(name, tool)` / `denyTool(name, tool)`, explicit overrides.
- *   4. `isToolAllowed(name, tool)`, checked before every tool invocation.
+ *   4. `evaluateToolCall(name, tool, args)`, checked before every tool invocation.
  *   5. `removeServer(name)`, called on permanent disconnection.
  */
 const mcpDecisionReadSources = new WeakMap<McpPermissionManager, () => () => void>();
@@ -236,39 +184,26 @@ export class McpPermissionManager {
   // ── Registration ─────────────────────────────────────────────────────────
 
   /**
-   * Register a server with default trust level `standard`.
+   * Register a server, or refresh its config-derived profile.
    *
    * Called on every transition to configured/connecting, so it also runs when
    * a server is reconnected after its config was edited in place. When a
-   * `profile` is supplied it is treated as the current config and replaces the
-   * stored config-derived fields; without one the call stays a no-op for an
-   * already-registered server.
-   *
-   * This used to return early for any known name, which meant an in-place edit
-   * (re-adding the same server with new `allowedPaths`/`allowedHosts`) never
-   * reached the stored record: `listServerSecurity()` kept reporting the first
-   * insert's values, so a reload that correctly counted the server as changed
-   * still looked like it had done nothing.
-   *
-   * Runtime state is not config-derived and is preserved across a refresh: a
-   * trust level set through {@link setTrustLevel} and per-tool overrides set
-   * through {@link allowTool}/{@link denyTool} both survive.
+   * `profile` is supplied it is treated as the current policy and replaces the
+   * stored fields it names; without one the call is a no-op for an
+   * already-registered server. Per-tool overrides set through
+   * {@link allowTool}/{@link denyTool} survive a refresh.
    *
    * @param serverName - Server identifier
-   * @param trustLevel - Initial trust level (defaults to `standard`); ignored
-   *                     when the server is already registered
-   * @param profile    - Current config-derived profile, if known
+   * @param profile    - Current profile (mode, role, scopes), if known
    */
   registerServer(
     serverName: string,
-    trustLevel: McpTrustLevel = DEFAULT_TRUST_LEVEL,
     profile?: Partial<McpServerPermissions['profile']>,
   ): void {
     const existing = this.permissions.get(serverName);
     if (existing) {
       if (!profile) return;
       const previous = existing.profile;
-      if (profile.mode) existing.trustLevel = trustLevelFromMode(profile.mode);
       const notes = profile.notes ?? previous.notes;
       existing.profile = {
         serverName,
@@ -276,7 +211,6 @@ export class McpPermissionManager {
         mode: profile.mode ?? previous.mode,
         allowedPaths: profile.allowedPaths ?? previous.allowedPaths,
         allowedHosts: profile.allowedHosts ?? previous.allowedHosts,
-        allowedCapabilities: profile.allowedCapabilities ?? previous.allowedCapabilities,
         ...(notes ? { notes } : {}),
         lastModifiedAt: Date.now(),
       };
@@ -286,23 +220,19 @@ export class McpPermissionManager {
     }
     this.permissions.set(serverName, {
       serverName,
-      // The profile mode decides what a live call may do, so the level that
-      // `isToolAllowed` reads must agree with it.
-      trustLevel: profile?.mode ? trustLevelFromMode(profile.mode) : trustLevel,
       profile: {
         serverName,
         role: profile?.role ?? DEFAULT_SERVER_ROLE,
-        mode: profile?.mode ?? modeFromTrustLevel(trustLevel),
+        mode: profile?.mode ?? DEFAULT_TRUST_MODE,
         allowedPaths: profile?.allowedPaths ?? [],
         allowedHosts: profile?.allowedHosts ?? [],
-        allowedCapabilities: profile?.allowedCapabilities ?? [],
         ...(profile?.notes ? { notes: profile.notes } : {}),
         lastModifiedAt: Date.now(),
       },
       toolOverrides: new Map(),
       lastModifiedAt: Date.now(),
     });
-    logger.debug('McpPermissionManager: server registered', { serverName, trustLevel });
+    logger.debug('McpPermissionManager: server registered', { serverName, mode: profile?.mode ?? DEFAULT_TRUST_MODE });
   }
 
   /**
@@ -316,39 +246,11 @@ export class McpPermissionManager {
     }
   }
 
-  // ── Trust level ───────────────────────────────────────────────────────────
-
-  /**
-   * Update the trust level for a registered server.
-   *
-   * @param serverName - Server identifier
-   * @param level      - New trust level
-   * @throws {Error} If the server is not registered
-   */
-  setTrustLevel(serverName: string, level: McpTrustLevel): void {
-    const record = this._getRequired(serverName);
-    record.trustLevel = level;
-    // `evaluateToolCall`, which every live call goes through, reads the profile
-    // mode; keep the two answers the same so a block applied here is enforced.
-    record.profile.mode = modeFromTrustLevel(level);
-    record.lastModifiedAt = Date.now();
-    record.profile.lastModifiedAt = record.lastModifiedAt;
-    logger.debug('McpPermissionManager: trust level updated', { serverName, level });
-  }
-
-  /**
-   * Return the current trust level for a server, or `null` if not registered.
-   *
-   * @param serverName - Server identifier
-   */
-  getTrustLevel(serverName: string): McpTrustLevel | null {
-    return this.permissions.get(serverName)?.trustLevel ?? null;
-  }
+  // ── Trust mode and role ───────────────────────────────────────────────────
 
   setTrustMode(serverName: string, mode: McpTrustMode): void {
     const record = this._getRequired(serverName);
     record.profile.mode = mode;
-    record.trustLevel = trustLevelFromMode(mode);
     record.lastModifiedAt = Date.now();
     record.profile.lastModifiedAt = record.lastModifiedAt;
   }
@@ -386,7 +288,7 @@ export class McpPermissionManager {
   }
 
   /**
-   * Explicitly deny a tool on a server, overriding trust-level default.
+   * Explicitly deny a tool on a server, whatever its trust mode allows.
    *
    * @param serverName - Server identifier
    * @param toolName   - Tool name on the server (not qualified)
@@ -401,7 +303,7 @@ export class McpPermissionManager {
   }
 
   /**
-   * Remove a per-tool override, reverting to the trust-level default.
+   * Remove a per-tool override, reverting to the trust mode and scopes.
    *
    * @param serverName - Server identifier
    * @param toolName   - Tool name on the server
@@ -416,63 +318,13 @@ export class McpPermissionManager {
 
   // ── Permission check ──────────────────────────────────────────────────────
 
-  /**
-   * Determine whether a tool call is permitted for the given server.
-   *
-   * Resolution order:
-   *   1. Server not registered → deny
-   *   2. Trust level `blocked`  → deny
-   *   3. Per-tool override exists → honour override
-   *   4. Trust level `restricted` with no allow override → deny
-   *   5. Trust level `standard` or `trusted` → allow
-   *
-   * @param serverName - Server identifier
-   * @param toolName   - Tool name on the server (not qualified)
-   */
-  isToolAllowed(serverName: string, toolName: string): McpPermission {
-    const record = this.permissions.get(serverName);
-
-    if (!record) {
-      return { allowed: false, reason: `server '${serverName}' is not registered` };
-    }
-
-    if (record.trustLevel === 'blocked') {
-      return { allowed: false, reason: `server '${serverName}' is blocked`, verdict: 'deny', profileMode: record.profile.mode };
-    }
-
-    const override = record.toolOverrides.get(toolName);
-    if (override) {
-      const allowed = override.verdict === 'allow';
-      return {
-        allowed,
-        reason: allowed
-          ? `tool '${toolName}' explicitly allowed${override.note ? ': ' + override.note : ''}`
-          : `tool '${toolName}' explicitly denied${override.note ? ': ' + override.note : ''}`,
-        verdict: allowed ? 'allow' : 'deny',
-        profileMode: record.profile.mode,
-      };
-    }
-
-    if (record.trustLevel === 'restricted') {
-      return {
-        allowed: false,
-        reason: `tool '${toolName}' not in allow-list for restricted server '${serverName}'`,
-        verdict: 'deny',
-        profileMode: record.profile.mode,
-      };
-    }
-
-    // standard or trusted, allow
-    return { allowed: true, reason: `trust level '${record.trustLevel}'`, verdict: 'allow', profileMode: record.profile.mode };
-  }
-
   async evaluateToolCall(
     serverName: string,
     toolName: string,
     args: Record<string, unknown>,
     owner: McpReadingOwner = {},
   ): Promise<McpPermission> {
-    const permission = await this._evaluateToolCall(serverName, toolName, args, owner);
+    const permission = this._evaluateToolCall(serverName, toolName, args, owner);
     const profile = this.permissions.get(serverName)?.profile;
     if (profile) {
       this._recordDecision({
@@ -480,7 +332,6 @@ export class McpPermissionManager {
         toolName,
         verdict: permission.verdict ?? (permission.allowed ? 'allow' : 'deny'),
         riskLevel: severityForPosture(profile.mode, 'unknown', profile.allowedPaths, profile.allowedHosts),
-        capability: permission.capability ?? 'generic',
         incoherent: (permission.causes?.length ?? 0) > 0,
         reason: permission.reason,
         profileMode: profile.mode,
@@ -490,12 +341,13 @@ export class McpPermissionManager {
     return permission;
   }
 
-  private async _evaluateToolCall(
+  /** Mode, override and scope, decided in code from what the record holds: no reading, no I/O beyond resolving paths. */
+  private _evaluateToolCall(
     serverName: string,
     toolName: string,
     args: Record<string, unknown>,
     owner: McpReadingOwner,
-  ): Promise<McpPermission> {
+  ): McpPermission {
     const record = this.permissions.get(serverName);
     if (!record) {
       return { allowed: false, reason: `server '${serverName}' is not registered`, verdict: 'deny' };
@@ -516,59 +368,24 @@ export class McpPermissionManager {
     }
 
     const profile = record.profile;
-    const scoped = readScopedValues(args, { paths: profile.allowedPaths.length > 0, hosts: profile.allowedHosts.length > 0 });
+    const scoped = readScopedValues(args, { paths: profile.allowedPaths.length > 0, hosts: profile.allowedHosts.length > 0 }, owner.inputSchema);
     const outsidePath = pathOutsideScope(profile.allowedPaths, scoped.paths, owner.workingDirectory);
     const outsideHost = hostOutsideScope(profile.allowedHosts, scoped.hosts);
-    const capability = profile.allowedCapabilities.length > 0 ? await this._readCapability(serverName, toolName, owner) : undefined;
-    const outsideCapability = capability !== undefined && !profile.allowedCapabilities.includes(capability.value);
     const causes = [
-      ...(outsideCapability ? ['capability-out-of-scope' as const] : []),
       ...(outsidePath ? ['path-out-of-scope' as const] : []),
       ...(outsideHost ? ['host-out-of-scope' as const] : []),
     ];
     const allowed = profile.mode === 'allow-all' || causes.length === 0;
     const details = [
-      ...(outsideCapability ? [capability!.value === 'generic' && capability!.read === false
-        ? `the capability of '${toolName}' could not be read (no decision model answered), and allowedCapabilities (${profile.allowedCapabilities.join(', ')}) does not list 'generic'`
-        : `'${toolName}' uses capability '${capability!.value}', not in allowedCapabilities (${profile.allowedCapabilities.join(', ')})`] : []),
       ...(outsidePath ? [`${describeScoped(outsidePath)} is outside allowedPaths (${profile.allowedPaths.join(', ')})`] : []),
       ...(outsideHost ? [`${describeScoped(outsideHost)} is not an allowed host (${profile.allowedHosts.join(', ')})`] : []),
     ];
     return {
       allowed, verdict: allowed ? 'allow' : 'deny', profileMode: profile.mode, causes,
-      ...(capability ? { capability: capability.value } : {}),
-      ...(capability?.decisionId ? { judgmentDecisionIds: [capability.decisionId] } : {}),
       reason: allowed
         ? `server '${serverName}' permits this tool`
         : `request exceeds configured scope for server '${serverName}': ${details.join('; ')}. Call it with values inside the scope, or ask the owner to widen the server's scope.`,
     };
-  }
-
-  /**
-   * The capability class of one server tool: a property of the tool, read
-   * once per (server, tool, listed schema) for the life of the process and
-   * only for a server whose profile lists allowed capabilities. With no
-   * decision model, or an unsure reading, it is `generic`.
-   */
-  private async _readCapability(serverName: string, toolName: string, owner: McpReadingOwner): Promise<{ value: McpCapabilityClass; read: boolean; decisionId?: string }> {
-    const outcome = await judge({
-      site: CAPABILITY_SITE,
-      battery: sideEffect,
-      only: ['capability'],
-      state: { server: serverName, tool: toolName, ...(owner.toolDescription ? { description: owner.toolDescription } : {}) },
-      cache: { key: JSON.stringify([serverName, toolName, owner.toolSchemaRevision ?? '']), scope: 'process' },
-      settle: (readings) => {
-        const reading = readings.capability;
-        return reading.outcome === 'act' && isCapability(reading.choice) ? reading.choice : undefined;
-      },
-      fallback: (): McpCapabilityClass | undefined => undefined,
-      describe: (value) => value ?? 'unread',
-      ...(owner.port ? { port: owner.port } : {}),
-      ...(owner.signal ? { signal: owner.signal } : {}),
-    });
-    return outcome.value === undefined
-      ? { value: 'generic', read: false }
-      : { value: outcome.value, read: true, ...(outcome.decisionId ? { decisionId: outcome.decisionId } : {}) };
   }
 
   // ── Inspection ────────────────────────────────────────────────────────────
@@ -680,15 +497,13 @@ export function buildMcpAttackPathReview(params: {
       kind: 'recent-decision',
       serverName: decision.serverName,
       toolName: decision.toolName,
-      capability: decision.capability,
       evaluatedAt: decision.evaluatedAt,
-      route: `${decision.serverName}:${decision.toolName} -> ${decision.capability} -> ${decision.profileMode}`,
+      route: `${decision.serverName}:${decision.toolName} -> ${decision.profileMode}`,
       verdict: decision.verdict,
       severity: decision.riskLevel,
       incoherent: decision.incoherent,
       reason: decision.reason,
       evidence: [
-        `capability=${decision.capability}`,
         `risk=${decision.riskLevel}`,
         `verdict=${decision.verdict}`,
         `mode=${decision.profileMode}`,

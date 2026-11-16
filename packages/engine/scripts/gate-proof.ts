@@ -5,8 +5,8 @@ import { judgmentProcessSignal } from '../../judgment/scripts/process-owner.ts';
  * readings (catastrophic, card details, outward taint) and the read-only
  * secrets question. Each case prints the
  * boundary result (every check), Jev's reading (family, facts, stakes), the
- * preset's action and the final decision. The MCP capability reading and the
- * sandbox advisory reading run live as well. The script exits non-zero when
+ * preset's action and the final decision. The sandbox advisory reading runs
+ * live as well. The script exits non-zero when
  * any decision differs from the expected one.
  *
  *   TYPESAFE_API_KEY=... bun run --cwd packages/engine gate:proof
@@ -18,7 +18,6 @@ import type { PermissionCheckResult } from '../platform/src/platform/permissions
 import type { PolicyRuntimeState } from '../platform/src/platform/runtime/permissions/policy-runtime.ts';
 import type { PermissionMode } from '../platform/src/platform/config/schema.ts';
 import { UntrustedContentLedger } from '../platform/src/platform/security/untrusted-content.ts';
-import { McpPermissionManager } from '../platform/src/platform/runtime/mcp/permissions.ts';
 import { runSandboxJudgment } from '../platform/src/platform/runtime/permissions/sandbox-judgment.ts';
 
 installJudgmentPort(createSystemOnePort(judgmentConfigFromEnv(process.env, { signal: judgmentProcessSignal() })));
@@ -112,20 +111,6 @@ for (const proof of CASES) {
   if (!ok) failures += 1;
   console.log(`${ok ? 'ok  ' : 'FAIL'} ${proof.label} [${proof.mode}] ${proof.tool}: ${outcome} (expected ${proof.expect})`);
   for (const line of describe(result, asked)) console.log(line);
-}
-
-console.log('\nMCP capability reading (engine.gate.side-effect, capability)');
-const mcp = new McpPermissionManager();
-mcp.registerServer('vault');
-mcp.registerServer('filesystem');
-for (const [server, tool, args, expectCapability] of [
-  ['vault', 'get_secret', { path: 'kv/prod/stripe' }, 'secret_read'],
-  ['filesystem', 'read_text_file', { path: `${WORKING_DIRECTORY}/README.md` }, 'read_fs'],
-] as const) {
-  const permission = await mcp.evaluateToolCall(server, tool, args);
-  const ok = permission.capability === expectCapability;
-  if (!ok) failures += 1;
-  console.log(`${ok ? 'ok  ' : 'FAIL'} ${server}.${tool}: capability ${permission.capability} (expected ${expectCapability}), risk ${permission.riskLevel}, verdict ${permission.verdict}`);
 }
 
 console.log('\nSandbox advisory reading (engine.gate.sandbox-advisory)');

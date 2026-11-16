@@ -33,6 +33,12 @@ export interface McpServerSecurityRecord {
   readonly quarantineReason?: QuarantineReason | undefined;
   readonly quarantineDetail?: string | undefined;
   readonly quarantineApprovedBy?: string | undefined;
+  /** A trust mode or role set for this session; it outlives reconnects and reloads until cleared or the process exits. */
+  readonly sessionTrustMode?: McpTrustMode | undefined;
+  readonly sessionRole?: McpServerRole | undefined;
+  /** The values the server's config gives, which apply again once a session value is cleared. */
+  readonly configuredTrustMode?: McpTrustMode | undefined;
+  readonly configuredRole?: McpServerRole | undefined;
 }
 
 export interface McpSandboxBindingRecord {
@@ -73,6 +79,8 @@ export interface McpApi {
   };
   setServerTrustMode(serverName: string, mode: McpTrustMode): void;
   setServerRole(serverName: string, role: McpServerRole): void;
+  /** End this session's trust mode or role so the configured one applies; false when none was set. */
+  clearServerSessionPolicy?(serverName: string, field: 'trustMode' | 'role'): boolean;
   quarantineSchema(serverName: string, reason: QuarantineReason, detail?: string): void;
   approveSchemaQuarantine(serverName: string, operatorId: string): void;
 }
@@ -102,6 +110,8 @@ export interface McpApiRegistry {
   captureToolCatalog(options?: McpToolCallOptions): ReturnType<McpApi['captureToolCatalog']>;
   setServerTrustMode(serverName: string, mode: McpTrustMode): void;
   setServerRole(serverName: string, role: McpServerRole): void;
+  /** End this session's trust mode or role so the configured one applies; false when none was set. */
+  clearServerSessionPolicy?(serverName: string, field: 'trustMode' | 'role'): boolean;
   quarantineSchema(serverName: string, reason: QuarantineReason, detail?: string): void;
   approveSchemaQuarantine(serverName: string, operatorId: string): void;
 }
@@ -150,6 +160,9 @@ export function createMcpApi(registry: McpApiRegistry): McpApi {
     setServerRole(serverName, role) {
       registry.setServerRole(serverName, role);
     },
+    ...(registry.clearServerSessionPolicy
+      ? { clearServerSessionPolicy: (serverName: string, field: 'trustMode' | 'role') => registry.clearServerSessionPolicy!(serverName, field) }
+      : {}),
     quarantineSchema(serverName, reason, detail) {
       registry.quarantineSchema(serverName, reason, detail);
     },

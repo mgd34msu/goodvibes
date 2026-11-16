@@ -50,38 +50,70 @@ const isHostKey = (key: string): boolean => {
 /** One argument value the scope applies to, with the argument it came from. */
 export interface ScopedValue { readonly argument: string; readonly value: string }
 
+type JsonSchemaNode = Readonly<Record<string, unknown>>;
+const schemaNode = (value: unknown): JsonSchemaNode | undefined =>
+  value && typeof value === 'object' && !Array.isArray(value) ? value as JsonSchemaNode : undefined;
+/** The schema of one property of an object schema, if the schema names it. */
+const propertySchema = (schema: JsonSchemaNode | undefined, name: string): JsonSchemaNode | undefined =>
+  schemaNode(schemaNode(schema?.['properties'])?.[name]);
+/** A JSON-schema `format` that names a filesystem location or a URI. */
+const URI_FORMATS = new Set(['uri', 'uri-reference', 'iri', 'iri-reference']);
+const schemaFormat = (schema: JsonSchemaNode | undefined): string =>
+  typeof schema?.['format'] === 'string' ? (schema['format'] as string).toLowerCase() : '';
+const isPathFormat = (format: string): boolean => /(?:^|-)(?:path|file|dir|directory|folder)(?:$|-)/.test(format);
+
+/**
+ * A value that names a location whatever argument holds it: absolute (`/x`,
+ * `\\x`, `C:\x`), under the home directory (`~`), a `file:` URL, relative to the
+ * working directory by its first segment (`.`, `..`, `./x`, `../x`), or climbing
+ * with a `..` segment anywhere. A slash alone is not a path: `either/or`,
+ * `text/plain` and `11/14/2026` are text.
+ */
+function isPathValue(value: string): boolean {
+  if (/\s/.test(value)) return false;
+  if (value === '~' || value.startsWith('~/') || value.startsWith('~\\')) return true;
+  if (value.startsWith('/') || value.startsWith('\\') || /^[a-z]:[\\/]/i.test(value)) return true;
+  if (value === '.' || value === '..' || /^\.\.?[\\/]/.test(value)) return true;
+  return /(?:^|[\\/])\.\.(?:[\\/]|$)/.test(value);
+}
+
 /**
  * The values of a call that the server's scopes apply to. A value is a path
- * when its argument is named like one (`path`, `filename`, `target`,
- * `sourcePath`, ...) or when the whole value is shaped like a path: no
- * whitespace and a separator, a home prefix, `.`/`..` or a `file:` URL. Prose
- * that happens to hold a slash ("TCP/IP tuning") is not a path. A value is a
- * destination when its argument is named like one, it has a URL scheme, or
- * it is an address (an IP, `localhost`, or a host with a port); a dotted file
+ * when the tool's own input schema declares its argument a path or URI
+ * (`format: "uri"`, `"path"`, `"file-path"`, ...), when its argument is named
+ * like one (`path`, `filename`, `target`, `sourcePath`, ...), or when the value
+ * itself names a location (see {@link isPathValue}). Text that merely holds a
+ * slash ("either/or", "text/plain", a date) is not a path. A value is a
+ * destination when its argument is named like one, it has a URL scheme, or it
+ * is an address (an IP, `localhost`, or a host with a port); a dotted file
  * name such as `report.pdf` is not a host.
  */
 export function readScopedValues(
   args: Record<string, unknown>,
   scopes: { readonly paths: boolean; readonly hosts: boolean },
+  inputSchema?: Readonly<Record<string, unknown>> | undefined,
 ): { readonly paths: readonly ScopedValue[]; readonly hosts: readonly ScopedValue[] } {
   const paths: ScopedValue[] = [];
   const hosts: ScopedValue[] = [];
   if (!scopes.paths && !scopes.hosts) return { paths, hosts };
-  const visit = (value: unknown, key: string): void => {
-    if (Array.isArray(value)) { for (const entry of value) visit(entry, key); return; }
-    if (value && typeof value === 'object') { for (const [name, entry] of Object.entries(value)) visit(entry, name); return; }
+  const visit = (value: unknown, key: string, schema: JsonSchemaNode | undefined): void => {
+    if (Array.isArray(value)) { for (const entry of value) visit(entry, key, schemaNode(schema?.['items'])); return; }
+    if (value && typeof value === 'object') {
+      for (const [name, entry] of Object.entries(value)) visit(entry, name, propertySchema(schema, name));
+      return;
+    }
     if (typeof value !== 'string') return;
     const trimmed = value.trim();
     if (!trimmed) return;
     const fileUrl = trimmed.startsWith('file:');
     const url = SCHEME.test(trimmed) && !fileUrl;
-    const pathKey = isPathKey(key);
-    const pathShaped = fileUrl || (!/\s/.test(trimmed) && !url
-      && (trimmed.startsWith('~') || trimmed.includes('/') || trimmed.includes('\\') || trimmed === '.' || trimmed === '..'));
-    if (scopes.paths && ((pathKey && !url) || pathShaped)) paths.push({ argument: key, value: trimmed });
-    if (scopes.hosts && !fileUrl && !pathShaped && (isHostKey(key) || url || ADDRESS.test(trimmed))) hosts.push({ argument: key, value: trimmed });
+    const format = schemaFormat(schema);
+    const declaredPath = isPathFormat(format) || (URI_FORMATS.has(format) && !url);
+    const pathShaped = fileUrl || (!url && isPathValue(trimmed));
+    if (scopes.paths && (((isPathKey(key) || declaredPath) && !url) || pathShaped)) paths.push({ argument: key, value: trimmed });
+    if (scopes.hosts && !fileUrl && !pathShaped && !declaredPath && (isHostKey(key) || url || ADDRESS.test(trimmed))) hosts.push({ argument: key, value: trimmed });
   };
-  visit(args, '');
+  visit(args, '', schemaNode(inputSchema));
   return { paths, hosts };
 }
 
@@ -98,18 +130,19 @@ const asFilesystemPath = (value: string): string => {
  * path-component comparison of real paths, so `/allowed-2` is not inside
  * `/allowed`; a relative path is resolved against `base`.
  */
-export function pathOutsideScope(allowedPaths: readonly string[], paths: readonly ScopedValue[], base?: string): ScopedValue | undefined {
+export function pathOutsideScope(allowedPaths: readonly string[], paths: readonly ScopedValue[], base?: string): (ScopedValue & { readonly resolved?: string }) | undefined {
   if (allowedPaths.length === 0) return undefined;
   const roots = allowedPaths.map((root) => realPathOf(root));
-  return paths.find(({ value }) => {
+  for (const entry of paths) {
     let target: string;
     try {
-      target = realPathOf(asFilesystemPath(value), base);
+      target = realPathOf(asFilesystemPath(entry.value), base);
     } catch {
-      return true;
+      return entry;
     }
-    return !roots.some((root) => target === root || target.startsWith(root.endsWith(sep) ? root : `${root}${sep}`));
-  });
+    if (!roots.some((root) => target === root || target.startsWith(root.endsWith(sep) ? root : `${root}${sep}`))) return { ...entry, resolved: target };
+  }
+  return undefined;
 }
 
 /**

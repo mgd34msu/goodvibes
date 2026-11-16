@@ -50,8 +50,8 @@ export function createMcpRuntimeCommands<Context extends McpCommandContext>(
   const MCP_COMMAND_TRUST_MODES = ['constrained', 'ask-on-risk', 'blocked'] as const;
   const MCP_ADD_COMMAND_USAGE =
     '/mcp add <name> <command> ... --yes; options: --scope project|global, --role <role>, --trust constrained|ask-on-risk|blocked, --env KEY=VALUE, --path <path>, --host <host>';
-  const MCP_TRUST_COMMAND_USAGE = '/mcp trust <server> <constrained|ask-on-risk|blocked> --yes';
-  const MCP_ROLE_COMMAND_USAGE = '/mcp role <server> <general|docs|filesystem|git|database|browser|automation|ops|remote> --yes';
+  const MCP_TRUST_COMMAND_USAGE = '/mcp trust <server> <constrained|ask-on-risk|blocked|config> --yes';
+  const MCP_ROLE_COMMAND_USAGE = '/mcp role <server> <general|docs|filesystem|git|database|browser|automation|ops|remote|config> --yes';
   interface ParsedMcpAddArgs {
     readonly scope: McpConfigScope;
     readonly server: McpServerConfig;
@@ -231,6 +231,26 @@ export function createMcpRuntimeCommands<Context extends McpCommandContext>(
           if (!server) print(`No MCP server named ${name}, so its ${change} was not changed. Run /mcp servers to list configured servers.`);
           return server;
         };
+        /** Return a server to its configured trust mode or role and say which value applies now. */
+        const clearSessionPolicy = (serverName: string, field: 'trustMode' | 'role'): void => {
+          const what = field === 'trustMode' ? 'trust mode' : 'role';
+          if (!mcpApi.clearServerSessionPolicy) {
+            print(`MCP ${what} not changed: this runtime cannot clear a session ${what}. Restart to return to the configured value.`);
+            return;
+          }
+          let cleared: boolean;
+          try {
+            cleared = mcpApi.clearServerSessionPolicy(serverName, field);
+          } catch (error) {
+            print(`MCP ${what} not changed: ${summarizeError(error)}`);
+            return;
+          }
+          const now = listServerSecurity().find((server) => server.name === serverName);
+          const value = now ? (field === 'trustMode' ? formatMcpTrustMode(now.trustMode) : formatMcpRole(now.role)) : 'its configured value';
+          print(cleared
+            ? `${serverName} is back on its configured MCP ${what}: ${value}.`
+            : `${serverName} had no MCP ${what} set for this session; it runs on its configured ${what}: ${value}.`);
+        };
         // A trailing --yes is never a server argument, whether or not this
         // product asks for confirmation; only tokens after -- are passed on.
         const stripped = args[0] === 'add' ? stripMcpAddYesFlag(args) : policy.confirmMutations ? stripYesFlag(args) : { rest: args, yes: true };
@@ -363,10 +383,19 @@ export function createMcpRuntimeCommands<Context extends McpCommandContext>(
         if (subcommand === 'trust') {
           const serverName = commandArgs[1];
           const requestedMode = commandArgs[2];
+          if (serverName && requestedMode === 'config') {
+            if (!knownServer(serverName, 'trust mode')) return;
+            if (!confirmation.yes) {
+              requireYesFlag(ctx, `return ${serverName} to its configured MCP trust mode`, MCP_TRUST_COMMAND_USAGE);
+              return;
+            }
+            clearSessionPolicy(serverName, 'trustMode');
+            return;
+          }
           if (serverName && requestedMode) {
             if (!isMcpTrustMode(requestedMode)) {
               print(
-                `Invalid MCP trust mode "${requestedMode}". Expected constrained, ask-on-risk, blocked, or allow-all.\nUsage: ${MCP_TRUST_COMMAND_USAGE}\nUse /settings -> MCP to explicitly enable allow-all.`,
+                `Invalid MCP trust mode "${requestedMode}". Expected constrained, ask-on-risk, blocked, config (back to the configured mode), or allow-all.\nUsage: ${MCP_TRUST_COMMAND_USAGE}\nUse /settings -> MCP to explicitly enable allow-all.`,
               );
               return;
             }
@@ -387,7 +416,7 @@ export function createMcpRuntimeCommands<Context extends McpCommandContext>(
               print(`MCP trust mode not changed: ${summarizeError(error)}`);
               return;
             }
-            print(`Updated MCP trust mode for ${serverName} to ${formatMcpTrustMode(mode)} for this session only. Edit the server in /mcp to keep it after a restart.`);
+            print(`Updated MCP trust mode for ${serverName} to ${formatMcpTrustMode(mode)} for this session only: it stays through reconnects and config reloads until \`/mcp trust ${serverName} config --yes\` or a restart. Edit the server in /mcp to keep it after a restart.`);
             return;
           }
           if (serverName || requestedMode) {
@@ -401,9 +430,18 @@ export function createMcpRuntimeCommands<Context extends McpCommandContext>(
         if (subcommand === 'role') {
           const serverName = commandArgs[1];
           const requestedRole = commandArgs[2];
+          if (serverName && requestedRole === 'config') {
+            if (!knownServer(serverName, 'role')) return;
+            if (!confirmation.yes) {
+              requireYesFlag(ctx, `return ${serverName} to its configured MCP role`, MCP_ROLE_COMMAND_USAGE);
+              return;
+            }
+            clearSessionPolicy(serverName, 'role');
+            return;
+          }
           if (serverName && requestedRole) {
             if (!isMcpRole(requestedRole)) {
-              print(`Invalid MCP role "${requestedRole}". Expected one of ${MCP_ROLES.join(', ')}.\nUsage: ${MCP_ROLE_COMMAND_USAGE}`);
+              print(`Invalid MCP role "${requestedRole}". Expected one of ${MCP_ROLES.join(', ')}, or config (back to the configured role).\nUsage: ${MCP_ROLE_COMMAND_USAGE}`);
               return;
             }
             const role = requestedRole;
@@ -418,7 +456,7 @@ export function createMcpRuntimeCommands<Context extends McpCommandContext>(
               print(`MCP role not changed: ${summarizeError(error)}`);
               return;
             }
-            print(`Updated MCP role for ${serverName} to ${formatMcpRole(role)} for this session only. Edit the server in /mcp to keep it after a restart.`);
+            print(`Updated MCP role for ${serverName} to ${formatMcpRole(role)} for this session only: it stays through reconnects and config reloads until \`/mcp role ${serverName} config --yes\` or a restart. Edit the server in /mcp to keep it after a restart.`);
             return;
           }
           if (serverName || requestedRole) {
@@ -603,6 +641,12 @@ export function createMcpRuntimeCommands<Context extends McpCommandContext>(
       },
     });
   }
+  /** ` (this session; config: X)` beside a value the owner set for this session, else nothing. */
+  function sessionNote<T extends string>(session: T | undefined, configured: T | undefined, format: (value: T) => string): string {
+    if (session === undefined) return '';
+    return configured === undefined ? ' (this session)' : ` (this session; config: ${format(configured)})`;
+  }
+
   function formatMcpServerList(servers: readonly McpSecurityServer[]): string {
     const connected = servers.filter((s) => s.connected);
     const disconnected = servers.filter((s) => !s.connected);
@@ -613,7 +657,7 @@ export function createMcpRuntimeCommands<Context extends McpCommandContext>(
       const freshness = ` status ${formatMcpFreshness(s.schemaFreshness)}`;
       const quarantine = s.schemaFreshness === 'quarantined' ? ` review reason ${s.quarantineReason ?? 'unknown'}` : '';
       lines.push(
-        `  ${s.connected ? '[connected]   ' : '[disconnected]'}  ${s.name}  trust=${formatMcpTrustMode(s.trustMode)}  role=${formatMcpRole(s.role)}${freshness}${quarantine}${pathScope}${hostScope}`,
+        `  ${s.connected ? '[connected]   ' : '[disconnected]'}  ${s.name}  trust=${formatMcpTrustMode(s.trustMode)}${sessionNote(s.sessionTrustMode, s.configuredTrustMode, formatMcpTrustMode)}  role=${formatMcpRole(s.role)}${sessionNote(s.sessionRole, s.configuredRole, formatMcpRole)}${freshness}${quarantine}${pathScope}${hostScope}`,
       );
     }
     if (connected.length > 0) {

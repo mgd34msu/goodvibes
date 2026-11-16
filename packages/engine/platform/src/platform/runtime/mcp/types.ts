@@ -92,19 +92,16 @@ export interface McpSchemaRecord {
 // ── Permissions ───────────────────────────────────────────────────────────────
 
 /**
- * Trust level assigned to an MCP server.
- *
- * - `trusted`   , all tools allowed; schema auto-refreshed
- * - `standard`  , all tools allowed; subject to per-tool overrides
- * - `restricted`, only explicitly allow-listed tools may be called
- * - `blocked`   , no tool calls permitted regardless of allow-list
+ * The trust levels of an older permission design. Nothing decides from them:
+ * a server's trust mode, per-tool overrides and its scopes decide every call.
+ * Kept only as an exported name.
  */
 export type McpTrustLevel = 'trusted' | 'standard' | 'restricted' | 'blocked';
 
 /** Runtime trust mode used by the hardened MCP policy layer. */
 // McpTrustMode and McpServerRole are imported from events/mcp.ts (see top of file).
 
-/** Capability classes inferred for MCP tool calls. */
+/** Capability classes of an older, model-read classification of MCP tools. No call is decided by one; kept only as an exported name. */
 export type McpCapabilityClass =
   | 'metadata'
   | 'read_fs'
@@ -121,7 +118,8 @@ export type McpCapabilityClass =
 /** Runtime trust mode used by the hardened MCP policy layer. */
 // McpTrustMode is imported from events/mcp.ts (see top of file).
 
-export type McpCoherenceVerdict = 'allow' | 'ask' | 'deny';
+/** Enforcement answers allow or deny; nothing at this layer asks. */
+export type McpCoherenceVerdict = 'allow' | 'deny';
 export type McpRiskLevel = 'low' | 'medium' | 'high' | 'critical';
 
 export interface McpTrustProfile {
@@ -130,7 +128,6 @@ export interface McpTrustProfile {
   mode: McpTrustMode;
   allowedPaths: string[];
   allowedHosts: string[];
-  allowedCapabilities: McpCapabilityClass[];
   notes?: string | undefined;
   lastModifiedAt: number;
 }
@@ -138,7 +135,6 @@ export interface McpTrustProfile {
 export interface McpCoherenceAssessment {
   verdict: McpCoherenceVerdict;
   riskLevel: McpRiskLevel;
-  capability: McpCapabilityClass;
   incoherent: boolean;
   reason: string;
 }
@@ -148,7 +144,6 @@ export interface McpDecisionRecord {
   toolName: string;
   verdict: McpCoherenceVerdict;
   riskLevel: McpRiskLevel;
-  capability: McpCapabilityClass;
   incoherent: boolean;
   reason: string;
   profileMode: McpTrustMode;
@@ -200,8 +195,6 @@ export interface McpAttackPathFinding {
   evidence: readonly string[];
   /** Optional tool name for recent decision findings. */
   toolName?: string | undefined;
-  /** Optional capability class for recent decision findings. */
-  capability?: McpCapabilityClass | undefined;
   /** Optional timestamp for recent decision findings. */
   evaluatedAt?: number | undefined;
 }
@@ -236,8 +229,7 @@ export interface McpAttackPathReview {
 
 /** Permission verdict for a single tool invocation. */
 export interface McpPermission {
-  readonly causes?: readonly ('risk-policy' | 'uncertain-reading' | 'role-mismatch' | 'capability-out-of-scope' | 'path-out-of-scope' | 'host-out-of-scope')[] | undefined;
-  readonly judgmentDecisionIds?: readonly string[] | undefined;
+  readonly causes?: readonly ('path-out-of-scope' | 'host-out-of-scope')[] | undefined;
   /** Whether the tool call is permitted. */
   allowed: boolean;
   /** Human-readable explanation for the verdict. */
@@ -246,8 +238,6 @@ export interface McpPermission {
   verdict?: McpCoherenceVerdict | undefined;
   /** Risk associated with the evaluated tool call. */
   riskLevel?: McpRiskLevel | undefined;
-  /** Inferred capability class. */
-  capability?: McpCapabilityClass | undefined;
   /** Whether the request was flagged as incoherent for its server role. */
   incoherent?: boolean | undefined;
   /** Effective trust mode when the decision was made. */
@@ -268,11 +258,9 @@ export interface McpToolPermission {
 export interface McpServerPermissions {
   /** Server name. */
   serverName: string;
-  /** Overall trust level governing default tool access. */
-  trustLevel: McpTrustLevel;
-  /** Runtime trust profile used by the coherence engine. */
+  /** Trust mode, role and scopes: what decides each call. */
   profile: McpTrustProfile;
-  /** Explicit per-tool overrides applied after the trust-level default. */
+  /** Explicit per-tool overrides, applied before the scope check. */
   toolOverrides: Map<string, McpToolPermission>;
   /** Epoch ms when permissions were last modified. */
   lastModifiedAt: number;

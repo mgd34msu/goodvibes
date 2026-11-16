@@ -27,7 +27,6 @@ import type {
   McpServerState,
   McpServerEntry,
   McpReconnectConfig,
-  McpTrustLevel,
   McpPermission,
   SchemaFreshness,
   QuarantineReason,
@@ -138,16 +137,18 @@ export class McpLifecycleManager {
   // ── Permission delegation ─────────────────────────────────────────────────
 
   /**
-   * Check whether a tool call is permitted for the given server.
+   * Decide one tool call for the given server.
    *
-   * Quarantined schemas unconditionally block execution, the freshness check
+   * Quarantined schemas unconditionally block execution: the freshness check
    * runs before the permission check so a quarantined schema cannot be bypassed
-   * by a permissive trust level.
+   * by a permissive trust mode. Otherwise the call is decided by the one
+   * permission decision the live registry uses (mode, overrides, scopes).
    *
    * @param serverName - Server identifier
    * @param toolName   - Tool name on the server (not qualified)
+   * @param args       - The call's arguments, held to the server's scopes
    */
-  isToolAllowed(serverName: string, toolName: string): McpPermission {
+  async evaluateToolCall(serverName: string, toolName: string, args: Record<string, unknown> = {}): Promise<McpPermission> {
     if (this.freshness.isQuarantined(serverName)) {
       const record = this.freshness.getRecord(serverName);
       const detail = record?.quarantine?.detail ?? 'schema is quarantined';
@@ -156,17 +157,7 @@ export class McpLifecycleManager {
         reason: `Schema quarantined (${record?.quarantine?.reason ?? 'unknown'}): ${detail}. Refresh schema or request operator approval to proceed.`,
       };
     }
-    return this.permissions.isToolAllowed(serverName, toolName);
-  }
-
-  /**
-   * Update the trust level for a server.
-   *
-   * @param serverName - Server identifier
-   * @param level      - New trust level
-   */
-  setTrustLevel(serverName: string, level: McpTrustLevel): void {
-    this.permissions.setTrustLevel(serverName, level);
+    return this.permissions.evaluateToolCall(serverName, toolName, args);
   }
 
   setTrustMode(serverName: string, mode: McpTrustMode): void {
@@ -327,7 +318,7 @@ export class McpLifecycleManager {
     }
 
     // Register in subsystems
-    this.permissions.registerServer(name, 'standard', {
+    this.permissions.registerServer(name, {
       role: config.role ?? 'general',
       mode: config.trustMode ?? 'ask-on-risk',
       allowedPaths: config.allowedPaths ?? [],

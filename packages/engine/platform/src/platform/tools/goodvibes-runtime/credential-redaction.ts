@@ -13,28 +13,27 @@
  *     through `holdsCredential`, the same battery.
  *   - Declared structured reference arrays are shown only after their exact
  *     parser detaches them; malformed arrays are masked as a whole.
- *   - A string value under a key that is not a credential is read by Jev
- *     (`engine.tools.credential-value`) and shown only on a no that acts. Not
- *     read: an empty value, a `goodvibes://` reference (it names a stored
- *     secret rather than holding one), and any value the schema already
- *     fixes: the default, one of the setting's `enumValues`, or a value of a
- *     boolean or number setting (fixed text in config/schema*.ts, the same on
- *     every install).
- * A reading that is unsure, late or unavailable redacts that one row with
- * `source: 'reading-unavailable'`; the listing still completes.
+ *   - A string value under a key that is not a credential is decided here, in
+ *     code, and never leaves the process: it is shown only when the local
+ *     credential patterns leave it alone AND its shape cannot be a secret (a
+ *     number, date or time; a name such as a model id, host name or on/off
+ *     word; a file path; a URL with no user, password, query or fragment),
+ *     with no part that looks generated. Everything else is masked with
+ *     `source: 'unrecognised-shape'`; the owner reads it in the config file
+ *     or the settings screen. Not checked: an empty value, a `goodvibes://`
+ *     reference (it names a stored secret rather than holding one), and any
+ *     value the schema already fixes: the default, one of the setting's
+ *     `enumValues`, or a value of a boolean or number setting (fixed text in
+ *     config/schema*.ts, the same on every install).
  */
-import { createHash } from 'node:crypto';
 import { snapshotJudgmentInput, captureOwnedJson } from '../../gate/judgment-input.js';
 import { CONFIG_SCHEMA, isValidConfigKey, type ConfigSetting } from '../../config/schema.js';
 import { configKeyDescription, holdsCredential } from '../../config/credential-key-reading.js';
 import { isSecretBearingConfigKey } from '../../config/secret-bearing-config-keys.js';
 import { isStructuredCredentialReferenceConfigKey, captureStructuredCredentialReferenceConfigValue } from '../../config/structured-credential-config.js';
-import { credentialValue, credentialValueState } from '../batteries/credential-value.js';
-import { judge } from '../../runtime/judge.js';
 import { redactSensitiveData } from '../../utils/redaction.js';
 
 const KEY_SITE = 'tools.goodvibes-runtime.credential-key';
-const VALUE_SITE = 'tools.goodvibes-runtime.credential-value';
 
 const SECRET_REFERENCE_SCHEME = 'goodvibes://';
 
@@ -44,38 +43,64 @@ export async function isCredentialConfigKey(key: string): Promise<boolean> {
   return holdsCredential(key, configKeyDescription(key), KEY_SITE);
 }
 
-type ValueReading = 'shown' | 'redacted' | 'reading-unavailable';
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
- * Whether a stored value is shown as it is: only a no that acts clears it.
- * Settled answers are kept for the process, keyed by the key and a hash of
- * the value, so a full config dump asks once per distinct value and no raw
- * value is held as a cache key.
+ * Whether a word looks generated rather than named: a UUID, or a run of
+ * twelve or more characters between separators that mixes letters with
+ * digits, mixes cases heavily, or is 24 or more letters long.
  */
-async function readValue(key: string, value: string): Promise<ValueReading> {
-  let state: ReturnType<typeof credentialValueState>;
-  // A value the input check refuses to send is credential material by that check.
-  try { state = credentialValueState(key, configKeyDescription(key), value); } catch { return 'redacted'; }
-  const { value: reading } = await judge<typeof credentialValue.items, ValueReading>({
-    site: VALUE_SITE,
-    battery: credentialValue,
-    state,
-    cache: { key: `${key}\u0000${createHash('sha256').update(value).digest('hex')}`, scope: 'process' },
-    settle: ({ credential_material: reading }) => reading.outcome !== 'act' || reading.verdict === 'uncertain'
-      ? undefined : reading.verdict === 'no' ? 'shown' : 'redacted',
-    // With decision models off the local credential patterns decide; otherwise an answer that did not come is not a no.
-    fallback: (why) => why === 'off' ? (redactSensitiveData(value) === value ? 'shown' : 'redacted') : why === 'unsure' ? 'redacted' : 'reading-unavailable',
-    describe: (reading) => reading,
+function looksGenerated(word: string): boolean {
+  if (UUID.test(word)) return true;
+  return word.split(/[._+~ ()-]/).some((part) => {
+    if (part.length < 12) return false;
+    const digits = part.replace(/[^0-9]/g, '').length;
+    if (digits === part.length) return false;
+    if (digits > 0) return true;
+    const upper = part.replace(/[^A-Z]/g, '').length;
+    return part.length >= 24 || (upper >= 4 && part.length - upper >= 4);
   });
-  return reading;
 }
 
-function redacted(value: unknown, source?: 'reading-unavailable'): Record<string, unknown> {
+const NUMBER_LIKE = /^[0-9][0-9\s:*/,.+%-]*[A-Za-z]{0,3}$/;
+const NAME_PART = '[A-Za-z0-9][A-Za-z0-9._+-]*';
+const NAME = new RegExp(`^${NAME_PART}(?:[/:]${NAME_PART}){0,7}$`);
+const PATH = /^(?:~|\.{1,2}|[A-Za-z]:)?[/\\][A-Za-z0-9._+~ ()/\\-]*$/;
+const URL_START = /^[a-z][a-z0-9+.-]*:\/\//i;
+const MAX_SHOWN_LENGTH = 1024;
+
+const namedParts = (text: string, separator: RegExp): boolean => text.split(separator).every((part) => !looksGenerated(part));
+
+/**
+ * Whether a stored value has a shape that cannot be a secret: a number, date,
+ * time or interval; a name (a model id, host name with an optional port, or a
+ * word such as on/off); a file path; or a URL with no user, password, query
+ * or fragment. A value with a part that looks generated is none of these.
+ * Decided from the text alone; nothing is sent anywhere.
+ */
+export function valueShapeCannotBeSecret(value: string): boolean {
+  const text = value.trim();
+  if (text.length === 0 || text.length > MAX_SHOWN_LENGTH) return false;
+  if (NUMBER_LIKE.test(text)) return true;
+  if (NAME.test(text)) return namedParts(text, /[/:]/);
+  if (PATH.test(text)) return namedParts(text, /[/\\]/);
+  if (!URL_START.test(text) || /[\s?#@]/.test(text)) return false;
+  let url: URL;
+  try { url = new URL(text); } catch { return false; }
+  if (url.username !== '' || url.password !== '' || url.search !== '' || url.hash !== '') return false;
+  const rest = text.slice(text.indexOf('://') + 3);
+  return /^[A-Za-z0-9._+~:/[\]-]*$/.test(rest) && namedParts(rest, /[/:]/);
+}
+
+const MASKED_NEXT = 'Not shown here because it could be a secret. The owner can read it in the config file or the settings screen; a value that must stay private belongs in a credential setting.';
+
+function redacted(value: unknown, source?: 'unrecognised-shape'): Record<string, unknown> {
   if (value === null || value === undefined || value === '') return { redacted: true, configured: false };
   return {
     redacted: true,
     configured: true,
     source: source ?? (typeof value === 'string' && value.startsWith(SECRET_REFERENCE_SCHEME) ? 'goodvibes-secret-ref' : 'credential-like-value'),
+    ...(source === 'unrecognised-shape' ? { next: MASKED_NEXT } : {}),
   };
 }
 
@@ -105,7 +130,7 @@ export async function redactConfigValue(key: string, value: unknown, schemaDefau
     try { return captureStructuredCredentialReferenceConfigValue(key, value); }
     catch { return redacted(value); }
   }
-  // Known private material is masked locally before asking even about its key.
+  // Known private material is masked locally before the key is read.
   // Detach objects before an awaited reading can yield to their owner.
   try { value = snapshotJudgmentInput(value); snapshotJudgmentInput(key); }
   catch { return redacted(value); }
@@ -113,8 +138,8 @@ export async function redactConfigValue(key: string, value: unknown, schemaDefau
   if (value && typeof value === 'object') return redactObjectByPath(key, value);
   if (typeof value !== 'string' || value.trim() === '' || value.trim().startsWith(SECRET_REFERENCE_SCHEME)) return value;
   if (fixedBySchema(key, value, schemaDefault)) return value;
-  const reading = await readValue(key, value);
-  return reading === 'shown' ? value : redacted(value, reading === 'reading-unavailable' ? 'reading-unavailable' : undefined);
+  if (redactSensitiveData(value) !== value) return redacted(value);
+  return valueShapeCannotBeSecret(value) ? value : redacted(value, 'unrecognised-shape');
 }
 
 /** Every leaf of a nested object, each redacted under its dotted path below `prefix`. */

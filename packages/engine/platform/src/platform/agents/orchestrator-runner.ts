@@ -25,7 +25,7 @@ import { createVerificationWriter, reportVerificationUsage } from '../core/verif
 import { VerificationStore } from '../core/verification/store.js';
 import { appendVerificationObservation, beginVerificationConversation } from '../core/verification/archive.js';
 import { failureEvidence, isBillingOrCreditError, isRateLimitOrQuotaError, isContextSizeExceededError, isNetworkTransportError } from '../types/errors.js';
-import { classifyFailure, readFailure } from '@goodvibes-jev/engine/errors';
+import { classifyFailure, httpStatusOf, readFailure } from '@goodvibes-jev/engine/errors';
 import { AgentSession } from './session.js';
 import {
   estimateTokens,
@@ -412,6 +412,19 @@ async function finalizeAgentRun(
   }
 }
 
+/** The HTTP status, error code and Retry-After an error (or its cause) carries as fields. */
+function failureFacts(err: unknown): { status?: number | undefined; code?: string | undefined; retryAfterMs?: number | undefined } {
+  const field = (value: unknown, key: string): unknown => value !== null && typeof value === 'object' ? (value as Record<string, unknown>)[key] : undefined;
+  const cause = field(err, 'cause');
+  const code = [field(err, 'code'), field(cause, 'code')].find((value): value is string => typeof value === 'string' && value.length > 0);
+  const delay = field(err, 'retryAfterMs');
+  return {
+    status: httpStatusOf(err) ?? httpStatusOf(cause),
+    code,
+    retryAfterMs: typeof delay === 'number' && Number.isFinite(delay) && delay >= 0 ? delay : undefined,
+  };
+}
+
 async function handleAgentRunFailure(
   context: AgentOrchestratorRunContext,
   record: AgentRecord,
@@ -455,6 +468,11 @@ async function handleAgentRunFailure(
   moveAgentRun(record, 'failed');
   if (err instanceof OrchestratorObservationHeldError) record.failureReason = 'semantic_observation_held';
   record.error = message;
+  // Whoever decides on a retry reads these, so the status and code tables answer without a model.
+  const facts = failureFacts(err);
+  record.failureStatus = facts.status;
+  record.failureCode = facts.code;
+  record.failureRetryAfterMs = facts.retryAfterMs;
   record.completedAt = Date.now();
   // The record now reads failed and a failed run cannot be failed again, so
   // AGENT_FAILED goes out before anything else here can throw.

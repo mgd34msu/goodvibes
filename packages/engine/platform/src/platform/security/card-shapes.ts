@@ -12,7 +12,8 @@
  *  - **Inbound mail** (`email/inbound/record-store.ts`), mail is REDACTED, not
  *    refused. Order confirmations legitimately carry long digit runs and they
  *    are the consumer the inbound-mail capability exists to serve; refusing
- *    them would break it. Only the digits fail to reach disk.
+ *    them would break it. Only the digits fail to reach disk. Mail is
+ *    redacted by code alone (`redactCardShapes`): no model is asked.
  *
  * The distinction a later reader will try to collapse, written in the terms
  * §11.0 asks for: approvals and vetoes for purchases DO work over remote
@@ -344,16 +345,33 @@ function findMatches(pattern: RegExp, text: string, kind: CardShapeKind, exclude
  * Findings are returned in ascending `startIndex` order and never overlap.
  */
 export async function detectCardShapes(text: string): Promise<readonly CardShapeFinding[]> {
-  return decisionOrClassic(() => detectDecisionCardShapes(text), () => {
-    const pans = findCardNumberShapes(text);
-    const expiries = findMatches(EXPIRY_PAIR, text, 'expiry', pans);
-    const codes = findMatches(BARE_SHORT_DIGIT_RUN, text, 'security-code', [...pans, ...expiries]);
-    const labelled = (finding: CardShapeFinding, label: RegExp) => label.test(text.slice(Math.max(0, finding.startIndex - 80), finding.startIndex));
-    return [...pans,
-      ...expiries.filter(finding => labelled(finding, /\b(?:exp(?:iry|iration)?(?:\s+date)?|valid\s+thru)\s*(?:is\s*)?[:=]?\s*$/iu)),
-      ...codes.filter(finding => labelled(finding, /\b(?:cvv2?|cvc2?|cid|security\s+code|card\s+code)\s*(?:is\s*)?[:=]?\s*$/iu)),
-    ].map(finding => Object.freeze({ ...finding, provenance: 'classic' as const })).sort((a, b) => a.startIndex - b.startIndex);
-  });
+  return decisionOrClassic(() => detectDecisionCardShapes(text),
+    () => findLabelledCardShapes(text).map(finding => Object.freeze({ ...finding, provenance: 'classic' as const })));
+}
+
+const EXPIRY_LABEL = /\b(?:exp(?:iry|iration)?(?:\s+date)?|valid\s+thru)\s*(?:is\s*)?[:=]?\s*$/iu;
+const SECURITY_CODE_LABEL = /\b(?:cvv2?|cvc2?|csc|cid|security\s+code|card\s+code|card\s+verification\s+(?:code|value|number))\s*(?:is\s*)?[:=]?\s*$/iu;
+
+/**
+ * Card-shaped spans by code alone: card numbers by their checksum, and a
+ * month/year pair or a three or four digit number only where the words just
+ * before it label it as an expiry or a security code. No model is asked.
+ *
+ * This is what stored and displayed mail is redacted by: every order
+ * confirmation carries a year, a price or an order number, and a model
+ * request per mail field to learn that those are not card details buys
+ * nothing for an excerpt of someone else's message. It is also what
+ * `detectCardShapes` falls back to when decision models are off.
+ */
+export function findLabelledCardShapes(text: string): readonly CardShapeFinding[] {
+  const pans = findCardNumberShapes(text);
+  const expiries = findMatches(EXPIRY_PAIR, text, 'expiry', pans);
+  const codes = findMatches(BARE_SHORT_DIGIT_RUN, text, 'security-code', [...pans, ...expiries]);
+  const labelled = (finding: CardShapeFinding, label: RegExp) => label.test(text.slice(Math.max(0, finding.startIndex - 80), finding.startIndex));
+  return [...pans,
+    ...expiries.filter(finding => labelled(finding, EXPIRY_LABEL)),
+    ...codes.filter(finding => labelled(finding, SECURITY_CODE_LABEL)),
+  ].sort((a, b) => a.startIndex - b.startIndex);
 }
 
 /** Settled card-talk answers by digest of the masked text; bounded, oldest first out. */
@@ -441,7 +459,8 @@ export function renderCardShapeRefusal(findings: readonly CardShapeFinding[]): s
 }
 
 /**
- * Replace every card-shaped span with a marker naming only its kind.
+ * Replace every card-shaped span with a marker naming only its kind. Code
+ * alone (`findLabelledCardShapes`): redacting mail never asks a model.
  *
  * Applied back-to-front so earlier spans keep their indices. The replacement is
  * longer than a three-digit security code, so callers with a length budget must
@@ -450,8 +469,8 @@ export function renderCardShapeRefusal(findings: readonly CardShapeFinding[]): s
  * straddling the excerpt boundary is redacted whole rather than truncated into
  * a still-readable prefix.
  */
-export async function redactCardShapes(text: string): Promise<string> {
-  const findings = await detectCardShapes(text);
+export function redactCardShapes(text: string): string {
+  const findings = findLabelledCardShapes(text);
   if (findings.length === 0) return text;
   let result = text;
   for (let index = findings.length - 1; index >= 0; index -= 1) {

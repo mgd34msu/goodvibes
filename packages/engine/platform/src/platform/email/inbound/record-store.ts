@@ -553,7 +553,7 @@ export class InboundMailStore {
       // same reason.
       ...clampRecordScope(input),
       // Sender, subject and delivery address arrive already redacted by the
-      // intake (card numbers and, by a reading, short codes in card context),
+      // intake (card numbers, and short codes labelled as card details),
       // the same text the owner's notice shows. The store still masks card
       // numbers itself, a local pattern pass with no model, so no caller can
       // put one on disk; then it bounds them.
@@ -589,8 +589,8 @@ export class InboundMailStore {
       ...(input.noticeFailureReason
         ? { noticeFailureReason: input.noticeFailureReason.slice(0, MAX_NOTICE_FAILURE_REASON_CHARS) }
         : {}),
-      // The intake redacted the whole body before handing it here (one scan
-      // with a reading, see `redactInboundFields`). Card numbers are masked
+      // The intake redacted the whole body before handing it here (one local
+      // scan, see `redactInboundFields`). Card numbers are masked
       // over the whole body before the cut and again after it, because a cut
       // can turn a longer digit run into one: local pattern passes, no model.
       bodyExcerpt: maskCardNumbers(maskCardNumbers(input.body).slice(0, this.policy.maxBodyExcerptChars)),

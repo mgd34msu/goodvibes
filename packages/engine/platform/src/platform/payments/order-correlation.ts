@@ -80,9 +80,9 @@ import { requireDecisionFeature } from '../runtime/decision-policy.js';
  * ══ No card material reaches a reading ════════════════════════════════════
  *
  * The subject and body have every card-shaped span redacted
- * (`redactCardShapes`: card numbers by the Luhn checksum in code, security
- * codes and expiry dates by the digit-masked card-talk reading) before any
- * reading here sees them.
+ * (`redactCardShapes`, code alone: card numbers by the Luhn checksum,
+ * security codes and expiry dates where the words before them label them)
+ * before any reading here sees them.
  */
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
 import type { Selector } from '@goodvibes-jev/judgment';
@@ -138,10 +138,9 @@ export function senderRegistrableDomain(address: string): string | null {
 }
 
 /** The mail with card-shaped spans redacted, and its body cut to what one reading takes. */
-async function redactedMail(mail: Pick<InboundMailFacts, 'subject' | 'body'>): Promise<{ subject: string; body: string; clipped: boolean }> {
-  const [subject, body] = await Promise.all([redactCardShapes(mail.subject), redactCardShapes(mail.body)]);
-  const clipped = clipMail(body);
-  return { subject, body: clipped.text, clipped: clipped.clipped };
+function redactedMail(mail: Pick<InboundMailFacts, 'subject' | 'body'>): { subject: string; body: string; clipped: boolean } {
+  const clipped = clipMail(redactCardShapes(mail.body));
+  return { subject: redactCardShapes(mail.subject), body: clipped.text, clipped: clipped.clipped };
 }
 
 function purchaseCandidate(record: PurchaseRecord, index: number): OrderMailCandidate {
@@ -191,7 +190,7 @@ export async function correlatePurchaseMail(
     };
   }
 
-  const redacted = await redactedMail(mail);
+  const redacted = redactedMail(mail);
   const context: OrderMailContext = {
     merchant: senderDomain,
     mail: { subject: redacted.subject, body: redacted.body, received_at: new Date(mail.receivedAtMs).toISOString() },
@@ -283,7 +282,7 @@ const utcDay = (ms: number): string => new Date(ms).toISOString().slice(0, 10);
  */
 export async function extractConfirmationFacts(mail: Pick<InboundMailFacts, 'subject' | 'body' | 'receivedAtMs'>): Promise<ConfirmationFacts> {
   requireDecisionFeature('semantic purchase confirmation extraction');
-  const { subject, body, clipped } = await redactedMail(mail);
+  const { subject, body, clipped } = redactedMail(mail);
   // A body longer than one reading takes may hold its references past the
   // cut; the report goes out with our own record and no identifiers rather
   // than with a reference read from part of the mail.
@@ -320,7 +319,7 @@ export const REFUND_MAIL_SITE = 'payments.refund-mail';
  */
 export async function readRefundMail(mail: Pick<InboundMailFacts, 'subject' | 'body'>, record: PurchaseRecord): Promise<boolean> {
   requireDecisionFeature('semantic purchase refund recognition');
-  const { subject, body } = await redactedMail(mail);
+  const { subject, body } = redactedMail(mail);
   const run = await refundMail.run(judgmentPort(REFUND_MAIL_SITE), {
     mail: { subject, body },
     purchase: { item: record.item, total: `${record.totalMinorUnits} minor units of ${record.currency}` },

@@ -362,12 +362,12 @@ function safeRegistrableDomain(rawHost: string): ValidatedRegistrableDomain {
  * by stripping first. Redacting first would leave that same number as two
  * halves too short for the detector, and pass both through.
  */
-function displaySafe(raw: string): Promise<string> {
+function displaySafe(raw: string): string {
   return redactCardShapes(stripControlAndLineBreaks(raw));
 }
 
 async function senderField(senderDisplay: string): Promise<NoticeField> {
-  const stripped = await displaySafe(senderDisplay);
+  const stripped = displaySafe(senderDisplay);
   return {
     label: 'From',
     value: [stripped.length > 0 ? untrusted(stripped) : literal('(unknown sender)')],
@@ -375,7 +375,7 @@ async function senderField(senderDisplay: string): Promise<NoticeField> {
 }
 
 async function subjectField(subject: string): Promise<NoticeField> {
-  const stripped = await displaySafe(subject);
+  const stripped = displaySafe(subject);
   return {
     label: 'Subject',
     value: [stripped.length > 0 ? untrusted(stripped) : literal('(no subject)')],
@@ -391,13 +391,13 @@ async function deliveredToField(deliveredTo: DeliveredRecipient | null): Promise
   // (including markup metacharacters) survives into the untrusted span
   // unmodified, to be escaped rather than stripped by whichever channel
   // renders this notice.
-  return { label: 'Delivered to', value: [untrusted(await displaySafe(deliveredTo.address))] };
+  return { label: 'Delivered to', value: [untrusted(displaySafe(deliveredTo.address))] };
 }
 
 async function outcomeField(outcome: InboundOutcome): Promise<NoticeField> {
   switch (outcome.kind) {
     case 'matched-expectation': {
-      const purpose = await displaySafe(outcome.purpose);
+      const purpose = displaySafe(outcome.purpose);
       const domain = safeRegistrableDomain(outcome.serviceDomain);
       return {
         label: 'Outcome',
@@ -434,7 +434,7 @@ async function outcomeField(outcome: InboundOutcome): Promise<NoticeField> {
         // line-safe and left it markup-live.
         value: [
           literal('LIMITED VIEW, this account cannot currently '),
-          untrusted(await displaySafe(outcome.missingCapability)),
+          untrusted(displaySafe(outcome.missingCapability)),
           literal(
             '. Read from envelope fields only; nothing here could match or '
             + 'satisfy a verification.',

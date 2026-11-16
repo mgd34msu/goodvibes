@@ -460,21 +460,20 @@ function note(
  * The body is scanned whole, before any cut, so a number straddling the
  * excerpt cap is redacted whole rather than truncated into a readable prefix.
  */
-export async function redactInboundFields(message: InboundMailboxMessage, deliveredToAddress: string | null): Promise<{
+export function redactInboundFields(message: InboundMailboxMessage, deliveredToAddress: string | null): {
   readonly senderDisplay: string;
   readonly subject: string;
   readonly deliveredToAddress: string | null;
   readonly body: string;
-}> {
-  const shown = (raw: string): Promise<string> => redactCardShapes(stripControlAndLineBreaks(raw));
-  const [senderDisplay, subject, address, body] = await Promise.all([
-    shown(message.from),
-    shown(message.subject),
-    deliveredToAddress === null ? Promise.resolve(null) : shown(deliveredToAddress),
+} {
+  const shown = (raw: string): string => redactCardShapes(stripControlAndLineBreaks(raw));
+  return {
+    senderDisplay: shown(message.from),
+    subject: shown(message.subject),
+    deliveredToAddress: deliveredToAddress === null ? null : shown(deliveredToAddress),
     // The IMAP envelope pass fetched no body, so the empty string is the honest value.
-    message.source === 'gmail' && message.body.length > 0 ? redactCardShapes(message.body) : Promise.resolve(''),
-  ]);
-  return { senderDisplay, subject, deliveredToAddress: address, body };
+    body: message.source === 'gmail' && message.body.length > 0 ? redactCardShapes(message.body) : '',
+  };
 }
 
 /** The identity and record key of one message, from its own source. */
@@ -505,7 +504,7 @@ export function createInboundMailSetAside(deps: {
   return async (message, error, attempts): Promise<void> => {
     const receivedAt = receiptTimestamp(deps.now());
     const deliveredTo = deliveredRecipientFromDeliveryHeaders(message.deliveredTo);
-    const fields = await redactInboundFields(message, deliveredTo?.address ?? null);
+    const fields = redactInboundFields(message, deliveredTo?.address ?? null);
     const { identity } = messageIdentity(message);
     const transport = error instanceof InboundNoticeTransportError;
     const why = transport
@@ -551,7 +550,7 @@ export function createInboundMailIntake(
     const receivedAt = receiptTimestamp(now);
     const deliveredTo = deliveredRecipientFromDeliveryHeaders(message.deliveredTo);
     // One redaction of the sender-written fields, carried to the record and the notice.
-    const shown = await redactInboundFields(message, deliveredTo?.address ?? null);
+    const shown = redactInboundFields(message, deliveredTo?.address ?? null);
 
     // Read BEFORE anything else, and it throws on an unusable value rather than
     // guessing, see `bodiesWithheldFrom`.

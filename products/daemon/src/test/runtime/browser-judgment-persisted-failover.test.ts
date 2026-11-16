@@ -10,21 +10,11 @@ import { composeBrowserJudgment } from '../../runtime/browser-judgment-compositi
 import { makeOwnedTempDir } from '../helpers/owned-temp.js';
 
 const principal: AuthenticatedPrincipal = { principalId: 'browser-failover-fixture', principalKind: 'user', admin: true, scopes: ['write:judgment'] };
-/** A catalog with one method whose canonical failure the daemon can issue an interpretation reference for. */
-function failingMethods(): GatewayMethodCatalog {
-  const methods = new GatewayMethodCatalog();
-  methods.register({ id: 'synthetic.browser.failure', title: 'Synthetic failure', description: 'Owned failure source',
-    category: 'sessions', access: 'authenticated', source: 'builtin', transport: ['http'], scopes: [],
-  }, async () => { throw new Error('unused'); });
-  return methods;
-}
-/** Interpret one canonical failure: a reference issued by the service, then the request that reads it. */
-function requestFor(service: { issueErrorReference(input: { principal: AuthenticatedPrincipal; methodId: string; status: number; body: unknown }): string | undefined }) {
-  const errorRef = service.issueErrorReference({ principal, methodId: 'synthetic.browser.failure', status: 500,
-    body: { error: 'The synthetic session has finished and cannot accept this operation.' } });
-  if (!errorRef) throw new Error('No error reference was issued.');
-  return { protocolVersion: 1, batteryVersion: 1, requestId: crypto.randomUUID(), battery: 'webui.errors.daemon-refusal', input: { errorRef } };
-}
+/** A provider registry with one undeclared runtime provider and one catalog provider, the only source the catalog reading uses. */
+const catalogSource = { captureProviderCatalogIds: () => ({ providerIds: ['fixture-runtime-provider'], catalogProviderIds: ['fixture-catalog-provider'], assertCurrent() {} }) };
+const providers = () => catalogSource;
+/** One provider-to-catalog reading through the daemon's own browser route. */
+const request = () => ({ protocolVersion: 1, batteryVersion: 1, requestId: crypto.randomUUID(), battery: 'webui.models.catalog-provider-match', input: { providerId: 'fixture-runtime-provider', keys: ['fixture-catalog-provider'] } });
 
 function endpoint(status: number) {
   const entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
@@ -38,7 +28,7 @@ function endpoint(status: number) {
     if (status !== 200) return new Response(null, { status });
     if (held) { entered.resolve(); await release.promise; }
     return Response.json({ model: body.model,
-      answers: Object.fromEntries(Object.keys(body.questions).map(name => [name, { type: 'noul', noul: name === 'session_closed' ? 0.99 : 0.01 }])),
+      answers: Object.fromEntries(Object.keys(body.questions).map(name => [name, { type: 'noul', noul: 0.99 }])),
       usage: { input_tokens: 1, output_tokens: 1 } });
   } });
   return { url: `http://127.0.0.1:${server.port}`, calls, entered: entered.promise, release: () => release.resolve(),
@@ -65,7 +55,7 @@ async function fixture(kind: 'env' | 'secret' | 'alias' | 'config') {
   const disposal = { add(_label: string, dispose: () => void | Promise<void>) { cleanup.push(dispose); } };
   const previous = installJudgmentPort(undefined);
   const judgment = composeJudgment({ config, secrets, env, stateRoot: join(root, 'state'), disposal });
-  const service = composeBrowserJudgment({ judgment, config, secrets, env, methods: failingMethods(), disposal });
+  const service = composeBrowserJudgment({ judgment, config, secrets, env, methods: new GatewayMethodCatalog(), providers, disposal });
   // Browser ownership is the explicit service passed above. An unrelated global
   // installation must neither admit nor strand these product-owned requests.
   installJudgmentPort(undefined);
@@ -79,7 +69,7 @@ async function fixture(kind: 'env' | 'secret' | 'alias' | 'config') {
 
 test.each(['env', 'secret', 'alias', 'config'] as const)('browser persisted failover retires %s changes and fresh explicit-port admissions recover', async kind => {
   const f = await fixture(kind); f.fallback.hold();
-  const pending = f.service.execute(requestFor(f.service), principal, new AbortController().signal, () => principal);
+  const pending = f.service.execute(request(), principal, new AbortController().signal, () => principal);
   void pending.catch(() => {});
   try {
     expect(() => judgmentPort('unrelated global fixture')).toThrow('No judgment port');
@@ -94,7 +84,7 @@ test.each(['env', 'secret', 'alias', 'config'] as const)('browser persisted fail
     f.fallback.resume();
     await expect(pending).rejects.toMatchObject({ code: 'JUDGMENT_PERMISSION_HELD' });
     expect(f.judgment.decisionLog.query()).toEqual([]);
-    expect(await f.service.execute(requestFor(f.service), principal, new AbortController().signal, () => principal)).toMatchObject({ status: 'settled' });
+    expect(await f.service.execute(request(), principal, new AbortController().signal, () => principal)).toMatchObject({ status: 'settled' });
     expect(f.primary.calls).toHaveLength(2); expect(f.fallback.calls).toHaveLength(2);
     expect(f.fallback.calls[1]?.authorization).toBe(`Bearer ${kind === 'env' || kind === 'secret' ? 'synthetic-new-fallback-key' : 'synthetic-fallback-key'}`);
     const records = f.judgment.decisionLog.query(); expect(records).toHaveLength(1);

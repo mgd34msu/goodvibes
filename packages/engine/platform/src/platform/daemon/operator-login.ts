@@ -73,6 +73,14 @@ export async function handleOperatorLogin(req: Request, clientAddress: string, d
         next: [`Wait ${retryAfterSeconds} seconds, then sign in again`],
       }, { status: 429 }), retryAfterSeconds);
     }
+    if (authResult.staleBootstrapCredential) {
+      // Only someone who read the private bootstrap file can send its exact pair, so saying why it failed tells a stranger nothing.
+      return jsonErrorResponse({
+        error: 'Invalid credentials', code: 'BOOTSTRAP_CREDENTIAL_STALE',
+        state: 'the bootstrap credential file no longer matches the stored password, so its password does not sign in',
+        next: [`Set a new password with goodvibes auth rotate-password ${username}`, 'Or delete both the user store and the bootstrap file and restart the daemon to generate a new admin'],
+      }, { status: 401 });
+    }
     return Response.json({ error: 'Invalid credentials' }, { status: 401 });
   }
 

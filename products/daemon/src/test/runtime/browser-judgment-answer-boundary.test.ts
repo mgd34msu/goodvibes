@@ -11,21 +11,11 @@ import { makeOwnedTempDir } from '../helpers/owned-temp.js';
 
 const principal: AuthenticatedPrincipal = { principalId: 'browser-boundary-fixture', principalKind: 'user', admin: true, scopes: ['write:judgment'] };
 const ECHO = 'synthetic-provider-echo-of-private-input';
-/** A catalog with one method whose canonical failure the daemon can issue an interpretation reference for. */
-function failingMethods(): GatewayMethodCatalog {
-  const methods = new GatewayMethodCatalog();
-  methods.register({ id: 'synthetic.browser.failure', title: 'Synthetic failure', description: 'Owned failure source',
-    category: 'sessions', access: 'authenticated', source: 'builtin', transport: ['http'], scopes: [],
-  }, async () => { throw new Error('unused'); });
-  return methods;
-}
-/** Interpret one canonical failure: a reference issued by the service, then the request that reads it. */
-function requestFor(service: { issueErrorReference(input: { principal: AuthenticatedPrincipal; methodId: string; status: number; body: unknown }): string | undefined }) {
-  const errorRef = service.issueErrorReference({ principal, methodId: 'synthetic.browser.failure', status: 500,
-    body: { error: 'The synthetic session has finished and cannot accept this operation.' } });
-  if (!errorRef) throw new Error('No error reference was issued.');
-  return { protocolVersion: 1, batteryVersion: 1, requestId: crypto.randomUUID(), battery: 'webui.errors.daemon-refusal', input: { errorRef } };
-}
+/** A provider registry with one undeclared runtime provider and one catalog provider, the only source the catalog reading uses. */
+const catalogSource = { captureProviderCatalogIds: () => ({ providerIds: ['fixture-runtime-provider'], catalogProviderIds: ['fixture-catalog-provider'], assertCurrent() {} }) };
+const providers = () => catalogSource;
+/** One provider-to-catalog reading through the daemon's own browser route. */
+const request = () => ({ protocolVersion: 1, batteryVersion: 1, requestId: crypto.randomUUID(), battery: 'webui.models.catalog-provider-match', input: { providerId: 'fixture-runtime-provider', keys: ['fixture-catalog-provider'] } });
 
 /** A loopback endpoint whose answers carry a field the question never asked for. */
 async function fixture(answer: (name: string) => Record<string, unknown>, refuse?: { status: number; body: string }, usage: Record<string, number> = { input_tokens: 1, output_tokens: 1 }) {
@@ -46,7 +36,7 @@ async function fixture(answer: (name: string) => Record<string, unknown>, refuse
   const disposal = { add(_label: string, dispose: () => void | Promise<void>) { cleanup.push(dispose); } };
   const previous = installJudgmentPort(undefined);
   const judgment = composeJudgment({ config, secrets, env, stateRoot: join(root, 'state'), disposal });
-  const service = composeBrowserJudgment({ judgment, config, secrets, env, methods: failingMethods(), disposal });
+  const service = composeBrowserJudgment({ judgment, config, secrets, env, methods: new GatewayMethodCatalog(), providers, disposal });
   installJudgmentPort(undefined);
   return { judgment, service, async close() {
     try { for (const dispose of cleanup.reverse()) await dispose(); } finally { server.stop(true); installJudgmentPort(previous); }
@@ -56,7 +46,7 @@ async function fixture(answer: (name: string) => Record<string, unknown>, refuse
 test('a provider refusal that echoes private input is retained without the echo', async () => {
   const f = await fixture(() => ({ type: 'noul', noul: 0.99 }), { status: 400, body: JSON.stringify({ error: { message: ECHO } }) });
   try {
-    await expect(f.service.execute(requestFor(f.service), principal, new AbortController().signal, () => principal)).rejects.toBeDefined();
+    await expect(f.service.execute(request(), principal, new AbortController().signal, () => principal)).rejects.toBeDefined();
     const entries = f.judgment.decisionLog.query();
     expect(entries.length).toBeGreaterThan(0);
     expect(entries.every(entry => entry.status === 'failed')).toBe(true);
@@ -65,9 +55,9 @@ test('a provider refusal that echoes private input is retained without the echo'
 });
 
 test('a well-formed answer settles through the same route', async () => {
-  const f = await fixture(name => ({ type: 'noul', noul: name === 'session_closed' ? 0.99 : 0.01 }));
+  const f = await fixture(() => ({ type: 'noul', noul: 0.99 }));
   try {
-    expect(await f.service.execute(requestFor(f.service), principal, new AbortController().signal, () => principal)).toMatchObject({ status: 'settled' });
+    expect(await f.service.execute(request(), principal, new AbortController().signal, () => principal)).toMatchObject({ status: 'settled', value: { matches: [true] } });
     expect(f.judgment.decisionLog.query({ status: 'answered' })).toHaveLength(1);
   } finally { await f.close(); }
 });
@@ -76,7 +66,7 @@ test('the browser route admits only the strict answer shape the shared route tol
   // Fractional token counts are not a shape the browser boundary admits.
   const f = await fixture(() => ({ type: 'noul', noul: 0.99 }), undefined, { input_tokens: 1.5, output_tokens: 1 });
   try {
-    await expect(f.service.execute(requestFor(f.service), principal, new AbortController().signal, () => principal))
+    await expect(f.service.execute(request(), principal, new AbortController().signal, () => principal))
       .rejects.toMatchObject({ code: 'JUDGMENT_INVALID_RESPONSE' });
     expect(f.judgment.decisionLog.query({ status: 'answered' })).toEqual([]);
   } finally { await f.close(); }

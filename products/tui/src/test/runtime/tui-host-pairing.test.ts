@@ -13,7 +13,7 @@ const id = 'pair-12345678-1234-1234-1234-123456789abc';
 function fixture(options: { migrationResponse?: () => Response | Promise<Response>; mutate?: () => void; rejectMinted?: boolean; holdAuth?: number; redirectAuth?: boolean } = {}) {
   const home = makeProjectTempDir('tui-host-pairing');
   const configManager = new TuiConfigManager({ surfaceRoot: 'tui', configDir: join(home, '.goodvibes', 'tui'), workingDir: home, homeDir: home });
-  let authorized = true; let migrations = 0; let authCalls = 0; let reads = 0; const paths: string[] = [];
+  let authorized = true; let migrations = 0; let authCalls = 0; let reads = 0; const paths: string[] = []; const attempts: unknown[] = [];
   const server = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(request) {
     const path = new URL(request.url).pathname; paths.push(path);
     const token = request.headers.get('authorization')?.replace('Bearer ', '');
@@ -26,7 +26,8 @@ function fixture(options: { migrationResponse?: () => Response | Promise<Respons
     }
     if (path === '/api/control-plane/methods/pairing.tokens.migrate/invoke' && request.method === 'POST') {
       migrations++; expect(token).toBe(shared);
-      const body = await request.json() as { body: { name: string } };
+      const body = await request.json() as { body: { name: string; attemptId?: unknown } };
+      attempts.push(body.body.attemptId);
       options.mutate?.();
       return options.migrationResponse?.() ?? Response.json({ token: { token: minted, id, name: body.body.name, createdAt: Date.now() } });
     }
@@ -36,7 +37,7 @@ function fixture(options: { migrationResponse?: () => Response | Promise<Respons
   const tokenPath = join(home, '.goodvibes', 'daemon', 'operator-tokens.json'); mkdirSync(join(home, '.goodvibes', 'daemon'), { recursive: true });
   writeFileSync(tokenPath, JSON.stringify({ token: shared }), { mode: 0o600 });
   const optionsForPairing = { configManager, homeDirectory: home, bootstrapShared: true };
-  return { home, host: server.url.origin, configManager, tokenPath, options: optionsForPairing, paths,
+  return { home, host: server.url.origin, configManager, tokenPath, options: optionsForPairing, paths, attempts,
     get migrations() { return migrations; }, get authCalls() { return authCalls; }, set authorized(value: boolean) { authorized = value; },
     close() { expect(reads).toBe(0); server.stop(true); } };
 }
@@ -92,19 +93,22 @@ describe('TUI-owned explicit host pairing', () => {
       expect(results.filter(result => result.status === 'paired')).toHaveLength(1); expect(f.migrations).toBe(1);
     } finally { f.close(); }
   });
-  for (const fault of ['lost', 'malformed', 'too-large', 'redirect'] as const) test(`${fault} result preserves durable unknown and forbids fallback/remint`, async () => {
+  for (const fault of ['lost', 'malformed', 'too-large', 'redirect'] as const) test(`${fault} result preserves durable unknown; only the same attempt is repeated`, async () => {
     const f = fixture({ migrationResponse: () => fault === 'lost' ? new Response(shared, { status: 503 }) : fault === 'malformed' ? Response.json({ token: shared }) : fault === 'too-large' ? new Response('x'.repeat(17_000)) : new Response(null, { status: 307, headers: { location: '/do-not-follow' } }) });
     try {
       const result = await pair(f); expect(result.status).toBe('unknown'); expect(JSON.stringify(result)).not.toContain(shared);
       expect(readTuiHostPairing(f.home, f.host).status).toBe('unknown'); expect(resolveNativeHostCredential(f.options).available).toBe(false);
-      expect((await previewTuiHostPairing(f.options)).result.status).toBe('unknown'); expect(f.migrations).toBe(1);
+      // Without the bootstrap selected nothing is sent.
+      expect((await previewTuiHostPairing({ ...f.options, bootstrapShared: false })).result.status).toBe('unknown'); expect(f.migrations).toBe(1);
+      expect((await previewTuiHostPairing(f.options)).result.status).toBe('unknown'); expect(f.migrations).toBe(2);
+      expect(typeof f.attempts[0]).toBe('string'); expect(f.attempts[1]).toBe(f.attempts[0]);
     } finally { f.close(); }
   });
   test('an unresolved attempt is forgotten only after its fresh owner confirmation, and a paired record is never cleared', async () => {
     const f = fixture({ migrationResponse: () => new Response(shared, { status: 503 }) });
     try {
       expect((await pair(f)).status).toBe('unknown');
-      const preview = await previewTuiHostPairing(f.options);
+      const preview = await previewTuiHostPairing({ ...f.options, bootstrapShared: false });
       expect(preview.result.status).toBe('unknown');
       expect(preview.result.confirmation).toMatch(/^CLEAR /);
       expect((await preview.confirm!('CLEAR nonsense')).status).toBe('cancelled');
@@ -134,13 +138,18 @@ describe('TUI-owned explicit host pairing', () => {
       expect(readTuiHostPairing(f.home, 'http://127.0.0.1:1').status).toBe('missing'); expect(resolveNativeHostCredential(f.options).available).toBe(false);
     } finally { f.close(); }
   });
-  test('cancelled in-flight request preserves unknown through restart', async () => {
+  test('a lost reply is settled by repeating the same attempt, which pairs without a second credential', async () => {
     let start!: () => void; const started = new Promise<void>(resolve => { start = resolve; });
-    const f = fixture({ mutate: start, migrationResponse: () => new Promise<Response>(() => {}) });
+    let replies = 0;
+    const f = fixture({ mutate: start, migrationResponse: () => replies++ === 0 ? new Promise<Response>(() => {}) : Response.json({ token: { token: minted, id, name: 'GoodVibes TUI', createdAt: Date.now() } }) });
     try {
       const p = await previewTuiHostPairing(f.options); const controller = new AbortController();
       const result = p.confirm!(p.result.confirmation!, controller.signal); await started; controller.abort();
-      expect((await result).status).toBe('unknown'); expect((await previewTuiHostPairing(f.options)).result.status).toBe('unknown'); expect(f.migrations).toBe(1);
+      expect((await result).status).toBe('unknown');
+      expect((await previewTuiHostPairing({ ...f.options, bootstrapShared: false })).result.status).toBe('unknown'); expect(f.migrations).toBe(1);
+      expect((await previewTuiHostPairing(f.options)).result.status).toBe('paired');
+      expect(f.migrations).toBe(2); expect(f.attempts[1]).toBe(f.attempts[0]);
+      expect(resolveNativeHostCredential(f.options)).toMatchObject({ available: true, token: minted });
     } finally { f.close(); }
   });
   for (const status of [403, 429]) test(`a ${status} answer from the host releases the marker so pairing can be previewed again`, async () => {

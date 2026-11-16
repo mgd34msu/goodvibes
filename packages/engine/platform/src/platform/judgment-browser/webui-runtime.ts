@@ -2,7 +2,7 @@ import { createSpeechSeamsAdapter } from './batteries/speech-seams.js';
 import { canonicalSpeechSeams, snapshotSpeechSeams } from './speech-source.js';
 import {
   BrowserJudgmentError, missingScopes,
-  type AuthenticatedPrincipal, type BrowserJudgmentBatteryId, type BrowserJudgmentErrorSource, type BrowserJudgmentChatSessions,
+  type AuthenticatedPrincipal, type BrowserJudgmentBatteryId, type BrowserJudgmentChatSessions,
 } from '@goodvibes-jev/engine/daemon-api';
 import type { GatewayMethodDescriptor } from '../control-plane/method-catalog-shared.js';
 import { snapshotJudgmentInput } from '../gate/judgment-input.js';
@@ -10,12 +10,11 @@ import { BrowserJudgmentReferences } from './references.js';
 import { BrowserJudgmentRegistry } from './registry.js';
 import { BrowserJudgmentService } from './service.js';
 import type { BrowserJudgmentAuthorization, BrowserJudgmentRoute } from './types.js';
-import { createWebuiCatalogProviderAdapter, webuiDaemonRefusalAdapter } from './batteries/webui-adapters.js';
-import { readStructuredDaemonRefusal, snapshotWebuiDaemonRefusal, snapshotWebuiCredentialNames } from './batteries/webui-readers.js';
+import { createWebuiCatalogProviderAdapter } from './batteries/webui-adapters.js';
+import { snapshotWebuiCredentialNames } from './batteries/webui-readers.js';
 import { granted, requireSynchronousAssertion } from './guards.js';
 
-const ERRORS = 'webui.errors.daemon-refusal';
-export type WebuiJudgmentSourceKind = 'daemon-error' | 'chat-speech' | 'provider-catalog-ids';
+export type WebuiJudgmentSourceKind = 'chat-speech' | 'provider-catalog-ids';
 
 /** Source/purpose permission is owned by the host, separately from read scopes. */
 export interface WebuiBrowserJudgmentOptions {
@@ -38,9 +37,10 @@ function canRead(principal: AuthenticatedPrincipal, scopes: readonly string[]): 
 }
 
 /**
- * The real WebUI source owner. Only host chat messages read for speech, provider
- * catalog ids, canonical mail-read subjects and authenticated failures enter this closed registry.
- * Status enums stay in the pure catalog; no dynamic status issuer is invented.
+ * The real WebUI source owner. Only host chat messages read for speech and
+ * provider catalog ids enter this closed registry. Daemon refusals carry their
+ * machine code, so the web UI reads them without a battery. Status enums stay
+ * in the pure catalog; no dynamic status issuer is invented.
  */
 export function createWebuiBrowserJudgment(options: WebuiBrowserJudgmentOptions): BrowserJudgmentService {
   const references = new BrowserJudgmentReferences();
@@ -138,39 +138,7 @@ export function createWebuiBrowserJudgment(options: WebuiBrowserJudgmentOptions)
       return { ...lease, dispose: revoke };
     } catch (error) { captured.signal.removeEventListener('abort', revoke); revoke(); throw error; }
   }));
-  registry.register(webuiDaemonRefusalAdapter);
-
-  const issueErrorReference = ({ principal, methodId, status, body }: BrowserJudgmentErrorSource): string | undefined => {
-    try {
-      if (!canRead(principal, ['write:judgment']) || status < 400 || status > 599) return undefined;
-      const method = options.methods.get(methodId);
-      if (!method || method.access === 'remote-peer' || (method.access === 'admin' && !principal.admin)
-        || !canRead(principal, method.scopes)) return undefined;
-      const scopes = Object.freeze([...method.scopes]);
-      const access = method.access;
-      // The canonical response is inspected in full before selecting its
-      // bounded original error message. No stack, URL, header or payload is
-      // staged by the browser, and no returned errorRef is ever trusted.
-      const source = snapshotJudgmentInput(body);
-      if (!source || typeof source !== 'object' || Array.isArray(source)) return undefined;
-      const fields = source as Record<string, unknown>;
-      const message = typeof fields['error'] === 'string' ? fields['error'] : fields['message'];
-      const snapshot = snapshotWebuiDaemonRefusal({ methodId, status, message,
-        ...(typeof fields['code'] === 'string' ? { code: fields['code'] } : {}),
-        ...(fields['category'] === 'network' || fields['category'] === 'authentication' ? { category: fields['category'] } : {}),
-      });
-      if (!snapshot.message.trim() || readStructuredDaemonRefusal(snapshot) !== undefined) return undefined;
-      const assertCurrent = () => {
-        if (options.methods.get(methodId) !== method || method.access !== access || method.scopes.length !== scopes.length
-          || method.scopes.some((scope, index) => scope !== scopes[index])) return held();
-      };
-      return remember(references.issue({ principalId: principal.principalId, battery: ERRORS,
-        revision: crypto.randomUUID(), expiresAt: Date.now() + 300_000, snapshot, assertCurrent,
-        mayRead: (actor) => actor.principalKind === principal.principalKind && canRead(actor, ['write:judgment', ...scopes]) && (access !== 'admin' || actor.admin),
-      }), principal, ERRORS, ['daemon-error']);
-    } catch { return undefined; }
-  };
-  return new BrowserJudgmentService({ registry, references, currentRoute: options.currentRoute, issueErrorReference,
+  return new BrowserJudgmentService({ registry, references, currentRoute: options.currentRoute,
     bindChatSessions(source) {
       const invalidate = () => {
         for (const [id, binding] of bindings) if (binding.sources.includes('chat-speech')) references.revoke(id);

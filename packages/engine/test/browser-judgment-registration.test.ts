@@ -19,7 +19,7 @@ const inputs: Record<BrowserJudgmentBatteryId, unknown> = {
 };
 
 /** Ids still in the wire contract whose readings the web UI now decides in code; the runtime no longer serves them. */
-const RETIRED = new Set<BrowserJudgmentBatteryId>(['webui.palette.command-rank', 'webui.credentials.provider-key', 'webui.code.language', 'webui.config.credential-key', 'webui.settings.card-material-key']);
+const RETIRED = new Set<BrowserJudgmentBatteryId>(['webui.palette.command-rank', 'webui.credentials.provider-key', 'webui.code.language', 'webui.config.credential-key', 'webui.settings.card-material-key', 'webui.errors.daemon-refusal']);
 
 test('every published battery id is served by the runtime, except the retired ones, and has a contract schema', async () => {
   const log = new SqliteDecisionLog(':memory:');

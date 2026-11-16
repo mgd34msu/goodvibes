@@ -44,7 +44,12 @@ const storeUnreadable = (home: string, refusal?: { readonly status: string; read
     : `The pairing store at ${agentHostPairingStorePath(home)} cannot be read or written. Fix its permissions or move the damaged file aside, then preview again. Nothing was created.`,
 });
 const unknown = (host: string): AgentHostPairingResult => ({ status: 'unknown', host, message: 'The reply to a pairing request was lost, so this Agent does not know whether the host created its credential. Run goodvibes-agent setup pair to repeat the same request: the host answers it with that credential, never a second one.' });
-const rejected = (host: string, status: number): AgentHostPairingResult => ({ status: 'rejected', host, message: `The host refused the pairing request (HTTP ${status}); nothing was created. Check that this host allows pairing, then preview again.` });
+const rejected = (host: string, status: number, repeat: boolean): AgentHostPairingResult => ({
+  status: 'rejected', host,
+  message: repeat
+    ? `The host refused the repeated pairing request (HTTP ${status}), so the unresolved attempt was forgotten; anything the host made for it was never received and lapses unused. Check that this host allows pairing, then preview again.`
+    : `The host refused the pairing request (HTTP ${status}); nothing was created. Check that this host allows pairing, then preview again.`,
+});
 // A refusal before any minting (a 4xx other than a timeout or a conflict, or a host that was not listening) proves no credential exists.
 const refusedWithoutMinting = (status: number): boolean => status >= 400 && status < 500 && status !== 408 && status !== 409;
 const connectionRefused = (error: unknown): boolean => {
@@ -84,10 +89,6 @@ function authCheckFailed(error: unknown, host: string, aborted: boolean): AgentH
   }
 }
 
-/** Preview is read-only. The returned one-shot capability binds the exact host,
- * source credential, name and store state to a fresh terminal confirmation.
- * No raw token, credential digest or remote error leaves this module.
- */
 /**
  * An unresolved attempt that could not be repeated (no credential to send, or
  * the host still did not answer). Clearing it is an owner-terminal action: it
@@ -194,7 +195,7 @@ async function sendAgentMigration(input: {
       if ((await clearAgentHostPairingAttempt(home, host, attemptId)).status !== 'cleared') return settled(unknown(host));
       return settled(response.status === 404
         ? { status: 'host-lacks-pairing', host, message: `The host at ${host} does not offer pairing (HTTP 404); it runs an older GoodVibes. Update GoodVibes on the host, then preview again. Nothing was created.` }
-        : rejected(host, response.status));
+        : rejected(host, response.status, input.repeat));
     }
     const minted = parseMintedPairingToken(await readHostPairingResponse(response), name);
     if (!minted) return settled(unknown(host));
@@ -209,6 +210,12 @@ async function sendAgentMigration(input: {
   }
 }
 
+/** Preview is read-only, except that an attempt the owner already confirmed
+ * and whose reply was lost is repeated under its own id. The returned one-shot
+ * capability binds the exact host, source credential, name and store state to
+ * a fresh terminal confirmation. No raw token, credential digest or remote
+ * error leaves this module.
+ */
 export async function previewAgentHostPairing(
   options: AgentDaemonVerbCallerOptions,
   name = 'GoodVibes Agent',
@@ -226,20 +233,53 @@ export async function previewAgentHostPairing(
     if (!host) return { result: { status: 'no-host-configured', message: `The configured host address (${configured}) is not a usable http(s) origin. Set controlPlane.host and controlPlane.port to the GoodVibes daemon, then preview again.` } };
     const pairingHost = host;
     const state = readAgentHostPairing(home, pairingHost);
-    if (state.status === 'unknown') return clearPreview(home, pairingHost, state.attemptId);
     if (state.status === 'unavailable') return { result: storeUnreadable(home, state) };
     const selection = { configManager: options.configManager, homeDirectory: options.homeDirectory };
     const selected = resolveConnectedHost(selection);
-    if (selected.token === null) {
-      return { result: { status: 'no-credential', host: pairingHost, message: `No credential to pair with: ${selected.unavailable?.reason ?? `nothing found in ${selected.credential}`}. Pairing starts from the host's shared operator token; provision it for this Agent, then preview again.` } };
-    }
-    const selectedToken = selected.token;
     const fetchOption = options.fetchImpl ? { fetchImpl: options.fetchImpl } : {};
     const verifyAs = (token: string, callSignal: AbortSignal | undefined) => {
       const connection: ConnectedHostConnection = { baseUrl: pairingHost, token, credential: selected.credential };
       return createConnectedHost(() => connection, fetchOption)
         .invoke('control.auth.current', {}, { signal: callSignal, deadlineMs: PAIRING_AUTH_DEADLINE_MS });
     };
+    // A freshly stored credential counts as paired only once the host verifies it as this device
+    // and it is what this Agent will present. `sourceToken` is the credential that asked for it.
+    const verifyStored = async (minted: { readonly token: string; readonly tokenId: string }, sourceToken: string, verifySignal: AbortSignal | undefined): Promise<AgentHostPairingResult> => {
+      // Persist before verifying: a lost verification reply must never lose
+      // the only copy of the newly issued credential or cause another mint.
+      if (verifySignal?.aborted) return { status: 'paired-unverified', host: pairingHost, message: 'Pairing credential stored for this host. Verification was interrupted; rerun setup status. No second credential will be created.' };
+      let pairedAuth;
+      try { pairedAuth = await verifyAs(minted.token, verifySignal); }
+      catch (error) {
+        const cause = authCheckFailed(error, pairingHost, Boolean(verifySignal?.aborted));
+        return { status: 'paired-unverified', host: pairingHost, message: `Pairing credential stored for this host, but live verification failed (${cause.status}). Rerun setup status; do not remint.` };
+      }
+      if (!isNativePairedPrincipal(pairedAuth) || pairedAuth.principalId !== `pairing:${minted.tokenId}`) return { status: 'paired-unverified', host: pairingHost, message: 'Pairing credential stored, but this host did not verify its expected native principal. Inspect the host; do not remint.' };
+      const finalHome = typeof options.homeDirectory === 'function' ? options.homeDirectory() : options.homeDirectory;
+      if (finalHome !== home || !resolveConnectedHostDialEnabled(options.configManager)
+        || canonicalizePairingHost(resolveConnectedHostBaseUrl(options.configManager)) !== pairingHost
+        || (envOverride() && readConnectedHostOperatorToken(home).token !== sourceToken)) return { status: 'paired-unverified', host: pairingHost, message: 'Pairing credential stored for the original host. Current host, home, dialing or environment credential changed; preview setup status again.' };
+      if (envOverride()) return { status: 'paired-shadowed', host: pairingHost, message: 'Pairing credential stored for this host. An environment token still takes precedence. Review that override before rerunning setup status; no environment variable was changed.' };
+      const effective = resolveConnectedHost(selection);
+      if (canonicalizePairingHost(effective.baseUrl) !== pairingHost || effective.token !== minted.token) return { status: 'paired-unverified', host: pairingHost, message: 'Pairing credential stored for the original host. Current configuration or authority is unverified; rerun setup status before native work.' };
+      return { status: 'paired', host: pairingHost, message: 'Agent pairing is stored and the selected host verified native intake authority. Provider, workspace, Jev and execution readiness remain separate checks.' };
+    };
+    if (state.status === 'unknown') {
+      // The owner confirmed this attempt when it was first sent; it is repeated
+      // under its own id, which the host answers with the credential it already
+      // made (or a first one), never a second. The marker hides the host-bound
+      // credential, so the shared token is read without a host.
+      const bootstrap = readConnectedHostOperatorToken(home).token;
+      if (!bootstrap) return clearPreview(home, pairingHost, state.attemptId);
+      const outcome = await sendAgentMigration({ home, host: pairingHost, token: bootstrap, name: state.name, attemptId: state.attemptId, repeat: true, fetchImpl: options.fetchImpl, signal });
+      if (outcome.status === 'paired') return { result: await verifyStored(outcome, bootstrap, signal) };
+      if (outcome.result.status === 'unknown') return clearPreview(home, pairingHost, state.attemptId);
+      return { result: outcome.result };
+    }
+    if (selected.token === null) {
+      return { result: { status: 'no-credential', host: pairingHost, message: `No credential to pair with: ${selected.unavailable?.reason ?? `nothing found in ${selected.credential}`}. Pairing starts from the host's shared operator token; provision it for this Agent, then preview again.` } };
+    }
+    const selectedToken = selected.token;
     const current = (): boolean => {
       const nowHome = typeof options.homeDirectory === 'function' ? options.homeDirectory() : options.homeDirectory;
       const now = resolveConnectedHost(selection);
@@ -271,7 +311,6 @@ export async function previewAgentHostPairing(
       if (consumed || answer !== confirmation || actionSignal?.aborted) return cancelled();
       consumed = true;
       let attempted = false;
-      let attemptId: string | undefined;
       try {
         // Authority can be revoked after preview without replacing the local token.
         let live;
@@ -280,7 +319,7 @@ export async function previewAgentHostPairing(
         if (actionSignal?.aborted) return cancelled();
         if (!current() || !isDeepStrictEqual(readAgentHostPairing(home, pairingHost), state)) return changed();
         if (!isHostPairingBootstrapPrincipal(live)) return changed();
-        attemptId = randomUUID();
+        const attemptId = randomUUID();
         const begin = await beginAgentHostPairing(home, pairingHost, { attemptId, name, startedAt: Date.now() });
         if (begin.status !== 'begun') return begin.status === 'conflict' ? changed() : storeUnreadable(home, begin);
         // Once the durable marker exists, every interruption is conservatively
@@ -291,50 +330,10 @@ export async function previewAgentHostPairing(
         const nowHome = typeof options.homeDirectory === 'function' ? options.homeDirectory() : options.homeDirectory;
         if (actionSignal?.aborted || nowHome !== home || !resolveConnectedHostDialEnabled(options.configManager)
           || canonicalizePairingHost(resolveConnectedHostBaseUrl(options.configManager)) !== pairingHost || bootstrap.token !== selectedToken) return unknown(pairingHost);
-        // `pairing.tokens.migrate` has no route of its own in the operator
-        // contract, so it goes through the daemon's invoke-by-id route.
-        const fetchImpl = options.fetchImpl ?? fetch;
-        const response = await fetchImpl(`${pairingHost}/api/control-plane/methods/pairing.tokens.migrate/invoke`, {
-          method: 'POST', redirect: 'error',
-          headers: { authorization: `Bearer ${selectedToken}`, 'content-type': 'application/json' },
-          body: JSON.stringify({ body: { name } }),
-          signal: AbortSignal.any([AbortSignal.timeout(PAIRING_MINT_DEADLINE_MS), ...(actionSignal ? [actionSignal] : [])]),
-        });
-        if (!response.ok) {
-          await response.body?.cancel();
-          if (!refusedWithoutMinting(response.status)) return unknown(pairingHost);
-          if ((await clearAgentHostPairingAttempt(home, pairingHost, attemptId)).status !== 'cleared') return unknown(pairingHost);
-          return response.status === 404
-            ? { status: 'host-lacks-pairing', host: pairingHost, message: `The host at ${pairingHost} does not offer pairing (HTTP 404); it runs an older GoodVibes. Update GoodVibes on the host, then preview again. Nothing was created.` }
-            : rejected(pairingHost, response.status);
-        }
-        const payload = await readHostPairingResponse(response);
-        const minted = parseMintedPairingToken(payload, name);
-        if (!minted) return unknown(pairingHost);
-        const complete = await completeAgentHostPairing(home, pairingHost, attemptId, { token: minted.token, tokenId: minted.id, name, createdAt: minted.createdAt });
-        if (complete.status !== 'paired') return unknown(pairingHost);
-        // Persist before verifying: a lost verification reply must never lose
-        // the only copy of the newly issued credential or cause another mint.
-        if (actionSignal?.aborted) return { status: 'paired-unverified', host: pairingHost, message: 'Pairing credential stored for this host. Verification was interrupted; rerun setup status. No second credential will be created.' };
-        let pairedAuth;
-        try { pairedAuth = await verifyAs(minted.token, actionSignal); }
-        catch (error) {
-          const cause = authCheckFailed(error, pairingHost, Boolean(actionSignal?.aborted));
-          return { status: 'paired-unverified', host: pairingHost, message: `Pairing credential stored for this host, but live verification failed (${cause.status}). Rerun setup status; do not remint.` };
-        }
-        if (!isNativePairedPrincipal(pairedAuth) || pairedAuth.principalId !== `pairing:${minted.id}`) return { status: 'paired-unverified', host: pairingHost, message: 'Pairing credential stored, but this host did not verify its expected native principal. Inspect the host; do not remint.' };
-        const finalHome = typeof options.homeDirectory === 'function' ? options.homeDirectory() : options.homeDirectory;
-        if (finalHome !== home || !resolveConnectedHostDialEnabled(options.configManager)
-          || canonicalizePairingHost(resolveConnectedHostBaseUrl(options.configManager)) !== pairingHost
-          || (envOverride() && readConnectedHostOperatorToken(home).token !== selectedToken)) return { status: 'paired-unverified', host: pairingHost, message: 'Pairing credential stored for the original host. Current host, home, dialing or environment credential changed; preview setup status again.' };
-        if (envOverride()) return { status: 'paired-shadowed', host: pairingHost, message: 'Pairing credential stored for this host. An environment token still takes precedence. Review that override before rerunning setup status; no environment variable was changed.' };
-        const effective = resolveConnectedHost(selection);
-        if (canonicalizePairingHost(effective.baseUrl) !== pairingHost || effective.token !== minted.token) return { status: 'paired-unverified', host: pairingHost, message: 'Pairing credential stored for the original host. Current configuration or authority is unverified; rerun setup status before native work.' };
-        return { status: 'paired', host: pairingHost, message: 'Agent pairing is stored and the selected host verified native intake authority. Provider, workspace, Jev and execution readiness remain separate checks.' };
+        const outcome = await sendAgentMigration({ home, host: pairingHost, token: selectedToken, name, attemptId, repeat: false, fetchImpl: options.fetchImpl, signal: actionSignal });
+        if (outcome.status !== 'paired') return outcome.result;
+        return await verifyStored(outcome, selectedToken, actionSignal);
       } catch (error) {
-        if (attempted && attemptId && connectionRefused(error) && (await clearAgentHostPairingAttempt(home, pairingHost, attemptId)).status === 'cleared') {
-          return { status: 'host-unreachable', host: pairingHost, message: `No GoodVibes daemon answered at ${pairingHost} when the pairing request was sent. Start the daemon there, then preview again. Nothing was created.` };
-        }
         if (attempted) return unknown(pairingHost);
         if (actionSignal?.aborted) return cancelled();
         return { status: 'host-error', host: pairingHost, message: `Pairing stopped before any request was sent: ${error instanceof Error ? error.name : 'unexpected failure'}. Preview again; nothing was created.` };

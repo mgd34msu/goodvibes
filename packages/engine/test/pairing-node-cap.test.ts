@@ -14,7 +14,7 @@
  *   - lowering the cap below the current count unpairs nobody.
  */
 import { describe, expect, test } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -38,6 +38,11 @@ function pair(manager: PairingTokenManager, name: string): ReturnType<PairingTok
   const minted = manager.mint({ name });
   if (!manager.authenticate(minted.token)) throw new Error(`${name} did not pair`);
   return minted;
+}
+
+/** Records in the persisted store, offers included: what could ever authenticate. */
+function stored(filePath: string): number {
+  return (JSON.parse(readFileSync(filePath, 'utf8')) as { tokens: unknown[] }).tokens.length;
 }
 
 function makeFixture(initialCap: number | undefined): Fixture {
@@ -220,6 +225,49 @@ describe('device.nodes.maxPaired bounds pairing', () => {
       expect(f.manager.pairedCount()).toBe(0);
       expect(() => pair(f.manager, 'Pixel')).not.toThrow();
       expect(f.manager.list().map((token) => token.name)).toEqual(['Pixel']);
+    } finally {
+      f.cleanup();
+    }
+  });
+
+  test('a pairing screen that mints again withdraws its own unused offer, never a device that used one', () => {
+    const f = makeFixture(undefined);
+    try {
+      let shown = f.manager.mint({ name: 'qr' });
+      for (let i = 0; i < 9; i++) {
+        const previous = shown;
+        shown = f.manager.mint({ name: 'qr', replacesOffer: previous.id });
+        expect(f.manager.authenticate(previous.token)).toBeNull();
+      }
+      expect(stored(f.filePath)).toBe(1);
+      expect(f.manager.isOpenOffer(shown.id)).toBe(true);
+
+      expect(f.manager.authenticate(shown.token)).not.toBeNull();
+      const next = f.manager.mint({ name: 'qr', replacesOffer: shown.id });
+      expect(f.manager.authenticate(shown.token)).not.toBeNull();
+      expect(f.manager.isOpenOffer(shown.id)).toBe(false);
+      expect(f.manager.isOpenOffer(next.id)).toBe(true);
+      expect(stored(f.filePath)).toBe(2);
+    } finally {
+      f.cleanup();
+    }
+  });
+
+  test('a migration repeated with its attempt id re-issues that offer: the lost secret never works, one device results', () => {
+    const f = makeFixture(undefined);
+    try {
+      const lost = f.manager.mintForMigration({ name: 'GoodVibes TUI', attemptId: 'attempt-0001' });
+      const repeated = f.manager.mintForMigration({ name: 'GoodVibes TUI', attemptId: 'attempt-0001' });
+      expect(repeated.id).toBe(lost.id);
+      expect(repeated.token).not.toBe(lost.token);
+      expect(f.manager.authenticate(lost.token)).toBeNull();
+      expect(stored(f.filePath)).toBe(1);
+
+      expect(f.manager.authenticate(repeated.token)?.id).toBe(lost.id);
+      // Claimed: the attempt is over, so the same id now asks for a new device.
+      const after = f.manager.mintForMigration({ name: 'GoodVibes TUI', attemptId: 'attempt-0001' });
+      expect(after.id).not.toBe(lost.id);
+      expect(f.manager.authenticate(repeated.token)?.id).toBe(lost.id);
     } finally {
       f.cleanup();
     }

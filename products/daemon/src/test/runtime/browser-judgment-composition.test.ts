@@ -26,14 +26,8 @@ const principal: AuthenticatedPrincipal = {
 };
 const questions = { session_not_found: noul('Does this fixture name a missing session?') };
 
-/** A catalog with one method whose canonical failure the daemon can issue a reference for. */
-function failingMethods(): GatewayMethodCatalog {
-  const methods = new GatewayMethodCatalog();
-  methods.register({ id: 'synthetic.browser.failure', title: 'Synthetic failure', description: 'Owned failure source',
-    category: 'sessions', access: 'authenticated', source: 'builtin', transport: ['http'], scopes: [],
-  }, async () => { throw new Error('unused'); });
-  return methods;
-}
+/** A provider registry with one undeclared runtime provider and one catalog provider, the only source the catalog reading uses. */
+const catalogSource = { captureProviderCatalogIds: () => ({ providerIds: ['fixture-runtime-provider'], catalogProviderIds: ['fixture-catalog-provider'], assertCurrent() {} }) };
 
 test.each(['TYPESAFE_BASE_URL', 'TYPESAFE_API_KEY', 'TYPESAFE_DEFAULT_MODEL'] as const)('fresh browser calls recover after observed %s environment changes', async (key) => {
   const entered = Promise.withResolvers<void>(); const release = Promise.withResolvers<void>();
@@ -43,18 +37,15 @@ test.each(['TYPESAFE_BASE_URL', 'TYPESAFE_API_KEY', 'TYPESAFE_DEFAULT_MODEL'] as
   const inner: JudgmentPort = { model: 'jev-1.13.0', async ask(input) {
     calls++; entered.resolve(); await release.promise;
     return { requestedModel: 'jev-1.13.0', model: 'jev-1.13.0', requestId: undefined, usage: { inputTokens: 1, outputTokens: 1 }, latencyMs: 1,
-      answers: Object.fromEntries(Object.keys(input.questions).map((name) => [name, { type: 'noul', noul: name === 'session_closed' ? 0.99 : 0.01 }])) as never };
+      answers: Object.fromEntries(Object.keys(input.questions).map((name) => [name, { type: 'noul', noul: 0.99 }])) as never };
   } };
   const cleanup: (() => void | Promise<void>)[] = [];
   const service = composeBrowserJudgment({ judgment: { port: withDecisionLog(inner, log), decisionLog: log, volumeMonitor: { lastAlert: () => undefined } }, env,
-    methods: failingMethods(), config: configuration().configManager, secrets: { onDidChange: () => () => {} },
+    methods: new GatewayMethodCatalog(), providers: () => catalogSource, config: configuration().configManager, secrets: { onDidChange: () => () => {} },
     disposal: { add(_label, dispose) { cleanup.push(dispose); } },
   });
-  const input = () => {
-    const errorRef = service.issueErrorReference({ principal, methodId: 'synthetic.browser.failure', status: 500, body: { error: 'The synthetic session has finished and cannot accept this operation.' } });
-    if (!errorRef) throw new Error('No error reference was issued.');
-    return { protocolVersion: 1, requestId: crypto.randomUUID(), battery: BATTERY, batteryVersion: 1, input: { errorRef } };
-  };
+  const input = () => ({ protocolVersion: 1, requestId: crypto.randomUUID(), battery: 'webui.models.catalog-provider-match', batteryVersion: 1,
+    input: { providerId: 'fixture-runtime-provider', keys: ['fixture-catalog-provider'] } });
   try {
     const pending = service.execute(input(), principal, new AbortController().signal, () => principal);
     await entered.promise;

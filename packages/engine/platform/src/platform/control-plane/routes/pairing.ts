@@ -15,7 +15,7 @@
 import type { GatewayMethodCatalog } from '../method-catalog.js';
 import type { GatewayMethodHandler, GatewayMethodInvocation } from '../method-catalog-shared.js';
 import type { PairingTokenManager } from '../../pairing/pairing-token-store.js';
-import { PairingLimitReachedError, PairingMinterRevokedError, pairingTokenIdOfPrincipal } from '../../pairing/pairing-token-store.js';
+import { PairingLimitReachedError, PairingMinterRevokedError, isPairingAttemptId, pairingTokenIdOfPrincipal } from '../../pairing/pairing-token-store.js';
 import { GatewayVerbError } from './gateway-verb-error.js';
 import { readInvocationParams } from './invocation-params.js';
 
@@ -79,12 +79,25 @@ function createMigrateHandler(service: PairingGatewayService): GatewayMethodHand
     requirePrincipal(invocation);
     const params = readInvocationParams(invocation);
     const name = requireString(params.name, 'name');
+    const rawAttemptId = params.attemptId;
+    let attemptId: string | undefined;
+    if (rawAttemptId !== undefined) {
+      if (!isPairingAttemptId(rawAttemptId)) {
+        throw new GatewayVerbError('attemptId must be 8 to 128 letters, digits or . _ : -', 'INVALID_ARGUMENT', 400, 'attemptId');
+      }
+      attemptId = rawAttemptId;
+    }
     try {
       // A device moving off the legacy shared token is not a NEW node, it is a
       // node that is already using this daemon. Refusing it at the cap would
       // strand a working device on a token that is about to be revoked, so the
-      // migration mint is exempt from the cap.
-      return { token: service.mintForMigration({ name, mintedBy: pairingTokenIdOfPrincipal(invocation.context.principalId) }) };
+      // migration mint is exempt from the cap. A repeated attempt id (the client
+      // lost the reply) re-issues the offer that attempt made instead of adding one.
+      return { token: service.mintForMigration({
+        name,
+        mintedBy: pairingTokenIdOfPrincipal(invocation.context.principalId),
+        ...(attemptId !== undefined ? { attemptId } : {}),
+      }) };
     } catch (error) {
       rethrowAsVerbError(error);
     }

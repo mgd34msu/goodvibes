@@ -106,7 +106,7 @@ describe('pairing modal surface', () => {
     const text = tabText(surface.buildView(), 'pairing');
     expect(text).toContain('token-v2');
     expect(text).not.toContain('token-v1');
-    expect(statuses.some((s) => s.includes('fresh device token'))).toBe(true);
+    expect(statuses).toHaveLength(1);
     // Non-destructive: it is not a confirmed action and routes to no command.
     expect((surface.actions ?? []).find((a) => a.id === 'newToken')?.confirm).toBeUndefined();
   });

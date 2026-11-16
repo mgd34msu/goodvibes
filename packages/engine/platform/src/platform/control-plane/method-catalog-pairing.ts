@@ -116,11 +116,11 @@ export const builtinGatewayPairingMethodDescriptors: readonly GatewayMethodDescr
   methodDescriptor({
     id: 'pairing.tokens.migrate',
     title: 'Migrate Off The Shared Token',
-    description: 'A client currently authenticated with the legacy single shared token mints its OWN named per-device token and receives the plaintext secret once, the honest migration path. This does NOT revoke the shared token; that is a separate explicit step (pairing.tokens.revokeShared).',
+    description: 'A client currently authenticated with the legacy single shared token mints its OWN named per-device token and receives the plaintext secret once, the honest migration path. Send an attemptId and send the same one again when a reply is lost: while the token that attempt produced is unused, the repeat returns that token (same id) under a new secret instead of minting a second one. This does NOT revoke the shared token; that is a separate explicit step (pairing.tokens.revokeShared).',
     category: 'pairing',
     scopes: ['write:control-plane'],
     transport: ['ws'],
-    inputSchema: objectSchema({ name: STRING_SCHEMA }, ['name']),
+    inputSchema: objectSchema({ name: STRING_SCHEMA, attemptId: STRING_SCHEMA }, ['name']),
     outputSchema: objectSchema({ token: MINTED_PAIRING_TOKEN_SCHEMA }, ['token']),
   }),
   methodDescriptor({

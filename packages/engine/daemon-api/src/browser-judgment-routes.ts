@@ -8,8 +8,6 @@ import { parseBrowserJudgmentRequest } from './browser-judgment-validation.js';
 
 export interface BrowserJudgmentCapability {
   execute(input: unknown, principal: AuthenticatedPrincipal, signal: AbortSignal, currentPrincipal: () => AuthenticatedPrincipal): Promise<object>;
-  /** Server-only canonical failure producer. Never populated from request JSON. */
-  issueErrorReference?(input: BrowserJudgmentErrorSource): string | undefined;
   /** Binds the actual host chat store; the returned release fences that store's lifetime. */
   bindChatSessions?(source: BrowserJudgmentChatSessions): () => void;
 }
@@ -27,12 +25,6 @@ export interface BrowserJudgmentChatSessions {
   /** Optional canonical completed messages; absence holds code-language reading. */
   getMessages?(sessionId: string): readonly BrowserJudgmentChatMessage[];
   getSession(id: string): { readonly id: string; readonly title: string; readonly createdAt: number; readonly updatedAt: number } | null;
-}
-export interface BrowserJudgmentErrorSource {
-  readonly principal: AuthenticatedPrincipal;
-  readonly methodId: string;
-  readonly status: number;
-  readonly body: unknown;
 }
 export interface BrowserJudgmentHttpContext {
   readonly authenticate: (req: Request) => AuthenticatedPrincipal | null;

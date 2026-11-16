@@ -18,15 +18,15 @@ import { formatPairingOffers, formatPostureCapabilities, pairingPostureNotice } 
 // encoded.
 //
 // `getConnectionInfo` is a lazy thunk (loaded on the first buildView of each
-// open, cached until the modal closes): each modal open mints its OWN named
-// per-device token and a closed modal forgets it, so a reopened modal never
-// shows a token that was revoked or has gone stale in between. A missing
+// open). The token it shows is an offer: no device is added until one uses it.
+// The modal keeps the offer across close and hands it back on the next open,
+// so reopening shows the same QR while nobody has used it and it has not
+// expired, and adds nothing; otherwise a new offer replaces it. A missing
 // pairing service, or one that refuses to mint (for example the paired-device
 // cap), degrades honestly to an "unavailable" state with the reason instead of
-// throwing at registration time. "new device token" clears the cache and re-pulls to mint a
-// fresh token + QR in place, non-destructive now, because a freshly minted
-// token no longer rotates a shared secret out from under a live device; old
-// tokens stay valid until explicitly revoked in the settings device surface.
+// throwing at registration time. "new device token" asks for a fresh offer in
+// place; the one it replaces stops working unless a device already used it, and
+// a device that did keeps working until it is revoked in the device surface.
 // ---------------------------------------------------------------------------
 
 export interface PairingModalConnectionInfo {
@@ -47,6 +47,15 @@ export interface PairingModalConnectionInfo {
    * from a locally-authored string. Absent when no web origin is known.
    */
   readonly posture?: OriginPosture | undefined;
+  /** The minted token's id, so the next request can reuse or replace this offer. */
+  readonly tokenId?: string | undefined;
+}
+/** What the modal asks of `getConnectionInfo`. */
+export interface PairingConnectionRequest {
+  /** The offer the modal showed last; reused while nobody has used it, else replaced. */
+  readonly held?: PairingModalConnectionInfo | undefined;
+  /** A new offer even when `held` is still open (the "new device token" action). */
+  readonly fresh?: boolean | undefined;
 }
 export interface PairingModalControlPlaneSnapshot { readonly activeClientIds: readonly string[]; }
 export interface PairingModalReadModel<T> { getSnapshot(): T; }
@@ -73,9 +82,10 @@ export interface PairingModalDeps {
   /** Lazy connection-info provider. Returns null when the daemon/companion
    *  token cannot be resolved, or throws with the reason (for example the
    *  paired-device cap); either way the modal renders an honest degraded state. */
-  readonly getConnectionInfo: () => PairingModalConnectionInfo | null;
+  readonly getConnectionInfo: (request?: PairingConnectionRequest) => PairingModalConnectionInfo | null;
   readonly controlPlaneReadModel?: PairingModalReadModel<PairingModalControlPlaneSnapshot>;
-  readonly copyToClipboard?: (text: string) => void;
+  /** Writes the terminal clipboard escape; true when it was written (the terminal never confirms it). */
+  readonly copyToClipboard?: (text: string) => boolean | void;
   /**
    * Probe tailscale (tailscale.get) once on open. Absent dep, a null result, or
    * `available:false` all keep the tailscale affordance QUIET, never a nag.
@@ -98,12 +108,16 @@ class PairingModalSurface implements ConfigModalSurface {
   readonly name = 'pairing-modal';
   readonly title = 'Device Pairing';
   private info: PairingModalConnectionInfo | null | undefined = undefined;
+  /** The offer shown last, kept across close so the next open can reuse or replace it. */
+  private held: PairingModalConnectionInfo | undefined = undefined;
   /** Why the last mint threw, shown in the degraded state; null when it returned null or has not run. */
   private infoError: string | null = null;
   private revealed = false;
   private requestRender: () => void = () => {};
   /** tailscale.get result: undefined = not probed yet, null = probed/absent (stays quiet). */
   private tailscale: PairingTailscaleStatus | null | undefined = undefined;
+  /** Why the Tailscale probe failed (not "not installed": a probe that threw). */
+  private tailscaleError: string | null = null;
   /** The receipt from a completed serve run, rendered verbatim under the affordance. */
   private serveReceipt: PairingTailscaleServeReceipt | null = null;
   /** True while a serve run is in flight (the action is single-shot). */
@@ -130,25 +144,29 @@ class PairingModalSurface implements ConfigModalSurface {
   onOpen(requestRender: () => void): void {
     this.requestRender = requestRender;
     // Probe tailscale once on open; the affordance stays quiet until (and unless)
-    // this resolves to an available status. Failures degrade to quiet absence.
+    // this resolves to an available status. Tailscale being absent stays quiet;
+    // a probe that failed says why in one dim row.
     if (this.deps.probeTailscale && this.tailscale === undefined) {
       this.deps.probeTailscale()
-        .then((status) => { this.tailscale = status ?? null; this.requestRender(); })
-        .catch(() => { this.tailscale = null; this.requestRender(); });
+        .then((status) => { this.tailscale = status ?? null; this.tailscaleError = null; this.requestRender(); })
+        .catch((error: unknown) => { this.tailscale = null; this.tailscaleError = summarizeError(error); this.requestRender(); });
     }
   }
 
-  /** The token minted for this open is dropped on close, so the next open mints its own. */
+  /** The view is rebuilt on the next open; the offer is held so that open reuses or replaces it. */
   onClose(): void {
     this.info = undefined;
     this.infoError = null;
     this.revealed = false;
   }
 
-  private ensureInfo(): PairingModalConnectionInfo | null {
+  private ensureInfo(fresh = false): PairingModalConnectionInfo | null {
     if (this.info === undefined) {
       this.infoError = null;
-      try { this.info = this.deps.getConnectionInfo(); } catch (error) { this.info = null; this.infoError = summarizeError(error); }
+      try {
+        this.info = this.deps.getConnectionInfo(this.held || fresh ? { held: this.held, fresh } : undefined);
+        if (this.info) this.held = this.info;
+      } catch (error) { this.info = null; this.infoError = summarizeError(error); }
     }
     return this.info;
   }
@@ -158,7 +176,7 @@ class PairingModalSurface implements ConfigModalSurface {
     if (!info) {
       return { title: 'Device Pairing', degraded: this.infoError
           ? `Device pairing is unavailable: ${this.infoError}`
-          : 'Device pairing is unavailable: the pairing token service could not be resolved for this session.', tabs: [{ id: 'pairing', label: 'Pairing', rows: [] }] };
+          : 'Device pairing is unavailable: this session has no pairing token store.', tabs: [{ id: 'pairing', label: 'Pairing', rows: [] }] };
     }
     const { url, token, tokenName, deepLink, offers, posture } = info;
     const displayToken = this.revealed ? token : SECRET_MASK;
@@ -219,6 +237,7 @@ class PairingModalSurface implements ConfigModalSurface {
    */
   private appendTailscaleRows(rows: ConfigModalRow[]): void {
     const ts = this.tailscale;
+    if (this.tailscaleError !== null) rows.push(infoRow('ts-error', `Tailscale check failed: ${this.tailscaleError}`, { fg: MODAL_TONES.dim }));
     if (!ts || !ts.available) return; // absence stays quiet
     const httpsUrl = this.serveReceipt?.url ?? ts.httpsUrl;
     if (httpsUrl) {
@@ -240,19 +259,20 @@ class PairingModalSurface implements ConfigModalSurface {
     if (id === 'toggleReveal') { this.revealed = !this.revealed; this.requestRender(); return; }
     if (id === 'tailscaleServe') { this.runTailscaleServe(ctx); return; }
     if (id === 'copyLink') {
-      if (!this.deps.copyToClipboard || !info) { ctx.print('Clipboard not available.'); return; }
-      this.deps.copyToClipboard(info.deepLink);
-      ctx.print('Pairing link copied to clipboard.');
+      if (!this.deps.copyToClipboard || !info) { ctx.setStatus('No pairing link to copy; press v to reveal it instead.'); return; }
+      const written = this.deps.copyToClipboard(info.deepLink);
+      ctx.setStatus(written === false
+        ? 'Could not write to the terminal clipboard; press v to reveal the link instead.'
+        : 'Sent the pairing link to the terminal clipboard, if your terminal supports it (OSC 52); press v to reveal it if the paste is empty.');
       return;
     }
     if (id === 'newToken') {
-      // Each open mints its own named token; "new device token" just re-pulls the
-      // thunk to mint a fresh one + QR in place. Non-destructive: the prior token
-      // stays valid until it is revoked in /settings → security → devices.
+      // A fresh offer + QR in place. The offer it replaces stops working unless a
+      // device already used it; a device that did is paired and stays until revoked.
       const previous = this.info;
       this.info = undefined;
       this.revealed = false;
-      if (this.ensureInfo() === null) {
+      if (this.ensureInfo(true) === null) {
         // A refused mint (e.g. the device cap) keeps the token already on screen rather than blanking a working QR.
         this.info = previous ?? null;
         ctx.setStatus(this.infoError ? `Could not mint a device token: ${this.infoError}` : 'Could not mint a device token.');
@@ -260,7 +280,7 @@ class PairingModalSurface implements ConfigModalSurface {
         return;
       }
       this.requestRender();
-      ctx.setStatus('Minted a fresh device token and QR. Revoke old ones in /settings → security → devices.');
+      ctx.setStatus('New device token and QR shown. The previous one no longer works unless a device already paired with it; paired devices are in /settings → security → devices.');
       return;
     }
   }
@@ -284,8 +304,8 @@ class PairingModalSurface implements ConfigModalSurface {
       })
       .catch((err: unknown) => {
         this.serving = false;
-        this.serveReceipt = { at: Date.now(), command: 'tailscale serve', ok: false, detail: err instanceof Error ? err.message : String(err) };
-        ctx.setStatus('Tailscale serve failed.');
+        this.serveReceipt = { at: Date.now(), command: 'tailscale serve', ok: false, detail: summarizeError(err) };
+        ctx.setStatus(`Tailscale serve failed: ${summarizeError(err)}`);
         this.requestRender();
       });
   }
@@ -293,25 +313,4 @@ class PairingModalSurface implements ConfigModalSurface {
 
 export function createPairingModalSurface(deps: PairingModalDeps): ConfigModalSurface {
   return new PairingModalSurface(deps);
-}
-
-/**
- * Deterministic golden fixture: a frozen connectionInfo literal (the QR renders
- * purely from its deepLink via generateQrMatrix) and a frozen control-plane
- * snapshot.
- */
-export function pairingModalGoldenSurface(): ConfigModalSurface {
-  const connectionInfo: PairingModalConnectionInfo = {
-    url: 'http://workshop.local:3141',
-    token: 'golden-token-0123456789abcdef',
-    tokenName: 'golden device',
-    deepLink: 'http://workshop.local:3141/#pair=golden-token-0123456789abcdef&offers=notifications~relay~passkey',
-    offers: ['notifications', 'relay', 'passkey'],
-    posture: describeOriginPosture('http://workshop.local:3141'),
-  };
-  return createPairingModalSurface({
-    getConnectionInfo: () => connectionInfo,
-    controlPlaneReadModel: { getSnapshot: () => ({ activeClientIds: ['golden-client-1'] }) },
-    copyToClipboard: () => {},
-  });
 }

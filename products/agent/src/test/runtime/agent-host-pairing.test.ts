@@ -23,7 +23,7 @@ function fixture(options: { mutate?: () => void; migrationResponse?: () => Respo
   savedEnv = envNames.map(key => process.env[key]); for (const key of envNames) delete process.env[key];
   const homeDirectory = makeProjectTempDir('agent-pairing');
   const configManager = new ConfigManager({ surfaceRoot: GOODVIBES_AGENT_SURFACE_ROOT, configDir: join(homeDirectory, '.goodvibes', 'agent'), workingDir: homeDirectory, homeDir: homeDirectory });
-  let authStatus = options.authStatus ?? 'shared'; let migrations = 0; const requests: string[] = [];
+  let authStatus = options.authStatus ?? 'shared'; let migrations = 0; const requests: string[] = []; const attempts: unknown[] = [];
   const server = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(request) {
     const path = new URL(request.url).pathname; requests.push(path);
     const token = request.headers.get('authorization')?.replace('Bearer ', '');
@@ -31,7 +31,8 @@ function fixture(options: { mutate?: () => void; migrationResponse?: () => Respo
       principalId: token === minted || authStatus === 'paired' ? `pairing:${tokenId}` : 'shared-token', principalKind: 'token', credential: (token === minted || authStatus === 'paired' ? `pairing:${tokenId}` : 'shared-token') === 'shared-token' ? 'shared-token' as const : 'device-token' as const, admin: authStatus !== 'non-admin' && !(options.rejectMintedAuth && token === minted), scopes: ['*'], roles: [] });
     if (path === '/api/control-plane/methods/pairing.tokens.migrate/invoke' && request.method === 'POST') {
       migrations++; expect(token).toBe(shared);
-      const body = await request.json() as { body: { name: string } };
+      const body = await request.json() as { body: { name: string; attemptId?: unknown } };
+      attempts.push(body.body.attemptId);
       options.mutate?.();
       return options.migrationResponse?.() ?? Response.json({ token: { token: minted, id: tokenId, name: body.body.name, createdAt: Date.now() } });
     }
@@ -40,7 +41,7 @@ function fixture(options: { mutate?: () => void; migrationResponse?: () => Respo
   configManager.set('controlPlane.host', '127.0.0.1'); configManager.set('controlPlane.port', server.port!); configManager.set('daemon.connectedHost.enabled', true);
   const tokenPath = join(homeDirectory, '.goodvibes', 'daemon', 'operator-tokens.json'); mkdirSync(join(homeDirectory, '.goodvibes', 'daemon'), { recursive: true });
   writeFileSync(tokenPath, JSON.stringify({ token: shared }));
-  return { configManager, homeDirectory, tokenPath, server, host: server.url.origin, requests, get migrations() { return migrations; }, set authStatus(value: typeof authStatus) { authStatus = value; }, close: () => server.stop(true) };
+  return { configManager, homeDirectory, tokenPath, server, host: server.url.origin, requests, attempts, get migrations() { return migrations; }, set authStatus(value: typeof authStatus) { authStatus = value; }, close: () => server.stop(true) };
 }
 
 async function confirm(f: ReturnType<typeof fixture>, name?: string) {
@@ -96,7 +97,7 @@ describe('explicit Agent host pairing', () => {
   });
 
   for (const response of ['lost', 'malformed', 'too-large'] as const) {
-    test(`durable unknown survives ${response} outcome and blocks remint`, async () => {
+    test(`durable unknown survives ${response} outcome; only the same attempt is repeated`, async () => {
       const f = fixture({ migrationResponse: () => response === 'lost' ? new Response(`remote-error-${shared}`, { status: 503 }) : response === 'malformed' ? Response.json({ token: shared }) : new Response('x'.repeat(17000)) });
       try {
         const result = await confirm(f);
@@ -104,7 +105,8 @@ describe('explicit Agent host pairing', () => {
         expect(readAgentHostPairing(f.homeDirectory, f.host).status).toBe('unknown');
         expect((await previewAgentHostPairing(f)).result.status).toBe('unknown');
         expect(readConnectedHostOperatorToken(f.homeDirectory, f.host).token).toBeNull();
-        expect(resolveDaemonOperatorConnection(f.configManager, f.homeDirectory).token).toBeNull(); expect(f.migrations).toBe(1);
+        expect(resolveDaemonOperatorConnection(f.configManager, f.homeDirectory).token).toBeNull();
+        expect(f.migrations).toBe(2); expect(typeof f.attempts[0]).toBe('string'); expect(f.attempts[1]).toBe(f.attempts[0]);
       } finally { f.close(); }
     });
   }
@@ -151,16 +153,19 @@ describe('explicit Agent host pairing', () => {
     } finally { f.close(); }
   });
 
-  test('cancellation after the one migration request leaves durable unknown and never retries', async () => {
+  test('a lost reply is settled by repeating the same attempt, which pairs without a second credential', async () => {
     let started!: () => void; const requested = new Promise<void>(resolve => { started = resolve; });
-    const f = fixture({ mutate: started, migrationResponse: () => new Promise<Response>(() => {}) });
+    let replies = 0;
+    const f = fixture({ mutate: started, migrationResponse: () => replies++ === 0 ? new Promise<Response>(() => {}) : Response.json({ token: { token: minted, id: tokenId, name: 'GoodVibes Agent', createdAt: Date.now() } }) });
     try {
       const preview = await previewAgentHostPairing(f); const controller = new AbortController();
       const result = preview.confirm!(preview.result.confirmation!, controller.signal);
       await requested; controller.abort();
       expect((await result).status).toBe('unknown'); expect(f.migrations).toBe(1);
       expect(readAgentHostPairing(f.homeDirectory, f.host).status).toBe('unknown');
-      expect((await previewAgentHostPairing(f)).result.status).toBe('unknown');
+      expect((await previewAgentHostPairing(f)).result.status).toBe('paired');
+      expect(f.migrations).toBe(2); expect(f.attempts[1]).toBe(f.attempts[0]);
+      expect(readConnectedHostOperatorToken(f.homeDirectory, f.host).token).toBe(minted);
     } finally { f.close(); }
   });
 

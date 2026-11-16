@@ -78,9 +78,10 @@ export function resolveNativeHostCredential(options: NativeHostCredentialOptions
     if (!enabled) return { available: false, identity, reason: 'Selected daemon is disabled.' };
     if (!baseUrl) return { available: false, identity, reason: 'Select an exact HTTP(S) daemon origin without a path, query, fragment or user information.' };
     if (pairing?.status === 'paired') return { available: true, baseUrl, token: pairing.token, identity, expectedPrincipalId: `pairing:${pairing.tokenId}` };
-    // A pairing whose outcome is unknown stays the owner's to inspect: its
-    // device token may be live on the daemon, so nothing is swapped in under it.
-    if (pairing?.status === 'unknown') return { available: false, identity, reason: 'A host pairing for this daemon has an unknown outcome. Check it with /host pair, then retry.' };
+    // A pairing whose reply was lost is settled by repeating it under its attempt
+    // id (the host answers with the credential it made, never a second one), so
+    // nothing is swapped in under it meanwhile.
+    if (pairing?.status === 'unknown') return { available: false, identity, reason: 'The reply to this terminal\'s pairing request was lost. On this machine /work repeats it on its own; for a daemon on another machine run /host pair --bootstrap-shared to repeat it.' };
     if (pairing?.status === 'missing') return { available: false, identity, reason: 'This terminal has no device credential for this daemon. On this machine /work creates one on first use; for a daemon on another machine, pair this terminal with /host pair.' };
     return { available: false, identity, reason: 'The TUI host credential store is unavailable.' };
   } catch {

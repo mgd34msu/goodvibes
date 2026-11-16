@@ -12,7 +12,6 @@ import type { RouteBindingManager } from '../platform/src/platform/channels/inde
 import { createDaemonRuntimeSessionRouteHandlers } from '../daemon-api/src/runtime-session-routes.js';
 import type { DaemonRuntimeRouteContext } from '../daemon-api/src/runtime-route-types.js';
 import { dispatchSessionRoutes } from '../daemon-api/src/sessions.js';
-import { readStructuredDaemonRefusal } from '../platform/src/platform/judgment-browser/batteries/webui-readers.js';
 
 const SESSION_ID = 's-tui-idle';
 const BODY = 'Queue a cleanup pass for later';
@@ -212,11 +211,6 @@ test('missing shared-session HTTP routes preserve the canonical structured refus
       expect(response.status, entry.methodId).toBe(404);
       const body = await response.json();
       expect(body, entry.methodId).toEqual({ error: 'Unknown shared session', code: 'SESSION_NOT_FOUND', status: 404 });
-      expect(readStructuredDaemonRefusal({ methodId: entry.methodId, status: response.status, message: body.error, code: body.code }), entry.methodId).toEqual({
-        status: 'ready', basis: 'structured', value: {
-          session_not_found: true, session_closed: false, session_active: false, session_not_local: false, method_unknown: false,
-        },
-      });
     }
     expect(fixture.broker.getSession('owned-missing-session')).toBeNull();
     expect(fixture.spawnCount).toBe(0);

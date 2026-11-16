@@ -12,6 +12,7 @@ import { createNativeDataWriteOwner, createInstalledReaderCohort } from '@goodvi
 import { drainOwned } from '@goodvibes-jev/judgment';
 import { defineLifecycle, logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import { RefusalError, refusal } from '@goodvibes-jev/engine/errors';
+import { WorkspaceSwapManager } from '@goodvibes-jev/engine/platform/platform/workspace';
 
 export interface DaemonHostBinding {
   readonly host?: string;
@@ -28,6 +29,12 @@ export interface DaemonHostOptions {
   /** Absent for source/embedded hosts; the native CLI supplies a verified installation. */
   readonly updateArtifact?: DaemonUpdateArtifact;
   readonly hasOverriddenHome?: boolean;
+  /**
+   * The start option that chose the working directory ahead of the saved
+   * setting (`--working-dir`, `GOODVIBES_WORKING_DIR`), when there was one: a
+   * saved working-directory change then says that option must change first.
+   */
+  readonly workingDirectoryOverride?: string;
   /** Explicit opt-in; an absent binding constructs no secondary listener. */
   readonly httpListener?: DaemonHostBinding;
   /**
@@ -284,6 +291,10 @@ export function createDaemonHost(options: DaemonHostOptions, factories: DaemonHo
         daemonHomeDir: options.runtime.daemonHomeDirectory,
         configManager: runtime.configManager, userAuth: runtime.localUserAuthManager,
         runtimeBus: runtime.runtimeBus, runtimeServices: runtime,
+        // A working-directory change (POST /config runtime.workingDir) is saved for the next start; this process stays on its root.
+        ...(options.runtime.daemonHomeDirectory === undefined ? {} : { swapManager: new WorkspaceSwapManager(runtime.workingDirectory, {
+          runtimeBus: runtime.runtimeBus, daemonHomeDir: options.runtime.daemonHomeDirectory, startOverride: options.workingDirectoryOverride,
+        }) }),
         drainForNativeHandover,
         deferNativeActivationUntilHostReady: true,
         serveFactory: createSafeHostServeFactory('Configured daemon', binding?.serveFactory),

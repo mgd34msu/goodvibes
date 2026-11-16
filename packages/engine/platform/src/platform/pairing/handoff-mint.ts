@@ -11,7 +11,9 @@
  *
  * The minted token is an offer until the device uses it: showing a QR that is
  * never scanned adds no device, and an unused offer stops working after
- * PAIRING_OFFER_LIFETIME_MS (pairing-token-store.ts).
+ * PAIRING_OFFER_LIFETIME_MS (pairing-token-store.ts). A producer that shows a
+ * new QR in place of its earlier one passes `replacesOffer`, so the earlier
+ * offer is withdrawn unless a device already used it.
  *
  * The token rides in the URL fragment, never the query, so it is never sent to a
  * server (no access-log / Referer exposure). The offer set rides alongside so a
@@ -27,7 +29,7 @@ import type { MintedPairingToken } from './pairing-token-store.js';
 
 /** The token-minting surface a handoff needs, satisfied by {@link PairingTokenManager}. */
 export interface PairingTokenMinter {
-  mint(input: { readonly name: string }): MintedPairingToken;
+  mint(input: { readonly name: string; readonly replacesOffer?: string | undefined }): MintedPairingToken;
 }
 
 export interface PairingHandoff {
@@ -54,6 +56,12 @@ export interface MintPairingHandoffInput {
   readonly offers: readonly PairingHandoffOfferKind[];
   /** The web-app origin the deep link points at; absent ⇒ fragment-only. */
   readonly webOrigin?: string | undefined;
+  /**
+   * The token id of the offer this producer showed before. If no device used
+   * it, it is withdrawn in the same write as the new mint, so a screen that is
+   * opened or refreshed again holds one live offer, not one per view.
+   */
+  readonly replacesOffer?: string | undefined;
 }
 
 /**
@@ -69,7 +77,7 @@ export function defaultPairingTokenName(now: Date = new Date()): string {
 }
 
 export function mintPairingHandoff(input: MintPairingHandoffInput): PairingHandoff {
-  const token = input.pairingTokens.mint({ name: input.name });
+  const token = input.pairingTokens.mint({ name: input.name, ...(input.replacesOffer !== undefined ? { replacesOffer: input.replacesOffer } : {}) });
   const fragment = buildPairingHandoffFragment({ token: token.token, offers: input.offers });
   const deepLink = input.webOrigin
     ? buildPairingHandoffLink({ webOrigin: input.webOrigin, token: token.token, offers: input.offers })

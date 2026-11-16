@@ -6,7 +6,7 @@ import { createProviderRuntimeInspectionQuery } from '@/runtime/index.ts';
 import { createRuntimeProviderApi } from '@/runtime/index.ts';
 import { copyToClipboard } from '../utils/clipboard.ts';
 import { ensurePublicBaseUrl, pairingOriginUsesStableHost, refreshStableHostInputs } from '@goodvibes-jev/engine/platform/platform/pairing';
-import { PairingLimitReachedError, availablePairingOffers, mintPairingHandoff, defaultPairingTokenName } from '@goodvibes-jev/engine/platform/platform/pairing';
+import { availablePairingOffers, mintPairingHandoff, defaultPairingTokenName } from '@goodvibes-jev/engine/platform/platform/pairing';
 import { probePairingTailscale, runPairingTailscaleServe } from '../core/pairing-tailscale-gateway.ts';
 // ── Providers & Connectivity + Security subset ────────────────────────────────
 import { createServicesModalSurface } from './modals/services-modal.ts';
@@ -28,7 +28,7 @@ import { createMemoryModalSurface, type MemoryModalDeps } from './modals/memory-
 import { createMemoryConsolidationGateway } from './memory-consolidation-gateway.ts';
 import { createWorkPlanModalSurface } from './modals/work-plan-modal.ts';
 import { createKeybindingsModalSurface } from './modals/keybindings-modal.ts';
-import { createPairingModalSurface, type PairingModalConnectionInfo } from './modals/pairing-modal.ts';
+import { createPairingModalSurface, type PairingConnectionRequest, type PairingModalConnectionInfo } from './modals/pairing-modal.ts';
 import { createDevicesModalSurface } from './modals/devices-modal.ts';
 import { createPlanningModalSurface } from './modals/planning-modal.ts';
 
@@ -158,7 +158,7 @@ export function registerBuiltinModals(
   // ladder, so opening the modal never waits on them and already has the answer.
   if (pairingOriginUsesStableHost(deps.configManager)) void refreshStableHostInputs();
   manager.registerModalSurface(createPairingModalSurface({
-    getConnectionInfo: () => buildPairingConnectionInfo(deps),
+    getConnectionInfo: (request) => buildPairingConnectionInfo(deps, request),
     controlPlaneReadModel: ui.readModels.controlPlane,
     copyToClipboard,
     probeTailscale: () => probePairingTailscale(tailscaleGatewayDeps),
@@ -189,44 +189,46 @@ export function registerBuiltinModals(
 
 /**
  * Build the companion-pairing connection info lazily (called from the pairing
- * surface's first render, not at registration time) so a missing daemon home
- * degrades to an honest "unavailable" modal instead of throwing at startup.
+ * surface's first render, not at registration time). A failure (a token store
+ * that cannot be written, a config error, the device cap) is thrown as it is:
+ * the pairing modal shows its message, so the cause is not guessed here.
  * Mirrors the retired Qr view factory's construction.
  */
-export function buildPairingConnectionInfo(deps: ResolvedBuiltinViewDeps): PairingModalConnectionInfo | null {
-  try {
-    const ui = deps.uiServices;
-    const configManager = deps.configManager;
-    // Freeze a stable web origin once (never clobbering a user-set value).
-    const webOrigin = ensurePublicBaseUrl(configManager);
-    const offers = availablePairingOffers({
-      relayEnabled: configManager.get('relay.enabled') === true,
-      // The TUI composition always wires a step-up service ⇒ the passkey offer is
-      // presentable; the web app declines it if the device has no authenticator.
-      stepUpAvailable: true,
-    });
-    // Mint a fresh per-device token and encode the canonical `#pair=` deep link,
-    // the same mint the pairing.handoff.create verb performs, no raw JSON blob.
-    const handoff = mintPairingHandoff({
-      pairingTokens: ui.platform.pairingTokens,
-      name: defaultPairingTokenName(),
-      offers,
-      webOrigin: webOrigin.origin,
-    });
-    return {
-      // The routable address rides beside a name the device may not resolve.
-      url: webOrigin.alternateOrigin ? `${webOrigin.origin}  (or ${webOrigin.alternateOrigin})` : webOrigin.origin,
-      token: handoff.token.token,
-      tokenName: handoff.token.name,
-      deepLink: handoff.deepLink ?? handoff.fragment,
-      offers: handoff.offers,
-      posture: handoff.posture,
-    };
-  } catch (error) {
-    // The device cap is a real, nameable refusal; the modal shows its message.
-    if (error instanceof PairingLimitReachedError) throw error;
-    return null;
-  }
+export function buildPairingConnectionInfo(deps: ResolvedBuiltinViewDeps, request: PairingConnectionRequest = {}): PairingModalConnectionInfo {
+  const ui = deps.uiServices;
+  const configManager = deps.configManager;
+  // Freeze a stable web origin once (never clobbering a user-set value).
+  const webOrigin = ensurePublicBaseUrl(configManager);
+  const url = webOrigin.alternateOrigin ? `${webOrigin.origin}  (or ${webOrigin.alternateOrigin})` : webOrigin.origin;
+  const held = request.held;
+  // Reopening shows the same offer while nobody has used it and it has not
+  // expired: no new credential, no write. Otherwise the new offer replaces it.
+  if (!request.fresh && held?.tokenId !== undefined && held.url === url && ui.platform.pairingTokens.isOpenOffer(held.tokenId)) return held;
+  const offers = availablePairingOffers({
+    relayEnabled: configManager.get('relay.enabled') === true,
+    // The TUI composition always wires a step-up service ⇒ the passkey offer is
+    // presentable; the web app declines it if the device has no authenticator.
+    stepUpAvailable: true,
+  });
+  // Mint a per-device offer and encode the canonical `#pair=` deep link,
+  // the same mint the pairing.handoff.create verb performs, no raw JSON blob.
+  const handoff = mintPairingHandoff({
+    pairingTokens: ui.platform.pairingTokens,
+    name: defaultPairingTokenName(),
+    offers,
+    webOrigin: webOrigin.origin,
+    replacesOffer: held?.tokenId,
+  });
+  return {
+    // The routable address rides beside a name the device may not resolve.
+    url,
+    token: handoff.token.token,
+    tokenName: handoff.token.name,
+    deepLink: handoff.deepLink ?? handoff.fragment,
+    offers: handoff.offers,
+    posture: handoff.posture,
+    tokenId: handoff.token.id,
+  };
 }
 
 /** A minimal config-modal surface that renders an honest "not wired" degraded
@@ -248,15 +250,20 @@ export function createBuiltinProviderHealthModalSurface(deps: ResolvedBuiltinVie
     favoritesStore: ui.providers.favoritesStore,
     providerRegistry: ui.providers.providerRegistry,
   }));
-  return createProviderHealthModalSurface(providerRuntime, ui.readModels.providers, () => ({
+  const m = ui.readModels;
+  const domainModels = [m.localAuth, m.settings, m.remote, m.security, m.intelligence, m.continuity, m.worktrees, m.session] as const;
+  return createProviderHealthModalSurface(providerRuntime, m.providers, () => ({
     configManager: deps.configManager,
-    auth: ui.readModels.localAuth.getSnapshot(),
-    settings: ui.readModels.settings.getSnapshot(),
-    remote: ui.readModels.remote.getSnapshot(),
-    security: ui.readModels.security.getSnapshot(),
-    intelligence: ui.readModels.intelligence.getSnapshot(),
-    continuity: ui.readModels.continuity.getSnapshot(),
-    worktrees: ui.readModels.worktrees.getSnapshot(),
-    session: ui.readModels.session.getSnapshot(),
-  }));
+    auth: m.localAuth.getSnapshot(),
+    settings: m.settings.getSnapshot(),
+    remote: m.remote.getSnapshot(),
+    security: m.security.getSnapshot(),
+    intelligence: m.intelligence.getSnapshot(),
+    continuity: m.continuity.getSnapshot(),
+    worktrees: m.worktrees.getSnapshot(),
+    session: m.session.getSnapshot(),
+  }), (listener) => {
+    const unsubs = domainModels.map((model) => model.subscribe(listener));
+    return () => { for (const unsub of unsubs) unsub(); };
+  });
 }

@@ -1,9 +1,5 @@
-import { JudgmentInputError, snapshotJudgmentInput } from '../../gate/judgment-input.js';
-import {
-  WEBUI_READER_LIMITS as LIMITS,
-  type DaemonRefusalItem, type DaemonRefusalValue,
-  type ResolvedCommandRank, type ResolvedDaemonRefusal, type WebuiReadResult,
-} from './webui-types.js';
+import { snapshotJudgmentInput } from '../../gate/judgment-input.js';
+import { WEBUI_READER_LIMITS as LIMITS, type ResolvedCommandRank } from './webui-types.js';
 
 class Hold extends Error {
   constructor(readonly reason: 'budget' | 'unsupported-input') { super('WebUI reading held.'); }
@@ -21,10 +17,6 @@ function text(value: unknown, limit: number, empty = false): string {
   if (value.length > limit) return budget();
   return value;
 }
-function member<T extends string>(value: unknown, options: readonly T[]): T {
-  if (typeof value !== 'string' || !options.includes(value as T)) return unsupported();
-  return value as T;
-}
 
 export function snapshotWebuiCode(input: unknown): { readonly code: string; readonly tag: string } {
   const source = object(snapshotJudgmentInput(input), ['code', 'tag']);
@@ -39,58 +31,6 @@ export function snapshotWebuiCredentialNames(input: unknown): { readonly provide
   const keys = names.map(name => text(name, 256));
   if (new Set(keys).size !== keys.length) return unsupported();
   return { providerId: text(source['providerId'], 128), keys };
-}
-
-export function snapshotWebuiDaemonRefusal(input: unknown): ResolvedDaemonRefusal {
-  // Inspect the COMPLETE source before caps, projection, any hash, or port use.
-  const source = object(snapshotJudgmentInput(input), ['methodId', 'status', 'code', 'category', 'message']);
-  const methodId = text(source['methodId'], 256);
-  const message = text(source['message'], LIMITS.errorBytes, true);
-  if (new TextEncoder().encode(message).byteLength > LIMITS.errorBytes) return budget();
-  const status = source['status'];
-  if (status !== undefined && (typeof status !== 'number' || !Number.isInteger(status) || (status !== 0 && (status < 100 || status > 599)))) return unsupported();
-  const code = source['code'] === undefined ? undefined : text(source['code'], 128, true);
-  const category = source['category'] === undefined ? undefined : member(source['category'], ['network', 'authentication'] as const);
-  return { methodId, message, ...(status === undefined ? {} : { status: status as number }),
-    ...(code === undefined ? {} : { code }), ...(category === undefined ? {} : { category }) };
-}
-
-const REFUSAL_CODES: Readonly<Record<string, DaemonRefusalItem>> = {
-  SESSION_NOT_FOUND: 'session_not_found', SESSION_CLOSED: 'session_closed',
-  SESSION_ACTIVE: 'session_active', SESSION_NOT_LOCAL: 'session_not_local', METHOD_NOT_FOUND: 'method_unknown',
-};
-// Exact existing wire categories, not substring guesses or HTTP 412/501 inference.
-const OTHER_CODES = new Set([
-  'NO_ACTIVE_TURN', 'CONFLICT', 'AUTH_REQUIRED', 'TOKEN_EXPIRED', 'PERMISSION_DENIED',
-  'NETWORK_UNREACHABLE', 'TIMEOUT', 'CANCELLED', 'NOT_INVOKABLE',
-  'CALENDAR_NOT_CONFIGURED', 'CALENDAR_CREDENTIALS_MISSING', 'CALENDAR_AUTH_FAILED',
-  'EMAIL_NOT_CONFIGURED', 'EMAIL_CREDENTIALS_MISSING', 'EMAIL_AUTH_FAILED',
-  'IMAP_NOT_CONFIGURED', 'SMTP_NOT_CONFIGURED', 'IMAP_AUTH_FAILED', 'SMTP_AUTH_FAILED',
-  'step-up-required', 'step-up-verifier-unavailable',
-]);
-const emptyRefusal = (): Record<DaemonRefusalItem, boolean> => ({
-  session_not_found: false, session_closed: false, session_active: false, session_not_local: false, method_unknown: false,
-});
-function structuredRefusal(source: ResolvedDaemonRefusal): DaemonRefusalValue | undefined {
-  const item = source.code !== undefined && Object.hasOwn(REFUSAL_CODES, source.code) ? REFUSAL_CODES[source.code] : undefined;
-  if (item !== undefined) return { ...emptyRefusal(), [item]: item !== 'method_unknown' || source.status === 404 };
-  if (OTHER_CODES.has(source.code ?? '') || source.status === 0 || source.status === 401 || source.category !== undefined) return emptyRefusal();
-  return undefined;
-}
-
-/**
- * Pure caller-side path before the interpretation endpoint. A structural result
- * has no probabilities or decision IDs; `undefined` means a reading is needed.
- */
-export function readStructuredDaemonRefusal(input: ResolvedDaemonRefusal): WebuiReadResult<DaemonRefusalValue> | undefined {
-  try {
-    const value = structuredRefusal(snapshotWebuiDaemonRefusal(input));
-    return value === undefined ? undefined : { status: 'ready', value, basis: 'structured' };
-  } catch (error) {
-    if (error instanceof JudgmentInputError) return { status: 'held', reason: error.problem === 'unsupported-input' ? 'unsupported-input' : 'unsafe-input' };
-    if (error instanceof Hold) return { status: 'held', reason: error.reason };
-    throw error;
-  }
 }
 
 export function snapshotWebuiCommandRank(input: unknown): ResolvedCommandRank {

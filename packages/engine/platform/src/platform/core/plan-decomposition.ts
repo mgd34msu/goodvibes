@@ -1,4 +1,3 @@
-import { JudgmentHeldError } from '../types/judgment-held.js';
 /**
  * Agent-driven goal decomposition for the planner.
  *
@@ -490,9 +489,10 @@ function buildUserPrompt(request: DecomposeGoalRequest, repairErrors?: string[])
  *  4. Agent path: run → parse → strict-validate → (assemble; issues===0 ?
  *     accept : ONE repair attempt) → accept-or-fallback. Spawn error,
  *     cancellation (kill / wall-timeout / token ceiling), or still-invalid
- *     output after repair report a 'fallback' outcome with a reason. When the
- *     gate said to decompose, that run is held: a JudgmentHeldError is thrown
- *     rather than a single-item plan being substituted.
+ *     output after repair report a 'fallback' outcome with a reason.
+ * Every path that does not accept an agent plan returns the documented
+ * single-item proposal (`decomposedBy: 'heuristic'`), with `fallbackReason`
+ * when the agent path failed, so the draft shows why for approval.
  */
 export async function decomposeGoal(
   request: DecomposeGoalRequest,
@@ -505,10 +505,6 @@ export async function decomposeGoal(
   const gate = await planner.shouldDecompose(inputs);
 
   const heuristicResult = (outcome: DecompositionOutcome): DecomposeGoalResult => {
-    if (gate.decompose) {
-      deps.onOutcome?.(outcome);
-      throw new JudgmentHeldError();
-    }
     const base = singleItemProposal(request.goal);
     const fallbackReason = outcome.kind === 'fallback' ? outcome.reason : undefined;
     const usage = outcome.kind === 'fallback' ? outcome.usage : undefined;
@@ -517,6 +513,9 @@ export async function decomposeGoal(
       ...base,
       ...(gate.provenance === undefined ? {} : { provenance: gate.provenance }),
       ...(gate.provenance === 'classic' ? { rationale: 'Classic retains the complete goal as one owner-reviewable item; no semantic decomposition or risk certification was performed.' } : {}),
+      // The planner would have split this goal; say why it is one item and how to change that.
+      ...(gate.decompose && outcome.kind === 'heuristic-configured' ? { rationale: "planner.decomposition is 'heuristic', so the goal is kept as one work item; set it to 'agent' to have a planning agent split it." } : {}),
+      ...(gate.decompose && outcome.kind === 'fallback' ? { rationale: `The planning agent did not produce a plan (${outcome.reason}), so the goal is kept as one work item; review it, or edit the draft into parts.` } : {}),
       decomposedBy: 'heuristic',
       ...(fallbackReason ? { fallbackReason } : {}),
       ...(usage ? { agentUsage: usage } : {}),

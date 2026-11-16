@@ -40104,8 +40104,7 @@ Start a contract for `ask` (the person's words verbatim) in a hosted session cre
                 "inputCommit",
                 "capturedAt",
                 "dirty",
-                "exclusions",
-                "files"
+                "exclusions"
               ],
               "additionalProperties": false
             },
@@ -40261,8 +40260,70 @@ Start a contract for `ask` (the person's words verbatim) in a hosted session cre
                 "inputCommit",
                 "capturedAt",
                 "dirty",
-                "exclusions",
-                "files"
+                "exclusions"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "version": {
+                  "const": 3
+                },
+                "id": {
+                  "type": "string"
+                },
+                "sourceRoot": {
+                  "type": "string"
+                },
+                "sourceIdentity": {
+                  "type": "string"
+                },
+                "gitIdentity": {
+                  "type": "string"
+                },
+                "ownerHead": {
+                  "type": "string"
+                },
+                "ownerRef": {
+                  "type": "string"
+                },
+                "indexFingerprint": {
+                  "type": "string"
+                },
+                "inputTree": {
+                  "type": "string"
+                },
+                "inputCommit": {
+                  "type": "string"
+                },
+                "capturedAt": {
+                  "type": "number"
+                },
+                "dirty": {
+                  "type": "boolean"
+                },
+                "exclusions": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "version",
+                "id",
+                "sourceRoot",
+                "sourceIdentity",
+                "gitIdentity",
+                "ownerHead",
+                "ownerRef",
+                "indexFingerprint",
+                "inputTree",
+                "inputCommit",
+                "capturedAt",
+                "dirty",
+                "exclusions"
               ],
               "additionalProperties": false
             }
@@ -48082,8 +48143,7 @@ One contract with its whole tree, running or ended. The captured input's per-fil
             "inputCommit",
             "capturedAt",
             "dirty",
-            "exclusions",
-            "files"
+            "exclusions"
           ],
           "additionalProperties": false
         },
@@ -48239,8 +48299,70 @@ One contract with its whole tree, running or ended. The captured input's per-fil
             "inputCommit",
             "capturedAt",
             "dirty",
-            "exclusions",
-            "files"
+            "exclusions"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "version": {
+              "const": 3
+            },
+            "id": {
+              "type": "string"
+            },
+            "sourceRoot": {
+              "type": "string"
+            },
+            "sourceIdentity": {
+              "type": "string"
+            },
+            "gitIdentity": {
+              "type": "string"
+            },
+            "ownerHead": {
+              "type": "string"
+            },
+            "ownerRef": {
+              "type": "string"
+            },
+            "indexFingerprint": {
+              "type": "string"
+            },
+            "inputTree": {
+              "type": "string"
+            },
+            "inputCommit": {
+              "type": "string"
+            },
+            "capturedAt": {
+              "type": "number"
+            },
+            "dirty": {
+              "type": "boolean"
+            },
+            "exclusions": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "version",
+            "id",
+            "sourceRoot",
+            "sourceIdentity",
+            "gitIdentity",
+            "ownerHead",
+            "ownerRef",
+            "indexFingerprint",
+            "inputTree",
+            "inputCommit",
+            "capturedAt",
+            "dirty",
+            "exclusions"
           ],
           "additionalProperties": false
         }
@@ -56049,8 +56171,7 @@ Every contract this daemon holds, newest first, each with its whole tree: the as
                   "inputCommit",
                   "capturedAt",
                   "dirty",
-                  "exclusions",
-                  "files"
+                  "exclusions"
                 ],
                 "additionalProperties": false
               },
@@ -56206,8 +56327,70 @@ Every contract this daemon holds, newest first, each with its whole tree: the as
                   "inputCommit",
                   "capturedAt",
                   "dirty",
-                  "exclusions",
-                  "files"
+                  "exclusions"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "version": {
+                    "const": 3
+                  },
+                  "id": {
+                    "type": "string"
+                  },
+                  "sourceRoot": {
+                    "type": "string"
+                  },
+                  "sourceIdentity": {
+                    "type": "string"
+                  },
+                  "gitIdentity": {
+                    "type": "string"
+                  },
+                  "ownerHead": {
+                    "type": "string"
+                  },
+                  "ownerRef": {
+                    "type": "string"
+                  },
+                  "indexFingerprint": {
+                    "type": "string"
+                  },
+                  "inputTree": {
+                    "type": "string"
+                  },
+                  "inputCommit": {
+                    "type": "string"
+                  },
+                  "capturedAt": {
+                    "type": "number"
+                  },
+                  "dirty": {
+                    "type": "boolean"
+                  },
+                  "exclusions": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "version",
+                  "id",
+                  "sourceRoot",
+                  "sourceIdentity",
+                  "gitIdentity",
+                  "ownerHead",
+                  "ownerRef",
+                  "indexFingerprint",
+                  "inputTree",
+                  "inputCommit",
+                  "capturedAt",
+                  "dirty",
+                  "exclusions"
                 ],
                 "additionalProperties": false
               }
@@ -64175,8 +64358,7 @@ Start a contract for `ask`, the person's words verbatim, which every stated acce
                 "inputCommit",
                 "capturedAt",
                 "dirty",
-                "exclusions",
-                "files"
+                "exclusions"
               ],
               "additionalProperties": false
             },
@@ -64332,8 +64514,70 @@ Start a contract for `ask`, the person's words verbatim, which every stated acce
                 "inputCommit",
                 "capturedAt",
                 "dirty",
-                "exclusions",
-                "files"
+                "exclusions"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "version": {
+                  "const": 3
+                },
+                "id": {
+                  "type": "string"
+                },
+                "sourceRoot": {
+                  "type": "string"
+                },
+                "sourceIdentity": {
+                  "type": "string"
+                },
+                "gitIdentity": {
+                  "type": "string"
+                },
+                "ownerHead": {
+                  "type": "string"
+                },
+                "ownerRef": {
+                  "type": "string"
+                },
+                "indexFingerprint": {
+                  "type": "string"
+                },
+                "inputTree": {
+                  "type": "string"
+                },
+                "inputCommit": {
+                  "type": "string"
+                },
+                "capturedAt": {
+                  "type": "number"
+                },
+                "dirty": {
+                  "type": "boolean"
+                },
+                "exclusions": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "version",
+                "id",
+                "sourceRoot",
+                "sourceIdentity",
+                "gitIdentity",
+                "ownerHead",
+                "ownerRef",
+                "indexFingerprint",
+                "inputTree",
+                "inputCommit",
+                "capturedAt",
+                "dirty",
+                "exclusions"
               ],
               "additionalProperties": false
             }

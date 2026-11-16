@@ -1,0 +1,453 @@
+{
+  "summaries": {
+    "type": "object",
+    "properties": {
+      "contracts": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "sessionId": {
+              "type": "string"
+            },
+            "ownerAgentId": {
+              "type": "string"
+            },
+            "origin": {
+              "type": "string",
+              "enum": [
+                "turn",
+                "agent-tool",
+                "cli",
+                "hosted",
+                "external",
+                "proposal"
+              ]
+            },
+            "ask": {
+              "type": "string"
+            },
+            "goal": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "queued",
+                "shaping",
+                "planning",
+                "checking-plan",
+                "running",
+                "judging",
+                "fixing",
+                "committing",
+                "awaiting-owner",
+                "passed",
+                "failed",
+                "cancelled"
+              ]
+            },
+            "statusLine": {
+              "type": "string"
+            },
+            "failureKind": {
+              "type": "string",
+              "enum": [
+                "transport",
+                "max_turns",
+                "planning",
+                "budget",
+                "owner-rejected",
+                "judgment-unavailable",
+                "zombie",
+                "other"
+              ]
+            },
+            "error": {
+              "type": "string"
+            },
+            "groupCount": {
+              "type": "number"
+            },
+            "unitCount": {
+              "type": "number"
+            },
+            "unitsPassed": {
+              "type": "number"
+            },
+            "unitsFailed": {
+              "type": "number"
+            },
+            "openEscalationIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "openEscalation": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "at": {
+                  "type": "number"
+                },
+                "question": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "at",
+                "question"
+              ],
+              "additionalProperties": false
+            },
+            "usage": {
+              "type": "object",
+              "properties": {
+                "inputTokens": {
+                  "type": "number"
+                },
+                "outputTokens": {
+                  "type": "number"
+                },
+                "cacheReadTokens": {
+                  "type": "number"
+                },
+                "cacheWriteTokens": {
+                  "type": "number"
+                },
+                "reasoningTokens": {
+                  "type": "number"
+                },
+                "llmCallCount": {
+                  "type": "number"
+                },
+                "turnCount": {
+                  "type": "number"
+                },
+                "toolCallCount": {
+                  "type": "number"
+                },
+                "costUsd": {
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "costState": {
+                  "type": "string",
+                  "enum": [
+                    "priced",
+                    "unpriced",
+                    "estimated"
+                  ]
+                },
+                "costSource": {
+                  "type": "string",
+                  "enum": [
+                    "user",
+                    "provider",
+                    "catalog",
+                    "mixed"
+                  ]
+                },
+                "pricingAsOf": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "inputTokens",
+                "outputTokens",
+                "cacheReadTokens",
+                "cacheWriteTokens",
+                "llmCallCount",
+                "turnCount",
+                "toolCallCount",
+                "costUsd",
+                "costState"
+              ],
+              "additionalProperties": false
+            },
+            "createdAt": {
+              "type": "number"
+            },
+            "completedAt": {
+              "type": "number"
+            },
+            "updatedAt": {
+              "type": "number"
+            },
+            "revision": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "sessionId",
+            "ownerAgentId",
+            "origin",
+            "ask",
+            "goal",
+            "status",
+            "groupCount",
+            "unitCount",
+            "unitsPassed",
+            "unitsFailed",
+            "openEscalationIds",
+            "usage",
+            "createdAt",
+            "updatedAt",
+            "revision"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "required": [
+      "contracts"
+    ],
+    "additionalProperties": false
+  },
+  "status": {
+    "anyOf": [
+      {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "sessionId": {
+            "type": "string"
+          },
+          "ownerAgentId": {
+            "type": "string"
+          },
+          "origin": {
+            "type": "string",
+            "enum": [
+              "turn",
+              "agent-tool",
+              "cli",
+              "hosted",
+              "external",
+              "proposal"
+            ]
+          },
+          "ask": {
+            "type": "string"
+          },
+          "goal": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "shaping",
+              "planning",
+              "checking-plan",
+              "running",
+              "judging",
+              "fixing",
+              "committing",
+              "awaiting-owner",
+              "passed",
+              "failed",
+              "cancelled"
+            ]
+          },
+          "statusLine": {
+            "type": "string"
+          },
+          "failureKind": {
+            "type": "string",
+            "enum": [
+              "transport",
+              "max_turns",
+              "planning",
+              "budget",
+              "owner-rejected",
+              "judgment-unavailable",
+              "zombie",
+              "other"
+            ]
+          },
+          "error": {
+            "type": "string"
+          },
+          "groupCount": {
+            "type": "number"
+          },
+          "unitCount": {
+            "type": "number"
+          },
+          "unitsPassed": {
+            "type": "number"
+          },
+          "unitsFailed": {
+            "type": "number"
+          },
+          "openEscalationIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "openEscalation": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "at": {
+                "type": "number"
+              },
+              "question": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "at",
+              "question"
+            ],
+            "additionalProperties": false
+          },
+          "usage": {
+            "type": "object",
+            "properties": {
+              "inputTokens": {
+                "type": "number"
+              },
+              "outputTokens": {
+                "type": "number"
+              },
+              "cacheReadTokens": {
+                "type": "number"
+              },
+              "cacheWriteTokens": {
+                "type": "number"
+              },
+              "reasoningTokens": {
+                "type": "number"
+              },
+              "llmCallCount": {
+                "type": "number"
+              },
+              "turnCount": {
+                "type": "number"
+              },
+              "toolCallCount": {
+                "type": "number"
+              },
+              "costUsd": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "costState": {
+                "type": "string",
+                "enum": [
+                  "priced",
+                  "unpriced",
+                  "estimated"
+                ]
+              },
+              "costSource": {
+                "type": "string",
+                "enum": [
+                  "user",
+                  "provider",
+                  "catalog",
+                  "mixed"
+                ]
+              },
+              "pricingAsOf": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "inputTokens",
+              "outputTokens",
+              "cacheReadTokens",
+              "cacheWriteTokens",
+              "llmCallCount",
+              "turnCount",
+              "toolCallCount",
+              "costUsd",
+              "costState"
+            ],
+            "additionalProperties": false
+          },
+          "createdAt": {
+            "type": "number"
+          },
+          "completedAt": {
+            "type": "number"
+          },
+          "updatedAt": {
+            "type": "number"
+          },
+          "revision": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "sessionId",
+          "ownerAgentId",
+          "origin",
+          "ask",
+          "goal",
+          "status",
+          "groupCount",
+          "unitCount",
+          "unitsPassed",
+          "unitsFailed",
+          "openEscalationIds",
+          "usage",
+          "createdAt",
+          "updatedAt",
+          "revision"
+        ],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "string"
+          },
+          "notModified": {
+            "type": "boolean",
+            "const": true
+          }
+        },
+        "required": [
+          "id",
+          "revision",
+          "notModified"
+        ],
+        "additionalProperties": false
+      }
+    ]
+  }
+}

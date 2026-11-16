@@ -39770,8 +39770,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "inputCommit",
                         "capturedAt",
                         "dirty",
-                        "exclusions",
-                        "files"
+                        "exclusions"
                       ],
                       "additionalProperties": false
                     },
@@ -39927,8 +39926,70 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "inputCommit",
                         "capturedAt",
                         "dirty",
-                        "exclusions",
-                        "files"
+                        "exclusions"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "version": {
+                          "const": 3
+                        },
+                        "id": {
+                          "type": "string"
+                        },
+                        "sourceRoot": {
+                          "type": "string"
+                        },
+                        "sourceIdentity": {
+                          "type": "string"
+                        },
+                        "gitIdentity": {
+                          "type": "string"
+                        },
+                        "ownerHead": {
+                          "type": "string"
+                        },
+                        "ownerRef": {
+                          "type": "string"
+                        },
+                        "indexFingerprint": {
+                          "type": "string"
+                        },
+                        "inputTree": {
+                          "type": "string"
+                        },
+                        "inputCommit": {
+                          "type": "string"
+                        },
+                        "capturedAt": {
+                          "type": "number"
+                        },
+                        "dirty": {
+                          "type": "boolean"
+                        },
+                        "exclusions": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "required": [
+                        "version",
+                        "id",
+                        "sourceRoot",
+                        "sourceIdentity",
+                        "gitIdentity",
+                        "ownerHead",
+                        "ownerRef",
+                        "indexFingerprint",
+                        "inputTree",
+                        "inputCommit",
+                        "capturedAt",
+                        "dirty",
+                        "exclusions"
                       ],
                       "additionalProperties": false
                     }
@@ -47757,8 +47818,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "inputCommit",
                     "capturedAt",
                     "dirty",
-                    "exclusions",
-                    "files"
+                    "exclusions"
                   ],
                   "additionalProperties": false
                 },
@@ -47914,8 +47974,70 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "inputCommit",
                     "capturedAt",
                     "dirty",
-                    "exclusions",
-                    "files"
+                    "exclusions"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "version": {
+                      "const": 3
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "sourceRoot": {
+                      "type": "string"
+                    },
+                    "sourceIdentity": {
+                      "type": "string"
+                    },
+                    "gitIdentity": {
+                      "type": "string"
+                    },
+                    "ownerHead": {
+                      "type": "string"
+                    },
+                    "ownerRef": {
+                      "type": "string"
+                    },
+                    "indexFingerprint": {
+                      "type": "string"
+                    },
+                    "inputTree": {
+                      "type": "string"
+                    },
+                    "inputCommit": {
+                      "type": "string"
+                    },
+                    "capturedAt": {
+                      "type": "number"
+                    },
+                    "dirty": {
+                      "type": "boolean"
+                    },
+                    "exclusions": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "id",
+                    "sourceRoot",
+                    "sourceIdentity",
+                    "gitIdentity",
+                    "ownerHead",
+                    "ownerRef",
+                    "indexFingerprint",
+                    "inputTree",
+                    "inputCommit",
+                    "capturedAt",
+                    "dirty",
+                    "exclusions"
                   ],
                   "additionalProperties": false
                 }
@@ -55728,8 +55850,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                           "inputCommit",
                           "capturedAt",
                           "dirty",
-                          "exclusions",
-                          "files"
+                          "exclusions"
                         ],
                         "additionalProperties": false
                       },
@@ -55885,8 +56006,70 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                           "inputCommit",
                           "capturedAt",
                           "dirty",
-                          "exclusions",
-                          "files"
+                          "exclusions"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "version": {
+                            "const": 3
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "sourceRoot": {
+                            "type": "string"
+                          },
+                          "sourceIdentity": {
+                            "type": "string"
+                          },
+                          "gitIdentity": {
+                            "type": "string"
+                          },
+                          "ownerHead": {
+                            "type": "string"
+                          },
+                          "ownerRef": {
+                            "type": "string"
+                          },
+                          "indexFingerprint": {
+                            "type": "string"
+                          },
+                          "inputTree": {
+                            "type": "string"
+                          },
+                          "inputCommit": {
+                            "type": "string"
+                          },
+                          "capturedAt": {
+                            "type": "number"
+                          },
+                          "dirty": {
+                            "type": "boolean"
+                          },
+                          "exclusions": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "required": [
+                          "version",
+                          "id",
+                          "sourceRoot",
+                          "sourceIdentity",
+                          "gitIdentity",
+                          "ownerHead",
+                          "ownerRef",
+                          "indexFingerprint",
+                          "inputTree",
+                          "inputCommit",
+                          "capturedAt",
+                          "dirty",
+                          "exclusions"
                         ],
                         "additionalProperties": false
                       }
@@ -63885,8 +64068,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "inputCommit",
                         "capturedAt",
                         "dirty",
-                        "exclusions",
-                        "files"
+                        "exclusions"
                       ],
                       "additionalProperties": false
                     },
@@ -64042,8 +64224,70 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "inputCommit",
                         "capturedAt",
                         "dirty",
-                        "exclusions",
-                        "files"
+                        "exclusions"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "version": {
+                          "const": 3
+                        },
+                        "id": {
+                          "type": "string"
+                        },
+                        "sourceRoot": {
+                          "type": "string"
+                        },
+                        "sourceIdentity": {
+                          "type": "string"
+                        },
+                        "gitIdentity": {
+                          "type": "string"
+                        },
+                        "ownerHead": {
+                          "type": "string"
+                        },
+                        "ownerRef": {
+                          "type": "string"
+                        },
+                        "indexFingerprint": {
+                          "type": "string"
+                        },
+                        "inputTree": {
+                          "type": "string"
+                        },
+                        "inputCommit": {
+                          "type": "string"
+                        },
+                        "capturedAt": {
+                          "type": "number"
+                        },
+                        "dirty": {
+                          "type": "boolean"
+                        },
+                        "exclusions": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "required": [
+                        "version",
+                        "id",
+                        "sourceRoot",
+                        "sourceIdentity",
+                        "gitIdentity",
+                        "ownerHead",
+                        "ownerRef",
+                        "indexFingerprint",
+                        "inputTree",
+                        "inputCommit",
+                        "capturedAt",
+                        "dirty",
+                        "exclusions"
                       ],
                       "additionalProperties": false
                     }

@@ -5,11 +5,12 @@ import { loadSchemaSnapshot, renderTs as renderSchema, TS_OUT_PATH as schemaPath
 import { loadOwnershipSnapshot, renderTs as renderOwnership, TS_OUT_PATH as ownershipPath } from './generate-config-ownership';
 import { loadContractSnapshot, renderTs as renderPresentation, renderCss, TS_OUT_PATH as presentationPath, CSS_OUT_PATH } from './generate-presentation-tokens';
 
-import { CONTRACT_SCHEMA_PATH, renderContractInspectionSchema } from './generate-contract-inspection-schema';
+import { CONTRACT_SCHEMA_PATH, CONTRACT_SUMMARY_SCHEMA_PATH, renderContractInspectionSchema, renderContractSummarySchema } from './generate-contract-inspection-schema';
 
 const presentation = loadContractSnapshot();
 const artifacts = [
   [CONTRACT_SCHEMA_PATH, renderContractInspectionSchema()],
+  [CONTRACT_SUMMARY_SCHEMA_PATH, renderContractSummarySchema()],
   [schemaPath, renderSchema(await loadSchemaSnapshot())],
   [ownershipPath, renderOwnership(loadOwnershipSnapshot())],
   [presentationPath, renderPresentation(presentation)],

@@ -130,7 +130,9 @@ const INPUT_SNAPSHOT_PROPERTIES = {
   dirty: BOOLEAN_SCHEMA,
   exclusions: STRING_LIST_SCHEMA,
 };
-const INPUT_SNAPSHOT_REQUIRED = ['version', ...Object.keys(INPUT_SNAPSHOT_PROPERTIES), 'files'];
+// Only version 1 and 2 receipts carry a per-file list, and `contracts.get`
+// returns it only when `includeInputFiles` asks; version 3 is the git tree alone.
+const INPUT_SNAPSHOT_REQUIRED = ['version', ...Object.keys(INPUT_SNAPSHOT_PROPERTIES)];
 const INPUT_FILE_PROPERTIES = {
   path: STRING_SCHEMA,
   kind: enumSchema(['file', 'symlink', 'missing']),
@@ -151,6 +153,7 @@ export const CONTRACT_INPUT_SNAPSHOT_SCHEMA = { oneOf: [
         ['path', 'kind', 'mode', 'oid', 'identity']),
     ] }),
   }, INPUT_SNAPSHOT_REQUIRED),
+  objectSchema({ version: { const: 3 }, ...INPUT_SNAPSHOT_PROPERTIES }, INPUT_SNAPSHOT_REQUIRED),
 ] };
 
 // parseCompletionReport historically persists partial reports, and the runner

@@ -181,7 +181,7 @@ if (!contracts.OPERATOR_METHOD_IDS || !contracts.PEER_ENDPOINT_IDS) throw new Er
 if (typeof runtimeEvents.createRemoteRuntimeEvents !== 'function') throw new Error('runtime realtime export missing');
 if (!runtime.observability || !runtime.transport || !runtime.state) throw new Error('runtime namespace seams missing');
 if (typeof runtimeObservability.TimelineBuffer !== 'function') throw new Error('runtime observability state inspector export missing');
-if (!runtimeObservability.GATE_SUITES || typeof runtimeObservability.GATE_SUITES !== 'object') throw new Error('runtime observability GATE_SUITES export missing');
+if (typeof runtimeObservability.runTaskSuite !== 'function') throw new Error('runtime observability runTaskSuite export missing');
 if (typeof providersEntry.resolveModelReference !== 'function') throw new Error('providers resolveModelReference export missing');
 if (typeof providersEntry.findClosestModelIds !== 'function') throw new Error('providers findClosestModelIds export missing');
 if (typeof featureAnnouncements.FeatureAnnouncementStore !== 'function') throw new Error('feature-announcements store export missing');

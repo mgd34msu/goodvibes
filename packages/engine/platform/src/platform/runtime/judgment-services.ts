@@ -64,20 +64,32 @@ function settingsDecisionDeadline(source: JudgmentSettingsSource): number {
   return validDecisionDeadline(value) ? value : DEFAULT_DECISION_DEADLINE_MS;
 }
 
+/** A secret-store read is local; a store that has not answered by then is reported as such, not waited on for the model's timeout. */
+const KEY_LOOKUP_BOUND_MS = 5_000;
+
+/**
+ * The stored key, or undefined when the store has no such key. A store that
+ * times out or fails is a different state from a missing key: the reading fails
+ * with `unavailable` naming the store, instead of going out with an empty key and
+ * coming back as "unauthorized" after a second wait.
+ */
 async function storedKey(secrets: JudgmentSettingsSource['secrets'], name: string, timeoutMs: number, signal?: AbortSignal): Promise<string | undefined> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   let cancelled = () => {};
+  const boundMs = Math.min(timeoutMs, KEY_LOOKUP_BOUND_MS);
   try {
     signal?.throwIfAborted();
     const expired = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => reject(new JudgmentError('unavailable', 'judgment credential resolution timed out')), timeoutMs);
+      timer = setTimeout(() => reject(new JudgmentError('unavailable', `judgment credential resolution timed out: the secret store did not return ${name} within ${boundMs} ms. Check that the secret store is unlocked and readable, then retry.`)), boundMs);
       cancelled = () => reject(new JudgmentError('aborted', 'the judgment call was cancelled'));
       signal?.addEventListener('abort', cancelled, { once: true });
     });
-    return (await Promise.race([secrets.get(name), expired]))?.trim();
-  } catch {
+    const value = (await Promise.race([secrets.get(name), expired]))?.trim();
+    return value === '' ? undefined : value;
+  } catch (error) {
     if (signal?.aborted) throw new JudgmentError('aborted', 'the judgment call was cancelled');
-    return undefined;
+    if (error instanceof JudgmentError) throw error;
+    throw new JudgmentError('unavailable', `judgment credential resolution failed: the secret store could not read ${name} (${error instanceof Error ? error.message : String(error)}). Check that the secret store is unlocked and readable, then retry.`);
   }
   finally { clearTimeout(timer); signal?.removeEventListener('abort', cancelled); }
 }
@@ -118,7 +130,12 @@ export async function judgmentConfigFromSettings(source: JudgmentSettingsSource,
   for (const [index, target] of targets.entries()) {
     let key: string | null | undefined;
     try { key = target.keySource === 'none' ? undefined : target.keySource === 'env' ? environmentKeys[index] : await storedKey(source.secrets, target.keyName, keyTimeoutMs, signal); }
-    catch { key = undefined; }
+    catch (error) {
+      signal?.throwIfAborted();
+      // A fallback whose key cannot be read is left out of this reading rather than sent with no key.
+      logger.warn('Judgment fallback left out: its key could not be read', { endpoint: target.endpoint, keyName: target.keyName, error: error instanceof Error ? error.message : String(error) });
+      continue;
+    }
     signal?.throwIfAborted();
     fallbacks.push({ endpoint: { kind: endpointKind(target.endpoint), baseURL: target.endpoint, apiKey: key?.trim() ?? '',
       ...(target.keySource === 'none' ? { authentication: 'none' as const } : {}), ...target.backend }, model: target.model });
@@ -191,7 +208,10 @@ export function createSettingsJudgmentPort(source: JudgmentSettingsSource): Judg
       assertDecisionModelsEnabled('configured decision transport');
       const signal = request.signal;
       if (!signal) throw new JudgmentError('invalid-request', 'settings judgment calls require an owning AbortSignal');
-      const config = await activeSettings(source, signal);
+      let config: JudgmentConfig;
+      // A secret store that did not answer is `unavailable` like an exhausted transport: Preferred may fall back to Classic.
+      try { config = await activeSettings(source, signal); }
+      catch (error) { activateClassicFallback(error); throw error; }
       // Key acquisition may finish after runtime shutdown or caller cancellation.
       // Never create another transport or send a late request in that case.
       signal.throwIfAborted();

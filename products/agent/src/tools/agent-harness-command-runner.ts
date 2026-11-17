@@ -52,6 +52,8 @@ export async function runCommand(deps: AgentHarnessToolDeps, args: Record<string
     // The command's definition says which admission a run needs: its per-verb
     // declaration (command-verbs.ts), else its `effect` and `readVerbs`.
     const command = registry.get(name);
+    // No such command: nothing to admit, and the caller reports it as unknown.
+    if (!command) return;
     const verb = commandVerbPolicy(command, commandArgs);
     const policy = describeCommandPolicy(name, command);
     if (!verb && policy.effect === 'undeclared') throw new RefusalError(refusal({

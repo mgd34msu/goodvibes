@@ -22,6 +22,14 @@ export interface AlignmentSpec extends PatternHeader {
   readonly fields: readonly string[];
   /** Band on the score's confidence; a weak reading on any level goes to review. */
   readonly band: ConfidenceBand;
+  /**
+   * What makes two of these closely related for this noun, read as the middle
+   * level after "They describe closely related <noun>s that may or may not be
+   * the same one: ". Omitted, it names the variants of a thing: a variant, a
+   * special edition, a namesake, or a record that could plausibly refer to
+   * either. Facts and rules relate differently: two answers to one question.
+   */
+  readonly related?: string;
   readonly fixtures: readonly {
     readonly name: string;
     readonly a: JsonValue;
@@ -48,7 +56,7 @@ export function defineEntityAligner(spec: AlignmentSpec): EntityAligner {
   assertBand(spec.band);
   const levels = [
     `They describe two different ${spec.noun}s.`,
-    `They describe closely related ${spec.noun}s that may or may not be the same one: a variant, a special edition, a namesake, or a record that could plausibly refer to either.`,
+    `They describe closely related ${spec.noun}s that may or may not be the same one: ${spec.related ?? 'a variant, a special edition, a namesake, or a record that could plausibly refer to either.'}`,
     `They describe one and the same ${spec.noun}.`,
   ] as const;
   const questions: Record<string, ReturnType<typeof score> | NoulQuestion> = {

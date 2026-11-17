@@ -50,7 +50,7 @@ const failed = (command: string, exitCode: number | null, stderr: string, stdout
 
 export const execRetry = defineBattery({
   name: 'engine.tools.exec-retry',
-  version: 2,
+  version: 3,
   description: 'Which kind of failure a failed shell command hit: network, lock, busy, out of memory, or a lasting failure a rerun would repeat.',
   accuracyFloor: 0.85,
   items: {

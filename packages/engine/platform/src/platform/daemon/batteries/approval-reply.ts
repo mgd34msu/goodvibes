@@ -12,11 +12,11 @@ const CANDIDATES = [{ id: 'export', content: EXPORT }, { id: 'deploy', content: 
 
 export const channelApprovalTarget = defineSelector({
   name: 'engine.daemon.approval-target',
-  version: 1,
+  version: 2,
   description: 'Which one of the authorized pending asks the owner is answering, or none when the reply does not identify exactly one.',
   accuracyFloor: 0.9,
   instructions: 'Which single pending ask in candidates does context.reply answer? Match an explicit approval id, tool, or proposal meaning. Choose none when the reply is unrelated, refers to several asks, or could answer more than one. Candidate order is not conversational evidence: never default to the first, newest, or last ask.',
-  fitInstructions: 'Does context.reply unambiguously answer this particular pending ask and no other offered ask? A bare yes or no when several asks are pending is not enough. Naming another ask to exclude it does not answer the excluded ask. Use the full reply, including corrections and exceptions.',
+  fitInstructions: 'Does context.reply unambiguously answer this particular pending ask and no other offered ask? A reply that approves, denies or changes the terms of this ask (an amendment such as a narrower target) answers it. A bare yes or no when several asks are pending is not enough. Naming another ask only to exclude it or leave it open does not answer that other ask, and does not stop the reply from answering this one. Use the full reply, including corrections and exceptions.',
   band: STAKES_BANDS.high.confidence,
   fitBand: STAKES_BANDS.high.yesNo,
   fixtures: [

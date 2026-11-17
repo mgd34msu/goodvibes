@@ -97,12 +97,14 @@ const PROD_DEPLOY = { class: 'runbook', summary: 'Production deploys run deploy/
 
 export const memoryAlignment = defineEntityAligner({
   name: 'engine.state.memory-alignment',
-  version: 1,
+  version: 2,
   description: 'Whether two project-memory records state the same fact, closely related variants of one fact (such as an older and a newer answer), or different facts.',
   accuracyFloor: 0.9,
   noun: 'fact',
   fields: [],
   band: MEDIUM.confidence,
+  // A fact's variant is another answer to the same question, not an edition of a thing.
+  related: 'two answers to the same question, such as an older and a newer value, or a general rule and a narrower one about the same procedure or setting, so that one could correct, replace or contradict the other; or a record that could plausibly refer to either.',
   fixtures: [
     { name: 'the same test runner fact worded twice', a: BUN_TEST, b: BUN_TEST_AGAIN, expect: 'same' },
     { name: 'two answers to which test runner', a: BUN_TEST, b: VITEST, expect: 'review' },

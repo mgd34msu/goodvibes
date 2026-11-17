@@ -72,11 +72,11 @@ export function repriceRoles(previous: { readonly lines: readonly { readonly lab
     ...previous.lines.map((line, index) => ({ key: `line_${String(index)}`, role: `unit price for the cart line ${JSON.stringify(line.label)} with quantity ${String(line.quantity)}; not its extended line total` })),
     { key: 'tax', role: 'total sales tax charged on this one-off purchase' },
     ...deliveryOptions.map((label, index) => ({ key: `shipping_${String(index)}`, role: `delivery price of the complete option ${JSON.stringify(label)}` })),
-    { key: 'total', role: 'final payable total for the delivery option actually selected' },
+    { key: 'total', role: 'final payable total of the whole order, with the delivery option actually selected: items, tax, fees and delivery together, not the delivery price alone' },
   ];
 }
 
-const REPRICE_HEADER = { name: 'engine.payments.reprice-reading', version: 1, accuracyFloor: 0.95,
+const REPRICE_HEADER = { name: 'engine.payments.reprice-reading', version: 2, accuracyFloor: 0.95,
   description: 'Whether a changed checkout is still the same one-off purchase, and which exact current amount supplies each price component, read in one request.' };
 
 interface RepriceDecision extends NamedDecision {
@@ -87,8 +87,14 @@ interface RepriceDecision extends NamedDecision {
 export const checkoutRepriceReading: RepriceDecision = {
   ...decisionHeader({ ...REPRICE_HEADER, fixtures }),
   async read(port, input, roles, options = {}) {
-    const ids = input.candidates.map(candidate => candidate.id);
-    const amounts: Record<string, EntryType> = { ...Object.fromEntries(ids.map(id => [id, null])), [NONE]: 'The current checkout does not establish this amount.' };
+    // Each option names its own amount, so a pick does not rest on looking an
+    // id up in the state. The literal is a numeral span the scan above
+    // admitted, never merchant prose, so it can stand in the question; the
+    // label and nearby text stay in the state as evidence.
+    const amounts: Record<string, EntryType> = {
+      ...Object.fromEntries(input.candidates.map(candidate => [candidate.id, `The amount ${candidate.content.literal} (state.candidates entry ${candidate.id}).`])),
+      [NONE]: 'The current checkout does not establish this amount.',
+    };
     const withZero: Record<string, EntryType> = { ...amounts, [ZERO]: 'An actual zero or free component established by the complete current checkout.' };
     const questions: Record<string, Question> = { samePurchase: noul(SAME_PURCHASE) };
     for (const { key, role } of roles) questions[key] = choice(`${PICK} Component: ${role}.`, withZero);

@@ -119,7 +119,7 @@ export function buildSetupTransferBundle(ctx: CommandContext, snapshot: SetupRev
   const readPart = (path: string): Record<string, unknown> | undefined => (existsSync(path)
     ? maskLiteralSecrets(JSON.parse(readFileSync(path, 'utf-8')), redacted, path.slice(path.lastIndexOf('/') + 1)) as Record<string, unknown>
     : undefined);
-  const services = readPart(shellPaths.resolveProjectPath('tui', 'services.json'));
+  const services = readPart(shellPaths.resolveUserPath('tui', 'services.json'));
   const plugins = readPart(shellPaths.resolveProjectPath('tui', 'ecosystem', 'plugins.json'));
   const skills = readPart(shellPaths.resolveProjectPath('tui', 'ecosystem', 'skills.json'));
 

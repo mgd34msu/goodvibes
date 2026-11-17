@@ -24,6 +24,7 @@
  * one, with the reason, is logged.
  */
 import { randomBytes } from 'node:crypto';
+import { statSync } from 'node:fs';
 import type { ConfigManager } from '../../config/manager.js';
 import type { SecretsManager } from '../../config/secrets.js';
 import type { ServiceRegistry } from '../../config/service-registry.js';
@@ -212,6 +213,8 @@ export class TelegramIngressSupervisor {
   private generation = 0;
   private credentialRevision = 0;
   private credentialUnsubscribe: (() => void) | null = null;
+  /** The last credential comparison and the owner revisions it was made under. */
+  private credentialCheck: { readonly key: string; readonly snapshot: string; readonly token: string; readonly result: boolean } | null = null;
   private abort: AbortController | null = null;
   private loop: Promise<void> | null = null;
   private readonly retiringLoops = new Set<Promise<void>>();
@@ -367,7 +370,7 @@ export class TelegramIngressSupervisor {
           owner.assertCurrent();
           if (generation !== this.generation || this.stopped || !config.get('surfaces.telegram.enabled')
             || config.get('surfaces.telegram.mode') !== 'polling' || this.credentialRevision !== credentialRevision
-            || credentialSnapshot === null || this.sourceCredentialSnapshot() !== credentialSnapshot || this.resolveSourceTokenSync() !== token
+            || !this.sourceCredentialsUnchanged(credentialSnapshot, token)
             || incarnation !== (typeof config.getConfigurationIncarnation === 'function' ? config.getConfigurationIncarnation() : undefined)) {
             throw new TelegramOffsetStoreError('unavailable');
           }
@@ -486,9 +489,8 @@ export class TelegramIngressSupervisor {
       && this.deps.configManager.get('surfaces.telegram.mode') === 'webhook'
       && String(this.deps.configManager.get('web.publicBaseUrl') ?? '') === base;
     const currentCredentials = (): boolean => live() && this.credentialUnsubscribe !== null
-      && this.credentialRevision === credentialRevision && credentialSnapshot !== null
-      && this.sourceCredentialSnapshot() === credentialSnapshot
-      && this.resolveSourceTokenSync() === token;
+      && this.credentialRevision === credentialRevision
+      && this.sourceCredentialsUnchanged(credentialSnapshot, token);
     // External credential resolvers without a local currentness fence retain
     // configured-secret ingress, but cannot lend native payment authority.
     const managed = attachWebhook !== undefined && typeof sourceOwner?.authorizeWebhook === 'function'
@@ -706,8 +708,8 @@ export class TelegramIngressSupervisor {
       readIdentity: (signal) => api.getVerifiedIdentity(signal),
       isCurrentSync: () => {
         cursor.assertCurrent();
-        return live() && this.credentialUnsubscribe !== null && this.credentialRevision === credentialRevision && credentialSnapshot !== null
-          && this.sourceCredentialSnapshot() === credentialSnapshot && this.resolveSourceTokenSync() === token;
+        return live() && this.credentialUnsubscribe !== null && this.credentialRevision === credentialRevision
+          && this.sourceCredentialsUnchanged(credentialSnapshot, token);
       },
       isCurrent: async () => {
         cursor.assertCurrent();
@@ -1316,6 +1318,40 @@ export class TelegramIngressSupervisor {
       this.credentialRevision++;
       this.deps.telegramSourceAccounts?.invalidate();
     });
+  }
+
+  /**
+   * Whether the bot credential is still the one polling started with. The
+   * answer is kept with the owners' revisions it was read under (settings
+   * incarnation, credential store revision, one `stat` of the services
+   * file) and read again only when one of them moved, so the check run on
+   * every poll does not re-read services.json and the credential store.
+   */
+  private sourceCredentialsUnchanged(snapshot: string | null, token: string): boolean {
+    if (snapshot === null) return false;
+    const key = this.credentialRevisionsKey();
+    const kept = this.credentialCheck;
+    if (key !== null && kept !== null && kept.key === key && kept.snapshot === snapshot && kept.token === token) return kept.result;
+    const result = this.sourceCredentialSnapshot() === snapshot && this.resolveSourceTokenSync() === token;
+    this.credentialCheck = key === null ? null : { key, snapshot, token, result };
+    return result;
+  }
+
+  /** Null when an owner has no revision: every check then reads afresh. */
+  private credentialRevisionsKey(): string | null {
+    const config = this.deps.configManager, secrets = this.deps.secretsManager;
+    if (typeof config.getConfigurationIncarnation !== 'function' || !secrets.revisionSource) return null;
+    const path = this.deps.serviceRegistry.userServicesFilePath;
+    let services = 'absent';
+    if (path) {
+      try {
+        const stat = statSync(path);
+        services = `${stat.ino}:${stat.size}:${stat.mtimeMs}`;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return null;
+      }
+    }
+    return `${config.getConfigurationIncarnation()}:${secrets.revisionSource.revision()}:${services}`;
   }
 
   /**

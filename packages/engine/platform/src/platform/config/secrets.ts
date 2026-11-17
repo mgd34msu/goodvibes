@@ -65,6 +65,7 @@ import { decodeLiteralSecret, encodeLiteralSecret, shouldStoreAsLiteral } from '
 import { getSecretRefSource, isSecretRefInput, normalizeSecretRef, resolveSecretRef, useSecretProviderHostConfig, type SecretProviderHostConfig } from './secret-refs.js';
 import { listMigratableSecrets, migratableStores } from './secrets-migration-view.js';
 import { ProjectSecretApprovals } from './project-secret-approvals.js';
+import { BUILTIN_PROVIDER_ENV_KEYS } from './provider-credential-catalog.js';
 import { logger } from '../utils/logger.js';
 import { requireSurfaceRoot, resolveSharedDirectory } from '../runtime/surface-root.js';
 import { summarizeError } from '../utils/error-display.js';
@@ -86,6 +87,9 @@ export type {
   SecretStorePath,
 } from './secrets-store-paths.js';
 import type { SecretScope, SecretSource, SecretStorageMedium } from './secrets-store-paths.js';
+
+/** Every environment variable name a built-in provider declares for its credential. */
+const DECLARED_PROVIDER_ENV_NAMES: ReadonlySet<string> = new Set(Object.values(BUILTIN_PROVIDER_ENV_KEYS).flat());
 
 export interface SecretRecord {
   readonly key: string;
@@ -1430,7 +1434,12 @@ export class SecretsManager {
       }
     }
 
+    // An environment variable is listed only when it can be a credential this
+    // manager serves: a stored key it overrides, or a name a built-in provider
+    // declares. The rest of the process environment is not a secret record.
+    const storedKeys = new Set(records.map((record) => record.key));
     for (const key of envKeys) {
+      if (!storedKeys.has(key) && !DECLARED_PROVIDER_ENV_NAMES.has(key)) continue;
       records.push({
         key,
         source: 'env',

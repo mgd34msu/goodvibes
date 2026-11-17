@@ -110,11 +110,14 @@ export function createCredentialStatusProvider(
     async get(key: string): Promise<CredentialStatusRecord | null> {
       const detailed = await secrets.listDetailed();
       // A named probe MAY consult env for this one caller-named key. Prefer a
-      // stored record; fall back to an env-backed record for the same name.
-      const match =
+      // stored record; fall back to the environment for the same name (the
+      // listing carries env records only for stored or declared names, and a
+      // custom provider may read any name).
+      const fromEnv: SecretRecord | null = process.env[key] !== undefined ? { key, source: 'env', scope: 'env', secure: false, overriddenByEnv: false } : null;
+      const match: SecretRecord | null =
         detailed.find((record) => record.key === key && record.source !== 'env') ??
         detailed.find((record) => record.key === key) ??
-        null;
+        fromEnv;
       if (!match) {
         return { key, configured: false, usable: false, source: 'none', scope: 'none', secure: false, overriddenByEnv: false };
       }

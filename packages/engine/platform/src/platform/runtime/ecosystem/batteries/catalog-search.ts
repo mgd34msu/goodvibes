@@ -11,8 +11,9 @@
  * the query and the page, and the question names one entry by its index
  * ({@link catalogSearchAt}), so a page costs one request instead of one per
  * entry. Other entries on the page are context, never an alternative target.
- * An empty query lists everything with no reading; that guard, the paging, the
- * cache and the name order stay code in catalog.ts.
+ * A search asks about one page: the entries the local word ranking puts
+ * first. An empty query lists everything with no reading; that guard, the
+ * ranking, the page and the cache stay code in catalog.ts.
  *
  * Band: low stakes. The result only filters a listing; installing an entry
  * still takes an explicit review and `/marketplace install`.

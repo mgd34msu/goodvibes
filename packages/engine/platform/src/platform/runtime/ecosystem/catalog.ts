@@ -5,7 +5,7 @@ import { VERSION } from '../../version.js';
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
 import { decisionOrClassic, isClassicOperation } from '../decision-policy.js';
 import { rankClassicCatalog } from '../classic-catalog.js';
-import { fanOut, mapLimit, toJson, type EntryType } from '@goodvibes-jev/judgment';
+import { fanOut, toJson, type EntryType } from '@goodvibes-jev/judgment';
 import { catalogSearch, catalogSearchAt, catalogSearchEntryView } from './batteries/catalog-search.js';
 import { trustNoteCaution } from './batteries/trust-note-caution.js';
 
@@ -466,17 +466,15 @@ export function loadEcosystemCatalog(
   return entries.sort((a, b) => a.name.localeCompare(b.name));
 }
 
-/** Entries read in one request; a catalog larger than this is read as several pages at once. */
+/** Candidates read in the one request a search makes. */
 const SEARCH_PAGE_SIZE = 24;
-/** Pages in flight at once. */
-const SEARCH_CONCURRENCY = 8;
 /** Searches remembered per process; the oldest is forgotten first. */
 const SEARCH_CACHE_LIMIT = 64;
 
 const SEARCH_SITE = 'runtime.ecosystem.catalog-search';
 const TRUST_NOTE_SITE = 'runtime.ecosystem.trust-note-caution';
 
-/** Kept/hidden per entry, by (kind, query, catalog files' size and time): a repeated search costs no request. */
+/** Listed entry ids per (kind, query, catalog files' size and time): a repeated search costs no request. */
 const searchCache = new Map<string, readonly string[]>();
 const pageQuestions = new Map<number, ReturnType<typeof catalogSearchAt>>();
 
@@ -501,40 +499,41 @@ function catalogStamp(kind: EcosystemEntryKind, options: EcosystemCatalogPathOpt
   }).join('|');
 }
 
-/** Which entries of one page the reading keeps, or why the page could not be read. */
+function describeForRanking(entry: EcosystemCatalogEntry): { readonly id: string; readonly description: string } {
+  return { id: entry.id, description: JSON.stringify(catalogSearchEntryView(entry)) };
+}
+
+/** Which entries of the page the reading keeps (all but a strong no). Throws when the request fails. */
 async function readSearchPage(
   query: string,
   page: readonly EcosystemCatalogEntry[],
   signal: AbortSignal | undefined,
-): Promise<{ readonly kept: readonly boolean[] } | { readonly failure: unknown }> {
+): Promise<readonly boolean[]> {
   const parts: Record<string, ReturnType<typeof catalogSearchAt>> = {};
   page.forEach((_, index) => { parts[`entry${index}`] = pageQuestion(index); });
-  try {
-    const read = await fanOut(judgmentPort(SEARCH_SITE), toJson({ query, entries: page.map(catalogSearchEntryView) }) as EntryType, parts, {
-      site: SEARCH_SITE, label: catalogSearch.name, ...(signal ? { signal } : {}),
-    });
-    const kept = page.map((_, index) => {
-      const reading = read.readings[`entry${index}`]?.wanted;
-      return !(reading?.verdict === 'no' && reading.outcome === 'act');
-    });
-    read.recordAction(`listed ${kept.filter(Boolean).length} hid ${kept.filter((keep) => !keep).length}`);
-    return { kept };
-  } catch (failure) {
-    signal?.throwIfAborted();
-    return { failure };
-  }
+  const read = await fanOut(judgmentPort(SEARCH_SITE), toJson({ query, entries: page.map(catalogSearchEntryView) }) as EntryType, parts, {
+    site: SEARCH_SITE, label: catalogSearch.name, ...(signal ? { signal } : {}),
+  });
+  const kept = page.map((_, index) => {
+    const reading = read.readings[`entry${index}`]?.wanted;
+    return !(reading?.verdict === 'no' && reading.outcome === 'act');
+  });
+  read.recordAction(`listed ${kept.filter(Boolean).length} hid ${kept.filter((keep) => !keep).length}`);
+  return kept;
 }
 
 /**
- * Catalog entries of `kind` that answer `query`, in name order. A blank
- * query lists every entry with no reading. Otherwise the entries are read
- * against the query by `engine.ecosystem.catalog-search` a page at a time (one
- * request per {@link SEARCH_PAGE_SIZE} entries, the pages in parallel), and an
- * entry is dropped only when read as a strong no: hiding a real match costs
- * the searcher more than one extra row, so a page whose request failed is
- * listed whole (and the answer is not remembered). The answer is remembered for the
- * process by (kind, query, catalog files' size and time), so repeating a
- * search, or searching an unchanged catalog again, makes no request.
+ * Catalog entries of `kind` that answer `query`, best match first. A blank
+ * query lists every entry, in name order, with no reading. Otherwise the
+ * entries are ranked locally by the words they share with the query, and the
+ * top {@link SEARCH_PAGE_SIZE} candidates (the ranked matches, then the rest
+ * in name order, so an entry described in other words is still read) go to
+ * `engine.ecosystem.catalog-search` in ONE request, whatever the catalog's
+ * size. A candidate is dropped only when read as a strong no; a ranked match
+ * beyond the page is listed unread. When the request fails the policy decides
+ * (the local ranking, or a report). The answer is remembered for the process
+ * by (kind, query, catalog files' size and time), so repeating a search, or
+ * searching an unchanged catalog again, makes no request.
  */
 export async function searchEcosystemCatalog(
   kind: EcosystemEntryKind,
@@ -546,32 +545,26 @@ export async function searchEcosystemCatalog(
   const trimmed = query.trim();
   const entries = loadEcosystemCatalog(kind, options);
   if (!trimmed || entries.length === 0) return entries;
+  const ranked = rankClassicCatalog(entries, trimmed, describeForRanking).map((match) => match.entry);
   return decisionOrClassic(async () => {
     const key = `${kind}\0${trimmed.toLocaleLowerCase()}\0${catalogStamp(kind, options)}`;
     const remembered = searchCache.get(key);
     if (remembered) {
-      const keptIds = new Set(remembered);
-      return entries.filter((entry) => keptIds.has(entry.id));
+      const byId = new Map(entries.map((entry) => [entry.id, entry]));
+      return remembered.flatMap((id) => byId.get(id) ?? []);
     }
-    const pages: EcosystemCatalogEntry[][] = [];
-    for (let start = 0; start < entries.length; start += SEARCH_PAGE_SIZE) pages.push(entries.slice(start, start + SEARCH_PAGE_SIZE));
-    const read = await mapLimit(pages, SEARCH_CONCURRENCY, (page) => readSearchPage(trimmed, page, run.signal));
-    // With no page read the decision path itself failed, and the policy decides
-    // (fall back to the literal match, or report). One failed page among read
-    // ones lists its entries: hiding a real match costs more than an extra row.
-    const firstFailure = read.find((page) => 'failure' in page);
-    if (firstFailure && read.every((page) => 'failure' in page)) throw (firstFailure as { failure: unknown }).failure;
-    const kept = read.flatMap((page, index) => 'kept' in page ? page.kept : pages[index]!.map(() => true));
-    const result = entries.filter((_, index) => kept[index]);
-    if (firstFailure) return result;
+    const rankedIds = new Set(ranked.map((entry) => entry.id));
+    const candidates = [...ranked, ...entries.filter((entry) => !rankedIds.has(entry.id))];
+    const page = candidates.slice(0, SEARCH_PAGE_SIZE);
+    const kept = await readSearchPage(trimmed, page, run.signal);
+    const result = [...page.filter((_, index) => kept[index]), ...ranked.slice(SEARCH_PAGE_SIZE)];
     searchCache.delete(key);
     searchCache.set(key, result.map((entry) => entry.id));
     while (searchCache.size > SEARCH_CACHE_LIMIT) searchCache.delete(searchCache.keys().next().value!);
     return result;
   }, () => {
     run.signal?.throwIfAborted();
-    return rankClassicCatalog(entries, trimmed, entry => ({ id: entry.id,
-      description: JSON.stringify(catalogSearchEntryView(entry)) })).map(match => match.entry);
+    return ranked;
   });
 }
 

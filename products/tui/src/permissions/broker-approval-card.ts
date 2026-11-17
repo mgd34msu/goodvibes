@@ -28,6 +28,7 @@ export interface BrokerApprovalCardBroker extends ApprovalRequesterLookup {
     approvalId: string,
     input: {
       readonly approved: boolean;
+      readonly disposition?: 'approved' | 'denied';
       readonly remember?: boolean;
       readonly rememberTier?: RememberTier;
       readonly reason?: string;
@@ -86,6 +87,8 @@ export function handleBrokerApprovalChange(params: BrokerApprovalChangeParams): 
       ...buildPendingPermissionExtras(current.request, (decision) => {
         void broker.resolveApproval(approval.id, {
           approved: decision.approved,
+          // The owner answered this card: an explicit decision, which owner-only asks (workspace trust) require.
+          disposition: decision.approved ? 'approved' : 'denied',
           remember: decision.remember ?? false,
           ...(decision.rememberTier ? { rememberTier: decision.rememberTier } : {}),
           ...(decision.reason ? { reason: decision.reason } : {}),

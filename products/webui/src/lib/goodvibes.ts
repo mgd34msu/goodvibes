@@ -781,11 +781,12 @@ const APPROVAL_REMEMBER_TIERS: readonly ApprovalRememberTier[] = ['session', 'ex
 
 /** The approve body: the contract's input, with an unknown remember tier refused before anything is sent. */
 function approveInput(approvalId: string, input: ApprovalApproveInput = {}): OperatorMethodInput<'approvals.approve'> {
+  // The owner pressed approve: say so, so a decision that must be the owner's own (trusting a workspace) counts it.
   const { rememberTier, ...rest } = input;
-  if (rememberTier === undefined) return { ...rest, approvalId };
+  if (rememberTier === undefined) return { ...rest, approvalId, disposition: 'approved' };
   const tier = APPROVAL_REMEMBER_TIERS.find((candidate) => candidate === rememberTier);
   if (!tier) throw new Error(`This daemon offers no remember tier "${rememberTier}"; nothing was approved. Choose another remember option.`);
-  return { ...rest, approvalId, rememberTier: tier };
+  return { ...rest, approvalId, disposition: 'approved', rememberTier: tier };
 }
 
 /** Whether a value survives JSON as it is: no function, symbol, class instance, NaN or Infinity silently changed on the way. */
@@ -1510,7 +1511,7 @@ export const client = {
       deny: (approvalId: string, input?: ApprovalDenyInput) =>
         invokeOperator<'approvals.deny', ApprovalActionResult>(
           'approvals.deny',
-          { approvalId, ...(input?.note ? { note: input.note } : {}), ...(input?.reason ? { reason: input.reason } : {}) },
+          { approvalId, disposition: 'denied', ...(input?.note ? { note: input.note } : {}), ...(input?.reason ? { reason: input.reason } : {}) },
         ),
     },
     // Durable approval rules (permissions.rules.*): the remembered-decision store,

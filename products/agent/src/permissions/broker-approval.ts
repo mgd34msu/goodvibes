@@ -43,6 +43,7 @@ export interface BrokerApprovalBroker {
     approvalId: string,
     input: {
       readonly approved: boolean;
+      readonly disposition?: 'approved' | 'denied';
       readonly remember?: boolean;
       readonly modifiedArgs?: Record<string, unknown>;
       readonly selectedHunks?: readonly number[];
@@ -101,6 +102,8 @@ export function handleBrokerApprovalChange(params: BrokerApprovalChangeParams): 
       resolve: (approved: boolean, remember = false, modifiedArgs?: Record<string, unknown>, extras?: { readonly selectedHunks?: readonly number[] | undefined }) => {
         void broker.resolveApproval(approval.id, {
           approved,
+          // The owner answered this card: an explicit decision, which owner-only asks (workspace trust) require.
+          disposition: approved ? 'approved' : 'denied',
           remember,
           ...(approved && modifiedArgs ? { modifiedArgs } : {}),
           ...(approved && extras?.selectedHunks ? { selectedHunks: extras.selectedHunks } : {}),

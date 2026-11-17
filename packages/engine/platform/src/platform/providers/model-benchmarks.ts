@@ -124,15 +124,42 @@ function parseEntries(json: unknown): BenchmarkEntry[] {
   }));
 }
 
-function buildNameIndex(entries: readonly BenchmarkEntry[]): Map<string, BenchmarkEntry> {
-  const index = new Map<string, BenchmarkEntry>();
+/**
+ * Lookups over one leaderboard, so a sweep over a whole model catalog (the
+ * provider listing carries each model's quality tier) costs one map read per
+ * model instead of a scan of every entry.
+ */
+interface BenchmarkNameIndex {
+  /** The first entry whose name or id is the key, exactly as written. */
+  readonly exact: Map<string, BenchmarkEntry>;
+  /** The last entry whose name or id matches the key ignoring case. */
+  readonly lower: Map<string, BenchmarkEntry>;
+  /** One catalog identity to its only entry, or null when two entries share it; built on the first miss. */
+  canonical: Map<string, BenchmarkEntry | null> | null;
+}
+
+function buildNameIndex(entries: readonly BenchmarkEntry[]): BenchmarkNameIndex {
+  const exact = new Map<string, BenchmarkEntry>();
+  const lower = new Map<string, BenchmarkEntry>();
   for (const entry of entries) {
-    index.set(entry.name.toLowerCase(), entry);
+    if (!exact.has(entry.name)) exact.set(entry.name, entry);
+    if (!exact.has(entry.modelId)) exact.set(entry.modelId, entry);
+    lower.set(entry.name.toLowerCase(), entry);
     if (entry.modelId) {
-      index.set(entry.modelId.toLowerCase(), entry);
+      lower.set(entry.modelId.toLowerCase(), entry);
     }
   }
-  return index;
+  return { exact, lower, canonical: null };
+}
+
+function buildCanonicalIndex(entries: readonly BenchmarkEntry[]): Map<string, BenchmarkEntry | null> {
+  const canonical = new Map<string, BenchmarkEntry | null>();
+  for (const entry of entries) {
+    const identity = knownCatalogModelIdentity(entry.modelId) ?? knownCatalogModelIdentity(entry.name);
+    if (!identity) continue;
+    canonical.set(identity, canonical.has(identity) ? null : entry);
+  }
+  return canonical;
 }
 
 function validateBenchmarksCache(value: unknown): { cache: BenchmarksCache | null; reason?: string } {
@@ -168,7 +195,7 @@ export interface BenchmarkStoreOptions {
 export class BenchmarkStore {
   private readonly dir: string;
   private cache: BenchmarksCache | null = null;
-  private nameIndex: Map<string, BenchmarkEntry> | null = null;
+  private nameIndex: BenchmarkNameIndex | null = null;
   private readonly refreshCallbacks = new Set<() => void>();
   /** The refresh initBenchmarks started, when the cache was missing or stale; settled at once otherwise. */
   private startupRefresh: Promise<void> = Promise.resolve();
@@ -248,17 +275,16 @@ export class BenchmarkStore {
   private findBenchmarks(modelName: string): BenchmarkEntry | undefined {
     const entries = this.cache?.entries;
     if (!entries || entries.length === 0) return undefined;
-    const index = this.nameIndex ?? buildNameIndex(entries);
-    const exact = entries.find((entry) => entry.name === modelName || entry.modelId === modelName);
+    const index = this.nameIndex ?? (this.nameIndex = buildNameIndex(entries));
+    const exact = index.exact.get(modelName);
     if (exact) return exact;
-    const indexed = index.get(modelName.toLowerCase());
+    const indexed = index.lower.get(modelName.toLowerCase());
     if (indexed) return indexed;
 
     const canonical = knownCatalogModelIdentity(modelName);
     if (!canonical) return undefined;
-    const matches = entries.filter(entry =>
-      (knownCatalogModelIdentity(entry.modelId) ?? knownCatalogModelIdentity(entry.name)) === canonical);
-    return matches.length === 1 ? matches[0] : undefined;
+    index.canonical ??= buildCanonicalIndex(entries);
+    return index.canonical.get(canonical) ?? undefined;
   }
 
   getTopBenchmarkModelIds(n: number): string[] {

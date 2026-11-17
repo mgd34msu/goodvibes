@@ -130048,6 +130048,15 @@ Return runtime metadata for a single provider.
           "tier": {
             "type": "string"
           },
+          "qualityTier": {
+            "type": "string",
+            "enum": [
+              "S",
+              "A",
+              "B",
+              "C"
+            ]
+          },
           "pricing": {
             "type": "object",
             "properties": {
@@ -130420,6 +130429,15 @@ Return runtime provider metadata, policy hooks, and priced model summaries.
                 "tier": {
                   "type": "string"
                 },
+                "qualityTier": {
+                  "type": "string",
+                  "enum": [
+                    "S",
+                    "A",
+                    "B",
+                    "C"
+                  ]
+                },
                 "pricing": {
                   "type": "object",
                   "properties": {
@@ -130584,6 +130602,15 @@ Return usage and pricing posture for a single provider.
           },
           "tier": {
             "type": "string"
+          },
+          "qualityTier": {
+            "type": "string",
+            "enum": [
+              "S",
+              "A",
+              "B",
+              "C"
+            ]
           },
           "pricing": {
             "type": "object",

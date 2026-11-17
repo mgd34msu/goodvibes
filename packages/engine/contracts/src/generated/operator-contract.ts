@@ -128829,6 +128829,15 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   "tier": {
                     "type": "string"
                   },
+                  "qualityTier": {
+                    "type": "string",
+                    "enum": [
+                      "S",
+                      "A",
+                      "B",
+                      "C"
+                    ]
+                  },
                   "pricing": {
                     "type": "object",
                     "properties": {
@@ -129198,6 +129207,15 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "tier": {
                           "type": "string"
                         },
+                        "qualityTier": {
+                          "type": "string",
+                          "enum": [
+                            "S",
+                            "A",
+                            "B",
+                            "C"
+                          ]
+                        },
                         "pricing": {
                           "type": "object",
                           "properties": {
@@ -129359,6 +129377,15 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   },
                   "tier": {
                     "type": "string"
+                  },
+                  "qualityTier": {
+                    "type": "string",
+                    "enum": [
+                      "S",
+                      "A",
+                      "B",
+                      "C"
+                    ]
                   },
                   "pricing": {
                     "type": "object",

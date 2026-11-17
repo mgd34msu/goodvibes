@@ -507,6 +507,8 @@ const PROVIDER_MODEL_SNAPSHOT_SCHEMA = objectSchema({
   contextWindow: NUMBER_SCHEMA,
   family: enumSchema(['Claude', 'GPT', 'Gemini', 'Llama', 'Qwen', 'GLM', 'MiniMax', 'DeepSeek', 'Mistral', 'Command', 'Grok', 'Kimi', 'Other']),
   tier: STRING_SCHEMA,
+  // Benchmark quality tier (S best); absent when the model has no benchmark.
+  qualityTier: enumSchema(['S', 'A', 'B', 'C']),
   pricing: objectSchema({
     inputPerMillionTokens: NUMBER_SCHEMA,
     outputPerMillionTokens: NUMBER_SCHEMA,

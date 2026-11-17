@@ -1,4 +1,5 @@
 import { modelFamilyReadings, type ModelFamily } from './model-family.js';
+import { getQualityTier, getQualityTierFromScore, type BenchmarkStore, type QualityTier } from './model-benchmarks.js';
 import type { ProviderAuthRouteDescriptor, ProviderRuntimeMetadata, ProviderRuntimeMetadataDeps } from './interface.js';
 import type { ModelDefinition, ProviderRegistry } from './registry.js';
 import type { LLMProvider } from './interface.js';
@@ -22,6 +23,12 @@ export interface ProviderModelSnapshot {
   /** Published picker family; omitted when repository metadata is unavailable. */
   readonly family?: ModelFamily | undefined;
   readonly tier?: string | undefined;
+  /**
+   * Benchmark quality tier (S best, then A, B, C), the one the terminal model
+   * pickers group by: from the model's leaderboard entry, or for a synthetic
+   * model its best backend's score. Omitted when the model has no benchmark.
+   */
+  readonly qualityTier?: QualityTier | undefined;
   readonly pricing?: {
     readonly inputPerMillionTokens: number;
     readonly outputPerMillionTokens: number;
@@ -58,9 +65,30 @@ export interface ProviderUsageSnapshot {
   readonly usage: NonNullable<ProviderRuntimeMetadata['usage']>;
 }
 
+/**
+ * What a snapshot reads for a model's quality tier. Optional so a registry
+ * without a leaderboard still lists its models; the tier is then omitted.
+ */
+interface QualityTierSources {
+  readonly benchmarks?: Pick<BenchmarkStore, 'getKnownBenchmarks'> | undefined;
+  readonly getSyntheticModelInfoFromCatalog?: ProviderRegistry['getSyntheticModelInfoFromCatalog'] | undefined;
+}
+
+/** Reads only the leaderboard already held in memory (one map read); never fetches. */
+function readQualityTier(model: ModelDefinition, sources: QualityTierSources): QualityTier | undefined {
+  if (model.provider === 'synthetic') {
+    const score = sources.getSyntheticModelInfoFromCatalog?.(model.id)?.bestCompositeScore;
+    return score != null ? getQualityTierFromScore(score) : undefined;
+  }
+  const store = sources.benchmarks;
+  if (!store) return undefined;
+  const entry = store.getKnownBenchmarks(model.id) ?? store.getKnownBenchmarks(model.displayName);
+  return entry ? getQualityTier(entry.benchmarks) : undefined;
+}
+
 function toModelSnapshot(
   model: ModelDefinition,
-  providerRegistry: Pick<ProviderRegistry, 'resolveModelPricing'>,
+  providerRegistry: Pick<ProviderRegistry, 'resolveModelPricing'> & QualityTierSources,
   enrichFamilies: boolean,
 ): ProviderModelSnapshot {
   // The ONE pricing resolver (manual -> registration -> provider-served ->
@@ -68,6 +96,7 @@ function toModelSnapshot(
   // price the platform actually charges with, carrying its provenance.
   const resolved = providerRegistry.resolveModelPricing(model.id, model.provider);
   const family = enrichFamilies ? modelFamilyReadings.known(model) : undefined;
+  const qualityTier = readQualityTier(model, providerRegistry);
   return {
     id: model.id,
     registryKey: model.registryKey,
@@ -83,6 +112,7 @@ function toModelSnapshot(
       : {}),
     ...(family !== undefined ? { family } : {}),
     ...(model.tier ? { tier: model.tier } : {}),
+    ...(qualityTier !== undefined ? { qualityTier } : {}),
     ...(resolved.status === 'priced'
       ? {
           pricing: {
@@ -120,6 +150,7 @@ function withConfiguredFromRoutes(runtime: ProviderRuntimeMetadata): ProviderRun
 
 /** The registry methods a snapshot reads; a listing also takes one reading of the stores for all providers when offered. */
 type SnapshotRegistry = Pick<ProviderRegistry, 'getRegistered' | 'getCurrentModel' | 'listModels' | 'resolveModelPricing' | 'describeRuntime'>
+  & QualityTierSources
   & { readonly runtimeMetadataSnapshot?: (() => ProviderRuntimeMetadataDeps) | undefined };
 
 async function buildSnapshotForProvider(
@@ -179,7 +210,7 @@ export async function listProviderRuntimeSnapshots(
 }
 
 export async function getProviderRuntimeSnapshot(
-  providerRegistry: Pick<ProviderRegistry, 'getRegistered' | 'getCurrentModel' | 'listModels' | 'resolveModelPricing' | 'describeRuntime'>,
+  providerRegistry: SnapshotRegistry,
   providerId: string,
   options: ProviderRuntimeSnapshotOptions = {},
 ): Promise<ProviderRuntimeSnapshot | null> {
@@ -187,7 +218,7 @@ export async function getProviderRuntimeSnapshot(
 }
 
 export async function getProviderUsageSnapshot(
-  providerRegistry: Pick<ProviderRegistry, 'getRegistered' | 'getCurrentModel' | 'listModels' | 'resolveModelPricing' | 'describeRuntime'>,
+  providerRegistry: SnapshotRegistry,
   providerId: string,
 ): Promise<ProviderUsageSnapshot | null> {
   const snapshot = await buildSnapshotForProvider(providerRegistry, providerId);

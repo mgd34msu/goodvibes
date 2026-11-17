@@ -32,6 +32,7 @@ import {
   filterModels,
   groupModels,
   hasAnyCapabilityData,
+  hasAnyQualityTierData,
   hasAnyTierData,
   MODEL_TARGETS,
   modelsFromProvidersResponse,
@@ -133,6 +134,7 @@ export function ModelWorkspaceModal({ open, onClose }: ModelWorkspaceModalProps)
   );
   const priceDataAvailable = useMemo(() => hasAnyTierData(allModels), [allModels]);
   const capabilityDataAvailable = useMemo(() => hasAnyCapabilityData(allModels), [allModels]);
+  const qualityTierDataAvailable = useMemo(() => hasAnyQualityTierData(allModels), [allModels]);
 
   const routing = useMemo(
     () => readTargetRouting(target, config.data, readPath(currentModel.data, ['model']) as { registryKey?: string; provider?: string; id?: string } | null),
@@ -152,7 +154,10 @@ export function ModelWorkspaceModal({ open, onClose }: ModelWorkspaceModalProps)
     [allModels, query, providerFilter, categoryFilter, capabilityFilter, capabilityDataAvailable, availableOnly, configuredProviderIds],
   );
 
-  const groups = useMemo(() => groupModels(filtered, groupBy), [filtered, groupBy]);
+  // A daemon that sends no quality tier (no benchmarks read yet, or one that
+  // predates the field) groups by provider instead of one "No benchmark" bucket.
+  const effectiveGroupBy: GroupByMode = groupBy === 'qualityTier' && !qualityTierDataAvailable ? 'provider' : groupBy;
+  const groups = useMemo(() => groupModels(filtered, effectiveGroupBy), [filtered, effectiveGroupBy]);
 
   const useModel = useMutation({
     mutationFn: async (model: CatalogModel) => {
@@ -307,12 +312,17 @@ export function ModelWorkspaceModal({ open, onClose }: ModelWorkspaceModalProps)
               <span className="model-workspace-filter__label" aria-hidden="true">Group</span>
               <Select<GroupByMode>
                 aria-label="Group"
-                value={groupBy}
+                value={effectiveGroupBy}
                 onChange={setGroupBy}
                 options={[
                   { value: 'provider', label: 'Provider' },
                   { value: 'family', label: 'Family' },
                   { value: 'pricingTier', label: 'Pricing tier' },
+                  {
+                    value: 'qualityTier',
+                    label: `Quality tier${qualityTierDataAvailable ? '' : ' (no benchmarks reported)'}`,
+                    disabled: !qualityTierDataAvailable,
+                  },
                 ]}
               />
             </div>

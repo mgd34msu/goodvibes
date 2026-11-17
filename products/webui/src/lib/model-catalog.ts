@@ -41,6 +41,11 @@
  *     multimodal }` per model from the registry definition (runtime-snapshot.ts
  *     toModelSnapshot()), and the Capability filter narrows by them. A daemon that
  *     predates the field sends none, and the filter renders disabled.
+ *
+ *   - Quality tier: providers.list carries `qualityTier` ('S' best, then 'A', 'B',
+ *     'C') per model that has a benchmark (runtime-snapshot.ts readQualityTier()),
+ *     the tier the terminal model pickers group by. The Quality tier grouping is
+ *     offered once any model carries one.
  */
 import { asRecord, firstArrayAtPath, firstString, readPath } from './object';
 import { isProviderConfigured } from './provider-status';
@@ -91,8 +96,17 @@ export interface CatalogModel {
   readonly contextWindow?: number;
   readonly family?: ModelFamily;
   readonly tier?: string;
+  readonly qualityTier?: QualityTier;
   readonly pricing?: ModelPricing;
   readonly capabilities?: ModelCapabilities;
+}
+
+export type QualityTier = 'S' | 'A' | 'B' | 'C';
+
+const QUALITY_TIERS: readonly QualityTier[] = ['S', 'A', 'B', 'C'];
+
+function readQualityTier(value: unknown): QualityTier | undefined {
+  return QUALITY_TIERS.find((tier) => tier === value);
 }
 
 function readCapabilities(raw: unknown): ModelCapabilities | undefined {
@@ -129,6 +143,7 @@ function normalizeCatalogModel(providerId: string, raw: unknown): CatalogModel |
     contextWindow: typeof contextWindowRaw === 'number' ? contextWindowRaw : undefined,
     family: readModelFamily(record.family),
     tier: firstString(record, ['tier']) || undefined,
+    qualityTier: readQualityTier(record.qualityTier),
     pricing: readPricing(record.pricing),
     capabilities: readCapabilities(record.capabilities),
   };
@@ -218,7 +233,7 @@ export function detectFamily(model: CatalogModel): ModelFamily | undefined {
 
 export type CategoryFilter = 'all' | 'free' | 'paid' | 'subscription';
 export type CapabilityFilter = 'reasoning' | 'toolUse' | 'multimodal' | 'none';
-export type GroupByMode = 'provider' | 'family' | 'pricingTier';
+export type GroupByMode = 'provider' | 'family' | 'pricingTier' | 'qualityTier';
 
 /** Matches the TUI's tierToCategoryFilter: 'free'/'subscription' pass through, anything else configured is 'paid'. */
 export function tierToCategoryFilter(tier: string | undefined): CategoryFilter | undefined {
@@ -231,6 +246,11 @@ export function tierToCategoryFilter(tier: string | undefined): CategoryFilter |
 /** True once the current dataset carries real tier data on at least one model. */
 export function hasAnyTierData(models: readonly CatalogModel[]): boolean {
   return models.some((model) => Boolean(model.tier));
+}
+
+/** True once the current dataset carries a quality tier on at least one model. */
+export function hasAnyQualityTierData(models: readonly CatalogModel[]): boolean {
+  return models.some((model) => model.qualityTier !== undefined);
 }
 
 /** True once the current dataset carries capability flags on at least one model. */
@@ -275,13 +295,26 @@ export interface ModelGroup {
   readonly models: readonly CatalogModel[];
 }
 
-/** Groups models by provider, family or pricing tier. */
+const UNRATED_QUALITY = 'unrated';
+
+function groupLabel(groupBy: GroupByMode, key: string): string {
+  if (groupBy === 'pricingTier' && key === 'unreported') return 'Pricing tier unreported';
+  if (groupBy === 'qualityTier') return key === UNRATED_QUALITY ? 'No benchmark' : `Tier ${key}`;
+  return key;
+}
+
+/**
+ * Groups models by provider, family, pricing tier or quality tier. Quality
+ * groups run best first (S, A, B, C, then models with no benchmark), the order
+ * the terminal model pickers show.
+ */
 export function groupModels(models: readonly CatalogModel[], groupBy: GroupByMode): ModelGroup[] {
   const buckets = new Map<string, CatalogModel[]>();
   const order: string[] = [];
   const keyFor = (model: CatalogModel): string => {
     if (groupBy === 'provider') return model.provider;
     if (groupBy === 'family') return detectFamily(model) ?? 'Ungrouped';
+    if (groupBy === 'qualityTier') return model.qualityTier ?? UNRATED_QUALITY;
     return model.tier ?? 'unreported';
   };
   for (const model of models) {
@@ -292,9 +325,16 @@ export function groupModels(models: readonly CatalogModel[], groupBy: GroupByMod
     }
     buckets.get(key)?.push(model);
   }
+  if (groupBy === 'qualityTier') {
+    const rank = (key: string): number => {
+      const index = QUALITY_TIERS.indexOf(key as QualityTier);
+      return index === -1 ? QUALITY_TIERS.length : index;
+    };
+    order.sort((a, b) => rank(a) - rank(b));
+  }
   return order.map((key) => ({
     key,
-    label: key === 'unreported' ? 'Pricing tier unreported' : key,
+    label: groupLabel(groupBy, key),
     models: buckets.get(key) ?? [],
   }));
 }

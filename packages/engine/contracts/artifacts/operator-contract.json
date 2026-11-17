@@ -128826,6 +128826,15 @@
                   "tier": {
                     "type": "string"
                   },
+                  "qualityTier": {
+                    "type": "string",
+                    "enum": [
+                      "S",
+                      "A",
+                      "B",
+                      "C"
+                    ]
+                  },
                   "pricing": {
                     "type": "object",
                     "properties": {
@@ -129195,6 +129204,15 @@
                         "tier": {
                           "type": "string"
                         },
+                        "qualityTier": {
+                          "type": "string",
+                          "enum": [
+                            "S",
+                            "A",
+                            "B",
+                            "C"
+                          ]
+                        },
                         "pricing": {
                           "type": "object",
                           "properties": {
@@ -129356,6 +129374,15 @@
                   },
                   "tier": {
                     "type": "string"
+                  },
+                  "qualityTier": {
+                    "type": "string",
+                    "enum": [
+                      "S",
+                      "A",
+                      "B",
+                      "C"
+                    ]
                   },
                   "pricing": {
                     "type": "object",

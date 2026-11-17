@@ -1,3 +1,4 @@
+/** A control-plane socket that presents a refused credential is closed; one with the operator credential stays open. */
 import { expect, test } from 'bun:test';
 import { DaemonControlPlaneHelper, type DaemonControlPlaneContext, type ControlPlaneWebSocketData } from '../platform/src/platform/daemon/control-plane.js';
 import { ControlPlaneGateway } from '../platform/src/platform/control-plane/gateway.js';
@@ -23,11 +24,12 @@ function connect() {
   return { helper, ws, sent, closed };
 }
 
-test('a refused credential on an unauthenticated socket is answered and the socket is closed with the reason', async () => {
+test('a refused credential on an unauthenticated socket is refused and the socket is closed', async () => {
   const { helper, ws, sent, closed } = connect();
   await helper.handleControlPlaneWebSocketMessage(ws, JSON.stringify({ type: 'auth', token: 'not-the-token' }));
-  expect(sent).toContainEqual({ type: 'auth', ok: false, error: 'Unauthorized' });
-  expect(closed).toEqual([{ code: 1008, reason: 'Unauthorized' }]);
+  expect(sent.filter((frame) => frame.type === 'auth').map((frame) => [frame.ok, frame.code])).toEqual([[false, 'AUTH_REQUIRED']]);
+  // 1008: closed for a policy violation.
+  expect(closed.map((entry) => entry.code)).toEqual([1008]);
 });
 
 test('a valid credential is acknowledged and the socket stays open', async () => {

@@ -3,6 +3,13 @@ import type { UiReadModel, UiRemoteSnapshot } from '../../runtime/ui-read-models
 import { toneStyle, statusGlyph, pad, postureLine, kv, runModalCommand, type Tone } from './modal-surface-helpers.ts';
 
 const RUNNER_ROW = 'runner:';
+
+/** The daemon this terminal works through when it hosts none itself: its mode and reason as the attach found them. */
+export interface AttachedDaemonStatus {
+  readonly mode: string;
+  readonly baseUrl?: string | undefined;
+  readonly reason?: string | undefined;
+}
 const STEP_ROW = 'step:';
 
 function stateTone(state: string): Tone {
@@ -38,7 +45,10 @@ class RemoteModalSurface implements ConfigModalSurface {
   private requestRender: () => void = () => {};
   private unsub: (() => void) | null = null;
 
-  constructor(private readonly readModel?: UiReadModel<UiRemoteSnapshot>) {}
+  constructor(
+    private readonly readModel?: UiReadModel<UiRemoteSnapshot>,
+    private readonly attachedDaemon?: () => AttachedDaemonStatus | undefined,
+  ) {}
 
   // One Enter: on a runner row it shows that runner's steps, on a step row it runs it.
   readonly actions = [
@@ -69,13 +79,23 @@ class RemoteModalSurface implements ConfigModalSurface {
     }
     const { daemon, acp, contracts, artifacts, supervisor, distributed, activeAutomationRuns } = snapshot;
     const peersConnected = distributed.peers.filter((p) => p.status === 'connected').length;
-    const header = [
-      postureLine([
+    // A terminal attached to a separately running daemon hosts no listener of
+    // its own; the daemon it is using is the one the attach reached.
+    const attached = this.attachedDaemon?.();
+    const daemonLine = attached && attached.mode !== 'embedded'
+      ? postureLine([
+        `daemon ${attached.mode === 'external' ? 'ATTACHED' : attached.mode.toUpperCase()}`,
+        ...(attached.baseUrl ? [kv('at', attached.baseUrl)] : []),
+        ...(attached.reason && attached.mode !== 'external' ? [kv('why', attached.reason)] : []),
+      ])
+      : postureLine([
         `daemon ${daemon.transportState.toUpperCase()}`,
         kv('running', daemon.isRunning ? 'yes' : 'no'),
         kv('jobs', activeAutomationRuns),
         ...(daemon.lastError ? [kv('error', daemon.lastError)] : []),
-      ]),
+      ]);
+    const header = [
+      daemonLine,
       postureLine([
         `acp ${acp.transportState.toUpperCase()}`,
         kv('conns', acp.activeConnections.length),
@@ -152,6 +172,9 @@ class RemoteModalSurface implements ConfigModalSurface {
   }
 }
 
-export function createRemoteModalSurface(readModel?: UiReadModel<UiRemoteSnapshot>): ConfigModalSurface {
-  return new RemoteModalSurface(readModel);
+export function createRemoteModalSurface(
+  readModel?: UiReadModel<UiRemoteSnapshot>,
+  attachedDaemon?: () => AttachedDaemonStatus | undefined,
+): ConfigModalSurface {
+  return new RemoteModalSurface(readModel, attachedDaemon);
 }

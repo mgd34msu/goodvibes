@@ -60,7 +60,10 @@ export function registerBuiltinModals(
   manager.registerModalSurface(createSubscriptionModalSurface(deps.serviceRegistry, deps.subscriptionManager));
   manager.registerModalRedirect('subscription', 'subscription-modal');
 
-  manager.registerModalSurface(createRemoteModalSurface(ui.readModels.remote));
+  manager.registerModalSurface(createRemoteModalSurface(
+    ui.readModels.remote,
+    () => ui.platform.externalServices?.inspect().daemonStatus,
+  ));
   manager.registerModalRedirect('remote', 'remote-modal');
 
   manager.registerModalSurface(createBuiltinProviderHealthModalSurface(deps));

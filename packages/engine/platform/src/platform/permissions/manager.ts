@@ -14,7 +14,7 @@ import type { PreparedToolCall, ToolRegistry, ToolExecutionEffect } from '../too
 import { assertProjectionCurrent, projectionFunction, projectionProperty, ToolInputProjectionError, type ToolPreparedSettingsMutation } from '../tools/input-projection.js';
 import { bindTurnHookDispatcher, type TurnHookOwner } from '../hooks/turn-ownership.js';
 import { getConfigSnapshot, isAutoApproveEnabled } from '../config/index.js';
-import type { BackgroundAgentsMode, PermissionsToolConfig } from '../config/schema.js';
+import type { PermissionsToolConfig } from '../config/schema.js';
 import type { PermissionAttribution, PermissionExecutionOptions, PermissionPromptDecision, PermissionRequestHandler } from './prompt.js';
 import { describeHookChange } from './hook-change-prompt.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
@@ -1595,11 +1595,6 @@ export class PermissionManager {
   /** The gate preset the current `permissions.mode` selects. */
   getPreset(): GatePreset {
     return presetForMode(this.getMode());
-  }
-
-  /** Saved background-agent settings no longer create a second execution policy. */
-  getBackgroundAgentsMode(): BackgroundAgentsMode {
-    return 'inherit';
   }
 
   /**

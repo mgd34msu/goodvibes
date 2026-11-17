@@ -127,11 +127,6 @@ export const ENUM_VALUE_DESCRIPTIONS: Record<string, Record<string, string>> = {
     guided: SHARED_SETTING_ENUM_DESCRIPTIONS['behavior.guidanceMode']['guided'],
   },
   'permissions.mode': Object.fromEntries(Object.values(GATE_PRESETS).map((preset) => [preset.mode, preset.summary])),
-  'permissions.backgroundAgents': {
-    inherit:
-      'Background/subagent tool calls consult the same session permission mode as the foreground turn, Safe owner asks the owner about dangerous actions; Safe Jev resolves them autonomously; YOLO has no execution-safety denials.',
-    'allow-all': 'Background/subagent tool calls are exempt from the session permission mode and auto-approve regardless of it.',
-  },
   'diagnostics.postEdit': {
     on: 'After a successful file write/edit, append cheap, in-process syntax diagnostics (errors only) to the tool result. Syntax-level only, not type-checking.',
     off: 'Never append post-edit diagnostics to write/edit tool results.',

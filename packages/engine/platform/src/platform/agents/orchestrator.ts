@@ -179,7 +179,7 @@ type AgentOrchestratorToolDeps = {
   readonly permissionManager?:
     | Pick<
         import('../permissions/manager.js').PermissionManager,
-        'checkDetailed' | 'check' | 'getBackgroundAgentsMode' | 'readAccess' | 'passesBoundary'
+        'checkDetailed' | 'check' | 'readAccess' | 'passesBoundary'
       > & Partial<Pick<import('../permissions/manager.js').PermissionManager, 'prepareAutonomousOwner' | 'admitAutonomous' | 'autonomousPreparation'>>
     | undefined;
   /**

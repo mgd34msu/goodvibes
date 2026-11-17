@@ -57,7 +57,6 @@ export const coreConfigDefaults = {
   },
   permissions: {
     mode: 'safe-owner',
-    backgroundAgents: 'inherit',
     engine: 'baseline',
     simulation: true,
     divergenceDashboard: true,
@@ -408,14 +407,6 @@ export const coreHeadConfigSettings: (ConfigSettingDefinition | ConfigSetting)[]
       + 'safe-jev lets Jev decide instead; yolo runs every action without safety denials. '
       + 'plan is a separate read-only planning posture.',
     enumValues: ['safe-owner', 'safe-jev', 'yolo', 'plan'],
-  },
-  {
-    key: 'permissions.backgroundAgents',
-    deprecated: true,
-    type: 'enum',
-    default: 'inherit',
-    description: 'Legacy background permission setting, retained for saved configurations. Background actions use the same execution mode as their owning session.',
-    enumValues: ['inherit', 'allow-all'],
   },
   {
     key: 'permissions.divergenceThreshold',

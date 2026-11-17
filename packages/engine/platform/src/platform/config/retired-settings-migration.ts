@@ -48,6 +48,10 @@ export const RETIRED_SETTINGS: readonly RetiredSetting[] = [
     instead: 'A collapse window now ends a fixed time after its first notification, so there is no cooldown; the window follows the print level (behavior.hitlMode).',
   },
   {
+    key: 'permissions.backgroundAgents',
+    instead: 'Background and subagent actions follow the execution mode of the session that started them: permissions.mode decides for both.',
+  },
+  {
     key: 'email.enabled',
     instead: 'The mailbox is on once surfaces.email has a host, an account and a password; there is no separate switch.',
   },

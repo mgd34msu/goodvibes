@@ -187,7 +187,6 @@ export const SETTING_LABELS: Partial<Record<string, string>> = {
   'behavior.guidanceMode': SHARED_SETTING_LABELS['behavior.guidanceMode'],
   'storage.secretPolicy': SHARED_SETTING_LABELS['storage.secretPolicy'],
   'permissions.mode': 'Permission Mode',
-  'permissions.backgroundAgents': 'Background Agents',
   'diagnostics.postEdit': 'Post-Edit Diagnostics',
   'sandbox.vmBackend': 'Sandbox Backend',
   'tools.llmProvider': SHARED_SETTING_LABELS['tools.llmProvider'],

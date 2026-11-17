@@ -24,7 +24,7 @@ GoodVibes ships **166** built-in slash commands across **76** categories. Every 
 - [Conversation](#conversation): 1
 - [Cost](#cost): 2
 - [Diagnostics](#diagnostics): 1
-- [Diff & Review](#diff-review): 3
+- [Diff & Review](#diff--review): 3
 - [Discovery](#discovery): 1
 - [Editor](#editor): 1
 - [Eval](#eval): 1
@@ -41,7 +41,7 @@ GoodVibes ships **166** built-in slash commands across **76** categories. Every 
 - [Local Providers](#local-providers): 1
 - [Local Runtime](#local-runtime): 10
 - [Local Setup](#local-setup): 1
-- [Mail & Calendar](#mail-calendar): 2
+- [Mail & Calendar](#mail--calendar): 2
 - [Managed Runtime](#managed-runtime): 1
 - [Marketplace](#marketplace): 1
 - [MCP](#mcp): 1
@@ -71,16 +71,16 @@ GoodVibes ships **166** built-in slash commands across **76** categories. Every 
 - [Security](#security): 2
 - [Services](#services): 1
 - [Session Content](#session-content): 10
-- [Sessions & Replay](#sessions-replay): 4
+- [Sessions & Replay](#sessions--replay): 4
 - [Settings Sync](#settings-sync): 1
 - [Sharing](#sharing): 1
-- [Shell & Session](#shell-session): 19
+- [Shell & Session](#shell--session): 19
 - [Skills](#skills): 1
 - [Subscriptions](#subscriptions): 1
 - [Tasks](#tasks): 1
 - [Teamwork](#teamwork): 1
 - [Testing](#testing): 1
-- [Voice & TTS](#voice-tts): 1
+- [Voice & TTS](#voice--tts): 1
 - [Web Search](#web-search): 1
 - [Work Plans](#work-plans): 1
 - [Workstreams](#workstreams): 1

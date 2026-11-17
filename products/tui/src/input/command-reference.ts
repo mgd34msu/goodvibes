@@ -21,13 +21,13 @@ function escapeCell(text: string): string {
   return text.replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/\r?\n/g, ' ').trim();
 }
 
-/** Stable anchor slug for a category heading (GitHub-style). */
+/** Stable anchor slug for a category heading, as GitHub makes it: each space becomes a hyphen, so "Diff & Review" is diff--review. */
 function slug(text: string): string {
   return text
     .toLowerCase()
     .replace(/[^a-z0-9\s-]/g, '')
     .trim()
-    .replace(/\s+/g, '-');
+    .replace(/\s/g, '-');
 }
 
 /**

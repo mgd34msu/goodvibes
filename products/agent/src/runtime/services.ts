@@ -746,6 +746,14 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
         currentSessionId: options.resolveSessionId ? () => options.resolveSessionId?.({}) ?? null : undefined,
         // The same privacy setting the shell's own notices read; unreadable means metadata only.
         notificationsMetadataOnly: () => readNotificationsMetadataOnly((key) => readAgentHostSetting(configManager, key)),
+        // No supervisor restarts the Agent, so a memory tripwire warns instead of exiting.
+        tripwireExit: (receipt) => {
+          logger.warn('[memory] the Agent keeps running past a memory tripwire; save your work and restart it when convenient', {
+            trigger: receipt.trigger,
+            rssMb: receipt.rssMb,
+            budgetMb: receipt.budgetMb,
+          });
+        },
         // Consolidation writes the store, so it runs here only while no daemon owns it.
         consolidationTarget: (registry, spine) => gateConsolidationToLocalWriter(registry, spine),
         onConsolidationReceipt: (receipt) => {

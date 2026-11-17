@@ -2811,13 +2811,13 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "surfaces.email.inbound.enabled",
     "type": "boolean",
     "default": false,
-    "description": "Turns on continuous IMAP watching of the configured inbound accounts below. Off by default, reading the owner's mail continuously is not a thing to start doing without being asked. Turn on after configuring at least one account in surfaces.email.inbound.accounts."
+    "description": "Turns on inbound notices: arriving mail is matched against open verification expectations, recorded and announced, and further accounts below are watched. Off by default. The daemon's own mailbox is read by one reader for the inbox as well whenever it is configured; this switch decides whether that mail is also announced."
   },
   {
     "key": "surfaces.email.inbound.accounts",
     "type": "string",
     "default": "[]",
-    "description": "JSON array of configured mailbox account identifiers to watch for inbound mail, e.g. [\"primary\"]. Empty means no mailbox is watched even when enabled is true. A list rather than a single switch because one address for signups and another for the owner's real mail is the expected shape. The first entry is the daemon's own mailbox (surfaces.email.*, or Gmail when Google is connected); every further entry is watched over IMAP with the connection surfaces.email.inbound.mailboxes gives it, and one without an entry there is reported in inbound mail status rather than watched.",
+    "description": "JSON array of configured mailbox account identifiers to watch for inbound mail, e.g. [\"primary\"]. The first names the daemon's own mailbox; empty labels it with the mail user. A list rather than a single switch because one address for signups and another for the owner's real mail is the expected shape. The first entry is the daemon's own mailbox (surfaces.email.*, or Gmail when Google is connected); every further entry is watched over IMAP with the connection surfaces.email.inbound.mailboxes gives it, and one without an entry there is reported in inbound mail status rather than watched.",
     "validationHint": "a JSON array of account names, e.g. [\"primary\"]"
   },
   {

@@ -1,4 +1,5 @@
 import { captureStrictJudgmentJson } from '@goodvibes-jev/engine/platform/platform/gate';
+import { isServiceMethodId, serviceExpectedOutcome, serviceLifecycleDecision, serviceOutcomeCertified, serviceReceiptEvidence } from './agent-service-lifecycle.ts';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { assertCurrentToolInvocation, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { logger, redactStructuredDataAsync } from '@goodvibes-jev/engine/platform/platform/utils';
@@ -45,7 +46,6 @@ interface PreparedOperatorRoute {
   readonly payload: JsonRecord;
 }
 
-type ServiceMethodId = 'services.status' | 'services.install' | 'services.start' | 'services.restart';
 type WatcherMethodId =
   | 'watchers.create'
   | 'watchers.patch'
@@ -75,7 +75,6 @@ const AUTONOMOUS_PROFILE_METHOD_IDS = new Set([
 const PROFILE_QUOTE_METHOD_IDS = new Set([
   'profile.set', 'profile.append', 'occasions.confirm', 'occasions.plans.confirm',
 ]);
-const SERVICE_METHOD_IDS = new Set<string>(['services.status', 'services.install', 'services.start', 'services.restart']);
 const WATCHER_METHOD_IDS = new Set<string>([
   'watchers.create',
   'watchers.patch',
@@ -116,60 +115,8 @@ function prepareOperatorRoute(method: OperatorContractMethod, input: unknown): P
   return { method, httpMethod, path, payload };
 }
 
-function isServiceMethodId(methodId: string): methodId is ServiceMethodId {
-  return SERVICE_METHOD_IDS.has(methodId);
-}
-
 function isWatcherMethodId(methodId: string): methodId is WatcherMethodId {
   return WATCHER_METHOD_IDS.has(methodId);
-}
-
-function serviceSuccessCriteria(methodId: ServiceMethodId): readonly string[] {
-  if (methodId === 'services.status') {
-    return [
-      'The daemon returns a service status receipt with installed, autostart, and running booleans.',
-      'The receipt has no actionError.',
-    ];
-  }
-  if (methodId === 'services.install') {
-    return [
-      'The daemon returns ok:true for services.install.',
-      'The service status receipt reports installed:true.',
-      'The receipt has no actionError.',
-      'Verify with services.status before retrying install, start, or restart.',
-    ];
-  }
-  if (methodId === 'services.start') {
-    return [
-      'The daemon returns ok:true for services.start.',
-      'The service status receipt reports running:true.',
-      'The receipt has no actionError.',
-      'Verify with services.status before retrying start or escalating.',
-    ];
-  }
-  return [
-    'The daemon returns ok:true for services.restart.',
-    'The service status receipt reports running:true after restart.',
-    'The receipt has no actionError.',
-    'Verify with services.status before retrying restart or escalating.',
-  ];
-}
-
-function serviceExpectedOutcome(methodId: ServiceMethodId): JsonRecord {
-  const target = methodId === 'services.status'
-    ? 'read-current-posture'
-    : methodId === 'services.install'
-      ? 'installed-service'
-      : methodId === 'services.start'
-        ? 'running-service'
-        : 'restarted-running-service';
-  return {
-    target,
-    successCriteria: serviceSuccessCriteria(methodId),
-    evidenceFields: ['installed', 'autostart', 'running', 'pid', 'lastAction', 'actionError', 'network.controlPlane.ready'],
-    verificationRoute: 'agent_operator_method methodId:"services.status"',
-    recoveryRoute: 'setup action:"item" setupItemId:"connected-host-readiness" includeParameters:true',
-  };
 }
 
 function watcherSuccessCriteria(methodId: WatcherMethodId): readonly string[] {
@@ -229,7 +176,7 @@ function summarizePreview(route: PreparedOperatorRoute): JsonRecord {
     body: READ_ONLY_HTTP_METHODS.has(route.httpMethod) ? undefined : route.payload,
     query: READ_ONLY_HTTP_METHODS.has(route.httpMethod) ? route.payload : undefined,
   };
-  if (isServiceMethodId(route.method.id)) preview.expectedOutcome = serviceExpectedOutcome(route.method.id);
+  if (isServiceMethodId(route.method.id)) preview.expectedOutcome = { ...serviceExpectedOutcome(route.method.id) };
   if (isWatcherMethodId(route.method.id)) preview.expectedOutcome = watcherExpectedOutcome(route.method.id);
   return preview;
 }
@@ -267,7 +214,7 @@ function operatorResultFields(method: OperatorContractMethod): NonNullable<Param
   for (const path of [['outcome', 'evidence'], ['outcome', 'lifecycleDecision', 'evidence']]) {
     for (const name of evidenceFields) add([...path, name]);
   }
-  for (const name of ['status', 'action', 'reason', 'evidence', 'statusRoute', 'setupRoute', 'modelRoute', 'methodId', 'decisionRules']) {
+  for (const name of ['status', 'action', 'reason', 'evidence', 'statusRoute', 'setupRoute', 'modelRoute', 'methodId']) {
     add(['outcome', 'lifecycleDecision', name]);
   }
   const pending = [{ schema: method.outputSchema, path: ['body'] },
@@ -295,147 +242,6 @@ function summarizeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function serviceReceiptEvidence(body: unknown): JsonRecord {
-  if (!isRecord(body)) return { receipt: 'not-json-object' };
-  const network = isRecord(body.network) ? body.network : {};
-  const controlPlane = isRecord(network.controlPlane) ? network.controlPlane : {};
-  return {
-    installed: typeof body.installed === 'boolean' ? body.installed : null,
-    autostart: typeof body.autostart === 'boolean' ? body.autostart : null,
-    running: typeof body.running === 'boolean' ? body.running : null,
-    pid: typeof body.pid === 'number' ? body.pid : null,
-    lastAction: typeof body.lastAction === 'string' ? body.lastAction : null,
-    actionError: typeof body.actionError === 'string' ? body.actionError : null,
-    controlPlaneReady: typeof controlPlane.ready === 'boolean' ? controlPlane.ready : null,
-  };
-}
-
-function serviceLifecycleRoute(methodId: ServiceMethodId): string {
-  return operatorMethodLikeRoute(methodId);
-}
-
-function operatorMethodLikeRoute(methodId: string): string {
-  return `agent_operator_method methodId:"${methodId}" input:{}`;
-}
-
-function serviceLifecycleDecisionFromStatus(body: unknown): JsonRecord {
-  const evidence = serviceReceiptEvidence(body);
-  const common = {
-    evidence,
-    statusRoute: serviceLifecycleRoute('services.status'),
-    setupRoute: 'setup action:"item" setupItemId:"connected-host-readiness" includeParameters:true',
-    decisionRules: [
-      'installed:false -> services.install',
-      'installed:true and running:false -> services.start',
-      'installed:true and running:true and network.controlPlane.ready:false -> services.restart',
-      'installed:true and running:true with no failed control-plane evidence -> no lifecycle mutation',
-    ],
-  };
-  if (!isRecord(body)) {
-    return {
-      status: 'needs-follow-up',
-      action: 'read-status',
-      reason: 'The service status receipt was not a JSON object.',
-      modelRoute: serviceLifecycleRoute('services.status'),
-      ...common,
-    };
-  }
-  const actionError = typeof body.actionError === 'string' ? body.actionError.trim() : '';
-  if (actionError) {
-    return {
-      status: 'needs-diagnostics',
-      action: 'inspect-diagnostics',
-      reason: 'The service status receipt includes actionError; inspect diagnostics before any lifecycle mutation.',
-      modelRoute: 'host action:"services" includeParameters:true',
-      ...common,
-    };
-  }
-  if (typeof body.installed !== 'boolean' || typeof body.running !== 'boolean' || typeof body.autostart !== 'boolean') {
-    return {
-      status: 'needs-follow-up',
-      action: 'read-status',
-      reason: 'The service status receipt is missing installed, autostart, or running booleans.',
-      modelRoute: serviceLifecycleRoute('services.status'),
-      ...common,
-    };
-  }
-  if (body.installed === false) {
-    return {
-      status: 'action-recommended',
-      action: 'install-service',
-      methodId: 'services.install',
-      modelRoute: serviceLifecycleRoute('services.install'),
-      reason: 'services.status reports installed:false.',
-      ...common,
-    };
-  }
-  if (body.running === false) {
-    return {
-      status: 'action-recommended',
-      action: 'start-service',
-      methodId: 'services.start',
-      modelRoute: serviceLifecycleRoute('services.start'),
-      reason: 'services.status reports installed:true and running:false.',
-      ...common,
-    };
-  }
-  const network = isRecord(body.network) ? body.network : {};
-  const controlPlane = isRecord(network.controlPlane) ? network.controlPlane : {};
-  if (controlPlane.ready === false) {
-    return {
-      status: 'action-recommended',
-      action: 'restart-service',
-      methodId: 'services.restart',
-      modelRoute: serviceLifecycleRoute('services.restart'),
-      reason: 'services.status reports the service is installed and running, but network.controlPlane.ready:false.',
-      ...common,
-    };
-  }
-  return {
-    status: 'no-action-needed',
-    action: 'none',
-    reason: 'services.status reports the service is installed and running with no failed control-plane readiness evidence.',
-    modelRoute: 'host action:"status" includeParameters:true',
-    ...common,
-  };
-}
-
-function serviceLifecycleDecision(methodId: ServiceMethodId, responseOk: boolean, body: unknown): JsonRecord {
-  if (!responseOk) {
-    return {
-      status: 'needs-follow-up',
-      action: 'read-status',
-      reason: `The ${methodId} daemon call failed; do not retry a lifecycle mutation until services.status or host action:"services" explains the failure.`,
-      evidence: serviceReceiptEvidence(body),
-      statusRoute: serviceLifecycleRoute('services.status'),
-      setupRoute: 'setup action:"item" setupItemId:"connected-host-readiness" includeParameters:true',
-      modelRoute: 'host action:"services" includeParameters:true',
-    };
-  }
-  if (methodId === 'services.status') return serviceLifecycleDecisionFromStatus(body);
-  return {
-    status: 'verify-status',
-    action: 'read-status',
-    reason: `${methodId} returned a receipt; verify services.status before closing or advancing setup.`,
-    evidence: serviceReceiptEvidence(body),
-    statusRoute: serviceLifecycleRoute('services.status'),
-    setupRoute: 'setup action:"item" setupItemId:"connected-host-readiness" includeParameters:true',
-    modelRoute: serviceLifecycleRoute('services.status'),
-  };
-}
-
-function serviceOutcomeCertified(methodId: ServiceMethodId, responseOk: boolean, body: unknown): boolean {
-  if (!responseOk || !isRecord(body) || (typeof body.actionError === 'string' && body.actionError.trim())) return false;
-  if (methodId === 'services.status') {
-    return typeof body.installed === 'boolean'
-      && typeof body.autostart === 'boolean'
-      && typeof body.running === 'boolean';
-  }
-  if (methodId === 'services.install') return body.installed === true;
-  if (methodId === 'services.start') return body.running === true;
-  return body.running === true;
-}
-
 function serviceOutcome(methodId: string, responseOk: boolean, body: unknown): JsonRecord | undefined {
   if (!isServiceMethodId(methodId)) return undefined;
   const certified = serviceOutcomeCertified(methodId, responseOk, body);
@@ -449,7 +255,7 @@ function serviceOutcome(methodId: string, responseOk: boolean, body: unknown): J
     certified,
     methodId,
     evidence: serviceReceiptEvidence(body),
-    expectedOutcome: serviceExpectedOutcome(methodId),
+    expectedOutcome: { ...serviceExpectedOutcome(methodId) },
     lifecycleDecision: serviceLifecycleDecision(methodId, responseOk, body),
     nextStep: certified
       ? 'Inspect services.status or connected-host status to confirm the setup wizard can advance.'

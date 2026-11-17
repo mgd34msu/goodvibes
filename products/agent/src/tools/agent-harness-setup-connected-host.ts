@@ -1,4 +1,5 @@
 import type { CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import { serviceExpectedOutcome, type ServiceMethodId } from './agent-service-lifecycle.ts';
 import { captureAsyncHarnessInput } from './agent-harness-async-input.ts';
 import { resolveConnectedHostBaseUrl } from '../config/connected-host-dial.ts';
 import { getOperatorContract } from '@goodvibes-jev/engine/platform/contracts';
@@ -246,53 +247,9 @@ export function setupRepairCard(
   };
 }
 
-export function serviceRepairOutcome(methodId: 'services.status' | 'services.install' | 'services.start' | 'services.restart'): SetupRepairOutcome {
-  const common = {
-    evidenceFields: ['installed', 'autostart', 'running', 'pid', 'lastAction', 'actionError', 'network.controlPlane.ready'],
-    verificationRoute: operatorMethodRoute('services.status'),
-    recoveryRoute: 'setup action:"item" setupItemId:"connected-host-readiness" includeParameters:true',
-  };
-  if (methodId === 'services.status') {
-    return {
-      target: 'read-current-posture',
-      successCriteria: [
-        'The daemon returns installed, autostart, and running booleans.',
-        'The receipt has no actionError.',
-      ],
-      ...common,
-    };
-  }
-  if (methodId === 'services.install') {
-    return {
-      target: 'installed-service',
-      successCriteria: [
-        'The confirmed services.install receipt reports installed:true.',
-        'The receipt has no actionError.',
-        'A follow-up services.status read confirms the same installed posture before retrying another lifecycle action.',
-      ],
-      ...common,
-    };
-  }
-  if (methodId === 'services.start') {
-    return {
-      target: 'running-service',
-      successCriteria: [
-        'The confirmed services.start receipt reports running:true.',
-        'The receipt has no actionError.',
-        'A follow-up services.status read confirms running:true before retrying start or escalating.',
-      ],
-      ...common,
-    };
-  }
-  return {
-    target: 'restarted-running-service',
-    successCriteria: [
-      'The confirmed services.restart receipt reports running:true after restart.',
-      'The receipt has no actionError.',
-      'A follow-up services.status read confirms running:true before retrying restart or escalating.',
-    ],
-    ...common,
-  };
+/** The method's success criteria, from the one service lifecycle module the operator-method tool also applies. */
+export function serviceRepairOutcome(methodId: ServiceMethodId): SetupRepairOutcome {
+  return serviceExpectedOutcome(methodId);
 }
 
 export function connectedHostRepairCards(
@@ -415,15 +372,6 @@ export function connectedHostRepairCards(
   ];
 }
 
-export function serviceLifecycleReceiptRules(): readonly string[] {
-  return [
-    'installed:false -> recommend confirmed services.install.',
-    'installed:true and running:false -> recommend confirmed services.start.',
-    'installed:true and running:true and network.controlPlane.ready:false -> recommend confirmed services.restart.',
-    'installed:true and running:true with no failed control-plane evidence -> no service lifecycle mutation.',
-  ];
-}
-
 export function setupServiceLifecycleDecision(
   snapshot: Awaited<ReturnType<typeof collectSnapshot>>,
   probe: SetupServiceProbe,
@@ -437,11 +385,6 @@ export function setupServiceLifecycleDecision(
     hostIssue,
     serviceStatusMethodPublished: statusPublished,
   };
-  const blockedMutations = [
-    'services.install until a services.status receipt reports installed:false',
-    'services.start until a services.status receipt reports installed:true and running:false',
-    'services.restart until a services.status receipt reports installed:true, running:true, and network.controlPlane.ready:false or diagnostics prove an unhealthy running service',
-  ];
   if (hostIssue) {
     return {
       status: 'bootstrap-first',
@@ -449,8 +392,6 @@ export function setupServiceLifecycleDecision(
       modelRoute: 'host action:"services" includeParameters:true',
       reason: 'Agent cannot trust connected-host lifecycle methods until the owning host is reachable enough to return compatible status evidence.',
       evidence,
-      receiptRules: serviceLifecycleReceiptRules(),
-      blockedMutations,
     };
   }
   if (!statusPublished) {
@@ -460,8 +401,6 @@ export function setupServiceLifecycleDecision(
       modelRoute: 'host action:"services" includeParameters:true',
       reason: 'The connected-host operator contract does not publish services.status, so setup cannot select install/start/restart from a service receipt.',
       evidence,
-      receiptRules: serviceLifecycleReceiptRules(),
-      blockedMutations,
     };
   }
   if (probe.status === 'reachable') {
@@ -471,18 +410,14 @@ export function setupServiceLifecycleDecision(
       modelRoute: operatorMethodRoute('services.status'),
       reason: 'The runtime endpoint is reachable; no install/start/restart mutation is justified by probe evidence alone. Read services.status only for install/autostart audit or setup closeout.',
       evidence,
-      receiptRules: serviceLifecycleReceiptRules(),
-      blockedMutations,
     };
   }
   return {
     status: 'needs-status-receipt',
     recommendedAction: 'read-services-status',
     modelRoute: operatorMethodRoute('services.status'),
-    reason: 'Probe evidence is not enough to choose install, start, or restart. Read a services.status receipt first and let agent_operator_method return the exact lifecycle decision.',
+    reason: 'No services.status receipt yet: probe evidence alone does not choose install, start or restart. Read services.status; its result carries the lifecycle decision.',
     evidence,
-    receiptRules: serviceLifecycleReceiptRules(),
-    blockedMutations,
   };
 }
 

@@ -101,8 +101,6 @@ export interface SetupServiceLifecycleDecision {
     readonly hostIssue: boolean;
     readonly serviceStatusMethodPublished: boolean;
   };
-  readonly receiptRules: readonly string[];
-  readonly blockedMutations: readonly string[];
 }
 
 export interface SetupServiceProbe {

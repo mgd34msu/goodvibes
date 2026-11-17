@@ -44,8 +44,6 @@ export function describeServiceLifecycleDecision(decision: SetupServiceLifecycle
     modelRoute: decision.modelRoute,
     reason: previewHarnessText(decision.reason, 180),
     evidence: decision.evidence,
-    receiptRules: decision.receiptRules,
-    blockedMutations: decision.blockedMutations,
   };
 }
 

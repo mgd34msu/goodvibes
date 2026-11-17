@@ -407,19 +407,49 @@ export function createDaemonSystemRouteHandlers(
         return jsonErrorResponse({ error: refusal.reason, code: refusal.code, state: refusal.state, next: [...refusal.next],
           ...(refusal.retryable ? { recoverable: true } : {}) }, { status: refusal.status ?? 409 });
       }
+      // Report what the host now HOLDS per key, and refuse success when a key
+      // did not take (a higher tier overrides it, or it was coerced to another value).
+      const held = changes.map(({ key, value }) => {
+        const source = context.configManager.describeConfigKeySource?.(key);
+        const persistedTo = (source?.daemonOwned ? source.daemonTierPath : null) ?? context.configManager.getConfigPath?.();
+        const current = context.configManager.get(key);
+        const applied = configValuesMatch(current, value) || configValuesMatch(current, normalizeRequested(context, key, value));
+        return {
+          applied,
+          origin: source?.effectiveOrigin,
+          entry: {
+            key,
+            value: current,
+            ...(persistedTo ? { persistedTo } : {}),
+            ...(source ? { tier: source.tier, daemonOwned: source.daemonOwned,
+              ...(source.effectiveOrigin ? { effectiveOrigin: source.effectiveOrigin } : {}) } : {}),
+          },
+        };
+      });
+      const entries = held.map(({ entry }) => entry);
+      const notApplied = held.filter(({ applied }) => !applied);
+      if (notApplied.length > 0) {
+        const keys = notApplied.map(({ entry }) => entry.key);
+        const described = notApplied.map(({ entry, origin }) => (context.isSecretBearingConfigKey?.(entry.key)
+          ? entry.key
+          : `${entry.key} (now ${JSON.stringify(entry.value)}${origin ? `, set by ${origin}` : ''})`));
+        // Built directly: the shared error body keeps only its own fields, and the
+        // keys, revision and held values are what a caller acts on here.
+        return Response.json({
+          error: `${keys.join(', ')} did not take the requested value${keys.length === 1 ? '' : 's'}.`,
+          code: 'CONFIG_SET_NOT_APPLIED',
+          status: 409,
+          state: `the update was written (revision ${String(result.revision)}), but the host holds a different value for ${described.join('; ')}`,
+          next: ['Check where each of these keys is set with config.get; a value from a higher tier (managed, environment or daemon-owned settings) overrides the one written here.'],
+          notApplied: keys,
+          revision: result.revision,
+          entries,
+        }, { status: 409 });
+      }
       return Response.json({
         success: true,
         revision: result.revision,
-        entries: changes.map(({ key }) => {
-          const source = context.configManager.describeConfigKeySource?.(key);
-          const persistedTo = (source?.daemonOwned ? source.daemonTierPath : null) ?? context.configManager.getConfigPath?.();
-          return {
-            key,
-            value: context.configManager.get(key),
-            ...(persistedTo ? { persistedTo } : {}),
-            ...(source ? { tier: source.tier, daemonOwned: source.daemonOwned } : {}),
-          };
-        }),
+        entries,
       });
     },
     postConfigReset: async (req) => {

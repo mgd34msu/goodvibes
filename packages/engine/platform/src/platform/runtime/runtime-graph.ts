@@ -467,6 +467,8 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
   scope.ownUntilRegistered('plugins', () => pluginManager.close());
   const workflow = createWorkflowServices({ workingDirectory: shellPaths.workingDirectory });
   scope.registry.add('hook action dispatch', hookDispatcher.setHookActions(workflow.hookActions, featureFlags));
+  // A scheduled command still running when this runtime closes is stopped with it, not left to its own time limit.
+  scope.registry.add('workflow schedules', () => workflow.scheduleManager.destroy());
   const channelPolicy = new ChannelPolicyManager({
     storePath: resolveStatePath('channels', 'policies.json'),
   });

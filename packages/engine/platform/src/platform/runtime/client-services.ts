@@ -559,6 +559,8 @@ function composeClientRuntimeServices(
 
   const workflow = createWorkflowServices({ workingDirectory: shellPaths.workingDirectory });
   disposalScope.registry.add('hook action dispatch', hookDispatcher.setHookActions(workflow.hookActions, featureFlags));
+  // A scheduled command still running when this runtime closes is stopped with it, not left to its own time limit.
+  disposalScope.registry.add('workflow schedules', () => workflow.scheduleManager.destroy());
 
   const policyRuntimeState = createPolicyRuntimeState(configManager, featureFlags);
   // A host that already owns the rule file lends its store, so one instance is

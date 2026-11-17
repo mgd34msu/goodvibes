@@ -5,14 +5,14 @@
 
 # Command Reference
 
-GoodVibes ships **164** built-in slash commands across **75** categories. Every command below is generated directly from the command registry, so this list is always complete and current. Type a command in the composer prefixed with `/`, or press `Ctrl+K` (or run `/palette`) to search them all in the command palette.
+GoodVibes ships **166** built-in slash commands across **76** categories. Every command below is generated directly from the command registry, so this list is always complete and current. Type a command in the composer prefixed with `/`, or press `Ctrl+K` (or run `/palette`) to search them all in the command palette.
 
 ## Categories
 
 - [Agents](#agents): 1
 - [Automation](#automation): 2
 - [Branches](#branches): 3
-- [Channels](#channels): 1
+- [Channels](#channels): 2
 - [Check-in](#check-in): 1
 - [Checkpoints](#checkpoints): 3
 - [CI](#ci): 1
@@ -23,6 +23,7 @@ GoodVibes ships **164** built-in slash commands across **75** categories. Every 
 - [Control Room](#control-room): 5
 - [Conversation](#conversation): 1
 - [Cost](#cost): 2
+- [Diagnostics](#diagnostics): 1
 - [Diff & Review](#diff-review): 3
 - [Discovery](#discovery): 1
 - [Editor](#editor): 1
@@ -96,7 +97,7 @@ GoodVibes ships **164** built-in slash commands across **75** categories. Every 
 | Command | Aliases | Usage | Description |
 | --- | --- | --- | --- |
 | `/graph` | None | `<workstreamId>` | Show a workstream's task graph: nodes, edges, states, and pool posture |
-| `/triggers` | None | `[status]` | Inspect the selected daemon’s supervised triggers |
+| `/triggers` | None | `[status\|list\|history <id> [count]\|create <json>\|cancel <id>\|reset <id>\|grants\|grant <id> <command> [args...]]` | List, inspect, create, cancel and reset the selected daemon’s supervised triggers; approve commands they may run |
 
 ## Branches
 
@@ -111,6 +112,7 @@ GoodVibes ships **164** built-in slash commands across **75** categories. Every 
 | Command | Aliases | Usage | Description |
 | --- | --- | --- | --- |
 | `/channel` | `/channels` | `[pair [surface]\|telegram-cursor\|status\|routes\|delivery\|policy [surface]\|policy set <surface> [flags]\|profiles [list\|get\|set\|delete]] [--json]` | Pair channels and inspect routes, delivery strategies, ingress policies, and per-channel profile bindings |
+| `/telegram` | None | `[list] \| configure <chatId>[/<threadId>] <bot> \| approve\|deny\|status\|read\|cancel <id> \| revoke <configurationId> \| release <chatId\|configurationId>` | Delegated Telegram intake: select a chat, decide its waiting messages, read and close reviews |
 
 ## Check-in
 
@@ -142,7 +144,7 @@ GoodVibes ships **164** built-in slash commands across **75** categories. Every 
 
 | Command | Aliases | Usage | Description |
 | --- | --- | --- | --- |
-| `/cluster` | None | `[status\|create\|join\|key\|nodes\|forget\|rotate\|leave\|rename\|groups]: status is the default; add --host https://<machine> (or a base URL), --port, --token to reach a daemon on another machine` | Share inbound channel work with your other goodvibes machines on this network |
+| `/cluster` | None | `[status\|create\|join\|key\|nodes\|forget\|rotate\|leave\|rename\|groups\|publish\|accept]: status is the default; add --host https://<machine> (or a base URL), --port, --token to reach a daemon on another machine` | Share inbound channel work with your other goodvibes machines on this network |
 
 ## Codebase
 
@@ -179,6 +181,12 @@ GoodVibes ships **164** built-in slash commands across **75** categories. Every 
 | `/cost` | None | `[panel\|budget <usd>\|attribution [24h\|7d] [--json]]` | Open Usage, set the session budget alert, or show windowed cost attribution |
 | `/usage` | None | `[turns\|agents]` | Context pressure, session tokens and cost, per-turn history, per-agent costs and the budget alert |
 
+## Diagnostics
+
+| Command | Aliases | Usage | Description |
+| --- | --- | --- | --- |
+| `/state` | None | `[domain...]` | Show what this app's runtime store holds now, by domain (session, conversation, agents, tasks, permissions...), for debugging |
+
 ## Diff & Review
 
 | Command | Aliases | Usage | Description |
@@ -203,7 +211,7 @@ GoodVibes ships **164** built-in slash commands across **75** categories. Every 
 
 | Command | Aliases | Usage | Description |
 | --- | --- | --- | --- |
-| `/eval` | None | `<subcommand> [args]` | Evaluation harness: run benchmark suites, compare baselines, and gate regressions |
+| `/eval` | None | `<subcommand> [args]` | Evaluate the product on real tasks: run a task suite through goodvibes run, compare baselines, and gate regressions |
 
 ## Experience
 
@@ -305,7 +313,7 @@ GoodVibes ships **164** built-in slash commands across **75** categories. Every 
 
 | Command | Aliases | Usage | Description |
 | --- | --- | --- | --- |
-| `/calendar` | `/cal` | `[status\|list\|get\|create] …` | Calendar over the daemon: connection status, agenda, event detail, create |
+| `/calendar` | `/cal` | `[status\|list\|get\|create\|update\|delete] …` | Calendar over the daemon: connection status, agenda, event detail, create, update, delete |
 | `/mail` | `/email` | `[status\|list\|read\|draft\|send] …` | Mail over the daemon: connection status, inbox, read, draft, send |
 
 ## Managed Runtime
@@ -361,7 +369,7 @@ GoodVibes ships **164** built-in slash commands across **75** categories. Every 
 | `/panel` | `/panels` | `[<name> \| open <name> [--target <id>[:<kind>]] \| list]` | Open a view by its old pane name (fleet, tokens, git, …) in its modal; /panel list shows where each goes |
 | `/prev-error` | `/pe` | None | Jump to the previous error message in the conversation |
 | `/profiles` | None | None | Browse and load config profiles |
-| `/settings` | `/cfg-ui` | None | Open the fullscreen configuration workspace |
+| `/settings` | `/cfg-ui` | `[category\|key]` | Open the fullscreen configuration workspace, at a category or setting when one is named |
 | `/tool` | None | `verify <name> \| verify-all \| contract show <name>` | Verify registered tool contracts |
 
 ## Owner Profile
@@ -406,7 +414,7 @@ GoodVibes ships **164** built-in slash commands across **75** categories. Every 
 | `/install` | None | `[review]` | Review install posture (the support bundle carries the install facts) |
 | `/login` | None | `[provider <name> start\|finish <code>\|service <daemon\|listener> <baseUrl> <username> [password] [secretKey]]` | Front-door login flow for provider subscriptions and local service sessions |
 | `/logout` | None | `[provider <name>\|service <daemon\|listener> <baseUrl> [secretKey]]` | Front-door logout flow for provider subscription sessions and supported overrides |
-| `/update` | `/upgrade` | `[check\|apply\|rollback\|review\|bundle export <path> [--yes]\|bundle inspect <path>]` | Check for a newer GoodVibes release and, for binary installs, download/verify/apply it or roll back to the kept previous version |
+| `/update` | `/upgrade` | `[check\|apply\|rollback\|review\|daemon [check]\|bundle export <path> [--yes]\|bundle inspect <path>]` | Check for a newer GoodVibes release and, for binary installs, download/verify/apply it or roll back to the kept previous version |
 
 ## Platform Services
 
@@ -502,18 +510,18 @@ GoodVibes ships **164** built-in slash commands across **75** categories. Every 
 
 | Command | Aliases | Usage | Description |
 | --- | --- | --- | --- |
-| `/services` | `/svc` | `[open\|list\|inspect <name>\|test <name>\|resolve\|auth <name>\|auth-review\|doctor\|export <path>\|import <path>]` | Manage API service configurations |
+| `/services` | `/svc` | `[open\|list\|inspect <name>\|test <name>\|resolve\|auth <name>\|auth-review\|doctor\|trust <name>\|export <path>\|import <path>]` | Manage API service configurations |
 
 ## Session Content
 
 | Command | Aliases | Usage | Description |
 | --- | --- | --- | --- |
-| `/export` | None | `[format] [path] [--yes]` | Export conversation to a Markdown file |
+| `/export` | None | `[format] [path]` | Export conversation to a Markdown file |
 | `/load` | None | `<name>` | Load a saved session |
 | `/note` | None | `[list\|add <text>\|remove <id>]` | Manage session notes (pinned across context compaction) |
 | `/redo` | None | `[rewind\|file]` | Redo last undone action. /redo rewind re-applies the last undone /rewind. /redo file re-applies the last reverted file. /redo alone restores a conversation turn |
 | `/retry` | `/r` | `[modified text]` | Retry the last request while retaining completed work |
-| `/save` | None | `[name] [--replace]` | Save current session to .goodvibes/tui/sessions/ |
+| `/save` | None | `[name] [--replace] [--switch]` | Save current session to .goodvibes/tui/sessions/ (--switch continues in the saved copy) |
 | `/sessions` | None | `[resume <id\|name>]` | List saved sessions |
 | `/template` | `/tmpl` | `save <name> \| use <name> [args] \| list \| show <name> \| edit <name> \| delete <name> [--global]` | Manage and use prompt templates |
 | `/title` | None | `[text]` | Show or set the conversation title |

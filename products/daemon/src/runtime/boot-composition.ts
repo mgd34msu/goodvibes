@@ -5,6 +5,7 @@ import { controlPlaneStorePath, registerNotificationDeadLetterGatewayMethods } f
 import { synchronizeConfiguredServices } from '@goodvibes-jev/engine/platform/platform/runtime/bootstrap';
 import { NOTIFICATIONS_METADATA_ONLY_KEY, readNotificationsMetadataOnly } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
+import { describeFatalFailure } from '@goodvibes-jev/engine/platform/platform/daemon/fatal-boot-report';
 import type { DaemonBootOperations } from './boot-tasks.js';
 import { createDaemonPluginLoaderDeps } from './plugin-composition.js';
 import type { RuntimeServices } from './runtime-services-types.js';
@@ -182,12 +183,14 @@ export function createDaemonBootOperations(runtime: RuntimeServices): DaemonBoot
       }, registry)),
     initializePlugins: () => runtime.pluginManager.init(createDaemonPluginLoaderDeps(runtime)),
     closePlugins: () => runtime.pluginManager.close(),
-    // The name and errno-style code say why; the message can carry settings values and stays out.
+    // The reason is the cause chain with credentials masked (the same line a
+    // failed start prints), so a degraded daemon's log says why, not only where.
     reportFailure(step, error) {
       const code = error !== null && typeof error === 'object' && 'code' in error && typeof error.code === 'string' ? error.code : undefined;
       logger.warn('Daemon boot step failed', {
         step, name: error instanceof Error ? error.name : typeof error,
         ...(code === undefined ? {} : { code }),
+        reason: describeFatalFailure(error),
       });
     },
   };

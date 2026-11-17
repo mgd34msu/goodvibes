@@ -159,7 +159,6 @@ export class AgentManager {
   private executor: AgentExecutor | null;
   private readonly configManager: Pick<ConfigManager, 'get'> | null;
   private readonly additionalFleetOwnership: (() => readonly AgentFleetOwnership[]) | undefined;
-  private readonly fleetSources: (() => readonly AgentFleetOwnership[])[] = [];
   /**
    * Live snapshot accessors for RUNNING agents (conversation-snapshot bridge).
    * Registered by the executor (orchestrator-runner.ts) right after it
@@ -263,20 +262,15 @@ export class AgentManager {
    * The one count fleet.maxSize is checked against, by every admission (spawn,
    * batch spawn, wake, the elastic pool, a hosted ACP session): this manager's
    * active agents, its queued wakes (they take a slot as soon as they start),
-   * sibling execution graphs, and the owned sources added with addFleetSource.
+   * and what the composition owns beyond them (sibling execution graphs, hosted
+   * ACP sessions), passed in as additionalFleetOwnership.
    */
   fleetCount(): number {
     const active = new Set<string>();
     for (const agent of this.fleetOwnership()) if (agent.active) active.add(agent.id);
     for (const id of this.queuedWakes) active.add(id);
     for (const agent of this.additionalFleetOwnership?.() ?? []) if (agent.active) active.add(agent.id);
-    for (const source of this.fleetSources) for (const agent of source()) if (agent.active) active.add(agent.id);
     return active.size;
-  }
-
-  /** Count another owned source against the fleet ceiling, such as the ACP sessions a composition hosts. */
-  addFleetSource(source: () => readonly AgentFleetOwnership[]): void {
-    this.fleetSources.push(source);
   }
 
   private deriveEffectiveTools(

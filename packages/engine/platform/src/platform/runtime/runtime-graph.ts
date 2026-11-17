@@ -106,7 +106,6 @@ import { FileWatcher } from '../state/file-watcher.js';
 import { ProjectIndex } from '../state/project-index.js';
 import { IdempotencyStore } from './idempotency/index.js';
 import { OverflowHandler } from '../tools/shared/overflow.js';
-import { ComponentHealthMonitor } from './perf/component-health-monitor.js';
 import { createWiredHealthSystem } from './health/index.js';
 import { bindHealthDomainEvents } from './health/domain-events.js';
 import { WorktreeRegistry } from './worktree/registry.js';
@@ -126,7 +125,7 @@ import { attachConfigEmitBridge } from './config/index.js';
 import { ObservedAgentSource } from './fleet/observed/source.js';
 import { composeContractRunner, resumeContracts } from './contract-composition.js';
 import { createContractOperatorService } from '../contract/operator-service.js';
-import { makeRuntimeFleetProbe } from './orchestration/fleet-count.js';
+import { fleetCeilingRefusal, makeRuntimeFleetProbe } from './orchestration/fleet-count.js';
 import { CacheRegistry, PauseController, wireDaemonMemoryGovernance } from './memory/index.js';
 import { createSessionStorageServices } from './session-storage-services.js';
 import { createChannelComposition } from './channel-composition.js';
@@ -438,7 +437,6 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
   // The security.tokenAudit.* settings decide the audit; findings reach the security domain.
   const tokenAuditor = createConfiguredTokenAuditor({ configManager, featureFlags, runtimeBus });
   scope.registry.add('pairing token audit', startPairingTokenAudit(pairingTokens, tokenAuditor));
-  const componentHealthMonitor = new ComponentHealthMonitor();
   const healthSystem = createWiredHealthSystem(runtimeBus);
   scope.registry.add('runtime health event bridge', bindHealthDomainEvents(runtimeBus, healthSystem.wiring));
   // One worktree register per working directory, shared by every surface over it.
@@ -579,6 +577,8 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
     registerSession: ({ id, title, agentTitle, cwd }) => void sessionBroker
       .register({ sessionId: id, kind: 'acp', title, project: cwd, participant: { surfaceKind: 'service', surfaceId: `acp-host:${agentTitle}`, lastSeenAt: Date.now() } })
       .catch(() => { /* best-effort; the fleet row is authoritative */ }),
+    // The same count spawning reads: native agents, what the product owns beyond them, and hosted sessions.
+    admitSession: () => fleetCeilingRefusal((key) => configManager.get(key as never), agentManager),
   });
   acpHostRef = acpHost;
   let acpClosing: Promise<void> | undefined;
@@ -596,19 +596,7 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
   // The contract runner over the project's work plan and execution plans. Its
   // units share the fleet ceiling: native agents, whatever else this product
   // owns, and the ACP sessions it hosts.
-  const fleetCapacity = makeRuntimeFleetProbe({
-    readConfig: (key) => configManager.get(key as never),
-    agentManager: seams.additionalFleetOwnership
-      ? {
-        list: () => {
-          const extra = seams.additionalFleetOwnership?.() ?? [];
-          const active = new Set([...agentManager.fleetOwnership(), ...extra].filter(agent => agent.active).map(agent => agent.id));
-          return [...active].map(id => ({ id, status: 'running' }));
-        },
-      }
-      : agentManager,
-    acpHost,
-  });
+  const fleetCapacity = makeRuntimeFleetProbe({ readConfig: (key) => configManager.get(key as never), fleet: agentManager });
   const contracts = composeContractRunner({
     nativeDataWriter,
     judgmentLog: judgment.decisionLog,
@@ -897,7 +885,6 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
     mcpRegistry,
     acpHost,
     tokenAuditor,
-    componentHealthMonitor,
     healthAggregator: healthSystem.aggregator,
     worktreeRegistry,
     sandboxSessionRegistry,

@@ -50,23 +50,8 @@ export function fleetCapacityProbeFrom(deps: {
 export function makeRuntimeFleetProbe(deps: {
   readonly readConfig: (key: string) => unknown;
   readonly fleet: { fleetCount(): number };
-} | {
-  readonly readConfig: (key: string) => unknown;
-  /** A composition that has not moved to `fleet` yet: native agents by status plus hosted sessions. */
-  readonly agentManager: { list(): ReadonlyArray<{ status: string }> };
-  readonly acpHost: { list(): ReadonlyArray<unknown> };
 }): () => FleetCapacityProbe {
-  if ('fleet' in deps) {
-    const fleet = deps.fleet;
-    return () => fleetCapacityProbeFrom({ readConfig: deps.readConfig, sources: { countNativeActive: () => fleet.fleetCount() } });
-  }
-  return () => fleetCapacityProbeFrom({
-    readConfig: deps.readConfig,
-    sources: {
-      countNativeActive: () => deps.agentManager.list().filter((agent) => agent.status === 'pending' || agent.status === 'running').length,
-      countAcpHosted: () => deps.acpHost.list().length,
-    },
-  });
+  return () => fleetCapacityProbeFrom({ readConfig: deps.readConfig, sources: { countNativeActive: () => deps.fleet.fleetCount() } });
 }
 
 /**

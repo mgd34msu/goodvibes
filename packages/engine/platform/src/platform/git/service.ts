@@ -152,6 +152,18 @@ async function mutateWorktree(git: SimpleGit, cwd: string, args: string[], befor
 }
 
 
+/** How a GitService runs git. */
+export interface GitServiceOptions {
+  /**
+   * Run every command with `--no-optional-locks`: for reads made in the
+   * background (a status poll), which must not hold the index lock another
+   * git command needs.
+   */
+  readonly noOptionalLocks?: boolean | undefined;
+  /** End a git command that produces no output for this long (simple-git's block timeout); it rejects. */
+  readonly timeoutMs?: number | undefined;
+}
+
 /**
  * GitService, Wraps simple-git with hook emission on all mutating operations.
  *
@@ -173,10 +185,12 @@ export class GitService {
   private gitClient: Promise<SimpleGit> | undefined;
   private hooks: HookDispatcher | null;
   private cwd: string;
+  private readonly options: GitServiceOptions;
 
-  constructor(cwd: string, hooks?: HookDispatcher) {
+  constructor(cwd: string, hooks?: HookDispatcher, options: GitServiceOptions = {}) {
     this.cwd = cwd;
     this.hooks = hooks ?? null;
+    this.options = options;
   }
 
   /**
@@ -185,7 +199,12 @@ export class GitService {
    * other git failure takes.
    */
   private git(): Promise<SimpleGit> {
-    this.gitClient ??= createSimpleGit({ baseDir: this.cwd });
+    // `--no-optional-locks` goes before the subcommand, as git requires: a
+    // background read then never takes .git/index.lock from the owner's own
+    // git commands in another terminal.
+    this.gitClient ??= createSimpleGit({ baseDir: this.cwd,
+      ...(this.options.noOptionalLocks === true ? { binary: ['git', '--no-optional-locks'] as [string, string] } : {}),
+      ...(this.options.timeoutMs !== undefined ? { timeout: { block: this.options.timeoutMs } } : {}) });
     return this.gitClient;
   }
 

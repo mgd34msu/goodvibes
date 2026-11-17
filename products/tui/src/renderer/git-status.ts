@@ -11,6 +11,8 @@ export interface GitHeaderInfo {
 }
 
 const FALLBACK: GitHeaderInfo = { branch: '?', dirty: false, ahead: 0, behind: 0 };
+/** A header read that produces nothing for this long is ended; the header shows '?' until a read succeeds. */
+const GIT_READ_TIMEOUT_MS = 10_000;
 
 function sameHeaderInfo(a: GitHeaderInfo, b: GitHeaderInfo): boolean {
   return a.branch === b.branch && a.dirty === b.dirty && a.ahead === b.ahead && a.behind === b.behind;
@@ -90,7 +92,10 @@ export class GitStatusProvider {
     if (this.fetching) return;
     this.fetching = true;
     try {
-      const git = new GitService(this.workingDirectory);
+      // A background read: it never takes .git/index.lock (an owner's or the
+      // agent's own git command would fail on it), and a stalled git is ended
+      // so `fetching` clears and the next tick reads again.
+      const git = new GitService(this.workingDirectory, undefined, { noOptionalLocks: true, timeoutMs: GIT_READ_TIMEOUT_MS });
       const [statusResult, branchResult] = await Promise.all([
         git.status(),
         git.branch(),

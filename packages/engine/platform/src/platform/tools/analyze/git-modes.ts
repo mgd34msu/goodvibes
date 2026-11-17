@@ -3,7 +3,7 @@ import { join, relative } from 'node:path';
 import { capturedAnalyzeSignal, createAnalyzeGitReader, type AnalyzeGitReader } from './captured-git.js';
 import { assertCapturedToolAccessCurrent, assertCapturedToolReadAccess } from '../shared/captured-input-tools.js';
 import type { ToolLLM } from '../../config/tool-llm.js';
-import type { AnalyzeInput, SemanticDiffSummary } from './types.js';
+import type { AnalyzeInput, JsonObject, SemanticDiffSummary } from './types.js';
 import { summarizeError } from '../../utils/error-display.js';
 import {
   isBreakingUpgrade,
@@ -485,46 +485,36 @@ export async function runUpgrade(
   projectRoot: string,
 ): Promise<Record<string, unknown>> {
   let packageNames: string[];
+  const pkgPath = join(projectRoot, 'package.json');
   // Authorize the captured package, even when explicit package names skip dependency discovery.
-  await assertCapturedToolReadAccess(join(projectRoot, 'package.json'));
+  await assertCapturedToolReadAccess(pkgPath);
+  const explicit = input.packages && input.packages.length > 0 ? input.packages : null;
 
-  if (input.packages && input.packages.length > 0) {
-    packageNames = input.packages;
-  } else {
-    const pkgPath = join(projectRoot, 'package.json');
-    if (!existsSync(pkgPath)) {
-      return analyzeRefusal('No package.json found and no packages specified', 'Pass packages with the package names to check, or point projectRoot at a directory holding package.json.', { projectRoot });
-    }
+  // package.json is read once: it names the dependencies and their current versions.
+  let currentVersions: Record<string, string> = {};
+  let projectScope: string | null = null;
+  if (existsSync(pkgPath)) {
     const pkgJson = await readJsonFile(pkgPath);
-    if (pkgJson === null) {
+    if (pkgJson !== null) {
+      currentVersions = loadDependencyVersions(pkgJson);
+      projectScope = ownScope(pkgJson);
+    } else if (!explicit) {
       return analyzeRefusal('Failed to parse package.json', 'Fix the JSON in package.json, or pass packages with the package names to check.');
     }
-    const deps = loadDependencyVersions(pkgJson);
-    packageNames = Object.keys(deps);
+  } else if (!explicit) {
+    return analyzeRefusal('No package.json found and no packages specified', 'Pass packages with the package names to check, or point projectRoot at a directory holding package.json.', { projectRoot });
+  }
+
+  if (explicit) {
+    packageNames = explicit;
+  } else {
+    packageNames = Object.keys(currentVersions);
     if (packageNames.length === 0) {
       return { packages: [], total: 0, outdated: 0, breaking: 0 };
     }
   }
 
-  const currentVersions: Record<string, string> = {};
-  const pkgPath = join(projectRoot, 'package.json');
-  if (existsSync(pkgPath)) {
-    try {
-      const pkgJson = await readJsonFile(pkgPath);
-      if (pkgJson === null) {
-        throw new Error('Failed to parse package.json');
-      }
-      const allDeps = loadDependencyVersions(pkgJson);
-      for (const [name, ver] of Object.entries(allDeps)) {
-        currentVersions[name] = ver;
-      }
-    } catch {
-      // Ignore parse errors
-    }
-  }
-
   type UpgradeRow = { name: string; current: string; latest: string; breaking: boolean };
-  const projectScope = await ownScope(projectRoot);
   const invocationSignal = capturedAnalyzeSignal();
   // Every package is checked, a few at a time. A spec the registry does not own (a workspace
   // link, a git URL, an alias) and a package of the project's own scope are never sent to the
@@ -588,10 +578,7 @@ function isRegistrySpec(spec: string): boolean {
 }
 
 /** The scope (`@scope`) of the project's own package name, if it has one. */
-async function ownScope(projectRoot: string): Promise<string | null> {
-  const pkgPath = join(projectRoot, 'package.json');
-  if (!existsSync(pkgPath)) return null;
-  const pkg = await readJsonFile(pkgPath);
-  const name = typeof pkg?.name === 'string' ? pkg.name : '';
+function ownScope(pkg: JsonObject): string | null {
+  const name = typeof pkg.name === 'string' ? pkg.name : '';
   return name.startsWith('@') && name.includes('/') ? name.slice(0, name.indexOf('/')) : null;
 }

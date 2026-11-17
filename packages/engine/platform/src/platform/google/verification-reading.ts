@@ -2,7 +2,7 @@ import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decision
 import { defineSelector, STAKES_BANDS } from '@goodvibes-jev/judgment';
 import { captureJudgmentPort, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
 import { assertJudgmentInput } from '../gate/judgment-input.js';
-import { retainStrictJudgmentJson, prepareJudgmentResult } from '../gate/judgment-result.js';
+import { captureStrictJudgmentJson, prepareJudgmentResult } from '../gate/judgment-result.js';
 import type { ProtectedSourceOwner } from '../security/source-screening/types.js';
 import type { CandidateEmail, VerificationExpectation } from './verification-expectations.js';
 import { extractVerification, hostMatchesServiceDomain, type VerificationArtifact, type VerificationExtraction } from './verification-extraction.js';
@@ -31,18 +31,17 @@ export interface VerificationReadingOptions extends JudgmentReadingOptions { rea
 /** Domain admission stays local. The reader sees opaque references, never verification tokens or URLs. */
 export async function readVerificationArtifact(email: CandidateEmail, expectation: VerificationExpectation, options: VerificationReadingOptions = {}): Promise<VerificationExtraction> {
   return withGoogleDecisionWork<VerificationExtraction>(options, async () => {
-    const source = retainStrictJudgmentJson({ email, expectation });
-    const captured = source.snapshot;
+    // One detached copy: everything below reads it, so the caller's objects changing later cannot matter.
+    const captured = captureStrictJudgmentJson({ email, expectation });
     const mechanical = extractVerification(captured.email, captured.expectation);
     // A plain-http link refusal is not final: the picker may still find a code the strict extractor did not.
     // When it finds none, that refusal is the answer, since it says why the link was not followed.
     const insecureLink = mechanical.artifact.kind === 'refused' && mechanical.artifact.reason === 'insecure-link';
     const empty = (reason = 'The verification artifact could not be established from current message evidence.'): VerificationExtraction =>
       insecureLink ? mechanical : ({ ...mechanical, artifact: { kind: 'none', reason } });
-    const signal = options.signal, assertCurrent = options.assertCurrent, sourceOwner = options.sourceOwner;
+    const { signal, assertCurrent } = options;
     const callerCurrent = () => {
-      source.assertCurrent(); signal?.throwIfAborted();
-      if (options.signal !== signal || options.assertCurrent !== assertCurrent || options.sourceOwner !== sourceOwner) throw new Error('Verification request owner changed.');
+      signal?.throwIfAborted();
       assertSynchronousJudgmentGuard(assertCurrent, () => new Error('Verification ownership must be synchronous.'));
     };
     callerCurrent();
@@ -85,17 +84,16 @@ export async function readVerificationArtifact(email: CandidateEmail, expectatio
     if (!candidates.length) return empty('The message holds no code, and no link on the service domain, to choose from.');
     // Screen complete token-free context for any other private material before its ordinary Jev request.
     const protection = options.sourceOwner;
-    const methods = { capture: protection.capture, screen: protection.screen, project: protection.project, release: protection.release };
     const serialized = JSON.stringify(state);
-    const handle = methods.capture.call(protection, [serialized]);
+    const handle = protection.capture([serialized]);
     try {
-      const screened = await methods.screen.call(protection, handle, { signal: options.signal, assertCurrent: callerCurrent });
+      const screened = await protection.screen(handle, { signal, assertCurrent: callerCurrent });
       callerCurrent();
       if (screened.status !== 'settled') return empty();
+      // The screening owner's projection is its own answer on whether the context is still released whole.
       const current = () => {
         callerCurrent();
-        for (const key of Object.keys(methods) as (keyof typeof methods)[]) if (protection[key] !== methods[key]) throw new Error('Verification source owner changed.');
-        const parts = methods.project.call(protection, screened.receipt);
+        const parts = protection.project(screened.receipt);
         if (parts.length !== 1 || parts[0] !== serialized) throw new Error('Verification context was withheld.');
       };
       current(); assertJudgmentInput(state);
@@ -110,6 +108,6 @@ export async function readVerificationArtifact(email: CandidateEmail, expectatio
       owner.assertCurrent(); current();
       return value ? { ...mechanical, artifact: value } : empty();
     } catch (error) { callerCurrent(); preserveGoogleDecisionFailure(error, options); return empty(); }
-    finally { await methods.release.call(protection, handle); callerCurrent(); }
+    finally { await protection.release(handle); callerCurrent(); }
   });
 }

@@ -93,6 +93,8 @@ function handleOptimizerToggle(
 
   const enable = sub === 'on';
   const wasEnabled = optimizer.enabled;
+  // Turning the optimizer off sets manual mode, which releases a pin; read it before the write.
+  const pinned = optimizer.pinnedTarget;
 
   // provider.optimizerMode owns the optimizer's state (off = disabled;
   // manual/auto/pinned = active); the provider stack applies the write to the
@@ -109,7 +111,9 @@ function handleOptimizerToggle(
   } else if (!enable && wasEnabled) {
     out.push('[provider] Optimizer disabled.');
     out.push('  Provider selection returns to manual-only mode. No automatic failover.');
-    out.push('  Pinned targets and fallback log are preserved; re-enable to resume.');
+    out.push(pinned
+      ? `  The pin to ${pinned.providerId}/${pinned.modelId} is released; turning it on again does not restore it. Pin again with: /provider-opt pin ${pinned.providerId}:${pinned.modelId}`
+      : '  The fallback log is kept. Turn it on again with: /provider-opt optimizer on');
   } else {
     out.push(`[provider] Optimizer already ${enable ? 'enabled' : 'disabled'}; no change.`);
   }

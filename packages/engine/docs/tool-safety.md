@@ -258,7 +258,10 @@ Denials are feedback, not turn-enders. A declined tool call resolves with a
 structured user-declined result, including the user's optional reason
 ("The user said: ..."), in a continuing turn, so the model adapts instead
 of dying. Duplicate in-flight asks coalesce to one prompt, and a remembered
-decision sweeps every queued ask its rule covers.
+decision sweeps every queued ask its rule covers. A remembered allow sweeps an
+owner-only ask (its request names the item in `ownerOnly`) only when the answer
+was given to that same item, and never an ask that offered nothing to remember;
+a remembered deny sweeps any ask its rule covers.
 
 ## Settings changes through the daemon
 

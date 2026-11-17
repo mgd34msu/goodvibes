@@ -168,6 +168,7 @@ function validatePermissionPromptRequestSnapshot(value: unknown): void {
     throwInvalidApprovalSnapshot();
   }
   validateOptionalString(value['workingDirectory']);
+  validateOptionalString(value['ownerOnly']);
 }
 
 function validateApprovalAuditRecord(value: unknown): void {
@@ -671,6 +672,8 @@ export class ApprovalBroker {
         args: approval.request.args,
         tier: input.rememberTier,
         effect: approved ? 'allow' : 'deny',
+        // An allow given to an owner-only item is remembered as that item's answer, as the gate keeps it.
+        ...(approved && approval.request.ownerOnly ? { ownerOnly: approval.request.ownerOnly } : {}),
       });
       if (rule) {
         // The same compiled lookup the gate matches saved rules with, compiled once for the sweep.
@@ -679,6 +682,10 @@ export class ApprovalBroker {
           if (candidate.id === approvalId) continue;
           if (candidate.status !== 'pending' && candidate.status !== 'claimed') continue;
           if (approved && candidate.requiresOwnerDecision) continue;
+          // The gate's rule for an owner-only item (gate/classify.ts): only an allow given to that
+          // same item settles it. An ask that offers nothing to remember is answered one call at a time.
+          if (approved && candidate.request.ownerOnly !== undefined && candidate.request.ownerOnly !== rule.ownerOnly) continue;
+          if (approved && candidate.request.rememberOptions?.length === 0) continue;
           // A remembered rule belongs to the project it was made in, so it answers only that project's asks.
           if (candidate.request.workingDirectory !== approval.request.workingDirectory) continue;
           if (this.pendingResolvers.get(candidate.id)?.retired) continue;

@@ -45,6 +45,7 @@ import type { RequestSharedApprovalInput, SharedApprovalRecord } from '../approv
 import type { RaisedApproval } from '../approval-broker-raise.js';
 import { GatewayVerbError } from './gateway-verb-error.js';
 import { readInvocationParams, requireStringValue } from './invocation-params.js';
+import { OWNER_ONLY_KINDS } from '../../gate/classify.js';
 
 /** The broker surface this verb needs, nothing but raising and reading back. */
 export interface ApprovalRaiseService {
@@ -128,6 +129,10 @@ export function readApprovalRaiseRequest(raw: unknown): PermissionPromptRequest 
   const workingDirectory = optionalString(raw['workingDirectory'], 'request.workingDirectory');
   const attribution = raw['attribution'];
   const rememberOptions = raw['rememberOptions'];
+  const ownerOnly = raw['ownerOnly'];
+  if (ownerOnly !== undefined && (typeof ownerOnly !== 'string' || !(OWNER_ONLY_KINDS as readonly string[]).includes(ownerOnly))) {
+    throw invalid(`Invalid request.ownerOnly: expected one of ${OWNER_ONLY_KINDS.join(', ')}`, 'request.ownerOnly');
+  }
   // Only the fields of a permission ask are copied: the record is stored and
   // shown to every surface, so a field nobody validated must not ride along.
   return {
@@ -139,6 +144,7 @@ export function readApprovalRaiseRequest(raw: unknown): PermissionPromptRequest 
     ...(workingDirectory === undefined ? {} : { workingDirectory }),
     ...(isRecord(attribution) ? { attribution: attribution as unknown as PermissionPromptRequest['attribution'] } : {}),
     ...(Array.isArray(rememberOptions) ? { rememberOptions: rememberOptions as PermissionPromptRequest['rememberOptions'] } : {}),
+    ...(ownerOnly === undefined ? {} : { ownerOnly: ownerOnly as NonNullable<PermissionPromptRequest['ownerOnly']> }),
   };
 }
 

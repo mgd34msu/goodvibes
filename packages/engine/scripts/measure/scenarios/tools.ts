@@ -10,6 +10,7 @@ import { executeToolCalls } from '../../../platform/src/platform/core/orchestrat
 import { createEmitterContext } from '../../../platform/src/platform/core/orchestrator-runtime.ts';
 import { withExecutionMode, withExecutionModeOwner } from '../../../platform/src/platform/gate/execution-context.ts';
 import { buildDurableRuleForDecision } from '../../../platform/src/platform/permissions/approval-rules.ts';
+import { projectIdentity } from '../../../platform/src/platform/permissions/user-rule-store.ts';
 import type { ToolCall, ToolResult } from '../../../platform/src/platform/types/tools.ts';
 import { ConfigManager } from '../../../platform/src/platform/config/manager.ts';
 import { createFloor, seedWorkspace, SURFACE, type Floor } from '../compose.ts';
@@ -27,11 +28,12 @@ function seedRules(floorConfigDir: string, count: number, workspace: string): vo
     const allowEcho = i === count - 1;
     const command = allowEcho ? 'echo measure' : `tool-${i} --flag`;
     const rule = buildDurableRuleForDecision({ toolName: 'exec', args: { commands: [{ cmd: command }] }, tier: 'command-class', effect: 'allow', now: now - i })!;
-    rules.push({ rule, createdAt: now - i, tier: 'command-class', tool: 'exec', ...(i % 2 === 0 ? { project: workspace } : {}) });
+    // Every other rule was remembered in this project: the store keeps it in the one list, keyed by the project root.
+    rules.push({ rule, createdAt: now - i, tier: 'command-class', tool: 'exec', ...(i % 2 === 0 ? { project: projectIdentity(workspace) } : {}) });
   }
   const path = join(floorConfigDir, 'permission-rules.json');
   mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, JSON.stringify({ version: 1, rules: rules.filter((r) => !('project' in r)), projectRules: rules.filter((r) => 'project' in r) }, null, 2));
+  writeFileSync(path, JSON.stringify({ version: 1, rules }, null, 2));
 }
 
 interface Session { readonly floor: Floor; readonly session: HostedSessionRuntime }

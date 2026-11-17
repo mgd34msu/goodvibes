@@ -1,6 +1,7 @@
 import type { TurnHookOwner } from '../hooks/turn-ownership.js';
 import type { PermissionCategory, PermissionRequestAnalysis } from './types.js';
 import type { RememberTier, RememberTierOption } from './approval-rules.js';
+import type { OwnerOnlyKind } from '../gate/classify.js';
 
 /** Stands in for a typed terminal-prompt answer in every stored or published approval record. */
 export const WITHHELD_PROMPT_ANSWER = '[answer withheld]';
@@ -110,6 +111,12 @@ export interface PermissionPromptRequest {
    * Absent: an ask from before remember tiers; a surface may offer a session answer.
    */
   rememberOptions?: readonly RememberTierOption[] | undefined;
+  /**
+   * Set when only the owner decides this ask (gate/classify.ts). A remembered
+   * allow answers it only when that allow was given to the same owner-only
+   * item, as the gate matches it; a remembered deny answers it like any ask.
+   */
+  ownerOnly?: OwnerOnlyKind | undefined;
 }
 
 export interface PermissionPromptDecision {

@@ -274,12 +274,12 @@
     },
     "tool-exec-remembered": {
       "counts": {
-        "decisionRequests": 1,
+        "decisionRequests": 0,
         "providerRequests": 0,
         "fileReads": 5,
         "fileWrites": 0,
         "fsyncs": 0,
-        "sqliteStatements": 2
+        "sqliteStatements": 0
       },
       "bytes": {
         "bytesWritten": 0
@@ -315,12 +315,12 @@
     },
     "turn-12-tools": {
       "counts": {
-        "decisionRequests": 3,
+        "decisionRequests": 2,
         "providerRequests": 2,
         "fileReads": 31,
         "fileWrites": 1,
         "fsyncs": 0,
-        "sqliteStatements": 6
+        "sqliteStatements": 4
       },
       "bytes": {
         "bytesWritten": 17

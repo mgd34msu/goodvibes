@@ -1217,6 +1217,7 @@ export class PermissionManager {
       ...(input.attribution ? { attribution: input.attribution } : {}),
       // A channel's request is approved one call at a time: no remembered answer can stand in for the owner there.
       rememberOptions: o.ownerOnly === 'channel-request' ? [] : buildRememberOptions(input.toolName, input.args, this.rememberedRulesHere()),
+      ...(o.ownerOnly ? { ownerOnly: o.ownerOnly } : {}),
     }, { signal: input.signal }), input.signal);
     input.assertCurrent();
     const modified = reply.modifiedArgs === undefined ? undefined : captureOwnedJson(reply.modifiedArgs) as Record<string, unknown>;
@@ -1500,6 +1501,7 @@ export class PermissionManager {
       workingDirectory: this.configReader.getWorkingDirectory() ?? undefined,
       // A channel's request is approved one call at a time: no remembered answer can stand in for the owner there.
       rememberOptions: item === 'channel-request' ? [] : buildRememberOptions('state', args, this.rememberedRulesHere()),
+      ownerOnly: item,
     }, { signal }), signal);
     assertPermissionActive(signal);
     // The change itself cannot be edited on the card: an answer that edited it remembers nothing.

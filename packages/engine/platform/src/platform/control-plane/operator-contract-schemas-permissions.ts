@@ -17,6 +17,7 @@ import {
 } from '../permissions/types.js';
 import { PERMISSION_DECISION_MACHINE_STATES, PERMISSION_DECISION_OUTCOMES } from '../runtime/store/domains/permissions.js';
 import { SESSION_GATE_PRESET_NAMES } from '../gate/presets.js';
+import { OWNER_ONLY_KINDS } from '../gate/classify.js';
 
 export const PERMISSION_CATEGORY_SCHEMA = enumSchema(PERMISSION_CATEGORIES);
 export const PERMISSION_RISK_LEVEL_SCHEMA = enumSchema(PERMISSION_RISK_LEVELS);
@@ -105,6 +106,8 @@ export const PERMISSION_PROMPT_REQUEST_SCHEMA = objectSchema({
   workingDirectory: STRING_SCHEMA,
   attribution: PERMISSION_ATTRIBUTION_SCHEMA,
   rememberOptions: arraySchema(PERMISSION_REMEMBER_TIER_OPTION_SCHEMA),
+  // Only the owner decides this ask; a remembered allow answers it only when given to the same item.
+  ownerOnly: enumSchema(OWNER_ONLY_KINDS),
 }, ['callId', 'tool', 'args', 'category', 'analysis'], { additionalProperties: false });
 
 export const PERMISSION_PROMPT_DECISION_SCHEMA = objectSchema({

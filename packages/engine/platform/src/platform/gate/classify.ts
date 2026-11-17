@@ -76,6 +76,9 @@ export function ownerOnlyReason(kind: OwnerOnlyKind): string {
   return OWNER_ONLY_REASONS[kind];
 }
 
+/** Every owner-only kind, for validating one that arrives over the wire. */
+export const OWNER_ONLY_KINDS = Object.freeze(Object.keys(OWNER_ONLY_REASONS)) as readonly OwnerOnlyKind[];
+
 /** The standing rule, setting or limit that matched the call; a deny or ask is reported over an allow. */
 export interface CallRuleFact {
   readonly effect: 'allow' | 'deny' | 'ask';

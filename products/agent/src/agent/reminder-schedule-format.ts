@@ -4,7 +4,7 @@ import {
   type ReminderSchedulePreview,
   type ReminderScheduleSuccess,
 } from './reminder-schedule.ts';
-import { scheduleConfirmationRouteLines, scheduleNextRouteLines, scheduleRouteArg } from './schedule-next-routes.ts';
+import { scheduleConfirmationRouteLines, scheduleNextRouteLines, scheduleRouteArg } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);

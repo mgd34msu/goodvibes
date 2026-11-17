@@ -9,7 +9,7 @@ import {
   type RoutineScheduleReceiptSnapshot,
 } from './routine-schedule-promotion.ts';
 import { deliveryTargetFlag } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { scheduleConfirmationRouteLines, scheduleNextRouteLines, scheduleRouteArg } from './schedule-next-routes.ts';
+import { scheduleConfirmationRouteLines, scheduleNextRouteLines, scheduleRouteArg } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);

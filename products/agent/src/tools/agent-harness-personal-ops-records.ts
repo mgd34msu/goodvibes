@@ -8,7 +8,7 @@ import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-t
 import { LANE_IDS } from './agent-harness-personal-ops-types.ts';
 import type { PersonalOpsConnectorSignal, PersonalOpsConnectorTool, PersonalOpsLane, PersonalOpsLaneId, PersonalOpsLiveRecord, PersonalOpsRecordFreshness, PersonalOpsStatus, PersonalOpsWorkflow, PersonalOpsWorkflowStatus } from './agent-harness-personal-ops-types.ts';
 import { PERSONAL_OPS_EFFECT_RECEIPT_PURPOSE, PERSONAL_OPS_REVIEW_PURPOSE } from './agent-personal-ops-native-fields.ts';
-import { PERSONAL_OPS_EFFECT_RECEIPT_STATUSES, type PersonalOpsEffectReceiptLane, type PersonalOpsEffectReceiptStatus } from './agent-personal-ops-effect-receipt.ts';
+import { PERSONAL_OPS_EFFECT_RECEIPT_STATUSES, type PersonalOpsEffectReceiptLane, type PersonalOpsEffectReceiptStatus } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { artifactShowRoute } from './agent-harness-personal-ops-routes.ts';
 import { UNTRUSTED_CONTENT_RULE } from '../trust/untrusted-content.ts';
 

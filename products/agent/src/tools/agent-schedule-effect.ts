@@ -2,10 +2,10 @@ import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { assertProjectionExecution, type ToolInputProjector, type ToolRegistry, ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { ShellPathService } from '@/runtime/index.ts';
 import type { AgentConnectedHostConfigReader } from '../agent/routine-schedule-promotion.ts';
-import { captureOperatorConnection } from '../agent/operator-connection-owner.ts';
+import { captureOperatorConnection } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { captureOperatorAutomationTarget } from '../agent/operator-automation-target.ts';
 import { executeOperatorMethodWithReceipt } from '../agent/operator-method-receipt.ts';
-import { scheduleNextRouteLines } from '../agent/schedule-next-routes.ts';
+import { scheduleNextRouteLines } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { getSessionUntrustedContentLedger } from '../trust/untrusted-content.ts';
 import { agentArtifactEffectGuard, captureAgentExportPath } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 

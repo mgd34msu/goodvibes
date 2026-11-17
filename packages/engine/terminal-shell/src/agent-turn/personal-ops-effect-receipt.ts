@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import type { ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
-import { PERSONAL_OPS_EFFECT_RECEIPT_PURPOSE } from './agent-personal-ops-native-fields.ts';
+
+/** The artifact purpose a Personal Ops effect receipt is saved under; the lanes list artifacts by it. */
+export const PERSONAL_OPS_EFFECT_RECEIPT_PURPOSE = 'personal-ops-effect-receipt';
 
 export type PersonalOpsEffectReceiptLane = 'inbox' | 'calendar' | 'reminders';
 /** `unknown`: the request reached the provider and its outcome could not be confirmed. */

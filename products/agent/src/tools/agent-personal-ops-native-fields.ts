@@ -1,9 +1,10 @@
 import type { StructuredRedactionOptions } from '@goodvibes-jev/engine/platform/platform/utils';
 import { captureOwnedJson } from '@goodvibes-jev/engine/platform/platform/gate';
 import { LANE_IDS } from './agent-harness-personal-ops-types.ts';
+import { PERSONAL_OPS_EFFECT_RECEIPT_PURPOSE } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 /** Written by `writePersonalOpsEffectReceipt` after a provider effect the Agent performed. */
-export const PERSONAL_OPS_EFFECT_RECEIPT_PURPOSE = 'personal-ops-effect-receipt';
+export { PERSONAL_OPS_EFFECT_RECEIPT_PURPOSE };
 export const PERSONAL_OPS_REVIEW_PURPOSE = 'personal-ops-review-cards';
 const NATIVE_METADATA_PURPOSES = new Set([
   PERSONAL_OPS_EFFECT_RECEIPT_PURPOSE, PERSONAL_OPS_REVIEW_PURPOSE, 'watcher-run-receipt',

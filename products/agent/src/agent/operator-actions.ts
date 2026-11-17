@@ -1,7 +1,7 @@
 import type { OperatorMethodInput } from '@goodvibes-jev/engine/platform/contracts';
-import { createConnectedHost, isHostFailure, type HostCallApplied, type HostFailureKind, type HostRefusal } from './connected-host-client.ts';
+import { createConnectedHost, isHostFailure, type HostCallApplied, type HostFailureKind, type HostRefusal } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { assertSafeOperatorPathValue, requireOperatorHttpBinding } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { scheduleNextRouteLines } from './schedule-next-routes.ts';
+import { scheduleNextRouteLines } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 export type JsonRecord = Record<string, unknown>;
 

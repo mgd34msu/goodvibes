@@ -2,7 +2,7 @@ import { assertDecisionModelsEnabled } from '@goodvibes-jev/engine/errors';
 import { agentResearchSourceOwner } from '../agent/protected-research-report.ts';
 import type { ProtectedSourceOwner } from '@goodvibes-jev/engine/platform/platform/security';
 import type { ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
-import { writePersonalOpsEffectReceipt, type PersonalOpsEffectReceiptStatus } from './agent-personal-ops-effect-receipt.ts';
+import { writePersonalOpsEffectReceipt, type PersonalOpsEffectReceiptStatus } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 /**
  * The `google` tool: Gmail and the owner's calendar.
  *
@@ -83,7 +83,7 @@ import type { GoogleApiFailure, GoogleApiResult } from '@goodvibes-jev/engine/pl
 import { describeDaemonExpectationState, getSessionExpectationBook, type DaemonExpectationClient } from '../agent/signup/session-expectations.ts';
 import { deliveryEvidenceFromMessage, describeDeliveryEvidence, NO_ALIAS_MAILBOXES } from '@goodvibes-jev/engine/platform/platform/google';
 import { readVerificationArtifact } from '@goodvibes-jev/engine/platform/platform/google';
-import { isHostFailure, type ConnectedHost } from '../agent/connected-host-client.ts';
+import { isHostFailure, type ConnectedHost } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { confirmParameter } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 const GOOGLE_ACTIONS = [

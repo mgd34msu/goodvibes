@@ -178,6 +178,7 @@ export const builtinGatewayControlCompanionMethodDescriptors: readonly GatewayMe
   }),
   methodDescriptor({
     id: 'companion.chat.sessions.delete',
+    irreversible: true,
     title: 'Delete Companion Chat Session',
     description: 'Permanently remove a companion-chat session: the on-disk record file is deleted and the session is dropped from the shared session store, this does NOT merely close it (use companion.chat.sessions.close for a soft close). Requires the session to already be closed: deleting a still-active session is rejected with 409 SESSION_ACTIVE (close it, then delete). An unknown or already-deleted id is a 404 SESSION_NOT_FOUND, never a 200-noop.',
     category: 'companion',

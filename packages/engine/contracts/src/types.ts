@@ -65,6 +65,12 @@ export interface OperatorMethodContract {
   readonly effect?: 'read' | 'write' | 'outward' | undefined;
   /** The owner's own act: taken only with the owner-request signal; an agent is refused. */
   readonly ownerOnly?: boolean | undefined;
+  /** The call cannot be undone: an agent's call is the owner's to decide, never Jev's. */
+  readonly irreversible?: boolean | undefined;
+  /** The call changes what a running contract requires: an agent's call is the owner's to decide. */
+  readonly changesContract?: boolean | undefined;
+  /** Input paths (`to`, `attendees[]`) of the recipients the call sends to as the owner. */
+  readonly recipients?: readonly string[] | undefined;
   readonly invokable?: boolean | undefined;
   /** Whether this method is idempotent. When true, safe to retry on 5xx + network errors. */
   readonly idempotent?: boolean | undefined;

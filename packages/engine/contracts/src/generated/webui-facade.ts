@@ -14615,6 +14615,11 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
               "dangerous": false,
               "effect": "read",
               "ownerOnly": false,
+              "irreversible": false,
+              "changesContract": false,
+              "recipients": [
+                "sample"
+              ],
               "invokable": false,
               "replay": {
                 "in": "sample",
@@ -14793,6 +14798,11 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "dangerous": false,
         "effect": "read",
         "ownerOnly": false,
+        "irreversible": false,
+        "changesContract": false,
+        "recipients": [
+          "sample"
+        ],
         "invokable": false,
         "replay": {
           "in": "sample",
@@ -14843,6 +14853,11 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "dangerous": false,
           "effect": "read",
           "ownerOnly": false,
+          "irreversible": false,
+          "changesContract": false,
+          "recipients": [
+            "sample"
+          ],
           "invokable": false,
           "replay": {
             "in": "sample",

@@ -596,7 +596,7 @@ export interface GatewayVerbGroupDeps extends FleetCheckpointsSearchGatewayDeps,
     // Warning: (ae-forgotten-export) The symbol "MemoryRegistry" needs to be exported by the entry point index.d.ts
     readonly memoryRegistry?: (MemoryProjectionSource & Partial<Pick<MemoryRegistry, 'decideConsolidationProposal' | 'listSnapshots' | 'restoreSnapshot'>>) | undefined;
     // Warning: (ae-forgotten-export) The symbol "GatePresetName" needs to be exported by the entry point index.d.ts
-    readonly modeInForce?: ((chosen: GatePresetName) => GatePresetName) | undefined;
+    readonly modeInForce?: ((chosen: GatePresetName, explicitlyChosen?: boolean) => GatePresetName) | undefined;
     // (undocumented)
     readonly onCiAutoWatch?: ((observer: (toolName: string, args: Record<string, unknown>, success: boolean) => void) => void) | undefined;
     // Warning: (ae-forgotten-export) The symbol "OwnerInboxGatewayService" needs to be exported by the entry point index.d.ts

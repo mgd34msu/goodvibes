@@ -6847,6 +6847,10 @@
           "write:automation"
         ],
         "x-effect": "write",
+        "x-recipients": [
+          "delivery.targets[].address",
+          "delivery.fallbackTargets[].address"
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -9082,6 +9086,7 @@
         ],
         "x-dangerous": true,
         "x-effect": "write",
+        "x-irreversible": true,
         "parameters": [
           {
             "name": "jobId",
@@ -9919,6 +9924,10 @@
           "write:automation"
         ],
         "x-effect": "write",
+        "x-recipients": [
+          "delivery.targets[].address",
+          "delivery.fallbackTargets[].address"
+        ],
         "parameters": [
           {
             "name": "jobId",
@@ -16564,6 +16573,10 @@
           "write:automation"
         ],
         "x-effect": "write",
+        "x-recipients": [
+          "delivery.targets[].address",
+          "delivery.fallbackTargets[].address"
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -18844,6 +18857,7 @@
         ],
         "x-dangerous": true,
         "x-effect": "write",
+        "x-irreversible": true,
         "parameters": [
           {
             "name": "scheduleId",
@@ -23128,6 +23142,9 @@
         ],
         "x-dangerous": true,
         "x-effect": "outward",
+        "x-recipients": [
+          "attendees[]"
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -23340,6 +23357,7 @@
         ],
         "x-dangerous": true,
         "x-effect": "outward",
+        "x-irreversible": true,
         "parameters": [
           {
             "name": "eventId",
@@ -23510,6 +23528,9 @@
         ],
         "x-dangerous": true,
         "x-effect": "outward",
+        "x-recipients": [
+          "attendees[]"
+        ],
         "parameters": [
           {
             "name": "eventId",
@@ -27274,6 +27295,7 @@
         ],
         "x-dangerous": true,
         "x-effect": "write",
+        "x-irreversible": true,
         "parameters": [
           {
             "name": "draftId",
@@ -29184,6 +29206,7 @@
         ],
         "x-dangerous": true,
         "x-effect": "write",
+        "x-irreversible": true,
         "parameters": [
           {
             "name": "surfaceKind",
@@ -30177,6 +30200,7 @@
         ],
         "x-dangerous": true,
         "x-effect": "write",
+        "x-irreversible": true,
         "parameters": [
           {
             "name": "assignmentId",
@@ -32518,6 +32542,7 @@
         ],
         "x-dangerous": true,
         "x-effect": "write",
+        "x-irreversible": true,
         "parameters": [
           {
             "name": "watchId",
@@ -35905,6 +35930,7 @@
           "write:sessions"
         ],
         "x-effect": "write",
+        "x-irreversible": true,
         "parameters": [
           {
             "name": "sessionId",
@@ -62296,6 +62322,7 @@
           "write:fleet"
         ],
         "x-effect": "outward",
+        "x-changes-contract": true,
         "x-error-codes": [
           {
             "code": "CONTRACT_NOT_FOUND",
@@ -63230,6 +63257,18 @@
                                   "ownerOnly": {
                                     "type": "boolean"
                                   },
+                                  "irreversible": {
+                                    "type": "boolean"
+                                  },
+                                  "changesContract": {
+                                    "type": "boolean"
+                                  },
+                                  "recipients": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string"
+                                    }
+                                  },
                                   "invokable": {
                                     "type": "boolean"
                                   },
@@ -64111,6 +64150,18 @@
                         "ownerOnly": {
                           "type": "boolean"
                         },
+                        "irreversible": {
+                          "type": "boolean"
+                        },
+                        "changesContract": {
+                          "type": "boolean"
+                        },
+                        "recipients": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
                         "invokable": {
                           "type": "boolean"
                         },
@@ -64365,6 +64416,18 @@
                           },
                           "ownerOnly": {
                             "type": "boolean"
+                          },
+                          "irreversible": {
+                            "type": "boolean"
+                          },
+                          "changesContract": {
+                            "type": "boolean"
+                          },
+                          "recipients": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
                           },
                           "invokable": {
                             "type": "boolean"
@@ -65736,6 +65799,9 @@
         ],
         "x-dangerous": true,
         "x-effect": "outward",
+        "x-recipients": [
+          "to"
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -78051,6 +78117,7 @@
         ],
         "x-dangerous": true,
         "x-effect": "write",
+        "x-irreversible": true,
         "requestBody": {
           "required": true,
           "content": {
@@ -91406,6 +91473,7 @@
           "write:knowledge"
         ],
         "x-effect": "write",
+        "x-irreversible": true,
         "parameters": [
           {
             "name": "id",
@@ -101084,6 +101152,7 @@
           "write:mcp"
         ],
         "x-effect": "write",
+        "x-irreversible": true,
         "parameters": [
           {
             "name": "serverName",
@@ -106703,6 +106772,7 @@
           "write:memory"
         ],
         "x-effect": "write",
+        "x-irreversible": true,
         "parameters": [
           {
             "name": "id",
@@ -111485,6 +111555,7 @@
         ],
         "x-dangerous": true,
         "x-effect": "write",
+        "x-irreversible": true,
         "requestBody": {
           "required": true,
           "content": {
@@ -111875,6 +111946,7 @@
         ],
         "x-dangerous": true,
         "x-effect": "write",
+        "x-irreversible": true,
         "requestBody": {
           "required": true,
           "content": {
@@ -113156,6 +113228,7 @@
           "write:payments"
         ],
         "x-effect": "write",
+        "x-irreversible": true,
         "parameters": [
           {
             "name": "id",
@@ -119816,6 +119889,7 @@
           "write:remote"
         ],
         "x-effect": "write",
+        "x-irreversible": true,
         "parameters": [
           {
             "name": "peerId",
@@ -124657,6 +124731,7 @@
         ],
         "x-dangerous": true,
         "x-effect": "write",
+        "x-irreversible": true,
         "parameters": [
           {
             "name": "bindingId",
@@ -125307,6 +125382,7 @@
           "write:remote"
         ],
         "x-effect": "write",
+        "x-irreversible": true,
         "parameters": [
           {
             "name": "artifactId",
@@ -129380,6 +129456,7 @@
           "write:sessions"
         ],
         "x-effect": "write",
+        "x-irreversible": true,
         "x-error-codes": [
           {
             "code": "SESSION_NOT_FOUND",
@@ -135568,6 +135645,7 @@
           "write:skills"
         ],
         "x-effect": "write",
+        "x-irreversible": true,
         "parameters": [
           {
             "name": "name",
@@ -142109,6 +142187,7 @@
         ],
         "x-dangerous": true,
         "x-effect": "write",
+        "x-irreversible": true,
         "parameters": [
           {
             "name": "watcherId",

@@ -16,7 +16,8 @@
  *      the plan posture;
  *   2. yolo runs everything that passed 1;
  *   3. a matching deny or ask rule;
- *   4. the owner-only list;
+ *   4. the owner-only list, recognised by code from the call and the facts
+ *      the caller holds (recognizeOwnerOnly), never from a model;
  *   5. a matching allow rule;
  *   6. the declared-effect defaults: a read inside the allowed directories,
  *      a read of the app's own state, a call its registration declared
@@ -32,19 +33,39 @@ import { relative, resolve, isAbsolute, sep } from 'node:path';
 import type { PermissionCategory, ToolArgumentPath, ToolDecision, ToolDefinition, ToolSideEffect } from '../types/tools.js';
 import type { GatePresetName } from './presets.js';
 import { effectPermittedForProvenance, surfaceCarriesCommandAuthority, surfaceRequestsReachOwner } from './surface-authority.js';
+import { execShellCommands } from '../runtime/permissions/exec-command-text.js';
+import { fileOperationDestroys, unrecoverableDeletionIn } from './unrecoverable-commands.js';
 
 /**
  * The closed list of what only the owner decides. Jev never approves one, in
  * any mode but yolo; a confident reading cannot move an item off this list.
  */
 export type OwnerOnlyKind =
-  /** Spending over a limit the owner set. */
+  /**
+   * Spending over a limit the owner set. Recognised by the payments layer once
+   * it has read the checkout's total (payments/decide.ts): the gate cannot know
+   * a total before the page is read. The purchase window puts it to the owner
+   * in every mode; answering it is an owner act a model is refused.
+   */
   | 'spend-over-limit'
-  /** Card entry, CVV, 3-D Secure, CAPTCHA inside a purchase. */
+  /**
+   * Card security code, 3-D Secure, CAPTCHA inside a purchase. Recognised by
+   * the payments layer as the checkout reaches it (a security-code request, a
+   * challenge pause); the owner completes it, a model is refused.
+   */
   | 'payment-step'
-  /** Deleting work that no undo record, checkpoint or clean git state can bring back. */
+  /**
+   * Deleting or overwriting what no undo record keeps: a command the exec
+   * rules recognise (gate/unrecoverable-commands.ts), an exec file operation
+   * that deletes or overwrites, or a confident reading that a call destroys
+   * something that cannot be brought back.
+   */
   | 'unrecoverable-delete'
-  /** Sending as the owner to a recipient not yet allowed. */
+  /**
+   * Sending as the owner to a recipient that is neither one of his configured
+   * destinations nor one he allowed: the tool declares where its recipients
+   * sit (`subjects.recipients`, `ownerDecisions.recipients`).
+   */
   | 'new-recipient'
   /** Sending content derived from untrusted text read this turn. */
   | 'untrusted-derived-send'
@@ -52,9 +73,13 @@ export type OwnerOnlyKind =
   | 'grant-access'
   /** A change that loosens a security, judgment or payment setting. */
   | 'loosen-security'
-  /** Changing what a contract requires. */
+  /** Changing what a contract requires: an operator method the catalog declares `changesContract`. */
   | 'change-contract'
-  /** Killing a session, revoking the shared token, an irreversible cluster operation. */
+  /**
+   * An operator method the catalog declares `irreversible` (killing a session,
+   * deleting a record nothing restores). Revoking the shared token and the
+   * other access acts are `owner-act`, refused to a model outright.
+   */
   | 'irreversible-operator'
   /** The owner's own standing "always ask me" rule matched. */
   | 'standing-ask'
@@ -313,20 +338,80 @@ export function changesMcpTrust(toolName: string, args: Record<string, unknown>)
 export interface OwnerOnlyCallFacts {
   /** The call writes a setting, and the key's declared loosening rule says this change loosens it (config-key-facts.ts). */
   readonly loosensSetting?: boolean | undefined;
+  /**
+   * The call sends as the owner to a recipient that is not one of his own
+   * configured destinations and that he has not allowed (callRecipients, read
+   * against his settings and answers by the caller).
+   */
+  readonly newRecipient?: boolean | undefined;
+}
+
+/** The definition fields the owner-only list is recognised from. */
+export type OwnerOnlyDefinition = Pick<ToolDefinition, 'dangerous' | 'ownerActs' | 'ownerDecisions' | 'subjects' | 'sideEffects'>;
+
+/** Whether the value the call gives `field` is one of `values`; a value that cannot be read counts as one (fails closed). */
+function namesOneOf(args: Record<string, unknown>, field: string, values: readonly string[] | undefined): boolean {
+  if (values === undefined || values.length === 0) return false;
+  const named = argumentValues(args, field);
+  // Ids are compared ignoring case and spaces, as the tools that take them resolve them.
+  const declared = new Set(values.map((value) => value.trim().toLowerCase()));
+  return named === undefined || named.some((value) => declared.has(value.trim().toLowerCase()));
+}
+
+/**
+ * The shell commands a call runs or installs, for a tool that runs commands
+ * (`exec`, a tool declaring the `exec` effect) or declares where its commands
+ * sit; empty for any other tool.
+ */
+export function callCommands(toolName: string, args: Record<string, unknown>, definition?: Pick<ToolDefinition, 'subjects' | 'sideEffects'> | undefined): string[] {
+  const declared = declaredValues(args, definition?.subjects?.commands) ?? [];
+  const runs = toolName === 'exec' || definition?.sideEffects?.includes('exec') === true;
+  return runs ? [...new Set([...execShellCommands(args), ...declared])] : declared;
+}
+
+/**
+ * The recipients a call sends to, from the tool's declared recipient paths
+ * (`subjects.recipients`, and `ownerDecisions.recipients` for the value its
+ * dispatch field names). Empty for a call that sends to no chosen recipient;
+ * undefined when a declared path holds something that is not text (it cannot
+ * be read, so it is treated as a recipient nobody allowed).
+ */
+export function callRecipients(args: Record<string, unknown>, definition?: Pick<ToolDefinition, 'subjects' | 'ownerDecisions'> | undefined): string[] | undefined {
+  const paths = [...(definition?.subjects?.recipients ?? [])];
+  const decisions = definition?.ownerDecisions;
+  if (decisions?.recipients !== undefined) {
+    const named = argumentValues(args, decisions.field);
+    if (named === undefined) return undefined;
+    for (const value of named) {
+      const key = Object.keys(decisions.recipients).find((candidate) => candidate.trim().toLowerCase() === value.trim().toLowerCase());
+      if (key !== undefined) paths.push(...decisions.recipients[key]!);
+    }
+  }
+  if (paths.length === 0) return [];
+  const values = declaredValues(args, paths);
+  return values?.map((value) => value.trim()).filter((value) => value.length > 0);
 }
 
 /** The owner-only kind a call is, from its tool, mode, arguments and the facts its caller read; undefined when it is none. */
 export function recognizeOwnerOnly(toolName: string, args: Record<string, unknown>,
-  definition?: Pick<ToolDefinition, 'dangerous' | 'ownerActs'> | undefined, facts: OwnerOnlyCallFacts = {}): OwnerOnlyKind | undefined {
+  definition?: OwnerOnlyDefinition | undefined, facts: OwnerOnlyCallFacts = {}): OwnerOnlyKind | undefined {
   const acts = definition?.ownerActs;
-  if (acts !== undefined) {
-    // A value that cannot be read is taken as an owner act: the declaration fails closed. Ids are
-    // compared ignoring case and spaces, as the tools that take them resolve them.
-    const named = argumentValues(args, acts.field);
-    const declared = new Set(acts.values.map((value) => value.toLowerCase()));
-    if (named === undefined || named.some((value) => declared.has(value.trim().toLowerCase()))) return 'owner-act';
-  }
+  // A value that cannot be read is taken as an owner act: the declaration fails closed.
+  if (acts !== undefined && namesOneOf(args, acts.field, acts.values)) return 'owner-act';
   if (definition?.dangerous === true || changesMcpTrust(toolName, args)) return 'grant-access';
   if (facts.loosensSetting === true) return 'loosen-security';
+  const decisions = definition?.ownerDecisions;
+  if (decisions !== undefined && namesOneOf(args, decisions.field, decisions.contractChanges)) return 'change-contract';
+  if (decisions !== undefined && namesOneOf(args, decisions.field, decisions.irreversible)) return 'irreversible-operator';
+  if (unrecoverableDeletion(toolName, args, definition) !== undefined) return 'unrecoverable-delete';
+  if (facts.newRecipient === true) return 'new-recipient';
   return undefined;
+}
+
+/** What a call destroys that nothing keeps a copy of, in words (gate/unrecoverable-commands.ts); undefined when nothing. */
+export function unrecoverableDeletion(toolName: string, args: Record<string, unknown>,
+  definition?: Pick<ToolDefinition, 'subjects' | 'sideEffects'> | undefined): string | undefined {
+  const commands = callCommands(toolName, args, definition);
+  return (commands.length > 0 ? unrecoverableDeletionIn(commands) : undefined)
+    ?? (toolName === 'exec' ? fileOperationDestroys(args) : undefined);
 }

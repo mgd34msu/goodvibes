@@ -53,6 +53,8 @@ function homeGraphDescriptor(input: {
   /** A read of counts and state only, no records: open to a signed-in user without the admin role. */
   readonly statusOnly?: boolean | undefined;
   readonly dangerous?: boolean | undefined;
+  /** The call cannot be undone; see GatewayMethodDescriptor.irreversible. */
+  readonly irreversible?: boolean | undefined;
   readonly metadata?: Record<string, unknown> | undefined;
 }): GatewayMethodDescriptor {
   return methodDescriptor({
@@ -68,6 +70,7 @@ function homeGraphDescriptor(input: {
     inputSchema: input.inputSchema,
     outputSchema: input.outputSchema,
     ...(input.dangerous ? { dangerous: true } : {}),
+    ...(input.irreversible ? { irreversible: true } : {}),
     ...(input.metadata ? { metadata: input.metadata } : {}),
   });
 }
@@ -427,6 +430,7 @@ export const builtinGatewayHomeGraphMethodDescriptors: readonly GatewayMethodDes
   }),
   homeGraphDescriptor({
     id: 'homeassistant.homeGraph.reset',
+    irreversible: true,
     title: 'Reset Home Graph Space',
     description: 'Clear one Home Assistant Home Graph knowledge space after callers export any diagnostic backup they need.',
     method: 'POST',

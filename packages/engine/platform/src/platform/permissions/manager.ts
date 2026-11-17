@@ -38,7 +38,8 @@ import { resolve } from 'node:path';
 import { extractPathArgs } from '../runtime/permissions/rules/path-scope.js';
 import { buildDurableRuleForDecision, buildRememberOptions, compileRules, sessionApprovalKey, type CompiledRules, type RememberTier } from './approval-rules.js';
 import { stableStringify } from '../providers/registry-helpers.js';
-import { changesMcpTrust, classifyCall, classifyPaths, declaredRecoverable, declaredValues, ownerOnlyReason, recognizeOwnerOnly, type CallClass, type CallFacts, type CallRuleFact, type OwnerOnlyKind } from '../gate/classify.js';
+import { callRecipients, changesMcpTrust, classifyCall, classifyPaths, declaredRecoverable, declaredValues, ownerOnlyReason, recognizeOwnerOnly, type CallClass, type CallFacts, type CallRuleFact, type OwnerOnlyKind } from '../gate/classify.js';
+import { OWNER_ADDRESS_CONFIG_KEYS, splitRecipients } from '../security/owner-identity.js';
 import { toolDecisionOf } from './denial.js';
 import { processHeldForOwner, type HeldForOwnerCall, type HeldForOwnerLedger } from './held-for-owner.js';
 import { processJevDecisions, type JevDecisionLedger, type JevDecisionRuleEffect } from './jev-decisions.js';
@@ -128,6 +129,8 @@ interface SafetyInput {
   readonly attribution?: PermissionAttribution | undefined;
   /** The owner confirmed this exact call himself; his confirmation is the approval. */
   readonly ownerConfirmed?: boolean | undefined;
+  /** Where the call sends as the owner (callRecipients): an answer to a new recipient covers these for the session. */
+  readonly recipients?: readonly string[] | undefined;
 }
 
 interface SafetyOutcome {
@@ -321,6 +324,27 @@ function ownerOnlySessionKey(kind: OwnerOnlyKind, key: string, args: Record<stri
   return `owner-only:${kind}|${key}|${stableStringify(args)}`;
 }
 
+/**
+ * The settings that name where the owner sends himself: his mail addresses,
+ * his notification webhooks and the default recipients his surfaces deliver
+ * to. A recipient found here is his own destination, not a new one.
+ */
+const OWNER_DESTINATION_KEYS: readonly string[] = [
+  ...OWNER_ADDRESS_CONFIG_KEYS, 'notifications.webhookUrls', 'surfaces.googleChat.webhookUrl',
+  'surfaces.signal.defaultRecipient', 'surfaces.whatsapp.defaultRecipient', 'surfaces.telephony.defaultRecipient',
+];
+
+/**
+ * The recipients one value names, as they are compared: a URL whole and as
+ * written; anything else split at commas into addresses, lowercased and
+ * without a display name (security/owner-identity.ts).
+ */
+function recipientParts(value: string): string[] {
+  const trimmed = value.trim();
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed)) return [trimmed];
+  return [...splitRecipients(trimmed)];
+}
+
 /** The reason code each boundary refusal is reported under (a judgment-input refusal has its own path). */
 const BOUNDARY_REFUSAL_CODES: Readonly<Record<Exclude<BoundaryCheckName, 'judgment-input'>, PermissionDecisionReasonCode>> = {
   catastrophic: 'boundary_catastrophic',
@@ -391,10 +415,12 @@ export interface PermissionConfigReader {
    * Whether a decision model works for the mode in force: it is set up to
    * answer (gate/presets.ts `decisionModelReady`), and, when the mode is the
    * shipped default rather than one the owner chose, a calibration run
-   * measured the gate's decisions on it (gate/calibration.ts). Absent counts
+   * measured the gate's decisions on it (gate/calibration.ts). `chosen`: the
+   * mode in force was chosen for this session (Shift+Tab, a hosted session's
+   * mode), which counts as the owner's choice like a saved one. Absent counts
    * as ready.
    */
-  isDecisionModelReady?(): boolean;
+  isDecisionModelReady?(chosen?: boolean): boolean;
   getSnapshot(): PermissionConfigSnapshot;
   getWorkingDirectory(): string | null;
   /**
@@ -458,7 +484,7 @@ export function createPermissionConfigReader(
     ...(flushPendingChanges ? { flushPendingChanges } : {}),
     ...(permissionSnapshot ? { getAutonomousSnapshot: permissionSnapshot } : {}),
     isAutoApproveEnabled: () => isAutoApproveEnabled(configManager),
-    isDecisionModelReady: () => permissionDecisionModelReady(configManager),
+    isDecisionModelReady: (chosen) => permissionDecisionModelReady(configManager, chosen === true ? { chosen: true } : {}),
     getSnapshot: permissionSnapshot
       ? () => ({ permissions: permissionSnapshot().permissions })
       : () => getConfigSnapshot(configManager),
@@ -728,6 +754,8 @@ export class PermissionManager {
    */
   private readonly sessionApprovals = new Map<string, boolean>();
   private sessionApprovalRevision = 0;
+  /** Recipients the owner allowed for the rest of a session, keyed `<session>|<recipient>`. */
+  private readonly allowedRecipients = new Set<string>();
   private readonly requestPermission: PermissionRequestHandler;
   private readonly configReader: PermissionConfigReader;
   private readonly hookDispatcher: Pick<HookDispatcher, 'fire'> | null;
@@ -1030,7 +1058,8 @@ export class PermissionManager {
     const effectSurface = capturedAuthority.surface;
     const effectWriteDenied = mode !== 'yolo' && permissions.tools?.write === 'deny';
     const owner = { frame: capturedAuthority, assertCurrent };
-    const ownerOnly = recognizeOwnerOnly(toolName, args, definition, this.settingsFacts(toolName, args, admissionEvidence));
+    const ownerFacts = this.ownerOnlyFacts(toolName, args, definition, admissionEvidence);
+    const ownerOnly = recognizeOwnerOnly(toolName, args, definition, ownerFacts);
     const rule = await this.ruleFactOf({
       toolName, args, category, mode, tools: permissions.tools, ownerOnly, subjects: callSubjects(args, definition),
       policyEnabled: capturedAuthority.policyEnabled, options: { signal, assertCurrent }, owner, sessionId: options.hookOwner?.sessionId,
@@ -1047,7 +1076,7 @@ export class PermissionManager {
       callId: sourceId, toolName, args, category, policyResult, decided, mode, signal, assertCurrent,
       workingDirectory: capturedAuthority.directory ?? undefined, source,
       sourceId, actionRevision: `action-${epoch.toString(36)}`, authorityRevision, authoritySnapshot,
-      supportingIds: options.preparationDecisionIds ?? [], decoratePort: options.decoratePort,
+      supportingIds: options.preparationDecisionIds ?? [], decoratePort: options.decoratePort, recipients: ownerFacts.recipients,
       ...(options.ownerConfirmed === true ? { ownerConfirmed: true } : {}),
     });
     const result = safety.result;
@@ -1274,6 +1303,12 @@ export class PermissionManager {
     const modified = reply.modifiedArgs === undefined ? undefined : captureOwnedJson(reply.modifiedArgs) as Record<string, unknown>;
     const notSaved = await this.rememberReply(input.toolName, input.args, reply, modified, o.ownerOnly);
     input.assertCurrent();
+    // A new recipient the owner allowed and asked to be remembered is his for the rest of the session, whatever is sent there next.
+    if (o.ownerOnly === 'new-recipient' && reply.approved && (reply.rememberTier ?? (reply.remember === true ? 'session' : undefined)) !== undefined
+      && (modified === undefined || isDeepStrictEqual(modified, input.args))) {
+      const session = sessionOfCheck.getStore() ?? '';
+      for (const recipient of input.recipients ?? []) for (const part of recipientParts(recipient)) this.allowedRecipients.add(`${session}|${part}`);
+    }
     const extra = { ...(o.boundary ? { boundary: o.boundary } : {}), ...(o.preset ? { preset: o.preset } : {}) };
     if (reply.approved && modified && !isDeepStrictEqual(modified, input.args)) {
       if (!input.source) {
@@ -1686,7 +1721,8 @@ export class PermissionManager {
     await this.fireHook('Pre:permission:request', 'Pre', 'permission', 'request', { callId, toolName, category, analysis }, hookOwner);
     assertCurrent();
     this.policyRuntimeState.recordPermissionRequest({ callId, tool: toolName, category, analysis });
-    const ownerOnly = recognizeOwnerOnly(toolName, args, definition, this.settingsFacts(toolName, args));
+    const ownerFacts = this.ownerOnlyFacts(toolName, args, definition);
+    const ownerOnly = recognizeOwnerOnly(toolName, args, definition, ownerFacts);
     const rule = await this.ruleFactOf({
       toolName, args, category, mode, tools: config.permissions?.tools, ownerOnly, subjects: callSubjects(args, definition),
       policyEnabled: this.featureFlags?.isEnabled('permissions-policy-engine') === true, options: { signal, assertCurrent },
@@ -1700,7 +1736,7 @@ export class PermissionManager {
     const safety = await this.assessExecutionSafety({
       callId, sourceId: callId, toolName, args, category, policyResult, decided, mode, signal, assertCurrent,
       workingDirectory: config.directory ?? undefined, authorityRevision, authoritySnapshot: captureJsonEntry(config),
-      actionRevision: callId, attribution,
+      actionRevision: callId, attribution, recipients: ownerFacts.recipients,
     });
     assertCurrent();
     this.noteJevDecision(toolName, args, safety.result, definition);
@@ -1731,7 +1767,7 @@ export class PermissionManager {
     const mode = this.getMode();
     const category = this.getCategory(toolName, captured, definition);
     const config = this.configReader.getSnapshot();
-    const ownerOnly = recognizeOwnerOnly(toolName, captured, definition, this.settingsFacts(toolName, captured));
+    const ownerOnly = recognizeOwnerOnly(toolName, captured, definition, this.ownerOnlyFacts(toolName, captured, definition));
     const rule = await this.ruleFactOf({
       toolName, args: captured, category, mode, tools: config.permissions?.tools, ownerOnly, subjects: callSubjects(captured, definition),
       policyEnabled: this.featureFlags?.isEnabled('permissions-policy-engine') === true, options: signal ? { signal } : {},
@@ -1744,9 +1780,41 @@ export class PermissionManager {
     return { mode, category, decided };
   }
 
-  /** Whether this call is a settings write that loosens its key, for the owner-only list. */
-  private settingsFacts(toolName: string, args: Record<string, unknown>, evidence?: ToolOwnedAdmissionEvidence): { readonly loosensSetting: boolean } {
-    return { loosensSetting: settingsWriteLoosens(toolName, args, evidence, key => this.configReader.getSetting?.(key)) };
+  /**
+   * The facts the owner-only list reads from this process's settings and the
+   * owner's answers: whether the call is a settings write that loosens its key,
+   * and whether it sends to a recipient that is neither one of his configured
+   * destinations nor one he allowed this session. Cost per call: nothing for a
+   * tool that declares no recipients; a few settings reads for one that does.
+   */
+  private ownerOnlyFacts(toolName: string, args: Record<string, unknown>, definition: ToolDefinition | undefined,
+    evidence?: ToolOwnedAdmissionEvidence): { readonly loosensSetting: boolean; readonly newRecipient: boolean; readonly recipients: readonly string[] } {
+    const recipients = callRecipients(args, definition);
+    const known = recipients === undefined || recipients.length === 0 ? undefined : this.knownRecipients();
+    return {
+      loosensSetting: settingsWriteLoosens(toolName, args, evidence, key => this.configReader.getSetting?.(key)),
+      newRecipient: recipients === undefined || (known !== undefined && recipients.some((recipient) => recipientParts(recipient).some((part) => !known.has(part)))),
+      recipients: recipients ?? [],
+    };
+  }
+
+  /**
+   * Where the owner sends himself: his mail addresses, his notification
+   * webhooks and the default recipients his surfaces are set up with, read
+   * from settings now, and the recipients he allowed earlier in this session.
+   */
+  private knownRecipients(): ReadonlySet<string> {
+    const session = `${sessionOfCheck.getStore() ?? ''}|`;
+    const known = new Set<string>();
+    for (const entry of this.allowedRecipients) if (entry.startsWith(session)) known.add(entry.slice(session.length));
+    for (const key of OWNER_DESTINATION_KEYS) {
+      let value: unknown;
+      try { value = this.configReader.getSetting?.(key); } catch { continue; }
+      for (const entry of Array.isArray(value) ? value : [value]) {
+        if (typeof entry === 'string') for (const part of recipientParts(entry)) known.add(part);
+      }
+    }
+    return known;
   }
 
   /** Explicit session decisions, then current durable rules with their own scope. */
@@ -2003,9 +2071,13 @@ export class PermissionManager {
     return sessionId === undefined ? key : `session:${sessionId}|${key}`;
   }
 
-  /** Whether Jev can decide now: the decision-model settings, read when a decision is made. */
-  private decisionModelWorks(): boolean {
-    return this.configReader.isDecisionModelReady?.() ?? true;
+  /**
+   * Whether Jev can decide now: the decision-model settings, read when a
+   * decision is made. `chosen`: the mode was chosen for this session rather
+   * than read from settings.
+   */
+  private decisionModelWorks(chosen = false): boolean {
+    return this.configReader.isDecisionModelReady?.(chosen) ?? true;
   }
 
   /**
@@ -2013,14 +2085,18 @@ export class PermissionManager {
    * ask-me while no decision model works, the same rule the configured mode
    * follows, so judgments go to the owner rather than to a model that cannot
    * answer. Read per call: setting up a decision model takes effect at once.
+   * `explicitlyChosen`: the mode was chosen for this session or channel (a
+   * Shift+Tab, a hosted session's mode, a channel profile), which counts as the
+   * owner's choice like a saved one. Otherwise whether the saved setting is
+   * the owner's or the shipped default decides, as for the configured mode.
    */
-  modeInForce(chosen: unknown): GatePresetName {
-    return effectivePermissionMode(chosen, false, this.decisionModelWorks());
+  modeInForce(chosen: unknown, explicitlyChosen = false): GatePresetName {
+    return effectivePermissionMode(chosen, false, this.decisionModelWorks(explicitlyChosen));
   }
 
-  /** A session owner's mode in force; the owner holds the mode the session chose. */
+  /** A session owner's mode in force; the owner holds the mode the session chose, or the settings' when it chose none. */
   private ownerMode(owner: ExecutionModeOwner): GatePresetName {
-    return this.modeInForce(owner.getMode());
+    return this.modeInForce(owner.getMode(), owner.isChosen?.() === true);
   }
 
   /**

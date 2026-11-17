@@ -66,7 +66,8 @@ export function channelExecutionModeOwner(broker: Pick<InboundIntakeBroker, 'get
     if (!isSettableGatePresetName(selected)) throw new Error('Channel execution mode is invalid');
     return { mode: selected, revision: session.channelPermissionModeRevision ?? 0 };
   };
-  return Object.freeze({ getMode: () => current().mode, getRevision: () => current().revision });
+  // The mode is the one the owner's channel profile chose for the channel.
+  return Object.freeze({ getMode: () => current().mode, getRevision: () => current().revision, isChosen: () => true });
 }
 
 /** Dispatch an actual broker-owned session under its configured channel default. */

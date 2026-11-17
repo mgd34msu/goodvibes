@@ -3175,6 +3175,7 @@ export interface OperatorMethodContract {
     readonly access: GatewayMethodAccess;
     // (undocumented)
     readonly category: string;
+    readonly changesContract?: boolean | undefined;
     // (undocumented)
     readonly dangerous?: boolean | undefined;
     // (undocumented)
@@ -3193,12 +3194,14 @@ export interface OperatorMethodContract {
     readonly inputSchema?: JsonSchema | undefined;
     // (undocumented)
     readonly invokable?: boolean | undefined;
+    readonly irreversible?: boolean | undefined;
     readonly metadata?: Record<string, unknown> | undefined;
     // (undocumented)
     readonly outputSchema?: JsonSchema | undefined;
     readonly ownerOnly?: boolean | undefined;
     // (undocumented)
     readonly pluginId?: string | undefined;
+    readonly recipients?: readonly string[] | undefined;
     // Warning: (ae-forgotten-export) The symbol "ContractReplayKey" needs to be exported by the entry point index.d.ts
     readonly replay?: ContractReplayKey | undefined;
     // (undocumented)
@@ -20128,6 +20131,9 @@ export interface OperatorMethodOutputMap {
                     dangerous?: boolean;
                     effect?: "outward" | "read" | "write";
                     ownerOnly?: boolean;
+                    irreversible?: boolean;
+                    changesContract?: boolean;
+                    recipients?: readonly string[];
                     invokable?: boolean;
                     replay?: {
                         in: string;
@@ -20282,6 +20288,9 @@ export interface OperatorMethodOutputMap {
             dangerous?: boolean;
             effect?: "outward" | "read" | "write";
             ownerOnly?: boolean;
+            irreversible?: boolean;
+            changesContract?: boolean;
+            recipients?: readonly string[];
             invokable?: boolean;
             replay?: {
                 in: string;
@@ -20324,6 +20333,9 @@ export interface OperatorMethodOutputMap {
             dangerous?: boolean;
             effect?: "outward" | "read" | "write";
             ownerOnly?: boolean;
+            irreversible?: boolean;
+            changesContract?: boolean;
+            recipients?: readonly string[];
             invokable?: boolean;
             replay?: {
                 in: string;

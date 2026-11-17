@@ -155,6 +155,8 @@ export function createAgentAutonomyScheduleTool(
         additionalProperties: false,
       },
       sideEffects: ['network', 'state'],
+      // A webhook target is chosen in the call: one the owner has not configured or allowed is his to decide.
+      subjects: { recipients: ['deliveryWebhook'] },
     },
     execute: async (rawArgs, options) => {
       let effect: ReturnType<typeof captureScheduleEffect> | undefined;

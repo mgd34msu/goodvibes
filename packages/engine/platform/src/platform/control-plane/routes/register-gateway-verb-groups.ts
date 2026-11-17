@@ -209,7 +209,7 @@ export interface GatewayVerbGroupDeps extends FleetCheckpointsSearchGatewayDeps,
    * modeInForce), so sessions.permissionMode.get reports what decides the
    * session's calls. Absent: the chosen mode is reported.
    */
-  readonly modeInForce?: ((chosen: import('../../gate/presets.js').GatePresetName) => import('../../gate/presets.js').GatePresetName) | undefined;
+  readonly modeInForce?: ((chosen: import('../../gate/presets.js').GatePresetName, explicitlyChosen?: boolean) => import('../../gate/presets.js').GatePresetName) | undefined;
   /**
    * Runtime store backing sessions.contextUsage.get and the local-session
    * resolution the session-runtime verbs gate on (getState().session.id).

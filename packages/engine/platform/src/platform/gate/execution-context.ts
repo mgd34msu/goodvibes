@@ -7,6 +7,11 @@ export { isInvocationAdmitted } from '../tools/registry.js';
 export interface ExecutionModeOwner {
   getMode(): GatePresetName;
   getRevision(): number;
+  /**
+   * Whether the mode was chosen for this owner (when it was created, or
+   * changed since) rather than taken from the saved setting. Absent: chosen.
+   */
+  isChosen?(): boolean;
 }
 const executionOwner = new AsyncLocalStorage<ExecutionModeOwner>();
 

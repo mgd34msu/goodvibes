@@ -193,6 +193,7 @@ export const builtinGatewayDeviceMethodDescriptors: readonly GatewayMethodDescri
   }),
   methodDescriptor({
     id: 'devices.artifacts.delete',
+    irreversible: true,
     title: 'Delete a Retained Device Capture',
     description: 'Remove one retained camera or screen capture now, before its retention window ends: the file on the daemon host and its record. The removal is added to the housekeeping disclosure like a sweep removal, with the reason `deleted`. `deleted` is true only when the file was unlinked; a capture whose file was already gone (`file-missing`) or no longer matches what was taken (`content-mismatch`, the file is kept for inspection) loses its record and says so. An id that is not retained is a 404.',
     category: 'runtime',

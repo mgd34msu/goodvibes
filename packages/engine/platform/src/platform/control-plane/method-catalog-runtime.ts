@@ -202,6 +202,7 @@ export const builtinGatewayRuntimeMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'mcp.servers.remove',
+    irreversible: true,
     title: 'Remove MCP Server',
     description: 'Remove a project/global MCP server config and disconnect it without daemon restart.',
     category: 'mcp',
@@ -356,6 +357,7 @@ export const builtinGatewayRuntimeMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'remote.backends.remove',
+    irreversible: true,
     effect: 'write',
     title: 'Remove Remote Backend',
     description: 'Remove a registered execution backend; 404 when no backend has that id.',
@@ -696,6 +698,7 @@ export const builtinGatewayRuntimeMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'memory.records.delete',
+    irreversible: true,
     title: 'Delete Memory Record',
     description: 'Permanently delete a memory record and its links from the canonical store. Delete means delete: the record is removed from the store and the semantic index, not merely flagged. Returns { deleted: false } when no record with that id existed, an honest boolean, never a 200 that pretends a phantom row was removed.',
     category: 'memory',

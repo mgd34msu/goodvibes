@@ -53,6 +53,11 @@ export interface PersistedHostedSession {
    * Kept beside the record, not on it, so no session listing shows them.
    */
   readonly owners?: readonly string[] | undefined;
+  /**
+   * The session's execution mode was chosen for it rather than copied from the
+   * saved setting; kept beside the record so a restart keeps it the owner's choice.
+   */
+  readonly permissionModeChosen?: true | undefined;
 }
 
 /** Bounds and retention, all configurable. */
@@ -106,6 +111,7 @@ export function describeInvalidPersistedHostedSession(value: unknown): string | 
   }
   const owners = value['owners'];
   if (owners !== undefined && (!Array.isArray(owners) || !owners.every((owner) => typeof owner === 'string'))) return 'the owner list is not a list of principal ids';
+  if (value['permissionModeChosen'] !== undefined && value['permissionModeChosen'] !== true) return 'invalid execution mode choice marker';
   if (record['permissionMode'] !== undefined && (typeof record['permissionMode'] !== 'string' || !isGatePresetName(record['permissionMode']))) return 'invalid session execution mode';
   if (record['nativeConversation'] !== undefined && record['nativeConversation'] !== true) return 'invalid native conversation classification';
   const id = record['id'];
@@ -267,7 +273,7 @@ export class HostedSessionStore {
   }
 
   /** Atomically write one session. Bounds the conversation before writing. */
-  async save(record: HostedSessionRecord, conversation: unknown, options: { readonly durable?: boolean; readonly owners?: readonly string[] | undefined } = {}): Promise<void> {
+  async save(record: HostedSessionRecord, conversation: unknown, options: { readonly durable?: boolean; readonly owners?: readonly string[] | undefined; readonly permissionModeChosen?: boolean | undefined } = {}): Promise<void> {
     if (!SAFE_ID.test(record.id)) {
       throw new Error(`Refusing to persist hosted session '${record.id}': the id is not a safe file name.`);
     }
@@ -275,7 +281,8 @@ export class HostedSessionStore {
     // `saveError` describes this process's last write, so it is never part of one.
     const stored: HostedSessionRecord = record.saveError === undefined ? record : { ...record, saveError: undefined };
     const payload: PersistedHostedSession = { version: CURRENT_HOSTED_SESSION_VERSION, record: stored, conversation: bounded,
-      ...(options.owners === undefined || options.owners.length === 0 ? {} : { owners: [...options.owners] }) };
+      ...(options.owners === undefined || options.owners.length === 0 ? {} : { owners: [...options.owners] }),
+      ...(options.permissionModeChosen === true ? { permissionModeChosen: true as const } : {}) };
     const file = this.fileFor(record.id);
     await this.writes.run(async () => {
       // One synchronous atomic publication avoids a best-effort older save

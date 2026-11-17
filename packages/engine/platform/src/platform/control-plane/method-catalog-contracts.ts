@@ -135,6 +135,7 @@ export const builtinGatewayContractMethodDescriptors: readonly GatewayMethodDesc
   }),
   methodDescriptor({
     id: 'contracts.reply',
+    changesContract: true,
     effect: 'outward',
     title: 'Reply to a Contract Escalation',
     description: 'The owner\'s free-text reply to an open escalation of a contract, read by Jev as approve, reject, amend or unclear. Returns how it was read and what the runner did: approved, amended, stopped, asked again (with the new escalation id), or refused when the escalation is no longer open. Approval never passes a criterion Jev read as unmet; the requirement changes only through an amendment. A failed-work question (a native work contract\'s failed turn, a failed unit, a result that could not be published) is not read by Jev: it accepts exactly `retry` or `cancel`. 404 with CONTRACT_NOT_FOUND for an unknown id; 409 with CONTRACT_NOT_RUNNING when this runner holds the contract only for inspection, 409 with CONTRACT_ENDED when the contract has ended, 409 with ESCALATION_NOT_OPEN when the escalation is already answered or another reply to it is being read, 400 with INVALID_ARGUMENT when the text is not an answer the question accepts.',
@@ -153,6 +154,7 @@ export const builtinGatewayContractMethodDescriptors: readonly GatewayMethodDesc
   }),
   methodDescriptor({
     id: 'contracts.remove',
+    irreversible: true,
     title: 'Remove an Ended Contract',
     description: 'Delete the record of a contract that has ended (passed, failed or cancelled): its checkpoint and summary. Its branch and worktree, if any, are left to the worktree retention rules. Ended contracts are also removed automatically 30 days after they end, and beyond the newest 100 per project. `removed` is true when it was deleted. 404 with CONTRACT_NOT_FOUND for an unknown id; 409 with CONTRACT_NOT_ENDED while it runs (cancel it first); 409 with CONTRACT_NATIVE for native work, whose record its native execution keeps.',
     category: 'contracts',
@@ -184,6 +186,7 @@ export const builtinGatewayContractMethodDescriptors: readonly GatewayMethodDesc
   }),
   methodDescriptor({
     id: 'contracts.budget',
+    changesContract: true,
     title: 'Set a Running Contract\'s Budget',
     description: 'Replace a running contract\'s token and cost ceiling (`maxCostUsd`, `maxTokens`, or both); a limit left out keeps its current value. Each running group\'s remaining allowance moves by the same amount, and a unit waiting because the budget was used up starts. Returns the new `budget`, both limits as they now stand. 400 with INVALID_ARGUMENT when neither limit is given or one is negative; 404 with CONTRACT_NOT_FOUND for an unknown id; 409 with CONTRACT_ENDED once the contract has ended; 409 with CONTRACT_NATIVE for native work.',
     category: 'contracts',

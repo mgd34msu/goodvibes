@@ -73238,6 +73238,18 @@ Return the operator-facing control-plane contract manifest, including auth, tran
                   "ownerOnly": {
                     "type": "boolean"
                   },
+                  "irreversible": {
+                    "type": "boolean"
+                  },
+                  "changesContract": {
+                    "type": "boolean"
+                  },
+                  "recipients": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
                   "invokable": {
                     "type": "boolean"
                   },
@@ -74113,6 +74125,18 @@ Return a single gateway method descriptor.
         "ownerOnly": {
           "type": "boolean"
         },
+        "irreversible": {
+          "type": "boolean"
+        },
+        "changesContract": {
+          "type": "boolean"
+        },
+        "recipients": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
         "invokable": {
           "type": "boolean"
         },
@@ -74362,6 +74386,18 @@ Return the gateway method catalog.
           },
           "ownerOnly": {
             "type": "boolean"
+          },
+          "irreversible": {
+            "type": "boolean"
+          },
+          "changesContract": {
+            "type": "boolean"
+          },
+          "recipients": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           },
           "invokable": {
             "type": "boolean"

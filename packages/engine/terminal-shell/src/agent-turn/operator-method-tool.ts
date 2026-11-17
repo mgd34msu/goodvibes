@@ -11,7 +11,7 @@ import { assertOperatorEffect, captureOperatorConnection } from './operator-conn
 import { forgetDelegatedCredential } from './agent-delegation-credential.js';
 import { agentCallConnection } from './agent-call-credential.js';
 import { publishOperatorMethodReceipt } from './operator-method-receipt.js';
-import { appendOperatorQuery, operatorMethodIsReadOnly, ownerOnlyOperatorMethodIds, READ_ONLY_HTTP_METHODS, resolveOperatorContractMethod, substituteOperatorPath } from './operator-contract-routes.js';
+import { appendOperatorQuery, operatorMethodIsReadOnly, operatorOwnerDecisions, ownerOnlyOperatorMethodIds, READ_ONLY_HTTP_METHODS, resolveOperatorContractMethod, substituteOperatorPath } from './operator-contract-routes.js';
 import { createOperatorInputProjector, operatorExecutionConnection, operatorExecutionWireInput, operatorExecutionRequestPolicy, operatorMethodIsOutward, operatorMethodIsOwnerOnly } from './operator-input-projector.js';
 import { confirmParameter, requestParameter } from './effect-admission.js';
 import { readFlag, readString } from './tool-args.js';
@@ -358,6 +358,8 @@ export function createAgentOperatorMethodTool(
       },
       sideEffects: ['network', 'state'],
       ownerActs: { field: 'methodId', values: ownerOnlyOperatorMethodIds() },
+      // Irreversible methods, contract changes and sends to a recipient nobody allowed are the owner's to decide.
+      ownerDecisions: operatorOwnerDecisions('methodId', 'input'),
     },
     execute: async (rawArgs, options) => {
       let args: OperatorMethodToolArgs;

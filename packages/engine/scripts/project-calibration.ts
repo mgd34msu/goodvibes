@@ -36,8 +36,8 @@ function gateRecordModule(record: unknown): string {
   return [
     "import type { CalibrationRecord } from '@goodvibes-jev/judgment';",
     '',
-    '/** A calibration record as the calibration script writes it: the run\'s measurements and the source it measured. */',
-    'export type GateCalibrationRecord = CalibrationRecord & { readonly source?: string };',
+    '/** A calibration record as the calibration script writes it: the run\'s measurements, the source it measured and the endpoint it asked. */',
+    'export type GateCalibrationRecord = CalibrationRecord & { readonly source?: string; readonly endpoint?: string };',
     '',
     '/**',
     ' * The last calibration run over the decisions the permission gate registers,',
@@ -225,7 +225,8 @@ async function main(): Promise<void> {
   const recordTarget = values.record ?? (values.gate && values.only === undefined ? resolve(ENGINE_ROOT, GATE_RECORD_MODULE) : undefined);
   if (recordTarget !== undefined) {
     const recordPath = resolve(recordTarget);
-    const record = { ...calibrationRecord(currentReport(), config.model), passed, source: source.sha };
+    // The endpoint is part of what the run certifies: the gate compares it with where its requests go.
+    const record = { ...calibrationRecord(currentReport(), config.model), passed, source: source.sha, endpoint: endpoint.baseURL };
     mkdirSync(dirname(recordPath), { recursive: true });
     await Bun.write(recordPath, recordPath.endsWith('.ts') ? gateRecordModule(record) : `${JSON.stringify(record, null, 2)}\n`);
     console.log(`[project-calibration] record: ${recordPath}`);

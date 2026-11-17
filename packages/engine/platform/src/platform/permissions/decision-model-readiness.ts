@@ -3,14 +3,39 @@
 import type { ConfigManager } from '../config/manager.js';
 import type { ConfigKey } from '../config/schema.js';
 import { decisionModelReady } from '../gate/presets.js';
-import { DECISION_MODEL_SET_KEYS, decisionModelSettings } from '../config/decision-model-set.js';
-import { gateDecisionsCalibrated } from '../gate/calibration.js';
-import { DEFAULT_MODEL } from '@goodvibes-jev/judgment';
+import { DECISION_MODEL_SET_KEYS, decisionModelSettings, type DecisionModelSettings } from '../config/decision-model-set.js';
+import { requestedDecisionEndpoint, requestedDecisionModel } from '../config/decision-model-request.js';
+import { captureJudgmentFallbackSettings } from '../config/judgment-fallback-settings.js';
+import { gateDecisionsCalibrated, type DecisionTarget } from '../gate/calibration.js';
 
 /** The settings whose change can turn the decision model the gate relies on ready or not ready. */
 export const DECISION_MODEL_READINESS_KEYS = DECISION_MODEL_SET_KEYS satisfies readonly ConfigKey[];
 
-const text = (value: unknown): string => (typeof value === 'string' ? value.trim() : '');
+/**
+ * Every place a gate decision can be answered: the endpoint and model a
+ * request goes to (the one resolver requests use, config/decision-model-request.ts),
+ * then each fallback target in order. Settings the request path would refuse
+ * are none: nothing measured them.
+ */
+function decisionTargets(settings: DecisionModelSettings, env: Readonly<Record<string, string | undefined>>): readonly DecisionTarget[] {
+  const primary: DecisionTarget = { endpoint: requestedDecisionEndpoint(settings.endpoint, env), model: requestedDecisionModel(settings.model, env) };
+  try {
+    return [primary, ...captureJudgmentFallbackSettings(settings.fallbacks).map((target) => ({ endpoint: target.endpoint, model: target.model }))];
+  } catch {
+    return [];
+  }
+}
+
+export interface DecisionModelReadinessOptions {
+  /**
+   * The mode in force was chosen by the owner for this session (Shift+Tab, a
+   * hosted session's mode, a channel profile) rather than read from settings.
+   * Such a choice counts as his, the same as one saved in settings.
+   */
+  readonly chosen?: boolean | undefined;
+  /** The environment requests read TYPESAFE_* from; the process environment when absent, as the gate's own readiness reads it. */
+  readonly env?: Readonly<Record<string, string | undefined>> | undefined;
+}
 
 /**
  * Whether the gate has a decision model to hand `jev-decides` calls to. The
@@ -19,12 +44,14 @@ const text = (value: unknown): string => (typeof value === 'string' ? value.trim
  */
 export function permissionDecisionModelReady(
   configManager: Pick<ConfigManager, 'get'> & Partial<Pick<ConfigManager, 'isExplicitlySet'>>,
+  options: DecisionModelReadinessOptions = {},
 ): boolean {
-  if (!decisionModelReady(decisionModelSettings(key => configManager.get(key)))) return false;
-  // The owner's own choice of mode stands on a working model; the shipped
-  // default hands decisions to Jev only once they were measured on it. The
-  // model is the one requests name: judgment.model, then
-  // TYPESAFE_DEFAULT_MODEL, then the judgment package's default.
-  return configManager.isExplicitlySet?.('permissions.mode') !== false
-    || gateDecisionsCalibrated(text(configManager.get('judgment.model')) || text(process.env['TYPESAFE_DEFAULT_MODEL']) || DEFAULT_MODEL);
+  const env = options.env ?? process.env;
+  const settings = decisionModelSettings(key => configManager.get(key));
+  if (!decisionModelReady(settings, env)) return false;
+  // The owner's own choice of mode, saved or chosen for the session, stands on
+  // a working model; the shipped default hands decisions to Jev only once they
+  // were measured on everything that can answer them.
+  if (options.chosen === true || configManager.isExplicitlySet?.('permissions.mode') !== false) return true;
+  return gateDecisionsCalibrated(decisionTargets(settings, env));
 }

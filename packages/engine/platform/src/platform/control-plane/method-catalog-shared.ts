@@ -46,6 +46,20 @@ export interface GatewayMethodDescriptor {
    * owner does it.
    */
   readonly ownerOnly?: boolean | undefined;
+  /**
+   * The call cannot be undone (it deletes what nothing restores, or ends work
+   * for good): an agent's call is the owner's to decide, and Jev is never
+   * offered it (gate/classify.ts `irreversible-operator`).
+   */
+  readonly irreversible?: boolean | undefined;
+  /** The call changes what a running contract requires: an agent's call is the owner's to decide (`change-contract`). */
+  readonly changesContract?: boolean | undefined;
+  /**
+   * Where in the input the recipients a call sends to as the owner sit, as
+   * argument paths (`to`, `attendees[]`): an agent's send to one he has not
+   * allowed is his to decide (`new-recipient`).
+   */
+  readonly recipients?: readonly string[] | undefined;
   /** The header or body field that makes a retry safe; the route that reads it is its owner. */
   readonly replay?: ContractReplayKey | undefined;
   /** Codes this method's route puts on an error body beyond the shared engine codes. */
@@ -204,6 +218,9 @@ export const METHOD_DESCRIPTOR_SCHEMA = objectSchema({
   dangerous: BOOLEAN_SCHEMA,
   effect: stringEnumSchema(['read', 'write', 'outward']),
   ownerOnly: BOOLEAN_SCHEMA,
+  irreversible: BOOLEAN_SCHEMA,
+  changesContract: BOOLEAN_SCHEMA,
+  recipients: arraySchema(STRING_SCHEMA),
   invokable: BOOLEAN_SCHEMA,
   replay: objectSchema({ in: STRING_SCHEMA, name: STRING_SCHEMA, behavior: STRING_SCHEMA }, ['in', 'name', 'behavior']),
   errorCodes: arraySchema(objectSchema({ code: STRING_SCHEMA, status: NUMBER_SCHEMA, meaning: STRING_SCHEMA }, ['code', 'status', 'meaning'])),

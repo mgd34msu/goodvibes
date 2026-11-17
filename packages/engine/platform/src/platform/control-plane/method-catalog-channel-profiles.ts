@@ -129,6 +129,7 @@ export const builtinGatewayChannelProfilesMethodDescriptors: readonly GatewayMet
   }),
   methodDescriptor({
     id: 'channels.profiles.delete',
+    irreversible: true,
     title: 'Unbind Channel Profile',
     description: 'Remove a channel profile binding. Returns { deleted: false } when no binding for that key existed, an honest boolean, never a phantom removal.',
     category: 'channels',

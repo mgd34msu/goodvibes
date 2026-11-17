@@ -910,7 +910,7 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
       credentialWrites: { config: configManager, secrets: secretsManager }, approvalRaise: approvalBroker, approvalList: approvalBroker, disposal: scope.registry,
       personalCapture, ciAutonomousHost: () => externalPermissionHost, onCiAutoWatch: (observer) => { ciAutoWatchObserver = observer; },
       listContracts: () => contractRunner.list({ includeInputSnapshot: false }),
-      modeInForce: (chosen) => permissionManager.modeInForce(chosen),
+      modeInForce: (chosen, explicitlyChosen) => permissionManager.modeInForce(chosen, explicitlyChosen),
     });
     scope.registry.add('native automation updates', registerNativeAutomationGatewayMethods(gatewayMethods, { manager: automationManager, host: externalPermissionHost }));
   }

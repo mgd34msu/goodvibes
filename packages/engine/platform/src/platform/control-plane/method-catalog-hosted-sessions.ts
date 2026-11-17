@@ -162,6 +162,7 @@ export const builtinGatewayHostedSessionMethodDescriptors: readonly GatewayMetho
   }),
   methodDescriptor({
     id: 'sessions.hosted.kill',
+    irreversible: true,
     title: 'End a Daemon-Hosted Session',
     description: 'End a hosted session regardless of who is attached or what its detach policy says: the in-flight turn is interrupted, its loop is taken apart, its workspace floor is released when it was the last session using it, and the record is kept, terminated, with the reason `killed`, until `hostedSessions.terminatedRetentionMs` retires it. Killing an already-terminated session returns that record unchanged rather than reporting an error for work that is already done. ws-only invoke verb; no REST binding.',
     category: 'sessions',

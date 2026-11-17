@@ -125,6 +125,7 @@ export const builtinGatewayPaymentsMethodDescriptors: readonly GatewayMethodDesc
   }),
   methodDescriptor({
     id: 'payments.cards.delete',
+    irreversible: true,
     title: 'Remove a Payment Card',
     description:
       'Delete a card: its config metadata and every secret derived from its config path, reporting how many secret entries were cleared so a partial deletion is visible rather than silent. payments.defaultCardId is not cleared by a delete; payments.cards.list shows a stale id as empty, and every purchase must name its card anyway.',

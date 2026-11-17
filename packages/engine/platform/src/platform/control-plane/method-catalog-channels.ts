@@ -478,6 +478,7 @@ export const builtinGatewayChannelMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'watchers.delete',
+    irreversible: true,
     title: 'Delete Watcher',
     description: 'Delete an existing watcher.',
     category: 'watchers',
@@ -772,6 +773,7 @@ export const builtinGatewayChannelMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'channels.routing.delete',
+    irreversible: true,
     title: 'Delete Channel Routing Rule',
     description: 'Remove a channel-to-profile routing rule from the daemon-persisted routing table.',
     category: 'channels',
@@ -828,6 +830,7 @@ export const builtinGatewayChannelMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'channels.drafts.delete',
+    irreversible: true,
     title: 'Delete Channel Draft',
     description: 'Remove a channel draft from the daemon-side store.',
     category: 'channels',

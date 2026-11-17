@@ -487,6 +487,7 @@ export const builtinGatewayOccasionsMethodDescriptors: readonly GatewayMethodDes
   }),
   methodDescriptor({
     id: 'occasions.remove',
+    irreversible: true,
     access: 'admin',
     title: 'Remove An Important Date',
     description: 'Remove one occasion and every record the machine kept against it, answers, gift history, open items, interviews and calendar mirrors. Takes exactly one confirmation: not unquestioned, and not an argument. People divorce and people die. A confirmed:false call returns the sentence to put to the owner and removes nothing.',
@@ -648,6 +649,7 @@ export const builtinGatewayOccasionsMethodDescriptors: readonly GatewayMethodDes
   }),
   methodDescriptor({
     id: 'occasions.plans.remove',
+    irreversible: true,
     access: 'admin',
     title: 'Remove A Plan',
     description: 'Remove one plan from the owner profile, chosen by planId (its normalised title) and planFrom when two plans share a name. One confirmation: confirmed:false returns the sentence to put to the owner and removes nothing. Goes through the owner-profile write gate, so authority is required.',

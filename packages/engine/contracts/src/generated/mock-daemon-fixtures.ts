@@ -11651,6 +11651,11 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
               "dangerous": false,
               "effect": "read",
               "ownerOnly": false,
+              "irreversible": false,
+              "changesContract": false,
+              "recipients": [
+                "sample"
+              ],
               "invokable": false,
               "replay": {
                 "in": "sample",
@@ -11842,6 +11847,11 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "dangerous": false,
         "effect": "read",
         "ownerOnly": false,
+        "irreversible": false,
+        "changesContract": false,
+        "recipients": [
+          "sample"
+        ],
         "invokable": false,
         "replay": {
           "in": "sample",
@@ -11894,6 +11904,11 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "dangerous": false,
           "effect": "read",
           "ownerOnly": false,
+          "irreversible": false,
+          "changesContract": false,
+          "recipients": [
+            "sample"
+          ],
           "invokable": false,
           "replay": {
             "in": "sample",

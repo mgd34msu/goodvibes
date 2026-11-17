@@ -228,6 +228,8 @@ interface LiveSession {
   termination: Promise<HostedSessionRecord> | null;
   /** The final transcript is on disk and no longer held in memory; nothing may persist this session again. */
   released?: true;
+  /** The session's mode was chosen for it (by its creator or since), not copied from the saved setting. */
+  modeChosen?: true;
 }
 
 const RESTART_NOTICE = 'This session was interrupted by a daemon restart. The turn that was running did not finish.';
@@ -319,6 +321,7 @@ export class HostedSessionManager {
         restoredConversation: persisted.conversation,
         attached: new HostedSessionAttachments(persisted.owners ?? []),
         initialization: null, composition: null, parking: null, termination: null,
+        ...(persisted.permissionModeChosen === true ? { modeChosen: true as const } : {}),
       });
       if (restored.terminated) {
         // Persist the reconciliation so the next restart does not repeat it.
@@ -514,6 +517,7 @@ export class HostedSessionManager {
     const live = this.requireLive(sessionId);
     this.assertSessionUsable(live);
     live.record = { ...live.record, permissionMode, updatedAt: this.now() };
+    live.modeChosen = true;
     // An acknowledged mode change must survive restart. Unlike routine history
     // snapshots, failure is returned to the operator rather than logged away.
     await this.saveDurably(live, live.runtime?.conversation.toJSON() ?? live.restoredConversation);
@@ -607,6 +611,7 @@ export class HostedSessionManager {
         restoredConversation: null,
         attached: new HostedSessionAttachments(input.principalId === undefined ? [] : [input.principalId]),
         initialization: null, composition: null, parking: null, termination: null,
+        ...(ownership?.permissionMode === undefined ? {} : { modeChosen: true as const }),
       };
       if (input.clientId) live.attached.renew(input.clientId, at, this.attachmentLeaseMs(), input.principalId);
       this.sessions.set(sessionId, live);
@@ -1152,7 +1157,7 @@ export class HostedSessionManager {
         ...(live.record.originSurface ? { originSurface: live.record.originSurface } : {}),
         ...this.surfaceTurnFor(live.record.originSurface),
         contracts: this.sessionContracts(live.record.id),
-        ...(live.record.permissionMode ? { permissionMode: live.record.permissionMode } : {}),
+        ...(live.record.permissionMode ? { permissionMode: live.record.permissionMode, permissionModeChosen: live.modeChosen === true } : {}),
         isSessionResumable: token => this.isSessionHeld(token),
         permissionModeChanged: mode => this.savePermissionMode(live.record.id, mode),
         ...(this.options.cloudflareAuthToken ? { cloudflareAuthToken: this.options.cloudflareAuthToken } : {}),
@@ -1383,7 +1388,7 @@ export class HostedSessionManager {
     if (live?.released) return;
     const conversation = live?.runtime ? live.runtime.conversation.toJSON() : live?.restoredConversation ?? null;
     try {
-      await this.options.store.save(record, conversation, { owners: live?.attached.identifiedOwners() });
+      await this.options.store.save(record, conversation, { owners: live?.attached.identifiedOwners(), permissionModeChosen: live?.modeChosen === true });
     } catch (error) {
       const reason = summarizeError(error);
       logger.warn('[hosted-sessions] persisting a session failed; it will not survive a restart', {
@@ -1417,7 +1422,7 @@ export class HostedSessionManager {
   /** A save whose failure the caller must see: it is thrown, and kept on the record like any other. */
   private async saveDurably(live: LiveSession, conversation: unknown): Promise<void> {
     try {
-      await this.options.store.save(live.record, conversation, { durable: true, owners: live.attached.identifiedOwners() });
+      await this.options.store.save(live.record, conversation, { durable: true, owners: live.attached.identifiedOwners(), permissionModeChosen: live.modeChosen === true });
     } catch (error) {
       this.noteSaveOutcome(live.record.id, summarizeError(error));
       throw error;

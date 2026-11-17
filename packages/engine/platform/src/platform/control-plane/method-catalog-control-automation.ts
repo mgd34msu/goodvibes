@@ -117,6 +117,7 @@ export const builtinGatewayControlAutomationMethodDescriptors: readonly GatewayM
   }),
   methodDescriptor({
     id: 'automation.jobs.create',
+    recipients: ['delivery.targets[].address', 'delivery.fallbackTargets[].address'],
     title: 'Create Automation Job',
     description: 'Create a durable automation job. An optional id keeps the job under that id and makes the create repeatable: when a job with that id already exists it is returned unchanged.',
     category: 'automation',
@@ -158,6 +159,7 @@ export const builtinGatewayControlAutomationMethodDescriptors: readonly GatewayM
   }),
   methodDescriptor({
     id: 'automation.jobs.update',
+    recipients: ['delivery.targets[].address', 'delivery.fallbackTargets[].address'],
     title: 'Update Automation Job',
     description: 'Update a durable automation job. (Renamed from automation.jobs.patch in the 1.0.0 core-verb rename, canonical verb is update, not patch.)',
     category: 'automation',
@@ -196,6 +198,7 @@ export const builtinGatewayControlAutomationMethodDescriptors: readonly GatewayM
   }),
   methodDescriptor({
     id: 'automation.jobs.delete',
+    irreversible: true,
     title: 'Delete Automation Job',
     description: 'Delete a durable automation job.',
     category: 'automation',
@@ -354,6 +357,7 @@ export const builtinGatewayControlAutomationMethodDescriptors: readonly GatewayM
   }),
   methodDescriptor({
     id: 'automation.schedules.create',
+    recipients: ['delivery.targets[].address', 'delivery.fallbackTargets[].address'],
     title: 'Create Schedule',
     description: 'Create a schedule record.',
     category: 'automation',
@@ -390,6 +394,7 @@ export const builtinGatewayControlAutomationMethodDescriptors: readonly GatewayM
   }),
   methodDescriptor({
     id: 'automation.schedules.delete',
+    irreversible: true,
     title: 'Delete Schedule',
     description: 'Delete a schedule record.',
     category: 'automation',
@@ -522,6 +527,7 @@ export const builtinGatewayControlAutomationMethodDescriptors: readonly GatewayM
   }),
   methodDescriptor({
     id: 'routes.bindings.delete',
+    irreversible: true,
     title: 'Delete Route Binding',
     description: 'Delete an existing route binding.',
     category: 'routes',

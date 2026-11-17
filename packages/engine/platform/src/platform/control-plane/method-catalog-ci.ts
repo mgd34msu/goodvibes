@@ -146,6 +146,7 @@ export const builtinGatewayCiMethodDescriptors: readonly GatewayMethodDescriptor
   }),
   methodDescriptor({
     id: 'ci.watches.delete',
+    irreversible: true,
     title: 'Delete CI Watch',
     description: 'Remove a standing CI watch. Returns { deleted: false } when no watch with that id existed.',
     category: 'ci',

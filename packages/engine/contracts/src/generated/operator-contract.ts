@@ -9649,6 +9649,10 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "write",
+        "recipients": [
+          "delivery.targets[].address",
+          "delivery.fallbackTargets[].address"
+        ],
         "invokable": true
       },
       {
@@ -9704,6 +9708,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "dangerous": true,
         "effect": "write",
+        "irreversible": true,
         "invokable": true
       },
       {
@@ -12808,6 +12813,10 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "write",
+        "recipients": [
+          "delivery.targets[].address",
+          "delivery.fallbackTargets[].address"
+        ],
         "invokable": true
       },
       {
@@ -19074,6 +19083,10 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "write",
+        "recipients": [
+          "delivery.targets[].address",
+          "delivery.fallbackTargets[].address"
+        ],
         "invokable": true
       },
       {
@@ -19126,6 +19139,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "dangerous": true,
         "effect": "write",
+        "irreversible": true,
         "invokable": true
       },
       {
@@ -24610,6 +24624,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "dangerous": true,
         "effect": "outward",
+        "recipients": [
+          "attendees[]"
+        ],
         "invokable": true
       },
       {
@@ -24667,6 +24684,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "dangerous": true,
         "effect": "outward",
+        "irreversible": true,
         "invokable": true
       },
       {
@@ -24920,6 +24938,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "dangerous": true,
         "effect": "outward",
+        "recipients": [
+          "attendees[]"
+        ],
         "invokable": true
       },
       {
@@ -28287,6 +28308,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "dangerous": true,
         "effect": "write",
+        "irreversible": true,
         "invokable": true
       },
       {
@@ -30039,6 +30061,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "dangerous": true,
         "effect": "write",
+        "irreversible": true,
         "invokable": true
       },
       {
@@ -30846,6 +30869,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "dangerous": true,
         "effect": "write",
+        "irreversible": true,
         "invokable": true
       },
       {
@@ -31610,6 +31634,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "outward",
+        "recipients": [
+          "address"
+        ],
         "invokable": true
       },
       {
@@ -33884,6 +33911,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "dangerous": true,
         "effect": "write",
+        "irreversible": true,
         "invokable": true
       },
       {
@@ -36805,6 +36833,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
+        "irreversible": true,
         "invokable": true
       },
       {
@@ -38918,6 +38947,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
+        "changesContract": true,
         "invokable": true,
         "errorCodes": [
           {
@@ -63280,6 +63310,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
+        "irreversible": true,
         "invokable": true,
         "errorCodes": [
           {
@@ -63383,6 +63414,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "outward",
+        "changesContract": true,
         "invokable": true,
         "errorCodes": [
           {
@@ -72960,6 +72992,18 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                           "ownerOnly": {
                             "type": "boolean"
                           },
+                          "irreversible": {
+                            "type": "boolean"
+                          },
+                          "changesContract": {
+                            "type": "boolean"
+                          },
+                          "recipients": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
                           "invokable": {
                             "type": "boolean"
                           },
@@ -73827,6 +73871,18 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "ownerOnly": {
                   "type": "boolean"
                 },
+                "irreversible": {
+                  "type": "boolean"
+                },
+                "changesContract": {
+                  "type": "boolean"
+                },
+                "recipients": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
                 "invokable": {
                   "type": "boolean"
                 },
@@ -74073,6 +74129,18 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   },
                   "ownerOnly": {
                     "type": "boolean"
+                  },
+                  "irreversible": {
+                    "type": "boolean"
+                  },
+                  "changesContract": {
+                    "type": "boolean"
+                  },
+                  "recipients": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
                   },
                   "invokable": {
                     "type": "boolean"
@@ -77333,6 +77401,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "dangerous": true,
         "effect": "outward",
+        "recipients": [
+          "to"
+        ],
         "invokable": true
       },
       {
@@ -91977,6 +92048,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "dangerous": true,
         "effect": "write",
+        "irreversible": true,
         "invokable": true
       },
       {
@@ -104478,6 +104550,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
+        "irreversible": true,
         "invokable": true
       },
       {
@@ -113668,6 +113741,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
+        "irreversible": true,
         "invokable": true
       },
       {
@@ -119074,6 +119148,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
+        "irreversible": true,
         "invokable": true
       },
       {
@@ -123437,6 +123512,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "dangerous": true,
         "effect": "write",
+        "irreversible": true,
         "invokable": true
       },
       {
@@ -123772,6 +123848,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "dangerous": true,
         "effect": "write",
+        "irreversible": true,
         "invokable": true
       },
       {
@@ -125533,6 +125610,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
+        "irreversible": true,
         "invokable": true
       },
       {
@@ -132490,6 +132568,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
+        "irreversible": true,
         "invokable": true
       },
       {
@@ -138198,6 +138277,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "dangerous": true,
         "effect": "write",
+        "irreversible": true,
         "invokable": true
       },
       {
@@ -138990,6 +139070,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
+        "irreversible": true,
         "invokable": true
       },
       {
@@ -142649,6 +142730,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
+        "irreversible": true,
         "invokable": true,
         "errorCodes": [
           {
@@ -144604,6 +144686,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
+        "irreversible": true,
         "invokable": true
       },
       {
@@ -149740,6 +149823,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
+        "irreversible": true,
         "invokable": true
       },
       {
@@ -155335,6 +155419,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "dangerous": true,
         "effect": "write",
+        "irreversible": true,
         "invokable": true
       },
       {

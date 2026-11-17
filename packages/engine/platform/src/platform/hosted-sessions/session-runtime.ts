@@ -84,6 +84,12 @@ export interface HostedSessionRuntimeOptions {
   readonly floor: HostedWorkspaceFloor;
   readonly permissionMode?: GatePresetName | undefined;
   /**
+   * Whether `permissionMode` was chosen for the session (by its creator, or
+   * changed since) rather than copied from the saved setting when it was made.
+   * Absent: chosen when `permissionMode` is given.
+   */
+  readonly permissionModeChosen?: boolean | undefined;
+  /**
    * Whether the host still holds the session behind a keyed tool-state file
    * (by file-name token). Omitted, those files are never reclaimed.
    */
@@ -213,6 +219,10 @@ export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions)
   // modeInForce, so jev-decides asks the owner while no decision model works
   // and hands decisions to Jev as soon as one does, without a mode change.
   let permissionMode = options.permissionMode ?? effectivePermissionMode(services.configManager.get('permissions.mode'), services.configManager.get('behavior.autoApprove') === true);
+  // A mode copied from the saved setting is the setting's: the shipped default
+  // still waits for a measured decision model. One chosen for the session, by
+  // its creator or later, is the owner's choice, like a saved one.
+  let permissionModeChosen = options.permissionMode !== undefined && options.permissionModeChosen !== false;
   let modeRevision = 0;
   let permissionModePersisted = true;
   let pendingModeWrite: Promise<void> | undefined;
@@ -221,6 +231,7 @@ export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions)
   const modeOwner: ExecutionModeOwner = {
     getMode() { assertModeLive(); return permissionMode; },
     getRevision() { assertModeLive(); return modeRevision; },
+    isChosen() { assertModeLive(); return permissionModeChosen; },
   };
   const originSurface = options.originSurface?.trim() || services.surfaceRoot;
   const clientOwnedStore = resolveClientOwnedStore(services, originSurface);
@@ -256,7 +267,7 @@ export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions)
     attended: options.attended,
     // The mode in force, not only the one chosen: with no working decision
     // model, jev-decides asks the owner here as it does for tool calls.
-    permissionMode: () => services.permissionManager.modeInForce(permissionMode),
+    permissionMode: () => services.permissionManager.modeInForce(permissionMode, permissionModeChosen),
   });
 
   const inbox = options.ownerQuestions;
@@ -473,14 +484,18 @@ export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions)
     orchestrator,
     liveTurnControls: {
       getPermissionMode: () => modeOwner.getMode(),
+      isPermissionModeChosen: () => permissionModeChosen,
       setPermissionMode: async mode => {
         assertModeLive();
         if (!isSettableGatePresetName(mode)) throw new Error('Invalid hosted execution mode');
         const previousMode = permissionMode;
-        if (previousMode === mode && pendingModeWrite) return pendingModeWrite;
-        if (previousMode === mode && permissionModePersisted) return;
+        // Choosing the mode the session already copied from the setting makes it the owner's choice.
+        const newlyChosen = !permissionModeChosen;
+        permissionModeChosen = true;
+        if (previousMode === mode && !newlyChosen && pendingModeWrite) return pendingModeWrite;
+        if (previousMode === mode && !newlyChosen && permissionModePersisted) return;
         const changed = previousMode !== mode;
-        if (changed) {
+        if (changed || newlyChosen) {
           permissionMode = mode;
           modeRevision++;
           // An admission belongs to its captured mode. Retire the pending turn

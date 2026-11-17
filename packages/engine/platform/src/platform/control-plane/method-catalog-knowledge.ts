@@ -560,6 +560,7 @@ export const builtinGatewayKnowledgeMethodDescriptors: readonly GatewayMethodDes
   }),
   methodDescriptor({
     id: 'knowledge.schedule.delete',
+    irreversible: true,
     title: 'Delete Knowledge Schedule',
     description: 'Delete a managed knowledge schedule.',
     category: 'knowledge',

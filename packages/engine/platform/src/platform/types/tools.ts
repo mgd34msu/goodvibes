@@ -109,6 +109,25 @@ export interface ToolOwnerActs {
   readonly values: readonly string[];
 }
 
+/**
+ * Which calls of a tool that dispatches on one argument (an operator method
+ * id, an action) are the owner's own decisions (gate/classify.ts), and where a
+ * sending call's recipients sit. Values are read from the published
+ * declaration of what is named (the operator catalog's `irreversible`,
+ * `changesContract` and `recipients`), not written by hand, and compared
+ * ignoring case and surrounding spaces.
+ */
+export interface ToolOwnerDecisions {
+  /** The argument that names what is called: `methodId`, `action`. */
+  readonly field: ToolArgumentPath;
+  /** Values whose call cannot be undone (`irreversible-operator`). */
+  readonly irreversible?: readonly string[] | undefined;
+  /** Values whose call changes what a running contract requires (`change-contract`). */
+  readonly contractChanges?: readonly string[] | undefined;
+  /** For a value whose call sends as the owner, where its recipients sit in the call's arguments (`new-recipient`). */
+  readonly recipients?: Readonly<Record<string, readonly ToolArgumentPath[]>> | undefined;
+}
+
 /** A tool whose changes are recorded where the owner can undo them, except when a listed argument is present. */
 export interface ToolRecoverability {
   readonly unless?: readonly ToolArgumentPath[] | undefined;
@@ -178,6 +197,8 @@ export interface ToolDefinition {
   dangerous?: boolean | undefined;
   /** Calls of this tool that only the owner makes himself; see {@link ToolOwnerActs}. */
   ownerActs?: ToolOwnerActs | undefined;
+  /** Calls of this tool the owner decides, and where a sending call's recipients sit; see {@link ToolOwnerDecisions}. */
+  ownerDecisions?: ToolOwnerDecisions | undefined;
   /**
    * Top-level argument names the host writes into a call after the model made
    * it (left out of the schema the model sees). They are the host's own, so a

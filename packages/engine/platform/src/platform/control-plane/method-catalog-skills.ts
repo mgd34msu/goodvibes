@@ -126,6 +126,7 @@ export const builtinGatewaySkillsMethodDescriptors: readonly GatewayMethodDescri
   }),
   methodDescriptor({
     id: 'skills.delete',
+    irreversible: true,
     title: 'Delete Skill',
     description: 'Permanently delete a skill. Delete means delete: a <name>.md document is removed, and a folder skill is removed with its folder, not tombstoned; path names what was removed. Returns { deleted: false } when no skill with that name existed, an honest boolean, never a 200 that pretends a phantom skill was removed.',
     category: 'skills',

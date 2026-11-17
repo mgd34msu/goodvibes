@@ -354,6 +354,7 @@ export const builtinGatewayEmailMethodDescriptors: readonly GatewayMethodDescrip
   }),
   methodDescriptor({
     id: 'email.send',
+    recipients: ['to'],
     effect: 'outward',
     title: 'Send Email',
     description:

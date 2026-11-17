@@ -23,6 +23,7 @@ import {
 export const builtinGatewayChannelTestMethodDescriptors: readonly GatewayMethodDescriptor[] = [
   methodDescriptor({
     id: 'channels.test.send',
+    recipients: ['address'],
     title: 'Send Channel Test Message',
     description: 'Send a real test message through a configured channel surface and report the actual delivery outcome. delivered:true means the daemon\'s delivery router accepted and sent it (with the surface\'s responseId when it returns one); a failed send is delivered:false with the real error (unconfigured/unsupported surface, provider/transport error), never a fabricated success. Provide address to target a specific recipient/channel, or omit it to use the surface\'s configured default.',
     category: 'channels',

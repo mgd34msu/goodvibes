@@ -475,6 +475,7 @@ export const builtinGatewayControlCoreMethodDescriptors: readonly GatewayMethodD
   }),
   methodDescriptor({
     id: 'sessions.delete',
+    irreversible: true,
     title: 'Delete Shared Session',
     description: 'Permanently remove a shared session record and its queued inputs/messages from the home-scoped store. A distinct, explicit hard-delete verb, NEVER triggered by close; closed sessions stay listable (includeClosed) and deletionRetentionMs semantics for non-deleted records are untouched. Requires the session to already be closed: deleting a still-active session is rejected with 409 SESSION_ACTIVE (close it, then delete). An unknown or already-deleted id is a 404 SESSION_NOT_FOUND, never a 200-noop. Emits control.session_update (session-deleted) so subscribers drop the row live.',
     category: 'sessions',

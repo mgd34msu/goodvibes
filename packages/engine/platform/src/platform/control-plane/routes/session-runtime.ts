@@ -85,6 +85,8 @@ export interface SessionContextUsage {
  */
 export interface SessionLiveTurnControls {
   getPermissionMode?(): GatePresetName;
+  /** Whether that mode was chosen for the session rather than copied from the saved setting; absent: chosen. */
+  isPermissionModeChosen?(): boolean;
   /** This session's own context usage, read from the conversation and model it runs. */
   getContextUsage?(): SessionContextUsage;
   setPermissionMode?(mode: SettableGatePresetName): Promise<void>;
@@ -350,9 +352,9 @@ export function createSessionRuntimeControls(deps: {
    * jev-decides reads as ask-me while no decision model works, which is what
    * decides the session's calls. Absent: the chosen mode is reported.
    */
-  readonly modeInForce?: ((chosen: GatePresetName) => GatePresetName) | undefined;
+  readonly modeInForce?: ((chosen: GatePresetName, explicitlyChosen?: boolean) => GatePresetName) | undefined;
 }): SessionRuntimeControls {
-  const inForce = (chosen: GatePresetName): GatePresetName => deps.modeInForce?.(chosen) ?? chosen;
+  const inForce = (chosen: GatePresetName, explicitlyChosen = false): GatePresetName => deps.modeInForce?.(chosen, explicitlyChosen) ?? chosen;
   const LOCAL_RUNTIME_ALIAS = 'runtime';
   return {
     isLocalSession(sessionId: string): boolean {
@@ -377,10 +379,11 @@ export function createSessionRuntimeControls(deps: {
       const hosted = sessionId && deps.liveTurnHolder?.getSession(sessionId);
       if (hosted) {
         if (!hosted.getPermissionMode) throw new GatewayVerbError('Hosted execution mode is unavailable.', 'LIVE_MODE_UNAVAILABLE', 409);
-        return inForce(hosted.getPermissionMode());
+        return inForce(hosted.getPermissionMode(), hosted.isPermissionModeChosen?.() ?? true);
       }
       const channel = sessionId && deps.channelSessions?.getSession?.(sessionId);
-      if (channel && channel.channelPermissionMode !== undefined) return inForce(channel.channelPermissionMode);
+      // A channel's mode is the one its profile chose for it.
+      if (channel && channel.channelPermissionMode !== undefined) return inForce(channel.channelPermissionMode, true);
       return inForce(effectivePermissionMode(deps.config.get('permissions.mode'), deps.config.get('behavior.autoApprove') === true));
     },
     setPermissionMode(mode: PermissionMode, sessionId?: string): void | Promise<void> {

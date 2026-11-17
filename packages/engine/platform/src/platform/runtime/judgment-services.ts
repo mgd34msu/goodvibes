@@ -11,8 +11,6 @@ import {
   JudgmentError,
   captureJudgmentBackendSettings,
   describeDecisionModelFailure,
-  HOSTED_BASE_URL,
-  DEFAULT_MODEL,
   DEFAULT_DECISION_DEADLINE_MS,
   validDecisionDeadline,
   withDecisionLog,
@@ -27,6 +25,7 @@ import type { JudgmentKeySource } from '../config/schema-types-judgment.js';
 import type { SecretsManager } from '../config/secrets.js';
 import { captureJudgmentFallbackSettings } from '../config/judgment-fallback-settings.js';
 import { decisionModelSet, decisionModelSettings } from '../config/decision-model-set.js';
+import { requestedDecisionEndpoint, requestedDecisionModel } from '../config/decision-model-request.js';
 import { openStateDecisionLogWithNotice, scheduleDecisionLogRetention } from '../state/decision-log.js';
 import { logger } from '../utils/logger.js';
 import { maskJudgmentStateCredentials } from '../gate/judgment-input.js';
@@ -57,9 +56,9 @@ export interface JudgmentSettingsSource {
 
 const text = (value: unknown): string => (typeof value === 'string' ? value.trim() : '');
 
-/** The model a request names when it names none: judgment.model, then TYPESAFE_DEFAULT_MODEL, then jev-latest. */
+/** The model a request names when it names none: judgment.model, then TYPESAFE_DEFAULT_MODEL, then jev-latest (the one resolver, config/decision-model-request.ts). */
 function settingsModel(source: JudgmentSettingsSource): string {
-  return text(source.config.get('judgment.model')) || text(source.env['TYPESAFE_DEFAULT_MODEL']) || DEFAULT_MODEL;
+  return requestedDecisionModel(source.config.get('judgment.model'), source.env);
 }
 
 /** The deadline judge() gives a decision a person or tool call waits on: judgment.decisionDeadlineMs, else the default. */
@@ -115,10 +114,9 @@ export async function judgmentConfigFromSettings(source: JudgmentSettingsSource,
   // reading, never to only part of a reading already acquiring its key.
   signal?.throwIfAborted();
   const keyName = text(source.config.get('judgment.keyName')) || JUDGMENT_KEY_NAME;
-  const env = {
-    TYPESAFE_API_KEY: source.env[keyName],
-    TYPESAFE_BASE_URL: text(source.config.get('judgment.endpoint')) || source.env['TYPESAFE_BASE_URL'],
-  };
+  const env = { TYPESAFE_API_KEY: source.env[keyName] };
+  // The one resolver of where a request goes and what it names (config/decision-model-request.ts).
+  const baseURL = requestedDecisionEndpoint(source.config.get('judgment.endpoint'), source.env);
   const model = settingsModel(source);
   const backend = captureJudgmentBackendSettings(source.config.get('judgment.backend'));
   const timeoutMs = source.config.get('judgment.timeoutMs');
@@ -144,7 +142,6 @@ export async function judgmentConfigFromSettings(source: JudgmentSettingsSource,
     fallbacks.push({ endpoint: { kind: endpointKind(target.endpoint), baseURL: target.endpoint, apiKey: key?.trim() ?? '',
       ...(target.keySource === 'none' ? { authentication: 'none' as const } : {}), ...target.backend }, model: target.model });
   }
-  const baseURL = env.TYPESAFE_BASE_URL?.trim() || HOSTED_BASE_URL;
   return {
     endpoint: { kind: endpointKind(baseURL), baseURL, apiKey: env.TYPESAFE_API_KEY?.trim() ?? '',
       ...(keySource === 'none' ? { authentication: 'none' as const } : {}), ...backend },

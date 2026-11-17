@@ -95,6 +95,7 @@ export const builtinGatewayCalendarMethodDescriptors: readonly GatewayMethodDesc
   }),
   methodDescriptor({
     id: 'calendar.events.create',
+    recipients: ['attendees[]'],
     title: 'Create Calendar Event',
     description: 'Create an event on the configured calendar. Requires explicit confirmation (confirm: true); attendees are invited by the calendar. Change it with calendar.events.update and remove it with calendar.events.delete.',
     category: 'calendar',
@@ -121,6 +122,7 @@ export const builtinGatewayCalendarMethodDescriptors: readonly GatewayMethodDesc
   }),
   methodDescriptor({
     id: 'calendar.events.update',
+    recipients: ['attendees[]'],
     title: 'Update Calendar Event',
     description: 'Change an event on the configured calendar (Google or CalDAV): only the fields sent change (attendees replaces the guest list; start and end are both dates for an all-day event or both date-times). Requires explicit confirmation (confirm: true). An unknown eventId is a 404; an id that names a whole recurring series is refused with 409 CALENDAR_SERIES_NOT_SUPPORTED (on Google, one occurrence is changed by the id calendar.events.list gives it); an event that changed on the calendar after it was read is refused with 409 CALENDAR_EVENT_CHANGED and nothing is written. A backend that cannot change events answers 501 CALENDAR_NOT_SUPPORTED.',
     category: 'calendar',
@@ -147,6 +149,7 @@ export const builtinGatewayCalendarMethodDescriptors: readonly GatewayMethodDesc
   }),
   methodDescriptor({
     id: 'calendar.events.delete',
+    irreversible: true,
     title: 'Delete Calendar Event',
     description: 'Remove an event from the configured calendar (Google or CalDAV). Requires explicit confirmation (confirm: true). `deleted: false` means the calendar no longer held it. A whole recurring series is refused with 409 CALENDAR_SERIES_NOT_SUPPORTED (on Google, one occurrence is removed by the id calendar.events.list gives it); an event that changed after it was read is refused with 409 CALENDAR_EVENT_CHANGED. A backend that cannot delete events answers 501 CALENDAR_NOT_SUPPORTED.',
     category: 'calendar',

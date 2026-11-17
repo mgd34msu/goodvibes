@@ -7,7 +7,7 @@ import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/r
 import type { ConnectedHostConfigReader as AgentConnectedHostConfigReader } from './connected-host-client.js';
 import type { AgentInProcessHost } from './in-process-host.js';
 import { assertOperatorEffect } from './operator-connection-owner.js';
-import { assertSafeOperatorPathValue, findOperatorContractMethod, ownerOnlyOperatorMethodIds } from './operator-contract-routes.js';
+import { assertSafeOperatorPathValue, findOperatorContractMethod, operatorOwnerDecisions, ownerOnlyOperatorMethodIds } from './operator-contract-routes.js';
 import { createOperatorInputProjector, operatorExecutionConnection, operatorExecutionWireInput, operatorExecutionRequestPolicy, operatorMethodIsOutward } from './operator-input-projector.js';
 import {
   buildOperatorActionRequest,
@@ -80,6 +80,8 @@ export function createAgentOperatorActionTool(
       },
       sideEffects: ['network', 'state'],
       ownerActs: { field: 'action', values: ownerActs },
+      // An irreversible action (deleting a job, a schedule, a route) is the owner's to decide.
+      ownerDecisions: operatorOwnerDecisions('action', undefined, OPERATOR_ACTION_IDS),
     },
     execute: async (rawArgs, options) => {
       // Set once the host's answer to the request has been received or the request has failed in flight.

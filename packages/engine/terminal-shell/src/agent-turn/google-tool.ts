@@ -540,6 +540,8 @@ export function createAgentGoogleTool(options: AgentGoogleToolOptions): Tool {
       },
       // Gmail and Calendar over the network; connect.clientFile reads a file; the credential is stored.
       sideEffects: ['network', 'read_fs', 'state'],
+      // Mail to an address that is not the owner's own and that he has not allowed is his to decide.
+      ownerDecisions: { field: 'action', recipients: { 'mail.send': ['to'] } },
     },
     execute: async (rawArgs: Record<string, unknown>, executionOptions): Promise<ToolOutput> => {
       const args = captureStrictJudgmentJson(rawArgs); snapshotJudgmentInput(args);

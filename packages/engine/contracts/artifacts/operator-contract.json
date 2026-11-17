@@ -9646,6 +9646,10 @@
           "additionalProperties": true
         },
         "effect": "write",
+        "recipients": [
+          "delivery.targets[].address",
+          "delivery.fallbackTargets[].address"
+        ],
         "invokable": true
       },
       {
@@ -9701,6 +9705,7 @@
         },
         "dangerous": true,
         "effect": "write",
+        "irreversible": true,
         "invokable": true
       },
       {
@@ -12805,6 +12810,10 @@
           "additionalProperties": true
         },
         "effect": "write",
+        "recipients": [
+          "delivery.targets[].address",
+          "delivery.fallbackTargets[].address"
+        ],
         "invokable": true
       },
       {
@@ -19071,6 +19080,10 @@
           "additionalProperties": true
         },
         "effect": "write",
+        "recipients": [
+          "delivery.targets[].address",
+          "delivery.fallbackTargets[].address"
+        ],
         "invokable": true
       },
       {
@@ -19123,6 +19136,7 @@
         },
         "dangerous": true,
         "effect": "write",
+        "irreversible": true,
         "invokable": true
       },
       {
@@ -24607,6 +24621,9 @@
         },
         "dangerous": true,
         "effect": "outward",
+        "recipients": [
+          "attendees[]"
+        ],
         "invokable": true
       },
       {
@@ -24664,6 +24681,7 @@
         },
         "dangerous": true,
         "effect": "outward",
+        "irreversible": true,
         "invokable": true
       },
       {
@@ -24917,6 +24935,9 @@
         },
         "dangerous": true,
         "effect": "outward",
+        "recipients": [
+          "attendees[]"
+        ],
         "invokable": true
       },
       {
@@ -28284,6 +28305,7 @@
         },
         "dangerous": true,
         "effect": "write",
+        "irreversible": true,
         "invokable": true
       },
       {
@@ -30036,6 +30058,7 @@
         },
         "dangerous": true,
         "effect": "write",
+        "irreversible": true,
         "invokable": true
       },
       {
@@ -30843,6 +30866,7 @@
         },
         "dangerous": true,
         "effect": "write",
+        "irreversible": true,
         "invokable": true
       },
       {
@@ -31607,6 +31631,9 @@
           "additionalProperties": false
         },
         "effect": "outward",
+        "recipients": [
+          "address"
+        ],
         "invokable": true
       },
       {
@@ -33881,6 +33908,7 @@
         },
         "dangerous": true,
         "effect": "write",
+        "irreversible": true,
         "invokable": true
       },
       {
@@ -36802,6 +36830,7 @@
           "additionalProperties": false
         },
         "effect": "write",
+        "irreversible": true,
         "invokable": true
       },
       {
@@ -38915,6 +38944,7 @@
           "additionalProperties": false
         },
         "effect": "write",
+        "changesContract": true,
         "invokable": true,
         "errorCodes": [
           {
@@ -63277,6 +63307,7 @@
           "additionalProperties": false
         },
         "effect": "write",
+        "irreversible": true,
         "invokable": true,
         "errorCodes": [
           {
@@ -63380,6 +63411,7 @@
           "additionalProperties": false
         },
         "effect": "outward",
+        "changesContract": true,
         "invokable": true,
         "errorCodes": [
           {
@@ -72957,6 +72989,18 @@
                           "ownerOnly": {
                             "type": "boolean"
                           },
+                          "irreversible": {
+                            "type": "boolean"
+                          },
+                          "changesContract": {
+                            "type": "boolean"
+                          },
+                          "recipients": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
                           "invokable": {
                             "type": "boolean"
                           },
@@ -73824,6 +73868,18 @@
                 "ownerOnly": {
                   "type": "boolean"
                 },
+                "irreversible": {
+                  "type": "boolean"
+                },
+                "changesContract": {
+                  "type": "boolean"
+                },
+                "recipients": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
                 "invokable": {
                   "type": "boolean"
                 },
@@ -74070,6 +74126,18 @@
                   },
                   "ownerOnly": {
                     "type": "boolean"
+                  },
+                  "irreversible": {
+                    "type": "boolean"
+                  },
+                  "changesContract": {
+                    "type": "boolean"
+                  },
+                  "recipients": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
                   },
                   "invokable": {
                     "type": "boolean"
@@ -77330,6 +77398,9 @@
         },
         "dangerous": true,
         "effect": "outward",
+        "recipients": [
+          "to"
+        ],
         "invokable": true
       },
       {
@@ -91974,6 +92045,7 @@
         },
         "dangerous": true,
         "effect": "write",
+        "irreversible": true,
         "invokable": true
       },
       {
@@ -104475,6 +104547,7 @@
           "additionalProperties": false
         },
         "effect": "write",
+        "irreversible": true,
         "invokable": true
       },
       {
@@ -113665,6 +113738,7 @@
           "additionalProperties": false
         },
         "effect": "write",
+        "irreversible": true,
         "invokable": true
       },
       {
@@ -119071,6 +119145,7 @@
           "additionalProperties": false
         },
         "effect": "write",
+        "irreversible": true,
         "invokable": true
       },
       {
@@ -123434,6 +123509,7 @@
         },
         "dangerous": true,
         "effect": "write",
+        "irreversible": true,
         "invokable": true
       },
       {
@@ -123769,6 +123845,7 @@
         },
         "dangerous": true,
         "effect": "write",
+        "irreversible": true,
         "invokable": true
       },
       {
@@ -125530,6 +125607,7 @@
           "additionalProperties": false
         },
         "effect": "write",
+        "irreversible": true,
         "invokable": true
       },
       {
@@ -132487,6 +132565,7 @@
           "additionalProperties": false
         },
         "effect": "write",
+        "irreversible": true,
         "invokable": true
       },
       {
@@ -138195,6 +138274,7 @@
         },
         "dangerous": true,
         "effect": "write",
+        "irreversible": true,
         "invokable": true
       },
       {
@@ -138987,6 +139067,7 @@
           "additionalProperties": false
         },
         "effect": "write",
+        "irreversible": true,
         "invokable": true
       },
       {
@@ -142646,6 +142727,7 @@
           "additionalProperties": false
         },
         "effect": "write",
+        "irreversible": true,
         "invokable": true,
         "errorCodes": [
           {
@@ -144601,6 +144683,7 @@
           "additionalProperties": false
         },
         "effect": "write",
+        "irreversible": true,
         "invokable": true
       },
       {
@@ -149737,6 +149820,7 @@
           "additionalProperties": false
         },
         "effect": "write",
+        "irreversible": true,
         "invokable": true
       },
       {
@@ -155332,6 +155416,7 @@
         },
         "dangerous": true,
         "effect": "write",
+        "irreversible": true,
         "invokable": true
       },
       {

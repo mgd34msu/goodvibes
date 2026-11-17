@@ -39,6 +39,12 @@ export interface OperatorContractMethodEntry {
   readonly invokable?: boolean | undefined;
   /** The owner's own act: a model's call of it is refused (the catalog's `ownerOnly`). */
   readonly ownerOnly?: boolean | undefined;
+  /** The call cannot be undone: the owner decides a model's call (the catalog's `irreversible`). */
+  readonly irreversible?: boolean | undefined;
+  /** The call changes what a running contract requires: the owner decides a model's call (`changesContract`). */
+  readonly changesContract?: boolean | undefined;
+  /** Input paths of the recipients the call sends to as the owner (`recipients`). */
+  readonly recipients?: readonly string[] | undefined;
 }
 
 /** A method's HTTP binding, exactly as the contract states it. */
@@ -93,6 +99,38 @@ let ownerOnlyIds: readonly string[] | null = null;
 export function ownerOnlyOperatorMethodIds(): readonly string[] {
   ownerOnlyIds ??= Object.freeze(operatorContractMethods().filter((method) => method.ownerOnly === true).map((method) => method.id));
   return ownerOnlyIds;
+}
+
+/** What the owner decides among a tool's calls that name operator methods (ToolDefinition.ownerDecisions). */
+export interface OperatorOwnerDecisions {
+  readonly field: string;
+  readonly irreversible: readonly string[];
+  readonly contractChanges: readonly string[];
+  readonly recipients?: Readonly<Record<string, readonly string[]>> | undefined;
+}
+
+/**
+ * The owner's decisions among the methods a tool names by `field`, read from
+ * the contract's `irreversible`, `changesContract` and `recipients`. With
+ * `inputPath`, each sending method's recipient paths are given under it (the
+ * method tool carries the method's input in `input`); without it none are.
+ * `ids` limits the methods to the ones the tool can name.
+ */
+export function operatorOwnerDecisions(field: string, inputPath?: string, ids?: readonly string[]): OperatorOwnerDecisions {
+  const allowed = ids === undefined ? undefined : new Set(ids);
+  const methods = operatorContractMethods().filter((method) => allowed === undefined || allowed.has(method.id));
+  const recipients: Record<string, readonly string[]> = {};
+  if (inputPath !== undefined) {
+    for (const method of methods) {
+      if (method.recipients && method.recipients.length > 0) recipients[method.id] = method.recipients.map((path) => `${inputPath}.${path}`);
+    }
+  }
+  return Object.freeze({
+    field,
+    irreversible: Object.freeze(methods.filter((method) => method.irreversible === true).map((method) => method.id)),
+    contractChanges: Object.freeze(methods.filter((method) => method.changesContract === true).map((method) => method.id)),
+    ...(inputPath === undefined ? {} : { recipients: Object.freeze(recipients) }),
+  });
 }
 
 /** The contract entry for a method id, or null when the contract has no such id. */

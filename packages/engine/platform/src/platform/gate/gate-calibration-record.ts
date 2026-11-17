@@ -1,7 +1,7 @@
 import type { CalibrationRecord } from '@goodvibes-jev/judgment';
 
-/** A calibration record as the calibration script writes it: the run's measurements and the source it measured. */
-export type GateCalibrationRecord = CalibrationRecord & { readonly source?: string };
+/** A calibration record as the calibration script writes it: the run's measurements, the source it measured and the endpoint it asked. */
+export type GateCalibrationRecord = CalibrationRecord & { readonly source?: string; readonly endpoint?: string };
 
 /**
  * The last calibration run over the decisions the permission gate registers,

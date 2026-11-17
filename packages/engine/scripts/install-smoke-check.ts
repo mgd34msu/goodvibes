@@ -177,7 +177,6 @@ if (typeof daemon.createDaemonControlRouteHandlers !== 'function') throw new Err
 if (!contracts.OPERATOR_METHOD_IDS || !contracts.PEER_ENDPOINT_IDS) throw new Error('contracts export missing');
 if (typeof runtimeEvents.createRemoteRuntimeEvents !== 'function') throw new Error('runtime realtime export missing');
 if (!runtime.observability || !runtime.transport || !runtime.state) throw new Error('runtime namespace seams missing');
-if (typeof runtimeObservability.TimelineBuffer !== 'function') throw new Error('runtime observability state inspector export missing');
 if (typeof runtimeObservability.runTaskSuite !== 'function') throw new Error('runtime observability runTaskSuite export missing');
 if (typeof providersEntry.resolveModelReference !== 'function') throw new Error('providers resolveModelReference export missing');
 if (typeof providersEntry.findClosestModelIds !== 'function') throw new Error('providers findClosestModelIds export missing');

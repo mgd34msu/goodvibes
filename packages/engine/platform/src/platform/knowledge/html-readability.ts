@@ -15,6 +15,8 @@ export interface ReadableHtmlExtraction {
   readonly links: readonly string[];
   readonly headings: readonly string[];
   readonly paragraphSamples: readonly string[];
+  /** Page blocks the decision model could not settle as content or not; they are kept, and counted here. */
+  readonly unsureBlockCount?: number | undefined;
 }
 
 /** Whether the optional DOM parser is available; the lightweight parser uses the same judgments. */

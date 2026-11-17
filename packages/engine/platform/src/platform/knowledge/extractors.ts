@@ -176,6 +176,7 @@ async function extractHtml(buffer: Buffer, owner: KnowledgeExtractionOwner): Pro
   }
   const summary = summarizeText([readable.excerpt, readable.paragraphSamples[0], readable.textContent].filter(Boolean).join(' '));
   const excerpt = excerptText(readable.textContent);
+  const unsure = readable.unsureBlockCount ?? 0;
   return {
     extractorId, format: 'html',
     ...(readable.title ? { title: readable.title } : {}),
@@ -189,6 +190,8 @@ async function extractHtml(buffer: Buffer, owner: KnowledgeExtractionOwner): Pro
       paragraphSamples: readable.paragraphSamples.slice(0, 4),
       ...(readable.byline ? { byline: readable.byline } : {}),
       ...(readable.siteName ? { siteName: readable.siteName } : {}),
+      ...(unsure > 0 ? { unsureBlockCount: unsure,
+        limitations: [`${unsure} page block(s) could not be settled as main content or not; they were kept.`] } : {}),
       extractionPath, ...warnings,
     },
   };

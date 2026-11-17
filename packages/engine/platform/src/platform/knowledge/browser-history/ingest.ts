@@ -8,7 +8,7 @@ import {
 } from '../../runtime/emitters/index.js';
 import { summarizeError } from '../../utils/error-display.js';
 import { compileKnowledgeSource } from '../ingest-compile.js';
-import { KnowledgeEntityAliasHoldError } from '../entity-aliases.js';
+import { KnowledgeIngestStoppedError } from '../ingest-stopped.js';
 import { KnowledgeNodeActivationHeldError } from '../activation/types.js';
 import { KnowledgeNodeMutationHeldError } from '../store-node-authority.js';
 import { JudgmentInputError } from '../../gate/judgment-input.js';
@@ -386,7 +386,7 @@ export async function ingestBrowserKnowledge(
       uris.assertCurrent();
       const diagnostic = { summary: summarizeError(error) };
       failed += 1;
-      const held = error instanceof KnowledgeEntityAliasHoldError || error instanceof KnowledgeNodeActivationHeldError
+      const held = error instanceof KnowledgeIngestStoppedError || error instanceof KnowledgeNodeActivationHeldError
         || error instanceof KnowledgeNodeMutationHeldError || error instanceof JudgmentInputError;
       const capture = captureCompleted ? 'completed' : sourceId ? 'partial' : 'failed';
       const compilation = captureCompleted ? held ? 'held' : 'failed' : 'not-attempted';

@@ -6,6 +6,7 @@ import type { KnowledgeIngestOwnership } from './ingest-context.js';
 import { KnowledgeExtractionJudgmentHoldError } from './extraction-policy.js';
 import { prepareRepairJudgmentResult } from './semantic/web-gap-repair/admission.js';
 import { KnowledgeEntityAliasHoldError } from './entity-aliases.js';
+import { KnowledgeIngestStoppedError, type KnowledgeIngestStopReason } from './ingest-stopped.js';
 import { KnowledgeSourceQualityHeldError } from './source-quality.js';
 import { HomeGraphPagePriorityHeldError } from './home-graph/page-priority.js';
 import { HomeGraphQualityHeldError } from './home-graph/quality/types.js';
@@ -18,7 +19,17 @@ import { KnowledgeRepairFactUsefulnessHeldError } from './semantic/repair-useful
  * stacks, extra properties and reason accessors never cross this boundary. */
 function restrictionFailure(error: unknown): Error {
   try {
-    if (error instanceof KnowledgeEntityAliasHoldError) return new KnowledgeEntityAliasHoldError();
+    // An ingest stop keeps its own reason (a changed source is not an unsure
+    // model) and the original as its cause; its borrowed text does not cross.
+    if (error instanceof KnowledgeIngestStoppedError) {
+      const descriptor = Object.getOwnPropertyDescriptor(error, 'reason');
+      const value: unknown = descriptor && 'value' in descriptor ? descriptor.value : undefined;
+      const reason: KnowledgeIngestStopReason = value === 'cancelled' || value === 'changed' || value === 'model-unsure' || value === 'model-unavailable'
+        ? value : 'model-unsure';
+      if (error instanceof KnowledgeEntityAliasHoldError) return new KnowledgeEntityAliasHoldError(reason, undefined, { cause: error });
+      if (error instanceof KnowledgeExtractionJudgmentHoldError) return new KnowledgeExtractionJudgmentHoldError(reason, undefined, { cause: error });
+      return new KnowledgeIngestStoppedError(reason, undefined, { cause: error });
+    }
     if (!(error instanceof KnowledgeSourceQualityHeldError || error instanceof HomeGraphPagePriorityHeldError
       || error instanceof HomeGraphQualityHeldError || error instanceof KnowledgeUriCanonicalizationHeldError
       || error instanceof KnowledgeGeneratedFactSupportHeldError || error instanceof KnowledgeRepairFactUsefulnessHeldError)) return new KnowledgeExtractionJudgmentHoldError();

@@ -1,5 +1,5 @@
 import { REGULAR_KNOWLEDGE_DB_FILE, prepareConfiguredProjectContext } from '@goodvibes-jev/engine/platform/platform/knowledge';
-import { createApprovalDerivedHandlers, registerGateRuntimeEvents } from '@goodvibes-jev/engine/platform/platform/runtime/bootstrap';
+import { createApprovalDerivedHandlers, createPolicyRuntimeState, registerGateRuntimeEvents } from '@goodvibes-jev/engine/platform/platform/runtime/bootstrap';
 import { FeatureAnnouncementStore, featureAnnouncementsPath } from '@goodvibes-jev/engine/platform/platform/runtime/feature-announcements';
 import { callingAgentAsker, deliveringQuestions } from '@goodvibes-jev/engine/platform/platform/agents';
 import { createDaemonWorkspaceTrustResolver } from './workspace-trust-composition.js';
@@ -50,7 +50,7 @@ import { createWorkspaceCheckpointing, daemonWorkspaceCheckpoints } from './work
 import { createSessionConversationRewindPort } from './conversation-rewind-port.js';
 import { createDomainDispatch } from '@goodvibes-jev/engine/platform/platform/runtime/store';
 import { bindHealthDomainEvents, createWiredHealthSystem } from '@goodvibes-jev/engine/platform/platform/runtime/observability';
-import { DistributedRuntimeManager, IntegrationHelperService, IdempotencyStore, ComponentHealthMonitor, WorktreeRegistry, createShellPathService, createFeatureFlagManager, createNoopPanelManager, createNoopKeybindingsManager, PolicyRuntimeState } from './index.js';
+import { DistributedRuntimeManager, IntegrationHelperService, IdempotencyStore, ComponentHealthMonitor, WorktreeRegistry, createShellPathService, createFeatureFlagManager, createNoopPanelManager, createNoopKeybindingsManager } from './index.js';
 import { VoiceProviderRegistry, VoiceService, ensureBuiltinVoiceProviders } from '@goodvibes-jev/engine/platform/platform/voice';
 import { CacheRegistry, PauseController, wireDaemonMemoryGovernance } from '@goodvibes-jev/engine/platform/platform/runtime/memory';
 import { WebSearchProviderRegistry, WebSearchService } from '@goodvibes-jev/engine/platform/platform/web-search';
@@ -501,7 +501,8 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
     const adaptivePlanner = new AdaptivePlanner();
     const idempotencyStore = new IdempotencyStore();
     const overflowHandler = new OverflowHandler({ baseDir: workingDirectory });
-    const policyRuntimeState = new PolicyRuntimeState();
+    // The configured bundle is loaded here too, and a bundle promoted before is enforced for hosted work as in the terminal.
+    const policyRuntimeState = createPolicyRuntimeState(configManager, featureFlags);
     const fileCache = new FileStateCache();
     const projectIndex = new ProjectIndex(workingDirectory);
     disposalScope.ownUntilRegistered('default workspace project index', () => projectIndex.dispose());

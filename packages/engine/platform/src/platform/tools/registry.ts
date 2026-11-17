@@ -924,6 +924,15 @@ export class ToolRegistry {
     return this.tools.get(name)?.definition;
   }
 
+  /**
+   * How this registry's permission owner would decide one call now, without
+   * running it: `PermissionManager.previewDecision` with the tool's registered
+   * definition. Undefined for a registry bound to no permission owner.
+   */
+  previewDecision(name: string, args: Record<string, unknown>, signal?: AbortSignal): ReturnType<PermissionManager['previewDecision']> | undefined {
+    return registryPermissionOwners.get(this)?.previewDecision(name, args, this.definitionOf(name), signal);
+  }
+
   /** Opaque backend binding, never part of the serializable permission evidence. */
   readPreparedSettingsMutation(call: PreparedToolCall): ToolPreparedSettingsMutation | undefined {
     this.assertPrepared(call);

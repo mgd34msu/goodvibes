@@ -4,13 +4,11 @@ import type { ToolDefinition } from '@goodvibes-jev/engine/platform/platform/typ
 import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { CommandContext } from '../input/command-registry.ts';
 import { snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
-import { readPermissionCategory } from '@goodvibes-jev/engine/platform/platform/gate/policy';
-import { HARNESS_MODE_DESCRIPTORS } from './agent-harness-mode-catalog.ts';
 import { explainAgentToolPolicyInvocation } from './agent-tool-policy-guard.ts';
 import { computeApprovalPosture, readApprovalPostureFromConfig, type ApprovalPosture } from '../permissions/approval-posture.ts';
 
-type PolicyExplanationStatus = 'held' | 'confirmation_required' | 'denied';
-type PermissionPredictionOutcome = 'unknown';
+/** `decided_at_call`: nothing settles it in advance; the decision model (or the owner) decides when the call is made. */
+type PolicyExplanationStatus = 'allowed' | 'denied' | 'owner_decides' | 'decided_at_call' | 'not_evaluated';
 
 export interface AgentPolicyExplainArgs {
   readonly toolName?: unknown;
@@ -27,15 +25,6 @@ export type AgentPolicyExplanationResolution =
   | { readonly status: 'ambiguous'; readonly input: string; readonly candidates: readonly Record<string, unknown>[] }
   | { readonly status: 'missing_lookup'; readonly usage: string };
 
-interface PermissionPrediction {
-  readonly outcome: PermissionPredictionOutcome;
-  readonly sourceLayer: 'not_evaluated';
-  readonly reasonCode: 'live_check_required';
-  readonly mode: string;
-  readonly reason: string;
-}
-
-
 const SECRET_KEY_RE = /(?:api[_-]?key|token|secret|password|authorization|auth|bearer|webhook)/i;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -44,10 +33,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function readString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
-}
-
-function readBoolean(value: unknown): boolean {
-  return value === true || (typeof value === 'string' && value.trim().toLowerCase() === 'true');
 }
 
 function readToolArgs(args: AgentPolicyExplainArgs): Record<string, unknown> {
@@ -70,13 +55,6 @@ function redactValue(key: string, value: unknown, depth = 0): unknown {
 
 function redactArgs(args: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(Object.entries(args).slice(0, 30).map(([key, value]) => [key, redactValue(key, value)]));
-}
-
-function hasSchemaProperty(definition: ToolDefinition | undefined, property: string): boolean {
-  const parameters = definition?.parameters;
-  if (!isRecord(parameters)) return false;
-  const properties = parameters.properties;
-  return isRecord(properties) && property in properties;
 }
 
 function sideEffects(definition: ToolDefinition | undefined): readonly string[] {
@@ -157,111 +135,47 @@ function readEffectivePosture(context: CommandContext): ApprovalPosture {
   return context.platform.configManager ? readApprovalPostureFromConfig(context.platform.configManager) : computeApprovalPosture({ autoApprove: readAutoApprove(context), mode: readPermissionMode(context) });
 }
 
-/**
- * A read-only explanation has no authoritative argument reading, boundary
- * result, session decision or runtime-policy result. A configured allowance
- * is therefore not an approval, and a category cannot predict the stakes.
- * Retain configured intent without running judgment I/O or asking the owner.
- */
-function predictPermission(context: CommandContext): PermissionPrediction {
-  const posture = readEffectivePosture(context);
-  return {
-    outcome: 'unknown',
-    sourceLayer: 'not_evaluated',
-    reasonCode: 'live_check_required',
-    mode: posture.mode,
-    reason: `${posture.detail} This report does not evaluate the supplied action.`,
-  };
-}
+type GatePreview = NonNullable<Awaited<ReturnType<ToolRegistry['previewDecision']>>>;
 
-/**
- * Whether the tool's own schema says `confirm`/`explicitUserRequest` are only provenance. Such a tool
- * gets its authority from recorded admission, so asking for those fields would send the model after a step that changes nothing.
- */
-const PROVENANCE_ONLY_WORDING = new RegExp([
-  '\\b(?:does not|do not|never|cannot)\\s+(?:grants?|authori[sz]es?)\\b',
-  '\\bgrants? no\\b',
-  '\\b(?:admission|engine admission) (?:authori[sz]es|supplies)\\b',
-  '\\bsupplies authority\\b',
-  '\\b(?:request|caller|user request) provenance\\b',
-  '\\boptional provenance\\b',
-  '\\baudit (?:annotation|field|text)\\b',
-  '\\bcaller annotation\\b',
-].join('|'), 'i');
-
-function confirmationFieldsAreProvenanceOnly(definition: ToolDefinition | undefined): boolean {
-  const parameters = definition?.parameters;
-  const properties = isRecord(parameters) && isRecord(parameters.properties) ? parameters.properties : {};
-  return ['confirm', 'explicitUserRequest'].some((name) => {
-    const property = properties[name];
-    const description = isRecord(property) && typeof property.description === 'string' ? property.description : '';
-    return PROVENANCE_ONLY_WORDING.test(description);
-  });
-}
-
-function harnessModeRequiresRecordedAdmission(toolName: string, toolArgs: Record<string, unknown>): boolean {
-  if (toolName !== 'agent_harness') return false;
-  const mode = readString(toolArgs.mode);
-  if (!mode) return false;
-  return HARNESS_MODE_DESCRIPTORS.some((descriptor) => descriptor.id === mode && descriptor.kind === 'effect');
-}
-
-function confirmationState(toolName: string, toolArgs: Record<string, unknown>, definition: ToolDefinition | undefined, category: PermissionCategory): {
-  readonly required: boolean;
-  readonly confirmed: boolean;
-  readonly recordedAdmissionRequired: boolean;
+/** The gate's answer for the exact call, in the words a live call would get. */
+function gateOutcome(preview: GatePreview | undefined): {
+  readonly status: PolicyExplanationStatus;
   readonly reason: string;
+  readonly next: readonly string[];
+  readonly decision?: Record<string, unknown>;
 } {
-  if (harnessModeRequiresRecordedAdmission(toolName, toolArgs)) {
+  if (!preview) {
+    return { status: 'not_evaluated', reason: 'This tool registry has no permission owner, so the gate decides only when the call is made.', next: ['make the call; the gate decides it then'] };
+  }
+  const decided = preview.decided;
+  if (decided.kind === 'fact') {
     return {
-      required: false,
-      confirmed: false,
-      recordedAdmissionRequired: true,
-      reason: 'This effect route requires current recorded Jev act admission for the exact invocation and current source and boundary checks. Caller confirmation fields do not establish that authority.',
+      status: decided.allow ? 'allowed' : 'denied',
+      reason: decided.decision.reason,
+      next: decided.decision.next ?? (decided.allow ? ['make the call'] : []),
+      decision: { ...decided.decision, basis: decided.basis },
     };
   }
-  const schemaRequestsConfirmation = hasSchemaProperty(definition, 'confirm') && hasSchemaProperty(definition, 'explicitUserRequest');
-  const required = schemaRequestsConfirmation && category !== 'read';
-  if (required && confirmationFieldsAreProvenanceOnly(definition)) {
+  if (decided.kind === 'owner-only') {
     return {
-      required: false,
-      confirmed: false,
-      recordedAdmissionRequired: true,
-      reason: 'This tool records confirm and explicitUserRequest as provenance only; they do not grant authority. The call needs current recorded effect admission for the exact invocation and current source and boundary checks.',
+      status: 'owner_decides',
+      reason: `This is the owner's to decide (${decided.item}). ${preview.mode === 'just-vibes'
+        ? 'In just-vibes mode the call is queued for the owner and the work carries on.'
+        : 'The owner is asked once when the call is made; his answer is remembered.'}`,
+      next: ['make the call and let the gate ask the owner', 'carry on with work that does not need it'],
     };
   }
-  if (!required) {
-    return {
-      required: false,
-      confirmed: true,
-      recordedAdmissionRequired: false,
-      reason: 'The tool contract does not declare typed confirmation for this route.',
-    };
-  }
-  const confirmed = readBoolean(toolArgs.confirm) && readString(toolArgs.explicitUserRequest).length > 0;
   return {
-    required,
-    confirmed,
-    recordedAdmissionRequired: false,
-    reason: confirmed
-      ? 'Typed confirmation is present: confirm:true and explicitUserRequest are set.'
-      : 'Typed confirmation is required: pass confirm:true and explicitUserRequest.',
+    status: 'decided_at_call',
+    reason: 'No rule, mode or declaration settles this call: the decision model decides it when it is made (the owner, when no decision model works).',
+    next: ['make the call; the gate decides it then'],
   };
 }
 
-function statusFor(
-  guard: ReturnType<typeof explainAgentToolPolicyInvocation>,
-  confirmation: ReturnType<typeof confirmationState>,
-): PolicyExplanationStatus {
-  if (guard.status === 'denied') return 'denied';
-  if (confirmation.required && !confirmation.confirmed) return 'confirmation_required';
-  return 'held';
-}
-
-function userExplanation(status: PolicyExplanationStatus, category: PermissionCategory): string {
-  if (status === 'denied') return 'This action is denied before execution. Use the recommended safer route or change policy explicitly.';
-  if (status === 'confirmation_required') return `This ${category} action requires the declared typed confirmation. The live permission gate must still evaluate the call.`;
-  return `This ${category} action is held pending live permission evaluation. Configuration alone cannot establish approval; argument readings and boundary checks are still required.`;
+function userExplanation(status: PolicyExplanationStatus, category: PermissionCategory, reason: string): string {
+  if (status === 'allowed') return `This ${category} call runs without asking: ${reason}`;
+  if (status === 'denied') return `This ${category} call is refused: ${reason}`;
+  return reason;
 }
 
 export async function explainAgentPolicyDecision(
@@ -270,8 +184,6 @@ export async function explainAgentPolicyDecision(
   args: AgentPolicyExplainArgs,
   signal?: AbortSignal,
 ): Promise<AgentPolicyExplanationResolution> {
-  // Capture before any lookup or await: classification and explanation must
-  // describe the same immutable, fully inspected call, without invoking getters.
   const input = snapshotJudgmentInput(args) as AgentPolicyExplainArgs;
   const resolved = resolveToolName(toolRegistry, input);
   if (resolved.status === 'missing_lookup') {
@@ -291,19 +203,16 @@ export async function explainAgentPolicyDecision(
   const toolName = resolved.toolName!;
   const toolArgs = readToolArgs(input);
   const definition = findToolDefinition(toolRegistry, toolName);
-  const categoryReading = await readPermissionCategory(toolName, toolArgs, 'agent.policy-explanation.category', signal);
-  const category = categoryReading.category;
-  const analysis = analyzePermissionRequest(toolName, toolArgs, category);
+  // The Agent's own route guard runs first on a live call; a denial there is final.
   const guard = explainAgentToolPolicyInvocation(toolName, toolArgs);
-  const permission = predictPermission(context);
-  const confirmation = confirmationState(toolName, toolArgs, definition, category);
-  const status = statusFor(guard, confirmation);
-  const requiredActions = [
-    ...(status !== 'denied' ? ['The live permission gate must evaluate this exact call before execution.'] : []),
-    ...(status !== 'denied' && confirmation.recordedAdmissionRequired
-      ? ['Execute this exact route only with current recorded Jev act admission and current source and boundary checks.'] : []),
-    ...(confirmation.required && !confirmation.confirmed ? ['Call the route with confirm:true and explicitUserRequest.'] : []),
-  ];
+  // The gate's own classification of this exact call: mode, category, session answers, saved rules,
+  // owner-only list and surface. Code only: no hook, prompt or model request.
+  const preview = guard.status === 'denied' ? undefined : await toolRegistry.previewDecision(toolName, toolArgs, signal);
+  const category: PermissionCategory = preview?.category ?? definition?.category ?? 'delegate';
+  const gate = guard.status === 'denied'
+    ? { status: 'denied' as const, reason: guard.reason, next: guard.allowedModes ? [`use one of these modes: ${guard.allowedModes.join(', ')}`] : [] }
+    : gateOutcome(preview);
+  const analysis = analyzePermissionRequest(toolName, toolArgs, category);
   // The overall approval posture, computed by the SAME shared helper that
   // cli/status.ts, the doctor surface, and the footer use, so this tool's
   // own displayed posture text can never disagree with theirs.
@@ -312,18 +221,17 @@ export async function explainAgentPolicyDecision(
   return {
     status: 'found',
     explanation: {
-      status,
+      status: gate.status,
       toolName,
       registered: definition !== undefined,
       category,
-      categoryConfident: categoryReading.confident,
-      userExplanation: categoryReading.confident
-        ? userExplanation(status, category)
-        : 'The category reading is uncertain. The live permission gate must evaluate this exact call before execution.',
+      userExplanation: userExplanation(gate.status, category, gate.reason),
+      ...('decision' in gate && gate.decision ? { decision: gate.decision } : {}),
+      next: gate.next,
       posture: {
         label: posture.label,
         autoApprove: posture.autoApprove,
-        mode: posture.mode,
+        mode: preview?.mode ?? posture.mode,
         automaticApprovals: posture.automaticApprovals,
         bypassesPrompts: posture.bypassesPrompts,
         detail: posture.detail,
@@ -335,31 +243,17 @@ export async function explainAgentPolicyDecision(
           reason: guard.reason,
           ...(guard.allowedModes ? { allowedModes: guard.allowedModes } : {}),
         },
-        {
-          layer: 'Permission mode',
-          outcome: permission.outcome,
-          mode: permission.mode,
-          sourceLayer: permission.sourceLayer,
-          reasonCode: permission.reasonCode,
-          reason: permission.reason,
-        },
-        {
-          layer: confirmation.recordedAdmissionRequired ? 'Recorded effect admission' : 'Tool confirmation',
-          outcome: confirmation.recordedAdmissionRequired ? 'not_evaluated'
-            : confirmation.required ? (confirmation.confirmed ? 'confirmed' : 'required') : 'not_required',
-          reason: confirmation.reason,
-        },
+        ...(preview ? [{
+          layer: 'Permission gate',
+          outcome: preview.decided.kind === 'fact' ? (preview.decided.allow ? 'allow' : 'deny') : preview.decided.kind,
+          mode: preview.mode,
+          reason: gate.reason,
+        }] : []),
       ],
-      requiredActions,
       analysis,
       preflight: {
-        approvedWithoutMoreInput: false,
-        permissionEvaluated: false,
-        permissionOutcome: permission.outcome,
-        toolConfirmationRequired: confirmation.required,
-        toolConfirmationSatisfied: confirmation.confirmed,
-        recordedAdmissionRequired: confirmation.recordedAdmissionRequired,
-        recordedAdmissionEvaluated: false,
+        permissionEvaluated: preview !== undefined,
+        outcome: gate.status,
       },
       toolArgs: redactArgs(toolArgs),
       routes: {
@@ -369,7 +263,8 @@ export async function explainAgentPolicyDecision(
         securityPosture: 'security action:"status" includeParameters:true',
       },
       notes: [
-        'This is a read-only explanation: no live permission evaluation, owner prompt, or tool execution was performed.',
+        'Nothing was run and nobody was asked: this is how the gate would decide this exact call now. A rule or mode change before the call changes the answer.',
+        'confirm and explicitUserRequest grant nothing on any Agent tool; the gate decides every call.',
         'Secret-looking argument values are redacted in this explanation.',
       ],
       ...(input.includeParameters === true && definition ? {
@@ -377,8 +272,6 @@ export async function explainAgentPolicyDecision(
           name: definition.name,
           description: definition.description,
           sideEffects: sideEffects(definition),
-          hasConfirmParameter: hasSchemaProperty(definition, 'confirm'),
-          hasExplicitUserRequestParameter: hasSchemaProperty(definition, 'explicitUserRequest'),
         },
       } : {}),
       ...(resolved.input ? { lookup: { input: resolved.input, explicit: resolved.explicit === true } } : {}),

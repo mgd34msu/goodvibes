@@ -214,7 +214,7 @@ export function effectOutput(value: unknown): { readonly success: boolean; reado
 export function error(message: string): { readonly success: false; readonly error: string } { return { success: false, error: message }; }
 
 function admissionRefusal(action: string): string {
-  return `${action} was not run and nothing was changed: it needs the owner to grant current recorded effect admission for this action. confirm and explicitUserRequest are context only and do not grant it. Ask the owner to approve the action in the visible approval prompt, then repeat the call unchanged.`;
+  return `${action} was not run and nothing was changed: this call carries no permission-gate admission for that effect (it was forwarded or nested without one). confirm and explicitUserRequest grant nothing. Make the same call directly as an ordinary tool call; the permission gate decides it as it decides any change.`;
 }
 
 export function requireConfirmedAction(args: Record<string, unknown>, options: Parameters<Tool['execute']>[1], action: string): string | null {

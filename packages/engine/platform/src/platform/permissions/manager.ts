@@ -1392,6 +1392,34 @@ export class PermissionManager {
     return this.surfaceAllows(this.getCategory(toolName, captured));
   }
 
+  /**
+   * How the gate would classify this exact call now, without running it: the
+   * mode, the category, the session answers and saved rules, the owner-only
+   * list and the surface, through the same classifier `check` uses. No hook,
+   * prompt or model request; a `judgment` result means a live call would ask
+   * the decision model (or, without one, the owner).
+   */
+  async previewDecision(toolName: string, args: Record<string, unknown>, definition?: ToolDefinition, signal?: AbortSignal): Promise<{
+    readonly mode: GatePresetName; readonly category: PermissionCategory; readonly decided: CallClass;
+  }> {
+    const captured = captureOwnedJson(args) as Record<string, unknown>;
+    const mode = this.getMode();
+    const category = this.getCategory(toolName, captured, definition);
+    const config = this.configReader.getSnapshot();
+    const ownerOnly = recognizeOwnerOnly(toolName, captured, definition);
+    const subjects = callSubjects(captured, definition);
+    const options = signal ? { signal } : {};
+    const remembered = mode === 'yolo' ? null
+      : await this.rememberedDecision(this.getApprovalKey(toolName, captured), toolName, captured, options, undefined, ownerOnly, subjects);
+    const landed = mode === 'yolo' || (remembered && !remembered.approved) ? null : await this.deniedWhereLinksLead(toolName, captured, options);
+    const decided = classifyCall(mode, this.callFacts({
+      toolName, args: captured, category, mode, surface: this.gate.surfaceOf?.(), definition, ownerOnly,
+      directory: this.configReader.getWorkingDirectory(), tools: config.permissions?.tools, remembered, landed, policy: null,
+      untrustedRead: (this.gate.ledger ?? getProcessUntrustedContentLedger()).ingestedThisTurn().length > 0,
+    }));
+    return { mode, category, decided };
+  }
+
   /** Explicit session decisions, then current durable rules with their own scope. */
   private async rememberedDecision(
     key: string,

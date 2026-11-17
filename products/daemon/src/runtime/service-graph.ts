@@ -421,13 +421,13 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
     const channelPolicy = new ChannelPolicyManager({
       storePath: shellPaths.resolveProjectPath(GOODVIBES_DAEMON_SURFACE_ROOT, 'channels', 'policies.json'),
     });
+    // A surface with no owner yet never takes its first sender as owner: that sender is held
+    // as a claim in the owner inbox, and becomes the owner only when the owner accepts it.
+    disposalScope.registry.add('channel owner claims', channelPolicy.attachOwnerInbox(ownerInbox));
     const distributedRuntime = new DistributedRuntimeManager(
       shellPaths.resolveProjectPath(GOODVIBES_DAEMON_SURFACE_ROOT, 'remote', 'distributed-runtime.json'),
     );
     distributedRuntime.attachRuntime({
-    // A surface with no owner yet never takes its first sender as owner: that sender is held
-    // as a claim in the owner inbox, and becomes the owner only when the owner accepts it.
-    disposalScope.registry.add('channel owner claims', channelPolicy.attachOwnerInbox(ownerInbox));
       sessionBridge: sessionBroker,
       approvalBridge: approvalBroker,
       automationBridge: automationManager,
@@ -723,10 +723,10 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
       ownerQuestions: deliveringQuestions(ownerInbox, () => callingAgentAsker(agentManager)),
       surfaceRoot: surface.surfaceRoot,
       permissionManager,
-      execPromptAnswerHandler,
-      sandboxEscalationHandler,
       // Workers' tool calls fire the owner's tool hooks, as a session's own calls do.
       toolCallHooks: hookDispatcher,
+      execPromptAnswerHandler,
+      sandboxEscalationHandler,
       localhostFetchApproval,
       fileCache,
       projectIndex,

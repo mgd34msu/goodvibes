@@ -1,4 +1,5 @@
 import type { BrowserKnowledgeKind, BrowserKnowledgeSourceKind } from '@goodvibes-jev/engine/platform/platform/knowledge';
+import { splitCommandOption } from '@goodvibes-jev/engine/terminal-shell/cli-arguments';
 
 const BROWSER_KINDS = ['chrome', 'chromium', 'brave', 'edge', 'vivaldi', 'arc', 'opera', 'firefox', 'zen', 'librewolf', 'waterfox', 'floorp', 'safari', 'orion', 'epiphany'] as const satisfies readonly BrowserKnowledgeKind[];
 const BROWSER_SOURCE_KINDS = ['history', 'bookmark'] as const satisfies readonly BrowserKnowledgeSourceKind[];
@@ -16,10 +17,18 @@ export type BrowserImportScopeResult =
   | { readonly ok: true; readonly scope: BrowserImportScope }
   | { readonly ok: false; readonly message: string };
 
+/**
+ * Both `--flag value` and `--flag=value` reach the same validation; a flag
+ * typed with no value (`--flag=`, or followed by another flag or nothing) is
+ * present with no value, so it is refused rather than ignored.
+ */
 function flagValue(args: readonly string[], names: readonly string[]): { readonly present: boolean; readonly value: string | undefined } {
-  for (const name of names) {
-    const index = args.indexOf(name);
-    if (index >= 0) return { present: true, value: args[index + 1] };
+  for (let index = 0; index < args.length; index += 1) {
+    const { name, value: inline } = splitCommandOption(args[index]!);
+    if (!names.includes(name)) continue;
+    if (inline !== undefined) return { present: true, value: inline.length > 0 ? inline : undefined };
+    const next = args[index + 1];
+    return { present: true, value: next === undefined || next.startsWith('--') ? undefined : next };
   }
   return { present: false, value: undefined };
 }

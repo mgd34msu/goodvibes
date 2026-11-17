@@ -58,6 +58,7 @@ import type {
   CloudflareR2BucketLike,
   CloudflareResolvedSecret,
   CloudflareSecretsStoreLike,
+  CloudflareTokenCreateResponseLike,
   CloudflareTokenRequirementsInput,
   CloudflareTokenRequirementsResult,
   CloudflareTunnelLike,
@@ -223,9 +224,11 @@ export class CloudflareControlPlaneManager {
     const signature = operationalTokenSignature(accountId, zone?.id, components);
     // A retry, a second Create or a provision after a restart for the same selection uses the
     // token already made: each new token is another live credential in the owner's account.
+    // Reused only while Cloudflare still has it live: one read, on this path only.
     if (input.reuse !== false && input.storeApiToken !== false && !input.returnGeneratedToken
       && previous && previous.signature === signature && previous.apiTokenRef === config.apiTokenRef
-      && (await this.resolveSecretRef(previous.apiTokenRef)).value) {
+      && (await this.resolveSecretRef(previous.apiTokenRef)).value
+      && await this.operationalTokenIsLive(tokenApi, previous.tokenId)) {
       return {
         ok: true,
         tokenId: previous.tokenId,
@@ -1172,6 +1175,33 @@ export class CloudflareControlPlaneManager {
       if (status === 404) return { tokenId, revoked: true, reason: 'Cloudflare has no token with that id' };
       return { tokenId, revoked: false, reason: summarizeError(error) };
     }
+  }
+
+  /**
+   * Whether the token the daemon made still works at Cloudflare: not deleted
+   * in the dashboard, not disabled, not past its expiry. A client that cannot
+   * read tokens keeps the stored one. A read that fails for any other reason
+   * is refused rather than guessed: reusing a dead token reports success for a
+   * credential that does not work, and a new one is another live credential.
+   */
+  private async operationalTokenIsLive(tokenApi: NonNullable<CloudflareApiClient['user']>['tokens'], tokenId: string): Promise<boolean> {
+    if (!tokenApi.get) return true;
+    let token: CloudflareTokenCreateResponseLike;
+    try {
+      token = await tokenApi.get(tokenId);
+    } catch (error: unknown) {
+      const status = error && typeof error === 'object' ? Object.getOwnPropertyDescriptor(error, 'status')?.value : undefined;
+      if (status === 404) return false;
+      throw new CloudflareControlPlaneError(
+        `Could not check at Cloudflare whether the operational token ${tokenId} made earlier still works: ${summarizeError(error)}. Nothing was created. Retry, or ask for a new token (reuse: false, /cloudflare create-token --new).`,
+        'CLOUDFLARE_TOKEN_CHECK_FAILED',
+        502,
+        { cause: error },
+      );
+    }
+    if (token.status !== undefined && token.status !== 'active') return false;
+    const expiresAt = token.expires_on ? Date.parse(token.expires_on) : Number.NaN;
+    return !(Number.isFinite(expiresAt) && expiresAt <= Date.now());
   }
 
   private requireUserTokens(client: CloudflareApiClient): NonNullable<CloudflareApiClient['user']>['tokens'] {

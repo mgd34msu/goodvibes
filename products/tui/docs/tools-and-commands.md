@@ -813,7 +813,7 @@ The high-signal subcommands, in the order a setup normally uses them:
 | --- | --- |
 | `/cloudflare status` | Show the integration's enabled/ready posture and every configured resource |
 | `/cloudflare requirements` | List the API-token permissions the integration needs |
-| `/cloudflare create-token --account <account-id> --bootstrap-env <ENV_NAME>` | Create the scoped API token from a bootstrap token |
+| `/cloudflare create-token --account <account-id> --bootstrap-env <ENV_NAME> [--new]` | Create the scoped API token from a bootstrap token; the daemon reuses the token it made for the same selection while Cloudflare reports it active, and `--new` makes a fresh one (the old one is revoked) |
 | `/cloudflare discover` | Discover existing account resources usable by the integration |
 | `/cloudflare validate` | Validate the token and configuration without changing anything |
 | `/cloudflare provision --batch-mode explicit` | Provision the Workers/Queues resources |

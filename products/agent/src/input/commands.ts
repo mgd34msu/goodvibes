@@ -49,6 +49,7 @@ import { registerOwnerProfileRuntimeCommands } from './commands/owner-profile-ru
 import { registerOperatorActionRuntimeCommands } from './commands/operator-actions-runtime.ts';
 import { registerConnectedHostAdminCommands } from './commands/connected-host-admin-runtime.ts';
 import { registerOwnerInboxCommands } from './commands/owner-inbox-runtime.ts';
+import { registerCloudflareRuntimeCommands } from './commands/cloudflare-runtime.ts';
 import { registerHeldCallsCommands } from './commands/held-calls-runtime.ts';
 import { registerIntelligenceRuntimeCommands } from './commands/intelligence-runtime.ts';
 import { registerEmailRuntimeCommands } from './commands/email-runtime.ts';
@@ -99,6 +100,7 @@ export function registerBuiltinCommands(
   registerOperatorActionRuntimeCommands(registry);
   registerConnectedHostAdminCommands(registry);
   registerOwnerInboxCommands(registry);
+  registerCloudflareRuntimeCommands(registry);
   registerHeldCallsCommands(registry);
   registerIntelligenceRuntimeCommands(registry);
   registerCalendarRuntimeCommands(registry);

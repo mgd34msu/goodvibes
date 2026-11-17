@@ -43,7 +43,7 @@ Use `/cloudflare` for runtime inspection and daemon actions:
 /cloudflare status
 /cloudflare setup
 /cloudflare requirements [--all|--component queues]
-/cloudflare create-token --account <account-id> --bootstrap-env <ENV_NAME>
+/cloudflare create-token --account <account-id> --bootstrap-env <ENV_NAME> [--new]
 /cloudflare discover --token-env CLOUDFLARE_API_TOKEN
 /cloudflare validate --token-env CLOUDFLARE_API_TOKEN
 /cloudflare provision --account <account-id> --batch-mode explicit --tunnel-token-ref goodvibes://secrets/goodvibes/GOODVIBES_CLOUDFLARE_TUNNEL_TOKEN
@@ -51,7 +51,9 @@ Use `/cloudflare` for runtime inspection and daemon actions:
 /cloudflare disable [--keep-cron] [--keep-worker-subdomain] [--bootstrap-token <token> | --bootstrap-env <ENV_NAME>]
 ```
 
-`/cloudflare setup` opens onboarding in edit mode. All other subcommands call platform-owned daemon routes under local daemon admin/auth.
+`/cloudflare setup` opens onboarding in edit mode. All other subcommands call platform-owned daemon routes under local daemon admin/auth. The Agent has the same `/cloudflare` command over its connected host (without the setup wizard); the model may run its reads, while `create-token`, `provision` and `disable` count only when the owner types them.
+
+`create-token` returns the token the daemon already made for the same account, zone and components while Cloudflare reports it active and unexpired (one check at Cloudflare); a token deleted in the dashboard, disabled or expired is replaced by a new one. `--new` always makes a new token and revokes the one it replaces.
 
 Each subcommand accepts only its own flags, and a line is refused before anything is sent when it has an unknown or misspelt flag (`--keepcron`), a flag that needs a value and has none (`--token-env` with no name), a word that names no component (`provision tunel`), a `--batch-mode` other than `off`, `explicit` or `eligible-by-default`, or a `--token-env`/`--bootstrap-env` naming a variable that is not set in the app's environment (the stored token would otherwise be used). The refusal names the accepted values.
 

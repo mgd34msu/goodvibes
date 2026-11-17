@@ -478,6 +478,10 @@ export interface CloudflareTokenCreateResponseLike {
   readonly name?: string | undefined;
   readonly policies?: readonly CloudflareTokenPolicyParam[] | undefined;
   readonly value?: string | undefined;
+  /** `active`, `disabled` or `expired`, as Cloudflare reports the token. */
+  readonly status?: string | undefined;
+  /** ISO time the token stops working, when it has one. */
+  readonly expires_on?: string | null | undefined;
 }
 
 export interface CloudflareTokenVerifyResponseLike {

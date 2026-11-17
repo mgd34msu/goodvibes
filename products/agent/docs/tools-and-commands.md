@@ -420,6 +420,7 @@ Routine promotion is an explicit scheduling route. Local routines stay local unt
 | `/delegate` | Explicitly delegate build/fix/review work to GoodVibes TUI with reason, success criteria, workspace hint, priority, and explicit review intent. |
 | `/devices` | Paired phones on the connected host: `nodes` (each phone and what it can serve), `grants` and `revoke-grant <grant-id> --yes` (always-allow answers), `captures` and `delete-capture <capture-id> --yes` (photos and screen captures the daemon is keeping, deleted now). |
 | `/effort` | Show or set reasoning effort level. |
+| `/cloudflare` | The connected host's optional Cloudflare integration: `status`, `requirements`, `discover`, `validate`, `verify`, and (typed by the owner only) `create-token [--new]`, `provision` and `disable`. Flags are the terminal app's; see its Cloudflare guide. |
 | `/email` | Configure direct email, read inbox summaries read-only, and send a confirmed message. |
 | `/expand` | Expand rendered blocks by type. |
 | `/export` | Export the current conversation to Markdown. |

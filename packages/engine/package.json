@@ -1962,6 +1962,21 @@
       "types": "./terminal-shell/dist/owner-inbox-command.d.ts",
       "import": "./terminal-shell/dist/owner-inbox-command.js"
     },
+    "./terminal-shell/cloudflare-command": {
+      "bun": "./terminal-shell/src/cloudflare-command.ts",
+      "types": "./terminal-shell/dist/cloudflare-command.d.ts",
+      "import": "./terminal-shell/dist/cloudflare-command.js"
+    },
+    "./terminal-shell/cloudflare-control-plane": {
+      "bun": "./terminal-shell/src/cloudflare-control-plane.ts",
+      "types": "./terminal-shell/dist/cloudflare-control-plane.d.ts",
+      "import": "./terminal-shell/dist/cloudflare-control-plane.js"
+    },
+    "./terminal-shell/declared-flags": {
+      "bun": "./terminal-shell/src/declared-flags.ts",
+      "types": "./terminal-shell/dist/declared-flags.d.ts",
+      "import": "./terminal-shell/dist/declared-flags.js"
+    },
     "./terminal-shell/held-calls-command": {
       "bun": "./terminal-shell/src/held-calls-command.ts",
       "types": "./terminal-shell/dist/held-calls-command.d.ts",

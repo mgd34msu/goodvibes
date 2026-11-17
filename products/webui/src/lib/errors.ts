@@ -99,6 +99,15 @@ export function isNoActiveTurnError(error: unknown): boolean {
 }
 
 /**
+ * companion.chat.turns.cancel accepted the stop, but the turn has not ended yet (a tool call
+ * or the provider is still finishing). The turn is stopping, not failed: the terminal
+ * turn.cancelled event on the session stream settles it.
+ */
+export function isTurnStoppingError(error: unknown): boolean {
+  return errorCode(error) === 'TURN_STOPPING';
+}
+
+/**
  * True for the daemon's honest 409 CONFLICT rejection. Two review-cockpit surfaces
  * raise it, both meaning "nothing was written, re-read and retry", never a partial apply:
  *   - checkpoints.revertHunk, when the hunk no longer reverse-applies cleanly because the

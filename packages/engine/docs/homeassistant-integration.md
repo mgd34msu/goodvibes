@@ -912,7 +912,10 @@ The cancel endpoint also accepts a `messageId` while the daemon still has the
 message-to-session correlation in memory; cancelling by `messageId` stops only
 that message's turn and succeeds without doing anything when a newer turn now
 holds the session. It only accepts chat sessions that Home Assistant
-conversations created; any other session id is a `404`.
+conversations created; any other session id is a `404`. The answer is
+`{"ok": true, "status": "cancelled"}` once the turn has stopped, or
+`{"ok": true, "status": "stopping"}` when the stop was accepted but a tool call
+is still ending; the turn then finishes as cancelled on its own.
 
 ### Home Assistant to GoodVibes webhook
 

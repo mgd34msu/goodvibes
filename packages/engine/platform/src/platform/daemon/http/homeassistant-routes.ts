@@ -406,7 +406,8 @@ export class HomeAssistantConversationRoutes {
       if (!closed || !sessionId || !turnId) return;
       void this.context.chatManager.cancelTurn(sessionId, { turnId }).catch((error: unknown) => {
         const code = (error as { code?: string }).code;
-        if (code !== 'NO_ACTIVE_TURN' && code !== 'TURN_MISMATCH') logger.warn('[homeassistant] could not cancel the turn of a closed stream', { sessionId, error: summarizeError(error) });
+        // TURN_STOPPING: the stop was accepted and the turn ends when its running tool call does.
+        if (code !== 'NO_ACTIVE_TURN' && code !== 'TURN_MISMATCH' && code !== 'TURN_STOPPING') logger.warn('[homeassistant] could not cancel the turn of a closed stream', { sessionId, error: summarizeError(error) });
       });
     };
     const stream = new ReadableStream<Uint8Array>({
@@ -515,6 +516,11 @@ export class HomeAssistantConversationRoutes {
       await this.context.chatManager.cancelTurn(sessionId, guard);
     } catch (error: unknown) {
       const code = (error as { code?: string }).code;
+      if (code === 'TURN_STOPPING') {
+        // The stop was accepted; a tool call or the provider is still ending, and the turn
+        // finishes as cancelled when it does.
+        return Response.json({ ok: true, sessionId, status: 'stopping' });
+      }
       if (code !== 'NO_ACTIVE_TURN' && code !== 'TURN_MISMATCH') {
         return Response.json(
           { ok: false, sessionId, error: error instanceof Error ? error.message : String(error) },

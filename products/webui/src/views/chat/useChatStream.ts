@@ -3,7 +3,7 @@ import { client as platformClient, DEFAULT_SSE_RECONNECT } from '../../lib/goodv
 import { getClientLifetime, isClientLifetimeCurrent } from '../../lib/client-lifetime';
 import { asRecord, firstString } from '../../lib/object';
 import { RELAY_OVERFLOW_EVENT, noteRelayOverflow, readDroppedCount } from '../../lib/relay-stream-overflow';
-import { isSessionNotFoundError, isAuthExpiredError, isMethodUnavailableError, isNoActiveTurnError } from '../../lib/errors';
+import { isSessionNotFoundError, isAuthExpiredError, isMethodUnavailableError, isNoActiveTurnError, isTurnStoppingError } from '../../lib/errors';
 import type { ToolActivityWords } from '@goodvibes-jev/engine/contracts';
 import { LocalCompanionMessage } from '../../lib/companion-chat';
 import {
@@ -223,6 +223,11 @@ export function useChatStream({
         // turn.completed already (or will) settle the state; just don't get
         // stuck in 'stopping' if it already did.
         setTurnState((current) => (current === 'stopping' ? 'idle' : current));
+        return;
+      }
+      if (isTurnStoppingError(error)) {
+        // The stop was accepted and the turn is still ending (a slow tool call): it stays
+        // 'stopping' until the terminal turn.cancelled event arrives on the stream.
         return;
       }
       if (isMethodUnavailableError(error)) {

@@ -871,7 +871,8 @@ async function handleGetMessages(
  * Stop the in-flight turn for a session. Optional `turnId` in the body guards
  * against cancelling a newer turn a stale stop click raced against
  * (409 TURN_MISMATCH). No turn in flight is the benign 404 NO_ACTIVE_TURN;
- * repeat cancels are idempotent successes. The terminal `turn.cancelled` SSE
+ * a stop accepted for a turn still ending is 409 TURN_STOPPING (stopping, not
+ * failed); repeat cancels are idempotent successes. The terminal `turn.cancelled` SSE
  * event (emitted to every subscriber) is the authoritative convergence signal.
  */
 async function handleCancelTurn(

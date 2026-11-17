@@ -42,6 +42,7 @@ import { FEATURE_SETTINGS } from '../../../lib/generated/config-schema';
 import { formatError, isAdminRequiredError } from '../../../lib/errors';
 import { useToast } from '../../../lib/toast';
 import { ErrorState } from '../../feedback/ErrorState';
+import { Button } from '../../ui/Button';
 import { SkeletonBlock } from '../../feedback/SkeletonBlock';
 import { SettingsField } from '../SettingsField';
 import { SettingsHeadingLevel } from './parts';
@@ -96,6 +97,9 @@ interface ConfigSettingsValue {
   persistedByKey: Readonly<Record<string, ConfigSetOutcome>>;
   /** What the running daemon reports per restart-gated feature id whose saved setting is not applied yet. */
   pendingRestart: ReadonlyMap<string, FeaturePendingRestart>;
+  /** Why that report could not be read (so no marker means "unknown", not "nothing pending"), or null. */
+  restartStatusError: string | null;
+  retryRestartStatus: () => void;
 }
 
 const FEATURE_RESTART_STATUS_KEY = ['flags', 'status'] as const;
@@ -123,7 +127,8 @@ export function ConfigSettingsProvider({ enabled = true, children }: { enabled?:
   });
 
   // Read beside config.get: the saved tree cannot say what the daemon runs. A
-  // daemon without this read (or a refusal) leaves no marker; config still shows.
+  // failed or refused read is said where restart-gated features are listed, so
+  // missing markers are never taken for "nothing pending"; config still shows.
   const restartStatus = useQuery({
     queryKey: FEATURE_RESTART_STATUS_KEY,
     queryFn: () => platformClient.operator.flags.status(),
@@ -134,6 +139,9 @@ export function ConfigSettingsProvider({ enabled = true, children }: { enabled?:
     () => new Map((restartStatus.data?.pendingRestart ?? []).map((entry) => [entry.featureId, entry] as const)),
     [restartStatus.data],
   );
+  const restartStatusError = restartStatus.isError ? formatError(restartStatus.error) : null;
+  const refetchRestartStatus = restartStatus.refetch;
+  const retryRestartStatus = useCallback(() => { void refetchRestartStatus(); }, [refetchRestartStatus]);
 
   const groups = useMemo(() => buildSettingsModel(config.data), [config.data]);
   // payments.currency's live value, for MoneyField's currency label, read from
@@ -234,7 +242,9 @@ export function ConfigSettingsProvider({ enabled = true, children }: { enabled?:
     readLatest,
     persistedByKey,
     pendingRestart,
-  }), [config, groups, currency, refused, degraded, commit, commitMany, reset, readLatest, persistedByKey, pendingRestart]);
+    restartStatusError,
+    retryRestartStatus,
+  }), [config, groups, currency, refused, degraded, commit, commitMany, reset, readLatest, persistedByKey, pendingRestart, restartStatusError, retryRestartStatus]);
 
   return <ConfigSettingsContext.Provider value={value}>{children}</ConfigSettingsContext.Provider>;
 }
@@ -258,7 +268,9 @@ export function ConfigGroupList({
   /** Shown when there is nothing to render (after the search). */
   emptyText?: string;
 }) {
-  const { config, refused, degraded, commit, commitMany, reset, readLatest, persistedByKey, pendingRestart, currency } = useConfigSettings();
+  const {
+    config, refused, degraded, commit, commitMany, reset, readLatest, persistedByKey, pendingRestart, restartStatusError, retryRestartStatus, currency,
+  } = useConfigSettings();
   const shown = useMemo(() => filterSettingsModel([...groups], query), [groups, query]);
   // One level under the section heading when the list sits inside a titled section.
   const GroupHeading = useContext(SettingsHeadingLevel) === 4 ? 'h4' : 'h3';
@@ -287,8 +299,17 @@ export function ConfigGroupList({
     return emptyText ? <p className="settings-empty">{emptyText}</p> : null;
   }
 
+  const showsRestartGated = shown.some((group) => group.featureUnits.some((unit) => unit.feature.restartRequired));
+
   return (
     <div className="settings-entries">
+      {restartStatusError && showsRestartGated && (
+        <p className="dv-notice dv-notice--bad" role="status">
+          Could not read which features wait for a daemon restart ({restartStatusError}), so a feature saved one way
+          and still running the other way shows no marker here.{' '}
+          <Button size="sm" variant="ghost" onClick={retryRestartStatus}>Retry</Button>
+        </p>
+      )}
       {shown.map((group) => (
         <section
           key={group.id}

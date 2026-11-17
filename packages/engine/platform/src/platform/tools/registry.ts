@@ -23,6 +23,7 @@ import { type JudgmentPort } from '@goodvibes-jev/judgment';
 import { captureOwnedJson, snapshotJudgmentInput } from '../gate/judgment-input.js';
 import { assertAutonomousConfigTransition, completeAutonomousConfigTransition, bindAutonomousNestedAdmission, readAutonomousSettingsPresentation, readAutonomousWorkspaceConstraint, readAutonomousEffectConstraint, readAutonomousNestedOwner, consumeAutonomousAdmission, type AutonomousNestedOwner, type AutonomousPermissionAdmission, type PermissionManager } from '../permissions/manager.js';
 import type { AutonomousChoiceProjection } from '../permissions/autonomous-input-projection.js';
+import { captureAutonomousSource } from '../permissions/autonomous.js';
 import { buildDenialErrorMessage, toolDecisionOf } from '../permissions/denial.js';
 import type { PreparedConfigMutationReceipt } from '../config/manager.js';
 import type { PreparedSecretImportTransition } from '../config/secrets.js';
@@ -1343,6 +1344,78 @@ export class ToolRegistry {
         ...(choiceProjection ? [manager.releaseAutonomousChoices(choiceProjection)] : []),
       ]);
       // Each nested call has its own source id; once it has settled its epoch is not needed.
+      manager.retireAutonomousSource(sourceId);
+      const failure = released.find(result => result.status === 'rejected');
+      if (failure?.status === 'rejected') throw failure.reason;
+    }
+  }
+
+  /**
+   * One call the owner confirmed himself: a form he filled in and answered yes
+   * to. It is prepared, admitted and run on the same path as a nested call,
+   * with no parent tool execution: the source is the owner's stated request,
+   * and the admission carries his confirmation, so a deny rule or plan mode
+   * still refuses but nobody is asked again. Only the owner's own input path
+   * calls this; a model reaches tools through a turn or `executeNested`.
+   */
+  async executeOwnerConfirmed(callId: string, name: string, args: Record<string, unknown>,
+    request: { readonly goal: string; readonly criteria: readonly string[]; readonly signal?: AbortSignal | undefined }): Promise<ToolResult> {
+    const manager = registryPermissionOwners.get(this);
+    if (!manager) {
+      return { callId, success: false, error: `${name} was not run: this tool registry has no permission owner to admit an owner-confirmed call.` };
+    }
+    if (!this.tools.has(name)) return { callId, success: false, error: `${name} was not run: no tool by that name is registered here.` };
+    const signal = request.signal;
+    const source = captureAutonomousSource({ goal: request.goal, criteria: [...request.criteria] });
+    const sourceOf = () => { signal?.throwIfAborted(); return source; };
+    const sourceId = randomUUID();
+    const projections = new Set<ProjectedToolCall>();
+    let choiceProjection: AutonomousChoiceProjection | undefined;
+    try {
+      await manager.prepareAutonomousOwner(signal);
+      const original = manager.autonomousPreparation(sourceId, sourceOf, signal);
+      const initial = await this.projectCall(callId, name, args, { signal, assertCurrent: () => original.assertCurrent() });
+      projections.add(initial);
+      choiceProjection = await manager.projectAutonomousChoices(sourceId, callId, sourceOf, this, signal);
+      original.assertCurrent();
+      const prepare = async (toolName: string, input: Record<string, unknown>) => {
+        const preparation = manager.autonomousPreparation(sourceId, sourceOf, signal, undefined, choiceProjection);
+        const assertCurrent = () => preparation.assertCurrent();
+        const projected = await this.projectCall(callId, toolName, input, { signal, assertCurrent });
+        projections.add(projected); assertCurrent();
+        const call = await this.prepareCall(callId, toolName, projected.args, { signal, port: preparation.port, assertCurrent });
+        assertCurrent(); return call;
+      };
+      let call = await prepare(name, initial.args);
+      const consumedRevisions: string[] = [];
+      let permittedRevisionIds: readonly string[] | undefined;
+      while (true) {
+        const current = call;
+        const admission = await manager.admitAutonomous(sourceId, current.name, current.args, {
+          sourceOf, signal, choiceProjection, ownerConfirmed: true,
+          consumedRevisions, ...(permittedRevisionIds ? { permittedRevisionIds } : {}),
+          schemaRevision: current.schemaRevision, preparationDecisionIds: current.judgmentDecisionIds,
+          preparedCall: { registry: this, call: current }, assertPrepared: () => this.assertPrepared(current),
+        });
+        permittedRevisionIds ??= admission.revisionIds;
+        if (admission.revision) {
+          const revision = admission.revision;
+          if (consumedRevisions.includes(revision.ref.id)) throw new ToolInputProjectionError('stale');
+          consumedRevisions.push(revision.ref.id);
+          call = await prepare(revision.toolName, revision.args);
+          continue;
+        }
+        if (!admission.result.approved) {
+          const reason = admission.result.detail ?? admission.result.reasonCode;
+          return { callId, success: false, error: `${current.name} was not run: ${reason}.` };
+        }
+        return await this.executePrepared(current, admission, signal ? { signal } : undefined);
+      }
+    } finally {
+      const released = await Promise.allSettled([
+        ...[...projections].map(projected => this.releaseProjected(projected)),
+        ...(choiceProjection ? [manager.releaseAutonomousChoices(choiceProjection)] : []),
+      ]);
       manager.retireAutonomousSource(sourceId);
       const failure = released.find(result => result.status === 'rejected');
       if (failure?.status === 'rejected') throw failure.reason;

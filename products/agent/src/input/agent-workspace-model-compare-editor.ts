@@ -3,7 +3,6 @@ import type { AgentModelCompareAnalyticsWorkspaceToolArgs, AgentModelCompareAppl
 import { compareExportMode, compareReviewMode, isAffirmative, readList, readPositiveInteger } from './agent-workspace-model-compare-utils.ts';
 
 export type { AgentModelCompareAnalyticsWorkspaceToolArgs, AgentModelCompareApplyWorkspaceToolArgs, AgentModelCompareExportWorkspaceToolArgs, AgentModelCompareHandoffDiffWorkspaceToolArgs, AgentModelCompareJudgmentWorkspaceToolArgs, AgentModelCompareReviewWorkspaceToolArgs, AgentModelCompareRouteDecisionWorkspaceToolArgs, AgentModelCompareWorkspaceToolArgs, AgentWorkspaceFieldReader } from './agent-workspace-model-compare-types.ts';
-export { buildAgentModelCompareAnalyticsPromptSubmission, buildAgentModelCompareApplyPromptSubmission, buildAgentModelCompareExportPromptSubmission, buildAgentModelCompareHandoffDiffPromptSubmission, buildAgentModelCompareJudgmentPromptSubmission, buildAgentModelComparePromptSubmission, buildAgentModelCompareReviewPromptSubmission, buildAgentModelCompareRouteDecisionPromptSubmission } from './agent-workspace-model-compare-prompt-submission.ts';
 
 export function createAgentModelCompareEditor(): AgentWorkspaceLocalEditor {
   return {

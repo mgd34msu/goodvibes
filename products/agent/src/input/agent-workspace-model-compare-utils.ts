@@ -26,7 +26,3 @@ export function compareReviewMode(value: string): AgentModelCompareReviewWorkspa
   if (normalized === 'handoffdiff' || normalized === 'diff' || normalized === 'visualdiff') return 'handoffDiff';
   return 'review';
 }
-
-export function quoteBlock(value: string): string {
-  return value.trim() || '(blank)';
-}

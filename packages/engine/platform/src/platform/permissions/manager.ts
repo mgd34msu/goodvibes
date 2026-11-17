@@ -122,6 +122,8 @@ interface SafetyInput {
   readonly supportingIds?: readonly string[];
   readonly decoratePort?: ((port: JudgmentPort) => JudgmentPort) | undefined;
   readonly attribution?: PermissionAttribution | undefined;
+  /** The owner confirmed this exact call himself; his confirmation is the approval. */
+  readonly ownerConfirmed?: boolean | undefined;
 }
 
 interface SafetyOutcome {
@@ -444,6 +446,12 @@ export interface AutonomousPermissionOptions extends PermissionExecutionOptions 
   readonly assertPrepared?: () => void;
   /** Exact registry-owned call. Required to authenticate a strict tool body. */
   readonly preparedCall?: Readonly<{ registry: ToolRegistry; call: PreparedToolCall }> | undefined;
+  /**
+   * The owner confirmed this exact call himself: a form he filled in and
+   * answered yes to (`ToolRegistry.executeOwnerConfirmed`). A fact (a deny
+   * rule, plan mode, a refused decision) still decides; nobody is asked again.
+   */
+  readonly ownerConfirmed?: boolean | undefined;
 }
 
 interface AuthenticAutonomousAdmission {
@@ -964,6 +972,7 @@ export class PermissionManager {
       workingDirectory: capturedAuthority.directory ?? undefined, source,
       sourceId, actionRevision: `action-${epoch.toString(36)}`, authorityRevision, authoritySnapshot,
       supportingIds: options.preparationDecisionIds ?? [], decoratePort: options.decoratePort,
+      ...(options.ownerConfirmed === true ? { ownerConfirmed: true } : {}),
     });
     const result = safety.result;
     // The owner answered a channel's request himself: his approval is the authority the channel lacked.
@@ -1117,10 +1126,18 @@ export class PermissionManager {
       }
     }
     if (this.takeOwnerRevision(input)) return { result: this.result(true, false, 'user_prompt', 'user_approved', analysis) };
+    if (input.ownerConfirmed === true) return this.ownerConfirmedOutcome(input);
     return this.askOwner(input, analysis, {
       reasons: ownerOnly ? [`Only you decide this: ${ownerOnlyReason(ownerOnly)}.`] : [],
       ownerOnly, revisedDetail: 'Prepare the exact action revised and approved by the owner during Classic operation.',
     });
+  }
+
+  /** A call the owner confirmed himself in a form: his yes is the approval, recorded as his. */
+  private ownerConfirmedOutcome(input: SafetyInput): SafetyOutcome {
+    input.assertCurrent();
+    return { result: this.result(true, false, 'user_prompt', 'user_approved', input.policyResult.analysis,
+      { detail: 'The owner confirmed this exact action in a form he filled in.' }) };
   }
 
   /**
@@ -1179,6 +1196,7 @@ export class PermissionManager {
       return { result: this.result(true, false, 'user_prompt', 'user_approved', input.policyResult.analysis,
         { detail: 'The owner approved these exact revised arguments.' }) };
     }
+    if (input.ownerConfirmed === true) return this.ownerConfirmedOutcome(input);
     if (decided.kind === 'owner-only') {
       if (input.mode === 'just-vibes') return this.queuedForOwner(input, input.policyResult.analysis, `held for you: ${ownerOnlyReason(decided.item)}`, decided.item);
       return this.askOwner(input, input.policyResult.analysis, {

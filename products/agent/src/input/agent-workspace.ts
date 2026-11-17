@@ -1,5 +1,3 @@
-import { agentResearchReportSourceOwner } from '@goodvibes-jev/engine/terminal-shell/agent-turn/protected-research-report';
-import { submitProtectedAgentResearchReport } from './agent-workspace-research-report-editor.ts';
 import { settleEditorMessageTone } from './agent-workspace-editor-message.ts';
 import type { MemoryApi } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import type { MemoryRecord } from '@goodvibes-jev/engine/platform/platform/state';
@@ -13,7 +11,6 @@ import type { AgentRuntimeProfileInfo } from '../agent/runtime-profile.ts';
 import { AgentSkillRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn/skill-registry';
 import { activateAgentWorkspaceSelection } from './agent-workspace-activation.ts';
 import { AGENT_WORKSPACE_CATEGORIES } from './agent-workspace-categories.ts';
-import { submitAgentResearchRunEditor } from './agent-workspace-research-run-editor.ts';
 import { buildAgentWorkspaceCommandEditorSubmission, isAgentWorkspaceCommandEditorKind } from './agent-workspace-command-editor.ts';
 import { createDeleteEditor, editorCategoryId } from './agent-workspace-editors.ts';
 import { submitAgentWorkspaceLocalRegistryEditor } from './agent-workspace-local-editor-submission.ts';
@@ -25,6 +22,7 @@ import { appendAgentWorkspaceActionSearchText, backspaceAgentWorkspaceActionSear
 import { applyAgentWorkspaceSetupCheckpointAction } from './agent-workspace-setup-checkpoint-action.ts';
 import { agentWorkspaceSettingSchema, agentWorkspaceTuiSettingsImportHasChanges, applyAgentWorkspaceSettingValue, applyAgentWorkspaceTuiSettingsImport, buildAgentWorkspaceSettingActionDisplay, buildAgentWorkspaceSettingActionEffect, createAgentWorkspaceSettingsImportEditor, describeAgentWorkspaceTuiSettingsImportPlan, isAgentWorkspaceActionVisible, planAgentWorkspaceTuiSettingsImport, type AgentWorkspaceSettingActionDisplay, type TuiSettingsImportPlan } from './agent-workspace-settings.ts';
 import { isAffirmative } from './agent-workspace-command-editor-engine.ts';
+import { workspaceEditorOwnerToolCall, type WorkspaceEditorToolCall } from './agent-workspace-editor-tool-calls.ts';
 import { buildAgentWorkspaceRuntimeSnapshot } from './agent-workspace-snapshot.ts';
 import { checkAgentWorkspaceHostSetup } from './agent-workspace-setup-host-status.ts';
 import { syncAgentWorkspaceLiveCounters } from './agent-workspace-live-counters.ts';
@@ -54,13 +52,10 @@ export class AgentWorkspace {
   public runtimeSnapshot: AgentWorkspaceRuntimeSnapshot | null = null;
   public lastActionResult: AgentWorkspaceActionResult | null = null;
   private _localEditor: AgentWorkspaceLocalEditor | null = null;
-  private researchSubmission: AbortController | null = null;
   /** The import plan the open confirm form shows; applying writes exactly this. */
   private pendingSettingsImport: TuiSettingsImportPlan | null = null;
   get localEditor(): AgentWorkspaceLocalEditor | null { return this._localEditor; }
   set localEditor(editor: AgentWorkspaceLocalEditor | null) {
-    this.researchSubmission?.abort();
-    this.researchSubmission = null;
     if (editor?.kind !== 'settings-import') this.pendingSettingsImport = null;
     this._localEditor = editor ? settleEditorMessageTone(this._localEditor, editor) : null;
   }
@@ -667,8 +662,11 @@ export class AgentWorkspace {
       return;
     }
     if (trySubmitDirectHostActionEditor(this, editor, this.context, (id) => this.editorField(id), requestRender)) return;
-    if (editor.kind === 'research-report') {
-      if (!this.researchSubmission) void this.submitResearchReport(editor, requestRender).catch(() => {});
+    // A form whose work is one tool call runs that call now, as the owner's
+    // confirmed action: no chat turn, and the values are exactly the ones typed.
+    const toolCall = workspaceEditorOwnerToolCall(editor);
+    if (toolCall) {
+      void this.submitToolCallEditor(editor, toolCall, requestRender);
       return;
     }
     if (isAgentWorkspaceCommandEditorKind(editor.kind)) {
@@ -750,50 +748,77 @@ export class AgentWorkspace {
     }
   }
 
-  private async submitResearchReport(editor: AgentWorkspaceLocalEditor, requestRender?: () => void): Promise<void> {
-    const controller = new AbortController();
-    this.researchSubmission = controller;
-    const context = this.context;
-    const dispatch = this.dispatchPrompt;
-    const fields = Object.freeze(Object.fromEntries(editor.fields.map(field => [field.id, field.value])));
-    const assertCurrent = () => {
-      if (controller.signal.aborted || this.researchSubmission !== controller || !this.active
-        || this.localEditor !== editor || this.context !== context || this.dispatchPrompt !== dispatch
-        || editor.fields.some(field => fields[field.id] !== field.value)) throw new Error('Research editor changed.');
-    };
-    this.status = 'Preparing research report privately...'; requestRender?.();
-    try {
-      await submitProtectedAgentResearchReport(editor, fields, this.hasPromptDispatch(),
-        agentResearchReportSourceOwner(context?.extensions?.toolRegistry), { signal: controller.signal, assertCurrent }, result => {
-          assertCurrent();
-          // Detach this operation before the editor setter invalidates edits.
-          this.researchSubmission = null;
-          this.localEditor = result.kind === 'editor' ? result.editor : null;
-          this.status = result.status;
-          if (result.actionResult) this.lastActionResult = result.actionResult;
-          if (result.kind === 'prompt') dispatch?.(result.prompt);
-          requestRender?.();
-        });
-    } finally {
-      if (this.researchSubmission === controller) this.researchSubmission = null;
+  private toolCallSubmission: AbortController | null = null;
+
+  /**
+   * Runs the one tool call a form stands for (the same call the agent's
+   * run_workspace_action makes from the same fields) through the registry's
+   * owner-confirmed entry: the owner's yes is the approval, a deny rule or plan
+   * mode still refuses, and the tool's own answer is shown here.
+   */
+  private async submitToolCallEditor(editor: AgentWorkspaceLocalEditor, toolCall: WorkspaceEditorToolCall, requestRender?: () => void): Promise<void> {
+    if (this.toolCallSubmission) {
+      this.status = `Not run again: ${editor.title} is still running; its result appears here when it finishes.`;
+      requestRender?.();
+      return;
     }
+    if (toolCall.confirmation && !isAffirmative(this.editorField('confirm'))) {
+      this.localEditor = { ...editor, message: 'Nothing was run. Type yes in Confirm, then press Enter.' };
+      this.status = `${editor.title} not confirmed.`;
+      requestRender?.();
+      return;
+    }
+    const context = this.context;
+    const registry = context?.extensions?.toolRegistry;
+    if (!context || !registry || typeof registry.executeOwnerConfirmed !== 'function') {
+      this.localEditor = { ...editor, message: `Nothing was run: this runtime has no tool registry to run ${toolCall.tool}.` };
+      this.status = `${editor.title} unavailable.`;
+      this.lastActionResult = { kind: 'error', title: `${editor.title} unavailable`, detail: `This runtime has no tool registry, so ${toolCall.tool} cannot run from the workspace.` };
+      requestRender?.();
+      return;
+    }
+    const request = `The owner filled in the workspace form "${editor.title}" and confirmed it.`;
+    const args = { ...toolCall.build((fieldId) => this.editorField(fieldId), request) } as Record<string, unknown>;
+    const controller = new AbortController();
+    this.toolCallSubmission = controller;
+    this.status = `Running ${editor.title}...`;
+    requestRender?.();
+    let result: { readonly success: boolean; readonly output?: string | undefined; readonly error?: string | undefined };
+    try {
+      result = await registry.executeOwnerConfirmed(`workspace-${toolCall.callId}`, toolCall.tool, args, {
+        goal: request,
+        criteria: [`Run ${toolCall.tool} with exactly the values the owner entered in "${editor.title}".`],
+        signal: controller.signal,
+      });
+    } catch (error) {
+      result = { success: false, error: error instanceof Error ? error.message : String(error) };
+    } finally {
+      if (this.toolCallSubmission === controller) this.toolCallSubmission = null;
+    }
+    // The person may have closed the workspace or moved to another form meanwhile.
+    if (this.context !== context) return;
+    if (!result.success) {
+      const detail = result.error ?? `${toolCall.tool} did not succeed and gave no reason.`;
+      if (this.localEditor?.kind === editor.kind) this.localEditor = { ...this.localEditor, message: `Not done: ${detail}` };
+      this.status = `${editor.title} was not done.`;
+      this.lastActionResult = { kind: 'error', title: `${editor.title} was not done`, detail, command: toolCall.tool };
+      requestRender?.();
+      return;
+    }
+    if (this.localEditor?.kind === editor.kind) this.localEditor = null;
+    this.runtimeSnapshot = buildAgentWorkspaceRuntimeSnapshot(context);
+    this.status = `${editor.title}: done.`;
+    this.lastActionResult = {
+      kind: 'refreshed',
+      title: `${editor.title}: done`,
+      detail: result.output?.trim() || `${toolCall.tool} finished with no output.`,
+      command: toolCall.tool,
+      safety: toolCall.confirmation ? 'safe' : 'read-only',
+    };
+    requestRender?.();
   }
 
   private submitCommandEditor(editor: AgentWorkspaceLocalEditor): void {
-    const shellPaths = this.context?.workspace?.shellPaths;
-    if (editor.kind === 'research-run' && shellPaths) {
-      // The owner's typed fields become the run directly; no model turn.
-      const outcome = submitAgentResearchRunEditor(shellPaths, editor, (fieldId) => this.editorField(fieldId));
-      this.status = outcome.status;
-      if (outcome.actionResult) this.lastActionResult = outcome.actionResult;
-      if (outcome.kind === 'editor') {
-        this.localEditor = outcome.editor;
-        return;
-      }
-      this.localEditor = null;
-      if (this.context) this.runtimeSnapshot = buildAgentWorkspaceRuntimeSnapshot(this.context);
-      return;
-    }
     const result = buildAgentWorkspaceCommandEditorSubmission(editor, (fieldId) => this.editorField(fieldId), this.hasCommandDispatch(), this.hasPromptDispatch());
     if (result.kind === 'editor') {
       this.localEditor = result.editor;

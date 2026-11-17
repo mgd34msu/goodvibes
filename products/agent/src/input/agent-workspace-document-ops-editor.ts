@@ -1,4 +1,4 @@
-import type { AgentWorkspaceActionResult, AgentWorkspaceLocalEditor, AgentWorkspaceReviewPacketDefaults } from './agent-workspace-types.ts';
+import type { AgentWorkspaceLocalEditor, AgentWorkspaceReviewPacketDefaults } from './agent-workspace-types.ts';
 import { isAffirmative } from './agent-workspace-command-editor-engine.ts';
 
 type AgentWorkspaceFieldReader = (fieldId: string) => string;
@@ -99,7 +99,7 @@ export function createAgentDocumentReviewPacketPresetEditor(
       { id: 'handoffArchiveArtifactId', label: 'Handoff archive', value: defaults?.handoffArchiveArtifactId ?? '', required: false, multiline: false, hint: 'Final reviewer handoff ZIP artifact id.' },
       { id: 'relatedArtifactIds', label: 'Related artifacts', value: defaults?.relatedArtifactIds.join('\n') ?? '', required: false, multiline: true, hint: 'Comma- or newline-separated source, export, attachment, receipt, or evidence artifact ids.' },
       { id: 'summary', label: 'Summary', value: defaults?.summary ?? '', required: false, multiline: false, hint: 'Short packet summary shown in list and timeline views.' },
-      { id: 'confirm', label: 'Confirm save', value: 'no', required: true, multiline: false, hint: 'Type yes only after the user explicitly asks to save this packet preset.' },
+      { id: 'confirm', label: 'Confirm save', value: 'no', required: true, multiline: false, hint: 'Type yes to save this packet preset.' },
     ],
   };
 }
@@ -115,7 +115,7 @@ export function createAgentDocumentReviewPacketPresetRefreshEditor(): AgentWorks
       { id: 'artifactId', label: 'Preset artifact id', value: '', required: true, multiline: false, hint: 'Existing review packet preset artifact id from list/show output.' },
       { id: 'name', label: 'New preset name', value: '', required: false, multiline: false, hint: 'Optional. Defaults to the old preset name plus "refreshed".' },
       { id: 'summary', label: 'New summary', value: '', required: false, multiline: false, hint: 'Optional. Defaults to the old summary with stale ids replaced when possible.' },
-      { id: 'confirm', label: 'Confirm refresh', value: 'no', required: true, multiline: false, hint: 'Type yes only after the user explicitly asks to refresh this packet preset.' },
+      { id: 'confirm', label: 'Confirm refresh', value: 'no', required: true, multiline: false, hint: 'Type yes to refresh this packet preset.' },
     ],
   };
 }
@@ -136,11 +136,10 @@ export function createAgentDocumentReviewPacketShareEditor(
       { id: 'channel', label: 'Channel target', value: '', required: false, multiline: false, hint: 'Optional surface[:route][ | label], such as slack:C123 | Ops. Fill exactly one target field.' },
       { id: 'route', label: 'Route target', value: '', required: false, multiline: false, hint: 'Optional id of a bound route, or route id | label. Fill exactly one target field.' },
       { id: 'webhook', label: 'Webhook URL', value: '', required: false, multiline: false, hint: 'Optional http(s) webhook target. Fill exactly one target field.' },
-      { id: 'confirm', label: 'Confirm share', value: 'no', required: true, multiline: false, hint: 'Type yes only after the user explicitly asks to share this review packet.' },
+      { id: 'confirm', label: 'Confirm share', value: 'no', required: true, multiline: false, hint: 'Type yes to share this review packet.' },
     ],
   };
 }
-
 
 function readList(value: string): readonly string[] {
   const seen = new Set<string>();
@@ -248,295 +247,5 @@ export function buildAgentDocumentReviewPacketShareToolArgs(
     ...(webhook ? { webhook } : {}),
     confirm: isAffirmative(readField('confirm')),
     explicitUserRequest,
-  };
-}
-
-export function buildAgentDocumentReviewerReadinessPromptSubmission(
-  editor: AgentWorkspaceLocalEditor,
-  readField: AgentWorkspaceFieldReader,
-  promptDispatchAvailable: boolean,
-): {
-  readonly kind: 'editor';
-  readonly editor: AgentWorkspaceLocalEditor;
-  readonly status: string;
-  readonly actionResult: AgentWorkspaceActionResult;
-} | {
-  readonly kind: 'prompt';
-  readonly prompt: string;
-  readonly status: string;
-  readonly actionResult: AgentWorkspaceActionResult;
-} {
-  if (!promptDispatchAvailable) {
-    return {
-      kind: 'editor',
-      editor: {
-        ...editor,
-        message: 'Prompt dispatch is unavailable in this runtime. Use agent_harness mode:"run_workspace_action" with this editor schema.',
-      },
-      status: 'Prompt dispatch unavailable.',
-      actionResult: {
-        kind: 'error',
-        title: 'Prompt dispatch unavailable',
-        detail: 'This runtime cannot submit the reviewer-readiness preflight from the workspace form.',
-        safety: 'read-only',
-      },
-    };
-  }
-
-  const includeRoutes = isAffirmative(readField('includeRoutes'));
-  return {
-    kind: 'prompt',
-    prompt: [
-      'Inspect Document Ops reviewer readiness with the `agent_harness` tool.',
-      'Use mode:"document_ops_lane" and laneId:"reviewer_readiness".',
-      `Include exact repair routes: ${includeRoutes ? 'yes' : 'no'}.`,
-      'Do not export, archive, reveal, apply a route update, or mutate a document from this preflight.',
-    ].join('\n'),
-    status: 'Submitting reviewer-readiness preflight.',
-    actionResult: {
-      kind: 'guidance',
-      title: 'Review readiness preflight',
-      detail: 'Submitted a read-only Document Ops readiness check before export, handoff archive, or route update.',
-      safety: 'read-only',
-    },
-  };
-}
-
-/** Mutating packet actions never reach the model unless the Confirm field says yes. */
-function unconfirmedPacketAction(editor: AgentWorkspaceLocalEditor, action: string): {
-  readonly kind: 'editor';
-  readonly editor: AgentWorkspaceLocalEditor;
-  readonly status: string;
-  readonly actionResult: AgentWorkspaceActionResult;
-} {
-  return {
-    kind: 'editor',
-    editor: {
-      ...editor,
-      selectedFieldIndex: Math.max(0, editor.fields.findIndex((field) => field.id === 'confirm')),
-      message: `Review packet ${action} not confirmed. Type yes, then press Enter.`,
-    },
-    status: `Review packet ${action} not confirmed.`,
-    actionResult: {
-      kind: 'error',
-      title: `Review packet ${action} not confirmed`,
-      detail: 'Type yes on the confirmation field to continue. Nothing was submitted.',
-      safety: 'safe',
-    },
-  };
-}
-
-export function buildAgentDocumentReviewPacketPresetPromptSubmission(
-  editor: AgentWorkspaceLocalEditor,
-  readField: AgentWorkspaceFieldReader,
-  promptDispatchAvailable: boolean,
-): {
-  readonly kind: 'editor';
-  readonly editor: AgentWorkspaceLocalEditor;
-  readonly status: string;
-  readonly actionResult: AgentWorkspaceActionResult;
-} | {
-  readonly kind: 'prompt';
-  readonly prompt: string;
-  readonly status: string;
-  readonly actionResult: AgentWorkspaceActionResult;
-} {
-  if (!isAffirmative(readField('confirm'))) return unconfirmedPacketAction(editor, 'preset save');
-  if (!promptDispatchAvailable) {
-    return {
-      kind: 'editor',
-      editor: {
-        ...editor,
-        message: 'Prompt dispatch is unavailable in this runtime. Use agent_harness mode:"run_workspace_action" with this editor schema.',
-      },
-      status: 'Prompt dispatch unavailable.',
-      actionResult: {
-        kind: 'error',
-        title: 'Prompt dispatch unavailable',
-        detail: 'This runtime cannot submit the review packet preset save from the workspace form.',
-        safety: 'safe',
-      },
-    };
-  }
-
-  const toolArgs = buildAgentDocumentReviewPacketPresetToolArgs(
-    readField,
-    'Save this Document Ops review packet preset from the workspace form.',
-  );
-  return {
-    kind: 'prompt',
-    prompt: [
-      'Save a reusable Document Ops review packet preset with the `agent_review_packet_presets` tool.',
-      `Use these preset fields: ${JSON.stringify(toolArgs, null, 2)}.`,
-      'Only call the tool with confirm:true when the user explicitly asked GoodVibes Agent to save this preset. The save creates one local preset artifact and must not mutate documents, model routing, handoffs, or archives.',
-    ].join('\n'),
-    status: 'Submitting review packet preset save.',
-    actionResult: {
-      kind: 'guidance',
-      title: 'Save review packet preset',
-      detail: 'Asked the model to save a review packet preset. Nothing is saved until the model calls the tool and its result appears in the conversation.',
-      safety: 'safe',
-    },
-  };
-}
-
-export function buildAgentDocumentReviewPacketPresetRefreshPromptSubmission(
-  editor: AgentWorkspaceLocalEditor,
-  readField: AgentWorkspaceFieldReader,
-  promptDispatchAvailable: boolean,
-): {
-  readonly kind: 'editor';
-  readonly editor: AgentWorkspaceLocalEditor;
-  readonly status: string;
-  readonly actionResult: AgentWorkspaceActionResult;
-} | {
-  readonly kind: 'prompt';
-  readonly prompt: string;
-  readonly status: string;
-  readonly actionResult: AgentWorkspaceActionResult;
-} {
-  if (!isAffirmative(readField('confirm'))) return unconfirmedPacketAction(editor, 'preset refresh');
-  if (!promptDispatchAvailable) {
-    return {
-      kind: 'editor',
-      editor: {
-        ...editor,
-        message: 'Prompt dispatch is unavailable in this runtime. Use agent_harness mode:"run_workspace_action" with this editor schema.',
-      },
-      status: 'Prompt dispatch unavailable.',
-      actionResult: {
-        kind: 'error',
-        title: 'Prompt dispatch unavailable',
-        detail: 'This runtime cannot submit the review packet preset refresh from the workspace form.',
-        safety: 'safe',
-      },
-    };
-  }
-
-  const toolArgs = buildAgentDocumentReviewPacketPresetRefreshToolArgs(
-    readField,
-    'Refresh this Document Ops review packet preset from the workspace form.',
-  );
-  return {
-    kind: 'prompt',
-    prompt: [
-      'Refresh a stale reusable Document Ops review packet preset with the `agent_review_packet_presets` tool.',
-      `Use these refresh fields: ${JSON.stringify(toolArgs, null, 2)}.`,
-      'Only call the tool with confirm:true when the user explicitly asked GoodVibes Agent to refresh this preset. The refresh creates one new local preset artifact from freshness recommendations and must not mutate documents, model routing, handoffs, archives, or the source preset.',
-    ].join('\n'),
-    status: 'Submitting review packet preset refresh.',
-    actionResult: {
-      kind: 'guidance',
-      title: 'Refresh review packet preset',
-      detail: 'Asked the model to refresh the review packet preset into a new local artifact. Nothing is saved until the model calls the tool and its result appears in the conversation.',
-      safety: 'safe',
-    },
-  };
-}
-
-export function buildAgentDocumentReviewPacketSharePromptSubmission(
-  editor: AgentWorkspaceLocalEditor,
-  readField: AgentWorkspaceFieldReader,
-  promptDispatchAvailable: boolean,
-): {
-  readonly kind: 'editor';
-  readonly editor: AgentWorkspaceLocalEditor;
-  readonly status: string;
-  readonly actionResult: AgentWorkspaceActionResult;
-} | {
-  readonly kind: 'prompt';
-  readonly prompt: string;
-  readonly status: string;
-  readonly actionResult: AgentWorkspaceActionResult;
-} {
-  if (!isAffirmative(readField('confirm'))) return unconfirmedPacketAction(editor, 'share');
-  if (!promptDispatchAvailable) {
-    return {
-      kind: 'editor',
-      editor: {
-        ...editor,
-        message: 'Prompt dispatch is unavailable in this runtime. Use agent_harness mode:"run_workspace_action" with this editor schema.',
-      },
-      status: 'Prompt dispatch unavailable.',
-      actionResult: {
-        kind: 'error',
-        title: 'Prompt dispatch unavailable',
-        detail: 'This runtime cannot submit the review packet share from the workspace form.',
-        safety: 'safe',
-      },
-    };
-  }
-
-  const toolArgs = buildAgentDocumentReviewPacketShareToolArgs(
-    readField,
-    'Share this Document Ops review packet archive from the workspace form.',
-  );
-  return {
-    kind: 'prompt',
-    prompt: [
-      'Share a saved Document Ops reviewer packet archive with the `agent_review_packet_share` tool.',
-      `Use these share fields: ${JSON.stringify(toolArgs, null, 2)}.`,
-      'Only call the tool with confirm:true when the user explicitly asked GoodVibes Agent to share this packet. The tool validates the saved handoff archive and sends packet evidence through the configured target, with the ZIP attached where the surface carries attachments.',
-    ].join('\n'),
-    status: 'Submitting review packet share.',
-    actionResult: {
-      kind: 'guidance',
-      title: 'Share review packet',
-      detail: 'Asked the model to share the saved handoff archive through the chosen target. Nothing is sent until the model calls the tool and its result appears in the conversation.',
-      safety: 'safe',
-    },
-  };
-}
-
-export function buildAgentDocumentReviewPacketWizardPromptSubmission(
-  editor: AgentWorkspaceLocalEditor,
-  readField: AgentWorkspaceFieldReader,
-  promptDispatchAvailable: boolean,
-): {
-  readonly kind: 'editor';
-  readonly editor: AgentWorkspaceLocalEditor;
-  readonly status: string;
-  readonly actionResult: AgentWorkspaceActionResult;
-} | {
-  readonly kind: 'prompt';
-  readonly prompt: string;
-  readonly status: string;
-  readonly actionResult: AgentWorkspaceActionResult;
-} {
-  if (!promptDispatchAvailable) {
-    return {
-      kind: 'editor',
-      editor: {
-        ...editor,
-        message: 'Prompt dispatch is unavailable in this runtime. Use agent_harness mode:"run_workspace_action" with this editor schema.',
-      },
-      status: 'Prompt dispatch unavailable.',
-      actionResult: {
-        kind: 'error',
-        title: 'Prompt dispatch unavailable',
-        detail: 'This runtime cannot submit the review packet wizard from the workspace form.',
-        safety: 'read-only',
-      },
-    };
-  }
-
-  const focus = readField('focus').trim() || 'next';
-  const includeRoutes = isAffirmative(readField('includeRoutes'));
-  return {
-    kind: 'prompt',
-    prompt: [
-      'Inspect the Document Ops review packet wizard with the `agent_harness` tool.',
-      'Use mode:"document_ops_lane" and laneId:"review_packet_wizard".',
-      `Focus: ${focus}.`,
-      `Include exact routes: ${includeRoutes ? 'yes' : 'no'}.`,
-      'Do not export, archive, reveal, apply a route update, or mutate a document from this wizard. Use the returned existing routes only after explicit user confirmation.',
-    ].join('\n'),
-    status: 'Submitting review packet wizard.',
-    actionResult: {
-      kind: 'guidance',
-      title: 'Review packet wizard',
-      detail: 'Submitted a read-only guided packet flow with progress, backtrack routes, route decision, and final evidence review.',
-      safety: 'read-only',
-    },
   };
 }

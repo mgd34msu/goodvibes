@@ -1,4 +1,4 @@
-import type { AgentWorkspaceActionResult, AgentWorkspaceLocalEditor, AgentWorkspaceReviewPacketDefaults } from './agent-workspace-types.ts';
+import type { AgentWorkspaceLocalEditor, AgentWorkspaceReviewPacketDefaults } from './agent-workspace-types.ts';
 import { isAffirmative } from './agent-workspace-command-editor-engine.ts';
 
 type AgentWorkspaceFieldReader = (fieldId: string) => string;
@@ -398,101 +398,5 @@ export function buildAgentDocumentToolArgs(
     documentId,
     confirm: true,
     explicitUserRequest,
-  };
-}
-
-export function buildAgentDocumentPromptSubmission(
-  editor: AgentWorkspaceLocalEditor,
-  readField: AgentWorkspaceFieldReader,
-  promptDispatchAvailable: boolean,
-): {
-  readonly kind: 'editor';
-  readonly editor: AgentWorkspaceLocalEditor;
-  readonly status: string;
-  readonly actionResult?: AgentWorkspaceActionResult;
-} | {
-  readonly kind: 'prompt';
-  readonly prompt: string;
-  readonly status: string;
-  readonly actionResult: AgentWorkspaceActionResult;
-} {
-  const mutation = editor.kind === 'document-create'
-    || editor.kind === 'document-update'
-    || editor.kind === 'document-review'
-    || editor.kind === 'document-comment'
-    || editor.kind === 'document-resolve-comment'
-    || editor.kind === 'document-suggest'
-    || editor.kind === 'document-accept-suggestion'
-    || editor.kind === 'document-reject-suggestion'
-    || editor.kind === 'document-insert-artifact'
-    || editor.kind === 'document-attach-artifact'
-    || editor.kind === 'document-export';
-  if (mutation && !isAffirmative(readField('confirm'))) {
-    return {
-      kind: 'editor',
-      editor: { ...editor, message: 'Type yes to confirm this Agent document action.' },
-      status: 'Agent document action not confirmed.',
-    };
-  }
-
-  if (!promptDispatchAvailable) {
-    return {
-      kind: 'editor',
-      editor: {
-        ...editor,
-        message: 'Prompt dispatch is unavailable in this runtime. Use agent_harness mode:"run_workspace_action" with this editor schema.',
-      },
-      status: 'Prompt dispatch unavailable.',
-      actionResult: {
-        kind: 'error',
-        title: 'Prompt dispatch unavailable',
-        detail: 'This runtime cannot submit the document request from the workspace form.',
-        safety: mutation ? 'safe' : 'read-only',
-      },
-    };
-  }
-
-  const args = buildAgentDocumentToolArgs(
-    editor,
-    readField,
-    `Run the Agent document workspace action ${editor.title}.`,
-  );
-  const prompt = [
-    'Use the `agent_documents` tool for this Agent document workspace request.',
-    `mode: ${JSON.stringify(args.mode)}`,
-    args.documentId ? `documentId: ${JSON.stringify(args.documentId)}` : 'documentId: none',
-    args.artifactId ? `artifactId: ${JSON.stringify(args.artifactId)}` : 'artifactId: none',
-    args.attachmentLabel ? `attachmentLabel: ${JSON.stringify(args.attachmentLabel)}` : 'attachmentLabel: none',
-    args.attachmentNote ? `attachmentNote: ${JSON.stringify(args.attachmentNote)}` : 'attachmentNote: none',
-    args.commentId ? `commentId: ${JSON.stringify(args.commentId)}` : 'commentId: none',
-    args.comment ? `comment: ${JSON.stringify(args.comment)}` : 'comment: none',
-    args.suggestionId ? `suggestionId: ${JSON.stringify(args.suggestionId)}` : 'suggestionId: none',
-    args.suggestionRationale ? `suggestionRationale: ${JSON.stringify(args.suggestionRationale)}` : 'suggestionRationale: none',
-    args.query ? `query: ${JSON.stringify(args.query)}` : 'query: none',
-    args.title ? `title: ${JSON.stringify(args.title)}` : 'title: none',
-    args.body ? `body: ${JSON.stringify(args.body)}` : 'body: none',
-    args.tags && args.tags.length > 0 ? `tags: ${JSON.stringify(args.tags)}` : 'tags: none',
-    args.status ? `status: ${JSON.stringify(args.status)}` : 'status: none',
-    args.placement ? `placement: ${JSON.stringify(args.placement)}` : 'placement: none',
-    args.sectionTitle ? `sectionTitle: ${JSON.stringify(args.sectionTitle)}` : 'sectionTitle: none',
-    args.changeSummary ? `changeSummary: ${JSON.stringify(args.changeSummary)}` : 'changeSummary: none',
-    typeof args.limit === 'number' ? `limit: ${args.limit}` : 'limit: default',
-    typeof args.includeVersions === 'boolean' ? `includeVersions: ${args.includeVersions ? 'true' : 'false'}` : 'includeVersions: default',
-    typeof args.includeContent === 'boolean' ? `includeContent: ${args.includeContent ? 'true' : 'false'}` : 'includeContent: default',
-    args.confirm ? 'confirm: true' : 'confirm: not required',
-    args.explicitUserRequest ? `explicitUserRequest: ${JSON.stringify(args.explicitUserRequest)}` : 'explicitUserRequest: not required',
-    'Policy: Agent-owned document drafts only; no default knowledge write and no artifact export unless mode is export.',
-  ].join('\n');
-
-  return {
-    kind: 'prompt',
-    prompt,
-    status: 'Submitting Agent document request.',
-    actionResult: {
-      kind: 'guidance',
-      title: editor.title,
-      detail: 'Asked the model to run the document tool. Nothing has changed until the model calls the tool and its result appears in the conversation.',
-      safety: mutation ? 'safe' : 'read-only',
-    },
   };
 }

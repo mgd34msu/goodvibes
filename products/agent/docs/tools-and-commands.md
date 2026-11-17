@@ -259,6 +259,7 @@ Execution routes:
 - Confirmed Agent Knowledge URL/file/artifact-id/bookmark/browser-history/connector ingest dispatches through `agent_knowledge_ingest`.
 - Command-backed editors dispatch through `workspace action:"run_command"`.
 - Learned-behavior and profile creation use the Agent-local or slash-command route.
+- Document, artifact, review-packet, model-compare and research forms run their one tool call directly when the owner types yes in the workspace, with exactly the values entered, and show the tool's answer in the result pane; no chat turn is involved. A deny rule or plan mode still refuses.
 - Web research/fetch forms return a main-conversation prompt instead of starting hidden nested work.
 - Selection-based actions accept `recordId` so the model can use the same selected-record flows as the TUI.
 

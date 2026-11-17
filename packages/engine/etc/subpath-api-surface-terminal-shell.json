@@ -3505,6 +3505,11 @@
       "text": "export declare class ConnectedHostVerbError extends Error { readonly status: number; readonly code: string | undefined; constructor(message: string, status: number, code?: string); }"
     },
     {
+      "name": "ConsolidationBasis",
+      "kind": "type",
+      "text": "export type ConsolidationBasis = 'readings' | 'identical';"
+    },
+    {
       "name": "ContainedProfileRead",
       "kind": "type",
       "text": "export type ContainedProfileRead = Omit<ProfileReadResponse, 'sections'> & { readonly sections: ReadonlyArray<ProfileSectionResponse | WithheldProfileSection>; }; ;; via Omit = type Omit<T, K extends keyof any> = Pick<T, Exclude<keyof T, K>>; ;; ReadonlyArray = interface ReadonlyArray<T> { readonly length: number; toString(): string; toLocaleString(): string; concat(...items: ConcatArray<T>[]): T[]; concat(...items: (T | ConcatArray<T>)[]): T[]; join(separator?: string): string; slice(start?: number, end?: number): T[]; indexOf(searchElement: T, fromIndex?: number): number; lastIndexOf(searchElement: T, fromIndex?: number): number; every<S extends T>(predicate: (value: T, index: number, array: readonly T[]) => value is S, thisArg?: any): this is readonly S[]; every(predicate: (value: T, index: number, array: readonly T[]) => unknown, thisArg?: any): boolean; some(predicate: (value: T, index: number, array: readonly T[]) => unknown, thisArg?: any): boolean; forEach(callbackfn: (value: T, index: number, array: readonly T[]) => void, thisArg?: any): void; map<U>(callbackfn: (value: T, index: number, array: readonly T[]) => U, thisArg?: any): U[]; filter<S extends T>(predicate: (value: T, index: number, array: readonly T[]) => value is S, thisArg?: any): S[]; filter(predicate: (value: T, index: number, array: readonly T[]) => unknown, thisArg?: any): T[]; reduce(callbackfn: (previousValue: T, currentValue: T, currentIndex: number, array: readonly T[]) => T): T; reduce(callbackfn: (previousValue: T, currentValue: T, currentIndex: number, array: readonly T[]) => T, initialValue: T): T; reduce<U>(callbackfn: (previousValue: U, currentValue: T, currentIndex: number, array: readonly T[]) => U, initialValue: U): U; reduceRight(callbackfn: (previousValue: T, currentValue: T, currentIndex: number, array: readonly T[]) => T): T; reduceRight(callbackfn: (previousValue: T, currentValue: T, currentIndex: number, array: readonly T[]) => T, initialValue: T): T; reduceRight<U>(callbackfn: (previousValue: U, currentValue: T, currentIndex: number, array: readonly T[]) => U, initialValue: U): U; readonly [n: number]: T; }"
@@ -4021,7 +4026,7 @@
         "unassessed",
         "unsettled"
       ],
-      "text": "export interface LearningCurationPassResult { readonly readings: number; readonly reused: number; readonly unsettled: number; readonly proposals: number; readonly duplicateGroups: number; readonly unassessed: number; readonly lastPassAt: number; }"
+      "text": "export interface LearningCurationPassResult { readonly readings: number; readonly reused: number; readonly unsettled: number; readonly proposals: number; readonly duplicateGroups: number; readonly unassessed: number; readonly lastPassAt: number; readonly withoutDecisionModel?: true | undefined; }"
     },
     {
       "name": "LearningCurationStore",
@@ -4961,7 +4966,7 @@
     {
       "name": "RESEARCH_SCREENING_UNCONFIGURED_DETAIL",
       "kind": "const",
-      "text": "RESEARCH_SCREENING_UNCONFIGURED_DETAIL = \"Research report screening needs tools.hostedResearchScreening turned on and the two screening provider keys (ABACUSAI_API_KEY, TYPESAFE_API_KEY), or the Classic decision policy.\""
+      "text": "RESEARCH_SCREENING_UNCONFIGURED_DETAIL = \"Research report screening needs tools.hostedResearchScreening turned on and the two screening provider keys (ABACUSAI_API_KEY, TYPESAFE_API_KEY), or judgment.policy No Decision Model.\""
     },
     {
       "name": "REVIEW_PACKET_PRESET_PURPOSE",
@@ -6039,7 +6044,7 @@
     {
       "name": "consolidationCandidateForGroup",
       "kind": "function",
-      "text": "export declare function consolidationCandidateForGroup(domain: LocalLearningCandidateDomain, group: readonly LearningRecord[], survivorId: string): LearningCandidateDraft | null;"
+      "text": "export declare function consolidationCandidateForGroup(domain: LocalLearningCandidateDomain, group: readonly LearningRecord[], survivorId: string, basis?: ConsolidationBasis): LearningCandidateDraft | null;"
     },
     {
       "name": "consolidationGroups",
@@ -6780,6 +6785,16 @@
       "name": "homeRelativePath",
       "kind": "function",
       "text": "export declare function homeRelativePath(path: string, home: string | null | undefined): string;"
+    },
+    {
+      "name": "identicalGroupSurvivor",
+      "kind": "function",
+      "text": "export declare function identicalGroupSurvivor(group: readonly LearningRecord[]): string | undefined;"
+    },
+    {
+      "name": "identicalLearningRecords",
+      "kind": "function",
+      "text": "export declare function identicalLearningRecords(domain: LocalLearningCandidateDomain, left: LearningRecord, right: LearningRecord): boolean;"
     },
     {
       "name": "inProcessVerbCaller",
@@ -10719,9 +10734,14 @@
       "text": "CONSOLIDATION_DOMAINS: readonly LocalLearningCandidateDomain[] ;; via LocalLearningCandidateDomain = export type LocalLearningCandidateDomain = 'memory' | 'note' | 'persona' | 'skill' | 'skill_bundle' | 'routine';"
     },
     {
+      "name": "ConsolidationBasis",
+      "kind": "type",
+      "text": "export type ConsolidationBasis = 'readings' | 'identical';"
+    },
+    {
       "name": "consolidationCandidateForGroup",
       "kind": "function",
-      "text": "export declare function consolidationCandidateForGroup(domain: LocalLearningCandidateDomain, group: readonly LearningRecord[], survivorId: string): LearningCandidateDraft | null; ;; via LearningCandidateDraft = export type LearningCandidateDraft = Omit<LearningCandidate, 'priority' | 'scores'>; ;; LearningRecord = export interface LearningRecord { readonly item: AgentWorkspaceLocalLibraryItem; readonly record: unknown; } ;; LocalLearningCandidateDomain = export type LocalLearningCandidateDomain = 'memory' | 'note' | 'persona' | 'skill' | 'skill_bundle' | 'routine';"
+      "text": "export declare function consolidationCandidateForGroup(domain: LocalLearningCandidateDomain, group: readonly LearningRecord[], survivorId: string, basis?: ConsolidationBasis): LearningCandidateDraft | null; ;; via LearningCandidateDraft = export type LearningCandidateDraft = Omit<LearningCandidate, 'priority' | 'scores'>; ;; LearningRecord = export interface LearningRecord { readonly item: AgentWorkspaceLocalLibraryItem; readonly record: unknown; } ;; LocalLearningCandidateDomain = export type LocalLearningCandidateDomain = 'memory' | 'note' | 'persona' | 'skill' | 'skill_bundle' | 'routine';"
     },
     {
       "name": "consolidationGroups",
@@ -10732,6 +10752,16 @@
       "name": "duplicatePairKey",
       "kind": "function",
       "text": "export declare function duplicatePairKey(domain: LocalLearningCandidateDomain, left: LearningRecord, right: LearningRecord): string; ;; via LearningRecord = export interface LearningRecord { readonly item: AgentWorkspaceLocalLibraryItem; readonly record: unknown; } ;; LocalLearningCandidateDomain = export type LocalLearningCandidateDomain = 'memory' | 'note' | 'persona' | 'skill' | 'skill_bundle' | 'routine';"
+    },
+    {
+      "name": "identicalGroupSurvivor",
+      "kind": "function",
+      "text": "export declare function identicalGroupSurvivor(group: readonly LearningRecord[]): string | undefined; ;; via LearningRecord = export interface LearningRecord { readonly item: AgentWorkspaceLocalLibraryItem; readonly record: unknown; }"
+    },
+    {
+      "name": "identicalLearningRecords",
+      "kind": "function",
+      "text": "export declare function identicalLearningRecords(domain: LocalLearningCandidateDomain, left: LearningRecord, right: LearningRecord): boolean; ;; via LearningRecord = export interface LearningRecord { readonly item: AgentWorkspaceLocalLibraryItem; readonly record: unknown; } ;; LocalLearningCandidateDomain = export type LocalLearningCandidateDomain = 'memory' | 'note' | 'persona' | 'skill' | 'skill_bundle' | 'routine';"
     },
     {
       "name": "liveGroupMembers",
@@ -10762,7 +10792,7 @@
         "unassessed",
         "unsettled"
       ],
-      "text": "export interface LearningCurationPassResult { readonly readings: number; readonly reused: number; readonly unsettled: number; readonly proposals: number; readonly duplicateGroups: number; readonly unassessed: number; readonly lastPassAt: number; }"
+      "text": "export interface LearningCurationPassResult { readonly readings: number; readonly reused: number; readonly unsettled: number; readonly proposals: number; readonly duplicateGroups: number; readonly unassessed: number; readonly lastPassAt: number; readonly withoutDecisionModel?: true | undefined; }"
     },
     {
       "name": "assertLearningCandidateCollection",
@@ -13940,7 +13970,7 @@
     {
       "name": "RESEARCH_SCREENING_UNCONFIGURED_DETAIL",
       "kind": "const",
-      "text": "RESEARCH_SCREENING_UNCONFIGURED_DETAIL = \"Research report screening needs tools.hostedResearchScreening turned on and the two screening provider keys (ABACUSAI_API_KEY, TYPESAFE_API_KEY), or the Classic decision policy.\""
+      "text": "RESEARCH_SCREENING_UNCONFIGURED_DETAIL = \"Research report screening needs tools.hostedResearchScreening turned on and the two screening provider keys (ABACUSAI_API_KEY, TYPESAFE_API_KEY), or judgment.policy No Decision Model.\""
     },
     {
       "name": "ResearchReportOperation",
@@ -14568,7 +14598,7 @@
     {
       "name": "RESEARCH_SCREENING_UNCONFIGURED_DETAIL",
       "kind": "const",
-      "text": "RESEARCH_SCREENING_UNCONFIGURED_DETAIL = \"Research report screening needs tools.hostedResearchScreening turned on and the two screening provider keys (ABACUSAI_API_KEY, TYPESAFE_API_KEY), or the Classic decision policy.\""
+      "text": "RESEARCH_SCREENING_UNCONFIGURED_DETAIL = \"Research report screening needs tools.hostedResearchScreening turned on and the two screening provider keys (ABACUSAI_API_KEY, TYPESAFE_API_KEY), or judgment.policy No Decision Model.\""
     },
     {
       "name": "createAgentCredentialReader",

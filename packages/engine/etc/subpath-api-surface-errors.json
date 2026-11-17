@@ -91,7 +91,7 @@
         "reason",
         "revision"
       ],
-      "text": "export interface DecisionModelPolicyState { readonly policy: DecisionModelPolicy; readonly operation: 'decision' | 'classic'; readonly reason: NoDecisionModelReason | null; readonly revision: number; readonly failure?: DecisionModelFailureState; }"
+      "text": "export interface DecisionModelPolicyState { readonly policy: DecisionModelPolicy; readonly operation: 'decision' | 'no-decision-model'; readonly reason: NoDecisionModelReason | null; readonly revision: number; readonly failure?: DecisionModelFailureState; }"
     },
     {
       "name": "DecisionModelUse",

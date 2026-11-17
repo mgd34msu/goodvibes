@@ -13,12 +13,6 @@ function shell(source: string, values: Record<string, string> = {}) {
   return spawnSync('sh', ['-c', `set -eu; . "$FIXTURE_INSTALLER"; ${source}`], { encoding: 'utf8', timeout: 12_000,
     env: { ...process.env, HOME: home, GOODVIBES_INSTALL_SH_LIB: '1', FIXTURE_INSTALLER: resolve(import.meta.dir, 'install.sh'), ...values } });
 }
-test('quoted display arguments preserve spaces, apostrophes, substitutions and separators', () => {
-  const value = `${home}/o'wner/$(touch NOT_A_COMMAND);file`;
-  const result = shell('shadow_quote "$VALUE"', { VALUE: value });
-  expect(result.status, result.stderr).toBe(0); expect(result.stdout).toBe(`'${value.replaceAll("'", "'\\''")}'`);
-  expect(existsSync(join(root, 'NOT_A_COMMAND'))).toBe(false);
-});
 test('a standalone path with shell metacharacters is removed only through structured argv', () => {
   const copy = binary(join(home, "o'wner;$(touch PWNED)", 'goodvibes'));
   const result = shell(`

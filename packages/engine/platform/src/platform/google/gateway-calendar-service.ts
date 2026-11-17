@@ -463,7 +463,8 @@ export function createGoogleCalendarGatewayService(
      * appears on every guest's Google calendar organised by the owner, which
      * for a forwarded invitation is a duplicate meeting sent to people the
      * owner was never shown. The result lists who was left off, and inviting
-     * them is `calendar.events.create`, which confirms with the list in view.
+     * them is `calendar.events.update` on the imported event, which confirms
+     * with the list in view; a second create would leave two events.
      */
     async importIcs(icsContent, calendarId, importOptions = {}): Promise<CalendarGatewayIcsImport> {
       const connection = await connect();
@@ -559,7 +560,7 @@ export function createGoogleCalendarGatewayService(
             eventId: created.value.id,
             title: event.summary || event.uid,
             attendees: guests,
-            next: 'To invite them, create the event with calendar.events.create and these attendees; it asks for confirmation with the list shown.',
+            next: `To invite them, add them to this event with calendar.events.update (eventId ${created.value.id}, attendees: these addresses); it asks for confirmation with the list shown. Do not create the event again: it is already on the calendar.`,
           });
         }
       }

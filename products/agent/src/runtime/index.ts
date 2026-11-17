@@ -225,7 +225,7 @@ export {
   isPluginReloadable, isPluginTerminal, resolveCapabilityManifest, validateManifestV2, validatePluginSignature, LOW_QUALITY_THRESHOLD,
   computeQualityScore, createCompactionManager, describeScore, escalateStrategy, isTerminalCompactionState, reachableFromCompactionState,
   compactionFailurePlaybook, exportRecoveryPlaybook, permissionDeadlockPlaybook, pluginDegradationPlaybook, reconnectFailurePlaybook, sessionUnrecoverablePlaybook,
-  stuckTurnPlaybook, createSessionUnrecoverablePlaybook, createStuckTurnPlaybook, evaluateOrchestrationSpawn, TRANSPORT_COMPATIBILITY_MATRIX,
+  stuckTurnPlaybook, createSessionUnrecoverablePlaybook, createStuckTurnPlaybook, evaluateOrchestrationSpawn,
   evaluateSessionMaintenance,
   formatSessionMaintenanceLines, getGuidanceMode, DEFAULT_RETENTION_CONFIG, RetentionPolicy, SnapshotPruner, buildPersistedSessionContext,
   buildLocalReturnContextSummary, formatReturnContextForDisplay, getReturnContextMode, maybeAssistReturnContextSummary, persistConversation, generateUserSessionId,
@@ -253,13 +253,7 @@ export {
   // lookup (runtime/path-shadow-startup.ts) and nothing else.
   detectInstallKind, announceReachability, boundedLatestRelease, runReachabilityCheck, resolveSelfDirectory, probeVersionLine,
   buildReachabilityNotices, reachabilityNoticeLines, INSTALLED_COMMANDS, removeRecoveryPoint, exportRemoteArtifactForAgent, importRemoteArtifact,
-  RemoteRunnerRegistry, RemoteSupervisor, DistributedRuntimeManager, getDistributedNodeHostContract, CURRENT_PROTOCOL_VERSION, VersionMismatchError,
-  negotiateProtocolVersion,
-  // Protocol version types, re-exported for transport compatibility tests.
-  // ProtocolVersion, VersionNegotiationResult, NegotiatedProtocol are available
-  // via operations namespace (operations.ProtocolVersion etc.) but cannot be
-  // re-exported here without a registered subpath. Tests that need these types
-  // should import from the operations namespace types directly.
+  RemoteRunnerRegistry, RemoteSupervisor, DistributedRuntimeManager, getDistributedNodeHostContract,
   createTaskManager, PhasedToolExecutor, budgetPhase, permissionPhase,
 } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 export type InstallKind = Operations.InstallKind;

@@ -118,9 +118,6 @@ export {
 export type {
   DistributedRuntimeSnapshotStore,
 } from './remote/index.js';
-export {
-  TRANSPORT_PROTOCOL_SUPPORT_MATRIX as TRANSPORT_COMPATIBILITY_MATRIX,
-} from './remote/index.js';
 export * from './crash-capture.js';
 export * from './session-maintenance.js';
 export * from './session-persistence.js';

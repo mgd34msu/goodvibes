@@ -310,6 +310,8 @@ export class ConversationManager {
       followUp?: true | undefined;
     },
   ): void {
+    // An answer held on screen while it was checked is replaced by the message itself.
+    this.releaseHeldReply();
     const candidate: AssistantMessage = {
       role: 'assistant',
       content,
@@ -487,6 +489,7 @@ export class ConversationManager {
   }
 
   public startStreamingBlock(): void {
+    this.releaseHeldReply();
     this.messages.push({ role: 'assistant', content: '' });
     this.streamingMessageIndex = this.messages.length - 1;
     this._messagesRevision++;
@@ -514,6 +517,19 @@ export class ConversationManager {
       retainVerificationMessagePositions(this, original => original === position ? undefined : original > position ? original - 1 : original);
     }
   }
+
+  /**
+   * The stream ended with an answer that is not a message yet (its completion
+   * check is running): the block leaves the history like a finalized one, so
+   * no request and no evidence reads it, while a display may keep showing it
+   * until `releaseHeldReply`. A manager with no display just finalizes it.
+   */
+  public holdStreamingBlock(): void {
+    this.finalizeStreamingBlock();
+  }
+
+  /** A held answer is no longer shown: it became a message, was withdrawn, or the turn ended. */
+  public releaseHeldReply(): void {}
 
   public getMessageSnapshot(): ConversationMessageSnapshot[] {
     return cloneMessages(this.messages);

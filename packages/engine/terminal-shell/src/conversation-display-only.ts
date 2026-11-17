@@ -47,6 +47,11 @@ export class DisplayOnlyOutput {
     this.trailingLineCount = 0;
   }
 
+  /** Forget one kept draw; the next rebuild leaves it out. */
+  remove(seq: number): void {
+    this.entries = this.entries.filter((entry) => entry.seq !== seq);
+  }
+
   /** Keep a draw; `anchor` is the message count when it was printed. */
   keep(anchor: number, draw: (width: number) => void): number {
     const seq = ++this.seq;

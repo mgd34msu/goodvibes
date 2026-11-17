@@ -395,10 +395,14 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
   // next request streams afresh); interim text and an accepted answer stay.
   let streamedText = '';
   let streamBlockOpen = false;
-  const endStream = (started: boolean): void => {
+  // `answer`: the stream ended with a reply that has no tool calls. It stays on
+  // screen (held, out of the history) while it is checked, until it is committed
+  // as the message or withdrawn, so the answer never vanishes during the check.
+  const endStream = (started: boolean, answer = false): void => {
     if (streamEnabled) {
       context.setStreamingActive(false);
-      context.conversation.finalizeStreamingBlock();
+      if (answer) context.conversation.holdStreamingBlock();
+      else context.conversation.finalizeStreamingBlock();
     }
     if (started && context.runtimeBus) {
       emitStreamEnd(context.runtimeBus, context.emitterContext(context.turnId), { turnId: context.turnId });
@@ -775,7 +779,7 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
       throw chatErr;
     }
 
-    endStream(true);
+    endStream(true, response.toolCalls.length === 0);
 
     response = {
       ...response,
@@ -1063,6 +1067,7 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
         context.conversation.updateStreamingBlock(streamedText);
       },
       draftWithdrawn: (_draft, reason) => {
+        context.conversation.releaseHeldReply();
         // Readers of the stream drop the draft they were shown; the next request streams its replacement.
         if (streamEnabled && context.runtimeBus) {
           emitDraftWithdrawn(context.runtimeBus, context.emitterContext(context.turnId), { turnId: context.turnId, reason });
@@ -1078,7 +1083,8 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
         context.requestRender();
       },
     },
-  });
+  // A held answer that never became a message (cancelled, ended, failed) leaves the screen with the turn.
+  }).finally(() => context.conversation.releaseHeldReply());
 
   if (outcome.status === 'cancelled') {
     // The orchestrator's cancellation path settles the turn (unfinished calls, rollback, TURN_CANCEL).

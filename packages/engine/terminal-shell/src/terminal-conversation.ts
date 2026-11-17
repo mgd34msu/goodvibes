@@ -364,6 +364,7 @@ export class TerminalConversationManager extends PlatformConversationManager {
      */
     public override updateStreamingBlock(content: string): void {
         super.updateStreamingBlock(content);
+        this.streamedContent = content;
         // Incrementally update the history buffer instead of full rebuild.
         // Throttle renderMarkdown to the 16ms render-coalescer cadence to avoid
         // O(n) parse overhead on every delta token during streaming.
@@ -391,10 +392,36 @@ export class TerminalConversationManager extends PlatformConversationManager {
      */
     public override finalizeStreamingBlock(): void {
         super.finalizeStreamingBlock();
+        this.streamedContent = '';
         this.streamingStartLine = -1;
         this.displayOnly.resetTrailing();
         this._streamWidth = -1;
         this._lastStreamRenderMs = 0;
+        this.markDirty();
+    }
+    /** The text of the reply streaming now, kept so an ended stream can stay on screen while it is checked. */
+    private streamedContent = '';
+    /** The display-only draw showing a held answer, while its completion check runs. */
+    private heldReplySeq: number | undefined;
+    /**
+     * holdStreamingBlock - The streamed answer leaves the history (no request or
+     * check reads it) but stays on screen, drawn display-only where it was, until
+     * the answer is committed as a message or withdrawn.
+     */
+    public override holdStreamingBlock(): void {
+        const content = this.streamedContent;
+        this.finalizeStreamingBlock();
+        this.releaseHeldReply();
+        if (!content)
+            return;
+        this.heldReplySeq = this.displayOnly.keep(this.getMessageCount(), (width) => { this.history.addLines(this.streamingLines(content, width)); });
+        this.markDirty();
+    }
+    public override releaseHeldReply(): void {
+        if (this.heldReplySeq === undefined)
+            return;
+        this.displayOnly.remove(this.heldReplySeq);
+        this.heldReplySeq = undefined;
         this.markDirty();
     }
     // -------------------------------------------------------------------------

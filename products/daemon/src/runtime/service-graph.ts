@@ -431,6 +431,7 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
       clusterCoordinator,
       checkoutSeam: browserCheckoutSeam.get, channelDeliveryRouter: graph.channelDeliveryRouter, inboxFactory: options.inboxFactory,
       mailboxReaders,
+      serviceRegistry: graph.serviceRegistry,
       triagePermissionHost: autonomousHost,
       nativeMutationHost: autonomousHost,
       hasProfile: (profileId: string): boolean => { try { graph.profileManager.load(profileId); return true; } catch { return false; } },

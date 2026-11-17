@@ -81,6 +81,8 @@ export interface DaemonHandlerCompositionOptions {
   readonly ownerInbox?: import('./payments-composition.js').PaymentsCompositionOptions['ownerInbox'];
   /** The meeting point the daemon facade's mailbox readers register on. */
   readonly mailboxReaders?: MailboxReaders | undefined;
+  /** Its entries can name where an inbox provider's credential is stored. */
+  readonly serviceRegistry?: { get(serviceName: string): object | null } | undefined;
 }
 
 /** Return only after each real surface is ready; failed acquisition rolls back. */
@@ -129,7 +131,8 @@ export async function createDaemonHandlerComposition(
       gatePollingOwned: (providerId, control) => options.clusterCoordinator.registerOwned(inboxPollerGate(providerId, control)),
       onOwnerMail: ownerMail.observe,
       ...(options.mailboxReaders ? { mailboxReaders: options.mailboxReaders } : {}),
-    }, { configManager: options.configManager, secretsManager: options.secretsManager }, options.triagePermissionHost),
+    }, { configManager: options.configManager, secretsManager: options.secretsManager,
+      ...(options.serviceRegistry ? { serviceRegistry: options.serviceRegistry } : {}) }, options.triagePermissionHost),
     registerDrafts: registerDraftMethods,
     registerPayments: () => createPaymentsServices({
       paymentContinuationOwner: options.paymentContinuationOwner,

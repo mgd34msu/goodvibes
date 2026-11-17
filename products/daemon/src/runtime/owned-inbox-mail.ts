@@ -9,13 +9,15 @@ import type { DaemonInboxControls, DaemonInboxFactory } from './daemon-handler-c
 import type { HandlerContext, OwnedHandlerSurface } from '../daemon/handlers/context.js';
 import type { RoutingRegistration } from '../daemon/handlers/index.js';
 import { acquireHostedInboxScreening, type HostedInboxScreeningHost, type HostedInboxScreeningAcquisition } from './hosted-source-screening-composition.js';
-import { inboxProviderFacts, SCREENING_FACTS, subscribeInboxFacts, type InboxFactOwners, type InboxFactScope, type InboxProvider } from './inbox-provider-facts.js';
+import { inboxProviderFacts, SCREENING_FACTS, serviceRegistrySecretKeys, subscribeInboxFacts, type InboxFactOwners, type InboxFactScope, type InboxProvider } from './inbox-provider-facts.js';
 
 type MailInput = Omit<Parameters<typeof composeMailDeps>[0], 'registerDispose'> & {
   readonly configManager: Partial<Pick<ConfigManager, 'subscribe' | 'getIngestionQuarantine' | 'getConfigurationIncarnation'
     | 'captureDurableConfigurationIncarnation' | 'getDurableConfigurationIncarnation' | 'onDidChangeIncarnation'>>;
   readonly secretsManager: Parameters<typeof composeMailDeps>[0]['secretsManager'] & Partial<HostedInboxScreeningHost['secrets']>
     & Partial<Pick<SecretsManager, 'onDidInvalidateCredentials'>>;
+  /** The service registry, whose entries can name where a provider's credential is stored. */
+  readonly serviceRegistry?: { get(serviceName: string): object | null } | undefined;
 };
 
 function hasHostedScreeningOwners(input: MailInput): input is MailInput & {
@@ -144,7 +146,10 @@ export async function registerOwnedMailInbox(factory: DaemonInboxFactory, contex
         return owned;
       } } satisfies Pick<DaemonInboxControls, 'acquireHostedScreening'> : {}),
       ...(onAccountInvalidation ? { onAccountInvalidation } : {}),
-      ...(subscribeFacts ? { onProviderInvalidation: (provider: InboxProvider, listener: () => void) => subscribeFacts(inboxProviderFacts(provider), listener) } satisfies
+      ...(subscribeFacts ? { onProviderInvalidation: (provider: InboxProvider, listener: () => void) => subscribeFacts(inboxProviderFacts(provider, {
+        config: mailInput.configManager,
+        ...(mailInput.serviceRegistry ? { serviceSecretKeys: serviceRegistrySecretKeys(mailInput.serviceRegistry) } : {}),
+      }), listener) } satisfies
         Pick<DaemonInboxControls, 'onProviderInvalidation'> : {}),
       ...(subscribeConfig ? { onConfigurationChange: (key, listener) => {
         assertCurrent(); return subscribeConfig(key, listener);

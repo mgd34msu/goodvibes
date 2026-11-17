@@ -316,6 +316,8 @@ export interface CommandWorkspaceServices extends CommandWorkspaceUiServices, Co
 export interface CommandPlatformConfigServices extends TerminalCommandPlatformConfigServices {
   /** Per-device pairing tokens, backs the /devices command family. */
   readonly pairingTokens?: import('@goodvibes-jev/engine/platform/platform/pairing').PairingTokenManager;
+  /** The daemon's paired-phone verbs: nodes, grants and retained captures for /devices. */
+  readonly devices?: import('@goodvibes-jev/engine/platform/platform/runtime/client').DevicesClient;
   /** Capability gate runtime, feature states derive from domain settings keys; surfaces read live/pending state here. */
   readonly featureFlagManager?: FeatureFlagManager;
 

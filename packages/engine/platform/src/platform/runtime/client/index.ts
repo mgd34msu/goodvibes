@@ -80,6 +80,7 @@ export type { ConversationRewindHostClient, ConversationRewindHostOptions } from
 
 export { createDevicesClient } from './devices-client.js';
 export type {
+  DeviceArtifactDeletion,
   DeviceArtifactSummary,
   DeviceCapabilityOutcomeWire,
   DeviceGrantSummary,

@@ -1,6 +1,13 @@
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { formatDeviceLine, resolveTokenByIdPrefix, shortTokenId } from '@goodvibes-jev/engine/platform/platform/pairing';
 import { holdMintedTokenForReveal } from '../../views/modals/devices-modal.ts';
+import {
+  DEVICE_CAPABILITY_SUBCOMMANDS,
+  DEVICE_CAPABILITY_USAGE,
+  deviceCapabilityConfirmation,
+  isDeviceCapabilitySubcommand,
+  runDeviceCapabilitySubcommand,
+} from '@goodvibes-jev/engine/terminal-shell/device-capabilities-command';
 
 /**
  * Register the /devices command, manage the per-device pairing tokens minted by
@@ -14,17 +21,25 @@ import { holdMintedTokenForReveal } from '../../views/modals/devices-modal.ts';
  *   /devices migrate-shared [name] mint a per-device token off the legacy shared token;
  *                                 the token is shown in the Paired Devices view, never in the transcript
  *   /devices revoke-shared        revoke the legacy shared token (asks once first)
+ *
+ * and the paired-phone capabilities the daemon serves (device-capabilities-command.ts):
+ *   /devices nodes                phones paired as device nodes and what each can serve
+ *   /devices grants               the "always allow" grants
+ *   /devices revoke-grant <id>    revoke one (asks once first)
+ *   /devices captures             photos and screen captures the daemon is keeping
+ *   /devices delete-capture <id>  delete one now (asks once first)
  */
 export function registerDevicesRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
     name: 'devices',
     aliases: ['device'],
-    description: 'Manage paired-device tokens (list, rename, revoke, migrate-shared)',
-    usage: '[list|rename <id> <name>|revoke <id>|migrate-shared [name]|revoke-shared]',
-    argsHint: '[list|rename|revoke|migrate-shared|revoke-shared]',
-    subcommands: { list: '', rename: '<id> <new name>', revoke: '<id>', 'migrate-shared': '[name]', 'revoke-shared': '' },
+    description: 'Manage paired devices: their tokens, the phones paired as device nodes, always-allow grants and retained captures',
+    usage: `[list|rename <id> <name>|revoke <id>|migrate-shared [name]|revoke-shared|${DEVICE_CAPABILITY_USAGE}]`,
+    argsHint: '[list|rename|revoke|migrate-shared|revoke-shared|nodes|grants|revoke-grant|captures|delete-capture]',
+    subcommands: { list: '', rename: '<id> <new name>', revoke: '<id>', 'migrate-shared': '[name]', 'revoke-shared': '', ...DEVICE_CAPABILITY_SUBCOMMANDS },
     confirm(args, ctx) {
       const sub = (args[0] ?? '').toLowerCase();
+      if (isDeviceCapabilitySubcommand(sub)) return deviceCapabilityConfirmation(args);
       const pairingTokens = ctx.platform.pairingTokens;
       if (!pairingTokens) return undefined;
       if (sub === 'revoke' && args[1]) {
@@ -47,7 +62,8 @@ export function registerDevicesRuntimeCommands(registry: CommandRegistry): void 
       }
       return undefined;
     },
-    handler(args, ctx) {
+    async handler(args, ctx) {
+      if (await runDeviceCapabilitySubcommand(args, ctx.platform.devices, (message) => ctx.print(message))) return;
       const pairingTokens = ctx.platform.pairingTokens;
       if (!pairingTokens) {
         ctx.print('Device management is unavailable in this runtime (no pairing token service wired).');
@@ -121,7 +137,7 @@ export function registerDevicesRuntimeCommands(registry: CommandRegistry): void 
         return;
       }
 
-      ctx.print(`Unknown /devices subcommand: ${sub}. Use: list | rename | revoke | migrate-shared | revoke-shared`);
+      ctx.print(`Unknown /devices subcommand: ${sub}. Use: list | rename | revoke | migrate-shared | revoke-shared | ${DEVICE_CAPABILITY_USAGE}`);
     },
   });
 }

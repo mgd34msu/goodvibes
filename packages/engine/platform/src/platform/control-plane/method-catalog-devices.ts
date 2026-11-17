@@ -4,8 +4,8 @@
  * The operator-contract surface for the paired-phone capability feature: which
  * device nodes are paired and what each can serve, ASKING one of them for a
  * capability and reading back what it returned, the durable "always allow"
- * grants with the ledger behind them, revoking a grant, and running the
- * housekeeping sweep on demand with its disclosure.
+ * grants with the ledger behind them, revoking a grant, deleting a retained
+ * capture, and running the housekeeping sweep on demand with its disclosure.
  *
  * The grants surface in any client renders from these verbs, so "visible and
  * revocable in the grants surface" (owner ruling 2026-07-25) is one contract
@@ -190,6 +190,20 @@ export const builtinGatewayDeviceMethodDescriptors: readonly GatewayMethodDescri
       artifact: DEVICE_ARTIFACT_SCHEMA,
       dataBase64: STRING_SCHEMA,
     }, ['artifact', 'dataBase64']),
+  }),
+  methodDescriptor({
+    id: 'devices.artifacts.delete',
+    title: 'Delete a Retained Device Capture',
+    description: 'Remove one retained camera or screen capture now, before its retention window ends: the file on the daemon host and its record. The removal is added to the housekeeping disclosure like a sweep removal, with the reason `deleted`. `deleted` is true only when the file was unlinked; a capture whose file was already gone (`file-missing`) or no longer matches what was taken (`content-mismatch`, the file is kept for inspection) loses its record and says so. An id that is not retained is a 404.',
+    category: 'runtime',
+    scopes: ['write:remote'],
+    http: { method: 'DELETE', path: '/api/devices/artifacts/{artifactId}' },
+    inputSchema: objectSchema({ artifactId: STRING_SCHEMA }, ['artifactId']),
+    outputSchema: objectSchema({
+      deleted: BOOLEAN_SCHEMA,
+      removal: DEVICE_ARTIFACT_REMOVAL_SCHEMA,
+      detail: STRING_SCHEMA,
+    }, ['deleted', 'removal', 'detail']),
   }),
   methodDescriptor({
     id: 'devices.grants.list',

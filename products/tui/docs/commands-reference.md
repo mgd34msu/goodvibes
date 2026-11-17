@@ -494,7 +494,7 @@ GoodVibes ships **163** built-in slash commands across **75** categories. Every 
 
 | Command | Aliases | Usage | Description |
 | --- | --- | --- | --- |
-| `/devices` | `/device` | `[list\|rename <id> <name>\|revoke <id>\|migrate-shared [name]\|revoke-shared --yes]` | Manage paired-device tokens (list, rename, revoke, migrate-shared) |
+| `/devices` | `/device` | `[list\|rename <id> <name>\|revoke <id>\|migrate-shared [name]\|revoke-shared --yes\|nodes\|grants\|revoke-grant <grant-id>\|captures\|delete-capture <capture-id>]` | Manage paired devices: their tokens (list, rename, revoke, migrate-shared), the phones paired as device nodes and what each can serve (nodes), the always-allow grants (grants, revoke-grant), and the photos and screen captures the daemon is keeping (captures, delete-capture deletes one now) |
 | `/host` | None | None | Inspect or explicitly pair this TUI with its selected host in the owner terminal |
 
 ## Services

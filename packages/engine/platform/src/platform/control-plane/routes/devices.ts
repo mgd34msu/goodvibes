@@ -6,9 +6,9 @@
  * paired device nodes and their capabilities, ASKING one of them for a
  * capability and reading back what it returned, listing the durable "always
  * allow" grants with their ledger, revoking a grant, and running the
- * housekeeping sweep with its disclosure.
+ * housekeeping sweep with its disclosure, and deleting one retained capture.
  *
- * `devices.capability.request` and the two artifact verbs are the path for a
+ * `devices.capability.request` and the two artifact read verbs are the path for a
  * surface that does not host the device posture runtime itself. In-process the
  * `phone` tool calls DeviceCapabilityService.request directly and reads capture
  * bytes off the daemon's own disk; a client somewhere else could see the grants
@@ -42,7 +42,7 @@ import type { DeviceHousekeeper } from '../../devices/device-housekeeping.js';
 export interface DevicesGatewayService {
   readonly capabilities: Pick<DeviceCapabilityService, 'listDeviceNodes' | 'getPolicy' | 'request'>;
   readonly grants: Pick<DeviceGrantStore, 'list' | 'listAudit' | 'revoke'>;
-  readonly housekeeper: Pick<DeviceHousekeeper, 'sweep'>;
+  readonly housekeeper: Pick<DeviceHousekeeper, 'sweep' | 'deleteCapture'>;
   readonly artifacts: Pick<DeviceCaptureArtifactStore, 'list' | 'read' | 'getPolicy' | 'pathFor'>;
 }
 
@@ -178,6 +178,41 @@ export function createDevicesArtifactsReadHandler(service: DevicesGatewayService
     return {
       artifact: describeArtifact(result.artifact, service.artifacts),
       dataBase64: encodeDeviceCapabilityMedia(result.bytes),
+    };
+  };
+}
+
+/**
+ * Delete one retained capture before its retention window ends. The owner asked
+ * for it gone, so an id the store does not hold is an honest 404, and a capture
+ * whose file was already gone or replaced says so instead of claiming a delete.
+ */
+export function createDevicesArtifactsDeleteHandler(service: DevicesGatewayService): GatewayMethodHandler {
+  return async (invocation) => {
+    const params = readInvocationParams(invocation);
+    const artifactId = requireString(params, 'artifactId');
+    const result = await service.housekeeper.deleteCapture(artifactId);
+    if (!result.ok) {
+      throw new GatewayVerbError(
+        `${ARTIFACT_READ_REFUSALS['not-found']} Nothing was deleted; devices.artifacts.list shows the retained captures.`,
+        'NOT_FOUND',
+        404,
+        'artifactId',
+      );
+    }
+    const { removal } = result;
+    return {
+      deleted: removal.reason === 'deleted' && result.fileRemoved,
+      removal: {
+        artifactId: removal.artifactId,
+        nodeId: removal.nodeId,
+        capabilityId: removal.capabilityId,
+        fileName: removal.fileName,
+        reason: removal.reason,
+        removedAt: removal.removedAt,
+        byteLength: removal.byteLength,
+      },
+      detail: result.summary ?? '',
     };
   };
 }
@@ -337,6 +372,7 @@ export function registerDevicesGatewayMethods(catalog: GatewayMethodCatalog, ser
   attach('devices.capability.request', createDevicesCapabilityRequestHandler(service));
   attach('devices.artifacts.list', createDevicesArtifactsListHandler(service));
   attach('devices.artifacts.read', createDevicesArtifactsReadHandler(service));
+  attach('devices.artifacts.delete', createDevicesArtifactsDeleteHandler(service));
   attach('devices.grants.list', createDevicesGrantsListHandler(service));
   attach('devices.grants.revoke', createDevicesGrantsRevokeHandler(service));
   attach('devices.housekeeping.run', createDevicesHousekeepingRunHandler(service));

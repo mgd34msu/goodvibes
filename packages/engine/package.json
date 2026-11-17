@@ -2757,6 +2757,11 @@
       "types": "./terminal-shell/dist/secrets-command.d.ts",
       "import": "./terminal-shell/dist/secrets-command.js"
     },
+    "./terminal-shell/device-capabilities-command": {
+      "bun": "./terminal-shell/src/device-capabilities-command.ts",
+      "types": "./terminal-shell/dist/device-capabilities-command.d.ts",
+      "import": "./terminal-shell/dist/device-capabilities-command.js"
+    },
     "./terminal-shell/renderer/mcp-workspace": {
       "bun": "./terminal-shell/src/renderer/mcp-workspace.ts",
       "types": "./terminal-shell/dist/renderer/mcp-workspace.d.ts",

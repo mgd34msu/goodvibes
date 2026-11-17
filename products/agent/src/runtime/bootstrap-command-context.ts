@@ -75,6 +75,7 @@ export type CreateBootstrapCommandContextOptions = {
   mediaProviderRegistry?: MediaProviderRegistry;
   artifactStore?: ArtifactStore;
   channelDeliveryRouter?: ChannelDeliveryRouter;
+  devices?: import('@goodvibes-jev/engine/platform/platform/runtime/client').DevicesClient;
   forensicsRegistry: ForensicsRegistry;
   policyRuntimeState: PolicyRuntimeState;
   readModels: UiReadModels;
@@ -158,6 +159,7 @@ export function createBootstrapCommandContext(options: CreateBootstrapCommandCon
       'mediaProviderRegistry',
       'artifactStore',
       'channelDeliveryRouter',
+      'devices',
       'forensicsRegistry',
       'policyRuntimeState',
       'readModels',

@@ -57,6 +57,7 @@ import {
 export type CreateBootstrapCommandContextOptions = {
   configManager: ConfigManager;
   pairingTokens?: import('@goodvibes-jev/engine/platform/platform/pairing').PairingTokenManager;
+  devices?: import('@goodvibes-jev/engine/platform/platform/runtime/client').DevicesClient;
   featureFlagManager?: import('@/runtime/index.ts').FeatureFlagManager;
   providerRegistry: ProviderRegistry;
   conversation: ConversationManager;

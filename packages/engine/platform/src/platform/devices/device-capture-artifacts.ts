@@ -27,7 +27,8 @@ export interface DeviceCaptureArtifact {
   readonly workId?: string | undefined;
   readonly reason?: string | undefined;
 }
-export type DeviceArtifactRemovalReason = 'expired' | 'file-missing' | 'content-mismatch' | 'orphan-file' | 'malformed' | 'count-cap';
+/** `deleted`: the owner asked for this capture to be removed before its retention window ended. */
+export type DeviceArtifactRemovalReason = 'expired' | 'file-missing' | 'content-mismatch' | 'orphan-file' | 'malformed' | 'count-cap' | 'deleted';
 export interface DeviceArtifactRemoval {
   readonly artifactId: string; readonly nodeId: string; readonly capabilityId: string; readonly fileName: string;
   readonly reason: DeviceArtifactRemovalReason; readonly removedAt: number; readonly byteLength: number;
@@ -88,6 +89,16 @@ export interface DeviceCaptureStoreOptions {
 }
 export type DeviceArtifactReadResult = { readonly ok: true; readonly artifact: DeviceCaptureArtifact; readonly bytes: Uint8Array }
   | { readonly ok: false; readonly reason: 'not-found' | 'expired' | 'file-missing' | 'content-mismatch' };
+/**
+ * One capture removed on request. `removal.reason` is `deleted` when the file
+ * and its record went; `file-missing` when only the record was left; and
+ * `content-mismatch` when the file on disk is no longer the capture that was
+ * taken, so the record went and that file is kept for inspection.
+ */
+export type DeviceArtifactDeleteResult = { readonly ok: true; readonly removal: DeviceArtifactRemoval;
+  /** False when the record went but the file could not be unlinked now; the next sweep removes it as an interrupted capture. */
+  readonly fileRemoved: boolean }
+  | { readonly ok: false; readonly reason: 'not-found' };
 interface Mutation {
   readonly owner: ArtifactStorageOwner;
   readonly preserved: Set<string>;
@@ -296,6 +307,31 @@ export class DeviceCaptureArtifactStore {
       mutation.retain(() => mutation.owner.assertImported(this.pathFor(row), row.sourceObservation ?? ''));
       if (!adopted.bytes) throw new Error('Device capture read did not acquire bytes');
       return { next: rows.map(candidate => candidate === original ? row : candidate), result: { ok: true as const, artifact: publicArtifact(row), bytes: adopted.bytes } };
+    });
+  }
+  /**
+   * Remove one retained capture now: its file and its record, under the same
+   * custody as a sweep removal (the file is unlinked only while it is still
+   * the inode that was retained). Expired or not, a capture in the index is
+   * removed; one that is not there is `not-found`.
+   */
+  async delete(artifactId: string): Promise<DeviceArtifactDeleteResult> {
+    return this.mutate<DeviceArtifactDeleteResult>(async (rows, _malformed, mutation) => {
+      const original = rows.find(row => row.id === artifactId);
+      if (!original) return { next: rows, result: { ok: false as const, reason: 'not-found' as const } };
+      const next = rows.filter(row => row !== original), now = this.now();
+      const removal = (reason: DeviceArtifactRemovalReason): DeviceArtifactRemoval => ({ artifactId: original.id, nodeId: original.nodeId,
+        capabilityId: original.capabilityId, fileName: original.fileName, reason, removedAt: now, byteLength: original.byteLength });
+      let row: SavedArtifact;
+      try { row = this.adopt(original, mutation, false).row; }
+      catch (error) {
+        mutation.current(); if (!missing(error)) mutation.preserved.add(original.fileName);
+        return { next, result: { ok: true as const, removal: removal(missing(error) ? 'file-missing' : 'content-mismatch'), fileRemoved: false } };
+      }
+      // Filled in once the unlink after the index write succeeds.
+      const result = { ok: true as const, removal: removal('deleted'), fileRemoved: false };
+      this.retire(row, mutation, () => { result.fileRemoved = true; });
+      return { next, result };
     });
   }
   async sweep(): Promise<DeviceArtifactSweepReport> {

@@ -7,9 +7,13 @@
  * to, the capability it covers, when it was given, when it expires, and how
  * often it has been used, each with a revoke control, plus the recent ledger
  * of grants given, used, revoked, and expired, and a control to run the
- * housekeeping sweep and read back exactly what it removed.
+ * housekeeping sweep and read back exactly what it removed. Beside the grants,
+ * the photos and screen captures the daemon is keeping, each with a delete
+ * control, so a capture is gone when the owner says so rather than when its
+ * retention window ends.
  *
  * It renders from devices.grants.list / devices.grants.revoke /
+ * devices.artifacts.list / devices.artifacts.delete /
  * devices.housekeeping.run, so it shows the daemon's own record rather than a
  * client-side mirror that could disagree with what is actually honoured.
  */
@@ -33,9 +37,15 @@ import '../../styles/components/device.css';
 type GrantsResult = OperatorMethodOutput<'devices.grants.list'>;
 type NodesResult = OperatorMethodOutput<'devices.nodes.list'>;
 type HousekeepingResult = OperatorMethodOutput<'devices.housekeeping.run'>;
+type CapturesResult = OperatorMethodOutput<'devices.artifacts.list'>;
 
 export const deviceGrantsQueryKey = ['devices', 'grants'] as const;
 export const deviceNodesQueryKey = ['devices', 'nodes'] as const;
+export const deviceCapturesQueryKey = ['devices', 'captures'] as const;
+
+function formatBytes(bytes: number): string {
+  return bytes >= 1024 * 1024 ? `${(bytes / (1024 * 1024)).toFixed(1)} MB` : `${String(Math.max(1, Math.round(bytes / 1024)))} KB`;
+}
 
 /** A time for a grant line; a missing time reads "never". */
 function formatWhen(value: number | null | undefined): string {
@@ -89,8 +99,41 @@ export function DeviceGrants() {
     onSuccess: (result) => {
       setSweep(result);
       void queryClient.invalidateQueries({ queryKey: deviceGrantsQueryKey });
+      void queryClient.invalidateQueries({ queryKey: deviceCapturesQueryKey });
     },
   });
+
+  const captures = useQuery<CapturesResult>({
+    queryKey: deviceCapturesQueryKey,
+    queryFn: () => invokeMethod('devices.artifacts.list', {}),
+  });
+  const [deleted, setDeleted] = useState<string | null>(null);
+  const deleteCapture = useMutation({
+    mutationFn: (artifactId: string) => invokeMethod('devices.artifacts.delete', { artifactId }),
+    onSuccess: (result) => {
+      setDeleted(result.deleted ? `Capture deleted (${formatBytes(result.removal.byteLength)}).` : result.detail);
+      void queryClient.invalidateQueries({ queryKey: deviceCapturesQueryKey });
+    },
+    // A refused delete may mean it was already swept; re-read so the list shows what the daemon keeps.
+    onError: () => {
+      void queryClient.invalidateQueries({ queryKey: deviceCapturesQueryKey });
+    },
+  });
+
+  /** Deleting is one-way: the confirm carries the warning. */
+  async function handleDeleteCapture(capture: { artifactId: string; capabilityId: string }): Promise<void> {
+    const ok = await confirm.ask({
+      title: 'Delete this capture?',
+      target: capture.capabilityId,
+      description: 'The photo or screen capture is removed from the daemon host now and cannot be recovered.',
+      confirmLabel: 'Delete',
+      tone: 'danger',
+    });
+    if (!ok) return;
+    deleteCapture.reset();
+    setDeleted(null);
+    deleteCapture.mutate(capture.artifactId);
+  }
 
   if (grants.isPending) {
     return (
@@ -192,6 +235,52 @@ export function DeviceGrants() {
                   aria-label={`Revoke ${grant.capabilityTitle}`}
                 >
                   Revoke
+                </Button>
+              )}
+            />
+          ))}
+        </RowList>
+      )}
+
+      <h4 className="device-panel__subhead">Captures kept on the daemon</h4>
+      {deleteCapture.isError ? (
+        <div className="banner warning" role="alert">
+          Delete failed, the capture may still be kept: {formatError(deleteCapture.error)}
+        </div>
+      ) : null}
+      {deleted ? <p className="device-panel__result" aria-live="polite">{deleted}</p> : null}
+      {captures.isError ? (
+        isMethodUnavailableError(captures.error)
+          ? <p className="device-panel__result">This daemon does not list retained captures yet.</p>
+          : <ErrorState error={captures.error} title="Captures unavailable" onRetry={() => void captures.refetch()} />
+      ) : (captures.data?.artifacts ?? []).length === 0 ? (
+        <EmptyState
+          icon={<Smartphone size={28} />}
+          title="No captures kept"
+          description="Photos and screen captures from a phone appear here until they are deleted or their retention window ends."
+        />
+      ) : (
+        <RowList aria-label="Captures kept on the daemon">
+          {(captures.data?.artifacts ?? []).map((capture) => (
+            <Row
+              key={capture.artifactId}
+              title={`${capture.capabilityId} · ${nodeLabels.get(capture.nodeId) ?? capture.nodeId}`}
+              meta={[
+                `Taken ${formatWhen(capture.capturedAt)}`,
+                `deleted ${formatWhen(capture.expiresAt)}`,
+                formatBytes(capture.byteLength),
+                ...(capture.reason ? [capture.reason] : []),
+              ].join(' · ')}
+              trailing={(
+                <Button
+                  variant="quiet-danger"
+                  size="sm"
+                  icon={<Trash2 aria-hidden="true" />}
+                  onClick={() => void handleDeleteCapture(capture)}
+                  disabled={deleteCapture.isPending}
+                  aria-label={`Delete capture ${capture.artifactId}`}
+                >
+                  Delete
                 </Button>
               )}
             />

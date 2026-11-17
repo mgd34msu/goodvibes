@@ -174,6 +174,8 @@ export interface CommandPlatformConfigServices extends TerminalCommandPlatformCo
   readonly mediaProviderRegistry?: MediaProviderRegistry;
   readonly artifactStore?: Pick<ArtifactStore, 'create'> & Partial<Pick<ArtifactStore, 'get' | 'list' | 'readContent' | 'storagePath'>>;
   readonly channelDeliveryRouter?: Pick<ChannelDeliveryRouter, 'deliver' | 'listStrategies'>;
+  /** The daemon's paired-phone verbs: nodes, grants and retained captures for /devices. */
+  readonly devices?: import('@goodvibes-jev/engine/platform/platform/runtime/client').DevicesClient;
 }
 
 export interface CommandPlatformServices extends CommandPlatformConfigServices, CommandPlatformShellServices {}

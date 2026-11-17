@@ -16,12 +16,13 @@
 import { PersistentStore } from '../state/persistent-store.js';
 import { logger } from '../utils/logger.js';
 import type { DeviceGrantStore, DeviceGrantSweepReport } from './device-grants.js';
-import type { DeviceArtifactSweepReport, DeviceCaptureArtifactStore } from './device-capture-artifacts.js';
+import type { DeviceArtifactDeleteResult, DeviceArtifactSweepReport, DeviceCaptureArtifactStore } from './device-capture-artifacts.js';
 
 /** What one full pass removed, across both stores. */
 export interface DeviceHousekeepingReport {
   readonly sweptAt: number;
-  readonly trigger: 'recovery' | 'periodic' | 'manual';
+  /** `request`: one capture the owner asked to have removed (`devices.artifacts.delete`). */
+  readonly trigger: 'recovery' | 'periodic' | 'manual' | 'request';
   readonly grants: DeviceGrantSweepReport;
   readonly artifacts: DeviceArtifactSweepReport;
   /** One-line summary a surface can render without reading the itemised lists. */
@@ -85,6 +86,8 @@ export class DeviceHousekeeper {
   private inFlight: Promise<DeviceHousekeepingReport> | null = null;
   /** Set while a timer runs; re-read after each sweep to follow a live setting. */
   private resolveInterval: (() => number) | null = null;
+  /** Disclosure appends in order, so a sweep and a deletion never drop each other's report. */
+  private disclosureChain: Promise<void> = Promise.resolve();
   private armedIntervalMs = 0;
 
   constructor(options: DeviceHousekeepingOptions) {
@@ -148,15 +151,57 @@ export class DeviceHousekeeper {
         : `${summarize(grants, artifacts)} The capture sweep did not run (${failureText}); captures were not checked.`,
     };
     this.lastReport = report;
-    this.observeRecoveryStage(trigger, 'disclosure-read');
-    const existing = await this.listDisclosures();
-    this.observeRecoveryStage(trigger, 'disclosure-persist');
-    await this.disclosure.persist({
-      version: 1,
-      reports: [...existing, report].slice(-MAX_DISCLOSURE_REPORTS),
-    });
+    await this.appendDisclosure(report, () => this.observeRecoveryStage(trigger, 'disclosure-read'),
+      () => this.observeRecoveryStage(trigger, 'disclosure-persist'));
     if (captureFailure !== undefined) throw captureFailure;
     return report;
+  }
+
+  private appendDisclosure(report: DeviceHousekeepingReport, beforeRead = (): void => {}, beforePersist = (): void => {}): Promise<void> {
+    const run = this.disclosureChain.then(async () => {
+      beforeRead();
+      const existing = await this.listDisclosures();
+      beforePersist();
+      await this.disclosure.persist({ version: 1, reports: [...existing, report].slice(-MAX_DISCLOSURE_REPORTS) });
+    });
+    this.disclosureChain = run.then(() => undefined, () => undefined);
+    return run;
+  }
+
+  /**
+   * Remove one retained capture because the owner asked, before its retention
+   * window ends, and disclose it exactly as a sweep removal is disclosed: one
+   * report in the same log, with the capture's id, device, reason and size.
+   */
+  async deleteCapture(artifactId: string): Promise<DeviceArtifactDeleteResult & { readonly summary?: string }> {
+    const result = await this.artifacts.delete(artifactId);
+    if (!result.ok) return result;
+    const removal = result.removal;
+    const summary = removal.reason === 'deleted'
+      ? result.fileRemoved
+        ? `Capture ${removal.artifactId} deleted on request (${removal.byteLength} bytes).`
+        : `Capture ${removal.artifactId} removed from the retained list on request; its file could not be removed now and is removed by the next housekeeping pass.`
+      : removal.reason === 'file-missing'
+        ? `Capture ${removal.artifactId} had no file left on disk; its record was removed on request.`
+        : `Capture ${removal.artifactId} no longer matched what was taken; its record was removed on request and the file on disk was kept for inspection.`;
+    const sweptAt = this.now();
+    const [grantsRetained, capturesRetained] = await Promise.all([
+      this.grants.list().then(grants => grants.length, () => 0),
+      this.artifacts.list().then(captures => captures.length, () => 0),
+    ]);
+    const report: DeviceHousekeepingReport = {
+      sweptAt,
+      trigger: 'request',
+      grants: { sweptAt, removed: [], retained: grantsRetained, auditTrimmed: 0 },
+      artifacts: { sweptAt, removed: [removal], retained: capturesRetained, bytesReclaimed: result.fileRemoved ? removal.byteLength : 0 },
+      summary,
+    };
+    try { await this.appendDisclosure(report); }
+    catch (error) {
+      // The capture is already gone; a disclosure that could not be written is reported, not turned into a failed delete.
+      logger.warn('Device capture deletion could not be added to the housekeeping disclosure', { artifactId, error: error instanceof Error ? error.message : String(error) });
+    }
+    return { ...result, summary };
   }
 
   /**

@@ -100,6 +100,7 @@ export interface BootstrapCommandSectionOptions {
   readonly mediaProviderRegistry?: MediaProviderRegistry;
   readonly artifactStore?: ArtifactStore;
   readonly channelDeliveryRouter?: ChannelDeliveryRouter;
+  readonly devices?: import('@goodvibes-jev/engine/platform/platform/runtime/client').DevicesClient;
   readonly forensicsRegistry: ForensicsRegistry;
   readonly policyRuntimeState: PolicyRuntimeState;
   readonly readModels: UiReadModels;
@@ -283,6 +284,7 @@ export function createBootstrapCommandPlatformSection(
     | 'mediaProviderRegistry'
     | 'artifactStore'
     | 'channelDeliveryRouter'
+    | 'devices'
   >,
   shellServices: BootstrapCommandShellServices,
 ): BootstrapCommandPlatformSection {
@@ -296,6 +298,7 @@ export function createBootstrapCommandPlatformSection(
     mediaProviderRegistry: options.mediaProviderRegistry,
     artifactStore: options.artifactStore,
     channelDeliveryRouter: options.channelDeliveryRouter,
+    ...(options.devices ? { devices: options.devices } : {}),
     ...shellServices.platform,
   };
 }

@@ -61,6 +61,12 @@
   font-size: var(--text-sm);
 }
 
+.device-panel__subhead {
+  margin: var(--space-4) 0 var(--space-2);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
 .device-panel__when {
   color: var(--text-3);
   font-size: var(--text-meta);

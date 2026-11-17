@@ -18,6 +18,7 @@ import { registerSecurityRuntimeCommands } from './commands/security-runtime.ts'
 import { registerMcpRuntimeCommands } from './commands/mcp-runtime.ts';
 import { registerSessionContentCommands } from './commands/session-content.ts';
 import { registerLocalRuntimeCommands } from './commands/local-runtime.ts';
+import { registerDevicesRuntimeCommands } from './commands/devices-runtime.ts';
 import { registerExperienceRuntimeCommands } from './commands/experience-runtime.ts';
 import { registerTasksRuntimeCommands } from './commands/tasks-runtime.ts';
 import { registerLocalProviderRuntimeCommands } from './commands/local-provider-runtime.ts';
@@ -113,6 +114,7 @@ export function registerBuiltinCommands(registry: CommandRegistry): void {
   registerOnboardingRuntimeCommands(registry);
   registerTtsRuntimeCommands(registry);
   registerLocalRuntimeCommands(registry);
+  registerDevicesRuntimeCommands(registry);
   registerScheduleRuntimeCommands(registry);
   registerSessionContentCommands(registry);
   registerPaymentCardCommands(registry);

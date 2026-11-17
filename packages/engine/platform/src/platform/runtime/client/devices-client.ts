@@ -19,9 +19,9 @@
  * ── The verbs ─────────────────────────────────────────────────────────────
  *
  * `devices.nodes.list`, `devices.grants.list`, `devices.grants.revoke`,
- * `devices.housekeeping.run`, and, the ones that make the tool actually able
- * to DO something, `devices.capability.request`, `devices.artifacts.list` and
- * `devices.artifacts.read`.
+ * `devices.housekeeping.run`, `devices.artifacts.delete`, and, the ones that
+ * make the tool actually able to DO something, `devices.capability.request`,
+ * `devices.artifacts.list` and `devices.artifacts.read`.
  *
  * Reads against no configured daemon degrade to an empty list (the reason is in
  * `describeAvailability`). Reads against a configured daemon that fails to
@@ -64,12 +64,28 @@ export interface DeviceNodeSummary extends Record<string, unknown> {
   readonly supported?: readonly string[] | undefined;
 }
 
-/** One capability grant the daemon is holding. */
+/** One capability grant the daemon is holding, named as the wire names it. */
 export interface DeviceGrantSummary {
   readonly grantId: string;
   readonly nodeId?: string | undefined;
-  readonly capability?: string | undefined;
+  readonly capabilityId?: string | undefined;
+  readonly capabilityTitle?: string | undefined;
+  readonly scope?: string | undefined;
+  readonly grantedAt?: number | undefined;
   readonly expiresAt?: number | undefined;
+  readonly lastUsedAt?: number | null | undefined;
+  readonly useCount?: number | undefined;
+}
+
+/** What deleting one retained capture did, as the daemon reports it. */
+export interface DeviceArtifactDeletion {
+  /** True only when the capture's file was removed. */
+  readonly deleted: boolean;
+  /** `deleted`, `file-missing` (only the record was left) or `content-mismatch` (record removed, file kept for inspection). */
+  readonly reason: string;
+  readonly artifactId: string;
+  readonly byteLength: number;
+  readonly detail: string;
 }
 
 /** One retained capture, as the daemon describes it. */
@@ -130,6 +146,8 @@ export interface DevicesClient {
     readonly retained: number;
     readonly retentionHours: number;
   }>;
+  /** Delete one retained capture now. Rejects when no daemon is reachable or the capture is not retained. */
+  deleteArtifact(artifactId: string): Promise<DeviceArtifactDeletion>;
   /** Fetch a capture's bytes, base64-encoded. Rejects when it cannot be served. */
   readArtifact(artifactId: string): Promise<{
     readonly artifact: DeviceArtifactSummary;
@@ -140,12 +158,13 @@ export interface DevicesClient {
 }
 
 /** A field of a verb's answer, read where the verb promises it; a missing or mistyped field is a failure, never an empty value. */
-function readField<T>(payload: unknown, methodId: string, key: string, kind: 'array' | 'number' | 'string' | 'object'): T {
+function readField<T>(payload: unknown, methodId: string, key: string, kind: 'array' | 'number' | 'string' | 'object' | 'boolean'): T {
   const value = payload && typeof payload === 'object' && !Array.isArray(payload) ? (payload as Record<string, unknown>)[key] : undefined;
   const fits = kind === 'array' ? Array.isArray(value)
     : kind === 'object' ? value !== null && typeof value === 'object' && !Array.isArray(value)
       : kind === 'number' ? typeof value === 'number' && Number.isFinite(value)
-        : typeof value === 'string';
+        : kind === 'boolean' ? typeof value === 'boolean'
+          : typeof value === 'string';
   if (!fits) throw new Error(`${methodId} answered without ${key}; the daemon may be a different version than this surface.`);
   return value as T;
 }
@@ -236,6 +255,20 @@ export function createDevicesClient(verbs: DaemonVerbCaller): DevicesClient {
       return {
         artifact: readField<DeviceArtifactSummary>(read, methodId, 'artifact' satisfies keyof ArtifactReadWire, 'object'),
         dataBase64: readField<string>(read, methodId, 'dataBase64' satisfies keyof ArtifactReadWire, 'string'),
+      };
+    },
+    deleteArtifact: async (artifactId) => {
+      requireDaemon(`delete capture ${artifactId}`);
+      // An id the daemon does not hold is its 404 with its own sentence; it propagates.
+      const methodId = 'devices.artifacts.delete';
+      const answer = await verbs.invoke<Record<string, unknown>>(methodId, { artifactId });
+      const removal = readField<Record<string, unknown>>(answer, methodId, 'removal', 'object');
+      return {
+        deleted: readField<boolean>(answer, methodId, 'deleted', 'boolean'),
+        reason: readField<string>(removal, methodId, 'reason', 'string'),
+        artifactId: readField<string>(removal, methodId, 'artifactId', 'string'),
+        byteLength: readField<number>(removal, methodId, 'byteLength', 'number'),
+        detail: readField<string>(answer, methodId, 'detail', 'string'),
       };
     },
     describeAvailability: () => {

@@ -413,6 +413,7 @@ Routine promotion is an explicit scheduling route. Local routines stay local unt
 | `/context` | Inspect context-window usage and token breakdown; `/context window [<size>\|clear]` shows where the current model's window came from, or sets or clears a custom window. |
 | `/conversation` | Review conversation structure, transcript hotspots, and composer posture. |
 | `/delegate` | Explicitly delegate build/fix/review work to GoodVibes TUI with reason, success criteria, workspace hint, priority, and explicit review intent. |
+| `/devices` | Paired phones on the connected host: `nodes` (each phone and what it can serve), `grants` and `revoke-grant <grant-id> --yes` (always-allow answers), `captures` and `delete-capture <capture-id> --yes` (photos and screen captures the daemon is keeping, deleted now). |
 | `/effort` | Show or set reasoning effort level. |
 | `/email` | Configure direct email, read inbox summaries read-only, and send a confirmed message. |
 | `/expand` | Expand rendered blocks by type. |

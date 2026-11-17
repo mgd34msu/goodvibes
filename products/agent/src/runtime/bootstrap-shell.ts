@@ -192,6 +192,7 @@ export function createBootstrapShell(options: BootstrapShellOptions): BootstrapS
     memoryGovernor: services.memoryGovernor,
     mediaProviderRegistry: services.mediaProviders,
     channelDeliveryRouter: services.channelDeliveryRouter,
+    devices: services.devicesClient,
     processManager: services.processManager,
     executionLedger: services.executionLedger,
     approvalsView: services.approvalsView,

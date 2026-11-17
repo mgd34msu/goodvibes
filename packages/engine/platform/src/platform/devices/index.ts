@@ -83,6 +83,7 @@ export type {
   DeviceArtifactRemovalReason,
   DeviceArtifactSweepReport,
   DeviceArtifactReadResult,
+  DeviceArtifactDeleteResult,
 } from './device-capture-artifacts.js';
 
 export { DeviceHousekeeper } from './device-housekeeping.js';

@@ -241,6 +241,7 @@ export const GATEWAY_REST_ROUTES: readonly GatewayRestRoute[] = [
   route('POST', '/api/devices/capability/request', 'devices.capability.request'),
   route('GET', '/api/devices/artifacts', 'devices.artifacts.list'),
   route('GET', '/api/devices/artifacts/{artifactId}', 'devices.artifacts.read'),
+  route('DELETE', '/api/devices/artifacts/{artifactId}', 'devices.artifacts.delete'),
   route('GET', '/api/devices/grants', 'devices.grants.list'),
   route('POST', '/api/devices/grants/revoke', 'devices.grants.revoke'),
   route('POST', '/api/devices/housekeeping', 'devices.housekeeping.run'),

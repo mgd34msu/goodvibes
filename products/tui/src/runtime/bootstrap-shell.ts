@@ -246,6 +246,7 @@ export function createBootstrapShell(options: BootstrapShellOptions): BootstrapS
       hydrateSessionUsage,
     }),
     pairingTokens: services.pairingTokens,
+    devices: services.devices,
     requestPermission: (request) => permissionPromptRef.requestPermission(request),
     webSearchService: services.webSearchService,
     mediaProviders: services.mediaProviders,

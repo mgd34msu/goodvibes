@@ -83,6 +83,7 @@ export interface BootstrapCommandActionOptions {
 export interface BootstrapCommandSectionOptions {
   readonly configManager: ConfigManager;
   readonly pairingTokens?: import('@goodvibes-jev/engine/platform/platform/pairing').PairingTokenManager;
+  readonly devices?: import('@goodvibes-jev/engine/platform/platform/runtime/client').DevicesClient;
   readonly featureFlagManager?: FeatureFlagManager;
   readonly providerRegistry: ProviderRegistry;
   readonly conversation: ConversationManager;
@@ -302,6 +303,7 @@ export function createBootstrapCommandPlatformSection(
     BootstrapCommandSectionOptions,
     | 'configManager'
     | 'pairingTokens'
+    | 'devices'
     | 'featureFlagManager'
     | 'voiceProviderRegistry'
     | 'voiceService'
@@ -315,6 +317,7 @@ export function createBootstrapCommandPlatformSection(
     config: getConfigSnapshot(options.configManager),
     configManager: options.configManager,
     ...(options.pairingTokens ? { pairingTokens: options.pairingTokens } : {}),
+    ...(options.devices ? { devices: options.devices } : {}),
     featureFlagManager: options.featureFlagManager,
     voiceProviderRegistry: options.voiceProviderRegistry,
     voiceService: options.voiceService,

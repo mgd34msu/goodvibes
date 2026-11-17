@@ -615,10 +615,16 @@ function buildAgentHarnessTool(deps: AgentHarnessToolDeps): Tool {
           return effectOutput(provisionConnectedHostOperatorToken(deps.commandContext, args));
         }
         if (dispatchMode === 'run_setup_smoke') {
-          const confirmationError = requireConfirmedAction(rawArgs, options, 'Setup smoke');
-          if (confirmationError) return error(confirmationError);
           const setupItemId = readString(args.setupItemId);
           if (setupItemId && setupItemId !== 'install-smoke') return error('run_setup_smoke currently supports setupItemId:"install-smoke" only.');
+          // Nothing is run or saved without fields: the answer is the read-only smoke item, with no approval asked.
+          if (args.fields === undefined) {
+            const resolved = await describeHarnessSetupItem(deps.commandContext, { ...args, setupItemId: 'install-smoke' }, catalogOptions);
+            if (resolved.status === 'found') return output(resolved.item);
+            return error(resolved.status === 'ambiguous' ? 'The install-smoke setup item is ambiguous.' : resolved.usage);
+          }
+          const confirmationError = requireConfirmedAction(rawArgs, options, 'Save setup evidence');
+          if (confirmationError) return error(confirmationError);
           const ownership = resolveSetupSmokeNativeEvidence(rawArgs, options, deps.commandContext);
           const result = await runSetupInstallSmoke(deps.commandContext, args, ownership, signal);
           ownership.assertCurrent();

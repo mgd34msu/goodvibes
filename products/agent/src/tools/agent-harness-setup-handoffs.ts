@@ -202,15 +202,15 @@ export function setupHandoffsForItem(item: SetupPlanItem): readonly SetupHandoff
       return [
         setupHandoff({
           id: 'run-setup-smoke',
-          label: item.status === 'blocked' ? 'List smoke blockers' : 'Run setup smoke',
+          label: 'Save setup evidence',
           kind: 'confirmed-route',
           effect: 'confirmed-effect',
           userRoute: item.userRoute,
-          modelRoute: 'setup action:"smoke" setupItemId:"install-smoke" confirm:true explicitUserRequest:"Run the install smoke checks."',
+          modelRoute: 'setup action:"smoke" setupItemId:"install-smoke" fields:{"<check id>":"<what the user saw>"} explicitUserRequest:"Save the setup smoke results."',
           nextStep: item.status === 'blocked'
-            ? 'Return the exact blocked checks and user-run checks without running shell or host commands implicitly.'
-            : 'Capture the setup smoke result and then save redacted user-run evidence.',
-          safety: 'Confirmed token-safe setup smoke; no package, host, or shell commands run implicitly.',
+            ? 'Fix the blocked checks first; setup action:"item" setupItemId:"install-smoke" lists them.'
+            : 'After the user runs the user-run checks, save what they saw as setup evidence (one local artifact).',
+          safety: 'Saves one local evidence artifact under write admission; nothing is run. Without fields it only returns the checklist.',
           requiresConfirmation: true,
         }),
         setupHandoff({

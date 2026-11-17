@@ -183,6 +183,10 @@ export function createAgentSetupTool(deps: AgentSetupToolDeps): Tool {
           ...confirmedArgs(args),
         });
       }
+      // Without fields nothing is run or saved: the smoke checklist is the read-only setup item.
+      if (action === 'smoke' && args.fields === undefined) {
+        return run('agent_harness', setupItemArgs({ ...args, setupItemId: itemLookup(args) || 'install-smoke' }));
+      }
       if (action === 'smoke') {
         const childArgs = {
           mode: 'run_setup_smoke',
@@ -224,7 +228,7 @@ export function registerAgentSetupTool(
   if (!registry.has('setup')) registry.register(createAgentSetupTool({ commandContext, toolRegistry: registry }), {
     inputProjection: {
       captureNativeReferences: createSetupSmokeReferenceCapture(commandContext, args => readAction(args) === 'smoke'
-        && (itemLookup(args) || 'install-smoke') === 'install-smoke'),
+        && args.fields !== undefined && (itemLookup(args) || 'install-smoke') === 'install-smoke'),
       async project(request) { request.assertCurrent(); return { status: 'projected', args: request.args }; },
     },
   });

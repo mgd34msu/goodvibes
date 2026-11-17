@@ -432,7 +432,25 @@ export interface TriggerRecord {
   readonly process?: TrackedProcessRef | undefined;
   /** on-exit: how the child ended, kept until its action is delivered so a failed action can be retried. */
   readonly pendingExit?: TerminationMetadata | undefined;
+  /**
+   * stream: matched lines whose action failed after their stream had ended (its
+   * final batch, or one in flight when the command exited). Kept and delivered
+   * again on the backoff ladder until delivered or the trigger is cancelled.
+   */
+  readonly owedStreamBatches?: readonly OwedStreamBatch[] | undefined;
   readonly updatedAt: number;
+}
+
+/** One stream batch whose action is still owed. */
+export interface OwedStreamBatch {
+  readonly reason: string;
+  readonly fingerprint: string;
+  /** The turn's prompt, as built when the lines arrived (bounded like every stream prompt). */
+  readonly prompt: string;
+  readonly lineCount: number;
+  /** Failed deliveries so far; the next one waits the ladder's rung for it. */
+  readonly attempts: number;
+  readonly nextAttemptAt: number;
 }
 
 /**

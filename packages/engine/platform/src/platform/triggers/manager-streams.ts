@@ -49,6 +49,8 @@ export interface StreamOwner {
   persist(id: string): void;
   readonly deferActivation?: boolean;
   assertCurrent?(id: string, runtime: StreamRuntime): void;
+  /** Keeps a batch whose stream is gone on the record, to be delivered again on the ladder. */
+  owe(id: string, batch: { readonly reason: string; readonly fingerprint: string; readonly prompt: string; readonly lineCount: number }): void;
   /** Resolves true when the action was delivered, false when it failed (the failure is already on the record). */
   fireAction(
     id: string,
@@ -152,8 +154,15 @@ export function drainStreamTrigger(owner: StreamOwner, id: string, force = false
     const prompt = renderStreamPrompt(batch, record.definition.label, spec.match.pattern);
     runtime.inFlight = true; runtime.lastTurnAt = now;
     const reason = `${batch.lines.length} line(s) matched ${spec.match.pattern}${batch.final ? ' as the command ended' : ''}${batch.dropped > 0 ? `, ${batch.dropped} dropped` : ''}`;
-    const giveBack = (): void => { if (!batch.final && owner.streams.get(id) === runtime) runtime.processor.requeue(batch.lines, owner.now()); };
-    void owner.fireAction(id, reason, `stream:${batch.lines[0] ?? ''}`, 'stream', prompt).then((delivered) => {
+    const fingerprint = `stream:${batch.lines[0] ?? ''}`;
+    // A failed batch goes back to its running stream's queue. When the stream is gone (this was its
+    // final batch, or the command ended while the action ran) the lines are kept on the record and
+    // delivered again on the ladder, so a crash log's last lines are never lost.
+    const giveBack = (): void => {
+      if (!batch.final && owner.streams.get(id) === runtime) runtime.processor.requeue(batch.lines, owner.now());
+      else owner.owe(id, { reason, fingerprint, prompt, lineCount: batch.lines.length });
+    };
+    void owner.fireAction(id, reason, fingerprint, 'stream', prompt).then((delivered) => {
       if (!delivered) giveBack();
     }, (error: unknown) => {
       logger.warn('Stream trigger action failed', { triggerId: id, error: summarizeError(error) });

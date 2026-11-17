@@ -379,7 +379,11 @@ A stream trigger whose command ends after a healthy run (it stayed up for the
 first backoff step, or matched a line) starts again without a strike; a clean
 exit is a restart, not a failure. When a stream ends, the lines still queued
 go to one final agent turn, and a batch whose action failed goes back at the
-head of the queue.
+head of the queue. When the stream is already gone (its final batch, or a
+batch in flight when the command ended), a failed batch is kept with the
+trigger (`owedBatches` in its summary) and delivered again on the backoff
+ladder until it is delivered or the trigger is cancelled; at most eight are
+kept, and a dropped one is recorded in the trigger's runs.
 
 ## Inspect supervised triggers
 

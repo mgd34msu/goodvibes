@@ -8,7 +8,7 @@ const STATUS = objectSchema({
 /** One trigger as `summarizeTrigger` describes it (never its observations or a command's output). */
 const TRIGGER = objectSchema({
   id: STRING_SCHEMA, label: STRING_SCHEMA, kind: STRING_SCHEMA, watching: STRING_SCHEMA, state: STRING_SCHEMA, firedCount: NUMBER_SCHEMA,
-  lastFiredAt: STRING_SCHEMA, nextCheckAt: STRING_SCHEMA, lastError: STRING_SCHEMA, droppedLines: NUMBER_SCHEMA, next: STRING_SCHEMA,
+  lastFiredAt: STRING_SCHEMA, nextCheckAt: STRING_SCHEMA, lastError: STRING_SCHEMA, droppedLines: NUMBER_SCHEMA, owedBatches: NUMBER_SCHEMA, next: STRING_SCHEMA,
 }, ['id', 'label', 'kind', 'watching', 'state', 'firedCount']);
 const ONE_TRIGGER = objectSchema({ trigger: TRIGGER }, ['trigger']);
 const BY_ID = objectSchema({ id: STRING_SCHEMA }, ['id']);

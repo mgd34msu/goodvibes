@@ -48,7 +48,7 @@ import {
   TriggerStoreOwnershipError,
   type TriggerRetentionPolicy,
 } from './store.js';
-import { applyFailure, applySuccess, checkReset, holdsAgainstCheckResult, isDue, resetBreaker, triggerLifecycle, resolveSupervisionPolicy, type SupervisionPolicy } from './supervision.js';
+import { applyFailure, applySuccess, backoffDelayFor, checkReset, holdsAgainstCheckResult, isDue, resetBreaker, triggerLifecycle, resolveSupervisionPolicy, type SupervisionPolicy } from './supervision.js';
 import { activateStreamTrigger, startStreamTrigger, type StreamOwner, type StreamRuntime } from './manager-streams.js';
 import type {
   ConditionTriggerSpec, OnExitTriggerSpec, StreamTriggerSpec, TerminationMetadata, TriggerActionGrant, TriggerDefinition,
@@ -64,6 +64,9 @@ interface RuleRollback { readonly restore: TriggerRecord['ruleState']; readonly 
 
 /** Prefix of the `lastError` a failed save leaves on a record until the save is retried. */
 const NOT_SAVED = 'not saved: ';
+
+/** Undelivered stream batches kept per trigger after their stream ended; the oldest gives way beyond this. */
+const MAX_OWED_STREAM_BATCHES = 8;
 
 function emptyReport(now: number): TriggerRecoveryReport {
   return { at: now, reason: 'startup', triggersLoaded: 0, triggersReaped: 0, reapedIds: [], runsReaped: 0, observationsReaped: 0, eventsReaped: 0, orphanedProcesses: [] };
@@ -333,6 +336,7 @@ export class TriggerManager {
       }
       this.retryUnsaved();
       await this.pollProcesses();
+      await this.deliverOwedStreamBatches();
       await this.tick();
     } catch (error) {
       logger.warn('Trigger supervision tick failed', { error: summarizeError(error) });
@@ -567,6 +571,7 @@ export class TriggerManager {
       ...record,
       state: 'cancelled',
       pendingExit: undefined,
+      owedStreamBatches: undefined,
       updatedAt: now,
       runs: [...record.runs, {
         at: now,
@@ -863,6 +868,45 @@ export class TriggerManager {
     return { ...record, state: 'running', process: ref, nextCheckAt: now, updatedAt: now };
   }
 
+  /** Keeps a stream batch whose action failed after its stream ended; the supervision tick delivers it again. */
+  private oweStreamBatch(id: string, batch: { readonly reason: string; readonly fingerprint: string; readonly prompt: string; readonly lineCount: number }): void {
+    const record = this.records.get(id);
+    if (!record || record.state === 'cancelled') return;
+    const now = this.now();
+    const owed = [...(record.owedStreamBatches ?? []), { ...batch, attempts: 1, nextAttemptAt: now + backoffDelayFor(this.policy, 0) }];
+    // Bounded like the stream queue: the oldest owed batch gives way, and the record says how many lines that was.
+    const over = Math.max(0, owed.length - MAX_OWED_STREAM_BATCHES);
+    const given = owed.slice(0, over).reduce((lines, entry) => lines + entry.lineCount, 0);
+    this.records.set(id, {
+      ...record,
+      owedStreamBatches: owed.slice(over),
+      ...(over > 0 ? { runs: [...record.runs, { at: now, outcome: 'failed' as const, detail: `${given} owed matched line(s) were dropped: more than ${MAX_OWED_STREAM_BATCHES} undelivered batches` }] } : {}),
+      updatedAt: now,
+    });
+    this.persist(id);
+  }
+
+  /** Delivers owed stream batches that are due, oldest first, one per trigger per tick. */
+  async deliverOwedStreamBatches(): Promise<void> {
+    if (!this.config.enabled) return;
+    const now = this.now();
+    for (const record of [...this.records.values()]) {
+      const next = record.owedStreamBatches?.[0];
+      if (!next || record.state === 'cancelled' || next.nextAttemptAt > now) continue;
+      const id = record.definition.id;
+      const delivered = await this.fireAction(id, `${next.reason} (delivered again after a failed attempt)`, next.fingerprint, 'stream', next.prompt)
+        .catch((error: unknown) => { logger.warn('Owed stream batch could not be delivered', { triggerId: id, error: summarizeError(error) }); return false; });
+      const current = this.records.get(id);
+      const head = current?.owedStreamBatches?.[0];
+      if (!current || head?.fingerprint !== next.fingerprint || head.prompt !== next.prompt) continue;
+      const rest = current.owedStreamBatches!.slice(1);
+      const owed = delivered ? rest
+        : [{ ...head, attempts: head.attempts + 1, nextAttemptAt: this.now() + backoffDelayFor(this.policy, head.attempts) }, ...rest];
+      this.records.set(id, { ...current, owedStreamBatches: owed.length > 0 ? owed : undefined, updatedAt: this.now() });
+      this.persist(id);
+    }
+  }
+
   /** Poll this supervisor's on-exit children, and retry on-exit actions that are still owed. */
   async pollProcesses(): Promise<void> {
     if (!this.config.enabled) return;
@@ -990,6 +1034,7 @@ export class TriggerManager {
       },
       fireAction: (id, reason, fingerprint, kind, promptOverride) =>
         this.fireAction(id, reason, fingerprint, kind, promptOverride),
+      owe: (id, batch) => { this.oweStreamBatch(id, batch); },
     };
   }
 }

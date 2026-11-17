@@ -26,6 +26,10 @@ function termination(value: unknown): boolean {
     && finite(value['startedAt']) && finite(value['endedAt']) && finite(value['durationMs']) && value['durationMs'] >= 0 && text(value['command']) && strings(value['args'])
     && (value['pid'] === null || count(value['pid'])) && text(value['stdoutTail']) && text(value['stderrTail']) && typeof value['observed'] === 'boolean';
 }
+function owedBatch(value: unknown): boolean {
+  return object(value) && text(value['reason']) && text(value['fingerprint']) && text(value['prompt'])
+    && count(value['lineCount']) && count(value['attempts']) && finite(value['nextAttemptAt']);
+}
 function run(value: unknown): boolean {
   return object(value) && finite(value['at']) && oneOf(value['outcome'], ['checked', 'fired', 'failed', 'suppressed', 'skipped'])
     && optional(value, 'detail', text) && optional(value, 'actionResult', text) && optional(value, 'durationMs', finite)
@@ -43,7 +47,8 @@ export function isTriggerRecord(value: unknown): value is TriggerRecord {
     || !Array.isArray(value['observations']) || !value['observations'].every(observation) || !Array.isArray(value['runs']) || !value['runs'].every(run)
     || !count(value['strikes']) || !count(value['backoffRung']) || !count(value['firedCount']) || !count(value['droppedLines']) || !finite(value['updatedAt'])
     || !optional(value, 'nextCheckAt', finite) || !optional(value, 'lastError', text) || !optional(value, 'lastFiredAt', finite)
-    || !optional(value, 'pendingExit', termination)) return false;
+    || !optional(value, 'pendingExit', termination)
+    || !optional(value, 'owedStreamBatches', entry => Array.isArray(entry) && entry.every(owedBatch))) return false;
   const rule = value['ruleState'];
   if (!object(rule) || !optional(rule, 'armed', entry => typeof entry === 'boolean') || !optional(rule, 'lastMatched', entry => typeof entry === 'boolean')
     || !optional(rule, 'streak', count) || !optional(rule, 'dedupMarks', entry => object(entry) && Object.values(entry).every(finite))) return false;

@@ -77,6 +77,7 @@ export function summarizeTrigger(record: TriggerRecord): TriggerSummary {
     ...(record.nextCheckAt !== undefined ? { nextCheckAt: new Date(record.nextCheckAt).toISOString() } : {}),
     ...(record.lastError !== undefined ? { lastError: record.lastError } : {}),
     ...(record.droppedLines > 0 ? { droppedLines: record.droppedLines } : {}),
+    ...(record.owedStreamBatches && record.owedStreamBatches.length > 0 ? { owedBatches: record.owedStreamBatches.length } : {}),
     ...(record.state === 'circuit-open' ? { next: 'reset the trigger once the cause is fixed' } : {}),
   };
 }

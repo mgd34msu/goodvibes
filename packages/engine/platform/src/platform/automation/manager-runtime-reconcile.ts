@@ -172,10 +172,10 @@ export function settleAutomationRun(
   // A failed run is announced by its failure notice when that goes to the
   // job's own targets; sending the run message too would say it twice.
   if (settlement.status !== 'failed' || !failureNoticeCoversRunDelivery(updatedJob)) context.maybeDeliverRun(updatedJob, updatedRun);
-  // A one-shot job is done when its run succeeded, or when it was already
-  // disabled (created disabled, or its only occurrence fired): the failure
-  // follow-up never retries a disabled job, so nothing would run it again.
-  if (updatedJob.deleteAfterRun && (settlement.status === 'completed' || !wasEnabled)) {
+  // A one-shot job is done only when a run of it succeeded. A failed or
+  // cancelled one stays (disabled once its occurrence fired) so the owner or
+  // an agent can retry the run or start it by hand; that run's success removes it.
+  if (updatedJob.deleteAfterRun && settlement.status === 'completed') {
     context.removeJobRecord(updatedJob.id, 'one-shot-complete');
   }
   if (settlement.status === 'failed') {

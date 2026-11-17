@@ -94,7 +94,8 @@ export interface HostRefusal {
 
 /** Why a credential is not usable, carried on a connection whose token is null. */
 export interface ConnectedHostUnavailable {
-  readonly code: 'dial_disabled' | 'no_credential' | 'credential_unreadable' | 'source_not_accepted';
+  /** `host_too_old`: the attached daemon's build is below what this Agent build needs (its build verdict). */
+  readonly code: 'dial_disabled' | 'no_credential' | 'credential_unreadable' | 'source_not_accepted' | 'host_too_old';
   readonly reason: string;
   readonly next: readonly string[];
 }
@@ -135,6 +136,28 @@ export interface ConnectedHostSelection {
    * reached in process, and no dial setting or credential file is read.
    */
   readonly inProcess?: AgentInProcessHost | undefined;
+  /**
+   * Why this host may not be called right now (the attached daemon is older
+   * than this build needs), or undefined. Read once per resolution, a field
+   * read; the process-wide refusal ({@link useConnectedHostRefusal}) applies
+   * when this is absent.
+   */
+  readonly hostRefusal?: (() => string | undefined) | undefined;
+}
+
+/** The refusal every connected-host call of this process answers with; set by the app that owns the daemon build verdict. */
+let processHostRefusal: (() => string | undefined) | undefined;
+
+/**
+ * Make every connected-host call of this process (schedules, operator tools,
+ * slash-command routes, owner questions, Activity, occasions) answer with
+ * `refusal()` while it says the attached daemon may not be used, instead of
+ * calling it and returning its own 404s. A call to the daemon hosting this turn
+ * in process is never refused. Returns the function that removes it.
+ */
+export function useConnectedHostRefusal(refusal: () => string | undefined): () => void {
+  processHostRefusal = refusal;
+  return () => { if (processHostRefusal === refusal) processHostRefusal = undefined; };
 }
 
 export type HostFailureKind =
@@ -319,6 +342,13 @@ export function resolveConnectedHost(selection: ConnectedHostSelection): Connect
         reason: 'this Agent is set not to dial a connected host (daemon.connectedHost.enabled is false)',
         next: ['set daemon.connectedHost.enabled to true in settings, then retry'],
       },
+    };
+  }
+  const tooOld = (selection.hostRefusal ?? processHostRefusal)?.();
+  if (tooOld) {
+    return {
+      baseUrl, token: null, credential: 'the daemon build check',
+      unavailable: { code: 'host_too_old', reason: tooOld, next: ['update GoodVibes on the host (goodvibes-daemon) to this Agent\'s version, then retry'] },
     };
   }
   const homeDirectory = typeof selection.homeDirectory === 'function' ? selection.homeDirectory() : selection.homeDirectory;
@@ -640,6 +670,12 @@ export function createConnectedHost(
         code: 'bad_input', retryable: false, state: `the request for ${methodId} could not be built`,
         reason: hostMessage(error), next: ['pass a real identifier, then retry'],
       }, error);
+    }
+    if (resolved.token === null && resolved.unavailable?.code === 'host_too_old') {
+      return refuse('connected_host_incompatible', {
+        code: 'host_too_old', reason: resolved.unavailable.reason, next: resolved.unavailable.next, retryable: false,
+        state: `the GoodVibes host at ${resolved.baseUrl} is older than this Agent build needs`,
+      });
     }
     if (resolved.token === null) {
       const unavailable = resolved.unavailable ?? {

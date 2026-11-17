@@ -6,6 +6,7 @@ import { shell as runtimeShell } from '@goodvibes-jev/engine/platform/platform/r
 import type { shell as RuntimeShell, bootstrap as RuntimeBootstrap } from '@goodvibes-jev/engine/platform/platform/runtime';
 import { readCheckpointGuardSettings, readCheckpointRegistrationSetting } from '../config/checkpoint-settings.ts';
 import { createAgentResearchSourceOwner } from '@goodvibes-jev/engine/terminal-shell/agent-turn/research-source-screening';
+import { useConnectedHostRefusal } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-client';
 import { createClassicProtectedSourceOwner } from '@goodvibes-jev/engine/platform/platform/security/source-screening/classic-owner';
 import type { ProtectedSourceOwner } from '@goodvibes-jev/engine/platform/platform/security';
 import { createWorkspaceRegistrationLiveChecker } from '../config/workspace-registration.ts';
@@ -670,6 +671,9 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
   // guard exists.
   let connectedHostRefusal: () => string | undefined = () => undefined;
   const connectedHostAccess = { configManager, homeDirectory, hostRefusal: () => connectedHostRefusal() };
+  // Every other connected-host path of this process (schedules, operator tools, slash-command routes, owner
+  // questions, Activity, occasions) builds its own selection; the one build verdict reaches them all here.
+  useConnectedHostRefusal(() => connectedHostRefusal());
   const daemonVerbs: DaemonVerbCaller = createAgentDaemonVerbCaller(connectedHostAccess);
   // What this process is actually running, answered from itself rather than from
   // the daemon's cross-surface register. Feeds inbound dispatch, the

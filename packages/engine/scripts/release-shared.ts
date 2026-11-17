@@ -280,6 +280,57 @@ export function cleanupStage(tempRoot: string): void {
   rmSync(tempRoot, { recursive: true, force: true });
 }
 
+/**
+ * Names a release stage that is already staged and packed (validate makes one
+ * for its pack, publint and install-smoke steps), so each of those checks
+ * reads it instead of copying and packing every package again. Unset, each
+ * check stages its own and removes it.
+ */
+export const SHARED_RELEASE_STAGE_ENV = 'GOODVIBES_RELEASE_STAGE';
+const PACKED_STAGE_FILE = 'packed-stage.json';
+
+/** A release stage with every public package packed. */
+export interface PackedReleaseStage {
+  readonly tempRoot: string;
+  readonly publicStages: readonly PackageStage[];
+  /** One tarball per public stage, in the same order. */
+  readonly tarballs: readonly string[];
+}
+
+/** Stage every package and pack the public ones; the caller removes it with `cleanupStage(tempRoot)`. */
+export async function createPackedReleaseStage(): Promise<PackedReleaseStage> {
+  const { tempRoot, publicStages } = await stagePackages();
+  try {
+    const packDestination = resolve(tempRoot, 'packed');
+    mkdirSync(packDestination, { recursive: true });
+    const tarballs = collectTarballs(publicStages.map((stage) => packStage(stage.stageDir, packDestination)), packDestination);
+    const packed: PackedReleaseStage = { tempRoot, publicStages, tarballs };
+    writeFileSync(resolve(tempRoot, PACKED_STAGE_FILE), `${JSON.stringify(packed)}\n`);
+    return packed;
+  } catch (error) {
+    cleanupStage(tempRoot);
+    throw error;
+  }
+}
+
+/** The packed stage `GOODVIBES_RELEASE_STAGE` names, or null when none is shared. */
+export function sharedPackedReleaseStage(): PackedReleaseStage | null {
+  const root = process.env[SHARED_RELEASE_STAGE_ENV];
+  if (!root) return null;
+  return JSON.parse(readFileSync(resolve(root, PACKED_STAGE_FILE), 'utf8')) as PackedReleaseStage;
+}
+
+/**
+ * The shared packed stage when one is named, else a fresh one this process
+ * owns. `release` removes only a stage this call made.
+ */
+export async function acquirePackedReleaseStage(): Promise<{ readonly stage: PackedReleaseStage; release(): void }> {
+  const shared = sharedPackedReleaseStage();
+  if (shared) return { stage: shared, release: () => {} };
+  const stage = await createPackedReleaseStage();
+  return { stage, release: () => cleanupStage(stage.tempRoot) };
+}
+
 export function getRegistryHost(registryUrl: string): string {
   const normalized = (registryUrl || 'https://registry.npmjs.org').replace(/\/+$/, '');
   return new URL(normalized).host;

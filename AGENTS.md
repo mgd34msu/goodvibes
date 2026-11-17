@@ -11,7 +11,7 @@ Bun 1.3.14 and TypeScript (strict). `exactOptionalPropertyTypes` is on for `pack
 
 ## Running tests
 
-Never run plain `bun test`: it skips the runner's isolated home, temp directory and network block. Never run `bun run test` to check one change: its `pretest` runs the full typecheck first.
+Never run plain `bun test`: it skips the runner's isolated home, temp directory and network block. `bun run test` runs every suite (installer, judgment, engine and every product) and does not typecheck; to check one change, run its file as below.
 
 ```sh
 # one engine test (path relative to packages/engine, or to where you are)
@@ -31,14 +31,14 @@ bun run test:installer
 
 ## Typecheck
 
-`bun run typecheck` builds the whole solution with `tsc -b --force` (16 GB heap) plus every product. It takes many minutes; run it once before you finish, not after each edit, and it is what CI runs.
+`bun run typecheck` compiles the engine sources once with `tsc -b --force` (16 GB heap), then checks the test, type-test and integration projects and every product against the declarations that build wrote, so no program checks engine source a second time. It takes many minutes; run it once before you finish, not after each edit. CI runs it inside `bun run validate`, right after `build`.
 
 While editing, check one project without `--force` (an unchanged project is skipped, so a second run is fast):
 
 ```sh
 bun packages/engine/scripts/typecheck.ts --project engine        # packages/engine sources
 bun packages/engine/scripts/typecheck.ts --project engine-tests  # packages/engine/test and scripts
-bun packages/engine/scripts/typecheck.ts --project agent         # also tui, daemon, webui
+bun packages/engine/scripts/typecheck.ts --project agent         # also tui, daemon, webui; refreshes stale engine declarations first
 ```
 
 The other names are `judgment`, `judgment-tests`, `type-tests` and `integration-tests`; an unknown name lists them. A scoped run trusts file times, so it can report nothing for a tree whose times were restored; it is not a substitute for the full run before a merge.

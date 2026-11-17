@@ -2,6 +2,8 @@ import { spawnSync } from 'node:child_process';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { cleanupStage, createPackedReleaseStage, SHARED_RELEASE_STAGE_ENV, type PackedReleaseStage } from './release-shared.ts';
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ENGINE_ROOT = resolve(__dirname, '..');
 // npm scripts live in the repo root package.json.
@@ -106,11 +108,39 @@ try {
   process.exit(2);
 }
 
+// The steps that read the packages as released. When more than one of them
+// runs, the packages are staged and packed once, after build, and every one of
+// them reads that stage (GOODVIBES_RELEASE_STAGE) instead of making its own.
+const STAGE_READERS = new Set(['pack:check', 'publint:check', 'install:smoke']);
+const stageReaders = steps.filter((step) => STAGE_READERS.has(step.label));
+let sharedStage: PackedReleaseStage | undefined;
+const releaseSharedStage = (): void => {
+  if (sharedStage) cleanupStage(sharedStage.tempRoot);
+  sharedStage = undefined;
+};
+
 for (const [index, step] of steps.entries()) {
   console.log(`[validate] ${step.label} ...`);
-  const result = spawnSync(step.command, step.args, { cwd: REPO_ROOT, stdio: 'inherit' });
-  if (result.status === 0) continue;
-  const reason = result.error ? result.error.message : result.signal ? `signal ${result.signal}` : `exit ${result.status}`;
+  let env: NodeJS.ProcessEnv = process.env;
+  let reason: string | undefined;
+  let status: number | null = 0;
+  if (stageReaders.length > 1 && STAGE_READERS.has(step.label)) {
+    try {
+      sharedStage ??= await createPackedReleaseStage();
+      env = { ...process.env, [SHARED_RELEASE_STAGE_ENV]: sharedStage.tempRoot };
+    } catch (error) {
+      reason = `staging the packages failed: ${error instanceof Error ? error.message : String(error)}`;
+      status = 1;
+    }
+  }
+  if (reason === undefined) {
+    const result = spawnSync(step.command, step.args, { cwd: REPO_ROOT, stdio: 'inherit', env });
+    if (step === stageReaders.at(-1)) releaseSharedStage();
+    if (result.status === 0) continue;
+    reason = result.error ? result.error.message : result.signal ? `signal ${result.signal}` : `exit ${result.status}`;
+    status = result.status;
+  }
+  releaseSharedStage();
   console.error([
     '',
     `[validate] FAILED at step ${index + 1}/${steps.length}: ${step.label} (${reason})`,
@@ -118,6 +148,6 @@ for (const [index, step] of steps.entries()) {
     `[validate]   re-run it:    bun run validate --only ${step.label}`,
     `[validate]   resume here:  bun run validate --from ${step.label}`,
   ].join('\n'));
-  process.exit(result.status && result.status > 0 ? result.status : 1);
+  process.exit(status && status > 0 ? status : 1);
 }
 console.log(`[validate] ${steps.length} step(s) passed.`);

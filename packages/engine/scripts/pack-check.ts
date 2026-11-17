@@ -3,14 +3,12 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import {
+  acquirePackedReleaseStage,
   cleanupStage,
-  collectTarballs,
   createPlatformTempDir,
   inspectPackedManifest,
   listPackedFiles,
-  packStage,
   readPackedText,
-  stagePackages,
 } from './release-shared.ts';
 
 type PackageManifestLike = Record<string, unknown> & {
@@ -163,16 +161,14 @@ function referencesPackageSpecifier(content: string, specifier: string): boolean
     || new RegExp(`\\brequire\\(\\s*['"]${escaped}(?:/[^'"]*)?['"]\\s*\\)`).test(content);
 }
 
-const { tempRoot, publicStages } = await stagePackages();
-const packDestination = createPlatformTempDir('goodvibes-pack-');
+// The stage validate already packed, or one of its own.
+const { stage: packed, release } = await acquirePackedReleaseStage();
 
 try {
-  const packageSpecifiers = publicStages
+  const packageSpecifiers = packed.publicStages
     .map((stage) => stage.manifest.name)
     .filter((name): name is string => typeof name === 'string' && !name.endsWith('/goodvibes'));
-  const packResults = publicStages.map((stage) => packStage(stage.stageDir, packDestination));
-  const tarballs = collectTarballs(packResults, packDestination);
-  tarballs.forEach((tarball) => {
+  packed.tarballs.forEach((tarball) => {
     const manifest = inspectPackedManifest(resolve(tarball));
     assertNoWorkspaceRanges(manifest, tarball);
     const files = listPackedFiles(resolve(tarball));
@@ -187,6 +183,5 @@ try {
   });
   console.log('pack check passed');
 } finally {
-  cleanupStage(packDestination);
-  cleanupStage(tempRoot);
+  release();
 }

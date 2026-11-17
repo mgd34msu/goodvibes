@@ -3,19 +3,16 @@ import { resolve } from 'node:path';
 
 import { retryTransientInstall } from './install-retry.ts';
 import {
-  cleanupStage,
-  collectTarballs,
+  acquirePackedReleaseStage,
   createPlatformTempDir,
   getAuthToken,
   getPublishRegistryOverride,
   getRootVersion,
   inspectPackedManifest,
   packageNameForDir as manifestPackageName,
-  packStage,
   publicPackageDirs,
   readPackage,
   run,
-  stagePackages,
 } from './release-shared.ts';
 
 const REGISTRY_MODE = process.argv.includes('--registry');
@@ -349,12 +346,10 @@ function buildRegistrySpecs(): string[] {
   return publicPackageDirs.map((dir) => `${manifestPackageName(dir)}@${version}`);
 }
 
-async function buildTarballSpecs() {
-  const { tempRoot, publicStages } = await stagePackages();
-  const packDestination = createPlatformTempDir('goodvibes-tarballs-');
-  const packResults = publicStages.map((stage) => packStage(stage.stageDir, packDestination));
-  const tarballs = collectTarballs(packResults, packDestination);
-  return { tempRoot, specs: tarballs };
+async function buildTarballSpecs(): Promise<{ readonly specs: readonly string[]; release(): void }> {
+  // The tarballs validate already packed, or a stage of its own.
+  const { stage, release } = await acquirePackedReleaseStage();
+  return { specs: stage.tarballs, release };
 }
 
 if (REGISTRY_MODE) {
@@ -363,17 +358,12 @@ if (REGISTRY_MODE) {
   await installWithBun(specs);
   console.log('registry install smoke passed');
 } else {
-  const { tempRoot, specs } = await buildTarballSpecs();
-  const firstSpec = specs[0];
-  const packDir = firstSpec !== undefined ? resolve(firstSpec, '..') : null;
+  const { specs, release } = await buildTarballSpecs();
   try {
     await installWithNpm(specs);
     await installWithBun(specs);
     console.log('tarball install smoke passed');
   } finally {
-    cleanupStage(tempRoot);
-    if (packDir) {
-      rmSync(packDir, { recursive: true, force: true });
-    }
+    release();
   }
 }

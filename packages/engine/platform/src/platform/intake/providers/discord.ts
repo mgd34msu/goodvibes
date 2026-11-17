@@ -165,43 +165,50 @@ export function createDiscordInboxAdapter(ctx: AdapterContext, ports: DiscordInb
         }
         const me = self!;
         const snapshot = catalog!.snapshot;
-        const readPage = async (channel: string, window: { floor: number; upper: number; continueFrom?: string }): Promise<ScanPage> => {
+        // Oldest page first: `after` the cursor's last snowflake, so each message is read once whatever the backlog.
+        const readForward = async (channel: string, window: { floor: number; upper: number; continueFrom?: string }): Promise<ScanPage> => {
           if (signal?.aborted) throw new ScanFailure(cancelledText, 'tick', false);
-          const before = window.continueFrom ?? (BigInt(window.upper - EPOCH_MS) << 22n).toString();
-          const body = await get(`/channels/${channel}/messages`, { limit: String(PAGE_SIZE), before }, channel);
+          const after = window.continueFrom
+            ?? (window.floor < EPOCH_MS ? '0' : ((BigInt(window.floor - EPOCH_MS + 1) << 22n) - 1n).toString());
+          const body = await get(`/channels/${channel}/messages`, { limit: String(PAGE_SIZE), after }, channel);
           try {
             const messages = rows(body, PAGE_SIZE);
             const candidates: ScanCandidate[] = [];
-            let oldest: { id: string; value: bigint; ms: number } | undefined;
+            let newest: { id: string; value: bigint; ms: number } | undefined;
             for (const entry of messages) {
               const message = record(entry);
               const id = snowflake(message.id);
-              if (id.value >= BigInt(before)) throw new Unreadable();
-              if (!oldest || id.value < oldest.value) oldest = id;
-              if (message.channel_id !== undefined && snowflake(message.channel_id).id !== channel) throw new Unreadable();
-              const authorValue = message.author;
-              const author = authorValue === undefined ? undefined : record(authorValue);
-              const bot = author?.bot;
-              if (bot !== undefined && typeof bot !== 'boolean') throw new Unreadable();
-              const authorId = author === undefined ? undefined : snowflake(author.id).id;
-              // Bot posts, the inbox bot's own included, are not inbound mail to the owner.
-              if (bot === true || authorId === me) continue;
-              const text = message.content ?? '';
-              if (typeof text !== 'string' || text.length > 40_000) throw new Unreadable();
-              // One ordering for pagination and the cursor: the id's own time.
-              candidates.push({ key: `${channel}:${id.id}`, conversation: channel, senderId: authorId ?? channel, text,
-                receivedAt: id.ms, kind: classify(message, me) });
+              if (id.value <= BigInt(after)) throw new Unreadable();
+              if (!newest || id.value > newest.value) newest = id;
+              const candidate = readCandidate(channel, message, id);
+              if (candidate) candidates.push(candidate);
             }
-            const more = messages.length === PAGE_SIZE && oldest !== undefined && oldest.ms > window.floor;
-            return { candidates, ...(more ? { next: oldest!.id } : {}) };
+            const more = messages.length === PAGE_SIZE && newest !== undefined && newest.ms < window.upper;
+            return { candidates, ...(more ? { next: newest!.id } : {}) };
           } catch {
             throw new ScanFailure(`Discord answered the history of channel ${channel} in a shape the inbox does not read; it is skipped this poll`, 'conversation', false);
           }
         };
+        /** One message as a candidate, or undefined for a bot post; throws Unreadable on a shape the inbox does not read. */
+        const readCandidate = (channel: string, message: Record<string, unknown>, id: { id: string; ms: number }): ScanCandidate | undefined => {
+          if (message.channel_id !== undefined && snowflake(message.channel_id).id !== channel) throw new Unreadable();
+          const authorValue = message.author;
+          const author = authorValue === undefined ? undefined : record(authorValue);
+          const bot = author?.bot;
+          if (bot !== undefined && typeof bot !== 'boolean') throw new Unreadable();
+          const authorId = author === undefined ? undefined : snowflake(author.id).id;
+          // Bot posts, the inbox bot's own included, are not inbound mail to the owner.
+          if (bot === true || authorId === me) return undefined;
+          const text = message.content ?? '';
+          if (typeof text !== 'string' || text.length > 40_000) throw new Unreadable();
+          // One ordering for pagination and the cursor: the id's own time.
+          return { key: `${channel}:${id.id}`, conversation: channel, senderId: authorId ?? channel, text,
+            receivedAt: id.ms, kind: classify(message, me) };
+        };
         const outcome = await scanConversations({
           conversations: snapshot.channels.map(channel => channel.id).sort(),
           floorOf: channel => conversations?.get(channel) ?? since ?? Math.max(0, cutoff - SEED_WINDOW_MS),
-          cutoff, limit, pageBudget: PAGES_PER_TICK, state: scan, readPage,
+          cutoff, limit, pageBudget: PAGES_PER_TICK, state: scan, readForward,
           map: candidate => ports.mapItem({ senderId: candidate.senderId, channelId: candidate.conversation, subject: 'Direct message', text: candidate.text }, signal),
           toItem: (candidate, fields): InboundChannelItem => ({
             id: `discord:${candidate.key}`, provider: PROVIDER, kind: candidate.kind,

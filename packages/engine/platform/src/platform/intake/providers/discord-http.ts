@@ -58,13 +58,16 @@ function capture(input: URL, request: Parameters<DiscordInboxHttp>[1], channels:
     const match = /^\/api\/v10\/channels\/([1-9]\d{0,19})(\/messages)?$/.exec(url.pathname);
     const method: Method = url.pathname === '/api/v10/users/@me' ? 'self' : match?.[2] ? 'history' : 'channel';
     if (method !== 'self' && (!match || !snowflake(match[1]!) || !channels.has(match[1]!))) throw invalid();
-    const allowed = method === 'history' ? ['limit', 'before'] : [];
+    const allowed = method === 'history' ? ['limit', 'before', 'after'] : [];
     const query = new Map<string, string>();
     for (const [key, value] of url.searchParams) {
       if (!allowed.includes(key) || query.has(key)) throw invalid();
       query.set(key, value);
     }
-    if (method === 'history' && (query.get('limit') !== '100' || !snowflake(query.get('before') ?? ''))) throw invalid();
+    // History pages one way: newest first `before` a snowflake, or oldest first `after` one (0 for the channel's start).
+    const before = query.get('before'), after = query.get('after');
+    if (method === 'history' && (query.get('limit') !== '100' || (before === undefined) === (after === undefined)
+      || (before !== undefined && !snowflake(before)) || (after !== undefined && after !== '0' && !snowflake(after)))) throw invalid();
     exactKeys(request, ['method', 'headers', 'signal']);
     const { method: verb, headers, signal } = request;
     exactKeys(headers, ['Authorization', 'Accept']);

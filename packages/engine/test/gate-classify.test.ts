@@ -78,8 +78,11 @@ test('who decides: one row per step of the order, the same in every deciding mod
   expect(refusal.kind === 'fact' && !refusal.allow && (refusal.decision.next?.length ?? 0) > 0).toBe(true);
 });
 
-/** Every owner-only kind. The type makes a new kind a compile error here until it has its row. */
-const OWNER_ONLY: Readonly<Record<OwnerOnlyKind, true>> = {
+/**
+ * Every owner-only kind the owner is asked about. The type makes a new kind a compile error here
+ * until it has its row. An owner act is not asked about: a model's call is refused outright.
+ */
+const OWNER_ONLY: Readonly<Record<Exclude<OwnerOnlyKind, 'owner-act'>, true>> = {
   'spend-over-limit': true, 'payment-step': true, 'unrecoverable-delete': true, 'new-recipient': true,
   'untrusted-derived-send': true, 'grant-access': true, 'loosen-security': true, 'change-contract': true,
   'irreversible-operator': true, 'standing-ask': true, 'channel-request': true,

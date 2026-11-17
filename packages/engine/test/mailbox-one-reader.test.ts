@@ -32,7 +32,7 @@ import {
 } from '../platform/src/platform/email/inbound/index.ts';
 import { holdProcessLock } from '../platform/src/platform/utils/process-lock.ts';
 import { configureDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.ts';
-import { createEmailInboxOwner } from '../platform/src/platform/intake/providers/email-owner.ts';
+import { createEmailInboxOwner, NOT_SCREENED_LABEL } from '../platform/src/platform/intake/providers/email-owner.ts';
 import { acquireAccountInboxIdentity } from '../platform/src/platform/intake/providers/account-identity.ts';
 import { createOwnedInboxSource, type OwnedInboxSource } from '../platform/src/platform/intake/registration.ts';
 import { makeFakeMailbox, openMailboxSocket, type FakeMailboxOptions, type FakeMailboxServer } from './_helpers/fake-imap-mailbox.ts';
@@ -136,8 +136,8 @@ async function machine(server: FakeMailboxOptions = {}) {
     mailbox, clock, cursors, notices, notes, rows, daemon,
     /** How many notices named this subject. */
     announced: (subject: string) => notices.filter((text) => text.includes(subject)).length,
-    /** How many inbox rows show this subject. */
-    shown: (subject: string) => rows().filter((row) => row.subjectPreview === subject).length,
+    /** How many inbox rows show this subject (with no decision model each is marked as not screened). */
+    shown: (subject: string) => rows().filter((row) => row.subjectPreview === `${NOT_SCREENED_LABEL} ${subject}`).length,
     holdNoticeFor(subject: string) {
       let reached!: () => void, release!: () => void;
       const at = new Promise<void>((resolve) => { reached = resolve; });

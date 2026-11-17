@@ -90,23 +90,6 @@ export {
   readDaemonTierFile,
 } from './daemon-config-tier.js';
 export {
-  DEFAULT_PRIMARY_DAEMON_SURFACE,
-  describeDaemonConfigMigration,
-  migrateDaemonOwnedConfig,
-} from './daemon-config-migration.js';
-export type {
-  DaemonConfigMigrationOptions,
-  DaemonConfigMigrationResult,
-  DaemonConfigMovedMarker,
-  DiscardedConfigKey,
-  MovedConfigKey,
-} from './daemon-config-migration.js';
-export {
-  DAEMON_CONFIG_MOVED_FILE,
-  daemonConfigMovedPath,
-  readDaemonConfigMovedMarker,
-} from './daemon-config-migration-io.js';
-export {
   DaemonConfigRejectedError,
   DaemonConfigUnreachableError,
   applyConfigWrite,
@@ -310,7 +293,7 @@ export {
   isDaemonOwnedSecretKey,
   listDaemonOwnedSecretKeys,
 } from './daemon-secret-keys.js';
-export { defaultDaemonSecretHome, siblingSurfaceSecretStores } from './secrets-store-paths.js';
+export { defaultDaemonSecretHome } from './secrets-store-paths.js';
 export {
   CREDENTIAL_SCOPE_DECLARATIONS,
   describeCredentialScope,
@@ -323,19 +306,6 @@ export type {
   CredentialScopeClass,
   CredentialScopeDeclaration,
 } from './credential-scope-registry.js';
-export {
-  buildCredentialMigrationReceipt,
-  describeCredentialMigration,
-  migrateDaemonNeededCredentials,
-  migrateOnSurfaceStart,
-} from './daemon-credential-migration.js';
-export type {
-  CredentialMigrationEntry,
-  CredentialMigrationOutcome,
-  CredentialMigrationReceipt,
-  CredentialMigrationReport,
-  MigratableSecretStore,
-} from './daemon-credential-migration.js';
 export {
   isDeclaredSecretBearingConfigKey,
   isSecretBearingConfigKey,

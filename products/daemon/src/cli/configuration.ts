@@ -6,7 +6,6 @@ const installedDataWriter = process.platform === 'darwin' ? undefined : admitIns
 import { resolve } from 'node:path';
 import { ConfigManager, daemonConfigPathForHome, resolveGoodVibesHomeOwnership } from '@goodvibes-jev/engine/platform/platform/config';
 import { readDaemonSetting } from '@goodvibes-jev/engine/platform/platform/workspace';
-import { runDaemonConfigMigration } from '../config/run-daemon-config-migration.js';
 import { GOODVIBES_DAEMON_SURFACE_ROOT } from '../config/surface.js';
 import type { DaemonCliFlags } from './types.js';
 
@@ -43,9 +42,6 @@ export function createDaemonCliConfiguration(
   const nativeDataWriter = process.platform === 'darwin' ? createOriginalDarwinDaemonDataWriter() : installedDataWriter;
   const homes = resolveDaemonCliOwnership(flags, env, cwd);
   const { workingDirectory } = homes;
-  if (!options.readOnly) {
-    runDaemonConfigMigration(homes.homeDirectory, daemonConfigPathForHome(homes.daemonHomeDirectory), options);
-  }
   const config = new ConfigManager({
     nativeDataWriter,
     workingDir: workingDirectory, homeDir: homes.homeDirectory,

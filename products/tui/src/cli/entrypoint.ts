@@ -47,8 +47,6 @@ import type { CliWorkspaceStatus, CliSandboxStatus, CliRelayStatus } from './sta
 import { detectSandboxAvailability, probeSandboxHost } from '@goodvibes-jev/engine/platform/platform/tools/exec/sandbox';
 import { createFeatureFlagManager, deriveFeatureStates } from '@/runtime/index.ts';
 import { ensureGoodvibesGitignore } from './ensure-goodvibes-gitignore.ts';
-import { runDaemonConfigMigration } from '../config/run-daemon-config-migration.ts';
-import { describeDaemonConfigMigration } from '@goodvibes-jev/engine/platform/platform/config';
 import { GOODVIBES_TUI_SURFACE_ROOT } from '../config/surface.ts';
 import { parseDeepLink } from '../input/commands/deep-link.ts';
 
@@ -123,11 +121,6 @@ export async function prepareShellCliRuntime(
     startupNoticeWriter(cli, { out: console.log, err: console.error })(
       "[goodvibes] added '.goodvibes/' to .gitignore: this directory holds transient TUI state (logs, session cache, exec output), not project source.",
     );
-  }
-  // The migration runs for diagnostics too: they must read the current layout, and it only moves files into it.
-  const daemonConfigMigration = runDaemonConfigMigration(bootstrapHomeDirectory);
-  if (daemonConfigMigration?.migrated && daemonConfigMigration.marker.moved.length + daemonConfigMigration.marker.discarded.length > 0) {
-    startupNoticeWriter(cli, { out: console.log, err: console.error })(`[goodvibes] ${describeDaemonConfigMigration(daemonConfigMigration.marker)}`);
   }
   const configManager = new TuiConfigManager({
     workingDir: bootstrapWorkingDir,

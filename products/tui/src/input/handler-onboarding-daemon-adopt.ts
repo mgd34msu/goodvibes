@@ -24,7 +24,6 @@ import {
   isRuntimeEndpointActive,
   runtimePortDiagnostic,
 } from './onboarding/onboarding-runtime-status.ts';
-import { runDaemonConfigMigration } from '../config/run-daemon-config-migration.ts';
 
 /**
  * Immediately (not deferred to the final wizard Apply):
@@ -170,8 +169,6 @@ export async function handleMigrateLegacyDaemonServiceForHandler(handler: InputH
     const port = Number(configManager.get('controlPlane.port') ?? 3421);
     const binaryPath = resolveInstalledDaemonBinary({ moduleUrl: import.meta.url });
 
-    // The daemon's settings are brought to the current shape before the unit is rendered from them.
-    runDaemonConfigMigration(homeDirectory);
     const unitHomeDir = homedir();
     const manager = buildManagedDaemonServiceManager({
       binaryPath, homeDir: homeDirectory, unitHomeDir, daemonHomeDirectory: resolveGoodVibesDaemonHome(homeDirectory), host, port,

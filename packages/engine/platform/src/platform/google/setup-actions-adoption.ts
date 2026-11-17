@@ -4,7 +4,7 @@
  * Split out of `setup-actions.ts` because it is not a step in any flow, no
  * runner calls it and it appears in no path. It is a route a PERSON asks for,
  * by naming a path or running the adopt command, and it is reached directly
- * from a command surface and from `connection-repair.ts`.
+ * from a command surface.
  *
  * Nothing scans for these files on its own. An earlier design probed
  * `~/.gmail-mcp` on every status call and offered to adopt whatever turned up;

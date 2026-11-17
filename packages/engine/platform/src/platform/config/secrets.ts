@@ -63,7 +63,6 @@ export { SecretStoreUnreadableError } from './secrets-keyfile.js';
 import { requireAbsoluteOwnedPath } from './manager-bootstrap.js';
 import { decodeLiteralSecret, encodeLiteralSecret, shouldStoreAsLiteral } from './secret-literal-codec.js';
 import { getSecretRefSource, isSecretRefInput, normalizeSecretRef, resolveSecretRef, useSecretProviderHostConfig, type SecretProviderHostConfig } from './secret-refs.js';
-import { listMigratableSecrets, migratableStores } from './secrets-migration-view.js';
 import { ProjectSecretApprovals } from './project-secret-approvals.js';
 import { BUILTIN_PROVIDER_ENV_KEYS } from './provider-credential-catalog.js';
 import { logger } from '../utils/logger.js';
@@ -1040,20 +1039,16 @@ export class SecretsManager {
    * Read `key` from ONE tier, ignoring the read order and the environment.
    *
    * `get()` answers "what value would be used", which is the right question
-   * almost everywhere and the wrong one for migration: a surface copy read
+   * almost everywhere and the wrong one for a read-back of a write: a copy read
    * through `get()` returns whatever the DAEMON tier holds, because the daemon
-   * tier leads. Moving a credential needs to see each tier separately, read
-   * the surface copy, write the daemon copy, read the daemon copy BACK and
-   * compare, and a resolver that transparently prefers one tier makes that
-   * comparison meaningless.
+   * tier leads.
    *
    * Returns the value exactly as stored. A `goodvibes://` reference is NOT
-   * followed: migration moves the stored bytes, and following a reference here
-   * would copy the pointed-at value over the pointer.
+   * followed: a read-back compares the stored bytes.
    */
-  async getFromScope(key: string, scope: SecretScope, storePath?: string): Promise<string | null> {
-    for (const path of this.getMigratableStores()) {
-      if (storePath !== undefined ? path.path !== storePath : path.scope !== scope) continue;
+  async getFromScope(key: string, scope: SecretScope): Promise<string | null> {
+    for (const path of this.getAllCandidateStores()) {
+      if (path.scope !== scope) continue;
       const secrets = path.secure ? this.readEncryptedFile(path.path) : this.readPlaintextFile(path.path);
       if (secrets !== null && Object.hasOwn(secrets, key)) return secrets[key] ?? null;
     }
@@ -1470,18 +1465,6 @@ export class SecretsManager {
    * every tier is swept, because a revoke narrowed to one tier reports success
    * while leaving a live copy behind, a credential the operator believes is
    * gone and is not.
-   *
-   * That makes this the wrong method for moving a credential between tiers, and
-   * the difference is not visible at the call site: the migration's "remove the
-   * surface copy now the daemon copy is verified" was spelled
-   * `delete(key, { scope: source })`, the key was daemon-needed by definition,
-   * so the sweep ran and destroyed the daemon copy it had just written and
-   * read back. Both stores ended empty while the report said `migrated: 1,
-   * failed: 0`. Use `deleteFromScope` to remove ONE physical copy.
-   *
-   * A daemon-needed key is also removed from every other product's store under
-   * this home (the stores the start-up migration reads), so an older copy left
-   * in another product cannot be promoted back to the daemon at the next start.
    */
   async delete(key: string, options: SecretDeleteOptions = {}): Promise<void> {
     await this.deleteWithReceipt(key, options);
@@ -1491,8 +1474,7 @@ export class SecretsManager {
   async deleteWithReceipt(key: string, options: SecretDeleteOptions = {}): Promise<readonly SecretDeletion[]> {
     const daemonNeeded = isDaemonNeededSecretKey(key);
     const scopeFilter = daemonNeeded ? undefined : options.scope;
-    const candidates = daemonNeeded ? this.getMigratableStores() : this.getAllCandidateStores();
-    const stores = candidates.filter((store) => {
+    const stores = this.getAllCandidateStores().filter((store) => {
       if (scopeFilter && store.scope !== scopeFilter) return false;
       if (options.medium && (options.medium === 'secure') !== store.secure) return false;
       return existsSync(store.path) && this.storeContainsKey(store, key);
@@ -1533,39 +1515,6 @@ export class SecretsManager {
     return deletions;
   }
 
-  /**
-   * Remove ONE tier's copy, and never any other. The narrow counterpart to
-   * `delete`: that one means "this credential is revoked" and sweeps every
-   * tier; this means "this copy is redundant, the real one is elsewhere".
-   * A separate method because the two were indistinguishable at the call site,
-   * and the migration reached for the wrong one. Migration is the only caller.
-   */
-  async deleteFromScope(key: string, scope: SecretScope, storePath?: string): Promise<void> {
-    const stores = this.getMigratableStores().filter(store =>
-      (storePath !== undefined ? store.path === storePath : store.scope === scope)
-      && existsSync(store.path) && this.storeContainsKey(store, key));
-    await this.withCredentialMutation(key, () => this.withStoreMutations(stores.map(store => store.path), () => this.deleteFromScopeOwned(key, stores)));
-  }
-
-  private deleteFromScopeOwned(key: string, stores: readonly SecretStorePath[]): void {
-    let removed = false;
-    try {
-      for (const store of stores) {
-        const current = store.secure ? this.readEncryptedFile(store.path) : this.readPlaintextFile(store.path);
-        if (!current || !Object.hasOwn(current, key)) continue;
-        const values = Object.assign(Object.create(null) as Record<string, string>, current);
-        // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
-        delete values[key];
-        if (store.secure) this.writeEncryptedFile(store.path, values);
-        else this.writePlaintextFile(store.path, values);
-        logger.debug('SecretsManager: removed one tier copy', { key, source: store.source });
-        removed = true;
-      }
-    } finally {
-      if (removed) this.notifyChanged(key);
-    }
-  }
-
   private getPolicy(): SecretStorageMode {
     return this.options.policy ?? loadConfiguredSecretPolicy(this.options.configManager);
   }
@@ -1576,19 +1525,6 @@ export class SecretsManager {
 
   private getAllCandidateStores(): SecretStorePath[] {
     return allSecretStores(this.layout);
-  }
-
-  /** Every store a MIGRATION may look in, including other surfaces' silos. */
-  private getMigratableStores(): SecretStorePath[] {
-    return migratableStores(this.layout, this.getAllCandidateStores());
-  }
-
-  /** Every credential a migration could move, across every surface's silo. */
-  async listDetailedForMigration(): Promise<SecretRecord[]> {
-    return listMigratableSecrets(
-      this.getMigratableStores(),
-      (path, secure) => (secure ? this.readEncryptedFile(path) : this.readPlaintextFile(path)),
-    );
   }
 
   private resolveWriteTarget(scope: SecretScope, medium: SecretStorageMedium): SecretStorePath {

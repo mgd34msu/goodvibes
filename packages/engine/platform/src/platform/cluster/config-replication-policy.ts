@@ -179,9 +179,8 @@ const NODE_LOCAL_CONFIG_KEYS: readonly string[] = [
   // own pass. Replicating the marker would tell it the work was done and leave
   // the credentials sitting in the clear where nobody looks again.
   'google.credentials.migratedFrom',
-  // The mailbox password references earlier builds kept under `email.*`. Each
-  // node copies its own stored secret to the mailbox password's name at start
-  // (email/carried-mail-password.ts), and that name replicates with `surfaces.`.
+  // Mailbox password references kept under `email.*` name a secret in this
+  // node's own store; the mailbox settings replicate with `surfaces.`.
   'email.passwordRef',
   'email.smtpPasswordRef',
   // How many daemon-hosted conversation loops THIS machine may hold at once.

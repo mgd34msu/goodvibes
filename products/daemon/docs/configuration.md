@@ -88,11 +88,7 @@ preference and applicable daemon or shared preference, and resets the command's
 current value. It also leaves project settings untouched; an existing project
 override can return on reload.
 
-Normal CLI construction runs the daemon-owned settings migration against the
-selected daemon store before loading settings. A migration failure is logged;
-it does not guarantee that every legacy value was moved.
-See [selected-store migration](../src/config/run-daemon-config-migration.ts) and
-the [daemon settings store](../../../packages/engine/platform/src/platform/config/daemon-config-tier.ts).
+See the [daemon settings store](../../../packages/engine/platform/src/platform/config/daemon-config-tier.ts).
 
 ## Overrides for one launch
 

@@ -80,11 +80,9 @@ const SHARED_PASSWORD_CHAIN: readonly string[] = [
 
 /**
  * The mail secret a password setting's stored reference names, when that is
- * not the name the setting derives. A mailbox carried over from the connector's
- * `email.passwordRef` holds such a reference until the daemon copies the secret
- * to the derived name at start (carried-mail-password.ts), so a product that
- * reads mail before that still finds the password. Only a key that is about
- * mail is followed (`parseEmailSecretRef`).
+ * not the name the setting derives, so a password stored under another name
+ * is still found. Only a key that is about mail is followed
+ * (`parseEmailSecretRef`).
  */
 function referencedSecretKeys(getConfig: ConfigReader | undefined, configKeys: readonly string[]): string[] {
   if (getConfig === undefined) return [];

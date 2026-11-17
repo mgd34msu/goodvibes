@@ -316,12 +316,9 @@ No prose parsing may reinterpret an unsuccessful command as a successful stop.
 ### Read-only preparation and rollback
 
 Service manager construction uses the canonical `ConfigManager` with an
-explicit read-only option. The same defaults, layer order and pure migration
-transformations are applied in memory; configuration files, migration receipts
-and quarantine state are not written. Mutating config methods refuse in this
-mode. The product must not eagerly run persistent config migration before a
-dry run, rejected endpoint flags or status request; actual daemon boot retains
-the separate migration entrypoint.
+explicit read-only option. The same defaults and layer order are applied in
+memory; configuration files and quarantine state are not written. Mutating
+config methods refuse in this mode.
 
 The service status query does not delete a stale PID file. Explicit stop and
 uninstall still own that cleanup. Migration refuses a managed target that already has a definition or reports

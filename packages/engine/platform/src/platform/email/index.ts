@@ -234,7 +234,6 @@ export {
 } from './surface-config.js';
 
 export type { SurfaceEmailConfigProblem, SurfaceEmailSettings, ConfigReaderWithOrigins, ConfigOriginSource } from './surface-config.js';
-export { adoptCarriedMailPasswords } from './carried-mail-password.js';
 
 export { EmailReplySubjectSourceOwner } from './reply-subject-source.js';
 export type { EmailInboxBatchInput, EmailInboxBatchMessage, EmailInboxBatchRead } from './email-inbox-batch.js';

@@ -1,5 +1,6 @@
 import { judge } from '../runtime/judge.js';
-import { assertJudgmentInput } from '../gate/judgment-input.js';
+import { mapLimit } from '@goodvibes-jev/judgment';
+import { assertJudgmentInput, JudgmentInputError } from '../gate/judgment-input.js';
 import { ENTITY_ALIAS_SLOTS, entityAlias } from './batteries/entity-alias.js';
 import { splitKnowledgePassages } from './passages.js';
 import { KnowledgeIngestStoppedError, type KnowledgeIngestStopReason } from './ingest-stopped.js';
@@ -11,6 +12,8 @@ export const MAX_ENTITY_ALIAS_EVIDENCE_BYTES = 2_048;
 /** A nominated name longer than this is a phrase, not a name. */
 export const MAX_ENTITY_ALIAS_NAME_CHARS = 64;
 const PASSAGE_CHARS = 600;
+/** Entities read at once, as the neighbouring knowledge readers do. */
+const ENTITY_ALIAS_CONCURRENCY = 4;
 const SITE = 'knowledge.ingest.entity-alias';
 
 interface EntityIdentity {
@@ -80,7 +83,8 @@ function nominate(title: string, evidence: string): string[] {
  * no request; otherwise one request reads all of its candidates, and each
  * confident yes that is a literal span of the passages is kept. An entity whose
  * reading does not settle (unsure, deadline, no decision model) keeps no
- * inferred alias; the other entities keep theirs and the ingest goes on.
+ * inferred alias, as does one whose passages hold protected text; the other
+ * entities keep theirs and the ingest goes on. At most four are read at once.
  */
 export async function readKnowledgeEntityAliases(
   entities: readonly EntityIdentity[],
@@ -113,11 +117,16 @@ export async function readKnowledgeEntityAliases(
     const evidence = chosen.join('\n');
     return { entity: { kind, title }, evidence, candidates: evidence ? nominate(title, evidence) : [] };
   });
-  // Only the passages and names that leave are scanned.
-  for (const request of requests) if (request.candidates.length) assertJudgmentInput(request);
-  const aliases = await Promise.all(requests.map(async ({ entity, evidence, candidates }) => {
+  const aliases = await mapLimit(requests, ENTITY_ALIAS_CONCURRENCY, async (request) => {
+    const { entity, evidence, candidates } = request;
     current();
     if (!candidates.length) return [] as readonly string[];
+    // Only the passages and names that leave are scanned. An entity whose
+    // passages hold protected text sends nothing and keeps no inferred alias.
+    try { assertJudgmentInput(request); } catch (error) {
+      if (error instanceof JudgmentInputError) return [] as readonly string[];
+      throw error;
+    }
     const slots = ENTITY_ALIAS_SLOTS.slice(0, candidates.length);
     const outcome = await judge({
       site: SITE, battery: entityAlias, only: slots,
@@ -132,7 +141,7 @@ export async function readKnowledgeEntityAliases(
       describe: (kept) => kept.length ? `aliases: ${kept.length} of ${candidates.length}` : 'no alias',
     });
     return outcome.value;
-  })).catch((error: unknown) => {
+  }).catch((error: unknown) => {
     // Only the caller's abort rejects `judge`; report it as this hold.
     if (signal?.aborted) throw new KnowledgeEntityAliasHoldError('cancelled');
     throw error;

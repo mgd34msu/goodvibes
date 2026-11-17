@@ -44,16 +44,18 @@ export interface InstrumentationHandle {
 /**
  * Create and attach domain instrumentation to a RuntimeEventBus.
  *
- * Subscribes to all domain channels (plugin, mcp, transport, task, agent,
- * permission, session, compaction) and creates OTel spans for each
+ * Subscribes to the turn, tool, plugin, mcp, transport, task, agent,
+ * permission, session and compaction channels (and health cascades on the
+ * session channel) and creates OTel spans for each
  * lifecycle state machine transition.
  *
- * @param tracer - The RuntimeTracer to use for span creation.
+ * @param tracer - The RuntimeTracer to use for span creation, or a function
+ *   returning the current one (read per span).
  * @param bus - The RuntimeEventBus to subscribe to.
  * @returns An InstrumentationHandle for cleanup and cascade recording.
  */
 export function createInstrumentation(
-  tracer: RuntimeTracer,
+  tracer: RuntimeTracer | (() => RuntimeTracer),
   bus: RuntimeEventBus
 ): InstrumentationHandle {
   const bridge = new DomainBridge(tracer);

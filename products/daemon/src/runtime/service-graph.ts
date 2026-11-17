@@ -67,6 +67,7 @@ import { WebhookNotifier } from '@goodvibes-jev/engine/platform/platform/integra
 import { BenchmarkStore, CacheHitTracker, FavoritesStore, ModelLimitsService, ProviderCapabilityRegistry, ProviderOptimizer, ProviderRegistry, ensureConfiguredModelIsRoutable } from '@goodvibes-jev/engine/platform/platform/providers';
 import { AdaptivePlanner, DeterministicReplayEngine, ExecutionPlanManager, SessionLineageTracker, SessionMemoryStore } from '@goodvibes-jev/engine/platform/platform/core';
 import { deriveFeatureStates, bindFeatureSettingsBridge } from '@goodvibes-jev/engine/platform/platform/runtime/state';
+import { attachComposedInstrumentation, installComposedTelemetry, releaseComposedTelemetry } from '@goodvibes-jev/engine/platform/platform/runtime/observability';
 import { createFleetServices } from './fleet-services.js';
 import { createTriggerServices } from './trigger-services.js';
 import { wireFleetNeedsInputPush } from './fleet-needs-input-push.js';
@@ -137,6 +138,11 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
       featureFlags.loadFromConfig({ flags: deriveFeatureStates(configManager) });
       disposalScope.registry.add('feature settings bridge', bindFeatureSettingsBridge(configManager, featureFlags));
     }
+    // telemetry.otelMode -> the process tracer, and spans for the daemon bus's lifecycle events.
+    // Registered early so it closes late: the tracer sends the spans its exporters still hold.
+    installComposedTelemetry(featureFlags);
+    disposalScope.registry.add('telemetry tracer', () => releaseComposedTelemetry());
+    disposalScope.registry.add('telemetry instrumentation', attachComposedInstrumentation(options.runtimeBus));
     const runtimeDispatch = createDomainDispatch(options.runtimeStore);
     // The daemon's approvals snapshot (approvals.list) reads the decisions the gate reports here.
     disposalScope.registry.add('gate events into the runtime store', registerGateRuntimeEvents(options.runtimeBus, runtimeDispatch));

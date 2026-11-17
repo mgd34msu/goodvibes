@@ -82,7 +82,7 @@ export const featureControlSettings: ConfigSetting[] = [
     type: 'enum',
     default: 'off',
     description:
-      'OpenTelemetry instrumentation: off (default, no OTel SDK initialization), in-process (span creation and in-process export only), or remote-export (additionally export spans as OTLP/HTTP JSON to the collector named by OTEL_EXPORTER_OTLP_TRACES_ENDPOINT, or OTEL_EXPORTER_OTLP_ENDPOINT with /v1/traces appended). Switching away from off requires a restart; in-process <-> remote-export applies live.',
+      'OpenTelemetry instrumentation: off (default, no OTel SDK initialization), in-process (spans for LLM calls, turns, tool calls, agents, tasks, plugins, MCP servers, transport, permission checks, sessions, compaction and health cascades, recorded and exported in-process only; a turn span records the prompt length, not its text), or remote-export (additionally export spans as OTLP/HTTP JSON to the collector named by OTEL_EXPORTER_OTLP_TRACES_ENDPOINT, or OTEL_EXPORTER_OTLP_ENDPOINT with /v1/traces appended). Switching away from off requires a restart; in-process <-> remote-export applies live.',
     enumValues: ['off', 'in-process', 'remote-export'],
   },
   {

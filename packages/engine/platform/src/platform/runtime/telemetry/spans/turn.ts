@@ -19,7 +19,7 @@ export interface TurnSpanContext {
   readonly traceId: string;
   /** Session ID. */
   readonly sessionId: string;
-  /** User prompt (truncated to 256 chars for the attribute). */
+  /** User prompt. Only its length is recorded: spans can be exported off the machine. */
   readonly prompt: string;
 }
 
@@ -52,8 +52,7 @@ export function startTurnSpan(tracer: RuntimeTracer, ctx: TurnSpanContext): Span
   const attrs: SpanAttributes = {
     'turn.id': ctx.turnId,
     'session.id': ctx.sessionId,
-    // Truncate prompt to avoid large attribute values
-    'turn.prompt': ctx.prompt.length > 256 ? ctx.prompt.slice(0, 256) + '...' : ctx.prompt,
+    'turn.prompt_chars': ctx.prompt.length,
   };
 
   return tracer.startSpan('turn.lifecycle', {

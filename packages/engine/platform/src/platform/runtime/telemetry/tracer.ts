@@ -157,6 +157,11 @@ export class RuntimeTracer {
     this.config = config;
   }
 
+  /** Whether spans are recorded. A disabled tracer hands out no-op spans. */
+  get enabled(): boolean {
+    return this.config.enabled;
+  }
+
   /**
    * Start a new span.
    *

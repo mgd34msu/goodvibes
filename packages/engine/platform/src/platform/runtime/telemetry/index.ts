@@ -27,6 +27,8 @@ import { OtlpExporter } from './exporters/index.js';
 import type { OtlpConfig } from './exporters/index.js';
 import { logger } from '../../utils/logger.js';
 import { installPlatformTracer, platformTracer } from '../metrics.js';
+import type { RuntimeEventBus } from '../events/index.js';
+import { createInstrumentation } from './instrumentation/index.js';
 
 // Re-export all public types
 export type {
@@ -248,6 +250,38 @@ export function installComposedTelemetry(
   if (previous !== provider.tracer) void previous.shutdown();
   return provider;
 }
+
+/**
+ * Open spans for the runtime's lifecycle events (turns, tools, agents, tasks,
+ * plugins, MCP servers, transport, permissions, sessions, compaction, health
+ * cascades) on the tracer `telemetry.otelMode` installed. With the mode off the
+ * process tracer records nothing, so no listener is attached and the event bus
+ * pays nothing; the returned function detaches what was attached and ends any
+ * span still open so it is exported.
+ */
+export function attachComposedInstrumentation(bus: RuntimeEventBus): () => void {
+  if (!platformTracer().enabled) return () => {};
+  // Compositions that share one bus (the daemon and its hosted workspaces)
+  // share one set of listeners, so each event opens one span, not one per composition.
+  let entry = instrumentedBuses.get(bus);
+  if (entry === undefined) {
+    entry = { holders: 0, detach: createInstrumentation(platformTracer, bus).detach };
+    instrumentedBuses.set(bus, entry);
+  }
+  const held = entry;
+  held.holders += 1;
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    held.holders -= 1;
+    if (held.holders > 0) return;
+    instrumentedBuses.delete(bus);
+    held.detach();
+  };
+}
+
+const instrumentedBuses = new WeakMap<RuntimeEventBus, { holders: number; readonly detach: () => void }>();
 
 /** Compositions that installed telemetry and have not released it. The tracer is process-wide, so it outlives all but the last. */
 let composedTelemetryHolders = 0;

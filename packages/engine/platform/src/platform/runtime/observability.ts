@@ -177,6 +177,9 @@ export type {
 } from './inspection/state-inspector/index.js';
 export {
   TelemetryApiService,
+  attachComposedInstrumentation,
+  installComposedTelemetry,
+  releaseComposedTelemetry,
 } from './telemetry/index.js';
 export type {
   LedgerEntry,

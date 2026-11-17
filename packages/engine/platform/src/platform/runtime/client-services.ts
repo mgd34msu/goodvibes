@@ -119,7 +119,7 @@ import { createDomainDispatch, type DomainDispatch, type RuntimeStore } from './
 import type { RuntimeEventBus } from './events/index.js';
 import type { FeatureFlagManager } from './feature-flags/index.js';
 import { disposeRuntimeFeatureFlags, resolveRuntimeFeatureFlags } from './feature-flag-composition.js';
-import { releaseComposedTelemetry } from './telemetry/index.js';
+import { attachComposedInstrumentation, releaseComposedTelemetry } from './telemetry/index.js';
 import { createProviderStack } from './provider-stack.js';
 import type { ProviderModelDiscoveryMode, ProviderRegistryFactory } from './provider-stack.js';
 import { createAgentGraph } from './agent-graph.js';
@@ -475,6 +475,7 @@ function composeClientRuntimeServices(
   disposalScope.registry.add('feature flag settings bridge', () => disposeRuntimeFeatureFlags(featureFlags));
   // Registered first so it closes last: the tracer sends the spans its exporters still hold after every other teardown has ended its own.
   disposalScope.registry.add('telemetry tracer', () => releaseComposedTelemetry());
+  disposalScope.registry.add('telemetry instrumentation', attachComposedInstrumentation(options.runtimeBus));
   const runtimeDispatch = createDomainDispatch(options.runtimeStore);
 
   const secretsManager = createRuntimeSecretsManager({

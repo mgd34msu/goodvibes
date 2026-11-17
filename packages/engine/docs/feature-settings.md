@@ -65,7 +65,7 @@ same way. No user action is needed.
 | Overflow spill backend | `tools.overflowSpillBackend` | `ledger`/`diagnostics` | `file` | yes | The backend is chosen when the runtime starts; `file` is the stock behavior. |
 | Tool contract verification | `tools.contractVerification` | `true` | on | no | Registration-time contract checks; invalid tools fail closed. |
 | Output schema fingerprints | `tools.outputSchemaFingerprints` | `true` | off | no | `_meta` fingerprints on find/analyze/inspect results. |
-| OpenTelemetry foundation | `telemetry.otelMode` | `in-process`/`remote-export` | `off` | yes (from off) | platform init, span creation, in-process export. |
+| OpenTelemetry foundation | `telemetry.otelMode` | `in-process`/`remote-export` | `off` | yes (from off) | platform init; spans for LLM calls, turns, tool calls, agents, tasks, plugins, MCP servers, transport, permission checks, sessions, compaction and health cascades; in-process export. |
 | OTel remote export | `telemetry.otelMode` | `remote-export` | off | no | OTLP export; decision-log export tunes via `telemetry.decisionOtlp*`. |
 | Local provider context ingestion | `provider.localContextIngestion` | `true` | on | no | Provider-reported context windows for local models. |
 | Provider optimizer | `provider.optimizerMode` | `manual`/`auto`/`pinned` | `off` | no | Capability-contract routing; pin via `provider.optimizerPinnedModel`. |

@@ -21,6 +21,7 @@ import { attachAgentDomain, attachCompactionDomain, attachPermissionDomain, atta
 import { attachPluginDomain, attachMcpDomain } from './domain-bridge-plugin-mcp.js';
 import { type DomainBridgeHelpers, type SpanMap } from './domain-bridge-shared.js';
 import { attachTaskDomain, attachTransportDomain } from './domain-bridge-transport-task.js';
+import { attachToolDomain, attachTurnDomain } from './domain-bridge-turn-tool.js';
 import { summarizeError } from '../../../utils/error-display.js';
 import { logger } from '../../../utils/logger.js';
 
@@ -36,9 +37,12 @@ import { logger } from '../../../utils/logger.js';
  * ```
  */
 export class DomainBridge {
-  private readonly _tracer: RuntimeTracer;
+  /** Read per span, so spans follow the tracer the process has installed now. */
+  private readonly _tracerOf: () => RuntimeTracer;
 
   /** Active spans per domain, keyed by entity ID. */
+  private readonly _turnSpans: SpanMap = new Map();
+  private readonly _toolSpans: SpanMap = new Map();
   private readonly _pluginSpans: SpanMap = new Map();
   private readonly _mcpSpans: SpanMap = new Map();
   private readonly _transportSpans: SpanMap = new Map();
@@ -48,8 +52,8 @@ export class DomainBridge {
   private readonly _sessionSpans: SpanMap = new Map();
   private readonly _compactionSpans: SpanMap = new Map();
 
-  constructor(tracer: RuntimeTracer) {
-    this._tracer = tracer;
+  constructor(tracer: RuntimeTracer | (() => RuntimeTracer)) {
+    this._tracerOf = typeof tracer === 'function' ? tracer : () => tracer;
   }
 
   /**
@@ -64,6 +68,8 @@ export class DomainBridge {
   public attach(bus: RuntimeEventBus): () => void {
     const helpers = this._helpers();
     const unsubs: Array<() => void> = [
+      attachTurnDomain({ bus, helpers }, this._turnSpans),
+      attachToolDomain({ bus, helpers }, this._toolSpans, this._turnSpans),
       attachPluginDomain({ bus, helpers }, this._pluginSpans),
       attachMcpDomain({ bus, helpers }, this._mcpSpans),
       attachTransportDomain({ bus, helpers }, this._transportSpans),
@@ -72,6 +78,11 @@ export class DomainBridge {
       attachPermissionDomain({ bus, helpers }, this._permissionSpans),
       attachSessionDomain({ bus, helpers }, this._sessionSpans),
       attachCompactionDomain({ bus, helpers }, this._compactionSpans),
+      // Health cascades travel on the session domain outside the typed event union.
+      bus.onDomain('session', (env) => {
+        const payload = env.payload as { readonly type: string };
+        if (payload.type === 'CASCADE_APPLIED') this.recordCascade(payload as unknown as CascadeAppliedEvent, env.traceId ?? '');
+      }),
     ];
 
     return () => {
@@ -99,13 +110,13 @@ export class DomainBridge {
    */
   public recordCascade(event: CascadeAppliedEvent, traceId: string): void {
     this._safe(() => {
-      recordHealthCascadeSpan(this._tracer, event, { traceId });
+      recordHealthCascadeSpan(this._tracerOf(), event, { traceId });
     });
   }
 
   private _allSpanMaps(): SpanMap[] {
     return [
-      this._pluginSpans, this._mcpSpans, this._transportSpans, this._taskSpans,
+      this._turnSpans, this._toolSpans, this._pluginSpans, this._mcpSpans, this._transportSpans, this._taskSpans,
       this._agentSpans, this._permissionSpans, this._sessionSpans, this._compactionSpans,
     ];
   }
@@ -132,8 +143,9 @@ export class DomainBridge {
     map.delete(key);
   }
   private _helpers(): DomainBridgeHelpers {
+    const tracerOf = this._tracerOf;
     return {
-      tracer: this._tracer,
+      get tracer() { return tracerOf(); },
       safe: (action) => this._safe(action),
       withSpan: (map, key, action) => this._withSpan(map, key, action),
       closeSpan: (map, key, action) => this._closeSpan(map, key, action),

@@ -19,8 +19,8 @@ export interface ToolSpanContext {
   readonly tool: string;
   /** Trace ID from the parent turn span. */
   readonly traceId: string;
-  /** Parent span ID (the turn span's spanId). */
-  readonly parentSpanId: string;
+  /** Parent span ID (the turn span's spanId); absent when the turn has no open span. */
+  readonly parentSpanId?: string | undefined;
   /** Tool call arguments (stored as JSON string, truncated). */
   readonly args?: Record<string, unknown> | undefined;
 }

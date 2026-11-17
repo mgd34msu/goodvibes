@@ -125,6 +125,7 @@ export function registerLocalAuthRuntimeCommands(registry: CommandRegistry): voi
     aliases: ['auth-local'],
     description: 'Inspect and manage local daemon/listener auth users, sessions, and bootstrap credentials',
     usage: '[review|panel|add-user <username> <password> [roles, default user]|delete-user <username>|rotate-password <username> <password>|revoke-session <session-id-or-token>|clear-bootstrap-file]',
+    secretArgs: { subcommands: { 'add-user': [2], 'rotate-password': [2], 'revoke-session': [1] } },
     subcommands: {
       'add-user': '<username> <password> [roles]', 'delete-user': '<username>', 'rotate-password': '<username> <password>',
       'revoke-session': '<session-id-or-token>', 'clear-bootstrap-file': '',

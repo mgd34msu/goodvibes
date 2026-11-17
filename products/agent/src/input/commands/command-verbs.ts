@@ -72,6 +72,7 @@ export function ownerOnlyVerbRefusal(commandName: string, resolved: ResolvedComm
  * invoked it; the owner's own keystrokes reach the handler unchanged.
  */
 export function withCommandVerbs(command: SlashCommand, verbs: CommandVerbs): SlashCommand {
+  assertCredentialArgsDeclared(command, verbs);
   const declared: SlashCommand = {
     ...command,
     handler: (args: string[], context: CommandContext) => {
@@ -87,6 +88,21 @@ export function withCommandVerbs(command: SlashCommand, verbs: CommandVerbs): Sl
 }
 
 /**
+ * A command with a verb that stores or presents a credential, or whose verb
+ * effect depends on its arguments, must say which typed words are secret
+ * (`secretArgs`, `{}` when none is typed): every executed line goes into the
+ * input history, so an undeclared secret would be kept there in clear.
+ */
+function assertCredentialArgsDeclared(command: SlashCommand, verbs: CommandVerbs): void {
+  if (command.secretArgs !== undefined) return;
+  const mayTouchCredential = verbs.otherwise.effect === 'credential'
+    || Object.values(verbs.verbs).some((entry) => typeof entry === 'function' || entry.effect === 'credential');
+  if (mayTouchCredential) {
+    throw new Error(`/${command.name} has a verb that stores or presents a credential; declare secretArgs on it ({} when no secret is typed on the line) so the input history never keeps one.`);
+  }
+}
+
+/**
  * Declare the verbs of a command registered elsewhere (a shared terminal-shell
  * factory), without wrapping it. Only for commands with no owner-only verb:
  * the wrapper in withCommandVerbs is what refuses those.
@@ -95,6 +111,7 @@ export function declareCommandVerbs(command: SlashCommand, verbs: CommandVerbs):
   if (Object.values(verbs.verbs).some((entry) => typeof entry !== 'function' && entry.ownerOnly) || verbs.otherwise.ownerOnly) {
     throw new Error(`/${command.name} declares an owner-only verb; register it with withCommandVerbs so the verb is refused for the model.`);
   }
+  assertCredentialArgsDeclared(command, verbs);
   declarations.set(command, { name: command.name, verbs });
 }
 

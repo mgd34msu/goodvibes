@@ -398,6 +398,19 @@ const EMAIL_VERBS: CommandVerbs = {
   otherwise: READ_VERB,
 };
 
+/**
+ * Where a `/email set password <value>` line holds the password, under any
+ * spelling of the field (`password`, `email.passwordRef`, ...): every word of
+ * the value, which `handleSet` joins with spaces.
+ */
+function mailboxPasswordPositions(args: readonly string[]): number[] {
+  if ((args[0] ?? '').trim().toLowerCase() !== 'set') return [];
+  const words: number[] = [];
+  for (let index = 1; index < args.length; index++) if (args[index] !== '--yes') words.push(index);
+  const key = words[0] === undefined ? '' : args[words[0]]!;
+  return resolveMailboxField(key) === 'password' ? words.slice(1) : [];
+}
+
 export function registerEmailRuntimeCommands(registry: CommandRegistry): void {
   registry.register(withCommandVerbs({
     name: 'email',
@@ -406,6 +419,7 @@ export function registerEmailRuntimeCommands(registry: CommandRegistry): void {
     description: 'Direct IMAP/SMTP email: configure, check inbox, or send a confirmed message',
     usage: 'status | config | set <key> <value> [--yes] | check [n] | send --yes <to> <subject...> [-- <body...>]',
     argsHint: 'status|config|set|check|send',
+    secretArgs: { select: mailboxPasswordPositions },
     async handler(args, ctx) {
       const sub = (args[0] ?? 'status').trim().toLowerCase();
 

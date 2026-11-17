@@ -171,6 +171,11 @@ export function registerPlatformAccessRuntimeCommands(registry: CommandRegistry)
     name: 'login',
     description: 'Front-door login flow for provider subscriptions and local service sessions',
     usage: '[provider <name> start|finish <code>|service <daemon|listener> <baseUrl> <username> [password] [secretKey]]',
+    // The service password and a provider sign-in code are never kept in the input history.
+    secretArgs: {
+      subcommands: { service: [4] },
+      select: (args) => (args[0]?.toLowerCase() === 'provider' && args[2]?.toLowerCase() === 'finish' ? [3] : []),
+    },
     async handler(args, ctx) {
       const shellPaths = requireShellPaths(ctx);
       const target = (args[0] ?? '').toLowerCase();
@@ -258,6 +263,7 @@ export function registerPlatformAccessRuntimeCommands(registry: CommandRegistry)
     description: 'Review auth posture, and sign in to or out of a daemon or listener session',
     usage:
       '[review|show <provider>|repair <provider>|bundle export <path>|bundle inspect <path>|login <daemon|listener> <baseUrl> <username> [password] [secretKey]|logout <daemon|listener> <baseUrl> [secretKey]|local <review|panel|add-user|delete-user|rotate-password|revoke-session|clear-bootstrap-file>]',
+    secretArgs: { subcommands: { login: [4], 'local add-user': [3], 'local rotate-password': [3], 'local revoke-session': [2] } },
     async handler(args, ctx) {
       const shellPaths = requireShellPaths(ctx);
       const sub = args[0] ?? 'review';

@@ -98,8 +98,10 @@ export interface HistoryRedactionRule {
  * Built-in redaction rules that apply regardless of caller-supplied rules.
  * An executed command's secret arguments are redacted from its own
  * declaration (`secretArgs` on the command registration) before the line
- * gets here; these rules cover the commands that do not declare them yet and
- * token flags typed anywhere.
+ * gets here. These rules cover a line whose command is not registered on this
+ * surface (the Agent has no `/local-auth`, and an unknown command line is
+ * still kept so it can be recalled and corrected) and token flags typed
+ * anywhere.
  */
 const LOCAL_AUTH = String.raw`\/(?:auth\s+local|auth-local|local-auth)`;
 const BUILTIN_REDACTION_RULES: readonly HistoryRedactionRule[] = [

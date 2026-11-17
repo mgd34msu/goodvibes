@@ -42,13 +42,17 @@ export type TerminalCommandEffect = 'read-only' | 'local-state' | 'connected-hos
  * value`, `local add-user` in `/auth local add-user NAME PASSWORD`), and
  * counts positions the same way, so `{ subcommands: { set: [2] } }` is the
  * value. `flags` names options whose value is a secret, in either
- * `--flag value` or `--flag=value` form.
+ * `--flag value` or `--flag=value` form. `select` is for a command whose
+ * secret depends on what the arguments name (`/email set password <value>`
+ * under any of the field's spellings): it returns the secret positions.
+ * A command that declares `{}` states that it takes no typed secret.
  */
 export interface CommandSecretArgs {
   readonly positions?: readonly number[] | undefined;
   /** Positions, or `{ from }` for every non-flag argument from that position on (a value that may contain spaces). */
   readonly subcommands?: Readonly<Record<string, readonly number[] | { readonly from: number }>> | undefined;
   readonly flags?: readonly string[] | undefined;
+  readonly select?: ((args: readonly string[]) => Iterable<number>) | undefined;
 }
 const REDACTED_ARGUMENT = '<redacted>';
 function quoteHistoryArgument(value: string): string {
@@ -70,13 +74,13 @@ export function commandHistoryLine(
   const first = args[0]?.toLowerCase();
   const second = args[1]?.toLowerCase();
   for (const key of [first, first !== undefined && second !== undefined ? `${first} ${second}` : undefined]) {
-    if (key === undefined) continue;
-    const declared = secretArgs.subcommands?.[key];
-    if (declared === undefined) continue;
+    if (key === undefined || !secretArgs.subcommands || !Object.hasOwn(secretArgs.subcommands, key)) continue;
+    const declared = secretArgs.subcommands[key]!;
     if ('from' in declared) {
       for (let index = declared.from; index < args.length; index++) if (!args[index]!.startsWith('--')) secret.add(index);
     } else for (const position of declared) secret.add(position);
   }
+  for (const position of secretArgs.select?.(args) ?? []) secret.add(position);
   const flags = new Set(secretArgs.flags ?? []);
   let redacted = false;
   const kept = args.map((value, index) => {

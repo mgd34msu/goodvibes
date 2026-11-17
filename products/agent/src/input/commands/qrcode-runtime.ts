@@ -23,6 +23,8 @@ export function registerQrcodeRuntimeCommands(registry: CommandRegistry): void {
     hidden: true,
     usage: '[--name <device name>]',
     argsHint: '[--name <device name>]',
+    // The token is minted by the host and shown, never typed.
+    secretArgs: {},
     async handler(args, ctx) {
       const nameIndex = args.indexOf('--name');
       const name = nameIndex >= 0 ? args[nameIndex + 1] : undefined;

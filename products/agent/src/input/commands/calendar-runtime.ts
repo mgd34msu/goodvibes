@@ -321,6 +321,16 @@ export const CALENDAR_VERBS: CommandVerbs = {
   otherwise: READ_VERB,
 };
 
+/** Where a `/calendar subscribe` line holds the feed address (positional or `--url`). */
+function calendarFeedAddressPositions(args: readonly string[]): number[] {
+  if ((args[0] ?? '').toLowerCase() !== 'subscribe') return [];
+  const positions: number[] = [];
+  for (let index = 1; index < args.length; index++) {
+    if (/^(?:https?|webcals?):\/\//i.test(args[index]!) || (args[index - 1] === '--url' && index > 1)) positions.push(index);
+  }
+  return positions;
+}
+
 export function registerCalendarRuntimeCommands(registry: CommandRegistry): void {
   registry.register(withCommandVerbs({
     name: 'calendar',
@@ -328,6 +338,8 @@ export function registerCalendarRuntimeCommands(registry: CommandRegistry): void
     aliases: ['cal'],
     description: 'Manage local calendar events, external calendar subscriptions, and connected calendar accounts',
     usage: '[list|upcoming [--days N]|connect <google|outlook> [--device]|disconnect <google|outlook>|accounts|import <path> [--yes]|export [--dest <path>] [--yes]|add --title <title> --start <ISO> [--end <ISO>] [--location <loc>] [--notes <notes>] --yes|delete <id> --yes|subscribe <ics-url> [--name N] [--every MIN] [--yes]|unsubscribe <name> --yes|subscriptions|refresh [name]]',
+    // A feed address can be a private one that grants read access; account sign-in takes no typed secret.
+    secretArgs: { select: (args) => calendarFeedAddressPositions(args) },
     handler: async (args: readonly string[], ctx: CommandContext) => {
       const sub = (args[0] ?? 'list').toLowerCase();
       if (CALENDAR_SUBSCRIPTION_VERBS.has(sub)) {

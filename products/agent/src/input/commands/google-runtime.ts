@@ -382,6 +382,8 @@ export function registerGoogleRuntimeCommands(registry: CommandRegistry): void {
     description: 'Connect Gmail and Google Calendar: one command, one consent link, proven by use',
     usage: 'connect | status | reauthorize | forget [--yes] | adopt [--yes] | setup [--path app-password|oauth|existing-client] | client-file <path> | client <id> <secret> | account <address> | calendar-address <url> | runbook | approve [<n>] [--yes|--drop]',
     argsHint: 'connect|status|reauthorize|forget|adopt|setup|client-file|client|account|calendar-address|runbook|approve',
+    // The client secret and the private calendar address are credentials typed on the line.
+    secretArgs: { subcommands: { client: [2], 'calendar-address': [1] } },
     handler: async (args, ctx) => {
       await runGoogleCommand(args, ctx);
       // Google settings are daemon-owned: the connected host is their one writer.

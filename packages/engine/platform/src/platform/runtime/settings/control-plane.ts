@@ -184,7 +184,7 @@ function applySettingsSyncBundleLocked(
     restoreWrittenSettings(configManager, written, before);
     throw error;
   }
-  writeStore(trimStore({
+  writeStore(trimStore(withoutStaleLayers(configManager, {
     ...store,
     syncedSettings: nextSynced.sort((a, b) => a.key.localeCompare(b.key)),
     conflicts: nextConflicts.sort((a, b) => a.key.localeCompare(b.key)),
@@ -195,7 +195,7 @@ function applySettingsSyncBundleLocked(
       timestamp: Date.now(),
       detail: `${appliedCount} settings pulled${skippedLockedKeys.length > 0 ? `, ${skippedLockedKeys.length} skipped because managed locks own them: ${skippedLockedKeys.join(', ')}` : ''}`,
     }],
-  }), configDir);
+  })), configDir);
   return { appliedCount, conflictCount, ...(skippedLockedKeys.length > 0 ? { skippedLockedKeys } : {}) };
 }
 
@@ -250,7 +250,7 @@ function resolveSettingsSyncConflictLocked(
     ].sort((a, b) => a.key.localeCompare(b.key));
   }
 
-  writeStore(trimStore({
+  writeStore(trimStore(withoutStaleLayers(configManager, {
     ...store,
     conflicts: nextConflicts.sort((a, b) => a.key.localeCompare(b.key)),
     syncedSettings: nextSynced,
@@ -261,7 +261,7 @@ function resolveSettingsSyncConflictLocked(
       timestamp: Date.now(),
       detail: `Conflict resolved for ${key} using ${resolution} value`,
     }],
-  }), configDir);
+  })), configDir);
   return true;
 }
 
@@ -422,7 +422,7 @@ function applyStagedManagedBundleLocked(
         changes: remainingChanges,
       }
     : undefined;
-  writeStore(trimStore({
+  writeStore(trimStore(withoutStaleLayers(configManager, {
     ...store,
     managedSettings: nextManaged.sort((a, b) => a.key.localeCompare(b.key)),
     managedLocks: nextLocks.sort((a, b) => a.key.localeCompare(b.key)),
@@ -448,7 +448,7 @@ function applyStagedManagedBundleLocked(
       timestamp: Date.now(),
       detail: `${restoredKeys.length} managed settings applied from ${stage.profileName}${remainingChanges.length > 0 ? ` (${remainingChanges.length} still staged)` : ''}`,
     }],
-  }), configDir);
+  })), configDir);
   return { rollbackToken, appliedCount: restoredKeys.length, remainingCount: remainingChanges.length };
 }
 
@@ -491,7 +491,7 @@ function rollbackManagedApplyLocked(configManager: ConfigManager, token: string,
     configManager.setDynamic(key, structuredClone(schema.default), { bypassManagedLock: true });
     restored++;
   }
-  writeStore(trimStore({
+  writeStore(trimStore(withoutStaleLayers(configManager, {
     ...store,
     managedSettings: nextManaged,
     managedLocks: nextLocks,
@@ -503,40 +503,68 @@ function rollbackManagedApplyLocked(configManager: ConfigManager, token: string,
       timestamp: Date.now(),
       detail: `${restored} managed settings rolled back from ${record.profileName}`,
     }],
-  }), configDir);
+  })), configDir);
   return restored;
 }
 
+/** The value the setting has now: the config is the one store of it. */
+function liveSettingValue(configManager: ConfigManager, key: ConfigKey): unknown {
+  return postalConfigKey(key) ? configManager.getStored(key) : configManager.get(key);
+}
+
+/** A pulled or managed layer is in effect only while the live setting still holds the value it applied. */
+function layerIsCurrent(configManager: ConfigManager, layer: SettingsLayerRecord): boolean {
+  return JSON.stringify(liveSettingValue(configManager, layer.key)) === JSON.stringify(layer.value);
+}
+
+/**
+ * The store without layers the owner has since changed by hand, and without
+ * the conflicts of those layers: the layer keeps provenance only while its
+ * value is the one in effect. A locked managed layer stays (the lock keeps
+ * the value). Applied on each write that has the live config in hand.
+ */
+function withoutStaleLayers(configManager: ConfigManager, store: SettingsControlPlaneStore): SettingsControlPlaneStore {
+  const syncedSettings = store.syncedSettings.filter((layer) => layerIsCurrent(configManager, layer));
+  const managedSettings = store.managedSettings.filter((layer) => layer.locked === true || layerIsCurrent(configManager, layer));
+  const current = {
+    synced: new Set(syncedSettings.map((layer) => layer.key)),
+    managed: new Set(managedSettings.map((layer) => layer.key)),
+  };
+  const conflicts = store.conflicts.filter((conflict) => current[conflict.source].has(conflict.key));
+  return { ...store, syncedSettings, managedSettings, conflicts };
+}
+
 function buildResolvedEntries(configManager: ConfigManager, store: SettingsControlPlaneStore, key?: ConfigKey): ResolvedSettingEntry[] {
-  const conflictKeys = new Set(store.conflicts.map((entry) => entry.key));
   const schema = configManager.getSchema();
   return (key === undefined ? schema : schema.filter(setting => setting.key === key)).map((setting) => {
-    const localValue = structuredClone((postalConfigKey(setting.key) ? configManager.getStored(setting.key) : configManager.get(setting.key)));
+    const localValue = structuredClone(liveSettingValue(configManager, setting.key));
     const syncedEntry = store.syncedSettings.find((entry) => entry.key === setting.key);
     const managedEntry = store.managedSettings.find((entry) => entry.key === setting.key);
     const overriddenSources: SettingsSource[] = [];
+    // The effective value is always the live one; a layer is named its source
+    // only while the live value is still the one that layer applied.
+    const effectiveValue: unknown = localValue;
     let effectiveSource: SettingsSource = 'default';
-    let effectiveValue: unknown = structuredClone(setting.default);
     let sourceLabel: string | undefined;
     let updatedAt: number | undefined;
     let lockReason: string | undefined;
-    if (managedEntry) {
+    let layerSource: 'managed' | 'synced' | undefined;
+    if (managedEntry && (managedEntry.locked === true || layerIsCurrent(configManager, managedEntry))) {
+      layerSource = 'managed';
       effectiveSource = 'managed';
-      effectiveValue = structuredClone(managedEntry.value);
       overriddenSources.push('local');
       if (syncedEntry) overriddenSources.push('synced');
       sourceLabel = managedEntry.sourceLabel;
       updatedAt = managedEntry.updatedAt;
       lockReason = managedEntry.detail;
-    } else if (syncedEntry) {
+    } else if (syncedEntry && layerIsCurrent(configManager, syncedEntry)) {
+      layerSource = 'synced';
       effectiveSource = 'synced';
-      effectiveValue = structuredClone(syncedEntry.value);
       overriddenSources.push('local');
       sourceLabel = syncedEntry.sourceLabel;
       updatedAt = syncedEntry.updatedAt;
     } else if (JSON.stringify(localValue) !== JSON.stringify(setting.default)) {
       effectiveSource = 'local';
-      effectiveValue = localValue;
     }
     const locked = store.managedLocks.some((entry) => entry.key === setting.key);
     return {
@@ -553,7 +581,8 @@ function buildResolvedEntries(configManager: ConfigManager, store: SettingsContr
       lockReason,
       sourceLabel,
       updatedAt,
-      conflict: conflictKeys.has(setting.key),
+      // A conflict stands only while the layer it was recorded against is in effect.
+      conflict: layerSource !== undefined && store.conflicts.some((entry) => entry.key === setting.key && entry.source === layerSource),
     };
   }).sort((a, b) => a.key.localeCompare(b.key));
 }

@@ -85,8 +85,9 @@ The full write-up, with measured speed figures and upgrade notes, is in
 - Remove worktrees that earlier versions created (no created-by record) with
   what they hold, deleting a branch only when it is merged; prune clean,
   unmerged worktrees after 14 days.
-- Rewrite the test suites to 109 files and 309 cases, each opening with the
-  risk it proves; CI runs `bun run validate --job <job>` in 12 jobs.
+- Rewrite the test suites to 151 files (142 in the default suite with 475
+  cases), each opening with the risk it proves; CI runs
+  `bun run validate --job <job>` in 12 jobs.
 
 ### Fixed
 

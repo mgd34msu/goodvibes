@@ -764,7 +764,7 @@ function runContext(
 ): { success: boolean; output?: string; error?: string } {
   const tokens = source?.getTokenState();
   const compaction = source?.getCompactionState();
-  const window = tokens?.contextWindow ?? null;
+  const contextWindow = tokens?.contextWindow ?? null;
   return {
     success: true,
     output: JSON.stringify({
@@ -773,9 +773,9 @@ function runContext(
       ...(source && tokens
         ? {
           scope: source.scope,
-          context_window: window,
+          context_window: contextWindow,
           last_request_tokens: tokens.lastInputTokens,
-          used_fraction: window && window > 0 ? Math.round((tokens.lastInputTokens / window) * 1000) / 1000 : null,
+          used_fraction: contextWindow && contextWindow > 0 ? Math.round((tokens.lastInputTokens / contextWindow) * 1000) / 1000 : null,
           ...(compaction ? { compacting: compaction.isCompacting, compactions: compaction.compactionCount ?? null } : {}),
         }
         : { context_window: null }),

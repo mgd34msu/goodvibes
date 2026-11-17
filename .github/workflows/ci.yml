@@ -96,6 +96,9 @@ jobs:
   # 22.04 allows unprivileged user namespaces without relaxing host security
   # (24.04's AppArmor default refuses them); never disable AppArmor, change
   # sysctls or run as root to make a failing host look supported.
+  # test/live/payments-unbudgeted-path drives a real Chromium: it uses the
+  # runner image's own Google Chrome (/usr/bin/google-chrome, one of the
+  # product's system browser paths) and fails, naming that, if none is found.
   live-sandbox:
     name: Live sandbox
     runs-on: ubuntu-22.04

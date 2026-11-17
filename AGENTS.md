@@ -29,7 +29,7 @@ bun run test:live   # files under test/live/ (the sandbox and real-browser proof
 bun run test:e2e    # files under src/test/e2e/ (the built binaries)
 ```
 
-The limits are fixed: 5 seconds per test, 10 seconds per file (30 under `test/live/` and `src/test/e2e/`), 600 file-seconds for the default suite. A file past its limit is killed and fails. Measured 2026-11-17 on 12 cores (11 workers) with other work running (load average 17 to 24) and the runs' temporary files on disk rather than tmpfs: the default suite, 100 files, took 16.2 to 18.4 s and 135 to 156 file-seconds over ten runs in a row, its slowest file 5.2 to 6.3 s; `test:live`, 5 files, 2.1 s and 4.5 file-seconds; `test:e2e`, 2 files, 7.4 s and 13.3 file-seconds (measured before the cut; its files are unchanged).
+The limits are fixed: 5 seconds per test, 10 seconds per file (30 under `test/live/` and `src/test/e2e/`), 600 file-seconds for the default suite. A file past its limit is killed and fails. Measured 2026-11-17 on 12 cores (11 workers) with other work running (load average 11 to 28): the default suite, 142 files and 475 cases, took 19.6 to 25.4 s and 174 to 220 file-seconds over fifteen runs in a row, its slowest file 4.6 to 6.8 s. By group (files, cases, file-seconds): engine 125, 397, 155 to 184; judgment 4, 30, 0.5 to 1.3; installer 6, 29, 6.5 to 11.7; Agent 3, 12, 7.0 to 12.6; terminal 3, 5, 4.5 to 8.4; daemon 1, 2, 1.1 to 2.3. `test:live`, 5 files, 3.3 s and 5.6 file-seconds; `test:e2e`, 2 files, 8.6 s and 16.4 file-seconds.
 
 Before anything runs, the runner parses every selected file and refuses the whole run, naming file, line and rule, on:
 

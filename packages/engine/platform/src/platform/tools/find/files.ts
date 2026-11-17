@@ -2,16 +2,19 @@ import type { FindSearchOptions } from './shared.js';
 import { paginateFindResult } from './pagination.js';
 import { assertCapturedInputPathContext } from '../../contract/input-authority.js';
 import { DirectoryWalk, type WalkDirOptions } from '../../utils/walk-dir.js';
-import { isAbsolute, join, relative } from 'node:path';
+import { isAbsolute, relative } from 'node:path';
 import { statSync, lstatSync } from 'node:fs';
 import type { FilesQuery, OutputOptions } from './shared.js';
 import {
+  addDiscoveryCutWarning,
   addFindWarning,
   buildIgnoreFileMatcher,
   collectGlobFiles,
   createFindDiagnostics,
-  findNestedGitignoreFiles,
+  findNestedIgnoreFiles,
   directoryIgnoreFiles,
+  heldSearchFiles,
+  NESTED_IGNORE_FILES_SHOWN,
   makeCountResult,
   makeFilesResult,
   matchesGlob,
@@ -78,13 +81,20 @@ async function scanFilesQuery(
   const gitignoreMatcher = respectGitignore
     ? buildIgnoreFileMatcher(rootIgnoreFiles, diagnostics)
     : null;
+  // A listing without hidden entries or followed links comes from the
+  // project's held file list, which a repeated query checks by directory
+  // stamps instead of walking, and which records each listed directory's
+  // ignore files, so nested ones are reported without a walk of their own.
+  const held = includeHidden || followSymlinks ? null : await heldSearchFiles(basePath, patterns, diagnostics, walkOptions);
   if (respectGitignore) {
-    const rootGitignorePath = join(ignoreRoot, '.gitignore');
-    const nestedGitignores = await findNestedGitignoreFiles(basePath, rootGitignorePath, walk, walkOptions, diagnostics);
-    if (nestedGitignores.length > 0) {
+    const nested = held
+      ? held.ignoreFiles.filter((file) => !rootIgnoreFiles.includes(file))
+      : await findNestedIgnoreFiles(basePath, rootIgnoreFiles, walk, walkOptions, diagnostics);
+    if (nested.length > 0) {
+      const count = !held && nested.length >= NESTED_IGNORE_FILES_SHOWN ? `${nested.length} or more` : `${nested.length}`;
       addFindWarning(
         diagnostics,
-        `Nested .gitignore files are not applied by find files; ${nestedGitignores.length} nested file(s) detected, including '${nestedGitignores[0]}'.`,
+        `Nested .gitignore and .ignore files are not applied by find files; ${count} nested file(s) detected, including '${nested[0]}'.`,
       );
     }
   }
@@ -92,7 +102,10 @@ async function scanFilesQuery(
   await using hasContentRegex = query.has_content
     ? await createSafeRegex(query.has_content, '', { ...options, assertCurrent: current, operation: 'find files has_content' }) : undefined;
 
-  const scannedFiles = await collectGlobFiles(basePath, patterns, includeHidden, followSymlinks, diagnostics, walk, walkOptions);
+  const scannedFiles = held
+    ? held.files
+    : Array.from(await collectGlobFiles(basePath, patterns, includeHidden, followSymlinks, diagnostics, walk, walkOptions));
+  if (options.shouldContinue?.() === false) addDiscoveryCutWarning(diagnostics, scannedFiles.length);
   const matchedFiles = new Set<string>();
   for (const file of scannedFiles) {
     // Ignore rules are written relative to the directory holding the .gitignore.

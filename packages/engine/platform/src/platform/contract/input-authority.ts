@@ -245,6 +245,19 @@ export function isCapturedInputPath(path: string): boolean {
   return RESERVED_VIEW_LAYOUT.test(absolute);
 }
 
+/**
+ * {@link isCapturedInputPath} for an entry a directory listing named, without
+ * resolving it: `directoryRealPath` is the real path of a directory that is not
+ * captured input, and the entry is not a symbolic link, so its real path is
+ * that directory's joined with its name. Nothing at or above the directory is
+ * captured, so only the entry itself can be a remembered root or complete the
+ * reserved layout.
+ */
+export function isCapturedInputEntry(directoryRealPath: string, name: string): boolean {
+  const absolute = join(directoryRealPath, name);
+  return capturedRoots.has(absolute) || RESERVED_VIEW_LAYOUT.test(absolute);
+}
+
 function stateOf(token: ContractInputAuthority): Authority {
   const state = authorities.get(token);
   if (!state) throw new Error('captured input authority is missing or revoked');

@@ -3,9 +3,12 @@ import { basename, dirname, relative, sep } from 'node:path';
 import { WALK_SKIP_DIRS } from '../../utils/walk-dir.js';
 
 /**
- * The per-project file list the text searches share (content, symbols,
- * references, structural): the files a search walk selects under a directory,
- * held between searches so a repeated search walks nothing.
+ * The per-project file list every `find` mode shares (files, content,
+ * symbols, references, structural): the files a search walk selects under a
+ * directory, held between searches so a repeated search walks nothing. Each
+ * held directory also records the ignore files (`.gitignore`, `.ignore`) its
+ * listing named, so files mode reports nested ignore files without a second
+ * walk through hidden entries.
  *
  * Invalidation is by directory stamp, not by walking again. Every directory the
  * walk entered is kept with a stamp (inode, change time, modification time)
@@ -49,6 +52,13 @@ interface DirNode {
   readonly files: string[];
   /** Directories directly below this one that the walk entered (or kept unchanged). */
   readonly dirs: string[];
+  /** Ignore files (`.gitignore`, `.ignore`) directly in this directory. */
+  readonly ignoreFiles: string[];
+}
+
+interface FlatList {
+  readonly files: readonly string[];
+  readonly ignoreFiles: readonly string[];
 }
 
 interface FileTree {
@@ -57,25 +67,30 @@ interface FileTree {
   readonly nodes: Map<string, DirNode>;
   fileCount: number;
   /** Flattened lists by searched directory, until the tree changes. */
-  readonly flat: Map<string, readonly string[]>;
+  readonly flat: Map<string, FlatList>;
 }
 
 /**
  * The walk a list is built with: the search walk from `start` (no hidden
  * entries, no followed links), which asks `hooks.enter` about every directory
- * its listings name before it decides to descend, and calls `hooks.notKept`
- * when what it met makes the list unfit to keep.
+ * its listings name before it decides to descend, passes every ignore file its
+ * listings name to `hooks.ignoreFile`, and calls `hooks.notKept` when what it
+ * met makes the list unfit to keep.
  */
 export type FileListWalk = (start: string, hooks: FileListWalkHooks) => AsyncIterable<string>;
 
 export interface FileListWalkHooks {
   /** False: the walk must not enter this directory (the list holds it unchanged). */
   readonly enter: (directory: string) => boolean;
+  /** An ignore file (`.gitignore`, `.ignore`) in a listed directory; it is not a file of the list. */
+  readonly ignoreFile: (path: string) => void;
   readonly notKept: () => void;
 }
 
 export interface FileListResult {
   readonly files: readonly string[];
+  /** The ignore files of the listed directories, in the same order as `files`. */
+  readonly ignoreFiles: readonly string[];
   /** The walk stopped at the time budget, so more files exist than are listed. */
   readonly cut: boolean;
 }
@@ -117,20 +132,23 @@ function byCodeUnit(a: string, b: string): number {
 }
 
 /**
- * The files under `start` in a fixed order: a directory's files by name, then
- * its subdirectories by name, each in the same way.
+ * The files (and ignore files) under `start` in a fixed order: a directory's
+ * files by name, then its subdirectories by name, each in the same way.
  */
-function flatten(tree: FileTree, start: string): readonly string[] {
+function flatten(tree: FileTree, start: string): FlatList {
   const held = tree.flat.get(start);
   if (held) return held;
-  const out: string[] = [];
+  const files: string[] = [];
+  const ignoreFiles: string[] = [];
   const visit = (directory: string): void => {
     const node = tree.nodes.get(directory);
     if (!node) return;
-    for (const file of [...node.files].sort(byCodeUnit)) out.push(file);
+    for (const file of [...node.files].sort(byCodeUnit)) files.push(file);
+    for (const file of [...node.ignoreFiles].sort(byCodeUnit)) ignoreFiles.push(file);
     for (const child of [...node.dirs].sort(byCodeUnit)) visit(child);
   };
   visit(start);
+  const out: FlatList = { files, ignoreFiles };
   tree.flat.set(start, out);
   return out;
 }
@@ -147,7 +165,7 @@ async function walkInto(tree: FileTree, start: string, walk: FileListWalk, held:
   const fresh = (directory: string): DirNode => {
     const previous = tree.nodes.get(directory);
     if (previous) tree.fileCount -= previous.files.length;
-    const node: DirNode = { stamp: '', racy: true, files: [], dirs: [] };
+    const node: DirNode = { stamp: '', racy: true, files: [], dirs: [], ignoreFiles: [] };
     tree.nodes.set(directory, node);
     listed.add(directory);
     stamps.push(directoryStamp(directory).then((stamp) => {
@@ -170,6 +188,9 @@ async function walkInto(tree: FileTree, start: string, walk: FileListWalk, held:
       fresh(directory);
       parent?.dirs.push(directory);
       return true;
+    },
+    ignoreFile: (path) => {
+      tree.nodes.get(dirname(path))?.ignoreFiles.push(path);
     },
     notKept,
   };
@@ -278,7 +299,7 @@ async function build(basePath: string, includeProductWorktrees: boolean, walk: F
   } else {
     remember(tree);
   }
-  return { files: flatten(tree, basePath), cut };
+  return { ...flatten(tree, basePath), cut };
 }
 
 /**
@@ -301,7 +322,7 @@ async function refresh(tree: FileTree, start: string, walk: FileListWalk, isProt
   }
   if (changed.size === 0) {
     remember(tree);
-    return { files: flatten(tree, start), cut: false };
+    return { ...flatten(tree, start), cut: false };
   }
   tree.flat.clear();
   let keep = true;
@@ -334,5 +355,5 @@ async function refresh(tree: FileTree, start: string, walk: FileListWalk, isProt
   const cut = isCut();
   if (!keep || cut || tree.fileCount > FILE_LIST_MAX_FILES) forget(tree);
   else remember(tree);
-  return { files: flatten(tree, start), cut };
+  return { ...flatten(tree, start), cut };
 }

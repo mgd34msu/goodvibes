@@ -1,8 +1,8 @@
-import { assertCapturedInputPathContext, isCapturedInputPath } from '../../contract/input-authority.js';
+import { assertCapturedInputPathContext, isCapturedInputEntry, isCapturedInputPath } from '../../contract/input-authority.js';
 import { assertCapturedToolReadAccess, assertCapturedToolInvocationCurrent, hasCapturedToolInvocation } from '../shared/captured-input-tools.js';
 import { projectFileList, type FileListWalk } from './file-list.js';
 import { hostRipgrep } from './ripgrep.js';
-import { resolve, relative, basename, sep } from 'node:path';
+import { resolve, relative, basename, dirname, join, sep } from 'node:path';
 import { stat as statAsync } from 'node:fs/promises';
 import { statSync, lstatSync, existsSync, readFileSync, realpathSync } from 'node:fs';
 import { walkDir, DirectoryWalk, WALK_SKIP_DIRS, type WalkDirOptions } from '../../utils/walk-dir.js';
@@ -341,33 +341,17 @@ export async function collectGlobFiles(
 ): Promise<Set<string>> {
   const matchedFiles = new Set<string>();
   const visitedRealPaths = new Set<string>();
-  const globs: Array<InstanceType<typeof Bun.Glob>> = [];
-  for (const pattern of patterns) {
-    try {
-      globs.push(new Bun.Glob(pattern));
-    } catch (err) {
-      addFindWarning(diagnostics, `Skipped invalid glob pattern '${pattern}': ${summarizeError(err)}`);
-    }
-  }
+  const globs = compileGlobs(patterns, diagnostics);
   if (!globs.length) return matchedFiles;
 
-  // Literal prefixes prove which subtrees cannot match. Complex syntax stays
-  // conservative; Bun.Glob remains the authority on individual file matches.
-  const root = resolve(basePath);
-  const prefixes = patterns.map(pattern => {
-    const parts = pattern.split('/');
-    if (pattern.startsWith('/') || parts.some(part => part === '.' || part === '..')) return root;
-    const end = parts.findIndex(part => !/^[A-Za-z0-9_. -]+$/.test(part));
-    return resolve(basePath, ...parts.slice(0, end < 0 ? parts.length : end));
-  });
+  const reaches = globReach(basePath, patterns);
   const explicitDirectories = patterns.flatMap(pattern => pattern.split('/').flatMap((part, index, parts) =>
     WALK_SKIP_DIRS.has(part) ? [new Bun.Glob(parts.slice(0, index + 1).join('/'))] : []));
   const selectedFile = (file: string): boolean => globs.some(glob => matchesGlob(glob, file, basePath))
     && walkOptions.selectFile?.(file) !== false;
   const selectedDirectory = (directory: string): boolean | undefined => {
     const selection = searchDirectorySelection(directory, walkOptions, diagnostics);
-    if (selection === false || !prefixes.some(prefix => prefix === root || prefix === directory
-      || prefix.startsWith(`${directory}${sep}`) || directory.startsWith(`${prefix}${sep}`))) return false;
+    if (selection === false || !reaches(directory)) return false;
     // A wildcard's "possibly relevant" must not accidentally opt all generated
     // and dependency directories into discovery. Explicitly named ones work.
     if (selection === true || explicitDirectories.some(glob => matchesGlob(glob, directory, basePath))) return true;
@@ -404,6 +388,36 @@ export async function collectGlobFiles(
     matchedFiles.add(file);
   }
   return matchedFiles;
+}
+
+function compileGlobs(patterns: readonly string[], diagnostics: FindDiagnostics | undefined): Array<InstanceType<typeof Bun.Glob>> {
+  const globs: Array<InstanceType<typeof Bun.Glob>> = [];
+  for (const pattern of patterns) {
+    try {
+      globs.push(new Bun.Glob(pattern));
+    } catch (err) {
+      addFindWarning(diagnostics, `Skipped invalid glob pattern '${pattern}': ${summarizeError(err)}`);
+    }
+  }
+  return globs;
+}
+
+/**
+ * Whether a directory can hold a match of `patterns`: each pattern's literal
+ * prefix proves which subtrees cannot. Complex syntax stays conservative;
+ * Bun.Glob remains the authority on individual file matches. A directory
+ * passes only when its ancestors under `basePath` pass too.
+ */
+function globReach(basePath: string, patterns: readonly string[]): (directory: string) => boolean {
+  const root = resolve(basePath);
+  const prefixes = patterns.map(pattern => {
+    const parts = pattern.split('/');
+    if (pattern.startsWith('/') || parts.some(part => part === '.' || part === '..')) return root;
+    const end = parts.findIndex(part => !/^[A-Za-z0-9_. -]+$/.test(part));
+    return resolve(basePath, ...parts.slice(0, end < 0 ? parts.length : end));
+  });
+  return (directory) => prefixes.some(prefix => prefix === root || prefix === directory
+    || prefix.startsWith(`${directory}${sep}`) || directory.startsWith(`${prefix}${sep}`));
 }
 
 export function matchesGlob(glob: InstanceType<typeof Bun.Glob>, filePath: string, basePath: string): boolean {
@@ -580,16 +594,30 @@ function searchDirectorySelection(directory: string, options: WalkDirOptions, di
   return selection;
 }
 
-export async function findNestedGitignoreFiles(
-  basePath: string, rootGitignorePath: string, walk = new DirectoryWalk(basePath), walkOptions: WalkDirOptions = {},
+/** The names of the ignore files files mode reads at the root and reports when nested. */
+export function isIgnoreFileName(name: string): boolean {
+  return name === '.gitignore' || name === '.ignore';
+}
+
+/** Nested ignore files found by the walk files mode stops at; it stops after this many. */
+export const NESTED_IGNORE_FILES_SHOWN = 5;
+
+/**
+ * The ignore files (`.gitignore`, `.ignore`) below `basePath` other than
+ * `rootIgnoreFiles`, by a walk through hidden directories too, stopping at
+ * {@link NESTED_IGNORE_FILES_SHOWN}. Files mode uses it only when the listing
+ * cannot come from the held project file list, which records them as it lists.
+ */
+export async function findNestedIgnoreFiles(
+  basePath: string, rootIgnoreFiles: readonly string[], walk = new DirectoryWalk(basePath), walkOptions: WalkDirOptions = {},
   diagnostics?: FindDiagnostics,
 ): Promise<string[]> {
   const nested: string[] = [];
-  const maxNested = 5;
+  const nestedFile = (file: string): boolean => isIgnoreFileName(basename(file)) && !rootIgnoreFiles.includes(file);
   for await (const file of walk.files({
     ...walkOptions, includeHidden: true, maxFileSize: Number.POSITIVE_INFINITY,
     selectDirectory: directory => searchDirectorySelection(directory, walkOptions, diagnostics),
-    selectFile: file => basename(file) === '.gitignore' && file !== rootGitignorePath && walkOptions.selectFile?.(file) !== false,
+    selectFile: file => nestedFile(file) && walkOptions.selectFile?.(file) !== false,
     beforeAttempt: () => {
       assertCapturedToolInvocationCurrent();
       walkOptions.beforeAttempt?.();
@@ -600,9 +628,9 @@ export async function findNestedGitignoreFiles(
     },
     assertPath: assertCapturedInputPathContext, site: 'tools.find.gitignore.skip-directory',
   })) {
-    if (basename(file) === '.gitignore' && file !== rootGitignorePath) {
+    if (nestedFile(file)) {
       nested.push(file);
-      if (nested.length >= maxNested) break;
+      if (nested.length >= NESTED_IGNORE_FILES_SHOWN) break;
     }
   }
   return nested;
@@ -622,54 +650,105 @@ export async function collectFilesForSearch(
   diagnostics?: FindDiagnostics,
   walkOptions: WalkDirOptions = {},
 ): Promise<string[]> {
-  const held = await heldSearchFiles(basePath, queryGlob, diagnostics, walkOptions);
-  if (held) return held;
+  const held = await heldSearchFiles(basePath, queryGlob === undefined ? undefined : [queryGlob], diagnostics, walkOptions);
+  if (held) return held.files;
   if (!queryGlob) {
     return collectWalkFiles(basePath, diagnostics, walkOptions);
   }
   return Array.from(await collectGlobFiles(basePath, [queryGlob], false, false, diagnostics, new DirectoryWalk(basePath), walkOptions));
 }
 
-/** The search's files from the held project list, or null when this search must walk for itself. */
-async function heldSearchFiles(
+/** `.`: the first character of a hidden entry's name. */
+const DOT = 46;
+
+export interface HeldSearchFiles {
+  /** The files the walk would have selected, filtered by the globs. */
+  readonly files: string[];
+  /** The ignore files (`.gitignore`, `.ignore`) of every listed directory, `basePath`'s own included. */
+  readonly ignoreFiles: readonly string[];
+}
+
+/**
+ * A search's files from the held project list (file-list.ts), or null when
+ * this search must walk for itself: hidden entries, followed links, a size
+ * limit, a caller directory selection, a glob naming a conventionally skipped
+ * directory, or a contract's captured input. With `patterns`, a file is kept
+ * when one of them matches it and the walk would have reached its directory,
+ * exactly as {@link collectGlobFiles} selects; an invalid pattern is warned
+ * about and matches nothing.
+ */
+export async function heldSearchFiles(
   basePath: string,
-  queryGlob: string | undefined,
+  patterns: readonly string[] | undefined,
   diagnostics: FindDiagnostics | undefined,
   walkOptions: WalkDirOptions,
-): Promise<string[] | null> {
+): Promise<HeldSearchFiles | null> {
   const { selectFile, selectDirectory, includeHidden, followSymlinks, maxFileSize, onSkippedProductWorktrees, ...callOptions } = walkOptions;
   if (selectDirectory || includeHidden || followSymlinks || maxFileSize !== undefined || onSkippedProductWorktrees) return null;
   if (hasCapturedToolInvocation() || isCapturedInputPath(basePath)) return null;
-  let glob: InstanceType<typeof Bun.Glob> | undefined;
-  if (queryGlob !== undefined) {
-    // A glob naming a conventionally skipped directory opts it in: that walk differs from the held one.
-    if (queryGlob.split('/').some((part) => WALK_SKIP_DIRS.has(part))) return null;
-    try { glob = new Bun.Glob(queryGlob); } catch { return null; }
+  // A glob naming a conventionally skipped directory opts it in: that walk differs from the held one.
+  if (patterns?.some((pattern) => pattern.split('/').some((part) => WALK_SKIP_DIRS.has(part)))) return null;
+  let matchesPatterns: ((file: string) => boolean) | undefined;
+  if (patterns !== undefined) {
+    const globs = compileGlobs(patterns, diagnostics);
+    const reaches = globReach(basePath, patterns);
+    matchesPatterns = (file) => globs.some((glob) => matchesGlob(glob, file, basePath)) && reaches(dirname(file));
   }
-  const walk: FileListWalk = (start, hooks) => walkDir(start, {
-    ...callOptions,
-    onSkippedProductWorktrees: (path, entryCount) => {
-      hooks.notKept();
-      reportSkippedWorktrees(diagnostics, basePath)(path, entryCount);
-    },
-    selectDirectory: (directory) => {
-      if (isCapturedInputPath(directory)) {
-        hooks.notKept();
-        if (searchDirectorySelection(directory, {}, diagnostics) === false) return false;
+  const walk: FileListWalk = (start, hooks) => {
+    // The real path of each directory of this walk that is not captured input,
+    // so an entry it lists is checked by name instead of being resolved: a
+    // listed file or directory (not a link; links are not followed) has its
+    // directory's real path joined with its name. A directory with no checked
+    // parent (the start) is resolved in full.
+    const clearDirectories = new Map<string, string>();
+    const capturedEntry = (path: string, directory: boolean): boolean => {
+      const parentReal = clearDirectories.get(dirname(path));
+      if (parentReal === undefined) {
+        if (isCapturedInputPath(path)) return true;
+        try { clearDirectories.set(path, realpathSync(path)); } catch { /* resolved in full again */ }
+        return false;
       }
-      return hooks.enter(directory) ? undefined : false;
-    },
-    beforeAttempt: () => {
-      assertCapturedToolInvocationCurrent();
-      callOptions.beforeAttempt?.();
-    },
-    beforeAsyncAttempt: async () => {
-      assertCapturedToolInvocationCurrent();
-      await callOptions.beforeAsyncAttempt?.();
-    },
-    assertPath: assertCapturedInputPathContext,
-    site: 'tools.find.skip-directory',
-  });
+      const name = basename(path);
+      if (isCapturedInputEntry(parentReal, name)) return true;
+      if (directory) clearDirectories.set(path, join(parentReal, name));
+      return false;
+    };
+    return walkDir(start, {
+      ...callOptions,
+      // Hidden entries are listed only so the list can note the ignore files
+      // among them; no hidden file is kept and no hidden directory entered.
+      includeHidden: true,
+      selectFile: (file) => {
+        if (file.charCodeAt(file.lastIndexOf(sep) + 1) !== DOT) return true;
+        if (isIgnoreFileName(basename(file))) hooks.ignoreFile(file);
+        return false;
+      },
+      onSkippedProductWorktrees: (path, entryCount) => {
+        hooks.notKept();
+        reportSkippedWorktrees(diagnostics, basePath)(path, entryCount);
+      },
+      selectDirectory: (directory) => {
+        if (directory.charCodeAt(directory.lastIndexOf(sep) + 1) === DOT) return false;
+        if (capturedEntry(directory, true)) {
+          hooks.notKept();
+          if (searchDirectorySelection(directory, {}, diagnostics) === false) return false;
+        }
+        return hooks.enter(directory) ? undefined : false;
+      },
+      beforeAttempt: () => {
+        assertCapturedToolInvocationCurrent();
+        callOptions.beforeAttempt?.();
+      },
+      beforeAsyncAttempt: async () => {
+        assertCapturedToolInvocationCurrent();
+        await callOptions.beforeAsyncAttempt?.();
+      },
+      assertPath: (path) => {
+        if (capturedEntry(path, false)) assertCapturedInputPathContext(path);
+      },
+      site: 'tools.find.skip-directory',
+    });
+  };
   const listed = await projectFileList(
     basePath, walkOptions.includeProductWorktrees === true, walk, isCapturedInputPath,
     () => walkOptions.shouldContinue?.() === false,
@@ -677,8 +756,8 @@ async function heldSearchFiles(
   walkOptions.signal?.throwIfAborted();
   callOptions.beforeAttempt?.();
   assertCapturedToolInvocationCurrent();
-  const files = listed.files.filter((file) => (!glob || matchesGlob(glob, file, basePath)) && selectFile?.(file) !== false);
-  return files;
+  const files = listed.files.filter((file) => matchesPatterns?.(file) !== false && selectFile?.(file) !== false);
+  return { files, ignoreFiles: listed.ignoreFiles };
 }
 
 /**

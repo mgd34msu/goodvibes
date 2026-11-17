@@ -141,12 +141,6 @@ function selectionEvidence(selection: Selection): Omit<Selection, 'recordAction'
   return evidence;
 }
 
-/** A held plan: which reading was unsure, and the fitting routes at low confidence for the caller to choose from. */
-export interface HeldTaskRoutePlan extends UncertainPlan {
-  readonly unsure: { readonly reading: 'route selection'; readonly outcome: Outcome; readonly leading: string; readonly probability: number };
-  readonly candidates: readonly TaskRouteCandidate[];
-}
-
 const MISSING_REQUEST: MissingRequestPlan = {
   status: 'missing_request',
   usage: 'Use route action:"plan" query:"<user task>" to get the preferred GoodVibes Agent route, alternatives, missing fields, and confirmation boundary.',
@@ -252,7 +246,7 @@ export async function planTaskRoute(
       slotRun.recordAction('held: route selection unsure');
       const restriction = authority.consumeObservation();
       retainCurrent?.(restriction.assertCurrent, TASK_ROUTE_SITE); assertPublication();
-      const held: HeldTaskRoutePlan = {
+      const held: UncertainPlan = {
         status: 'uncertain', request: previewText(protectedRequest, includeParameters ? 220 : 120), judgment,
         unsure: { reading: 'route selection', outcome: selection.outcome, leading: leading.draft.id, probability: leading.score },
         candidates: ranked.slice(0, limit).map((route) => ({ ...describeRoute(route, includeParameters), confidence: 'low' as const })),

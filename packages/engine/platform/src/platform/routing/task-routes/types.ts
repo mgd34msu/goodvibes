@@ -2,7 +2,7 @@
  * Shapes shared by the task route catalog, the planner and the route tool.
  * The candidate and plan shapes match the agent's planAgentTaskRoute output.
  */
-import type { Ranked, Reading, Selection } from '@goodvibes-jev/judgment';
+import type { Outcome, Ranked, Reading, Selection } from '@goodvibes-jev/judgment';
 import type { NamedIdSources } from './named-ids.js';
 import type { JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
 import type { ProtectedSourceOwner } from '../../security/source-screening/types.js';
@@ -152,10 +152,13 @@ export interface ReadyPlan {
   readonly policy: string;
 }
 
+/** A held plan: which reading was unsure, and the fitting routes at low confidence for the caller to choose from. */
 export interface UncertainPlan {
   readonly status: 'uncertain';
   readonly request: string;
   readonly judgment: TaskRouteJudgment;
+  readonly unsure: { readonly reading: 'route selection'; readonly outcome: Outcome; readonly leading: string; readonly probability: number };
+  readonly candidates: readonly TaskRouteCandidate[];
   readonly nextAction: string;
   readonly policy: string;
 }

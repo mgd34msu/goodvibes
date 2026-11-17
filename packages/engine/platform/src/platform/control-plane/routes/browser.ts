@@ -46,6 +46,8 @@ import { readInvocationParams, requireStringValue } from './invocation-params.js
 export interface BrowserGatewayTarget {
   readonly sessionId?: string | undefined;
   readonly pageId?: string | undefined;
+  /** The request's cancellation: a caller that disconnects ends every wait of its call. */
+  readonly signal?: AbortSignal | undefined;
 }
 
 /** Launch arguments carried on an ordinary call, so an implicit open matches the ask. */
@@ -187,10 +189,11 @@ function readExtractFields(value: unknown): readonly BrowserGatewayExtractField[
   return EXTRACT_FIELDS.filter((field) => requested.has(field));
 }
 
-function readTarget(params: Record<string, unknown>): BrowserGatewayTarget {
+function readTarget(params: Record<string, unknown>, invocation: GatewayMethodInvocation): BrowserGatewayTarget {
   return {
     sessionId: readOptionalString(params.sessionId),
     pageId: readOptionalString(params.pageId),
+    signal: invocation.signal,
   };
 }
 
@@ -305,7 +308,7 @@ export function createBrowserGatewayHandlers(
     ['browser.sessions.close', handler(async (params) => service.close(requireStringValue(params.sessionId, 'sessionId')))],
     ['browser.navigate', handler(async (params, invocation) => {
       const waitUntil = readOptionalString(params.waitUntil);
-      return service.navigate(readTarget(params), {
+      return service.navigate(readTarget(params, invocation), {
         url: requireStringValue(params.url, 'url'),
         launch: { ...readLaunchArgs(params), ...provisionLifetime(invocation) },
         ...(waitUntil !== undefined && WAIT_UNTIL_STATES.has(waitUntil)
@@ -314,19 +317,19 @@ export function createBrowserGatewayHandlers(
         timeoutMs: readOptionalNumber(params.timeoutMs),
       });
     })],
-    ['browser.snapshot', handler(async (params) => service.snapshot(readTarget(params), {
+    ['browser.snapshot', handler(async (params, invocation) => service.snapshot(readTarget(params, invocation), {
       limit: readOptionalNumber(params.limit),
     }))],
-    ['browser.click', handler(async (params) => {
+    ['browser.click', handler(async (params, invocation) => {
       const button = readOptionalString(params.button);
-      return service.click(readTarget(params), {
+      return service.click(readTarget(params, invocation), {
         ref: requireStringValue(params.ref, 'ref'),
         ...(button !== undefined && MOUSE_BUTTONS.has(button) ? { button: button as 'left' | 'right' | 'middle' } : {}),
         clickCount: readOptionalNumber(params.clickCount),
         timeoutMs: readOptionalNumber(params.timeoutMs),
       });
     })],
-    ['browser.type', handler(async (params) => service.type(readTarget(params), {
+    ['browser.type', handler(async (params, invocation) => service.type(readTarget(params, invocation), {
       ref: requireStringValue(params.ref, 'ref'),
       // An empty string is a legitimate value here: clearing a field is
       // `text: ""` with the default replace behaviour, so this one is read
@@ -336,41 +339,41 @@ export function createBrowserGatewayHandlers(
       replace: readOptionalBoolean(params.replace),
       timeoutMs: readOptionalNumber(params.timeoutMs),
     }))],
-    ['browser.select', handler(async (params) => {
+    ['browser.select', handler(async (params, invocation) => {
       const values = readStringList(params.values);
       if (values.length === 0) {
         throw new GatewayVerbError('values (a non-empty list of option values) is required', 'INVALID_ARGUMENT', 400, 'values');
       }
-      return service.select(readTarget(params), {
+      return service.select(readTarget(params, invocation), {
         ref: requireStringValue(params.ref, 'ref'),
         values,
         timeoutMs: readOptionalNumber(params.timeoutMs),
       });
     })],
-    ['browser.press', handler(async (params) => service.press(readTarget(params), {
+    ['browser.press', handler(async (params, invocation) => service.press(readTarget(params, invocation), {
       ref: requireStringValue(params.ref, 'ref'),
       key: requireStringValue(params.key, 'key'),
       timeoutMs: readOptionalNumber(params.timeoutMs),
     }))],
-    ['browser.scroll', handler(async (params) => {
+    ['browser.scroll', handler(async (params, invocation) => {
       const direction = readOptionalString(params.direction);
-      return service.scroll(readTarget(params), {
+      return service.scroll(readTarget(params, invocation), {
         ref: readOptionalString(params.ref),
         ...(direction !== undefined && SCROLL_DIRECTIONS.has(direction) ? { direction: direction as 'up' | 'down' } : {}),
         amount: readOptionalNumber(params.amount),
       });
     })],
-    ['browser.waitFor', handler(async (params) => service.waitFor(readTarget(params), {
+    ['browser.waitFor', handler(async (params, invocation) => service.waitFor(readTarget(params, invocation), {
       text: readOptionalString(params.text),
       url: readOptionalString(params.url),
       timeoutMs: readOptionalNumber(params.timeoutMs),
     }))],
-    ['browser.readText', handler(async (params) => service.readText(readTarget(params), {
+    ['browser.readText', handler(async (params, invocation) => service.readText(readTarget(params, invocation), {
       maxChars: readOptionalNumber(params.maxChars),
     }))],
-    ['browser.extract', handler(async (params) => {
+    ['browser.extract', handler(async (params, invocation) => {
       const fields = readExtractFields(params.fields);
-      return service.extract(readTarget(params), {
+      return service.extract(readTarget(params, invocation), {
         ref: readOptionalString(params.ref),
         selector: readOptionalString(params.selector),
         ...(fields.length > 0 ? { fields } : {}),
@@ -378,23 +381,23 @@ export function createBrowserGatewayHandlers(
         limit: readOptionalNumber(params.limit),
       });
     })],
-    ['browser.screenshot', handler(async (params) => service.screenshot(readTarget(params), {
+    ['browser.screenshot', handler(async (params, invocation) => service.screenshot(readTarget(params, invocation), {
       fullPage: readOptionalBoolean(params.fullPage),
       path: readOptionalString(params.path),
     }))],
-    ['browser.tabs.list', handler(async (params) => service.tabs(readTarget(params)))],
-    ['browser.tabs.create', handler(async (params, invocation) => service.newTab(readTarget(params), {
+    ['browser.tabs.list', handler(async (params, invocation) => service.tabs(readTarget(params, invocation)))],
+    ['browser.tabs.create', handler(async (params, invocation) => service.newTab(readTarget(params, invocation), {
       url: readOptionalString(params.url),
       launch: { ...readLaunchArgs(params), ...provisionLifetime(invocation) },
     }))],
-    ['browser.tabs.switch', handler(async (params) => service.switchTab(readTarget(params), {
+    ['browser.tabs.switch', handler(async (params, invocation) => service.switchTab(readTarget(params, invocation), {
       pageId: requireStringValue(params.pageId, 'pageId'),
     }))],
-    ['browser.tabs.close', handler(async (params) => service.closeTab(readTarget(params), {
+    ['browser.tabs.close', handler(async (params, invocation) => service.closeTab(readTarget(params, invocation), {
       pageId: requireStringValue(params.pageId, 'pageId'),
     }))],
-    ['browser.history.back', handler(async (params) => service.goBack(readTarget(params)))],
-    ['browser.history.forward', handler(async (params) => service.goForward(readTarget(params)))],
+    ['browser.history.back', handler(async (params, invocation) => service.goBack(readTarget(params, invocation)))],
+    ['browser.history.forward', handler(async (params, invocation) => service.goForward(readTarget(params, invocation)))],
   ];
   return new Map(entries);
 }

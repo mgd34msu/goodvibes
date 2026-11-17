@@ -256,15 +256,40 @@ export function shouldRunInteractive(interaction: ExecInteractionRuntime | null,
   return cmdInput.interactive === true;
 }
 
+/** Programs that ask for the terminal before they run anything else. */
+const PROMPT_FIRST_PROGRAMS: ReadonlySet<string> = new Set(['sudo', 'doas', 'su']);
+
+/**
+ * The prompt-first program a command invokes when the command is one plain
+ * invocation of it (no sequence, pipe, redirection, substitution or subshell,
+ * quoted or not), else undefined. Text only; no request.
+ */
+function promptFirstInvocation(command: string): string | undefined {
+  const text = command.trim();
+  if (text.length === 0 || /[\n\r;&|<>`$(){}]/u.test(text)) return undefined;
+  const first = text.split(/\s+/u)[0] ?? '';
+  const program = first.slice(first.lastIndexOf('/') + 1);
+  return PROMPT_FIRST_PROGRAMS.has(program) ? program : undefined;
+}
+
 /**
  * Whether a piped run that just failed should be run again, once, under the
- * PTY: it failed with the terminal-required signature, the caller did not
- * force the pipe, and the host has a PTY backend.
+ * PTY: the host has a PTY backend, the caller did not force the pipe, and the
+ * run provably did nothing but fail to reach a terminal. That is, the command
+ * is a single plain invocation of a prompt-first program (sudo, doas, su), it
+ * wrote nothing to stdout, and every line it wrote to stderr is that program's
+ * own, with the terminal-required signature among them. Anything else (a
+ * script or `&&` chain that may have written, pushed or sent something before
+ * the terminal step) is never repeated unasked: it returns with the note
+ * telling the caller to rerun it with `interactive: true`.
  */
-export function shouldRerunUnderPty(interaction: ExecInteractionRuntime | null, cmdInput: ExecCommandInput, result: ExecCommandResult): boolean {
+export function shouldRerunUnderPty(interaction: ExecInteractionRuntime | null, cmdInput: ExecCommandInput, result: ExecCommandResult, command: string): boolean {
   if (!interaction?.availability.available || cmdInput.interactive === false) return false;
   if (cmdInput.background || cmdInput.until || result.success || result.pty || result.denied || result.cancelled) return false;
-  return terminalRequiredNote(result.stderr) !== undefined;
+  if (terminalRequiredNote(result.stderr) === undefined || result.stdout.trim().length > 0) return false;
+  const program = promptFirstInvocation(command);
+  if (program === undefined) return false;
+  return result.stderr.split(/\r?\n/u).every((line) => line.trim().length === 0 || line.startsWith(`${program}:`));
 }
 
 // ── The interactive runner ────────────────────────────────────────────────────

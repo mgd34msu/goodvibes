@@ -129,9 +129,10 @@ export const EXEC_TOOL_SCHEMA = {
             type: 'boolean',
             description:
               'Run under a PTY so terminal prompts (host-key confirmations, credential asks) can be'
-              + ' detected and answered instead of hanging. Without it a command runs with piped output; if that'
-              + ' run fails because the command needed a terminal, it is run once more under a PTY (when the host has one)'
-              + ' and the result says so. Set false to keep the plain pipe path. PTY output merges stderr into stdout (result notes pty: true).',
+              + ' detected and answered instead of hanging. Without it a command runs with piped output; a plain sudo, doas'
+              + ' or su that fails only for want of a terminal is run once more under a PTY (when the host has one) and the'
+              + ' result says so; any other command that needed a terminal is not repeated and the result says to rerun it'
+              + ' with interactive: true. Set false to keep the plain pipe path. PTY output merges stderr into stdout (result notes pty: true).',
           },
         },
         // cmd or cmd_base64 required, validated at runtime
@@ -285,8 +286,9 @@ export interface ExecCommandInput {
   /**
    * Run under a PTY with the prompt-answer path (see exec/interactive.ts).
    * true forces it (when the host has a PTY backend), false forces the plain
-   * pipe path, undefined runs piped and reruns once under the PTY when the
-   * piped run failed for want of a terminal.
+   * pipe path, undefined runs piped and reruns once under the PTY only when a
+   * single plain sudo/doas/su failed for want of a terminal before running
+   * anything (any other command is returned with the note to rerun it).
    */
   interactive?: boolean | undefined;
 }

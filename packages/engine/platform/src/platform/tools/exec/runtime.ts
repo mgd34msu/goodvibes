@@ -391,11 +391,16 @@ async function runCommand(
   };
   const executionSignal = admission ? AbortSignal.any([admission.signal, ...(signal ? [signal] : [])]) : signal;
   try {
+    const started = Date.now();
     const result = await runAdmittedCommand(processManager, overflowHandler, featureFlags, cmdStr, cmdInput, workingDirectory, globalTimeout, scrub, policy, plan, beforeSpawn, executionSignal, assertCurrent);
-    // A piped run that failed only because it needed a terminal runs once more under the PTY, where its
-    // prompt reaches the owner. Not after an escalation: that approval covered one run.
-    if (policy.capturedInput || admission || !shouldRerunUnderPty(policy.interaction, cmdInput, result)) return result;
-    const rerun = await runAdmittedCommand(processManager, overflowHandler, featureFlags, cmdStr, { ...cmdInput, interactive: true }, workingDirectory, globalTimeout, scrub, policy, plan, assertCurrent, executionSignal, assertCurrent);
+    // A piped `sudo`/`doas`/`su` that failed before running anything, only because it needed a terminal,
+    // runs once more under the PTY, where its prompt reaches the owner. Any other command is returned
+    // with the note to rerun it with interactive: true, never repeated unasked. Not after an escalation:
+    // that approval covered one run (so the rerun's spawn guard is the invocation check alone, which is
+    // all `beforeSpawn` holds without one). The rerun gets what is left of the command's timeout.
+    if (policy.capturedInput || admission || !shouldRerunUnderPty(policy.interaction, cmdInput, result, cmdStr)) return result;
+    const remaining = Math.max(1, (cmdInput.timeout_ms ?? globalTimeout) - (Date.now() - started));
+    const rerun = await runAdmittedCommand(processManager, overflowHandler, featureFlags, cmdStr, { ...cmdInput, interactive: true, timeout_ms: remaining }, workingDirectory, globalTimeout, scrub, policy, plan, assertCurrent, executionSignal, assertCurrent);
     return { ...rerun, warnings: [...(rerun.warnings ?? []), 'The piped run failed because the command needed a terminal, so it was run again under one.'] };
   } finally { admission?.close(); }
 }

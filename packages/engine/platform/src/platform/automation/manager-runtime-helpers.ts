@@ -22,6 +22,8 @@ import { getNextAutomationOccurrence } from './schedules.js';
 import { defineLifecycle } from '../utils/lifecycle-machine.js';
 
 export interface CreateAutomationJobInput {
+  /** The id to keep the job under; a create naming an id a job already has returns that job unchanged. */
+  readonly id?: string | undefined;
   readonly requiresSourceOwner?: boolean | undefined;
   readonly name: string;
   readonly kind?: import('./jobs.js').AutomationJobKind | undefined;

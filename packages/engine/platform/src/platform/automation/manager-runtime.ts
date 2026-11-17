@@ -488,6 +488,11 @@ export class AutomationManager {
     this.requireEnabled('create automation job');
     await this.start();
     current();
+    // A create that names its id is repeatable: sent again after a lost reply,
+    // or for a job this manager already holds, it returns that job instead of
+    // making a second copy.
+    const existing = input.id?.trim() ? this.jobs.get(input.id.trim()) : undefined;
+    if (existing) return existing;
     return await createAutomationJobRecord(this.jobMutationContext(), input, { signal: options.signal, assertCurrent: current, withPublication: options.withPublication });
   }
 

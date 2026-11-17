@@ -60,7 +60,7 @@ export async function createAutomationJobRecord(
 ): Promise<ManagedAutomationJob> {
   const now = Date.now();
   const enabled = input.enabled ?? true;
-  const jobId = `auto-${randomUUID().slice(0, 8)}`;
+  const jobId = input.id?.trim() || `auto-${randomUUID().slice(0, 8)}`;
   const schedule = anchoredSchedule(ensureAutomationCronPhase(withCronTimezone(input.schedule)), now);
   const job: AutomationJob = {
     id: jobId,

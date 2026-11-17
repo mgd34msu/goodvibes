@@ -247,6 +247,7 @@ const JOB_FIELD_CHECKS: readonly FieldCheck[] = [
 ];
 
 const CREATE_JOB_CHECKS: readonly FieldCheck[] = [
+  optionalString('id'),
   field('name', (value) => typeof value === 'string', 'a string'),
   field('prompt', (value) => typeof value === 'string', 'a string'),
   scheduleCheck(true),

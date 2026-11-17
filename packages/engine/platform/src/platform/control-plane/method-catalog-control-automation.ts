@@ -118,7 +118,7 @@ export const builtinGatewayControlAutomationMethodDescriptors: readonly GatewayM
   methodDescriptor({
     id: 'automation.jobs.create',
     title: 'Create Automation Job',
-    description: 'Create a durable automation job.',
+    description: 'Create a durable automation job. An optional id keeps the job under that id and makes the create repeatable: when a job with that id already exists it is returned unchanged.',
     category: 'automation',
     scopes: ['write:automation'],
     access: 'admin',

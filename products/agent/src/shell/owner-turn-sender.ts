@@ -1,0 +1,222 @@
+/**
+ * owner-turn-sender.ts, where one message from the owner goes once the
+ * composer (or the phone, or an activated plan) has handed it over.
+ *
+ * Typed, spoken, companion and plan input all end in `sendTurn`: native
+ * intake, the routing decision (the connected host's loop or this process)
+ * and the turn-finished signal. A message the route refuses (another message
+ * is still being taken, or the intake said no) is never reported as taken:
+ * held `!` output goes back to the buffer and `notSent` decides where the text
+ * goes. Companion and plan messages come in through `receiveOwnerInput`; one
+ * that is refused is held, in order, and sent on its own once the way clears.
+ *
+ * It lives beside interactive.ts rather than inside it so this path can be
+ * run as the shell runs it.
+ */
+import type { NativeConversationInput, ProductInputContext } from '@goodvibes-jev/engine/terminal-shell/native';
+import type { NoticeLevel, OrchestratorUserInputOptions } from '@goodvibes-jev/engine/platform/platform/core';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { withShellContext, type ShellContextHold } from '../input/shell-passthrough.ts';
+import { routeNativeConversationInput } from '../runtime/native-conversation-ingress.ts';
+import type { NativeConversationIntakeActions, NativeConversationIntakeState } from '../runtime/native-conversation-intake.ts';
+import type { NativeRemoteConversationWiring } from './remote-conversation-wiring.ts';
+
+export interface OwnerTurnSenderDeps {
+  /** The connected host's route, see remote-conversation-wiring.ts. */
+  readonly remoteConversation: Pick<NativeRemoteConversationWiring, 'routeNativeOrExplain'>;
+  /** The native intake in effect now; read for every message, since /work commands may replace it. */
+  readonly intake: () => NativeConversationIntakeActions | undefined;
+  /** `!` output taken for a message that has not been admitted yet. */
+  readonly shellContextHold: Pick<ShellContextHold, 'take'>;
+  /** Typed text refused before admission goes back here. */
+  readonly restoreDraft: (text: string) => void;
+  /** Runs the turn in this process. */
+  readonly runTurn: (text: string, spokenOutput: boolean, turnOptions: OrchestratorUserInputOptions | undefined) => Promise<void>;
+  /** Runs a turn the native intake admitted for this process. */
+  readonly dispatchNativeTurn: (state: NativeConversationIntakeState, spokenOutput: boolean, turnOptions: OrchestratorUserInputOptions | undefined) => Promise<void>;
+  /** True while a turn runs here; a held message waits for it. */
+  readonly isBusy: () => boolean;
+  readonly messages: {
+    readonly high: (message: string, level?: NoticeLevel) => void;
+    readonly userAction: (message: string) => void;
+    readonly activity: (message: string) => void;
+  };
+  readonly render: () => void;
+}
+
+export interface OwnerTurnSendOptions {
+  /** Gets the text back when it was refused before admission. Default: the composer's draft. */
+  readonly notSent?: ((text: string) => void) | undefined;
+  /** The output of `!` commands run since the last message goes in front of this one; a refusal gives it back. */
+  readonly attachShellOutput?: boolean | undefined;
+  /** The intake's lines go to the activity feed (a held message sent again). */
+  readonly quiet?: boolean | undefined;
+}
+
+export interface OwnerTurnSender {
+  /** Resolves true once the message was taken (its turn ran or the host has it), false when it was refused and handed to `notSent`. */
+  sendTurn(text: string, options: ProductInputContext, turnOptions?: OrchestratorUserInputOptions, how?: OwnerTurnSendOptions): Promise<boolean>;
+  /** The companion/plan route (bindOwnerInput): sent as given, or held when refused. */
+  receiveOwnerInput(text: string, turnOptions: OrchestratorUserInputOptions | undefined): void;
+  /** Messages held from the phone or a plan, oldest first. */
+  held(): readonly string[];
+  dispose(): void;
+}
+
+const HELD_OWNER_INPUT_LIMIT = 16;
+const HELD_OWNER_RETRY_MS = 5_000;
+
+export function createOwnerTurnSender(deps: OwnerTurnSenderDeps): OwnerTurnSender {
+  const { messages } = deps;
+  /** The reason last shown for running turns in this process; cleared once the host takes a message. */
+  let localTurnReason: string | undefined;
+
+  function sendTurn(
+    text: string,
+    options: ProductInputContext,
+    turnOptions?: OrchestratorUserInputOptions,
+    how: OwnerTurnSendOptions = {},
+  ): Promise<boolean> {
+    if (!text) {
+      deps.render();
+      return Promise.resolve(false);
+    }
+    const notSent = how.notSent ?? deps.restoreDraft;
+    const spokenOutput = options.spokenOutput === true;
+    const shell = how.attachShellOutput ? deps.shellContextHold.take() : null;
+    const source: NativeConversationInput = { text: shell ? withShellContext(shell.blocks, text) : text, unsupportedSources: [] };
+    const refused = (): false => {
+      shell?.restore();
+      notSent(text);
+      return false;
+    };
+    // The host cannot take this message and nothing was sent for it: the turn runs here (the
+    // documented behaviour of hostedSessions.routeConversationTurns). The reason is shown once
+    // while it stays the same, not before every message.
+    const runLocal = (reason: string): Promise<void> => {
+      if (reason !== localTurnReason) {
+        localTurnReason = reason;
+        messages.userAction(reason);
+        deps.render();
+      }
+      // The held output now goes with this turn; a later failure does not bring it back.
+      shell?.release();
+      return deps.runTurn(source.text, spokenOutput, turnOptions);
+    };
+    const taken = (async (): Promise<boolean> => {
+      try {
+        // The hosted route refused it and nothing was sent: the shell output goes back and
+        // `notSent` decides where the text goes (the composer, or the held queue for a phone
+        // or plan message), and the caller is told it was not taken.
+        let hostRefused = false;
+        const routed = await deps.remoteConversation.routeNativeOrExplain(source, deps.intake(), () => { hostRefused = true; });
+        if (hostRefused) return refused();
+        if (routed && 'local' in routed) {
+          await runLocal(routed.reason);
+          return true;
+        }
+        if (routed) {
+          shell?.release();
+          localTurnReason = undefined;
+          return true;
+        }
+        const state = await routeNativeConversationInput({
+          intake: deps.intake(),
+          source,
+          notify: (message) => {
+            if (how.quiet) messages.activity(message);
+            else messages.userAction(message);
+            deps.render();
+          },
+          record: (message) => messages.activity(message),
+          dispatch: (state) => deps.dispatchNativeTurn(state, spokenOutput, turnOptions),
+          runLocal,
+        });
+        // The host answered for this message: a later fallback states its reason again.
+        if (state?.result) localTurnReason = undefined;
+        // Refused (another input still being admitted or unresolved, input not acceptable): nothing was sent.
+        if (state?.notSent || state?.status === 'pending' || state?.status === 'unavailable' || state?.status === 'invalid') return refused();
+        shell?.release();
+        return true;
+      } catch (error) {
+        // Routing failed before the input was admitted: give back the draft.
+        refused();
+        const line = `Your message was not sent: ${summarizeError(error)}`;
+        if (how.quiet) messages.activity(line);
+        else messages.high(line, 'error');
+        deps.render();
+        return false;
+      }
+    })();
+    // A message taken and settled has cleared the way for one held from the phone or a plan.
+    void taken.then((ok) => { if (ok && !how.quiet) sendHeldOwnerInput(); });
+    return taken;
+  }
+
+  // Companion messages and an activated plan take the composer's path as sent (no
+  // composer grammar), carrying their origin. One the intake refuses (another
+  // message is still being taken) is held, in order, and sent on its own once
+  // the way clears: when a message here settles, and every few seconds while
+  // something is held. Nothing from the phone or a plan's first turn is dropped,
+  // and the draft is never touched.
+  const heldOwnerInput: Array<{ readonly text: string; readonly turnOptions: OrchestratorUserInputOptions | undefined }> = [];
+  let heldOwnerTimer: ReturnType<typeof setTimeout> | null = null;
+  let heldOwnerSending = false;
+  let disposed = false;
+  const describeOwnerInput = (text: string, turnOptions: OrchestratorUserInputOptions | undefined): string => {
+    const quoted = `"${text.length > 120 ? `${text.slice(0, 117)}...` : text}"`;
+    const from = turnOptions?.origin?.source;
+    return from ? `the ${from} message ${quoted}` : quoted;
+  };
+  function scheduleHeldOwnerInput(): void {
+    if (disposed || heldOwnerTimer || heldOwnerInput.length === 0) return;
+    heldOwnerTimer = setTimeout(() => {
+      heldOwnerTimer = null;
+      sendHeldOwnerInput();
+    }, HELD_OWNER_RETRY_MS);
+    (heldOwnerTimer as { unref?: () => void }).unref?.();
+  }
+  function sendHeldOwnerInput(): void {
+    if (disposed || heldOwnerSending || heldOwnerInput.length === 0) return;
+    heldOwnerSending = true;
+    void (async () => {
+      try {
+        while (heldOwnerInput.length > 0 && !deps.isBusy()) {
+          const next = heldOwnerInput[0]!;
+          if (!await sendTurn(next.text, {}, next.turnOptions, { notSent: () => {}, quiet: true })) break;
+          heldOwnerInput.shift();
+          messages.activity(`Sent ${describeOwnerInput(next.text, next.turnOptions)}, held until the previous message was taken.`);
+        }
+      } finally {
+        heldOwnerSending = false;
+        scheduleHeldOwnerInput();
+      }
+    })();
+  }
+  const receiveOwnerInput = (text: string, turnOptions: OrchestratorUserInputOptions | undefined): void => {
+    const hold = (): void => {
+      if (heldOwnerInput.length >= HELD_OWNER_INPUT_LIMIT) {
+        messages.high(`Not sent: ${describeOwnerInput(text, turnOptions)}. ${HELD_OWNER_INPUT_LIMIT} messages are already waiting; send it again once they are taken.`, 'warning');
+      } else {
+        heldOwnerInput.push({ text, turnOptions });
+        messages.high(`Held ${describeOwnerInput(text, turnOptions)}: the current message is still being taken. It is sent on its own once that clears.`, 'warning');
+        scheduleHeldOwnerInput();
+      }
+      deps.render();
+    };
+    // Behind a held message, a new one waits its turn so the order is kept.
+    if (heldOwnerInput.length > 0) hold();
+    else void sendTurn(text, {}, turnOptions, { notSent: hold });
+  };
+
+  return {
+    sendTurn,
+    receiveOwnerInput,
+    held: () => heldOwnerInput.map((entry) => entry.text),
+    dispose: () => {
+      disposed = true;
+      if (heldOwnerTimer) clearTimeout(heldOwnerTimer);
+      heldOwnerTimer = null;
+    },
+  };
+}

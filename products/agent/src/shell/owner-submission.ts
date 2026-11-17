@@ -9,8 +9,8 @@
  * that arrived by voice are never run as a shell command.
  *
  * Extracted from main() so the routing is one module taking the shell's parts
- * as ports; interactive.ts keeps the turn itself (sendTurn), the model switch
- * and the refusal of what a turn cannot carry.
+ * as ports; the turn itself is owner-turn-sender.ts (sendTurn), and
+ * interactive.ts keeps the model switch and the refusal of what a turn cannot carry.
  */
 import type { ContentPart } from '@goodvibes-jev/engine/platform/platform/providers';
 import type { NoticeLevel, OrchestratorUserInputOptions } from '@goodvibes-jev/engine/platform/platform/core';

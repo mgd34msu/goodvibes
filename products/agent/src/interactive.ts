@@ -6,9 +6,10 @@ import { readShellFrameFacts, createShellSubmissionPorts, createUiEventPublisher
 import { readInitialExecutionMode } from './permissions/execution-mode.ts';
 import { isConversationUsageAvailable, isConversationContextAvailable } from './core/conversation-usage.ts';
 import type { NativeConversationIntakeState } from './runtime/native-conversation-intake.ts';
-import type { NativeConversationInput, ProductInputContext } from '@goodvibes-jev/engine/terminal-shell/native';
+import type { NativeConversationInput } from '@goodvibes-jev/engine/terminal-shell/native';
 import { formatRefusal, refusal } from '@goodvibes-jev/engine/errors';
-import { routeNativeConversationInput, dispatchNativeConversationTurn, describeFailedNativeDispatch } from './runtime/native-conversation-ingress.ts';
+import { dispatchNativeConversationTurn, describeFailedNativeDispatch } from './runtime/native-conversation-ingress.ts';
+import { createOwnerTurnSender } from './shell/owner-turn-sender.ts';
 import { createNativeWorkLedgerView } from './runtime/native-work-ledger-host.ts';
 import { createAgentNativeHostSelection } from './runtime/agent-native-host-selection.ts';
 import { SetupPairingController } from './shell/setup-pairing-controller.ts';
@@ -35,7 +36,7 @@ import './input/command-registry.ts';
 import './input/commands.ts';
 import '@goodvibes-jev/engine/platform/platform/tools';
 import './input/input-history.ts';
-import { ShellContextHold, ShellPassthrough, withShellContext } from './input/shell-passthrough.ts';
+import { ShellContextHold, ShellPassthrough } from './input/shell-passthrough.ts';
 import { buildShellFooter, estimateShellFooterHeight } from './renderer/shell-surface.ts';
 import { HEADER_GAP_ROWS, withHeaderGap } from './renderer/header-line.ts';
 import { TranscriptScroll, mainBackToBottom, transcriptEscape } from './shell/transcript-scroll.ts';
@@ -598,6 +599,25 @@ async function main(prepared: PreparedShellCliRuntime) {
   };
   commandContext.dispatchNativeIntakeTurn = (state) => dispatchNativeTurn(state);
 
+  // The owner-input path every message ends in, see shell/owner-turn-sender.ts.
+  const ownerTurns = createOwnerTurnSender({
+    remoteConversation,
+    intake: () => commandContext.nativeConversationIntake,
+    shellContextHold,
+    restoreDraft,
+    runTurn: (text, spokenOutput, turnOptions) => orchestrator.handleUserInput(text, undefined,
+      spokenOutput ? { ...turnOptions, ...createSpokenTurnInputOptions() } : turnOptions),
+    dispatchNativeTurn: (state, spokenOutput, turnOptions) => dispatchNativeTurn(state, spokenOutput, turnOptions),
+    isBusy: () => orchestrator.isBusy,
+    messages: {
+      high: (message, level) => systemMessageRouter.high(message, level),
+      userAction: (message) => systemMessageRouter.userAction(message),
+      activity: (message) => systemMessageRouter.activity(message),
+    },
+    render: () => render(),
+  });
+  unsubs.push(() => ownerTurns.dispose());
+
   // Every submission starts here: a pending setup takeover is let go, the
   // conversation is offered for rewinds again, and the view returns to the bottom.
   const prepareSubmission = (): void => {
@@ -612,7 +632,7 @@ async function main(prepared: PreparedShellCliRuntime) {
   // A conversation turn carries text. `!@file` and `@path`/URL references are
   // already text by the time the composer submits (the composer expands them,
   // each file capped with the cut stated), and held `!` output goes in front of
-  // the message in sendTurn. Only an image cannot go with it: say so before
+  // the message in ownerTurns.sendTurn. Only an image cannot go with it: say so before
   // anything is pinned or sent, and give the draft back.
   const refuseUnsendable = (draft: string, source: NativeConversationInput | undefined, content: readonly ContentPart[] | undefined): boolean => {
     const images = (source?.unsupportedSources ?? []).filter((part) => part.kind === 'image');
@@ -646,113 +666,13 @@ async function main(prepared: PreparedShellCliRuntime) {
     }),
     refuseUnsendable,
     answerOptions: () => contractQuestions.answerOptions(),
-    sendTurn: (text, options, turnOptions, how) => sendTurn(text, options, turnOptions, how),
+    sendTurn: (text, options, turnOptions, how) => ownerTurns.sendTurn(text, options, turnOptions, how),
     restoreDraft: (text) => restoreDraft(text),
     onShellCommandsRunning: (running) => { shellCommandsRunning = running; },
     notify: (message, level) => systemMessageRouter.high(message, level),
     render: () => render(),
   });
   const { submitComposerText, submitTurn } = submission;
-
-  /** The reason last shown for running turns in this process; cleared once the host takes a message. */
-  let localTurnReason: string | undefined;
-  /**
-   * The owner-input path: native intake, the routing decision (the connected
-   * host's loop or this process) and the turn-finished signal. Typed, spoken,
-   * companion and plan input all end here. `notSent` gets the text back when it
-   * was refused before admission (the composer puts it back in the draft).
-   * With `attachShellOutput`, the output of `!` commands run since the last
-   * message goes in front of this one (as in the TUI); a refused message gives
-   * that output back, so the resend still carries it. With `quiet`, the
-   * intake's lines go to the activity feed (a held message sent again).
-   * Resolves true once the message was taken (its turn ran or the host has
-   * it), false when it was refused and handed to `notSent`.
-   */
-  function sendTurn(
-    text: string,
-    options: ProductInputContext,
-    turnOptions?: OrchestratorUserInputOptions,
-    how: {
-      readonly notSent?: ((text: string) => void) | undefined;
-      readonly attachShellOutput?: boolean | undefined;
-      readonly quiet?: boolean | undefined;
-    } = {},
-  ): Promise<boolean> {
-    if (!text) {
-      render();
-      return Promise.resolve(false);
-    }
-    const notSent = how.notSent ?? restoreDraft;
-    const shell = how.attachShellOutput ? shellContextHold.take() : null;
-    const source: NativeConversationInput = { text: shell ? withShellContext(shell.blocks, text) : text, unsupportedSources: [] };
-    const refused = (): false => {
-      shell?.restore();
-      notSent(text);
-      return false;
-    };
-    // The host cannot take this message and nothing was sent for it: the turn runs here (the
-    // documented behaviour of hostedSessions.routeConversationTurns). The reason is shown once
-    // while it stays the same, not before every message.
-    const runLocal = (reason: string): Promise<void> => {
-      if (reason !== localTurnReason) {
-        localTurnReason = reason;
-        systemMessageRouter.userAction(reason);
-        render();
-      }
-      // The held output now goes with this turn; a later failure does not bring it back.
-      shell?.release();
-      return orchestrator.handleUserInput(source.text, undefined,
-        options.spokenOutput ? { ...turnOptions, ...createSpokenTurnInputOptions() } : turnOptions);
-    };
-    const taken = (async (): Promise<boolean> => {
-      try {
-        // The hosted route refused it and nothing was sent: the shell output goes back and
-        // `notSent` decides where the text goes (the composer, or the held queue for a phone
-        // or plan message), and the caller is told it was not taken.
-        let hostRefused = false;
-        const routed = await remoteConversation.routeNativeOrExplain(source, commandContext.nativeConversationIntake, () => { hostRefused = true; });
-        if (hostRefused) return refused();
-        if (routed && 'local' in routed) {
-          await runLocal(routed.reason);
-          return true;
-        }
-        if (routed) {
-          shell?.release();
-          localTurnReason = undefined;
-          return true;
-        }
-        const state = await routeNativeConversationInput({
-          intake: commandContext.nativeConversationIntake,
-          source,
-          notify: (message) => {
-            if (how.quiet) systemMessageRouter.activity(message);
-            else systemMessageRouter.userAction(message);
-            render();
-          },
-          record: (message) => systemMessageRouter.activity(message),
-          dispatch: (state) => dispatchNativeTurn(state, options.spokenOutput, turnOptions),
-          runLocal,
-        });
-        // The host answered for this message: a later fallback states its reason again.
-        if (state?.result) localTurnReason = undefined;
-        // Refused (another input still being admitted or unresolved, input not acceptable): nothing was sent.
-        if (state?.notSent || state?.status === 'pending' || state?.status === 'unavailable' || state?.status === 'invalid') return refused();
-        shell?.release();
-        return true;
-      } catch (error) {
-        // Routing failed before the input was admitted: give back the draft.
-        refused();
-        const line = `Your message was not sent: ${summarizeError(error)}`;
-        if (how.quiet) systemMessageRouter.activity(line);
-        else systemMessageRouter.high(line, 'error');
-        render();
-        return false;
-      }
-    })();
-    // A message taken and settled has cleared the way for one held from the phone or a plan.
-    void taken.then((ok) => { if (ok && !how.quiet) sendHeldOwnerInput(); });
-    return taken;
-  }
 
   const cancelGeneration = () => {
     spokenTurns.stop('Spoken output stopped.');
@@ -782,66 +702,8 @@ async function main(prepared: PreparedShellCliRuntime) {
       () => input.handlePaste(),
     ),
   );
-  // Companion messages and an activated plan take the composer's path as sent (no
-  // composer grammar), carrying their origin. One the intake refuses (another
-  // message is still being taken) is held, in order, and sent on its own once
-  // the way clears: when a message here settles, and every few seconds while
-  // something is held. Nothing from the phone or a plan's first turn is dropped,
-  // and the draft is never touched.
-  const heldOwnerInput: Array<{ readonly text: string; readonly turnOptions: OrchestratorUserInputOptions | undefined }> = [];
-  let heldOwnerTimer: ReturnType<typeof setTimeout> | null = null;
-  let heldOwnerSending = false;
-  const HELD_OWNER_INPUT_LIMIT = 16;
-  const HELD_OWNER_RETRY_MS = 5_000;
-  const describeOwnerInput = (text: string, turnOptions: OrchestratorUserInputOptions | undefined): string => {
-    const quoted = `"${text.length > 120 ? `${text.slice(0, 117)}...` : text}"`;
-    const from = turnOptions?.origin?.source;
-    return from ? `the ${from} message ${quoted}` : quoted;
-  };
-  function scheduleHeldOwnerInput(): void {
-    if (heldOwnerTimer || heldOwnerInput.length === 0) return;
-    heldOwnerTimer = setTimeout(() => {
-      heldOwnerTimer = null;
-      sendHeldOwnerInput();
-    }, HELD_OWNER_RETRY_MS);
-    (heldOwnerTimer as { unref?: () => void }).unref?.();
-  }
-  function sendHeldOwnerInput(): void {
-    if (heldOwnerSending || heldOwnerInput.length === 0) return;
-    heldOwnerSending = true;
-    void (async () => {
-      try {
-        while (heldOwnerInput.length > 0 && !orchestrator.isBusy) {
-          const next = heldOwnerInput[0]!;
-          if (!await sendTurn(next.text, {}, next.turnOptions, { notSent: () => {}, quiet: true })) break;
-          heldOwnerInput.shift();
-          systemMessageRouter.activity(`Sent ${describeOwnerInput(next.text, next.turnOptions)}, held until the previous message was taken.`);
-        }
-      } finally {
-        heldOwnerSending = false;
-        scheduleHeldOwnerInput();
-      }
-    })();
-  }
-  unsubs.push(() => {
-    if (heldOwnerTimer) clearTimeout(heldOwnerTimer);
-    heldOwnerTimer = null;
-  });
-  bindOwnerInput(orchestrator, (text, turnOptions) => {
-    const hold = (): void => {
-      if (heldOwnerInput.length >= HELD_OWNER_INPUT_LIMIT) {
-        systemMessageRouter.high(`Not sent: ${describeOwnerInput(text, turnOptions)}. ${HELD_OWNER_INPUT_LIMIT} messages are already waiting; send it again once they are taken.`, 'warning');
-      } else {
-        heldOwnerInput.push({ text, turnOptions });
-        systemMessageRouter.high(`Held ${describeOwnerInput(text, turnOptions)}: the current message is still being taken. It is sent on its own once that clears.`, 'warning');
-        scheduleHeldOwnerInput();
-      }
-      render();
-    };
-    // Behind a held message, a new one waits its turn so the order is kept.
-    if (heldOwnerInput.length > 0) hold();
-    else void sendTurn(text, {}, turnOptions, { notSent: hold });
-  });
+  // Companion messages and an activated plan take the composer's path as sent; one refused is held (shell/owner-turn-sender.ts).
+  bindOwnerInput(orchestrator, (text, turnOptions) => ownerTurns.receiveOwnerInput(text, turnOptions));
   // Composer line prompts: masked for card material, echoed for addresses (see input/handler-line-prompts.ts).
   commandContext.beginConcealedInput = (request) => input.beginConcealedInput(request);
   commandContext.beginPlainInput = (request) => input.beginPlainInput(request);

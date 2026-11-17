@@ -157,9 +157,7 @@ class DisabledAgentWorktreeRegistry extends runtimeShell.WorktreeRegistry {
 }
 
 function createDisabledAgentWorktreeRegistry(workingDirectory: string): WorktreeRegistry {
-  return new DisabledAgentWorktreeRegistry(workingDirectory, {
-    surfaceRoot: GOODVIBES_AGENT_SURFACE_ROOT,
-  });
+  return new DisabledAgentWorktreeRegistry(workingDirectory);
 }
 
 /**

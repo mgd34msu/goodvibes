@@ -532,25 +532,26 @@ function applyOp(root: Record<string, unknown>, op: ProgressOp, readSideFile: (n
 
 /**
  * The envelope a version-6 file would hold for this base and log. A torn last
- * line is ignored; a damaged line is skipped and logged. A record that cannot
- * be applied (a missing side file) ends the replay there: the state is the one
- * the saves before it left, and the next save rewrites the log.
+ * line is ignored. Each record is a change against the state the one before
+ * it left, so a damaged line, or a record that cannot be applied (a missing
+ * side file), ends the replay there: the state is the one the saves before it
+ * left, and the next save sets the log aside and writes a snapshot.
  */
 export function assembleCheckpoint(dir: string, baseText: string, log: Buffer | null): AssembledCheckpoint {
   const records: LogRecord[] = [];
-  let damagedLines = 0;
+  let damagedLine = false;
   if (log !== null && log.length > 0) {
     let start = 0;
     for (;;) {
       const end = log.indexOf(NEWLINE, start);
       if (end === -1) break; // A torn last line: its save never finished.
       const record = parseRecord(log.toString('utf8', start, end));
-      if (record === null) damagedLines += 1;
-      else records.push(record);
+      if (record === null) { damagedLine = true; break; }
+      records.push(record);
       start = end + 1;
     }
   }
-  if (damagedLines > 0) logger.warn('contract store: skipped damaged progress records', { dir, damagedLines });
+  if (damagedLine) logger.warn('contract store: a progress record is damaged; the contract reads as saved before it', { dir, record: records.length });
   const readSideFile = (name: string): unknown => {
     if (!SIDE_FILE_NAME.test(name)) throw new Error('invalid side file name');
     return JSON.parse(readFileSync(join(dir, name), 'utf8')) as unknown;
@@ -560,7 +561,7 @@ export function assembleCheckpoint(dir: string, baseText: string, log: Buffer | 
     const result = replay(baseText, records, limit, readSideFile);
     if (typeof result !== 'number') {
       if (limit < records.length) logger.warn('contract store: a progress record could not be applied; the contract reads as saved before it', { dir, record: limit, of: records.length });
-      return { ...result, damaged: limit < records.length };
+      return { ...result, damaged: damagedLine || limit < records.length };
     }
     limit = result;
   }

@@ -35,7 +35,7 @@ import './input/command-registry.ts';
 import './input/commands.ts';
 import '@goodvibes-jev/engine/platform/platform/tools';
 import './input/input-history.ts';
-import { ShellContextHold, ShellPassthrough, SHELL_USAGE_HINT } from './input/shell-passthrough.ts';
+import { ShellContextHold, ShellPassthrough, SHELL_USAGE_HINT, withShellContext } from './input/shell-passthrough.ts';
 import { applyComposerCapture, readComposerMarker, shouldSendAfterCapture } from '@goodvibes-jev/engine/terminal-shell/submission-router';
 import { buildShellFooter, estimateShellFooterHeight } from './renderer/shell-surface.ts';
 import { HEADER_GAP_ROWS, withHeaderGap } from './renderer/header-line.ts';
@@ -597,31 +597,20 @@ async function main(prepared: PreparedShellCliRuntime) {
    * note without sending, `!` runs a shell command. Everything else is sent
    * through `sendTurn` as typed.
    */
-  // A conversation turn carries complete typed text. An image, a file or URL
-  // reference, or held shell output cannot go with it: say which part and what
-  // to do, before anything is pinned or sent, and give the draft back.
+  // A conversation turn carries text. `!@file` and `@path`/URL references are
+  // already text by the time the composer submits (the composer expands them,
+  // each file capped with the cut stated), and held `!` output goes in front of
+  // the message in sendTurn. Only an image cannot go with it: say so before
+  // anything is pinned or sent, and give the draft back.
   const refuseUnsendable = (draft: string, source: NativeConversationInput | undefined, content: readonly ContentPart[] | undefined): boolean => {
-    const parts = [...(source?.unsupportedSources ?? [])];
-    if (content?.some((part) => part.type !== 'text') && !parts.some((part) => part.kind === 'image')) parts.push({ kind: 'image', label: 'attached image' });
-    const shell = shellContextHold.take();
-    if (parts.length === 0 && shell.blocks.length === 0) {
-      shell.restore();
-      return false;
-    }
-    // Held shell output is dropped so the next Enter sends the text alone; it stays visible in the transcript.
-    shell.release();
-    const named = [...parts.map((part) => part.label), ...(shell.blocks.length > 0 ? ['the output of your last shell command'] : [])];
-    const next = [
-      ...(parts.some((part) => part.kind === 'image') ? ['remove the image and describe it in words'] : []),
-      ...(parts.some((part) => part.kind === 'file') ? ["paste the file's text in place of the !@ reference"] : []),
-      ...(parts.some((part) => part.kind === 'context') ? ['paste the text in place of the @ reference or link'] : []),
-      ...(shell.blocks.length > 0 ? ['paste the shell lines you need (the held output was not attached)'] : []),
-    ];
+    const images = (source?.unsupportedSources ?? []).filter((part) => part.kind === 'image');
+    if (content?.some((part) => part.type !== 'text') && images.length === 0) images.push({ kind: 'image', label: 'attached image' });
+    if (images.length === 0) return false;
     systemMessageRouter.high(formatRefusal(refusal({
       code: 'TURN_SOURCE_UNSUPPORTED',
       state: 'not sent; your text is back in the composer',
-      reason: `Not sent: a conversation turn carries typed text only, and this message has ${named.join(', ')}`,
-      next: [`Your text is back in the composer; to send it, ${next.join('; ')}, then press Enter`],
+      reason: `Not sent: a conversation turn carries text only, and this message has ${images.map((part) => part.label).join(', ')}`,
+      next: ['Your text is back in the composer; to send it, remove the image and describe it in words, then press Enter'],
     })), 'warning');
     restoreDraft(draft);
     render();
@@ -675,7 +664,12 @@ async function main(prepared: PreparedShellCliRuntime) {
     // Model directives and the memory markers are the composer's own grammar; what remains is what the user sent.
     // A typed message answers the contract question on offer, unless it was dismissed.
     const answer: { readonly answersContractQuestion?: string } = options.spokenOutput ? {} : contractQuestions.answerOptions();
-    sendTurn(processedText, options, answer.answersContractQuestion ? answer : undefined);
+    // A refused message goes back to the composer as typed, not with its references expanded
+    // into file text; a `!#` pin already saved is not repeated on the resend.
+    const expandedReferences = options.source?.unsupportedSources.some((part) => part.kind === 'file' || part.kind === 'context') === true;
+    const resendable = (unsent: string): string => !expandedReferences ? unsent
+      : marker.kind === 'memory-pin' ? draft.replace(/^\s*!#\s*/, '') : draft;
+    sendTurn(processedText, options, answer.answersContractQuestion ? answer : undefined, (unsent) => restoreDraft(resendable(unsent)), true);
   };
 
   /**
@@ -686,7 +680,7 @@ async function main(prepared: PreparedShellCliRuntime) {
   const submitTurn = (text: string, content?: ContentPart[], options: ProductInputContext = {}): void => {
     prepareSubmission();
     if (refuseUnsendable(text, options.source, content)) return;
-    sendTurn(text, options);
+    sendTurn(text, options, undefined, restoreDraft, true);
   };
 
   /** The reason last shown for running turns in this process; cleared once the host takes a message. */
@@ -696,18 +690,27 @@ async function main(prepared: PreparedShellCliRuntime) {
    * host's loop or this process) and the turn-finished signal. Typed, spoken,
    * companion and plan input all end here. `notSent` gets the text back when it
    * was refused before admission (the composer puts it back in the draft).
+   * With `attachShellOutput`, the output of `!` commands run since the last
+   * message goes in front of this one (as in the TUI); a refused message gives
+   * that output back, so the resend still carries it.
    */
   function sendTurn(
     text: string,
     options: ProductInputContext,
     turnOptions?: OrchestratorUserInputOptions,
     notSent: (text: string) => void = restoreDraft,
+    attachShellOutput = false,
   ): void {
     if (!text) {
       render();
       return;
     }
-    const source: NativeConversationInput = { text, unsupportedSources: [] };
+    const shell = attachShellOutput ? shellContextHold.take() : null;
+    const source: NativeConversationInput = { text: shell ? withShellContext(shell.blocks, text) : text, unsupportedSources: [] };
+    const refused = (): void => {
+      shell?.restore();
+      notSent(text);
+    };
     // The host cannot take this message and nothing was sent for it: the turn runs here (the
     // documented behaviour of hostedSessions.routeConversationTurns). The reason is shown once
     // while it stays the same, not before every message.
@@ -717,6 +720,8 @@ async function main(prepared: PreparedShellCliRuntime) {
         systemMessageRouter.userAction(reason);
         render();
       }
+      // The held output now goes with this turn; a later failure does not bring it back.
+      shell?.release();
       return orchestrator.handleUserInput(source.text, undefined,
         options.spokenOutput ? { ...turnOptions, ...createSpokenTurnInputOptions() } : turnOptions);
     };
@@ -728,6 +733,7 @@ async function main(prepared: PreparedShellCliRuntime) {
           return;
         }
         if (routed) {
+          shell?.release();
           localTurnReason = undefined;
           return;
         }
@@ -745,10 +751,11 @@ async function main(prepared: PreparedShellCliRuntime) {
         // The host answered for this message: a later fallback states its reason again.
         if (state?.result) localTurnReason = undefined;
         // Refused (another input still being admitted or unresolved, input not acceptable): nothing was sent.
-        if (state?.notSent || state?.status === 'pending' || state?.status === 'unavailable' || state?.status === 'invalid') notSent(source.text);
+        if (state?.notSent || state?.status === 'pending' || state?.status === 'unavailable' || state?.status === 'invalid') refused();
+        else shell?.release();
       } catch (error) {
         // Routing failed before the input was admitted: give back the draft.
-        notSent(source.text);
+        refused();
         systemMessageRouter.high(`Your message was not sent: ${summarizeError(error)}`, 'error');
         render();
       }

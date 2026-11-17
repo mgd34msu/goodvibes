@@ -12,12 +12,9 @@ import {
 import type { RecoveryFileInfo, SessionSnapshot, SessionSurface } from '@/runtime/index.ts';
 import { closeSessionHere, crashSnapshotTurn, openSessionHere, writeCrashSnapshotAtTurnMoments, type CrashSnapshotTurnMoment } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { moveLiveSessionArtifacts } from '../core/session-resume-core.ts';
-import {
-  readOnboardingCheckMarker,
-  readOnboardingCompletionMarker,
-} from '../runtime/onboarding/index.ts';
+import { readOnboardingCheckMarker } from '../runtime/onboarding/index.ts';
 import { deriveOnboardingState } from '../runtime/onboarding/onboarding-state.ts';
-import { isOnboardingComplete } from '../runtime/onboarding/completion.ts';
+import { isOnboardingComplete, readOnboardingDoneMarker } from '../runtime/onboarding/completion.ts';
 import { buildSetupIncompleteHint } from '../core/setup-incomplete-hint.ts';
 import { answerWorkspaceRegistrationPrompt, isBroadWorkspaceRoot, normalizeWorkspaceRoot, resolveWorkspaceRegistrationSync } from '../config/workspace-registration.ts';
 import type { AskWorkspaceRegistration } from './workspace-registration-question.ts';
@@ -364,7 +361,8 @@ export function wireSetupIncompleteHint(deps: SetupIncompleteHintDeps): void {
     const { shellPaths, providerReady, localReady, hostReady, systemMessageRouter } = deps;
 
     const checkMarker = readOnboardingCheckMarker(shellPaths, 'user');
-    const completionMarker = readOnboardingCompletionMarker(shellPaths, 'user');
+    // The marker that decides "setup is done" everywhere (completion.ts).
+    const completionMarker = readOnboardingDoneMarker(shellPaths);
 
     // Build a minimal plan with BOTH provider-access AND local-model-readiness so
     // that deriveReadyToChat mirrors the workspace's canonical definition:

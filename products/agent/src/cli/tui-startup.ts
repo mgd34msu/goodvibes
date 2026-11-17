@@ -3,7 +3,7 @@ import type { CommandContext, CommandRegistry } from '../input/command-registry.
 import type { InputHandler } from '../input/handler.ts';
 // Startup diagnostics must not initialize the Agent runtime/onboarding barrels:
 // they pull in feature-enablement's eager metadata lookups before boot begins.
-import { readOnboardingCompletionMarker } from '../runtime/onboarding/markers.ts';
+import { isOnboardingComplete } from '../runtime/onboarding/completion.ts';
 import type { GoodVibesCliParseResult } from './types.ts';
 import { checkRecoveryFile, readLastSessionPointer, type SessionSurface } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { resolveResumableSession, surfaceResumeRelaunchNotice } from './resume-relaunch-notice.ts';
@@ -145,13 +145,14 @@ export function applyInitialTuiCliState(options: {
   readonly input: InputHandler;
   readonly commandRegistry: CommandRegistry;
   readonly commandContext: CommandContext;
-  readonly shellPaths: Parameters<typeof readOnboardingCompletionMarker>[0] & { readonly homeDirectory: string };
+  readonly shellPaths: Parameters<typeof isOnboardingComplete>[0] & { readonly homeDirectory: string };
   /** Declare-once session-storage handle threaded through the resume-relaunch notice's pointer/recovery reads so they can never diverge from the writer's paths. */
   readonly surface: SessionSurface;
   readonly render: () => void;
 }): void {
   const { cli, input, commandRegistry, commandContext, shellPaths, surface, render } = options;
-  const onboardingCompletionMarker = readOnboardingCompletionMarker(shellPaths, 'user');
+  // The one answer to "has setup been done" (completion.ts), as status and the setup screen read it.
+  const onboardingDone = isOnboardingComplete(shellPaths);
   if (cli.command === 'onboarding') {
     input.openAgentWorkspace(commandContext, undefined, 'ONBOARDING');
   } else if ((cli.command === 'sessions' && cli.commandArgs[0] === 'resume') || cli.flags.resume !== undefined) {
@@ -163,9 +164,12 @@ export function applyInitialTuiCliState(options: {
         commandContext.print(`[Resume] Could not resume session ${target}: ${summarizeError(error)}`);
       });
     } else {
-      commandContext.print('[Resume] No saved session pointer is available. Run /session list to choose a saved session.');
+      // Nothing to continue: say so, then start as a plain launch would, so a
+      // new user who starts with --resume still gets setup.
+      commandContext.print('No previous conversation to continue. This is a new one; /session list shows saved ones.');
+      if (!onboardingDone) input.openAgentWorkspace(commandContext, 'setup', 'ONBOARDING');
     }
-  } else if (!onboardingCompletionMarker.payload) {
+  } else if (!onboardingDone) {
     input.openAgentWorkspace(commandContext, 'setup', 'ONBOARDING');
   } else {
     // Normal relaunch: onboarding is done and the user didn't ask for

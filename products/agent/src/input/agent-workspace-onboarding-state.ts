@@ -5,9 +5,9 @@ import type { OnboardingShellPaths } from '../runtime/onboarding/types.ts';
 import {
   deriveOnboardingState,
   readOnboardingCheckMarker,
-  readOnboardingCompletionMarker,
   type OnboardingState,
 } from '../runtime/onboarding/index.ts';
+import { readOnboardingDoneMarker } from '../runtime/onboarding/completion.ts';
 
 /**
  * Adapts an AgentSetupWizardStep to a SetupPlanItem for use with
@@ -103,8 +103,9 @@ export function computeOnboardingStateFromSnapshot(
   const checkMarker = shellPaths
     ? readOnboardingCheckMarker(shellPaths, 'user')
     : { scope: 'user' as const, path: '', exists: false, payload: null };
+  // The marker that decides "setup is done" everywhere (completion.ts).
   const completionMarker = shellPaths
-    ? readOnboardingCompletionMarker(shellPaths, 'user')
+    ? readOnboardingDoneMarker(shellPaths)
     : { scope: 'user' as const, path: '', exists: false, payload: null };
 
   return deriveOnboardingState({ plan, checkMarker, completionMarker });

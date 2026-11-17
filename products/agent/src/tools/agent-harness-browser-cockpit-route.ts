@@ -1,7 +1,7 @@
 import type { CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-ranking';
 import type { CommandContext } from '../input/command-registry.ts';
 import { resolveRuntimeEndpointBinding } from '../cli/endpoints.ts';
-import { readOnboardingCompletionMarker } from '../runtime/onboarding/index.ts';
+import { readOnboardingDoneMarker } from '../runtime/onboarding/completion.ts';
 import { urlHostForConfiguredHost } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-dial';
 
 /** This browser opens on THIS host, so a wildcard bind resolves to loopback. */
@@ -12,9 +12,11 @@ function agentOnboarding(context: CommandContext, includeDetails: boolean): Reco
   try {
     const shellPaths = context.workspace?.shellPaths;
     if (!shellPaths) return { status: 'unavailable', reason: 'Agent shell paths are unavailable in this runtime.' };
-    const completion = readOnboardingCompletionMarker(shellPaths, 'user');
+    // The same answer start-up and status give: a damaged marker is not done.
+    const completion = readOnboardingDoneMarker(shellPaths);
     return {
-      status: completion.exists ? 'complete' : 'missing',
+      status: completion.payload !== null ? 'complete' : 'missing',
+      ...(completion.exists && completion.payload === null ? { reason: `The setup marker at ${completion.path} cannot be read; setup is offered again.` } : {}),
       ...(includeDetails ? {
         scope: 'user',
         updatedAt: completion.payload?.updatedAt ?? null,

@@ -5,7 +5,7 @@ import { resolveConnectedHostBaseUrl } from '@goodvibes-jev/engine/terminal-shel
 import { connectedHostOperatorTokenPath, readConnectedHostOperatorToken } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-auth';
 import { fetchDaemonCredentialAvailability } from '../config/credential-status.ts';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { readOnboardingCheckMarker } from '../runtime/onboarding/markers.ts';
+import { readOnboardingDoneMarker } from '../runtime/onboarding/completion.ts';
 import { createShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell-paths';
 import { buildCliStatusSnapshot, renderCliStatus, renderOnboardingCliStatus } from './status.ts';
 import type { GoodVibesCliParseResult } from './types.ts';
@@ -38,7 +38,7 @@ export async function runOnboardingStatusCommand(runtime: StatusCommandRuntime):
       configManager,
       workingDirectory,
       homeDirectory,
-      onboardingMarker: readOnboardingCheckMarker(shellPaths),
+      onboardingMarker: readOnboardingDoneMarker(shellPaths),
       nativeReadiness,
       pairingStatus,
       selectedHost,
@@ -55,7 +55,7 @@ export async function runStatusCommand(runtime: StatusCommandRuntime): Promise<n
   const userStorePath = shellPaths.resolveUserPath(GOODVIBES_AGENT_SURFACE_ROOT, 'auth-users.json');
   const bootstrapCredentialPath = shellPaths.resolveUserPath(GOODVIBES_AGENT_SURFACE_ROOT, 'auth-bootstrap.txt');
   const operatorTokenPath = connectedHostOperatorTokenPath(homeDirectory);
-  const onboardingMarker = readOnboardingCheckMarker(shellPaths);
+  const onboardingMarker = readOnboardingDoneMarker(shellPaths);
   const service = await buildCliServicePosture({ configManager, workingDirectory, homeDirectory });
   const externalRuntime = await inspectCliExternalRuntime({ configManager, homeDirectory });
   // Only probe host metrics when the host is actually reachable, otherwise

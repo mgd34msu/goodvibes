@@ -9,7 +9,6 @@ import {
   readFailure,
   RETRYABLE_STATUS_CODES,
   structuralFailureConclusions,
-  structuredTransience,
   type FailureConclusions,
   type FailureEvidence,
 } from '@goodvibes-jev/engine/errors';
@@ -67,7 +66,7 @@ export class ConfigError extends AppError {
   }
 }
 
-/** Thrown when an LLM provider API call fails. Recoverable when statusCode is in RETRYABLE_STATUS_CODES, or, with no status, when the failure is a network or timeout fault. */
+/** Thrown when an LLM provider API call fails. Recoverable as its structure says (structuredTransience): a transient status, a connection fault in its cause, or a transient category. */
 export class ProviderError extends AppError {
   declare readonly code: 'PROVIDER_ERROR';
   constructor(message: string, statusCode?: number);
@@ -82,11 +81,10 @@ export class ProviderError extends AppError {
     const category = options.category ?? categoryForStatus(statusCode) ?? 'unknown';
     const guidance = options.guidance ?? inferProviderGuidance(category, statusCode);
 
-    // A failure that never reached an HTTP status (a reset, a timeout) is the one a
-    // retry most often clears; only a retryable status or a transport fault marks it recoverable.
-    const transportFault = statusCode === undefined
-      && (category === 'network' || category === 'timeout' || structuredTransience(options.cause)?.basis === 'errno');
-    super(message, 'PROVIDER_ERROR', statusCode !== undefined ? RETRYABLE_STATUS_CODES.includes(statusCode) : transportFault, {
+    // Whether a retry can clear it is the structure's answer (status, the
+    // cause's connection code, category), not a rule of this class; a failure
+    // with none of those is read by its wording or retried within its budget.
+    super(message, 'PROVIDER_ERROR', undefined, {
       // retryAfterMs passes through as given: only the explicit value (a
       // Retry-After header or a structured field). A wait the message states
       // in words is read by Jev through readRetryWait.
@@ -307,10 +305,20 @@ export async function isNetworkTransportError(err: unknown, site = 'types.errors
  */
 export async function isNonTransientProviderFailure(err: unknown, site = 'types.errors.non-transient'): Promise<boolean> {
   if (!(err instanceof Error)) return false;
-  // A status or a category answers it: only a failure with neither is read, and a failed reading answers no.
+  // The error's own category answers first: a spent OpenAI account is a 429
+  // whose category is billing. Then the status. A 400 whose category says no
+  // more than its status may be a spent account in words ("credit balance is
+  // too low"), which the billing check reads. Only a failure with neither a
+  // status nor a category is read whole, and a failed reading answers no.
+  const own = err instanceof AppError && err.category !== 'unknown' ? err.category : undefined;
+  if (own !== undefined && NON_TRANSIENT_CATEGORIES.has(own)) return true;
   const status = err instanceof AppError ? err.statusCode : undefined;
-  if (status !== undefined) return NON_TRANSIENT_STATUS.has(status);
-  const category = err instanceof AppError && err.category !== 'unknown' ? err.category : classifyFailure(err)?.category;
+  if (status !== undefined) {
+    if (NON_TRANSIENT_STATUS.has(status)) return true;
+    const categoryTellsMore = own !== undefined && own !== categoryForStatus(status);
+    return status === 400 && !categoryTellsMore ? isBillingOrCreditError(err, site) : false;
+  }
+  const category = own ?? classifyFailure(err)?.category;
   if (category !== undefined) return NON_TRANSIENT_CATEGORIES.has(category);
   return (await readErrorFailure(err, site)).providerUnusable;
 }

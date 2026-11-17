@@ -1,5 +1,6 @@
 import { randomInt } from 'node:crypto';
-import { AppError, RETRYABLE_STATUS_CODES } from '../types/errors.js';
+import { structuredTransience } from '@goodvibes-jev/engine/errors';
+import { AppError } from '../types/errors.js';
 import { summarizeError } from './error-display.js';
 import { sleep } from './concurrency.js';
 
@@ -59,23 +60,14 @@ export function hasStatus(err: unknown): err is { status: number } {
 }
 
 /**
- * Determines whether an error should trigger a retry.
- * Checks AppError.recoverable first, then falls back to HTTP status code inspection.
- * Handles both Error subclasses and plain objects with statusCode/status properties.
+ * Determines whether an error should trigger a retry: what its structure says
+ * (structuredTransience, the one owner of that answer): a recoverability its
+ * creator stated, a Retry-After, the HTTP status (`status` or `statusCode`, on
+ * any throwable), a connection-failure code, a timeout, its category. A
+ * failure none of those places is not retried here.
  */
 export function isRetryableError(error: unknown): boolean {
-  // AppError with explicit recoverability flag takes priority
-  if (error instanceof AppError) {
-    return error.recoverable;
-  }
-  // Inspect statusCode / status on any object (including non-Error throwables)
-  if (hasStatusCode(error)) {
-    return RETRYABLE_STATUS_CODES.includes(error.statusCode);
-  }
-  if (hasStatus(error)) {
-    return RETRYABLE_STATUS_CODES.includes(error.status);
-  }
-  return false;
+  return structuredTransience(error)?.failureClass === 'retryable';
 }
 
 /**

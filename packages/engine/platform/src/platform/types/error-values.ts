@@ -57,10 +57,17 @@ export class AppError extends GoodVibesError {
   /** Raw provider message before normalisation. */
   public readonly rawMessage?: string | undefined;
 
+  /**
+   * @param recoverable Whether a retry can clear this failure, when the
+   * creator knows. Undefined leaves it to the failure's structure (status,
+   * connection code, timeout, category), the one owner of that answer, and
+   * marks nothing as stated, so a failure structure cannot place is read by
+   * its wording.
+   */
   constructor(
     message: string,
     public override readonly code: string,
-    public override readonly recoverable: boolean,
+    recoverable: boolean | undefined,
     options: AppErrorOptions = {},
   ) {
     super(message, {

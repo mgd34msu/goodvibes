@@ -2,7 +2,7 @@ import { assertDecisionAvailable } from '../routing/decision-availability.js';
 import { isDeepStrictEqual } from 'node:util';
 import { decisionOrClassic, isClassicOperation } from '../runtime/decision-policy.js';
 import { captureJudgmentPort, JudgmentAuthorityRetiredError, JudgmentPortMissingError, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
-import { JudgmentError, mapLimit, type JudgmentResult, type Questions } from '@goodvibes-jev/judgment';
+import { JudgmentError, mapLimit, type JudgmentResult, type Questions, type YesNoReading } from '@goodvibes-jev/judgment';
 import { logger } from '../utils/logger.js';
 import { JudgmentInputError } from '../gate/judgment-input.js';
 import { CompletionEvidenceProjection } from './response-completion-evidence.js';
@@ -13,6 +13,8 @@ import { responseCompletion, completionApplicability, MAX_ANSWER_PASSAGES } from
 
 /** The questions of the response-completion battery asked of every checked draft. */
 const RESPONSE_COMPLETION_CHECKS = ['false_blocker', 'unfinished', 'unsupported', 'unanswered', 'unnecessary_permission'] as const;
+/** The yes/no readings of one checked draft. The passage locator is a choice, asked and read on its own. */
+type CompletionCheckReadings = Readonly<Record<typeof RESPONSE_COMPLETION_CHECKS[number], YesNoReading>>;
 import { delegationConsolidation } from './batteries/delegation-consolidation.js';
 import { executionAssurance } from './batteries/execution-assurance.js';
 import type { AgentManager } from '../tools/agent/manager.js';
@@ -737,7 +739,9 @@ export class ResponseCompletionGuard {
     const run = (checks[0] as PromiseFulfilledResult<Awaited<ReturnType<typeof responseCompletion.run>>>).value;
     const consolidation = (checks[1] as PromiseFulfilledResult<Awaited<ReturnType<typeof delegationConsolidation.run>> | null>).value;
     const execution = (checks[2] as PromiseFulfilledResult<Awaited<ReturnType<typeof executionAssurance.run>> | null>).value;
-    if ([...Object.values(run.readings), ...Object.values(consolidation?.readings ?? {})]
+    // Only the yes/no checks were asked; every loop, lookup and summary below reads them as yes/no.
+    const completionReadings: CompletionCheckReadings = run.readings;
+    if ([...Object.values(completionReadings), ...Object.values(consolidation?.readings ?? {})]
       .some(reading => reading.verdict === 'yes' && reading.outcome === 'act')) this.hasSemanticRefusal = true;
     owner.assertCurrent(); current();
     const publicationSource = state === fullState ? null : fullState;
@@ -753,9 +757,9 @@ export class ResponseCompletionGuard {
       }
       return qualified.has(aspect);
     };
-    for (const [aspect, reading] of Object.entries(run.readings)) settle(qualifications.completion, aspect, reading);
+    for (const [aspect, reading] of Object.entries(completionReadings)) settle(qualifications.completion, aspect, reading);
     for (const [aspect, reading] of Object.entries(consolidation?.readings ?? {})) settle(qualifications.consolidation, aspect, reading);
-    const { false_blocker, unfinished, unsupported, unanswered, unnecessary_permission } = run.readings;
+    const { false_blocker, unfinished, unsupported, unanswered, unnecessary_permission } = completionReadings;
     let unsupportedAccepted = qualifications.completion.has('unsupported');
     if (!unsupportedAccepted && unsupported.outcome !== 'act' && typeof (state as { response?: unknown }).response === 'string') {
       const response = (state as { response: string }).response;
@@ -785,7 +789,7 @@ export class ResponseCompletionGuard {
       else if (failure.verdict === 'yes' && failure.outcome === 'act') qualifications.execution.delete(aspect);
     }
     const executionAccepted = executionChecks.every(([aspect]) => qualifications.execution.has(aspect));
-    const needsFinalSource = Object.entries(run.readings).some(([aspect, reading]) =>
+    const needsFinalSource = Object.entries(completionReadings).some(([aspect, reading]) =>
       !qualifications.completion.has(aspect) && (!verificationFindings.length || !['unfinished', 'unanswered'].includes(aspect)));
     const needsDelegatedSource = Object.keys(consolidation?.readings ?? {}).some(aspect => !qualifications.consolidation.has(aspect));
     // A weak direct reading is a question for primary evidence, not a list of
@@ -795,7 +799,7 @@ export class ResponseCompletionGuard {
     // its original-source retrieval still has to pass afterward.
     if (state === fullState && this.verification && !requireVerification
       && (needsFinalSource || needsDelegatedSource || !executionAccepted)
-      && [...Object.values(run.readings), ...Object.values(consolidation?.readings ?? {}), ...Object.values(execution?.readings ?? {})]
+      && [...Object.values(completionReadings), ...Object.values(consolidation?.readings ?? {}), ...Object.values(execution?.readings ?? {})]
         .some(reading => reading.outcome !== 'act')) {
       run.recordAction('Settle uncertain direct readings against the original requirements and primary evidence before requesting any working-model repair.');
       batch.abort();
@@ -812,7 +816,7 @@ export class ResponseCompletionGuard {
       continue;
     }
     if (state !== fullState && this.verification && (needsFinalSource || needsDelegatedSource || (!executionAccepted && !verificationFindings.length))) {
-      const opened = await this.verification.openFinal(state, { completion: run.readings, consolidation: consolidation?.readings ?? null, execution: execution?.readings ?? null },
+      const opened = await this.verification.openFinal(state, { completion: completionReadings, consolidation: consolidation?.readings ?? null, execution: execution?.readings ?? null },
         { ...readingOptions, port, identity: this.cacheIdentity(port), assertCurrent: owner.assertCurrent });
       if (opened) {
         run.recordAction('Keep this exact draft private and retrieve primary evidence to settle the held publication readings.');
@@ -823,7 +827,7 @@ export class ResponseCompletionGuard {
         continue;
       }
     }
-    if (Object.keys(run.readings).every(aspect => qualifications.completion.has(aspect))
+    if (Object.keys(completionReadings).every(aspect => qualifications.completion.has(aspect))
       && Object.keys(consolidation?.readings ?? {}).every(aspect => qualifications.consolidation.has(aspect)) && executionAccepted && !verificationFindings.length) {
       run.recordAction('Allow the checked final response to end this run.');
       consolidation?.recordAction('Allow the checked synthesis to end this run.');
@@ -835,8 +839,8 @@ export class ResponseCompletionGuard {
     consolidation?.recordAction('Hold completion until relevant delegated work is incorporated and contradictions are resolved.');
     execution?.recordAction('Hold completion until the fix, verification and success criteria support the requested result.');
     owner.assertCurrent(); current();
-    const heldChecks = [...Object.entries(run.readings), ...Object.entries(consolidation?.readings ?? {})]
-      .filter(([aspect]) => !(Object.hasOwn(run.readings, aspect) ? qualifications.completion : qualifications.consolidation).has(aspect)).map(([name]) => name);
+    const heldChecks = [...Object.entries(completionReadings), ...Object.entries(consolidation?.readings ?? {})]
+      .filter(([aspect]) => !(Object.hasOwn(completionReadings, aspect) ? qualifications.completion : qualifications.consolidation).has(aspect)).map(([name]) => name);
     if (execution) {
       for (const [applies, failure] of [['implementation_presented', 'ineffective_fix'], ['verification_claimed', 'irrelevant_verification'], ['criteria_altered', 'weakened_criteria']] as const) {
         if (!qualifications.execution.has(failure)) heldChecks.push(failure);
@@ -845,7 +849,7 @@ export class ResponseCompletionGuard {
     // Localize the held checks against the actual evidence now: a correction
     // that names the failed command, stale verification or missing artifact is
     // actionable, while a generic category repeated at the model is not.
-    const assessments = { ...run.readings, ...consolidation?.readings, ...execution?.readings };
+    const assessments = { ...completionReadings, ...consolidation?.readings, ...execution?.readings };
     const localizeHeld = async (): Promise<readonly CompletionFinding[]> => {
       let findings: readonly CompletionFinding[];
       try { findings = await completionFindings(port, state, heldChecks, readingOptions); }
@@ -864,7 +868,7 @@ export class ResponseCompletionGuard {
     current();
     this.rememberReview(localized, input);
     this.describeHeld = async () => { current(); return completionRepairMessage(localized); };
-    const unsettled = [...Object.entries(run.readings), ...Object.entries(consolidation?.readings ?? {}),
+    const unsettled = [...Object.entries(completionReadings), ...Object.entries(consolidation?.readings ?? {}),
       ...Object.entries(execution?.readings ?? {})].filter(([, reading]) => reading.outcome !== 'act')
       .map(([aspect, reading]) => `${aspect}: ${reading.verdict} (${reading.outcome})`);
     // Only checks about what was actually executed are beyond rewording: a

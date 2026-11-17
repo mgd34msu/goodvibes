@@ -87,6 +87,8 @@ export interface NetworkConfig {
   remoteFetch: {
     allowPrivateHosts: boolean;
   };
+  /** Comma-separated hosts on the owner's own network that owner-configured deliveries (watchers, notification webhooks) may reach. */
+  privateDeliveryHosts: string;
 }
 
 /**

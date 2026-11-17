@@ -183,6 +183,7 @@ export const runtimeConfigDefaults = {
     remoteFetch: {
       allowPrivateHosts: false,
     },
+    privateDeliveryHosts: '',
   },
   relay: {
     enabled: true,
@@ -575,6 +576,13 @@ export const runtimeSecondaryConfigSettings: ConfigSettingDefinition[] = [
     type: 'boolean',
     default: false,
     description: 'Allow explicit admin-approved remote fetches from private, localhost, or metadata hosts for artifacts and ingest flows',
+  },
+  {
+    key: 'network.privateDeliveryHosts',
+    type: 'string',
+    default: '',
+    description:
+      'Comma-separated hosts on your own network that deliveries you configured may reach: a watcher\'s target, a notification webhook, the default webhook target (a LAN device 192.168.1.20, a name such as ha.lan, or *.home.lan for every name under it). Such a host may resolve to a private, loopback, link-local, unique-local or shared (CGNAT, Tailscale) address; a cloud metadata address is always refused, and addresses from outside parties never use this list. Your own settings only: a project settings file cannot set it, and adding a host is yours to decide.',
   },
   {
     key: 'relay.enabled',

@@ -180,6 +180,10 @@ export const DAEMON_OWNED_CONFIG_KEYS: readonly string[] = [
   // operator would have picked a zone, been shown that zone, and had their
   // money reset in a different one.
   'daemon.timezone',
+  // The hosts on the owner's own network that deliveries may reach: watchers and
+  // channel webhooks run in the daemon, notification webhooks in every app, and
+  // all of them read the one list the owner set, wherever he set it from.
+  'network.privateDeliveryHosts',
 ];
 
 /**

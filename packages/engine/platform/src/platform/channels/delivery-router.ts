@@ -29,6 +29,7 @@ import {
 import { resolveChannelDeliverySurfaceKind, resolveRouteBindingTarget, splitForSurface, SURFACE_TEXT_LIMITS } from './delivery/shared.js';
 import { channelCredentials } from './credential-holder.js';
 import { logger } from '../utils/logger.js';
+import { parsePrivateDeliveryHosts, PRIVATE_DELIVERY_HOSTS_SETTING } from '../utils/url-safety.js';
 import { describeStructuralDeliveryError } from '../integrations/delivery-diagnostics.js';
 import { CHANNEL_DELIVERY_SURFACE_KINDS } from './delivery/types.js';
 import type {
@@ -102,7 +103,10 @@ export function createDefaultChannelDeliveryStrategies(
   secretsManager: Pick<SecretsManager, 'get' | 'getGlobalHome'>,
 ): ChannelDeliveryStrategy[] {
   return [
-    createWebhookDeliveryStrategy(configManager, artifactStore, secretsManager),
+    // The owner's own targets may name a host he approved on his network (`network.privateDeliveryHosts`).
+    createWebhookDeliveryStrategy(configManager, artifactStore, secretsManager, {
+      privateDeliveryHosts: () => parsePrivateDeliveryHosts(configManager.get(PRIVATE_DELIVERY_HOSTS_SETTING)),
+    }),
     createSlackDeliveryStrategy(serviceRegistry, configManager, artifactStore, secretsManager),
     createDiscordDeliveryStrategy(serviceRegistry, configManager, artifactStore, secretsManager),
     createNtfyDeliveryStrategy(configManager, serviceRegistry, artifactStore, secretsManager),

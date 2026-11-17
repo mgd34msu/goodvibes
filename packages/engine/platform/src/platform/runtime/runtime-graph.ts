@@ -10,6 +10,7 @@
 import { join } from 'node:path';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
+import { parsePrivateDeliveryHosts, PRIVATE_DELIVERY_HOSTS_SETTING } from '../utils/url-safety.js';
 import { resolveSecretInput } from '../config/secret-refs.js';
 import { ServiceRegistry } from '../config/service-registry.js';
 import { SubscriptionManager, sharedSubscriptionsPath } from '../config/subscriptions.js';
@@ -276,6 +277,8 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
   const profileManager = new ProfileManager(shellPaths.resolveUserPath(surfaceRoot, 'profiles'));
   const bookmarkManager = new BookmarkManager(shellPaths.resolveUserPath(surfaceRoot, 'bookmarks'));
   const hookActivityTracker = new HookActivityTracker();
+  // Hosts on the owner's own network that deliveries he configured may reach, read live on every delivery.
+  const privateDeliveryHosts = (): readonly string[] => parsePrivateDeliveryHosts(configManager.get(PRIVATE_DELIVERY_HOSTS_SETTING));
   // featureFlags is required in practice: a registry without one treats
   // `watchers.enabled` as on, so turning the setting off would change nothing.
   const watcherRegistry = new WatcherRegistry({
@@ -283,6 +286,7 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
     featureFlags,
     recoveryWindowMinutes: () => Number(configManager.get('watchers.recoveryWindowMinutes')),
     resolveHeaderValue: (value) => resolveSecretInput(value, { resolveLocalSecret: (key) => secretsManager.get(key), homeDirectory: secretsManager.getGlobalHome() }),
+    privateDeliveryHosts,
   });
   scope.ownUntilRegistered('watcher registry', () => watcherRegistry.dispose());
   watcherRegistry.attachRuntime({ runtimeStore, runtimeBus });
@@ -502,7 +506,7 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
   const worktreeRegistry = seams.worktreeRegistry?.(workingDirectory) ?? new WorktreeRegistry(workingDirectory);
   const notificationsMetadataOnly = seams.notificationsMetadataOnly
     ?? ((): boolean => readNotificationsMetadataOnly(() => configManager.get(NOTIFICATIONS_METADATA_ONLY_KEY as never)));
-  const webhookNotifier = new WebhookNotifier([], { metadataOnly: notificationsMetadataOnly });
+  const webhookNotifier = new WebhookNotifier([], { metadataOnly: notificationsMetadataOnly, privateDeliveryHosts });
   // It can send memory-pressure notices before boot attaches it; own it now.
   scope.registry.add('shared webhook notifier', () => webhookNotifier.close());
   const replayEngine = new DeterministicReplayEngine(workingDirectory);

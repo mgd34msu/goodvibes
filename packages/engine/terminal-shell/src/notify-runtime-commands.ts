@@ -1,6 +1,5 @@
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { NotificationDeadLetter, NotificationDeadLetterSource, WebhookNotifier } from '@goodvibes-jev/engine/platform/platform/integrations';
-import { classifyHostTrustTier, extractHostname } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { TerminalCommandRegistry } from './command-registry.js';
 import { commandRefusal, stripYesFlag } from './command-confirmation.js';
 interface NotifyContext {
@@ -22,7 +21,7 @@ function formatDeadLetter(entry: NotificationDeadLetter): string {
 }
 
 export function createNotifyRuntimeCommands<Context extends NotifyContext>(
-  requireWebhookNotifier: (context: Context) => Pick<WebhookNotifier, 'setUrls' | 'send' | 'test' | 'listDeadLetters' | 'replayDeadLetters'>,
+  requireWebhookNotifier: (context: Context) => Pick<WebhookNotifier, 'setUrls' | 'send' | 'test' | 'listDeadLetters' | 'replayDeadLetters' | 'targetProblem'>,
   policy: {
     /** Other notifiers whose failed notifications `/notify failed` and `/notify resend` also cover (the Slack and Discord one). */
     readonly deadLetterSources?: ((context: Context) => readonly NotificationDeadLetterSource[]) | undefined;
@@ -88,11 +87,11 @@ export function createNotifyRuntimeCommands<Context extends NotifyContext>(
           if (target.protocol !== 'http:' && target.protocol !== 'https:') {
             throw commandRefusal(`Nothing was added: ${target.protocol} addresses cannot be delivered to; use an http or https webhook URL.`);
           }
-          // Delivery refuses these hosts, so a stored URL for one would only ever fail silently.
-          const hostname = extractHostname(url);
-          const trust = hostname === null ? null : classifyHostTrustTier(hostname);
-          if (trust !== null && (trust.tier === 'blocked' || trust.tier === 'localhost')) {
-            throw commandRefusal(`Nothing was added: delivery never sends to ${shownUrl(url)} (${trust.reason}). Use a public http or https webhook URL.`);
+          // The delivery's own rule: a stored URL it refuses would only ever fail. A host on the
+          // owner's network is admitted once it is listed in network.privateDeliveryHosts, and the refusal says so.
+          const problem = notifier.targetProblem(url);
+          if (problem !== undefined) {
+            throw commandRefusal(`Nothing was added: ${problem}`);
           }
           if (urls.includes(url)) {
             ctx.print(`Already configured: ${shownUrl(url)}`);

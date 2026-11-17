@@ -224,6 +224,7 @@ declareLoosening('permissions.tools.', TOOL_PERMISSION);
 for (const key of OPENING_SWITCHES) declareLoosening(key, OPENING);
 declareLoosening('fetch.blockedHosts', BLOCKED_HOSTS);
 declareLoosening('fetch.allowedPrivateHosts', PRIVATE_HOSTS);
+declareLoosening('network.privateDeliveryHosts', addsToList('let a delivery reach a host on your own network'));
 declareLoosening('relay.requireStepUpForMutations', STEP_UP);
 declareLoosening('sandbox.judgment', { loosening: 'let a model approve sandbox escalations', loosens: becomes('auto-approve') });
 declareLoosening('permissions.commandParser', { loosening: 'stop parsing shell commands before they run', loosens: becomes('flat') });

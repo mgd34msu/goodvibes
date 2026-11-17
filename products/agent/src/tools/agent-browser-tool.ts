@@ -269,9 +269,9 @@ export function createAgentBrowserTool(options: AgentBrowserToolOptions = {}): T
       const inputCurrent = executionOptions ? captureCatalogSnapshotGuard(rawArgs) : undefined;
       const signal = executionOptions?.signal;
       const invocationCurrent = () => {
-        inputCurrent?.(rawArgs); existingMethodCurrent?.(); signal?.throwIfAborted();
+        inputCurrent?.(rawArgs); signal?.throwIfAborted();
         assertCurrentToolInvocation(rawArgs, executionOptions);
-        inputCurrent?.(rawArgs); existingMethodCurrent?.(); signal?.throwIfAborted();
+        inputCurrent?.(rawArgs); signal?.throwIfAborted();
       };
       signal?.throwIfAborted();
       const args = rawArgs as BrowserToolArgs;

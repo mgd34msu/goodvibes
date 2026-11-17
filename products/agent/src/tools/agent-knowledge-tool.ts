@@ -202,7 +202,6 @@ export function createAgentKnowledgeTool(
           if (!captured || captured.shellPaths !== shellPaths || captured.configManager !== configManager) throw new ToolInputProjectionError('held');
           assertProjectionExecution(context, rawArgs); captured.assertCurrent();
         }
-        optionsCurrent?.();
       };
       assertInvocation();
       const connection = captured ? captured.connection : captureOperatorConnection(shellPaths, configManager, assertInvocation);

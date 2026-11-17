@@ -79,7 +79,7 @@ export async function healToolFile(
     const check = () => { assertSource(); reading?.assertCurrent(); };
     const stopWatching = abortOnSettingsChange(config, controller);
     try {
-      const result = await executePolicyCheck(() => new AutoHealer(config, llm, undefined, check, signal, reading, workspaceLanguages(config), () => config.getWorkingDirectory?.()).heal(path, content, errors), signal);
+      const result = await executePolicyCheck(() => new AutoHealer(config, llm, undefined, check, signal, reading, workspaceLanguages(config), () => config.getWorkingDirectory?.() ?? undefined).heal(path, content, errors), signal);
       // Once, before the caller publishes: the caller re-checks the invocation, not the acceptance reading.
       check();
       return { ...result, assertCurrent: async () => { check(); }, assertCurrentSynchronous: check };

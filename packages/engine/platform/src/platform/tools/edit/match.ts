@@ -404,7 +404,7 @@ export function computeAstEdit(fileContent: string, item: EditItem, filePath: st
   const intel = CodeIntelligence.forPath(filePath);
   return intel
     .getSymbols(filePath, fileContent)
-    .then((symbols) => {
+    .then((symbols): EditComputationResult => {
       // Asked after the parse, when the workspace's language files are loaded.
       if (symbols.length === 0 && !intel.hasTreeSitter(filePath)) {
         return withExactFallbackWarning(

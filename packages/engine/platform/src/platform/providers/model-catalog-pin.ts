@@ -21,4 +21,7 @@ export interface ModelCatalogPin {
   readonly sha256: string;
 }
 
-export const MODEL_CATALOG_PIN: ModelCatalogPin | null = null;
+export const MODEL_CATALOG_PIN: ModelCatalogPin | null = {
+  commit: 'e55f4b9fb271ca84031920de389eae88dbf7fd86',
+  sha256: 'd50488d4e0c801bbf4f81afdffb89c4bb8fadefd322cde78d34bbbfa64cc699d',
+};

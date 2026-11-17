@@ -49,11 +49,6 @@ export class MemorySecretStore implements ClusterSecretStore {
   async delete(key: string): Promise<void> {
     this.values.delete(key);
   }
-
-  /** Every stored blob, for the "no plaintext key on disk" style assertions. */
-  snapshot(): Record<string, string> {
-    return Object.fromEntries(this.values);
-  }
 }
 
 /**
@@ -83,20 +78,6 @@ export class MemoryConfigStore {
   }
 }
 
-/**
- * The in-memory store a node was built with.
- *
- * Throws when a test injected a different store (a real `SecretsManager`, say),
- * because `snapshot()` is a property of this one and quietly returning an empty
- * object there would turn a "nothing was stored" assertion into a lie.
- */
-export function memorySecrets(node: GroupTestNode): MemorySecretStore {
-  if (!(node.secrets instanceof MemorySecretStore)) {
-    throw new Error(`node ${node.id} was built with an injected secret store, not the in-memory one`);
-  }
-  return node.secrets;
-}
-
 export interface GroupTestNode {
   readonly id: string;
   readonly runtime: ClusterGroupRuntime;
@@ -114,8 +95,6 @@ export interface GroupTestWorld {
   readonly bus: MemoryClusterBus;
   readonly nodes: GroupTestNode[];
   readonly tempRoot: string;
-  /** Every datagram that went onto the bus, newest last. */
-  readonly wire: { readonly from: string; readonly raw: string }[];
 }
 
 /**
@@ -145,7 +124,6 @@ export function createGroupWorld(): GroupTestWorld {
     bus,
     nodes: [],
     tempRoot: mkdtempSync(join(tmpdir(), 'gv-cluster-group-')),
-    wire: bus.sent,
   };
 }
 
@@ -249,80 +227,9 @@ export async function settle(passes = 8): Promise<void> {
   }
 }
 
-/** Advance the clock and let everything it triggered finish. */
-export async function advance(world: GroupTestWorld, ms: number): Promise<void> {
-  world.clock.advance(ms);
-  await settle();
-}
-
-/**
- * Advance in small steps, letting async work finish between each.
- *
- * Required whenever an ELECTION is attached. The election re-arms its watchdog
- * from inside an async handler, so a single large jump fires that timer once
- * with an enormous gap and the node concludes the host was suspended. Stepping
- * with a settle in between is what a real clock does anyway.
- */
-export async function advanceStepped(world: GroupTestWorld, ms: number, stepMs = 50): Promise<void> {
-  let remaining = ms;
-  while (remaining > 0) {
-    const delta = Math.min(stepMs, remaining);
-    world.clock.advance(delta);
-    remaining -= delta;
-    await settle(3);
-  }
-}
-
-/**
- * Await something that may be waiting on a fake-clock timer.
- *
- * A join or a rejoin resolves either when the group answers, which happens in
- * a microtask, or when its deadline passes on the injected clock, which only
- * moves when a test moves it. This settles microtasks first, so a fast answer
- * costs nothing, and only then starts winding the clock forward.
- */
-export async function resolveWithClock<T>(
-  world: GroupTestWorld,
-  work: Promise<T>,
-  stepMs = 1_000,
-): Promise<T> {
-  let done = false;
-  const tracked = work.then((value) => { done = true; return value; });
-  await settle();
-  // Real time is spent as well as fake time on purpose: deriving a join
-  // verifier is scrypt on the thread pool, so the deadline timer this is
-  // waiting on does not even exist until that has finished. Winding the fake
-  // clock without ever yielding real time would race past the whole exchange.
-  // There is no real-time budget: a slow machine takes longer rather than
-  // failing, and a join that never settles ends at the test's own timeout.
-  while (!done) {
-    world.clock.advance(stepMs);
-    await new Promise<void>((resolve) => { setTimeout(resolve, 2); });
-  }
-  return tracked;
-}
-
 /** Stop every runtime in the world. */
 export async function stopGroupWorld(world: GroupTestWorld): Promise<void> {
   for (const node of world.nodes) await node.runtime.stop();
   await settle();
 }
 
-/** Every datagram of a given type that reached the bus. */
-export function datagramsOfType(world: GroupTestWorld, type: string): Record<string, unknown>[] {
-  const found: Record<string, unknown>[] = [];
-  for (const entry of world.wire) {
-    try {
-      const parsed = JSON.parse(entry.raw) as Record<string, unknown>;
-      if (parsed['type'] === type) found.push(parsed);
-    } catch {
-      // A non-JSON datagram is itself a finding; the tests that care assert it.
-    }
-  }
-  return found;
-}
-
-/** Everything that has ever been on the wire, as one string, for leak checks. */
-export function wireText(world: GroupTestWorld): string {
-  return world.wire.map((entry) => entry.raw).join('\n');
-}

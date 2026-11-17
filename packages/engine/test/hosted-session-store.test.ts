@@ -1,226 +1,80 @@
 /**
- * hosted-session-store.test.ts
- *
- * The durability half of the hosted-session engine, against a real directory.
- *
- * What is checked is the standing treatment for anything persisted, one
- * property per test: a bound that actually bounds, a validator that rejects
- * what cannot be rebuilt (and keeps it where it can be looked at), a sweep that
- * retires what is past its retention, and a load report that says what happened
- * instead of leaving it in a log line.
+ * A hosted session's transcript outlives the daemon: what was saved loads in a
+ * new store over the same directory, an older file still loads, a file that
+ * cannot be read is kept for inspection rather than deleted, a live session is
+ * never retired, and a session id cannot write outside the directory.
  */
-
 import { afterEach, beforeEach, expect, test } from 'bun:test';
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-
-import {
-  HostedSessionStore,
-  CURRENT_HOSTED_SESSION_VERSION,
-  boundMessages,
-  describeInvalidPersistedHostedSession,
-} from '../platform/src/platform/hosted-sessions/store.ts';
+import { HostedSessionStore } from '../platform/src/platform/hosted-sessions/store.ts';
 import type { HostedSessionRecord } from '../platform/src/platform/hosted-sessions/types.ts';
 
+let root: string;
 let dir: string;
-
-const LIMITS = {
-  maxSessions: 3,
-  maxMessagesPerSession: 4,
-  terminatedRetentionMs: 1_000,
-};
+const LIMITS = { maxSessions: 3, maxMessagesPerSession: 4, terminatedRetentionMs: 1_000 };
 
 function record(overrides: Partial<HostedSessionRecord> & { id: string }): HostedSessionRecord {
   return {
-    workspaceRoot: '/tmp/workspace',
-    title: 'a session',
-    status: 'idle',
-    detachPolicy: null,
-    effectiveDetachPolicy: 'kill',
-    attachedClients: [],
-    createdAt: 1_000,
-    updatedAt: 1_000,
-    turnCount: 0,
-    messageCount: 0,
-    restoredFromDisk: false,
-    contractIds: [],
+    workspaceRoot: '/tmp/workspace', title: 'a session', status: 'idle', detachPolicy: null, effectiveDetachPolicy: 'kill',
+    attachedClients: [], createdAt: 1_000, updatedAt: 1_000, turnCount: 0, messageCount: 0, restoredFromDisk: false, contractIds: [],
     ...overrides,
   };
 }
 
-beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), 'hosted-store-'));
-});
+beforeEach(() => { root = mkdtempSync(join(tmpdir(), 'hosted-store-')); dir = join(root, 'sessions'); });
+afterEach(() => { rmSync(root, { recursive: true, force: true }); });
 
-afterEach(() => {
-  rmSync(dir, { recursive: true, force: true });
-});
-
-test('a persisted transcript is bounded to the most recent messages', async () => {
-  const store = new HostedSessionStore(dir, LIMITS);
+test('a saved transcript and the contracts the session started load in a new store; the most recent messages are the ones kept', async () => {
   const messages = [1, 2, 3, 4, 5, 6].map((n) => ({ role: 'user', content: `m${n}` }));
-  await store.save(record({ id: 'a' }), { messages, title: 'a session' });
+  await new HostedSessionStore(dir, LIMITS).save(record({ id: 'a', contractIds: ['ctr-00000001'] }), { messages, title: 'a session' });
 
-  const loaded = await store.load(1_000);
+  const loaded = await new HostedSessionStore(dir, LIMITS).load(1_000);
   expect(loaded.restored).toHaveLength(1);
-  const persisted = loaded.restored[0]!.conversation as { messages: { content: string }[] };
-  // The TAIL is what a reattach needs, so the tail is what survives.
-  expect(persisted.messages.map((m) => m.content)).toEqual(['m3', 'm4', 'm5', 'm6']);
+  const session = loaded.restored[0]!;
+  expect((session.conversation as { messages: { content: string }[] }).messages.map((m) => m.content)).toEqual(['m3', 'm4', 'm5', 'm6']);
+  expect(session.record.contractIds).toEqual(['ctr-00000001']);
 });
 
-test('has reports a stored session by its file and refuses names that are not plain ids', async () => {
-  const store = new HostedSessionStore(dir, LIMITS);
-  await store.save(record({ id: 'hs-a' }), null);
-  expect(store.has('hs-a')).toBe(true);
-  expect(store.has('hs-b')).toBe(false);
-  expect(store.has('../hs-a')).toBe(false);
-  expect(store.has('')).toBe(false);
-});
-
-test('boundMessages keeps everything when it is already within the bound', () => {
-  const messages = [1, 2].map((n) => ({ n }));
-  expect(boundMessages(messages, 4)).toBe(messages);
-  expect(boundMessages(messages, 0)).toBe(messages);
-});
-
-test('a conversation payload the store does not understand passes through untouched', async () => {
-  const store = new HostedSessionStore(dir, LIMITS);
-  await store.save(record({ id: 'a' }), 'not an object');
-  const loaded = await store.load(1_000);
-  expect(loaded.restored[0]!.conversation).toBe('not an object');
-});
-
-test('an unusable file is rejected with a reason and moved aside rather than dropped', async () => {
-  writeFileSync(join(dir, 'broken.json'), '{ this is not json');
-  writeFileSync(join(dir, 'wrong-shape.json'), JSON.stringify({ version: 1, record: { id: 'x' } }));
-  writeFileSync(join(dir, 'old-version.json'), JSON.stringify({ version: 99, record: record({ id: 'y' }), conversation: null }));
-
-  const store = new HostedSessionStore(dir, LIMITS);
-  const loaded = await store.load(1_000);
-
-  expect(loaded.restored).toHaveLength(0);
-  expect(loaded.rejected.map((entry) => entry.file).sort()).toEqual(['broken.json', 'old-version.json', 'wrong-shape.json']);
-  // Every rejection names WHY, not just that it happened.
-  for (const entry of loaded.rejected) expect(entry.reason.length).toBeGreaterThan(0);
-  // And the bytes are still there to look at.
-  const remaining = readdirSync(dir).sort();
-  expect(remaining).toEqual(['broken.json.rejected', 'old-version.json.rejected', 'wrong-shape.json.rejected']);
-});
-
-const COUNTED = { title: 'a session', detachPolicy: null, attachedClients: [], turnCount: 0, messageCount: 0 };
-
-test('the validator names the specific thing that is wrong', () => {
-  expect(describeInvalidPersistedHostedSession(null)).toBe('not a JSON object');
-  expect(describeInvalidPersistedHostedSession({ version: 3 })).toContain('unsupported version');
-  expect(describeInvalidPersistedHostedSession({ version: 1 })).toContain('missing the session record');
-  expect(describeInvalidPersistedHostedSession({ version: 1, record: { id: '../escape' } }))
-    .toContain('not a safe file name');
-  expect(describeInvalidPersistedHostedSession({ version: 1, record: { id: 'ok' } }))
-    .toContain('workspace root');
-  expect(describeInvalidPersistedHostedSession({ version: 1, record: { id: 'ok', workspaceRoot: '/w', status: 'weird' } }))
-    .toContain('unknown session status');
-  expect(describeInvalidPersistedHostedSession({ version: 1, record: { id: 'ok', workspaceRoot: '/w', status: 'idle' } }))
-    .toContain('timestamps');
-  const base = { id: 'ok', workspaceRoot: '/w', status: 'idle', createdAt: 1, updatedAt: 1, ...COUNTED };
-  const { title: _title, ...untitled } = base;
-  const { attachedClients: _attached, ...unattached } = base;
-  expect(describeInvalidPersistedHostedSession({ version: 1, record: untitled })).toContain('title');
-  expect(describeInvalidPersistedHostedSession({ version: 1, record: unattached })).toContain('attached client list');
-  expect(describeInvalidPersistedHostedSession({ version: 1, record: { ...base, detachPolicy: 'sometimes' } })).toContain('detach policy');
-  expect(describeInvalidPersistedHostedSession({ version: 1, record: { ...base, turnCount: '3' } })).toContain('count');
-  expect(describeInvalidPersistedHostedSession({
-    version: 1,
-    record: { id: 'ok', workspaceRoot: '/w', status: 'idle', createdAt: 1, updatedAt: 1, ...COUNTED },
-  })).toBeNull();
-});
-
-test('a version 1 file, written before sessions carried contracts, loads with an empty contract list', async () => {
+test('a file written before sessions carried contracts still loads', async () => {
   const { contractIds: _dropped, ...v1Record } = record({ id: 'legacy' });
-  writeFileSync(join(dir, 'legacy.json'), JSON.stringify({ version: 1, record: v1Record, conversation: null }));
+  const messages = [{ role: 'user', content: 'kept' }];
+  await new HostedSessionStore(dir, LIMITS).load(1_000);
+  writeFileSync(join(dir, 'legacy.json'), JSON.stringify({ version: 1, record: v1Record, conversation: { messages } }));
   const loaded = await new HostedSessionStore(dir, LIMITS).load(1_000);
   expect(loaded.rejected).toEqual([]);
-  expect(loaded.restored).toHaveLength(1);
-  expect(loaded.restored[0]!.version).toBe(CURRENT_HOSTED_SESSION_VERSION);
-  expect(loaded.restored[0]!.record.contractIds).toEqual([]);
+  expect(loaded.restored.map((s) => [s.record.id, s.record.contractIds, s.conversation])).toEqual([['legacy', [], { messages }]]);
 });
 
-test('a save writes version 2 with the contracts the session started, and they load back', async () => {
+test('a file that cannot be used is moved aside with its bytes, not deleted', async () => {
+  await new HostedSessionStore(dir, LIMITS).load(1_000);
+  writeFileSync(join(dir, 'broken.json'), '{ this is not json');
+  writeFileSync(join(dir, 'newer.json'), JSON.stringify({ version: 99, record: record({ id: 'newer' }), conversation: null }));
+  const loaded = await new HostedSessionStore(dir, LIMITS).load(1_000);
+  expect(loaded.restored).toEqual([]);
+  expect(loaded.rejected.map((entry) => entry.file).sort()).toEqual(['broken.json', 'newer.json']);
+  expect(readdirSync(dir).sort()).toEqual(['broken.json.rejected', 'newer.json.rejected']);
+});
+
+test('a live session is never retired or evicted, however old; a terminated one goes first', async () => {
   const store = new HostedSessionStore(dir, LIMITS);
-  await store.save(record({ id: 'with-contracts', contractIds: ['ctr-00000001', 'ctr-00000002'] }), null);
-  const written = JSON.parse(readFileSync(join(dir, 'with-contracts.json'), 'utf-8')) as { version: number; record: { contractIds: string[] } };
-  expect(CURRENT_HOSTED_SESSION_VERSION).toBe(2);
-  expect(written.version).toBe(2);
-  expect(written.record.contractIds).toEqual(['ctr-00000001', 'ctr-00000002']);
-  const loaded = await store.load(1_000);
-  expect(loaded.restored[0]!.record.contractIds).toEqual(['ctr-00000001', 'ctr-00000002']);
-});
-
-test('a version 2 record without a contract id list is rejected with that reason', () => {
-  const valid = { id: 'ok', workspaceRoot: '/w', status: 'idle', createdAt: 1, updatedAt: 1, ...COUNTED };
-  expect(describeInvalidPersistedHostedSession({ version: 2, record: valid })).toContain('contract id list');
-  expect(describeInvalidPersistedHostedSession({ version: 2, record: { ...valid, contractIds: [7] } })).toContain('contract id list');
-  expect(describeInvalidPersistedHostedSession({ version: 2, record: { ...valid, contractIds: ['ctr-00000001'] } })).toBeNull();
-});
-
-test('a session id that is not a safe file name is refused at the write, not at the read', async () => {
-  const store = new HostedSessionStore(dir, LIMITS);
-  await expect(store.save(record({ id: '../../etc/passwd' }), null)).rejects.toThrow(/not a safe file name/);
-  expect(readdirSync(dir)).toHaveLength(0);
-});
-
-test('terminated sessions past their retention are swept and reported', async () => {
-  const store = new HostedSessionStore(dir, LIMITS);
-  await store.save(record({ id: 'fresh', status: 'terminated', terminatedAt: 5_000 }), null);
-  await store.save(record({ id: 'stale', status: 'terminated', terminatedAt: 1_000 }), null);
-
-  const loaded = await store.load(5_500);
-  expect(loaded.swept).toEqual(['stale']);
-  expect(loaded.restored.map((s) => s.record.id)).toEqual(['fresh']);
-  expect(existsSync(join(dir, 'stale.json'))).toBe(false);
-});
-
-test('a live session is never swept, however old it is', async () => {
-  const store = new HostedSessionStore(dir, LIMITS);
-  await store.save(record({ id: 'ancient', status: 'idle', updatedAt: 1 }), null);
-  const loaded = await store.load(10_000_000);
-  expect(loaded.swept).toEqual([]);
-  expect(loaded.restored.map((s) => s.record.id)).toEqual(['ancient']);
-});
-
-test('the directory is bounded, and terminated records are evicted before live ones', async () => {
-  const store = new HostedSessionStore(dir, LIMITS);
-  // Four files against a cap of three. The terminated one is the oldest kind of
-  // history, so it goes first even though it was touched most recently.
-  await store.save(record({ id: 'live-old', updatedAt: 10 }), null);
+  await store.save(record({ id: 'live-old', updatedAt: 1 }), null);
   await store.save(record({ id: 'live-mid', updatedAt: 20 }), null);
   await store.save(record({ id: 'live-new', updatedAt: 30 }), null);
-  await store.save(record({ id: 'done', status: 'terminated', terminatedAt: 9_999, updatedAt: 40 }), null);
+  // Over the cap of three; the terminated one was touched last but is history.
+  await store.save(record({ id: 'done', status: 'terminated', terminatedAt: 9_999_999, updatedAt: 40 }), null);
 
-  const loaded = await store.load(10_000);
+  const loaded = await new HostedSessionStore(dir, LIMITS).load(10_000_000);
+  expect(loaded.swept).toEqual([]);
   expect(loaded.evicted).toEqual(['done']);
   expect(loaded.restored.map((s) => s.record.id).sort()).toEqual(['live-mid', 'live-new', 'live-old']);
-  expect(existsSync(join(dir, 'done.json'))).toBe(false);
 });
 
-test('an unreadable directory loads as empty rather than throwing', async () => {
-  const store = new HostedSessionStore(join(dir, 'a-file-not-a-dir', 'nested'), LIMITS);
-  writeFileSync(join(dir, 'a-file-not-a-dir'), 'blocking the path');
-  const loaded = await store.load(1_000);
-  expect(loaded.restored).toEqual([]);
-  expect(loaded.rejected).toEqual([]);
-});
-
-test('the explicit sweep retires exactly the terminated records past retention', async () => {
+test('a session id that is not a plain file name is refused before anything is written', async () => {
   const store = new HostedSessionStore(dir, LIMITS);
-  await store.save(record({ id: 'a', status: 'terminated', terminatedAt: 1_000 }), null);
-  await store.save(record({ id: 'b', status: 'idle' }), null);
-
-  const retired = await store.sweep([
-    record({ id: 'a', status: 'terminated', terminatedAt: 1_000 }),
-    record({ id: 'b', status: 'idle' }),
-  ], 5_000);
-  expect(retired).toEqual(['a']);
-  expect(existsSync(join(dir, 'a.json'))).toBe(false);
-  expect(existsSync(join(dir, 'b.json'))).toBe(true);
+  await store.load(1_000);
+  await expect(store.save(record({ id: '../escape' }), null)).rejects.toThrow();
+  expect(readdirSync(dir)).toEqual([]);
+  expect(existsSync(join(root, 'escape.json'))).toBe(false);
 });

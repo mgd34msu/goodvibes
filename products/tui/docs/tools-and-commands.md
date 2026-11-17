@@ -685,7 +685,7 @@ The plugin's trust tier decides what of its declaration it gets, checked at ever
 | `limited` | also the tools, providers and hooks it declares |
 | `trusted` | also the high-risk capabilities it declares |
 
-A plugin that declares a high-risk capability does not start below `trusted`: it runs inside this process, so a capability it was refused can only be withheld by not running it. `/plugin trust <name> <tier>` sets the tier and starts a running plugin again at once; `trusted` is set by a verified signature, or by your confirmation when the signature does not verify.
+A plugin that declares a high-risk capability does not start below `trusted`: it runs inside this process, so a capability it was refused can only be withheld by not running it. `/plugin trust <name> <tier>` sets the tier and starts a running plugin again at once; `trusted` is set by a verified signature, or by your confirmation when the signature does not verify. The signature is checked against the publisher's Ed25519 public key, which you save once with `/plugin trust-key <name> <key.pem>`.
 
 ### Plugin API
 

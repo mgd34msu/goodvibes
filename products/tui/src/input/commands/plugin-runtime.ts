@@ -1,3 +1,4 @@
+import { readFileSync } from 'fs';
 import { resolve } from 'path';
 import type { PluginStatus } from '@goodvibes-jev/engine/platform/platform/plugins';
 import { getPluginDirectories, getUserPluginDirectory } from '@goodvibes-jev/engine/platform/platform/plugins';
@@ -367,6 +368,23 @@ export function registerPluginRuntimeCommands(registry: CommandRegistry): void {
           : `Error: ${result.error}`);
         return;
       }
+      if (sub === 'trust-key') {
+        const name = args[1];
+        const keyPath = args[2];
+        if (!name || !keyPath) { ctx.print('Usage: /plugin trust-key <name> <publisher-public-key.pem>'); return; }
+        let pem: string;
+        try { pem = readFileSync(resolve(keyPath), 'utf-8'); } catch (error) {
+          ctx.print(`Error: could not read ${keyPath}: ${error instanceof Error ? error.message : String(error)}. Give the path of the publisher's Ed25519 public key file.`);
+          return;
+        }
+        const saved = pluginManager.setPublisherKey(name, pem);
+        if (!saved.ok) { ctx.print(`Error: ${saved.error}`); return; }
+        const check = pluginManager.verify(name);
+        ctx.print(`Publisher key saved for '${name}'. ${check.valid
+          ? `Its manifest signature verifies with it; /plugin trust ${name} trusted now records the signed grant.`
+          : `Its manifest signature does not verify with it (${check.reason ?? 'unknown reason'}); the tier is unchanged.`}`);
+        return;
+      }
       if (sub === 'verify') {
         const name = args[1];
         if (!name) { ctx.print('Usage: /plugin verify <name>'); return; }
@@ -445,6 +463,7 @@ export function registerPluginRuntimeCommands(registry: CommandRegistry): void {
         + '  disable <name>             — disable a plugin\n'
         + '  reload                     — reload all enabled plugins\n'
         + '  trust <name> <tier> [note] — record a trust tier (untrusted|limited|trusted); trusted without a valid signature asks once\n'
+        + '  trust-key <name> <pem>     — save the publisher\'s Ed25519 public key that verifies its signature\n'
         + '  verify <name>              — inspect a plugin manifest signature\n'
         + '  capabilities <name>        — show requested capabilities and trust tier\n'
         + '  browse [query]             — browse curated local-first plugin catalog entries\n'

@@ -1,3 +1,4 @@
+import { createPublicKey } from 'node:crypto';
 import { captureFileIdentities, captureRevisionReadSource } from '../security/read-source.js';
 import { readJsonFileOrQuarantine, writeJsonFileAtomic } from '../utils/atomic-json-store.js';
 import { logger } from '../utils/logger.js';
@@ -56,6 +57,8 @@ interface PluginState {
   trust: Record<string, PluginTrustRecord>;
   /** Map of plugin name → quarantine record. */
   quarantine: Record<string, QuarantineRecord>;
+  /** Map of plugin name → its publisher's Ed25519 public key (PEM), used to verify the manifest signature. */
+  publisherKeys: Record<string, string>;
 }
 
 /**
@@ -90,7 +93,7 @@ export interface PluginManagerObserver {
   getQuarantineRecord(name: string): Readonly<QuarantineRecord> | undefined;
 }
 
-const DEFAULT_STATE: PluginState = { enabled: {}, enabledDirs: {}, config: {}, trust: {}, quarantine: {} };
+const DEFAULT_STATE: PluginState = { enabled: {}, enabledDirs: {}, config: {}, trust: {}, quarantine: {}, publisherKeys: {} };
 
 export interface PluginManagerOptions {
   readonly pathOptions: PluginPathOptions;
@@ -171,7 +174,7 @@ export class PluginManager {
     return () => { revision(); files(); };
   }
   private plugins = new Map<string, LoadedPlugin>();
-  private state: PluginState = { ...DEFAULT_STATE, enabled: {}, enabledDirs: {}, config: {}, trust: {}, quarantine: {} };
+  private state: PluginState = { ...DEFAULT_STATE, enabled: {}, enabledDirs: {}, config: {}, trust: {}, quarantine: {}, publisherKeys: {} };
   /** Lifecycle operations run one at a time, in the order they were asked for. */
   private operationTail: Promise<unknown> = Promise.resolve();
   private deps: PluginLoaderDeps | undefined;
@@ -282,8 +285,9 @@ export class PluginManager {
     }
 
     // Build the record off to the side and publish it only once it is on disk,
-    // so a refused write leaves the live tier as it was.
-    const record = new PluginTrustStore().setTier(name, tier, { note });
+    // so a refused write leaves the live tier as it was. An accepted publisher key stays.
+    const publisherKey = this.trustStore.getRecord(name)?.publisherKey;
+    const record = { ...new PluginTrustStore().setTier(name, tier, { note }), ...(publisherKey ? { publisherKey } : {}) };
     const failure = this.commitState(() => { this.state.trust[name] = record; }, this.undoTrust(name));
     if (failure) return { ok: false, error: `Trust tier for '${name}' was not saved, ${failure}` };
     this.trustStore.importRecords({ [name]: record });
@@ -298,7 +302,7 @@ export class PluginManager {
    */
   trustSigned(
     name: string,
-    publicKey?: string,
+    publicKey: string | undefined = this.state.publisherKeys[name],
   ): PluginTrustChangeResult & { fingerprint?: string | undefined } {
     if (this.closed) return { ok: false, error: 'Plugin manager is closed' };
     const discovered = this.findDiscoveredPlugin(name);
@@ -313,23 +317,48 @@ export class PluginManager {
       signature?: string | undefined;
     };
 
-    const result = new PluginTrustStore().trustSigned(name, manifest, publicKey);
+    const publisherKey = publicKey ?? this.trustStore.getRecord(name)?.publisherKey;
+    const result = new PluginTrustStore().trustSigned(name, manifest, publisherKey);
     if (!result.ok) {
-      return { ok: false, error: result.reason };
+      return { ok: false, error: publisherKey ? result.reason : `${result.reason}; accept the publisher's key with /plugin trust-key ${name} <public-key.pem>` };
     }
 
-    const failure = this.commitState(() => { this.state.trust[name] = result.record; }, this.undoTrust(name));
+    const record = { ...result.record, ...(publisherKey ? { publisherKey } : {}) };
+    const failure = this.commitState(() => { this.state.trust[name] = record; }, this.undoTrust(name));
     if (failure) return { ok: false, error: `Trust tier for '${name}' was not saved, ${failure}` };
-    this.trustStore.importRecords({ [name]: result.record });
+    this.trustStore.importRecords({ [name]: record });
     this.notifySubscribers();
     const restarting = this.restartAfterTrustChange(name);
     return { ok: true, fingerprint: result.record.signatureFingerprint, ...(restarting ? { restarting } : {}) };
   }
 
   /**
+   * setPublisherKey, Remember the publisher's Ed25519 public key (PEM) for a
+   * plugin, so `verify` and `trustSigned` can check its manifest signature.
+   * The key is checked before it is saved; it changes no tier by itself.
+   */
+  setPublisherKey(name: string, publicKeyPem: string): PluginTrustChangeResult {
+    if (this.closed) return { ok: false, error: 'Plugin manager is closed' };
+    if (!this.findDiscoveredPlugin(name)) return { ok: false, error: this.notFoundError(name) };
+    try {
+      if (createPublicKey(publicKeyPem).asymmetricKeyType !== 'ed25519') {
+        return { ok: false, error: 'The key is not an Ed25519 public key; ask the publisher for the Ed25519 key their manifest is signed with.' };
+      }
+    } catch {
+      return { ok: false, error: 'The file is not a readable public key (PEM); ask the publisher for their Ed25519 public key file.' };
+    }
+    const prior = this.state.publisherKeys[name];
+    const failure = this.commitState(
+      () => { this.state.publisherKeys[name] = publicKeyPem; },
+      () => { if (prior !== undefined) this.state.publisherKeys[name] = prior; else delete this.state.publisherKeys[name]; },
+    );
+    return failure ? { ok: false, error: `The publisher key for '${name}' was not saved, ${failure}` } : { ok: true };
+  }
+
+  /**
    * verify, Inspect a plugin's manifest signature without changing its tier.
    */
-  verify(name: string, publicKey?: string): { ok: boolean } & SignatureValidationResult {
+  verify(name: string, publicKey: string | undefined = this.state.publisherKeys[name]): { ok: boolean } & SignatureValidationResult {
     const discovered = this.findDiscoveredPlugin(name);
     if (!discovered) {
       return { ok: false, valid: false, reason: this.notFoundError(name) };
@@ -342,8 +371,31 @@ export class PluginManager {
       signature?: string | undefined;
     };
 
-    const result = this.trustStore.verify(manifest, publicKey);
-    return { ok: result.valid, ...result };
+    const publisherKey = publicKey ?? this.trustStore.getRecord(name)?.publisherKey;
+    const result = this.trustStore.verify(manifest, publisherKey);
+    return { ok: result.valid, ...result,
+      ...(!result.valid && !publisherKey ? { reason: `${result.reason}; accept the publisher's key with /plugin trust-key ${name} <public-key.pem>` } : {}) };
+  }
+
+  /**
+   * Accept a publisher's Ed25519 public key for a plugin: kept with its trust
+   * record, and used by `verify` and `trustSigned`. The tier does not change.
+   */
+  setPublisherKey(name: string, pem: string): { ok: true; valid: boolean; reason?: string | undefined } | { ok: false; error: string } {
+    if (this.closed) return { ok: false, error: 'Plugin manager is closed' };
+    if (!this.findDiscoveredPlugin(name)) return { ok: false, error: this.notFoundError(name) };
+    const key = readEd25519PublicKey(pem);
+    if (!key.ok) return { ok: false, error: `Key not accepted: ${key.reason}` };
+    const prior = this.trustStore.getRecord(name);
+    const record: PluginTrustRecord = prior
+      ? { ...prior, publisherKey: key.pem, updatedAt: Date.now() }
+      : { pluginName: name, tier: 'untrusted', updatedAt: Date.now(), grantedBy: 'operator', publisherKey: key.pem };
+    const failure = this.commitState(() => { this.state.trust[name] = record; }, this.undoTrust(name));
+    if (failure) return { ok: false, error: `The key for '${name}' was not saved, ${failure}` };
+    this.trustStore.importRecords({ [name]: record });
+    this.notifySubscribers();
+    const check = this.verify(name);
+    return { ok: true, valid: check.valid, ...(check.valid ? {} : { reason: check.reason }) };
   }
 
   /**
@@ -924,6 +976,7 @@ export class PluginManager {
         this.state.config = parsed.config ?? {};
         this.state.trust = parsed.trust ?? {};
         this.state.quarantine = parsed.quarantine ?? {};
+        this.state.publisherKeys = parsed.publisherKeys ?? {};
         // Restore trust and quarantine state into their engines.
         if (Object.keys(this.state.trust).length > 0) {
           this.trustStore.importRecords(this.state.trust);

@@ -302,7 +302,8 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
   const processTaskAdapter = new ProcessTaskAdapter(store, services.processManager);
   bootstrapUnsubs.push(processTaskAdapter.attach({ sessionId: userSessionId }));
   // An ACP task row's owner is its subagent id; the ACP manager can stop it and nothing else.
-  const opsTaskManager = createTaskManager(store, runtimeBus, userSessionId, services.featureFlags,
+  // Task events carry the running session, which a resume or fork changes.
+  const opsTaskManager = createTaskManager(store, runtimeBus, () => runtime.sessionId, services.featureFlags,
     (task) => task.kind === 'acp' ? { cancel: () => acpManager.cancel(task.owner) }
       : task.kind === 'exec' ? processTaskAdapter.controllerFor(task.id) : undefined);
   // Operator interventions ride the control-plane gateway capability

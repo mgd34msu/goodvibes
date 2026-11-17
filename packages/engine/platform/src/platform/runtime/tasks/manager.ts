@@ -157,8 +157,8 @@ export class UnifiedTaskManager implements TaskManager {
   private readonly _store: RuntimeStore;
   private readonly _dispatch: DomainDispatch;
   private readonly _bus: RuntimeEventBus;
-  /** Session ID for emitter context. */
-  private readonly _sessionId: string;
+  /** The running session's id for emitter context, read at each event so a resume or fork is followed. */
+  private readonly _sessionId: () => string;
   private readonly _featureFlags: FeatureFlagReader;
   private readonly _controllers: TaskControllerResolver;
   /** Ids of the tasks createTask recorded; see RECORD_ONLY_CONTROLLER. */
@@ -167,20 +167,20 @@ export class UnifiedTaskManager implements TaskManager {
   /**
    * @param store - The Zustand runtime store to dispatch state updates to.
    * @param bus - The RuntimeEventBus to emit task lifecycle events on.
-   * @param sessionId - The current session identifier for emitter context.
+   * @param sessionId - The session identifier for emitter context: a fixed id, or a reader of the running session's id.
    * @param controllers - Finds the owner's controller for a task; without one every verb is refused.
    */
   public constructor(
     store: RuntimeStore,
     bus: RuntimeEventBus,
-    sessionId: string,
+    sessionId: string | (() => string),
     featureFlags?: FeatureFlagReader,
     controllers?: TaskControllerResolver,
   ) {
     this._store = store;
     this._dispatch = createDomainDispatch(store);
     this._bus = bus;
-    this._sessionId = sessionId;
+    this._sessionId = typeof sessionId === 'function' ? sessionId : () => sessionId;
     this._featureFlags = featureFlags ?? null;
     this._controllers = controllers ?? (() => undefined);
   }
@@ -497,7 +497,7 @@ export class UnifiedTaskManager implements TaskManager {
    */
   private _makeCtx(taskId: string): EmitterContext {
     return {
-      sessionId: this._sessionId,
+      sessionId: this._sessionId(),
       source: 'task-manager',
       traceId: crypto.randomUUID(),
       taskId,

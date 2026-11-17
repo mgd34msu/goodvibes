@@ -57,19 +57,19 @@ import type { FeatureFlagReader } from '../feature-flags/index.js';
  *
  * @param store - The runtime Zustand store.
  * @param bus - The RuntimeEventBus for event emission.
- * @param sessionId - Current session identifier (used in emitter context).
+ * @param sessionId - Session identifier used in emitter context: a fixed id, or a reader of the running session's id (followed across a resume or fork).
  * @param controllers - Finds the owner's controller for a task; operator verbs are refused for a task without one.
  * @returns A TaskManager instance ready for use.
  *
  * @example
  * ```ts
- * const taskManager = createTaskManager(store, bus, sessionId);
+ * const taskManager = createTaskManager(store, bus, () => runtime.sessionId);
  * ```
  */
 export function createTaskManager(
   store: RuntimeStore,
   bus: RuntimeEventBus,
-  sessionId: string,
+  sessionId: string | (() => string),
   featureFlags?: FeatureFlagReader,
   controllers?: TaskControllerResolver,
 ): TaskManager {

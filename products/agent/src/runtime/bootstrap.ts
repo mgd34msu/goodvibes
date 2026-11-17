@@ -414,7 +414,8 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
   // Background processes are tasks from start to exit, and a task cancel stops the process.
   const processTaskAdapter = new ProcessTaskAdapter(store, services.processManager);
   runtimeUnsubs.push(processTaskAdapter.attach({ sessionId: userSessionId }));
-  const opsTaskManager = createTaskManager(store, runtimeBus, userSessionId, services.featureFlags,
+  // Task events carry the running session, which a resume or fork changes.
+  const opsTaskManager = createTaskManager(store, runtimeBus, () => runtime.sessionId, services.featureFlags,
     (task) => task.kind === 'exec' ? processTaskAdapter.controllerFor(task.id) : undefined);
 
   // Surface-bound closure, not the raw multi-arg platform function, see

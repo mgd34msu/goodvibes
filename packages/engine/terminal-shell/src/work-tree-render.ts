@@ -33,8 +33,8 @@ export interface TurnRenderOptions {
     readonly collapseThreshold: number;
     /** Code blocks longer than the threshold start collapsed: their default is written here. */
     readonly collapseState: Map<string, boolean>;
-    /** Whether a system message at this index is navigable (error navigation). */
-    readonly isNavigableSystem: (messageIndex: number, content: string) => boolean;
+    /** Whether a system message at this index, written at this notice level, is navigable (error navigation). */
+    readonly isNavigableSystem: (messageIndex: number, severity: 'error' | 'warning' | 'info' | undefined) => boolean;
     /** Spinner frame for running beads. */
     readonly frame: number;
 }
@@ -269,7 +269,9 @@ export function renderTurn(model: TurnModel, options: TurnRenderOptions, present
                 const shift = Math.max(0, textColumn(p) - MARKDOWN_TEXT_COL);
                 for (const source of body)
                     lines.push(shiftUnderGutter(source, shift, cont, p));
-                if (row.role === 'system' && options.isNavigableSystem(row.messageIndex, row.content))
+                // Notices are drawn after the turn with their own level; the only system
+                // row inside a turn is the model-switch line, which is information.
+                if (row.role === 'system' && options.isNavigableSystem(row.messageIndex, 'info'))
                     errorLines.push(start);
                 noteMessage(row.messageIndex, start);
                 break;

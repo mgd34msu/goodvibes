@@ -52,7 +52,7 @@ Use the interactive workspace first. CLI subcommands are secondary support paths
 The workspace opens into a set of operator areas. Each area below names what it covers; the Setup area carries the guided path from a fresh install to a working connected host and model route, and the rest become useful as soon as setup is applied.
 
 - Setup:
-  - guided first-run wizard with progress, current-step route hints, saved setup checkpoints, checkpoint auto-advance evidence when a saved step is already ready, backtracking routes, setup-smoke rerun/save routes, repeated-blocker focus from saved smoke history, and closeout state from critical blocker, saved smoke, durable setup receipt, and user completion-marker evidence
+  - guided first-run wizard with progress, current-step route hints, saved setup checkpoints, checkpoint auto-advance evidence when a saved step is already ready, backtracking routes, setup-smoke rerun/save routes, repeated-blocker focus from saved smoke history, and closeout state from critical blocker, saved smoke, and user completion-marker evidence
   - visible checklist for runtime, connected-host auth, provider/model, install smoke, and follow-on capabilities
   - prioritized first-run plan
   - primary handoffs from every actionable setup row to the safest visible form, diagnostic, or confirmed route

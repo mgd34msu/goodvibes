@@ -21,8 +21,8 @@ import { markCapturedInputPath } from './input-authority.js';
  */
 import { spawnSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, type BigIntStats } from 'node:fs';
-import { lstat, mkdir, realpath } from 'node:fs/promises';
+import { copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, rmSync, type BigIntStats } from 'node:fs';
+import { lstat, mkdir, readFile, realpath } from 'node:fs/promises';
 import { tmpdir, uptime } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
@@ -389,20 +389,44 @@ export function contractInputPath(snapshot: ContractInputSnapshot): string {
   return join(snapshot.sourceRoot, '.goodvibes', '.worktrees', 'contract-input', snapshot.id);
 }
 
-/** Regular files of captured trees, by repository and tree id; a tree id never changes meaning, so a reading is reused. */
-const treeFiles = new Map<string, readonly string[]>();
+/** Regular files of captured trees with their blob ids, by repository and tree id; a tree id never changes meaning, so a reading is reused. */
+const treeFiles = new Map<string, ReadonlyMap<string, { readonly oid: string; readonly size: number }>>();
 const TREE_FILES_KEPT = 16;
+
+function capturedBlobs(snapshot: ContractInputSnapshot): ReadonlyMap<string, { readonly oid: string; readonly size: number }> {
+  const key = `${snapshot.sourceRoot}\0${snapshot.inputTree}`;
+  let blobs = treeFiles.get(key);
+  if (blobs === undefined) {
+    blobs = new Map(treeEntries(snapshot.sourceRoot, snapshot.inputTree)
+      .filter((entry) => entry.mode === '100644' || entry.mode === '100755')
+      .map((entry) => [entry.path, { oid: entry.oid, size: entry.size }] as const));
+    if (treeFiles.size >= TREE_FILES_KEPT) treeFiles.delete(treeFiles.keys().next().value!);
+    treeFiles.set(key, blobs);
+  }
+  return blobs;
+}
+
+/** Git's blob id of `bytes`, in the repository's object format (a 40-character id is SHA-1, 64 is SHA-256). */
+function blobId(bytes: Buffer, idLength: number): string {
+  return createHash(idLength === 64 ? 'sha256' : 'sha1').update(`blob ${bytes.length}\0`).update(bytes).digest('hex');
+}
+
+/** One line per path: its stat identity, or `-` when it is absent. Two or three `lstat` calls, no process. */
+function statWitness(paths: readonly string[]): string {
+  return paths.map((path) => {
+    try { return fileIdentity(lstatSync(path, { bigint: true })); }
+    catch { return '-'; }
+  }).join('|');
+}
+
+/** Absolute paths of git's own files for a worktree (HEAD, its index, a ref). One `git rev-parse`. */
+function gitPaths(worktreePath: string, names: readonly string[]): readonly string[] {
+  return gitText(worktreePath, ['rev-parse', '--path-format=absolute', ...names.flatMap((name) => ['--git-path', name])]).split('\n');
+}
 
 /** The regular files of the captured input, from `git ls-tree` once per tree. Never a read grant. */
 export function contractInputFiles(snapshot: ContractInputSnapshot): readonly string[] {
-  const key = `${snapshot.sourceRoot}\0${snapshot.inputTree}`;
-  let files = treeFiles.get(key);
-  if (files === undefined) {
-    files = Object.freeze(treeEntries(snapshot.sourceRoot, snapshot.inputTree).filter((entry) => entry.mode === '100644' || entry.mode === '100755').map((entry) => entry.path));
-    if (treeFiles.size >= TREE_FILES_KEPT) treeFiles.delete(treeFiles.keys().next().value!);
-    treeFiles.set(key, files);
-  }
-  return files;
+  return Object.freeze([...capturedBlobs(snapshot).keys()]);
 }
 
 /** A planner can resume only from its recorded input generation, never today's source or a result tree. */
@@ -414,31 +438,86 @@ export async function assertContractInputView(snapshot: ContractInputSnapshot, s
   signal?.throwIfAborted();
 }
 
-/** The whole-view check of an immutable view, and a per-path check for reads inside a batch the whole-view check brackets. */
+/**
+ * The whole-view check of an immutable view, and a per-path check of each file
+ * a tool reads. The guarantee is that nothing a tool delivers differs from the
+ * captured tree. A full check records the stat identity of every captured file
+ * and then compares the view's tree id with the captured one; after that the
+ * whole check only compares the stat identity of the view's HEAD and index (git
+ * changes one of them for any checkout, reset or staging) and runs in full
+ * again when they moved. A path whose stat identity is not the recorded one
+ * (an edit made in place from outside) has its bytes matched with the captured
+ * blob id before it is used, so a change is caught where it would be delivered.
+ */
 export interface ContractInputViewAssertion {
   (): Promise<void>;
-  /** The path is a captured regular file, unchanged since this batch first read it. One `lstat`. */
+  /** The path is a captured regular file whose bytes are the captured blob. One `lstat` for an unchanged file. */
   readonly assertPath: (path: string, signal?: AbortSignal) => Promise<void>;
 }
 export function createContractInputViewAssertion(snapshot: ContractInputSnapshot, signal?: AbortSignal, viewPath = contractInputPath(snapshot)): ContractInputViewAssertion {
-  let files: ReadonlySet<string> | undefined;
-  // Stat identity of each path as first read since the last whole-view check.
-  const seen = new Map<string, string>();
+  // Stat identity of each captured file whose bytes are known to be the captured blob.
+  let known = new Map<string, string>();
+  let witnessFiles: readonly string[] | undefined;
+  let witness: string | undefined;
+  const changed = () => new Error('contract input view changed at accessed path');
   const assertPath = async (path: string, current?: AbortSignal) => {
     signal?.throwIfAborted(); current?.throwIfAborted();
-    const stat = await lstat(join(viewPath, path), { bigint: true });
+    const full = join(viewPath, path);
+    const stat = await lstat(full, { bigint: true });
     signal?.throwIfAborted(); current?.throwIfAborted();
     if (stat.isDirectory()) return;
-    files ??= new Set(contractInputFiles(snapshot));
-    const id = fileIdentity(stat), first = seen.get(path);
-    if (!stat.isFile() || !files.has(path) || (first !== undefined && first !== id)) throw new Error('contract input view changed at accessed path');
-    seen.set(path, id);
+    const blob = capturedBlobs(snapshot).get(path);
+    if (!stat.isFile() || blob === undefined) throw changed();
+    const id = fileIdentity(stat);
+    if (known.get(path) === id) return;
+    if (Number(stat.size) !== blob.size || blobId(await readFile(full), blob.oid.length) !== blob.oid) throw changed();
+    if (fileIdentity(await lstat(full, { bigint: true })) !== id) throw changed();
+    known.set(path, id);
+  };
+  const sweep = async (): Promise<Map<string, string>> => {
+    const ids = new Map<string, string>();
+    const paths = [...capturedBlobs(snapshot).keys()];
+    for (let start = 0; start < paths.length; start += 64) {
+      signal?.throwIfAborted();
+      await Promise.all(paths.slice(start, start + 64).map(async (path) => {
+        try {
+          const stat = await lstat(join(viewPath, path), { bigint: true });
+          if (stat.isFile()) ids.set(path, fileIdentity(stat));
+        } catch { /* Absent: an access fails on its own lstat. */ }
+      }));
+    }
+    return ids;
   };
   const whole = async (): Promise<void> => {
+    signal?.throwIfAborted();
+    witnessFiles ??= gitPaths(viewPath, ['HEAD', 'index']);
+    const before = statWitness(witnessFiles);
+    if (before === witness) return;
+    // Identities first, tree second: a file changed after its identity was taken changes the tree or its identity.
+    const ids = await sweep();
     await assertContractInputView(snapshot, signal, viewPath);
-    seen.clear();
+    if (statWitness(witnessFiles) !== before) throw new Error('contract input view changed while it was checked');
+    known = ids;
+    witness = before;
   };
   return Object.freeze(Object.assign(whole, { assertPath }));
+}
+
+/**
+ * `assertContractExecutionView` for one member worktree, run in full only when
+ * git's HEAD, the branch ref or the packed refs changed since the last full
+ * run (a branch switch, a commit, a reset); otherwise three `lstat` calls.
+ */
+export function createContractExecutionViewAssertion(snapshot: ContractInputSnapshot, worktreePath: string, branch: string): () => void {
+  let witnessFiles: readonly string[] | undefined;
+  let witness: string | undefined;
+  return () => {
+    witnessFiles ??= gitPaths(worktreePath, ['HEAD', `refs/heads/${branch}`, 'packed-refs']);
+    const before = statWitness(witnessFiles);
+    if (before === witness) return;
+    assertContractExecutionView(snapshot, worktreePath, branch);
+    witness = statWitness(witnessFiles) === before ? before : undefined;
+  };
 }
 
 /** Member worktrees start from the contract's current exact Git tree, without owner checkout hooks. */

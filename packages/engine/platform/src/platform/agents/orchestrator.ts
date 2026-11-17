@@ -15,8 +15,6 @@ import {
   assertContractInputAuthority,
   isCapturedInputPath,
   assertContractInputReadAccess,
-  assertContractInputReadSet,
-  withContractInputReadBatch,
   type ContractInputAuthority,
 } from '../contract/input-authority.js';
 import { capturedInputTool, capturedInputReadFilter } from '../tools/shared/captured-input-tools.js';
@@ -927,11 +925,10 @@ export class AgentOrchestrator {
               beforeProviderRequest: async () => {
                 autonomousSource?.();
                 if (authority) {
-                  await withContractInputReadBatch(authority, async () => {
-                    await assertContractInputAuthority(authority, cwd, signal);
-                    await assertContractInputReadAccess(authority, ownerReadAccess, signal);
-                    await assertContractInputReadSet(authority, delivered, ownerReadAccess, signal);
-                  });
+                  // Once per provider request: the view is the captured one (the batch,
+                  // before and after) and every path read so far still passes the owner's
+                  // policy (the paths delivered to the model are among them).
+                  await assertContractInputReadAccess(authority, ownerReadAccess, signal);
                 }
                 autonomousSource?.();
               },

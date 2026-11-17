@@ -596,7 +596,8 @@ async function runAgentTaskWithPolicy(context: AgentOrchestratorRunContext, reco
       verificationStore: new VerificationStore(context.workingDirectory, record.id),
       verificationWriter: createVerificationWriter({
         route: () => ({ provider: activeRoute.provider, model: activeRoute.modelId, ...(record.reasoningEffort ? { reasoning: { reasoningEffort: record.reasoningEffort } } : {}) }),
-        beforeAttempt: async () => { terminal.assertCurrent(); await assertVerificationProvider(); terminal.assertCurrent(); },
+        // A verification request is its own provider request, so it takes the request check itself.
+        beforeAttempt: async () => { terminal.assertCurrent(); await assertVerificationProvider(); await context.beforeProviderRequest?.(); terminal.assertCurrent(); },
         onUsage: (response, durationMs) => {
           record.usage = { ...record.usage!, inputTokens: record.usage!.inputTokens + response.usage.inputTokens,
             outputTokens: record.usage!.outputTokens + response.usage.outputTokens,
@@ -892,7 +893,7 @@ async function runAgentTaskWithPolicy(context: AgentOrchestratorRunContext, reco
           terminal.assertCurrent(); decisionRoute?.assertCurrent();
           try { await codeAuthorityForAttempt?.(); } catch (error) { throw new ProviderAttemptDeniedError(error); }
           await capturedCode?.assertCurrent?.(capturedCodeGeneration);
-          await context.beforeProviderRequest?.();
+          // beforeProviderRequest ran for this request at the top of the round; an attempt does not repeat it.
           assertOrchestratorKnowledgeCurrent(record, promptContext);
           if (nativeSource && (!context.autonomousSource || JSON.stringify(captureAutonomousSource(context.autonomousSource())) !== JSON.stringify(nativeSource)))
             throw new Error('Native provider source changed before retry');

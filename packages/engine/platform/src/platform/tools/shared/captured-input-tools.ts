@@ -16,7 +16,6 @@ import { ToolInputProjectionError } from '../input-projection.js';
 import {
   assertContractInputAuthority,
   assertCapturedInputPathContext,
-  assertContractInputReadAccess,
   assertContractInputReadSet,
   withContractInputAuthority,
   withContractInputReadBatch,
@@ -179,10 +178,13 @@ export function capturedInputTool(
               assertInvocationCurrent();
               deliveryReads.getStore()!.paths.add(authorized);
             },
+            // Before content of this call goes to a model: the paths this call read still
+            // pass the owner's policy and are unchanged. Earlier calls' reads are the provider
+            // request's to recheck (agents/orchestrator.ts), not every step of every call.
             assertCurrent: async () => {
               assertInvocationCurrent();
               const combined = signal && callSignal ? AbortSignal.any([signal, callSignal]) : (signal ?? callSignal);
-              await assertContractInputReadAccess(authority, filter, combined);
+              await assertContractInputReadSet(authority, deliveryReads.getStore()!.paths, filter, combined);
               assertInvocationCurrent();
             },
           },
@@ -193,10 +195,10 @@ export function capturedInputTool(
                 // Model arguments and callers remain mutable outside this invocation.
                 // Pin an owned deep copy before the first permission/validation await.
                 if (!authenticated) args = freezeInput(structuredClone(args));
+                // The batch around this call checked the whole view; this is the root and owner identity only.
                 await assertContractInputAuthority(authority, root, signal);
                 assertInvocationCurrent();
                 if (!filter) throw new Error('captured input requires original-owner read authorization');
-                await assertCapturedToolAccessCurrent();
                 if (name === 'read') {
                   // Actual ReadTool gates each path before its in-process extractors read bytes.
                 } else if (name === 'find') {
@@ -259,19 +261,19 @@ export function capturedInputTool(
                   : name === 'analyze'
                     ? await withCapturedAnalyzeInput(authority, root, publicationSignal, () => tool.execute(args, childOptions))
                     : await tool.execute(args, childOptions);
-                await assertContractInputAuthority(authority, root, signal);
                 assertInvocationCurrent();
-                // No content, cached output, diagnostics or errors leave after revocation.
+                // No content, cached output, diagnostics or errors leave after revocation:
+                // the paths this call read pass the owner's policy and are unchanged, and
+                // the batch checks the whole view once more before the result is returned.
                 const combined = signal && callSignal ? AbortSignal.any([signal, callSignal]) : (signal ?? callSignal);
                 await assertContractInputReadSet(authority, deliveryReads.getStore()!.paths, filter, combined);
                 for (const check of deliveryReads.getStore()!.checks) await check();
-                await assertCapturedToolAccessCurrent();
                 combined?.throwIfAborted();
                 return result;
               };
-              return name === 'read' || name === 'find'
-                ? await withContractInputReadBatch(authority, execute)
-                : await execute();
+              // One owner of "the view is the captured one" per call: the batch checks the
+              // whole view before and after; inside it each path is checked as it is used.
+              return await withContractInputReadBatch(authority, execute);
             } catch (error) {
               if (error instanceof UnsupportedCapturedWorkflow) return { success: false, error: error.message };
               // Backend error strings can include source bytes. A held call returns

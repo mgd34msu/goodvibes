@@ -5,9 +5,9 @@ import { lstat, realpath } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { Contract } from './types.js';
 import {
-  assertContractExecutionView,
   assertContractInputObjects,
   assertContractInputGitIdentity,
+  createContractExecutionViewAssertion,
   createContractInputViewAssertion,
   contractInputFiles,
   CONTRACT_INPUT_EXCLUSIONS,
@@ -27,8 +27,8 @@ export class ContractInputReadDeniedError extends Error {
   constructor() { super('captured input path is access-restricted'); this.name = 'ContractInputReadDeniedError'; }
 }
 interface Admission {
+  /** A frozen private copy: nothing can change it, so it is never compared again. */
   readonly receipt: ContractInputSnapshot;
-  readonly serialized: string;
   readonly original: ContractInputSnapshot;
   readonly contract: Contract;
   readonly signal?: AbortSignal | undefined;
@@ -82,13 +82,19 @@ export function capturedInputRootCount(): number {
 }
 const identity = (stat: { dev: bigint; ino: bigint }): string => `${stat.dev}:${stat.ino}`;
 
-function assertAdmission(admission: Admission, compareContents = true): void {
+/** The contract still carries the receipt that was admitted (a reference compare). Authority reads only the frozen copy. */
+function assertAdmission(admission: Admission): void {
   admission.signal?.throwIfAborted();
-  if (
-    admission.contract.inputSnapshot !== admission.original ||
-    (compareContents && JSON.stringify(admission.contract.inputSnapshot) !== admission.serialized)
-  )
+  if (admission.contract.inputSnapshot !== admission.original)
     throw new Error('contract input receipt changed after admission');
+}
+
+function deepFreeze<T>(value: T): T {
+  if (value !== null && typeof value === 'object' && !Object.isFrozen(value)) {
+    for (const child of Object.values(value)) deepFreeze(child);
+    Object.freeze(value);
+  }
+  return value;
 }
 
 /** Pin once, immediately after capture or validated restore, before external awaits. */
@@ -102,8 +108,7 @@ export function pinContractInputAdmission(contract: Contract, signal?: AbortSign
   if (!original) throw new Error('contract input authority requires a recorded receipt');
   const admission: Admission = {
     original,
-    receipt: structuredClone(original),
-    serialized: JSON.stringify(original),
+    receipt: deepFreeze(structuredClone(original)),
     contract,
     signal,
   };
@@ -134,12 +139,14 @@ export async function createContractInputAuthority(
   const snapshot = options.snapshot === undefined ? admission.receipt : structuredClone(options.snapshot);
   const immutableView = options.assertView === undefined && !options.mutable
     ? createContractInputViewAssertion(snapshot, options.signal, view) : undefined;
+  const executionView = options.assertView === undefined && options.mutable && options.branch
+    ? createContractExecutionViewAssertion(admission.receipt, view, options.branch) : undefined;
   const assertView =
     options.assertView ??
     immutableView ??
       (async () => {
-        if (!options.mutable || !options.branch) throw new Error('member authority requires its recorded branch');
-        assertContractExecutionView(admission.receipt, view, options.branch);
+        if (!executionView) throw new Error('member authority requires its recorded branch');
+        executionView();
       });
   assertAdmission(admission);
   assertContractInputObjects(admission.receipt, admission.receipt.sourceRoot);
@@ -243,7 +250,7 @@ function stateOf(token: ContractInputAuthority): Authority {
   state.signal?.throwIfAborted();
   state.admission.signal?.throwIfAborted();
   if (state.revoked) throw new Error('captured input authority is missing or revoked');
-  assertAdmission(state.admission, !inReadBatch(token));
+  assertAdmission(state.admission);
   return state;
 }
 export async function assertContractInputAuthority(

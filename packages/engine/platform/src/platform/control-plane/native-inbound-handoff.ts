@@ -1,6 +1,6 @@
 import { sameNativeInboundSourceRef } from './native-inbound-source.js';
 /** Shared host-private handoff. No wire metadata can construct its source or owner. */
-import type { SharedSessionContinuationRequest, SharedSessionContinuationOutcome } from './session-intents.js';
+import type { SharedSessionContinuationRequest } from './session-intents.js';
 import type { NativeInboundBrokerIdentity, NativeInboundResolvedSource, NativeInboundSourceRef, NativeInboundSourceResolver } from './native-inbound-source.js';
 
 export type NativeInboundDisposition =
@@ -73,7 +73,7 @@ export function createNativeInboundHandoff(deps: {
     return { disposition: 'transferred', requestId: attempt.ref.requestId };
   };
   return Object.freeze({
-    async run(request: SharedSessionContinuationRequest): Promise<SharedSessionContinuationOutcome> {
+    async run(request: SharedSessionContinuationRequest): Promise<NativeInboundDisposition> {
       // Never read task/body or infer provenance from metadata, even for an owner-labelled sender.
       if (request.sessionId !== request.input.sessionId || request.input.intent !== 'submit') return held();
       const target = { sessionId: request.sessionId, inputId: request.input.id };

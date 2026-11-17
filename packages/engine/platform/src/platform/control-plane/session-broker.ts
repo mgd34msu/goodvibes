@@ -730,9 +730,27 @@ export class SharedSessionBroker {
     await this.persist();
     // The session's verification journal holds its tool output and file contents; it goes with the session.
     forgetVerificationJournal(session.project, sessionId);
+    await this.releaseSessionRoutes(sessionId);
     this.updateActiveSessionsGauge();
     this.publishUpdate('session-deleted', { sessionId });
     return 'deleted';
+  }
+
+  /**
+   * A session gone for good takes its thread and per-message route bindings
+   * with it; channel and direct-conversation bindings stay for the next
+   * message. A closed session keeps them, since a reply in its thread reopens
+   * it or rolls the conversation over with a notice.
+   */
+  private async releaseSessionRoutes(sessionId: string): Promise<void> {
+    try {
+      await this.routeBindings.releaseSession(sessionId);
+    } catch (error) {
+      logger.warn('[session-broker] route bindings of a deleted session could not be released; the 30-day idle sweep removes them', {
+        sessionId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   /**
@@ -1531,6 +1549,10 @@ export class SharedSessionBroker {
         isExternallyLive: (session) => this.externalLivenessProbe?.(session) === true,
       }, (event, payload) => this.publishUpdate(event, payload)).length;
     }
+    // Only a finite retention window deletes closed sessions, so only then is there anything to compare.
+    const closedBefore = Number.isFinite(this._deletionRetentionMs)
+      ? [...this.sessions.values()].filter((session) => session.status === 'closed').map((session) => session.id)
+      : [];
     const swept = sweepSharedSessions(
       { sessions: this.sessions, messages: this.messages, inputs: this.inputs },
       {
@@ -1541,6 +1563,9 @@ export class SharedSessionBroker {
         isExternallyLive: (session) => this.externalLivenessProbe?.(session) === true,
       },
     );
+    for (const sessionId of closedBefore) {
+      if (!this.sessions.has(sessionId)) void this.releaseSessionRoutes(sessionId);
+    }
     if (swept || orphaned > 0) {
       this.updateActiveSessionsGauge();
       void this.persist().catch((error: unknown) => {

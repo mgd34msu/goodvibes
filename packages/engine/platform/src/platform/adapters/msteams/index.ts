@@ -1,5 +1,5 @@
 import type { ChannelConversationKind } from '../../channels/index.js';
-import { constantTimeEquals, readBearerOrHeaderToken, readTextBodyWithinLimit, readRecord, readString, ingressMetadata, noticeUnsupportedAttachment, hasAttachments } from '../helpers.js';
+import { constantTimeEquals, readBearerOrHeaderToken, readTextBodyWithinLimit, readRecord, readString, noticeUnsupportedAttachment, hasAttachments } from '../helpers.js';
 import { resolveSurfaceCredential, surfaceCredentialUnavailable } from '../surface-credential.js';
 import { runSurfaceMessage, surfaceOutcomeResponse } from '../surface-message.js';
 import type { SurfaceAdapterContext } from '../types.js';
@@ -190,8 +190,8 @@ export async function handleMSTeamsSurfaceWebhook(req: Request, context: Surface
       channelId: channelId,
       threadId: replyToId,
       title: readString(conversation?.name) ?? readString(channel?.id) ?? conversationId,
+      // The fields a reply needs; the activity itself (message text included) is not kept on the binding.
       metadata: {
-        ...ingressMetadata(activity),
         conversationId,
         serviceUrl,
         conversationType,

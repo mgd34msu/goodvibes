@@ -201,6 +201,8 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
   const panelManager = seams.panelManager ?? createNoopPanelManager();
   const keybindingsManager = seams.keybindingsManager ?? createNoopKeybindingsManager();
   const { routeBindings, surfaceRegistry, channelPlugins } = createChannelComposition({ configManager, runtimeStore, runtimeBus, featureFlags });
+  // Last-seen times and reply targets held in memory are written on close, after the channels that change them stop.
+  scope.registry.add('channel route bindings', () => routeBindings.flush());
 
   // Credentials and identity.
   const secretsManager = createRuntimeSecretsManager({

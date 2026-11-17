@@ -28,6 +28,23 @@ import { summarizeError } from '../utils/error-display.js';
 const IDLE_THREAD_BINDING_MS = 30 * 24 * 60 * 60 * 1000;
 /** How long last-seen times and per-message values wait in memory before they are written. */
 const TOUCH_FLUSH_DELAY_MS = 60_000;
+/**
+ * Bot Framework activity fields a Teams binding once copied into its metadata
+ * (the message text and attachments among them). No reply reads them; they
+ * are dropped when the bindings load, so no message body stays on disk.
+ */
+const TEAMS_ACTIVITY_METADATA_KEYS = [
+  'text', 'textFormat', 'attachments', 'entities', 'value', 'channelData', 'from', 'recipient',
+  'conversation', 'summary', 'speak', 'timestamp', 'localTimestamp', 'locale', 'type', 'id',
+] as const;
+
+/** A Teams binding without the activity fields, or the binding itself when it holds none. */
+function withoutTeamsActivity(binding: AutomationRouteBinding): AutomationRouteBinding {
+  if (binding.surfaceKind !== 'msteams' || !TEAMS_ACTIVITY_METADATA_KEYS.some((key) => Object.hasOwn(binding.metadata, key))) return binding;
+  const metadata = { ...binding.metadata };
+  for (const key of TEAMS_ACTIVITY_METADATA_KEYS) delete metadata[key];
+  return { ...binding, metadata };
+}
 
 export interface UpsertRouteBindingInput {
   readonly id?: string | undefined;
@@ -212,17 +229,18 @@ export class RouteBindingManager {
     this.byNaturalKey.clear();
     const now = Date.now();
     let reaped = 0;
+    let cleaned = false;
     // Oldest first, so the newest binding owns a natural key two rows share.
-    for (const binding of [...snapshot.routes].sort((a, b) => a.lastSeenAt - b.lastSeenAt)) {
-      if (isIdleThreadBinding(binding, now)) { reaped += 1; continue; }
+    for (const stored of [...snapshot.routes].sort((a, b) => a.lastSeenAt - b.lastSeenAt)) {
+      if (isIdleThreadBinding(stored, now)) { reaped += 1; continue; }
+      const binding = withoutTeamsActivity(stored);
+      if (binding !== stored) cleaned = true;
       this.place(binding);
       this.runtimeDispatch?.syncRouteBinding(binding, 'routes.load');
     }
     this.loaded = true;
-    if (reaped > 0) {
-      logger.info('Route bindings: dropped thread bindings idle for more than 30 days', { reaped });
-      this.markDirty();
-    }
+    if (reaped > 0) logger.info('Route bindings: dropped thread bindings idle for more than 30 days', { reaped });
+    if (reaped > 0 || cleaned) this.markDirty();
   }
 
   private place(binding: AutomationRouteBinding): void {
@@ -258,8 +276,9 @@ export class RouteBindingManager {
 
   /**
    * Write in-memory changes (last-seen times, per-message values) now. The
-   * daemon calls this when it stops; otherwise they are written within a
-   * minute or with the next real change, whichever comes first.
+   * runtime graph calls this when it closes, after the channels that change
+   * them have stopped; otherwise they are written within a minute or with the
+   * next real change, whichever comes first.
    */
   async flush(): Promise<void> {
     if (this.flushTimer) { clearTimeout(this.flushTimer); this.flushTimer = null; }
@@ -539,9 +558,9 @@ export class RouteBindingManager {
   }
 
   /**
-   * A session closed: its thread and per-message bindings are over. Channel
-   * and direct-conversation bindings stay, since the next message in that
-   * conversation reuses them. Returns how many were removed.
+   * A session was deleted: its thread and per-message bindings are over.
+   * Channel and direct-conversation bindings stay, since the next message in
+   * that conversation reuses them. Returns how many were removed.
    */
   async releaseSession(sessionId: string): Promise<number> {
     if (!this.isEnabled()) return 0;

@@ -4,7 +4,7 @@ import { checkAnswers, oneOf, defineBattery, defineSelector, STAKES_BANDS, toJso
 import { captureJudgmentPort, decisionModelPolicyState, JudgmentPortMissingError, type JudgmentPortCapture, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
 import { activateClassicFallback, isClassicOperation, requireDecisionFeature } from '../runtime/decision-policy.js';
 import { snapshotJudgmentInput } from '../gate/judgment-input.js';
-import { awaitPermission } from '../permissions/cancellation.js';
+import { executePolicyCheck } from '../gate/execute-policy-check.js';
 
 export const occasionInterest = defineSelector({
   name: 'engine.occasions.interest-line', version: 1, accuracyFloor: 0.95,
@@ -70,7 +70,7 @@ export class OccasionReadingWork {
   }
   async wait<T>(work: () => Promise<T>): Promise<T> {
     this.assertCurrent();
-    const result = await awaitPermission(work, this.signal).catch((error: unknown) => { this.assertCurrent(); throw error; });
+    const result = await executePolicyCheck(work, this.signal).catch((error: unknown) => { this.assertCurrent(); throw error; });
     this.assertCurrent(); return result;
   }
   get signal(): AbortSignal | undefined { return isClassicOperation() ? this.options.signal : this.owner?.signal ?? this.options.signal; }

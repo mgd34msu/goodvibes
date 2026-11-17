@@ -1,7 +1,7 @@
 import { defineBattery, estimateTokens, LIMITS, oneOf, STAKES_BANDS, toJson, yesNo, type EntryType, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { captureJudgmentPort, judgmentPort, JudgmentAuthorityRetiredError, DecisionModelsDisabledError, type JudgmentPortCapture } from '@goodvibes-jev/engine/errors';
 import { activateClassicFallback, decisionOrClassic, isClassicOperation } from '../runtime/decision-policy.js';
-import { assertPermissionActive, awaitPermission } from '../permissions/cancellation.js';
+import { executePolicyCheck } from '../gate/execute-policy-check.js';
 import { captureJudgmentFailure } from '../gate/failure-input.js';
 import { JudgmentInputError } from '../gate/judgment-input.js';
 import type { CommandOutcome } from './browser-types.js';
@@ -22,7 +22,7 @@ export function ownProvisionLifetime<T extends BrowserProvisionLifetime>(options
   const original = Object.freeze({ ...options });
   let authority: JudgmentPortCapture | undefined;
   const check = (): void => {
-    assertPermissionActive(original.signal);
+    original.signal?.throwIfAborted();
     original.assertCurrent?.();
     if (!isClassicOperation()) authority?.assertCurrent();
   };
@@ -39,7 +39,7 @@ export function ownProvisionLifetime<T extends BrowserProvisionLifetime>(options
   return Object.freeze({ ...original, assertCurrent: check });
 }
 export function assertProvisionCurrent(lifetime: BrowserProvisionLifetime): void {
-  assertPermissionActive(lifetime.signal);
+  lifetime.signal?.throwIfAborted();
   lifetime.assertCurrent?.();
 }
 function readingOwner(lifetime: BrowserProvisionLifetime): JudgmentPortCapture {
@@ -125,7 +125,7 @@ async function readDecisionCategory(command: string, phase: string, outcome: Com
     const state = evidence(command, phase, outcome);
     if (estimateTokens(state) > LIMITS.maxStateWithQuestionTokens - 1500) throw new BrowserProvisionReadingError();
     const owner = readingOwner(lifetime);
-    const run = await awaitPermission(() => browserProvisionFailure.run(owner.port, toJson(state) as EntryType, {
+    const run = await executePolicyCheck(() => browserProvisionFailure.run(owner.port, toJson(state) as EntryType, {
       only: ['category'], signal: owner.signal, beforeAttempt: () => assertProvisionCurrent(lifetime),
     }), owner.signal);
     assertProvisionCurrent(lifetime);
@@ -194,7 +194,7 @@ export async function missingLibrary(command: string, outcome: CommandOutcome, l
     assertProvisionCurrent(lifetime);
     try {
       const owner = readingOwner(lifetime);
-      const run = await awaitPermission(() => browserProvisionFailure.run(owner.port, toJson({ ...state, candidate }) as EntryType, {
+      const run = await executePolicyCheck(() => browserProvisionFailure.run(owner.port, toJson({ ...state, candidate }) as EntryType, {
         only: ['candidate_missing'], signal: owner.signal, beforeAttempt: () => assertProvisionCurrent(lifetime),
       }), owner.signal);
       assertProvisionCurrent(lifetime);

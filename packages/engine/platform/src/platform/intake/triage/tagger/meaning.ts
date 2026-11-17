@@ -1,7 +1,7 @@
 import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 /** Custom label meaning is a versioned recorded reading, never substring dispatch. */
 import { defineBattery, oneOf, STAKES_BANDS, type DecisionRecorder, type JudgmentPort } from '@goodvibes-jev/judgment';
-import { awaitPermission } from '../../../permissions/cancellation.js';
+import { executePolicyCheck } from '../../../gate/execute-policy-check.js';
 import { snapshotJudgmentInput } from '../../../gate/judgment-input.js';
 import { types } from 'node:util';
 import { captureTriageJudgment, triageConfiguredModel } from '../model-result.js';
@@ -75,9 +75,9 @@ export async function readCustomTagMeaning(tag: string, port: JudgmentPort | und
     },
     async ask(request) {
       current(guard);
-      // The shared permission wait owns cancellation even for an injected port
+      // The shared reading wait owns cancellation even for an injected port
       // that ignores its signal. Retention also ends with the exact operation.
-      const raw = await awaitPermission(() => port.ask({ ...request,
+      const raw = await executePolicyCheck(() => port.ask({ ...request,
         captureResult: original => { current(guard); return captureTriageJudgment(original, request.questions, configured).result; },
         beforeAttempt() { current(guard); assertSynchronousJudgmentGuard(() => request.beforeAttempt?.()); },
         assertLogCurrent() { current(guard); assertSynchronousJudgmentGuard(() => request.assertLogCurrent?.(), 'retention'); },

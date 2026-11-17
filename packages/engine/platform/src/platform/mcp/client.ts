@@ -86,6 +86,8 @@ interface McpToolCatalog {
 interface InflightCall {
   readonly operation: ExternalOperationSource | undefined;
   readonly questions: McpUnansweredQuestion[];
+  /** Pauses the call's deadline while a server question waits; returns the resume. */
+  readonly onServerQuestion?: (() => () => void) | undefined;
 }
 
 const DEFAULT_TIMEOUT_MS = 0;
@@ -197,8 +199,13 @@ export class McpClient {
     try {
       const owned = snapshotJudgmentInput(params);
       assertCurrent();
-      const outcome = await awaitPermission(() => resolver({ serverName, id, params: owned,
-        context: { scope: { connectionId, destination, signal, assertCurrent }, ...(owner ? { operation: owner } : {}) } }), signal);
+      // Time spent answering is not the server's time: the call's deadline stops meanwhile.
+      const resumeDeadline = call?.onServerQuestion?.();
+      let outcome: McpElicitationOutcome;
+      try {
+        outcome = await awaitPermission(() => resolver({ serverName, id, params: owned,
+          context: { scope: { connectionId, destination, signal, assertCurrent }, ...(owner ? { operation: owner } : {}) } }), signal);
+      } finally { resumeDeadline?.(); }
       held = outcome;
       assertCurrent();
       if (wasHandedBackToAgent(outcome)) call?.questions.push(describeQuestion(owned));
@@ -453,7 +460,7 @@ export class McpClient {
     const boundOperation: ExternalOperationSource | undefined = operation
       ? { ...operation, operationId: randomUUID(), signal, assertCurrent: () => { signal.throwIfAborted(); operation.assertCurrent(); } }
       : undefined;
-    const call: InflightCall = { operation: boundOperation, questions: [] };
+    const call: InflightCall = { operation: boundOperation, questions: [], onServerQuestion: options.onServerQuestion };
     let responses: Record<string, unknown> | null = null;
     this.#inflight.add(call);
     try {

@@ -64,6 +64,13 @@ export interface McpClientCallOptions {
   readonly beforeSend?: (() => void) | undefined;
   /** The autonomous operation the call belongs to; server questions during the call are resolved against it. */
   readonly operation?: ExternalOperationSource | undefined;
+  /**
+   * Called when a question the server asked during this call starts waiting on
+   * an answer; the function it returns is called once the question is settled.
+   * The registry stops the call's deadline in between, since that time is spent
+   * answering, not waiting on the server.
+   */
+  readonly onServerQuestion?: (() => () => void) | undefined;
 }
 
 export interface McpClientNotification {

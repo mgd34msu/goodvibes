@@ -532,7 +532,15 @@ export class McpRegistry {
     const host = this.permissionHost;
     const transport = client.captureToolScope();
     const configLife = new AbortController();
-    const signal = AbortSignal.any([this.policyLifetime(serverName).signal, transport.signal, configLife.signal,
+    // A permission or configuration change refuses a call that has not been sent.
+    // Once its request is written it no longer ends the wait: the tool may already
+    // be doing its work, and abandoning the answer would invite a duplicate call.
+    // Only the caller, the connection and the deadline end a sent call.
+    const staleBeforeSend = AbortSignal.any([this.policyLifetime(serverName).signal, configLife.signal]);
+    const unsent = new AbortController();
+    const forwardStale = () => unsent.abort(staleBeforeSend.reason);
+    if (staleBeforeSend.aborted) forwardStale(); else staleBeforeSend.addEventListener('abort', forwardStale, { once: true });
+    const signal = AbortSignal.any([unsent.signal, transport.signal,
       ...(host ? [host.signal] : []), ...(source?.signal ? [source.signal] : []), ...(options?.signal ? [options.signal] : [])]);
     const record = this.permissions.getServerPermissions(serverName);
     const serverPolicy = snapshotJudgmentInput(record ? {
@@ -543,7 +551,7 @@ export class McpRegistry {
     const execution = this.executionByClient.get(client);
     let assertWorkspaceCurrent: (() => void) | undefined;
     // The caller's and the source's own checks run at admission and again just before sending;
-    // everything else this call depends on ends the composed signal when it changes.
+    // everything else this call depends on ends the composed signal when it changes before sending.
     const assertCurrent = () => {
       signal.throwIfAborted(); options?.assertCurrent?.(); source?.assertCurrent();
     };
@@ -551,6 +559,7 @@ export class McpRegistry {
     let admission: Awaited<ReturnType<typeof admitExternalRequest>> | undefined;
     const unsubscribe = host?.config.onDidInvalidate(() => configLife.abort(new Error(`MCP call '${qualifiedName}': the configuration changed during the call, so nothing more was sent. Call the tool again.`)));
     let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
+    let callSettled = false;
     try {
       assertCurrent();
       if (host && !operation) throw new Error(`MCP call '${qualifiedName}' has unresolved permission: original operation source is unavailable`);
@@ -601,23 +610,60 @@ export class McpRegistry {
       const deadlineMs = options?.deadlineMs ?? this.serverConfigs.get(serverName)?.toolTimeoutMs ?? DEFAULT_TOOL_CALL_DEADLINE_MS;
       const deadline = new AbortController();
       const sentAt = performance.now();
-      if (deadlineMs > 0) {
+      // The deadline counts the server's time only: while a question the server
+      // asked during this call waits on an answer (a person may be reading it),
+      // the timer stops, and it starts again with what was left once answered.
+      let deadlineLeftMs = deadlineMs;
+      let deadlineArmedAt = 0;
+      let questionsWaiting = 0;
+      let questionStartedAt = 0;
+      let questionMs = 0;
+      const armDeadline = () => {
+        deadlineArmedAt = performance.now();
         deadlineTimer = setTimeout(() => deadline.abort(new Error(
           `MCP tool '${parsed.toolName}' on server '${serverName}' gave no answer within ${Math.round(deadlineMs / 1000)} s `
-          + `(waited ${Math.round(performance.now() - sentAt)} ms); the call was cancelled and the server was told.`)), deadlineMs);
+          + `(waited ${Math.round(performance.now() - sentAt - questionMs)} ms`
+          + `${questionMs > 0 ? `, not counting ${Math.round(questionMs)} ms spent answering its questions` : ''}); `
+          + 'the call was cancelled and the server was told.')), Math.max(0, deadlineLeftMs));
         deadlineTimer.unref?.();
-      }
+      };
+      if (deadlineMs > 0) armDeadline();
+      const onServerQuestion = (): (() => void) => {
+        if (questionsWaiting++ === 0) {
+          questionStartedAt = performance.now();
+          if (deadlineTimer !== undefined) {
+            clearTimeout(deadlineTimer); deadlineTimer = undefined;
+            deadlineLeftMs -= performance.now() - deadlineArmedAt;
+          }
+        }
+        let answered = false;
+        return () => {
+          if (answered) return;
+          answered = true;
+          if (--questionsWaiting > 0) return;
+          questionMs += performance.now() - questionStartedAt;
+          if (deadlineMs > 0 && !callSettled && !deadline.signal.aborted) armDeadline();
+        };
+      };
       const callSignal = AbortSignal.any([signal, deadline.signal]);
-      let claimed = false;
+      let sent = false;
       try {
         assertCurrent();
         const result = await client.callTool(parsed.toolName, args, {
           signal: callSignal,
           ...(operation ? { operation } : {}),
+          onServerQuestion,
           beforeSend: () => {
+            if (staleBeforeSend.aborted) {
+              const reason: unknown = staleBeforeSend.reason;
+              if (!sent) throw reason instanceof Error ? reason : new Error(String(reason));
+              // A later request of a call whose first request already went out.
+              throw new Error(`MCP call '${qualifiedName}': the server's permissions or the configuration changed after the call was sent, `
+                + 'so its next request was not sent. The tool may have done part of its work; check its state before calling it again.');
+            }
             callSignal.throwIfAborted(); options?.assertCurrent?.(); source?.assertCurrent();
             assertWorkspaceCurrent?.(); execution?.assertCurrent();
-            if (!claimed) { admission?.claim(); claimed = true; }
+            if (!sent) { admission?.claim(); sent = true; staleBeforeSend.removeEventListener('abort', forwardStale); }
           },
         });
         // The tool has already run: a policy, configuration or caller change after
@@ -659,7 +705,13 @@ export class McpRegistry {
         dispatcher.fire(failEvent).catch((hookErr: unknown) => { logger.warn('Fail:mcp:call hook error', { error: String(hookErr) }); });
         throw failure;
       }
-    } finally { clearTimeout(deadlineTimer); admission?.close(); unsubscribe?.(); configLife.abort(); }
+    } finally {
+      callSettled = true; clearTimeout(deadlineTimer);
+      staleBeforeSend.removeEventListener('abort', forwardStale);
+      // Ends anything still holding this call's signal, such as a question left unanswered.
+      unsent.abort(new Error(`MCP call '${qualifiedName}' has ended.`));
+      admission?.close(); unsubscribe?.(); configLife.abort();
+    }
   }
 
   /**

@@ -7,6 +7,7 @@ import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/conf
 
 export type GoodVibesCliCommand =
   | 'tui'
+  | 'open'
   | 'run'
   | 'serve'
   | 'web'

@@ -147,6 +147,12 @@ export const COMPLETION_COMMANDS: readonly CompletionCommand[] = [
     subcommands: [],
   },
   {
+    name: 'open',
+    aliases: ['open'],
+    description: 'Start the app on the view a goodvibes://open link names',
+    subcommands: [],
+  },
+  {
     name: 'run',
     aliases: ['run', 'exec', 'e'],
     description: 'Run non-interactively with text/json/stream-json output',

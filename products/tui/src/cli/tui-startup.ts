@@ -13,6 +13,7 @@ import { buildRecoveryOfferWiring, type RecoveryOfferWiringInput } from '../runt
 import type { ConversationManager } from '../core/conversation.ts';
 import type { SessionManager } from '@goodvibes-jev/engine/platform/platform/sessions';
 import type { GoodVibesCliParseResult } from '@goodvibes-jev/engine/terminal-shell';
+import { openDeepLink, parseDeepLink } from '../input/commands/deep-link.ts';
 
 export type TuiStartupShellPaths = Parameters<typeof readOnboardingCheckMarker>[0] & {
   readonly workingDirectory: string;
@@ -272,6 +273,11 @@ export function applyInitialTuiCliState(options: {
 
   if (cli.command === 'onboarding') {
     input.openOnboardingWizard({ mode: 'edit', reset: true });
+  } else if (cli.command === 'open') {
+    // The entry point refused a link that does not parse, so this one does.
+    const link = parseDeepLink(cli.commandArgs[0] ?? '');
+    if (link) commandContext.print(openDeepLink(commandContext, link.surface, link.target));
+    runFirstRunSteps();
   } else if (cli.command === 'sessions' && cli.commandArgs[0] === 'resume') {
     const target = cli.commandArgs.slice(1).join(' ').trim();
     if (target) {

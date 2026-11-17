@@ -247,6 +247,7 @@ const OWNS_OPTIONS: ReadonlySet<GoodVibesCliCommand> = new Set<GoodVibesCliComma
 /** Every command word this vocabulary accepts. */
 const COMMANDS: readonly CommandSpec<GoodVibesCliCommand, GoodVibesCliFlagField>[] = ([
   ['tui', ['app']],
+  ['open', []],
   ['run', ['exec', 'e']],
   ['serve', ['daemon', 'server']],
   ['web', []],

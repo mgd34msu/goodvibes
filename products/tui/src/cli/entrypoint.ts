@@ -50,6 +50,7 @@ import { ensureGoodvibesGitignore } from './ensure-goodvibes-gitignore.ts';
 import { runDaemonConfigMigration } from '../config/run-daemon-config-migration.ts';
 import { describeDaemonConfigMigration } from '@goodvibes-jev/engine/platform/platform/config';
 import { GOODVIBES_TUI_SURFACE_ROOT } from '../config/surface.ts';
+import { parseDeepLink } from '../input/commands/deep-link.ts';
 
 export type PreparedShellCliRuntime = {
   readonly cli: ReturnType<typeof parseGoodVibesCli>;
@@ -153,6 +154,11 @@ export async function prepareShellCliRuntime(
   });
   const endpointOverrideErrors = applyRuntimeCommandEndpointFlagOverrides(configManager, cli.command, cli.flags);
   requireValidCliOverrides(endpointOverrideErrors, console.error, process.exit);
+
+  if (cli.command === 'open' && (cli.commandArgs.length !== 1 || !parseDeepLink(cli.commandArgs[0]!))) {
+    console.error(`goodvibes open takes one link: goodvibes://open/<view>[?target=<id>[:<kind>]]${cli.commandArgs[0] ? ` ("${cli.commandArgs[0]}" is not one)` : ''}.`);
+    process.exit(2);
+  }
 
   if (cli.command === 'doctor' && ['explain', 'routing', 'hooks'].includes(cli.commandArgs[0] ?? '')) {
     const result = await handleDoctorSubcommand({

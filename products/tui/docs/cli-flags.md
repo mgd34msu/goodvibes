@@ -236,6 +236,10 @@ Unsupported capabilities are reported as such in `initialize`: `loadSession` is 
 
 To expose the operator surface to an MCP client instead, use `goodvibes-daemon mcp serve` (see the [daemon command reference](../../daemon/docs/commands-reference.md#mcp)).
 
+### `goodvibes open <link>`
+
+Starts the app and opens the view a `goodvibes://open/<view>[?target=<id>[:<kind>]]` link names, the same link `/deeplink open` and `/setup link` use. In a process view (agents, tasks, orchestration) the target selects that process; another view opens and says the target was not used. The transcript's first line says what was opened. A missing or unparsable link prints the expected form on stderr and exits `2`. Registering the `goodvibes://` scheme with the operating system, so a click in another program runs this command, is left to the installer.
+
 ## Argument terminator
 
 `--` stops flag parsing. All subsequent tokens are passed through as positional arguments or subcommand arguments.

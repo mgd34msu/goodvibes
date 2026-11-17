@@ -1,15 +1,19 @@
 // Proves: The same provider message id sent to two sessions is two messages, and a redelivery to one session is one, also after a restart.
 // Red when: The replay key leaves out the session (the second session's message is dropped) or a redelivery after a restart is recorded twice.
+// Proves: After a conversation's session is closed by the idle timer or the owner, every later message on that chat is refused and dropped.
+// Red when: handleSharedSessionIntent stops reopening a system-closed session or rolling over an owner-closed one.
 /**
  * A caller that addresses sessions by id numbers its messages per session, so
  * the same message id sent to two sessions is two messages: each session
  * records its own. A redelivery of one message to the same session is still
- * recorded once, also after the daemon restarts.
+ * recorded once, also after the daemon restarts. A chat whose session was
+ * closed keeps taking messages: one the idle sweep closed is reopened with its
+ * transcript, one the owner closed is followed by a new session.
  *
  * Real session broker over its store file and real route bindings; a restart
  * is a second broker over the same files.
  */
-import { afterEach, expect, test } from 'bun:test';
+import { afterEach, expect, setSystemTime, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -18,7 +22,10 @@ import { RouteBindingManager } from '../platform/src/platform/channels/route-man
 import { AutomationRouteStore } from '../platform/src/platform/automation/store/routes.ts';
 
 const cleanups: Array<() => void | Promise<void>> = [];
-afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
+afterEach(async () => {
+  for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
+  setSystemTime();
+});
 
 async function broker(root: string): Promise<SharedSessionBroker> {
   const opened = new SharedSessionBroker({
@@ -71,4 +78,43 @@ test('the same message id sent to two sessions is recorded in both, and a redeli
   expect(recorded(second, a.id, 'question for A')).toBe(1);
   expect(recorded(second, b.id, 'question for B')).toBe(1);
   expect(recorded(second, b.id, 'question for A')).toBe(0);
+});
+
+test('a chat whose session the idle sweep closed is reopened by its next message, and one the owner closed moves to a new session', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'gv-session-closed-route-'));
+  cleanups.push(() => rmSync(root, { recursive: true, force: true }));
+  const routeBindings = new RouteBindingManager({ store: new AutomationRouteStore(join(root, 'bindings.json')) });
+  const opened = new SharedSessionBroker({
+    storePath: join(root, 'sessions.json'), routeBindings,
+    agentStatusProvider: { getStatus: () => null }, messageSender: { send: () => false },
+  });
+  await opened.start();
+  cleanups.push(() => opened.stop());
+  const route = await routeBindings.upsertBinding({ kind: 'channel', surfaceKind: 'telegram', surfaceId: 'telegram', externalId: 'chat-1', channelId: 'chat-1' });
+  const fromChat = (n: number) => opened.submitMessage({
+    routeId: route.id, surfaceKind: 'telegram', surfaceId: 'telegram', externalId: 'chat-1', userId: 'owner-1', body: `message ${n}`, providerMessageId: `tg-${n}`,
+  });
+
+  const first = await fromChat(1);
+  const session = first.session.id;
+  // The agent answers the first message; the conversation then goes quiet.
+  await opened.bindAgent(session, 'agent-1', first.input!.id);
+  await opened.completeAgent(session, 'agent-1', 'answer 1');
+  // A day of silence, then the idle sweep runs (the clock is the stand-in).
+  setSystemTime(new Date(Date.now() + 26 * 60 * 60 * 1000));
+  (opened as unknown as { gcSweep(): void }).gcSweep();
+  expect(opened.getSession(session)?.status).toBe('closed');
+
+  const afterSweep = await fromChat(2);
+  expect(afterSweep.session.id).toBe(session);
+  expect(opened.getSession(session)?.status).toBe('active');
+  expect(opened.getMessages(session, 100).filter((message) => message.role === 'user').map((message) => message.body)).toEqual(['message 1', 'message 2']);
+
+  await opened.closeSession(session);
+  const afterOwnerClose = await fromChat(3);
+  expect(afterOwnerClose.session.id).not.toBe(session);
+  expect(afterOwnerClose.mode).not.toBe('rejected');
+  expect(opened.getSession(session)?.status).toBe('closed');
+  expect(routeBindings.getBinding(route.id)?.sessionId).toBe(afterOwnerClose.session.id);
+  expect(opened.getMessages(afterOwnerClose.session.id, 100).filter((message) => message.role === 'user').map((message) => message.body)).toEqual(['message 3']);
 });

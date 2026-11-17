@@ -54,21 +54,24 @@ function xmlUnescape(value: string): string {
   return value.replace(/&(amp|lt|gt|quot|apos);/g, (_, name: string) => XML_ENTITIES[name] ?? '');
 }
 
-function readDefinitionFile(path: string): string | 'absent' | 'other' | 'unreadable' {
+type DefinitionFile = { readonly contents: string } | { readonly state: Exclude<ManagedDefinitionOwner, 'product'> };
+
+function readDefinitionFile(path: string): DefinitionFile {
   try {
     const entry = lstatSync(path, { throwIfNoEntry: false });
-    if (entry === undefined) return 'absent';
-    if (!entry.isFile()) return 'other';
-    return readFileSync(path, 'utf-8');
+    if (entry === undefined) return { state: 'absent' };
+    if (!entry.isFile()) return { state: 'other' };
+    return { contents: readFileSync(path, 'utf-8') };
   } catch {
-    return 'unreadable';
+    return { state: 'unreadable' };
   }
 }
 
 /** One read of the definition file; the service manager is not asked. */
 export function readManagedDefinitionOwner(path: string, binaryPath: string): ManagedDefinitionOwner {
-  const contents = readDefinitionFile(path);
-  if (contents === 'absent' || contents === 'other' || contents === 'unreadable') return contents;
+  const file = readDefinitionFile(path);
+  if ('state' in file) return file.state;
+  const { contents } = file;
   if ([MANAGED_SERVICE_DESCRIPTION, DAEMON_ROUTE_SERVICE_DESCRIPTION, RELEASE_INSTALLER_MARKER].some((mark) => contents.includes(mark))) return 'product';
   const program = /<key>ProgramArguments<\/key>\s*<array>\s*<string>([^<]*)<\/string>/.exec(contents)?.[1];
   return program !== undefined && xmlUnescape(program) === binaryPath ? 'product' : 'other';
@@ -80,8 +83,9 @@ export function readManagedDefinitionOwner(path: string, binaryPath: string): Ma
  * reader cannot take literally (a `-`/`~` prefixed systemd value).
  */
 export function readDefinitionWorkingDirectory(path: string): string | undefined {
-  const contents = readDefinitionFile(path);
-  if (contents === 'absent' || contents === 'other' || contents === 'unreadable') return undefined;
+  const file = readDefinitionFile(path);
+  if ('state' in file) return undefined;
+  const { contents } = file;
   const systemd = /^WorkingDirectory=(.*)$/m.exec(contents)?.[1]?.replaceAll('%%', '%');
   const launchd = /<key>WorkingDirectory<\/key>\s*<string>([^<]*)<\/string>/.exec(contents)?.[1];
   const value = systemd ?? (launchd === undefined ? undefined : xmlUnescape(launchd));

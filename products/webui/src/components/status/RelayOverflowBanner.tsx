@@ -8,7 +8,7 @@
  * runs it by itself, once per burst (notices inside the coalescing window share one pass),
  * and shows a passive one-line note while it runs. Nothing is asked of the operator.
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { RefreshCw } from 'lucide-react';
 import { useRelayOverflow } from '../../hooks/useRelayOverflow';
@@ -23,17 +23,29 @@ export function RelayOverflowBanner() {
   const { totalDropped } = useRelayOverflow();
   const outstanding = totalDropped > 0;
   const [refreshing, setRefreshing] = useState(false);
+  // Component lifetime and passes in flight are tracked apart from the scheduling effect: the
+  // acknowledge below flips `outstanding`, which re-runs that effect while its refetch is still
+  // running, so the effect's own cleanup cannot say whether the note may be taken down.
+  const alive = useRef(true);
+  const passesInFlight = useRef(0);
+  useEffect(() => {
+    alive.current = true;
+    return () => { alive.current = false; };
+  }, []);
 
   useEffect(() => {
     if (!outstanding) return;
-    let mounted = true;
     const timer = setTimeout(() => {
       // Cleared before the refetch, so a drop during the refetch schedules its own pass.
       acknowledgeRelayOverflow();
+      passesInFlight.current += 1;
       setRefreshing(true);
-      void queryClient.invalidateQueries().finally(() => { if (mounted) setRefreshing(false); });
+      void queryClient.invalidateQueries().finally(() => {
+        passesInFlight.current -= 1;
+        if (alive.current && passesInFlight.current === 0) setRefreshing(false);
+      });
     }, RESYNC_COALESCE_MS);
-    return () => { mounted = false; clearTimeout(timer); };
+    return () => { clearTimeout(timer); };
   }, [outstanding, queryClient]);
 
   if (!outstanding && !refreshing) return null;

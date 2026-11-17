@@ -121,7 +121,8 @@ export type WorkItemState =
  * - pending -> in-phase: claimed; awaiting-capacity/blocked-budget reach in-phase the same way.
  * - in-phase -> awaiting-capacity | passed (routeItem), pending (bounded auto-retry, or restart
  *   reconciliation), failed. A failed post-gate commit does not change the state: the item
- *   passes with a warning, and engine.retryItemCommit records the changes later.
+ *   passes with a warning, and engine.retryItemCommit records the changes later; in worktree
+ *   mode its branch is not merged until that commit lands.
  * - -> blocked-dependency and back to pending: the per-tick dependency gate.
  * - failed -> pending: retryItem only. A failed item is never auto-retried again.
  * - passed -> held-merge: a best-of-N attempt parks after routeItem passed it; held-merge -> passed

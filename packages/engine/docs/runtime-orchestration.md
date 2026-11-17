@@ -246,8 +246,9 @@ reset, so its dependents wait on it again); `cancel` stops the contract. Native
 work, session-mode contracts and best-of-N units keep their own failure rules.
 `contracts.retryUnit` runs one unit of a running contract again: a working
 unit gets a fresh agent, a failed unit is retried as if the owner had replied
-`retry`, a passed unit whose commit failed has its changes committed again,
-and anything else is refused with the reason. A contract whose
+`retry`, a passed unit whose commit failed has its changes committed again
+(in worktree mode its branch is held out of the merge until that commit lands,
+then merged), and anything else is refused with the reason. A contract whose
 budget is used up waits rather than failing (its status line says so);
 `contracts.budget` sets a new ceiling and the waiting unit starts.
 `contracts.dispatch` starts the work in a hosted session made for it, so its

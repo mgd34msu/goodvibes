@@ -166,7 +166,8 @@ export interface OrchestrationEngine {
   /**
    * Run the scoped commit of a passed item's last failed commit again (the
    * changes stayed in the working tree). Null when the item has no failed
-   * commit to retry; a success clears the item's commit warning.
+   * commit to retry; a success clears the item's commit warning and, in
+   * worktree mode, merges the branch the lane held while the commit was missing.
    */
   retryItemCommit(itemId: string): Promise<PhaseCommitOutcome | null>;
   /** Add a dependency edge LIVE (a discovered missed dependency / manual serialization). Cycles are refused with a structured graph-cycle outcome. */
@@ -340,6 +341,7 @@ export function createOrchestrationEngine(deps: OrchestrationEngineDeps): Orches
     keptWorktreeCap: deps.keptWorktreeCap,
     runSetup: runWorktreeSetupHook,
     initializeWorktree: deps.initializeWorktree,
+    commitPending: (workstream, item) => commitPendingReason(workstream, item),
   });
 
   function getWorkstream(id: string): Workstream | null {
@@ -361,6 +363,7 @@ export function createOrchestrationEngine(deps: OrchestrationEngineDeps): Orches
     },
     diffItem: (item) => worktreeIsolation.diffItem(item),
     judge: deps.judgeAttempts,
+    commitPending: (workstream, item) => commitPendingReason(workstream, item),
   });
 
   function listWorkstreams(): Workstream[] {
@@ -620,13 +623,16 @@ export function createOrchestrationEngine(deps: OrchestrationEngineDeps): Orches
     if (outcome.result.gate.passed) {
       // The gate passed, so the work stands. A commit that still failed after
       // its lock retries leaves the changes in the working tree: a warning
-      // that names retryItemCommit, never a failure or a hold.
+      // that names retryItemCommit, never a failure. In worktree mode the
+      // integration lane does not merge the branch until that commit lands.
       const commit = phaseResult.commit;
+      const forwardTarget = nextPhaseAfter(workstream, phase.ordinal) ?? null;
       if (commit?.status === 'failed') {
-        warnItem(item, `${COMMIT_WARNING_PREFIX}${commit.reason ?? 'commit failed'}; the changes are still in the working tree, and retrying the commit records them`);
+        const merge = workstream.isolation === 'worktree' && forwardTarget === null
+          ? '; the branch is merged once the commit is retried and lands' : '';
+        warnItem(item, `${COMMIT_WARNING_PREFIX}${commit.reason ?? 'commit failed'}; the changes are still in the working tree${item.worktreePath === undefined ? '' : ` ${item.worktreePath}`}, and retrying the commit records them${merge}`);
       }
 
-      const forwardTarget = nextPhaseAfter(workstream, phase.ordinal) ?? null;
       routeItem(workstream, item, forwardTarget, phase.id);
       // Terminal pass in worktree mode: the branch enters the sequential
       // integration lane (fire-and-forget; the lane orders itself).
@@ -832,18 +838,32 @@ export function createOrchestrationEngine(deps: OrchestrationEngineDeps): Orches
     return true;
   }
 
+  /** Index in the workstream's results of the item's latest phase result when that phase's commit failed, else -1. */
+  function failedCommitIndex(workstream: Workstream, item: WorkItem): number {
+    const results = completedResults.get(workstream.id) ?? [];
+    for (let at = results.length - 1; at >= 0; at--) {
+      if (results[at]!.itemId === item.id) return results[at]!.commit?.status === 'failed' ? at : -1;
+    }
+    return -1;
+  }
+
+  /** Why the item's latest phase commit failed, or undefined when its work is committed. */
+  function commitPendingReason(workstream: Workstream, item: WorkItem): string | undefined {
+    const index = failedCommitIndex(workstream, item);
+    return index < 0 ? undefined : completedResults.get(workstream.id)?.[index]?.commit?.reason ?? 'commit failed';
+  }
+
   async function retryItemCommit(itemId: string): Promise<PhaseCommitOutcome | null> {
     const found = findItemAndWorkstream(itemId);
     if (!found) return null;
     const { workstream, item } = found;
     if (item.state !== 'passed' && item.state !== 'held-merge') return null;
-    // A merged branch already left its worktree; its missed commit is not on the branch to retry.
-    if (workstream.isolation === 'worktree' && (item.mergeState === 'merged' || item.worktreePath === undefined)) return null;
+    // A removed worktree took nothing uncommitted with it (removal refuses a
+    // dirty tree), so only a tree that still exists can hold the missed work,
+    // including a branch an earlier run merged as empty and then kept.
+    if (workstream.isolation === 'worktree' && (item.worktreePath === undefined || (item.mergeState === 'merged' && item.worktreeKept !== true))) return null;
     const results = completedResults.get(workstream.id) ?? [];
-    let index = -1;
-    for (let at = results.length - 1; at >= 0; at--) {
-      if (results[at]!.itemId === item.id) { index = results[at]!.commit?.status === 'failed' ? at : -1; break; }
-    }
+    const index = failedCommitIndex(workstream, item);
     if (index < 0) return null;
     const phase = workstream.phases.find((candidate) => candidate.id === results[index]!.phaseId);
     if (!phase) return null;
@@ -857,6 +877,13 @@ export function createOrchestrationEngine(deps: OrchestrationEngineDeps): Orches
       if (item.warnings.length === 0) item.warnings = undefined;
     }
     emit({ type: 'workstream-persisted', workstreamId: workstream.id });
+    // The integration lane held this branch while its commit was missing; with
+    // the work recorded it merges now. A best-of-N attempt merges when picked.
+    const integrable = item.attemptGroupId === undefined || item.attemptWinner === true;
+    if (commit.status !== 'failed' && workstream.isolation === 'worktree' && item.state === 'passed' && integrable
+      && item.mergeState !== 'pending' && item.mergeState !== 'conflict') {
+      await worktreeIsolation.enqueueIntegration(workstream, item);
+    }
     return commit;
   }
 

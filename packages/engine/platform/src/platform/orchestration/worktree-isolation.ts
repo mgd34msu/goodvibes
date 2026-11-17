@@ -80,6 +80,12 @@ export interface WorktreeIsolationManagerDeps {
   readonly initializeWorktree?: ((worktree: IsolatedWorktree) => Promise<void>) | undefined;
   /** Returns a sentence for the item's agent when the setup did not complete. */
   readonly runSetup?: ((worktreePath: string) => Promise<string | void> | string | void) | undefined;
+  /**
+   * Why the item's last phase commit failed, or undefined when its work is
+   * committed. Such a branch lacks that phase's work, so it is not merged until
+   * the commit is retried and lands.
+   */
+  readonly commitPending?: ((workstream: Workstream, item: WorkItem) => string | undefined) | undefined;
 }
 
 export interface ItemWorktreeHandle {
@@ -415,6 +421,14 @@ export function createWorktreeIsolationManager(deps: WorktreeIsolationManagerDep
   }
 
   async function integrateOne(workstream: Workstream, item: WorkItem): Promise<void> {
+    // A branch missing its last phase's commit would merge as empty and be
+    // reported merged while the work sits uncommitted in the tree. It waits
+    // for the commit retry, which hands it back to this lane once it lands.
+    const missingCommit = deps.commitPending?.(workstream, item);
+    if (missingCommit !== undefined) {
+      logger.info('worktree-isolation: integration waits for the item\'s commit to be retried', { itemId: item.id, reason: missingCommit });
+      return;
+    }
     let instance: IsolatedWorktree | undefined;
     item.mergeState = 'pending';
     try {

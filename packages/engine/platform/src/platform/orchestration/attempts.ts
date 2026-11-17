@@ -77,6 +77,8 @@ export interface AttemptsCoordinatorDeps {
   readonly diffItem: (item: WorkItem) => Promise<{ files: string[]; unifiedDiff: string; stat: string } | null>;
   /** Optional judge (the contract.best-of-n selector). Absent → fleet.attempts.judge honestly reports no judge is configured. */
   readonly judge?: AttemptJudge | undefined;
+  /** Why a candidate's last phase commit failed, or undefined when its work is committed; such a branch cannot be merged yet. */
+  readonly commitPending?: ((workstream: Workstream, item: WorkItem) => string | undefined) | undefined;
 }
 
 export interface AttemptsCoordinator {
@@ -373,6 +375,11 @@ export function createAttemptsCoordinator(deps: AttemptsCoordinatorDeps): Attemp
     const winner = siblings.find((s) => s.id === winnerItemId);
     if (!winner || winner.state !== 'held-merge') {
       throw new AttemptError(`winner must be a held (passed) candidate of group ${groupId}: ${winnerItemId}`);
+    }
+    const missingCommit = deps.commitPending?.(workstream, winner);
+    if (missingCommit !== undefined) {
+      // Its branch lacks the last phase's work; the integration lane would merge it without that work.
+      throw new AttemptMergeError(groupId, winner.id, 'not-merged', [], `attempt ${winner.id}'s last commit did not land (${missingCommit}); its changes are still in ${winner.worktreePath ?? 'its worktree'}. Retry its commit, then pick it again`);
     }
     const losers = siblings.filter((s) => s.id !== winnerItemId);
     // Winner returns to 'passed' and merges through the existing lane. Mark it the

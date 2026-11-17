@@ -28,9 +28,10 @@ import { Select } from '../../components/ui/Select';
 import { StatusDot, type StatusTone } from '../../components/ui/StatusDot';
 import { useWorkPlan, type WorkPlanEdit, type WorkPlanTask, type WorkPlanTaskStatus } from '../../hooks/useWorkPlan';
 
-const STATUS_ORDER: readonly WorkPlanTaskStatus[] = ['pending', 'in_progress', 'blocked', 'done', 'failed', 'cancelled'];
+const STATUS_ORDER = ['pending', 'in_progress', 'blocked', 'done', 'failed', 'cancelled'] as const;
+type KnownStatus = typeof STATUS_ORDER[number];
 
-const STATUS_LABEL: Record<WorkPlanTaskStatus, string> = {
+const STATUS_LABEL: Record<KnownStatus, string> = {
   pending: 'Pending',
   in_progress: 'In progress',
   blocked: 'Blocked',
@@ -39,7 +40,7 @@ const STATUS_LABEL: Record<WorkPlanTaskStatus, string> = {
   cancelled: 'Cancelled',
 };
 
-const STATUS_TONE: Record<WorkPlanTaskStatus, StatusTone> = {
+const STATUS_TONE: Record<KnownStatus, StatusTone> = {
   pending: 'idle',
   in_progress: 'live',
   blocked: 'warn',
@@ -48,9 +49,15 @@ const STATUS_TONE: Record<WorkPlanTaskStatus, StatusTone> = {
   cancelled: 'idle',
 };
 
-const STATUS_OPTIONS = STATUS_ORDER.map((status) => ({ value: status, label: STATUS_LABEL[status] }));
+const STATUS_OPTIONS: readonly { value: WorkPlanTaskStatus; label: string }[] = STATUS_ORDER.map((status) => ({ value: status, label: STATUS_LABEL[status] }));
 
-type Counts = Readonly<Record<WorkPlanTaskStatus | 'total', number>>;
+// A status this build does not know (a newer daemon) is shown as written.
+const LABELS: Readonly<Record<string, string | undefined>> = STATUS_LABEL;
+const TONES: Readonly<Record<string, StatusTone | undefined>> = STATUS_TONE;
+const statusLabel = (status: WorkPlanTaskStatus): string => LABELS[status] ?? status;
+const statusTone = (status: WorkPlanTaskStatus): StatusTone => TONES[status] ?? 'idle';
+
+type Counts = Readonly<Record<KnownStatus | 'total', number>>;
 
 /** "12 items: 3 pending, 1 in progress, 8 done", statuses with no items left out. */
 export function workPlanSummary(counts: Counts): string {
@@ -114,7 +121,7 @@ export function WorkPlanPanel({ lifetime }: { lifetime: ClientLifetime }) {
   const setStatus = (task: WorkPlanTask, status: WorkPlanTaskStatus) => {
     if (status === task.status) return;
     edit.mutate({
-      label: `“${task.title}” is ${STATUS_LABEL[status].toLowerCase()}`,
+      label: `“${task.title}” is ${statusLabel(status).toLowerCase()}`,
       run: () => platformClient.workPlan.tasks.status(task.taskId, { status, source: 'web' }),
     });
   };
@@ -224,15 +231,15 @@ export function WorkPlanPanel({ lifetime }: { lifetime: ClientLifetime }) {
           ) : (
             <Row
               key={task.taskId}
-              leading={<StatusDot tone={STATUS_TONE[task.status]} />}
+              leading={<StatusDot tone={statusTone(task.status)} />}
               title={task.title}
               meta={[
-                STATUS_LABEL[task.status],
+                statusLabel(task.status),
                 task.owner ? `@${task.owner}` : '',
                 task.notes ?? '',
                 `updated ${whenLabel(task.updatedAt)}`,
               ].filter(Boolean).join(' · ')}
-              aria-label={`${task.title}, ${STATUS_LABEL[task.status]}`}
+              aria-label={`${task.title}, ${statusLabel(task.status)}`}
               trailing={(
                 <span className="work-plan__actions">
                   <Select<WorkPlanTaskStatus>

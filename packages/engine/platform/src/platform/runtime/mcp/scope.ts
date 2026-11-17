@@ -29,6 +29,24 @@ function realPathOf(path: string, base?: string): string {
 
 /** An IPv4 address, `localhost` or a bracketed IPv6 address, or any dotted host with a port. */
 const ADDRESS = /^(?:(?:localhost|\d{1,3}(?:\.\d{1,3}){3}|\[[0-9a-f:.]+\])(?::\d{1,5})?|(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z][a-z0-9-]*:\d{1,5})$/i;
+/** A bare domain name (`evil.example`, `api.example.com.`), its last label letters only, two or more. */
+const DOMAIN = /^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+([a-z]{2,63})\.?$/i;
+/**
+ * File extensions that are not top-level domains, so a value such as
+ * `report.pdf` or `package.json` is a file name, not a destination. An
+ * extension that is also a domain (`.sh`, `.py`, `.md`, `.rs`, `.zip`, `.app`)
+ * is deliberately absent: such a value is checked as a host.
+ */
+const FILE_EXTENSIONS = new Set(['json', 'jsonl', 'txt', 'pdf', 'ts', 'tsx', 'mts', 'cts', 'js', 'jsx', 'mjs', 'cjs', 'yaml', 'yml',
+  'toml', 'csv', 'tsv', 'html', 'htm', 'css', 'scss', 'less', 'png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'ico', 'xml', 'log',
+  'lock', 'ini', 'cfg', 'conf', 'env', 'sql', 'db', 'sqlite', 'wasm', 'gz', 'tgz', 'tar', 'bz2', 'xz', 'exe', 'dll',
+  'bak', 'tmp', 'cpp', 'hpp', 'java', 'kt', 'swift', 'go', 'rb', 'php', 'lua', 'vue', 'svelte', 'mdx', 'docx', 'xlsx',
+  'pptx', 'doc', 'xls', 'ppt', 'mp3', 'mp4', 'wav', 'ogg', 'webm', 'pem', 'crt', 'cer', 'diff', 'patch']);
+/** A bare domain name that is not a file name by its extension. */
+const isDomainValue = (value: string): boolean => {
+  const match = DOMAIN.exec(value);
+  return match !== null && !FILE_EXTENSIONS.has(match[1]!.toLowerCase());
+};
 const SCHEME = /^[a-z][a-z0-9+.-]*:\/\//i;
 
 /** Keys whose value is a filesystem location, whatever it looks like (a bare name included). */
@@ -63,18 +81,33 @@ const schemaFormat = (schema: JsonSchemaNode | undefined): string =>
 const isPathFormat = (format: string): boolean => /(?:^|-)(?:path|file|dir|directory|folder)(?:$|-)/.test(format);
 
 /**
- * A value that names a location whatever argument holds it: absolute (`/x`,
- * `\\x`, `C:\x`), under the home directory (`~`), a `file:` URL, relative to the
- * working directory by its first segment (`.`, `..`, `./x`, `../x`), or climbing
- * with a `..` segment anywhere. A slash alone is not a path: `either/or`,
- * `text/plain` and `11/14/2026` are text.
+ * One token that names a location: absolute (`/x`, `\\x`, `//server/x`,
+ * `C:\x`), under the home directory (`~`), relative by its first segment (`.`,
+ * `..`, `./x`, `../x`), or holding a separator between names (`secrets/key.pem`).
+ * Separators alone (`//`, `/*`) are not a path.
+ */
+function isPathToken(token: string): boolean {
+  if (token === '~' || token.startsWith('~/') || token.startsWith('~\\')) return true;
+  if (token === '/' || token === '\\' || /^[\\/]{1,2}[\w.~$@+-]/.test(token) || /^[a-z]:[\\/]/i.test(token)) return true;
+  if (token === '.' || token === '..' || /^\.\.?[\\/]/.test(token)) return true;
+  return /[\w.~$@+-][\\/][\w.~$@+-]/.test(token);
+}
+
+/** A token that starts at a root, the home directory or `.`/`..`: a location even with spaces after it. */
+const isRootedToken = (token: string): boolean =>
+  isPathToken(token) && (/^(?:~|[\\/]|[a-z]:[\\/]|\.\.?(?:[\\/]|$))/i.test(token));
+
+/**
+ * A value that names a location whatever argument holds it. With no
+ * whitespace: any path token, a relative `dir/file` included. A one-line value
+ * with spaces (`/home/me/My Keys/id_rsa`, `~/x y/../z`) is a path when its first
+ * token starts at a root, the home directory or `.`/`..`, so prose that holds a
+ * slash ("TCP/IP tuning", "either/or") is not one. A multi-line value is text.
  */
 function isPathValue(value: string): boolean {
-  if (/\s/.test(value)) return false;
-  if (value === '~' || value.startsWith('~/') || value.startsWith('~\\')) return true;
-  if (value.startsWith('/') || value.startsWith('\\') || /^[a-z]:[\\/]/i.test(value)) return true;
-  if (value === '.' || value === '..' || /^\.\.?[\\/]/.test(value)) return true;
-  return /(?:^|[\\/])\.\.(?:[\\/]|$)/.test(value);
+  if (/[\r\n]/.test(value)) return false;
+  if (!/\s/.test(value)) return isPathToken(value);
+  return isRootedToken(value.split(/\s/, 1)[0]!);
 }
 
 /**
@@ -82,11 +115,12 @@ function isPathValue(value: string): boolean {
  * when the tool's own input schema declares its argument a path or URI
  * (`format: "uri"`, `"path"`, `"file-path"`, ...), when its argument is named
  * like one (`path`, `filename`, `target`, `sourcePath`, ...), or when the value
- * itself names a location (see {@link isPathValue}). Text that merely holds a
- * slash ("either/or", "text/plain", a date) is not a path. A value is a
- * destination when its argument is named like one, it has a URL scheme, or it
- * is an address (an IP, `localhost`, or a host with a port); a dotted file
- * name such as `report.pdf` is not a host.
+ * itself names a location (see {@link isPathValue}). Membership is decided on
+ * the value: the argument's name only labels it in the refusal. A value is a
+ * destination when its argument is named like one, it has a URL scheme, it is
+ * an address (an IP, `localhost`, or a host with a port), or it is a bare
+ * domain name, unless its argument is a declared path; a dotted file name such
+ * as `report.pdf` (an extension that is not a domain) is not a host.
  */
 export function readScopedValues(
   args: Record<string, unknown>,
@@ -111,7 +145,8 @@ export function readScopedValues(
     const declaredPath = isPathFormat(format) || (URI_FORMATS.has(format) && !url);
     const pathShaped = fileUrl || (!url && isPathValue(trimmed));
     if (scopes.paths && (((isPathKey(key) || declaredPath) && !url) || pathShaped)) paths.push({ argument: key, value: trimmed });
-    if (scopes.hosts && !fileUrl && !pathShaped && !declaredPath && (isHostKey(key) || url || ADDRESS.test(trimmed))) hosts.push({ argument: key, value: trimmed });
+    if (scopes.hosts && !fileUrl && !pathShaped && !declaredPath
+      && (isHostKey(key) || url || ADDRESS.test(trimmed) || (!isPathKey(key) && isDomainValue(trimmed)))) hosts.push({ argument: key, value: trimmed });
   };
   visit(args, '', schemaNode(inputSchema));
   return { paths, hosts };

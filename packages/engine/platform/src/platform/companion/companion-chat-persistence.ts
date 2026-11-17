@@ -172,11 +172,18 @@ export class CompanionChatPersistence {
     if (log.size <= transcript.messages.length * 2 + COMPACT_SLACK) return transcript;
     const remaining = new Map<string, number>();
     for (const record of log.scan()) remaining.set(recordKey(record), (remaining.get(recordKey(record)) ?? 0) + 1);
+    const placed = new Set<string>();
+    // Each message keeps its first line, which holds its place in the chat (a
+    // message is read where it first appears), and its last, which holds its
+    // state. Keeping only the last would move a message updated later, such as
+    // a question an edit superseded, after the replies that followed it.
     // The rewrite runs to completion before compact() returns its promise; a failure leaves the log as it was.
     void log.compact((record) => {
       const key = recordKey(record), left = (remaining.get(key) ?? 1) - 1;
       remaining.set(key, left);
-      return left === 0;
+      const first = !placed.has(key);
+      placed.add(key);
+      return first || left === 0;
     }).catch((err: unknown) => {
       logger.warn('CompanionChatPersistence: rewriting a long transcript failed; it stays as it was', { sessionId, error: summarizeError(err) });
     });

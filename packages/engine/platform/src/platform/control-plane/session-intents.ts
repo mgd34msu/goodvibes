@@ -55,6 +55,14 @@ export interface SharedSessionRoutingIntent {
   readonly reasoningEffort?: string | undefined;
 }
 
+/**
+ * The input metadata key naming the surface process that is running the agent a
+ * delivered input is bound to (`<host>:<pid>:<nonce>`), written only by a
+ * surface's `sessions.inputs.deliver` with an agent. A restarted surface reads it
+ * to fail the delivered inputs a process that is gone was answering.
+ */
+export const SURFACE_INSTANCE_METADATA_KEY = 'deliveringSurfaceInstance';
+
 export interface SharedSessionInputRecord {
   readonly id: string;
   readonly sessionId: string;

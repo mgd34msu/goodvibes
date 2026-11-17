@@ -101,6 +101,8 @@ export interface HttpTransportSessionsClient {
       readonly claim?: boolean | undefined;
       /** The agent this surface is running for the input, binds the channel reply. */
       readonly agentId?: string | undefined;
+      /** The surface process running that agent, so a restarted surface can fail what a process that is gone was answering. */
+      readonly surfaceInstance?: string | undefined;
       /** That agent's finished output, reported with `consumed:true`. */
       readonly answer?: string | undefined;
       readonly status?: 'completed' | 'failed' | 'cancelled' | undefined;

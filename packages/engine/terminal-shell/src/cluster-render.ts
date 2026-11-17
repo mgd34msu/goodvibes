@@ -154,12 +154,8 @@ export function renderNodes(result: NodesResult, now: number): string[] {
     lines.push(`${pad('MACHINE', width)}  ${pad('NODE ID', 38)}  LAST SEEN`);
     for (const member of result.members) {
       const suffix = member.isThisMachine ? '  (this machine)' : '';
-      // Not heard since start: lastSeenAt is when this daemon started listening, not a sighting of the machine.
-      const seen = member.heardSinceStart === false
-        ? `not heard since this daemon started (${describeAge(member.lastSeenAt, now)})`
-        : describeAge(member.lastSeenAt, now);
       lines.push(
-        `${pad(printableName(member.displayName), width)}  ${pad(member.nodeId, 38)}  ${seen}${suffix}`,
+        `${pad(printableName(member.displayName), width)}  ${pad(member.nodeId, 38)}  ${describeAge(member.lastSeenAt, now)}${suffix}`,
       );
     }
   }

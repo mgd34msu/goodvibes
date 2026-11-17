@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { logger } from '../utils/logger.js';
 import type { SubmitSharedSessionMessageInput } from './session-types.js';
 import type { SharedSessionInputIntent, SharedSessionInputRecord, SharedSessionInputState, SharedSessionSurfaceReplyBinding } from './session-intents.js';
-import { isDelegatedSessionInput, sharedSessionInputLifecycle } from './session-intents.js';
+import { isDelegatedSessionInput, sharedSessionInputLifecycle, SURFACE_INSTANCE_METADATA_KEY } from './session-intents.js';
 import type { SharedSessionRecord } from './session-types.js';
 import { BOOT_RECONCILE_CANCEL_REASON, countPendingSessionInputs, sortInputs } from './session-broker-state.js';
 import { bindSharedSessionAgent, hasFreshSurfaceParticipant, isSurfaceManagedSession, SURFACE_ROUTE_FRESHNESS_MS } from './session-broker-sessions.js';
@@ -328,7 +328,7 @@ export function applySurfaceInputDelivery(
   store: SharedSessionInputStore,
   sessionId: string,
   inputId: string,
-  options: { readonly consumed?: boolean | undefined; readonly agentId?: string | undefined; readonly claim?: boolean | undefined },
+  options: { readonly consumed?: boolean | undefined; readonly agentId?: string | undefined; readonly claim?: boolean | undefined; readonly surfaceInstance?: string | undefined },
   hooks: {
     readonly publish: (event: string, payload: unknown) => void;
     readonly publishInput: (event: string, input: SharedSessionInputRecord, extra: Record<string, unknown>) => void;
@@ -356,9 +356,16 @@ export function applySurfaceInputDelivery(
       store.sessions.set(sessionId, rebound);
       hooks.publish('session-agent-bound', rebound);
     }
-    record = updateSharedSessionInput(store, sessionId, inputId, (entry) => ({
-      ...entry, activeAgentId: agentId, updatedAt: Date.now(),
-    })) ?? updated;
+    // The surface process running the agent is named on the row (or, when the report names none,
+    // any earlier name is cleared), so a restarted surface can tell a run that is gone.
+    const surfaceInstance = options.surfaceInstance?.trim().slice(0, 200);
+    record = updateSharedSessionInput(store, sessionId, inputId, (entry) => {
+      const { [SURFACE_INSTANCE_METADATA_KEY]: _previous, ...metadata } = entry.metadata;
+      return {
+        ...entry, activeAgentId: agentId, updatedAt: Date.now(),
+        metadata: surfaceInstance ? { ...metadata, [SURFACE_INSTANCE_METADATA_KEY]: surfaceInstance } : metadata,
+      };
+    }) ?? updated;
     hooks.announce({
       sessionId,
       agentId,

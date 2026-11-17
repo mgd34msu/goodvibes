@@ -47,7 +47,7 @@
  * happens inside this module rather than at the call site.
  */
 import { createDaemonHttpTransport, type HostServiceStatus, type DaemonHttpTransportOptions } from '@/runtime/index.ts';
-import { createSpineAdoptionSync as createPlatformSpineAdoptionSync } from '@goodvibes-jev/engine/platform/platform/runtime/client';
+import { createSessionInputChangeSubscriber, createSpineAdoptionSync as createPlatformSpineAdoptionSync } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 import type { SpineAdoptionOptions as PlatformSpineAdoptionOptions } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 
 import { createSessionsClientSpineTransport, type SpineSessionsClient } from '@goodvibes-jev/engine/platform/platform/runtime/session-spine';
@@ -92,6 +92,9 @@ export function createSpineAdoptionSync(
             httpTransport.operator.sessions.deliverInput(sessionId, inputId, { claim: true }),
           deliverInput: (sessionId, inputId, opts) =>
             httpTransport.operator.sessions.deliverInput(sessionId, inputId, opts),
+          // Input moves are pushed from the daemon's session-update stream, so a hosted
+          // session is read when one of its inputs moved, not every two seconds.
+          subscribeInputChanges: createSessionInputChangeSubscriber({ baseUrl, getAuthToken: () => authToken }),
         },
         sessionList: { list: (limit: number) => httpTransport.operator.sessions.list(limit) },
         memoryTransport: createTuiMemorySpineTransport({ baseUrl, authToken }),

@@ -563,7 +563,7 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
   // re-activates for free when a daemon comes back after a loss; the detach side
   // deactivates so the poller stops dialing a dead wire while keeping the bound
   // runner for the next attach.
-  const sessionInputsClient = createAgentSessionInputsClient(services.daemonVerbs);
+  const sessionInputsClient = createAgentSessionInputsClient(services.daemonVerbs, () => services.resolveConnectedHost());
   const reconcileMemorySpine = (): Promise<void> =>
     reconcileMemorySpineAdoption({
       memorySpineClient: services.memorySpineClient,

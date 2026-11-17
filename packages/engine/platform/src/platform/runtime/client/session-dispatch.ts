@@ -60,12 +60,24 @@
  * a minute covers anything the stream missed (a suspended laptop, a dropped
  * tunnel). A client without it is read every two seconds.
  *
+ * A stream that cannot be opened, or ends, puts the dispatcher back on the
+ * two-second read until the stream is asked for again a minute later.
+ *
  * A runner that keeps failing on one input is not retried forever: after
  * MAX_RUNNER_FAILURES attempts the input is reported failed with the reason,
  * so the row and the sender's surface say so instead of waiting in silence.
+ *
+ * Every input delivered with an agent names the surface process running it
+ * (`<host>:<pid>:<nonce>`). A delivered input whose process is gone from this
+ * machine (the surface was closed or restarted mid-run), or that no live
+ * surface acknowledged within the answer window, is ended as failed with the
+ * reason, so the sender is told instead of waiting for an answer no one owes.
  */
+import { randomUUID } from 'node:crypto';
+import { hostname } from 'node:os';
 import { logger, summarizeError } from '../../utils/index.js';
 import type { SharedSessionInputRecord } from '../../control-plane/index.js';
+import { SURFACE_INSTANCE_METADATA_KEY } from '../../control-plane/session-intents.js';
 import type { SharedSessionContinuationRunner } from '../../control-plane/session-intents.js';
 import type { SessionContinuationDispatch } from '../client-services.js';
 import { renderAgentCompletionAnswer, type AgentCompletionRecordView } from '../../agents/completion-answer.js';
@@ -114,19 +126,31 @@ export interface SessionInputsWireClient {
   claimInput?(sessionId: string, inputId: string): Promise<unknown>;
   /**
    * Be told when a session's inputs change (from the session-update stream).
-   * Returns the unsubscribe. Optional: without it inputs are read on a short interval.
+   * Returns the unsubscribe. Optional: without it inputs are read on a short
+   * interval, and the dispatcher goes back to that interval when `onEnd` says
+   * the stream could not be opened or has ended.
    */
-  subscribeInputChanges?(onChange: (sessionId: string) => void): () => void;
+  subscribeInputChanges?(onChange: (sessionId: string) => void, handlers?: SessionInputChangeHandlers): () => void;
   deliverInput(
     sessionId: string,
     inputId: string,
     options?: {
       readonly consumed?: boolean | undefined;
       readonly agentId?: string | undefined;
+      /** The surface process running that agent, kept on the input so a restarted surface can tell the run is gone. */
+      readonly surfaceInstance?: string | undefined;
       readonly answer?: string | undefined;
       readonly status?: 'completed' | 'failed' | 'cancelled' | undefined;
     },
   ): Promise<unknown>;
+}
+
+/** What an input-change subscription reports about itself. */
+export interface SessionInputChangeHandlers {
+  /** The stream is open: what changed before it opened is read once now. */
+  readonly onOpen?: (() => void) | undefined;
+  /** The stream could not be opened, or ended: inputs are read on the short interval again. */
+  readonly onEnd?: (() => void) | undefined;
 }
 
 /** Whether a failed `claimInput` was the daemon saying another surface holds the input, not a failure to reach it. */
@@ -206,6 +230,21 @@ export interface WireSessionDispatchOptions {
   readonly intervalMs?: number;
   readonly log?: Pick<typeof logger, 'debug' | 'info' | 'warn'>;
   readonly now?: (() => number) | undefined;
+  /** This process's name on the inputs it delivers with an agent; default `<host>:<pid>:<nonce>`. */
+  readonly surfaceInstance?: string | undefined;
+  /** Whether a process on this machine is running; default a signal-0 probe. */
+  readonly processAlive?: ((pid: number) => boolean) | undefined;
+}
+
+/** Whether a process on this machine is running (a probe that sends no signal). */
+function processIsRunning(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    // EPERM: it runs under another user; only "no such process" means it is gone.
+    return (error as { code?: unknown }).code !== 'ESRCH';
+  }
 }
 
 export interface WireSessionDispatch extends SessionContinuationDispatch {
@@ -232,6 +271,11 @@ export interface WireSessionDispatch extends SessionContinuationDispatch {
 export function createWireSessionDispatch(options: WireSessionDispatchOptions): WireSessionDispatch {
   const log = options.log ?? logger;
   const now = options.now ?? Date.now;
+  const thisHost = hostname();
+  const surfaceInstance = options.surfaceInstance ?? `${thisHost}:${process.pid}:${randomUUID().slice(0, 8)}`;
+  const processAlive = options.processAlive ?? processIsRunning;
+  /** When the input-change stream was last asked for; a stream that ended is asked for again after one reconcile interval. */
+  let listenedAt = 0;
   let runner: ContinuationRunner = null;
   let client: SessionInputsWireClient | null = null;
   let timer: ReturnType<typeof setInterval> | null = null;
@@ -292,7 +336,7 @@ export function createWireSessionDispatch(options: WireSessionDispatchOptions): 
       claims.delete(key);
       return;
     }
-    await active.deliverInput(sessionId, inputId, { agentId });
+    await active.deliverInput(sessionId, inputId, { agentId, surfaceInstance });
     claims.delete(key);
   };
 
@@ -306,6 +350,44 @@ export function createWireSessionDispatch(options: WireSessionDispatchOptions): 
         agentId: oldest.value,
         limit: MAX_AWAITED_ANSWERS,
       });
+    }
+  };
+
+  /**
+   * Whether the run a delivered input is bound to can no longer answer it: the
+   * surface process named on it is gone from this machine, or (on another
+   * machine, or named by no process) it is older than the window after which a
+   * live surface gives up on a run and acknowledges it itself.
+   */
+  const abandonedRun = (input: SharedSessionInputRecord): boolean => {
+    if (!input.activeAgentId || awaitingAnswers.has(input.activeAgentId)) return false;
+    const named = input.metadata?.[SURFACE_INSTANCE_METADATA_KEY];
+    if (named === surfaceInstance) return false;
+    if (typeof named === 'string') {
+      const last = named.lastIndexOf(':');
+      const pidAt = named.lastIndexOf(':', last - 1);
+      const host = pidAt > 0 ? named.slice(0, pidAt) : '';
+      const pid = Number(named.slice(pidAt + 1, last));
+      if (host === thisHost && Number.isInteger(pid) && pid > 0 && pid !== process.pid) return !processAlive(pid);
+      if (host === thisHost && pid === process.pid) return false;
+    }
+    return now() - input.updatedAt >= AWAITED_ANSWER_MAX_AGE_MS + RECONCILE_INTERVAL_MS;
+  };
+
+  /** Ends, with the reason, the delivered inputs whose run is gone, so the sender is told instead of waiting. */
+  const failAbandoned = async (active: SessionInputsWireClient, sessionId: string, delivered: readonly SharedSessionInputRecord[]): Promise<void> => {
+    for (const input of delivered) {
+      if (input.intent !== 'submit' || !abandonedRun(input)) continue;
+      try {
+        await active.deliverInput(sessionId, input.id, {
+          consumed: true,
+          status: 'failed',
+          answer: 'The surface that was answering this message stopped before it finished (it was closed or restarted), so no answer is coming. Send the message again to retry.',
+        });
+        log.info('[session dispatch] ended a delivered input whose run is gone', { sessionId, inputId: input.id, agentId: input.activeAgentId });
+      } catch (error) {
+        log.debug('[session dispatch] ending an abandoned input failed; retrying next read', { sessionId, inputId: input.id, error: summarizeError(error) });
+      }
     }
   };
 
@@ -323,6 +405,7 @@ export function createWireSessionDispatch(options: WireSessionDispatchOptions): 
       // another process's are taken over only once its lease has run out.
       try {
         const { inputs: delivered } = await active.listInputs(sessionId, { state: 'delivered', limit: 500 });
+        await failAbandoned(active, sessionId, delivered);
         inputs = [...queued, ...delivered.filter((input) => {
           if (input.activeAgentId) return false;
           const key = claimKey(sessionId, input.id);
@@ -509,6 +592,8 @@ export function createWireSessionDispatch(options: WireSessionDispatchOptions): 
     if (inFlight) { rerun = true; return; }
     inFlight = true;
     rerun = false;
+    // A change stream that ended is asked for again once per reconcile interval.
+    if (unsubscribe === null && active.subscribeInputChanges && now() - listenedAt >= RECONCILE_INTERVAL_MS) { listen(active); ensureTimer(); }
     try {
       // One session's failure (an unknown or unreadable session on the daemon)
       // must not starve the others, nor the answers already waiting.
@@ -541,10 +626,22 @@ export function createWireSessionDispatch(options: WireSessionDispatchOptions): 
     unsubscribe?.();
     unsubscribe = null;
     if (!next.subscribeInputChanges) return;
-    unsubscribe = next.subscribeInputChanges((sessionId) => {
+    listenedAt = now();
+    let current: (() => void) | null = null;
+    current = next.subscribeInputChanges((sessionId) => {
       if (client !== next || !options.hostedSessionIds().includes(sessionId)) return;
       void tick();
+    }, {
+      // What queued between the last read and the stream opening is read once now.
+      onOpen: () => { if (client === next && unsubscribe === current) void tick(); },
+      // No stream: back to the short interval until it is asked for again.
+      onEnd: () => {
+        if (unsubscribe !== current || current === null) return;
+        unsubscribe = null;
+        if (runner !== null && client !== null) ensureTimer();
+      },
     });
+    unsubscribe = current;
   };
 
   return {

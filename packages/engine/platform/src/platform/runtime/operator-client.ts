@@ -73,6 +73,8 @@ export interface SurfaceInputDeliveryOptions {
   /** Take the input before working on it; refused when another surface already holds it. */
   readonly claim?: boolean | undefined;
   readonly agentId?: string | undefined;
+  /** The surface process running that agent (`<host>:<pid>:<nonce>`), so a restarted surface can fail what a process that is gone was answering. */
+  readonly surfaceInstance?: string | undefined;
   readonly answer?: string | undefined;
   readonly status?: 'completed' | 'failed' | 'cancelled' | undefined;
 }

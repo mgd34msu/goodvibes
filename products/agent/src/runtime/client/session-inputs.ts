@@ -11,6 +11,7 @@
  * every verb. Nothing here is policy: the poller decides what to do with an
  * input, the daemon decides what an input IS, and this shapes two calls.
  */
+import { createSessionInputChangeSubscriber } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 import type { DaemonVerbCaller, SessionInputsWireClient } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 import type { SharedSessionInputRecord } from '@goodvibes-jev/engine/platform/platform/control-plane';
 
@@ -21,15 +22,33 @@ function readInputs(payload: unknown): readonly SharedSessionInputRecord[] {
   return Array.isArray(inputs) ? inputs as readonly SharedSessionInputRecord[] : [];
 }
 
+/** The connected host's address and token, the same the verb caller dials, or why there is none. */
+export type SessionInputsConnection = () => { readonly baseUrl: string; readonly token: string } | { readonly reason: string };
+
 /**
  * Build the inbound-inputs wire client.
  *
  * Neither method swallows a failure: the dispatch poller that owns this treats
  * a rejected list as "retry next tick" and a rejected deliver as "leave it
  * queued", and it can only do that if the failure actually reaches it.
+ *
+ * With `connection`, input changes are pushed from the host's session-update
+ * stream, so a hosted session is read when one of its inputs moved rather than
+ * every two seconds; without one (or when the stream ends) the poller keeps its
+ * short interval.
  */
-export function createAgentSessionInputsClient(verbs: DaemonVerbCaller): SessionInputsWireClient {
+export function createAgentSessionInputsClient(verbs: DaemonVerbCaller, connection?: SessionInputsConnection): SessionInputsWireClient {
   return {
+    subscribeInputChanges(onChange, handlers) {
+      const resolved = connection?.();
+      if (!resolved || 'reason' in resolved) {
+        queueMicrotask(() => handlers?.onEnd?.());
+        return () => {};
+      }
+      const token = resolved.token;
+      return createSessionInputChangeSubscriber({ baseUrl: resolved.baseUrl, getAuthToken: () => token })(onChange, handlers);
+    },
+
     async listInputs(sessionId, options) {
       const payload = await verbs.invoke<unknown>('sessions.inputs.list', {
         sessionId,
@@ -56,6 +75,8 @@ export function createAgentSessionInputsClient(verbs: DaemonVerbCaller): Session
         // daemon has no reply binding for a channel message it dispatched to
         // this process, and no answer to deliver back to that conversation.
         ...(options?.agentId === undefined ? {} : { agentId: options.agentId }),
+        // The process running that agent, so a restarted Agent can end what a process that is gone was answering.
+        ...(options?.surfaceInstance === undefined ? {} : { surfaceInstance: options.surfaceInstance }),
         ...(options?.answer === undefined ? {} : { answer: options.answer }),
         ...(options?.status === undefined ? {} : { status: options.status }),
       });

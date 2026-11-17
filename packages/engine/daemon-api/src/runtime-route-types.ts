@@ -231,7 +231,7 @@ export interface DaemonRuntimeRouteContext {
     getMessages(sessionId: string, limit: number, offset?: number): unknown[];
     getInputs(sessionId: string, limit: number): unknown[];
     getInputsSince(sessionId: string, options: { state?: SessionInputState | undefined; since?: number | undefined; limit?: number | undefined }): unknown[];
-    markInputDelivered(sessionId: string, inputId: string, options: { consumed?: boolean | undefined; agentId?: string | undefined; claim?: boolean | undefined; beforeApply?: (() => void) | undefined }): Promise<unknown | null>;
+    markInputDelivered(sessionId: string, inputId: string, options: { consumed?: boolean | undefined; agentId?: string | undefined; claim?: boolean | undefined; surfaceInstance?: string | undefined; beforeApply?: (() => void) | undefined }): Promise<unknown | null>;
     closeSession(sessionId: string): Promise<{ id: string } | null>;
     reopenSession(sessionId: string): Promise<{ id: string } | null>;
     detachParticipant(sessionId: string, surfaceId: string): Promise<{ id: string; status: string } | null>;

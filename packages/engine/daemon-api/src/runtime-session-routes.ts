@@ -517,6 +517,8 @@ async function handleDeliverSharedSessionInput(
   if (body instanceof Response) return body;
   const consumed = body?.consumed === true;
   const agentId = typeof body?.agentId === 'string' && body.agentId.trim() ? body.agentId.trim() : undefined;
+  // The surface process running that agent; kept on the input only beside an agent.
+  const surfaceInstance = agentId && typeof body?.surfaceInstance === 'string' && body.surfaceInstance.trim() ? body.surfaceInstance.trim() : undefined;
   const answer = typeof body?.answer === 'string' ? body.answer : undefined;
   const claim = body?.claim === true && !consumed;
   // A surface that could not start the message reports it failed, with why,
@@ -539,6 +541,7 @@ async function handleDeliverSharedSessionInput(
     input = await context.sessionBroker.markInputDelivered(sessionId, inputId, {
       consumed,
       ...(agentId ? { agentId } : {}),
+      ...(surfaceInstance ? { surfaceInstance } : {}),
       ...(claim ? { claim } : {}),
     });
   } catch (error) {

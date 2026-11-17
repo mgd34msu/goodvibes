@@ -217,6 +217,7 @@ function createOperatorClient(
           // ends) what it produced. Both are what let a message that arrived
           // over a channel and was dispatched HERE get its answer back there.
           ...(options?.agentId ? { agentId: options.agentId } : {}),
+          ...(options?.surfaceInstance ? { surfaceInstance: options.surfaceInstance } : {}),
           ...(options?.answer !== undefined ? { answer: options.answer } : {}),
           ...(options?.status ? { status: options.status } : {}),
         }));

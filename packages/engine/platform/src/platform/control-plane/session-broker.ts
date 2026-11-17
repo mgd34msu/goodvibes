@@ -1317,7 +1317,7 @@ export class SharedSessionBroker {
   async markInputDelivered(
     sessionId: string,
     inputId: string,
-    options: { readonly consumed?: boolean | undefined; readonly agentId?: string | undefined; readonly claim?: boolean | undefined; readonly beforeApply?: (() => void) | undefined } = {},
+    options: { readonly consumed?: boolean | undefined; readonly agentId?: string | undefined; readonly claim?: boolean | undefined; readonly surfaceInstance?: string | undefined; readonly beforeApply?: (() => void) | undefined } = {},
   ): Promise<SharedSessionInputRecord | null> {
     await this.start();
     // The async startup boundary must not turn a stale source into a claim.

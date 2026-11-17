@@ -18,6 +18,7 @@ import {
   modelNameFromCurrent,
   clampLatency,
   deriveAuthState,
+  daemonCompatibilityFromStatus,
 } from '../lib/daemon-health';
 import { getActiveRoute, probeConnection, setActiveRoute, subscribeActiveRoute } from '../lib/relay-connection';
 import { reviveEventStreams, useEventStreamState, type EventStreamStatus } from '../lib/event-stream';
@@ -242,6 +243,19 @@ export function useDaemonHealth(): DaemonHealth {
     ? workingFromGrant(auth.data)
     : authStatus === 401 ? 'blocked' : 'unknown';
 
+  // -- Daemon build against this UI's floor -----------------------------------
+  // One /status read per connection, shared with Settings' status view through its
+  // query key, so a daemon too old for this UI is named ("update the daemon") instead
+  // of its verbs failing one at a time.
+  const daemonStatus = useQuery({
+    queryKey: queryKeys.status,
+    queryFn: () => platformClient.operator.control.status(),
+    enabled: connectionState === 'connected' && signedIn === 'signed-in',
+    staleTime: 5 * 60_000,
+    retry: false,
+  });
+  const daemonCompatibility = daemonStatus.isSuccess ? daemonCompatibilityFromStatus(daemonStatus.data) : null;
+
   // -- Current model --------------------------------------------------------
   // MODEL_CHANGED rides the `providers` domain, which revalidates this key.
   const modelQuery = useQuery({
@@ -274,5 +288,6 @@ export function useDaemonHealth(): DaemonHealth {
     queuedTasks,
     modelName,
     compatibility,
+    daemonCompatibility,
   };
 }

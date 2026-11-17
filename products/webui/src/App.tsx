@@ -635,6 +635,13 @@ export default function App() {
       )}
       banners={(
         <>
+          {health.daemonCompatibility?.notice && (
+            <div className="banner warning" role="status">
+              <TriangleAlert size={16} aria-hidden="true" />
+              {' '}
+              {health.daemonCompatibility.notice}
+            </div>
+          )}
           {realtimeError && (
             <div className="banner warning">
               <Plug size={16} />

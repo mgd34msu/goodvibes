@@ -1,9 +1,12 @@
 /**
  * The contracts domain reducer: folds `contracts` events into contract records
  * (docs/design/contract-runner.md section 8.2). Events may arrive for a
- * contract, group or unit the domain has not seen yet (a surface that attached
- * mid-run, or a status change reported before the creation event), so every
- * handler creates what it needs rather than dropping the event.
+ * group or unit the domain has not seen yet (a fix unit added after planning),
+ * so those handlers create what they need. A contract itself is created only by
+ * an event that describes one (creation, a status change or a plan, which is
+ * how a surface that attached mid-run learns of it); any other event for an
+ * unknown contract is dropped rather than inventing a queued contract that
+ * never ends.
  */
 import type { ContractEvent, ContractStatus, CriterionVerdict } from '../../../../../events/contract.js';
 import type {
@@ -41,6 +44,19 @@ function evictEnded(contracts: Map<string, ContractRecord>): string[] {
 function movesStatus(event: ContractEvent): boolean {
   return event.type === 'CONTRACT_STATUS_CHANGED' || event.type === 'CONTRACT_PASSED'
     || event.type === 'CONTRACT_FAILED' || event.type === 'CONTRACT_CANCELLED';
+}
+
+/** The terminal status a terminal event records, or undefined for any other event. */
+function terminalStatusOf(event: ContractEvent): ContractStatus | undefined {
+  if (event.type === 'CONTRACT_PASSED') return 'passed';
+  if (event.type === 'CONTRACT_FAILED') return 'failed';
+  if (event.type === 'CONTRACT_CANCELLED') return 'cancelled';
+  return undefined;
+}
+
+/** Events that describe a contract well enough to start a record for one the domain has not seen. */
+function describesContract(event: ContractEvent): boolean {
+  return event.type === 'CONTRACT_CREATED' || event.type === 'CONTRACT_STATUS_CHANGED' || event.type === 'CONTRACT_PLANNED';
 }
 
 function emptyContract(contractId: string, timestamp: number): ContractRecord {
@@ -86,9 +102,16 @@ function withUnit(
   patch: (unit: ContractUnitRecord) => ContractUnitRecord,
 ): ContractRecord {
   const units = new Map(contract.units);
-  const existing = units.get(unitId) ?? emptyUnit(unitId, groupId ?? '');
+  const known = units.get(unitId);
+  const existing = known ?? emptyUnit(unitId, groupId ?? '');
   units.set(unitId, patch(groupId !== undefined ? { ...existing, groupId } : existing));
-  return { ...contract, units };
+  // A unit first seen here (a fix unit added after planning) joins its group's list too.
+  if (known !== undefined || groupId === undefined || groupId === '') return { ...contract, units };
+  const group = contract.groups.get(groupId) ?? emptyGroup(groupId);
+  if (group.unitIds.includes(unitId)) return { ...contract, units };
+  const groups = new Map(contract.groups);
+  groups.set(groupId, { ...group, unitIds: [...group.unitIds, unitId] });
+  return { ...contract, units, groups };
 }
 
 function verdictsOf(criteria: readonly { readonly criterionId: string; readonly verdict: CriterionVerdict }[]): Record<string, CriterionVerdict> {
@@ -243,10 +266,13 @@ export function updateContractsState(domain: ContractDomainState, event: Contrac
   }
   const timestamp = now();
   const known = domain.contracts.get(event.contractId);
-  // An ended contract keeps its first outcome (a cancel racing a pass must not count both), and a
-  // late event for one that was evicted must not bring it back as a contract that never ends.
-  if (known && TERMINAL_STATUSES.has(known.status) && movesStatus(event)) return domain;
-  if (!known && domain.evictedContractIds?.includes(event.contractId)) return domain;
+  // An ended contract keeps its first outcome (a cancel racing a pass must not count both). The
+  // runner ends a contract with a status change followed by the terminal event that carries the
+  // reason, so that terminal event still lands when it names the status already reached.
+  if (known && TERMINAL_STATUSES.has(known.status) && movesStatus(event) && terminalStatusOf(event) !== known.status) return domain;
+  // A late event for an evicted contract, or one that does not describe a contract, must not
+  // bring back a contract that never ends.
+  if (!known && (domain.evictedContractIds?.includes(event.contractId) || !describesContract(event))) return domain;
   const existing = known ?? emptyContract(event.contractId, timestamp);
   const next = applyToContract(existing, event, timestamp);
   if (next === null) return domain;

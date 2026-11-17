@@ -26,7 +26,7 @@ export {
 } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
 
 export type { InstallKind } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
-export { detectInstallKind } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+export { detectInstallKind } from '@goodvibes-jev/engine/platform/platform/runtime/install-kind';
 
 import type { InstallKind } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 

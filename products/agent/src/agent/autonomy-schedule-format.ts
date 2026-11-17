@@ -1,10 +1,5 @@
-import {
-  AUTONOMY_SCHEDULE_METHOD,
-  type AutonomyScheduleFailure,
-  type AutonomySchedulePreview,
-  type AutonomyScheduleSuccess,
-} from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { scheduleConfirmationRouteLines, scheduleNextRouteLines, scheduleRouteArg } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { AUTONOMY_SCHEDULE_METHOD, type AutonomyScheduleFailure, type AutonomySchedulePreview, type AutonomyScheduleSuccess } from '@goodvibes-jev/engine/terminal-shell/agent-turn/autonomy-schedule';
+import { scheduleConfirmationRouteLines, scheduleNextRouteLines, scheduleRouteArg } from '@goodvibes-jev/engine/terminal-shell/agent-turn/schedule-next-routes';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);

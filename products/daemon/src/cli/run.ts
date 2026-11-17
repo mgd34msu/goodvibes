@@ -1,26 +1,13 @@
 /** CLI dispatch without import-time startup. Adapted from the upstream daemon/cli. */
 import { homedir } from 'node:os';
 import { writeSync } from 'node:fs';
-import { runClusterCommand } from '@goodvibes-jev/engine/terminal-shell';
-import { readOperatorTokenFile } from '@goodvibes-jev/engine/platform/platform/workspace';
-import { readLegacySharedRevoked } from '@goodvibes-jev/engine/platform/platform/pairing';
-import { controlPlaneStorePath } from '@goodvibes-jev/engine/platform/platform/control-plane';
-import { createShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
-import { createRuntimeSecretsManager, isDeclaredSecretBearingConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
-import { runConfigCommand } from '../daemon/config-command.js';
-import { runPairCommand } from '../daemon/pair-command.js';
-import { createDaemonCommandRemote } from '../daemon/remote-transport.js';
-import { runMcpCommand } from '../daemon/mcp-command.js';
-import { runSessionsCommand } from '../daemon/sessions-command.js';
-import { runStatusCommand, runUpdateCommand, type DaemonCommandResult } from '../daemon/status-command.js';
-import { runWebuiCommand } from '../daemon/webui-command.js';
-import { runProvisionWakeModelCommand } from '../daemon/provision-wake-model.js';
-import { isDaemonServiceSubcommand, runDaemonServiceCli, resolveInstalledDaemonBinary, type ManagedServiceActionRunner } from '../daemon/service-commands.js';
+// Each command's module loads when that command is chosen, so `--version`,
+// `--help` and `status` never load serving, MCP, cluster or service code.
+import type { DaemonCommandResult } from '../daemon/status-command.js';
+import type { ManagedServiceActionRunner } from '../daemon/service-commands.js';
 import type { DaemonProcessOptions } from '../daemon/process-lifecycle.js';
 import { VERSION } from '../version.js';
-import { installProcessCrashCapture, surfaceCrashLogPath } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { GOODVIBES_DAEMON_SURFACE_ROOT } from '../config/surface.js';
-import { createDaemonCliConfiguration, resolveDaemonCliOwnership } from './configuration.js';
 import { parseDaemonCli } from './parser.js';
 import { answersHelpFlag, renderGoodVibesDaemonHelp, renderDaemonCommandHelp, renderGoodVibesVersion, renderDaemonCliCatalog } from './help.js';
 import { daemonCommandFailureLines } from './command-failure.js';
@@ -39,8 +26,8 @@ export interface DaemonCliOptions {
   readonly createRuntime?: () => Promise<DaemonCliRuntime>;
   /** Explicit installed executable that composes the same runtime; never guessed from Bun. */
   readonly serviceBinaryPath?: string;
-  /** Code-owned shipped entrypoint admission, invoked only for service activation. */
-  readonly resolveServiceExecutable?: () => ShippedServiceExecutable | undefined;
+  /** Code-owned shipped entrypoint admission, invoked only for service activation (it may load its module then). */
+  readonly resolveServiceExecutable?: () => ShippedServiceExecutable | undefined | Promise<ShippedServiceExecutable | undefined>;
   /** Trusted embedding port; ordinary commands use the real platform manager. */
   readonly serviceActionRunner?: ManagedServiceActionRunner;
   readonly process?: DaemonProcessOptions;
@@ -109,6 +96,9 @@ export async function runDaemonCli(argv: readonly string[], options: DaemonCliOp
       const { prepareSendCommand, runPreparedSendCommand } = await import('../daemon/send/command.js');
       const prepared = prepareSendCommand(cli.commandArgs);
       if (prepared.kind === 'result') return result(prepared.result);
+      const [{ createDaemonCliConfiguration }, { isDeclaredSecretBearingConfigKey }] = await Promise.all([
+        import('./configuration.js'), import('@goodvibes-jev/engine/platform/platform/config'),
+      ]);
       const configuration = createDaemonCliConfiguration(cli.flags, env, options.cwd, { diagnosticMode: 'structural' });
       const withheld = configuration.config.getIngestionQuarantine()
         .filter((entry) => isDeclaredSecretBearingConfigKey(entry.key));
@@ -128,7 +118,7 @@ export async function runDaemonCli(argv: readonly string[], options: DaemonCliOp
     let serviceExecutable: ShippedServiceExecutable | undefined;
     if (['install-service', 'start-service', 'restart-service'].includes(cli.command)) {
       if (typeof runtime?.inboxFactory !== 'function') return refuse(PARTIAL);
-      serviceExecutable = options.resolveServiceExecutable?.();
+      serviceExecutable = await options.resolveServiceExecutable?.();
       if (!serviceExecutable && !options.serviceBinaryPath) return refuse(`${PARTIAL} Service activation requires an explicitly composed executable.`);
       serviceExecutable?.assertCurrent();
     }
@@ -136,6 +126,9 @@ export async function runDaemonCli(argv: readonly string[], options: DaemonCliOp
     if (cli.command === 'provision-wake-model') {
       if (cli.commandArgs.some((arg) => arg === '--help' || arg === '-h')) return result({ exitCode: 0, lines: [renderDaemonCommandHelp(cli.command)!] });
       if (cli.commandArgs.some((arg) => arg !== '--strict')) return refuse('Usage: goodvibes-daemon provision-wake-model [--strict] [--help]');
+      const [{ resolveDaemonCliOwnership }, { runProvisionWakeModelCommand }] = await Promise.all([
+        import('./configuration.js'), import('../daemon/provision-wake-model.js'),
+      ]);
       const { homeDirectory } = resolveDaemonCliOwnership(cli.flags, env, options.cwd);
       // Provisioning and service commands preserve their stdout receipt even when
       // a nonzero status carries a degraded/absent state.
@@ -144,9 +137,15 @@ export async function runDaemonCli(argv: readonly string[], options: DaemonCliOp
     if (cli.command === 'webui' && cli.commandArgs.includes('--json')) {
       // Machine discovery is an inspection: no migration, settings bootstrap,
       // network transport, runtime composition, token acquisition or listener.
+      const [{ createDaemonCliConfiguration }, { runWebuiCommand }] = await Promise.all([
+        import('./configuration.js'), import('../daemon/webui-command.js'),
+      ]);
       const configuration = createDaemonCliConfiguration(cli.flags, env, options.cwd, { readOnly: true, diagnosticMode: 'structural' });
       return result(runWebuiCommand(cli.commandArgs, { configManager: configuration.config, baseDirectory: configuration.workingDirectory }));
     }
+    const [{ createDaemonCliConfiguration }, { createDaemonCommandRemote }] = await Promise.all([
+      import('./configuration.js'), import('../daemon/remote-transport.js'),
+    ]);
     const configuration = createDaemonCliConfiguration(cli.flags, env, options.cwd,
       // A malformed settings file can hold a credential at the parse error; every command withholds it from its diagnostics.
       cli.command === 'serve' || cli.command === 'mcp' ? { readOnly: true, diagnosticMode: 'structural' } : { diagnosticMode: 'structural' });
@@ -154,22 +153,52 @@ export async function runDaemonCli(argv: readonly string[], options: DaemonCliOp
     const remoteFlags = { host: cli.flags.host, port: cli.flags.port, token: cli.flags.token, json: cli.flags.json };
     const remote = createDaemonCommandRemote({ configManager: config, daemonHomeDir: daemonHomeDirectory, controlPlaneConfigDir: config.getControlPlaneConfigDir() });
     switch (cli.command) {
-      case 'config': return result(await runConfigCommand(cli.commandArgs, { configManager: config, json: cli.flags.json,
-        openSecretStore: () => createRuntimeSecretsManager({ projectRoot: workingDirectory, globalHome: homeDirectory,
-          surfaceRoot: GOODVIBES_DAEMON_SURFACE_ROOT, daemonHome: daemonHomeDirectory, configManager: config, diagnosticMode: 'structural' }) }));
-      case 'status': return result(await runStatusCommand({ ...remote, flags: remoteFlags }));
-      case 'update': return result(await runUpdateCommand({ ...remote, flags: { ...remoteFlags, check: cli.flags.check } }));
-      case 'sessions': return result(await runSessionsCommand({ ...remote, flags: { ...remoteFlags, all: cli.flags.all }, args: cli.commandArgs }));
-      case 'pair': return result(await runPairCommand({ ...remote,
-        version: VERSION, readToken: readOperatorTokenFile, operatorToken: env.GOODVIBES_DAEMON_TOKEN?.trim() ? env.GOODVIBES_DAEMON_TOKEN : undefined,
-        sharedTokenRevoked: () => readLegacySharedRevoked(controlPlaneStorePath(createShellPathService({ workingDirectory, homeDirectory }),
-          GOODVIBES_DAEMON_SURFACE_ROOT, 'pairing-tokens.json')),
-        flags: { ...remoteFlags, yes: cli.flags.yes } }));
-      case 'mcp': return await runMcpCommand({ configManager: config, daemonHomeDir: daemonHomeDirectory,
-        flags: { ...remoteFlags, categories: cli.flags.categories, allowWrite: cli.flags.allowWrite, allowDestructive: cli.flags.allowDestructive }, args: cli.commandArgs, stderr, fetchImpl: remote.fetchImpl,
-        input: options.mcpStdio?.input ?? process.stdin, output: options.mcpStdio?.output ?? process.stdout });
-      case 'webui': return result(runWebuiCommand(cli.commandArgs, { configManager: config, baseDirectory: workingDirectory }));
+      case 'config': {
+        const [{ runConfigCommand }, { createRuntimeSecretsManager }] = await Promise.all([
+          import('../daemon/config-command.js'), import('@goodvibes-jev/engine/platform/platform/config'),
+        ]);
+        return result(await runConfigCommand(cli.commandArgs, { configManager: config, json: cli.flags.json,
+          openSecretStore: () => createRuntimeSecretsManager({ projectRoot: workingDirectory, globalHome: homeDirectory,
+            surfaceRoot: GOODVIBES_DAEMON_SURFACE_ROOT, daemonHome: daemonHomeDirectory, configManager: config, diagnosticMode: 'structural' }) }));
+      }
+      case 'status': {
+        const { runStatusCommand } = await import('../daemon/status-command.js');
+        return result(await runStatusCommand({ ...remote, flags: remoteFlags }));
+      }
+      case 'update': {
+        const { runUpdateCommand } = await import('../daemon/status-command.js');
+        return result(await runUpdateCommand({ ...remote, flags: { ...remoteFlags, check: cli.flags.check } }));
+      }
+      case 'sessions': {
+        const { runSessionsCommand } = await import('../daemon/sessions-command.js');
+        return result(await runSessionsCommand({ ...remote, flags: { ...remoteFlags, all: cli.flags.all }, args: cli.commandArgs }));
+      }
+      case 'pair': {
+        const [{ runPairCommand }, { readOperatorTokenFile }, { readLegacySharedRevoked }, { controlPlaneStorePath }, { createShellPathService }] = await Promise.all([
+          import('../daemon/pair-command.js'),
+          import('@goodvibes-jev/engine/platform/platform/workspace'),
+          import('@goodvibes-jev/engine/platform/platform/pairing'),
+          import('@goodvibes-jev/engine/platform/platform/control-plane'),
+          import('@goodvibes-jev/engine/platform/platform/runtime/shell'),
+        ]);
+        return result(await runPairCommand({ ...remote,
+          version: VERSION, readToken: readOperatorTokenFile, operatorToken: env.GOODVIBES_DAEMON_TOKEN?.trim() ? env.GOODVIBES_DAEMON_TOKEN : undefined,
+          sharedTokenRevoked: () => readLegacySharedRevoked(controlPlaneStorePath(createShellPathService({ workingDirectory, homeDirectory }),
+            GOODVIBES_DAEMON_SURFACE_ROOT, 'pairing-tokens.json')),
+          flags: { ...remoteFlags, yes: cli.flags.yes } }));
+      }
+      case 'mcp': {
+        const { runMcpCommand } = await import('../daemon/mcp-command.js');
+        return await runMcpCommand({ configManager: config, daemonHomeDir: daemonHomeDirectory,
+          flags: { ...remoteFlags, categories: cli.flags.categories, allowWrite: cli.flags.allowWrite, allowDestructive: cli.flags.allowDestructive }, args: cli.commandArgs, stderr, fetchImpl: remote.fetchImpl,
+          input: options.mcpStdio?.input ?? process.stdin, output: options.mcpStdio?.output ?? process.stdout });
+      }
+      case 'webui': {
+        const { runWebuiCommand } = await import('../daemon/webui-command.js');
+        return result(runWebuiCommand(cli.commandArgs, { configManager: config, baseDirectory: workingDirectory }));
+      }
       case 'cluster': {
+        const { runClusterCommand } = await import('@goodvibes-jev/engine/terminal-shell/cluster-commands');
         const answer = await runClusterCommand({ argv: cli.commandArgs, configManager: config, daemonHomeDir: daemonHomeDirectory, fetchImpl: remote.fetchImpl });
         if (answer.rawOutput) stdout(answer.rawOutput);
         return result(answer);
@@ -178,7 +207,10 @@ export async function runDaemonCli(argv: readonly string[], options: DaemonCliOp
         const { prepareDaemonCliServe, runConfiguredDaemonCli } = await import('./serve.js');
         const errors = prepareDaemonCliServe(config, cli.flags);
         if (errors.length) return result({ exitCode: 2, lines: errors });
-        const { repairDaemonSuiteBeforeStartup } = await import('./startup-suite-repair.js');
+        const [{ repairDaemonSuiteBeforeStartup }, { installProcessCrashCapture, surfaceCrashLogPath }] = await Promise.all([
+          import('./startup-suite-repair.js'),
+          import('@goodvibes-jev/engine/platform/platform/runtime/operations'),
+        ]);
         const originalArgv = [...argv];
         const releaseCrashCapture = options.captureCrashes === true ? installProcessCrashCapture({
           surface: 'daemon', version: VERSION, writeStderr: stderr,
@@ -197,6 +229,7 @@ export async function runDaemonCli(argv: readonly string[], options: DaemonCliOp
         finally { releaseCrashCapture?.(); }
       }
       default: {
+        const { isDaemonServiceSubcommand, runDaemonServiceCli, resolveInstalledDaemonBinary } = await import('../daemon/service-commands.js');
         if (!isDaemonServiceSubcommand(cli.command)) return refuse('This command has no migrated dispatcher.');
         const servicePlatform = config.get('service.platform');
         if (configuration.isOverridden && ['install-service', 'start-service', 'restart-service'].includes(cli.command)

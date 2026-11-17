@@ -1,8 +1,9 @@
-import { type Line, createEmptyLine, createStyledCell } from '@goodvibes-jev/engine/platform/platform/types';
-import { getDisplayWidth, truncateDisplay, wrapText, wrapTextRows } from '@goodvibes-jev/engine/platform/platform/utils';
+import { createEmptyLine, createStyledCell } from '@goodvibes-jev/engine/platform/platform/types/grid';
+import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
+import { getDisplayWidth, truncateDisplay, wrapText, wrapTextRows } from '@goodvibes-jev/engine/platform/platform/utils/terminal-width';
 import { LAYOUT } from './layout.js';
 import { GLYPHS } from '@goodvibes-jev/engine/platform/platform/presentation';
-import { foldPreviewText } from '@goodvibes-jev/engine/terminal-shell';
+import { foldPreviewText } from '../conversation-fold-policy.js';
 import { activeTokens } from './theme.js';
 /** Column of a transcript event row's marker (the ● of a flush row). */
 const MARKER_COL = LAYOUT.LEFT_MARGIN - 1;

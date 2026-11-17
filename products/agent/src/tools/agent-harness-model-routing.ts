@@ -2,7 +2,7 @@ import { arch, cpus, freemem, platform, totalmem } from 'node:os';
 import type { ArtifactDescriptor } from '@goodvibes-jev/engine/platform/platform/artifacts';
 import type { CommandContext } from '../input/command-registry.ts';
 import { requireProviderApi } from '../input/commands/runtime-services.ts';
-import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn/preview-text';
 import { readLocalModelCookbook } from './agent-harness-local-model-cookbook.ts';
 import { localBenchmarkRouteLatencyMap, localBenchmarkRouteLatencyMapFor, readLocalModelBenchmarkSnapshot } from './agent-harness-local-model-benchmarks.ts';
 import { localModelDetection, localModelServerEndpoints, localModelServerFacts } from './agent-harness-local-model-endpoints.ts';
@@ -11,7 +11,7 @@ import { localHardwareProfile, modelReadinessScore } from './agent-harness-model
 import { contextWindowFor, loadModels, listProviderIds, modelBenchmarkCompositeScore, modelBenchmarkQualityTier, modelAvailable, modelConfigured, modelCapabilities, modelCurrent, modelDisplayName, modelModelId, modelProviderId, modelReasoning, modelRegistryKey, modelTier, readConfig, readProviderApi } from './agent-harness-model-catalog.ts';
 import type { AgentHarnessModelRoutingArgs, LocalModelServerEndpoint, ModelCandidate, ModelProviderHealthSignal, ModelRouteLookupSource, ModelRouteResolution, RouteCandidate } from './agent-harness-model-routing-types.ts';
 import type { ModelReadingOptions } from './agent-harness-model-reading-source.ts';
-import { rankHarnessCatalog } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { rankHarnessCatalog } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-ranking';
 import { mapWithConcurrency, readLimit, readString } from './agent-harness-model-routing-utils.ts';
 export type { AgentHarnessModelRoutingArgs } from './agent-harness-model-routing-types.ts';
 export { localModelCookbook } from './agent-harness-local-model-cookbook.ts';

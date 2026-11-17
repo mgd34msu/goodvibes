@@ -1,4 +1,4 @@
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 import type { ConfigModalAction, ConfigModalActionContext, ConfigModalRow, ConfigModalSurface, ConfigModalView } from '../../input/config-modal-types.ts';
 import { getSettingsControlPlaneSnapshot } from '@/runtime/index.ts';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';

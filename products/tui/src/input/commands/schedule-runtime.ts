@@ -19,7 +19,7 @@ import type {
 } from '@goodvibes-jev/engine/platform/platform/automation';
 import type { OperatorMethodOutput } from '@goodvibes-jev/engine/platform';
 import { resolveDaemonEnabled } from '@goodvibes-jev/engine/platform/platform/config';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 import { REASONING_EFFORT_SEVERITY, reasoningEffortRank } from '@goodvibes-jev/engine/platform/platform/providers';
 import { describeOperatorRpcError, getOperatorRpc, type OperatorRpcAvailable } from './operator-rpc.ts';
 import {

@@ -2,8 +2,9 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { profileDataToConfigSnapshot } from '@goodvibes-jev/engine/platform/platform/profiles';
-import { CONFIG_SCHEMA, type ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
-import { CONFIG_KEYS } from '@goodvibes-jev/engine/platform/platform/config';
+import { CONFIG_SCHEMA } from '@goodvibes-jev/engine/platform/platform/config/schema';
+import type { ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
+import { CONFIG_KEYS } from '@goodvibes-jev/engine/platform/platform/config/schema';
 import type { ManagedSettingsBundle } from '@/runtime/index.ts';
 import {
   applyStagedManagedBundle,
@@ -18,7 +19,7 @@ import {
   stageManagedSettingsBundle,
 } from '@/runtime/index.ts';
 import { requireProfileManager, requireShellPaths } from './runtime-services.ts';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 import { describeSetupTransferChanges, isSecurityBearingChange } from './local-setup-transfer.ts';
 
 /** The stored settings, never an owner-profile value: a rollback must not pin a profile value as a setting. */

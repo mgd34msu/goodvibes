@@ -5,7 +5,7 @@
  * classification. Never retries an operator mutation.
  */
 import type { OperatorMethodId, OperatorMethodInput, OperatorMethodOutput } from '@goodvibes-jev/engine/platform/contracts';
-import { createConnectedHost, isHostFailure, type HostCallApplied, type HostRefusal } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { createConnectedHost, isHostFailure, type HostCallApplied, type HostRefusal } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-client';
 import type { AgentConnectedHostConnection } from './routine-schedule-promotion.ts';
 
 export type OperatorGatewayCallFailureKind =

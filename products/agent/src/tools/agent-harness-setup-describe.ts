@@ -1,10 +1,10 @@
 import { captureCatalogReadRequest, selectHarnessCatalog } from './agent-harness-catalog-selection.ts';
-import type { CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import type { CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-ranking';
 import { rankStatefulCatalog } from './agent-harness-stateful-catalog-source.ts';
 import type { OnboardingStep1CapabilityItem } from '../runtime/onboarding/index.ts';
 import type { AgentSetupWizard } from '../agent/setup-wizard.ts';
 import { DEFAULT_AGENT_SETUP_WIZARD_REVIEW_ROUTE } from '../agent/setup-wizard.ts';
-import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn/preview-text';
 import { setupHandoffsForItem } from './agent-harness-setup-handoffs.ts';
 import { collectSnapshot, lookupFromArgs, readLimit, safeIso, summarizeLocalBehavior } from './agent-harness-setup-posture-utils.ts';
 import type { AgentHarnessSetupArgs, SetupHandoffCard, SetupPlanItem, SetupRepairCard, SetupRepairDecision, SetupServiceLifecycleDecision } from './agent-harness-setup-posture-types.ts';

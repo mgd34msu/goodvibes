@@ -1,4 +1,5 @@
-import { isTerminalContractStatus, type ContractRunner, type ContractStatus } from '@goodvibes-jev/engine/platform/platform/contract';
+import { isTerminalContractStatus } from '@goodvibes-jev/engine/platform/platform/contract/types';
+import type { ContractRunner, ContractStatus } from '@goodvibes-jev/engine/platform/platform/contract';
 import type { ConversationMessageSnapshot, Orchestrator } from '@goodvibes-jev/engine/platform/platform/core';
 import type { PermissionManager, PermissionRequestHandler } from '@goodvibes-jev/engine/platform/platform/permissions';
 import { buildPersistedSessionContextFromFacts } from '@goodvibes-jev/engine/platform/platform/runtime/operations';

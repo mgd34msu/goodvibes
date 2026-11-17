@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { homedir } from 'node:os';
 import { installedDataWriterAdmission } from './runtime/native-data-writer.ts';
 import { installedReaderCommand } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
 import { COMPILED_VERSION } from './version.ts';
@@ -27,4 +28,31 @@ if (!installedDataWriterAdmission.ok) {
   writeFatalLine(installedDataWriterAdmission.message);
   process.exit(1);
 }
-await import('./interactive.ts');
+// Commands (`status`, `run`, management) are answered by the CLI entry, which
+// loads only the chosen command's modules and exits; the terminal UI's module
+// graph loads only when no command took the launch.
+const { prepareShellCliRuntime } = await import('./cli/entrypoint.ts');
+let prepared: Awaited<ReturnType<typeof prepareShellCliRuntime>>;
+try {
+  prepared = await prepareShellCliRuntime(
+    process.argv.slice(2),
+    {
+      defaultWorkingDirectory: process.env['GOODVIBES_WORKING_DIR'] ?? process.cwd(),
+      homeDirectory: process.env['GOODVIBES_AGENT_HOME'] ?? homedir(),
+    },
+    'goodvibes-agent',
+  );
+} catch (error) {
+  const [{ reportFatalStartupError }, { envFlag, logger }] = await Promise.all([
+    import('./cli/tui-startup.ts'),
+    import('@goodvibes-jev/engine/platform/platform/utils'),
+  ]);
+  reportFatalStartupError(
+    error,
+    { binary: 'goodvibes-agent', debug: envFlag(process.env['GOODVIBES_AGENT_DEBUG']) },
+    { logError: (message, context) => logger.error(message, context), writeStderr: writeFatalLine, exit: (code) => process.exit(code) },
+  );
+  process.exit(1);
+}
+const { runInteractive } = await import('./interactive.ts');
+await runInteractive(prepared);

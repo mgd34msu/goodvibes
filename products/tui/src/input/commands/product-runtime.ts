@@ -3,7 +3,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { runnerToolsText } from './remote-ceiling-text.ts';
-import { listInstalledEcosystemEntries, loadEcosystemCatalog } from '@/runtime/index.ts';
+import { listInstalledEcosystemEntries, loadEcosystemCatalog } from '@goodvibes-jev/engine/platform/platform/runtime/ecosystem/catalog';
 import { BUILTIN_SUITES } from '@/runtime/index.ts';
 import {
   requireEcosystemCatalogPaths,

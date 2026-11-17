@@ -12,7 +12,7 @@ import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/conf
 import type { AdaptivePlanner } from '@goodvibes-jev/engine/platform/platform/core';
 import type { ConversationManager } from '../core/conversation';
 import type { KnowledgeApi } from '@goodvibes-jev/engine/platform/platform/knowledge';
-import type { AgentPromptContextReceiptStore } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import type { AgentPromptContextReceiptStore } from '@goodvibes-jev/engine/terminal-shell/agent-turn/prompt-context-receipts';
 import type { HookApi } from '@goodvibes-jev/engine/platform/platform/hooks';
 import type { MemorySpineClient } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
 import type { McpApi } from '@goodvibes-jev/engine/platform/platform/mcp';

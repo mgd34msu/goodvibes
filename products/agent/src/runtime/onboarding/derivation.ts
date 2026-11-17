@@ -12,8 +12,7 @@ import {
   hasExternalIntegrations,
 } from '@goodvibes-jev/engine/terminal-shell/onboarding-signals';
 import '@goodvibes-jev/engine/terminal-shell/onboarding-values';
-import { DEFAULT_CONFIG } from '../../config/index.ts';
-import '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { DEFAULT_CONFIG } from '@goodvibes-jev/engine/platform/platform/config/schema';
 import type {
   OnboardingSnapshotState,
   OnboardingStep1CapabilityFlags,

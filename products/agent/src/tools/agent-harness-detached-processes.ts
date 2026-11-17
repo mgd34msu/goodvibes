@@ -8,7 +8,7 @@ import { closeSync, fstatSync, openSync, readFileSync, readSync } from 'node:fs'
 import type { ShellPathService } from '@/runtime/index.ts';
 import { redactSensitiveData } from '@goodvibes-jev/engine/platform/platform/utils';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
-import { runStoreFileUpdateSync, writeStoreJson } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { runStoreFileUpdateSync, writeStoreJson } from '@goodvibes-jev/engine/terminal-shell/agent-turn/store-file';
 
 export interface DetachedProcessRecord {
   readonly processId: string;

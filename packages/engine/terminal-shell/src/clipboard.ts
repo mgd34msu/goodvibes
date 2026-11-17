@@ -1,6 +1,6 @@
 import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-import { allowTerminalWrite } from './terminal-output-guard.js';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
+import { allowTerminalWrite } from './terminal-write.js';
 
 /**
  * copyToClipboard - Uses OSC 52 escape sequence to copy text to the terminal clipboard.

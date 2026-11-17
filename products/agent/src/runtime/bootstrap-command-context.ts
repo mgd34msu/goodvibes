@@ -11,7 +11,7 @@ import type { OpsApi } from '@/runtime/index.ts';
 import type { MutableRuntimeState } from '@/runtime/index.ts';
 import type { ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
 import type { CommandContext } from '../input/command-registry.ts';
-import type { AgentPromptContextReceiptStore } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import type { AgentPromptContextReceiptStore } from '@goodvibes-jev/engine/terminal-shell/agent-turn/prompt-context-receipts';
 import type { ConsolidationReceiptSource } from '../agent/memory-consolidation-proposals.ts';
 import type { KeybindingsManager } from '../input/keybindings.ts';
 import type { PermissionRequestHandler } from '@goodvibes-jev/engine/platform/platform/permissions';

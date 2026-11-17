@@ -13,7 +13,7 @@
 // ---------------------------------------------------------------------------
 
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { resolveOperatorRpc } from '../input/commands/operator-rpc.ts';
+import { resolveOperatorRpc } from '../runtime/client/operator-endpoint.ts';
 import type {
   PairingTailscaleServeReceipt,
   PairingTailscaleStatus,

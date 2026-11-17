@@ -48,9 +48,7 @@
  * by the number of occasions declared rather than by how long the session runs.
  */
 
-import type {
-  OccasionsPendingResponse,
-} from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import type { OccasionsPendingResponse } from '@goodvibes-jev/engine/terminal-shell/agent-turn/occasions-types';
 
 /**
  * One thing to say, and the ledger entry that records having said it.

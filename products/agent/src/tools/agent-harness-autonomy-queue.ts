@@ -1,5 +1,5 @@
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
-import { rankHarnessCatalog, type CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { rankHarnessCatalog, type CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-ranking';
 import { contractMethodsForAutonomy } from './agent-harness-personal-ops-discovery.ts';
 import type { CommandContext } from '../input/command-registry.ts';
 import { buildAgentWorkspaceRoutineCounters } from '../input/agent-workspace-snapshot.ts';
@@ -9,9 +9,9 @@ import { autonomyLiveNativeFacts, captureAutonomyLiveRecords, controlAvailable, 
   type AutonomyLiveRecordBundle, type AutonomyLiveNativeFacts } from './agent-harness-autonomy-live-records.ts';
 import { watcherReadModelLiveRecords, watcherReadModelNativeFacts, watcherReadModelPublication } from './agent-harness-autonomy-watcher-read-models.ts';
 import type { AgentHarnessAutonomyQueueArgs, AutonomyQueueItem, AutonomyQueueLiveRecord, AutonomyQueueRecordControl, AutonomyQueueRecordOutput, AutonomyQueueResolution, AutonomyQueueStatus } from './agent-harness-autonomy-queue-types.ts';
-import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn/read-helpers';
 export type { AutonomyQueueResolution } from './agent-harness-autonomy-queue-types.ts';
-import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn/preview-text';
 
 function readString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';

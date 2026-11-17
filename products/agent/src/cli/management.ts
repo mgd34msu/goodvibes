@@ -7,7 +7,7 @@ export { openBrowser } from '@goodvibes-jev/engine/terminal-shell/cli-environmen
 import { hasCommandFlag, isPresentConfigValue } from '@goodvibes-jev/engine/terminal-shell/cli-arguments';
 export { hasCommandFlag, isPresentConfigValue } from '@goodvibes-jev/engine/terminal-shell/cli-arguments';
 import { probeTcp as probe } from '@goodvibes-jev/engine/terminal-shell/service-io';
-import { resolveConnectedHostBaseUrl } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { resolveConnectedHostBaseUrl } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-dial';
 import { runSetupPairingCommand, runSetupUnpairCommand } from './setup-pair-command.ts';
 import { runNativeHeadlessCommand } from './native-headless-command.ts';
 import { existsSync } from 'node:fs';
@@ -16,8 +16,7 @@ import 'node:child_process';
 import 'node:os';
 import type { ConfigManager } from '../config/index.ts';
 import '../config/index.ts';
-import '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { readConnectedHostOperatorToken } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { readConnectedHostOperatorToken } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-auth';
 import '../config/secrets.ts';
 import { createShellPathService } from '@/runtime/index.ts';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
@@ -54,7 +53,7 @@ import { handleRelayCommand } from './relay-command.ts';
 import { handleFleetCommand } from './fleet-command.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import { withProviderServices, type OneShotProviderServices } from './one-shot-services.ts';
-import { dialHostForConfiguredHost } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { dialHostForConfiguredHost } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-dial';
 
 export interface CliCommandRuntime {
   readonly cli: GoodVibesCliParseResult;

@@ -1,7 +1,7 @@
 import { isDirectOwnerCommandContext, type CommandRegistry } from '../command-registry.ts';
 import { resolveNativeHostCredential } from '../../runtime/client/native-host-credential.ts';
 import { formatTuiHostPairing, unpairTuiHost } from '../../runtime/tui-host-pairing.ts';
-import { requireShellPaths } from './runtime-services.ts';
+import { requireShellPaths } from '@goodvibes-jev/engine/terminal-shell/command-service-access';
 
 const USAGE = 'Usage: /host pair [--bootstrap-shared] [--name <device-name>] [--apply] | /host unpair. --yes and inline confirmation are unsupported; apply requires fresh confirmation in the owner terminal.';
 

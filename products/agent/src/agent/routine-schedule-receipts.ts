@@ -1,29 +1,13 @@
-import { readJsonStore, updateJsonStore, type JsonStoreSpec } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { readJsonStore, updateJsonStore, type JsonStoreSpec } from '@goodvibes-jev/engine/terminal-shell/agent-turn/store-file';
 import type { OperatorMethodOutput } from '@goodvibes-jev/engine/platform/contracts';
 import { formatEveryInterval } from '@goodvibes-jev/engine/platform/platform/automation';
 import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-import { createConnectedHost, isHostFailure } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { createConnectedHost, isHostFailure } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-client';
 import type { ShellPathService } from '@/runtime/index.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import { isRoutineScheduleDeliverySurfaceKind } from './routine-schedule-args.ts';
-import {
-  ROUTINE_SCHEDULE_LIST_METHOD,
-  ROUTINE_SCHEDULE_METHOD,
-  ROUTINE_SCHEDULE_ROUTE,
-  type AgentConnectedHostConnection,
-  type RoutineScheduleCorrelation,
-  type RoutineScheduleCorrelationFailure,
-  type RoutineScheduleCorrelationResult,
-  type RoutineScheduleCorrelationSuccess,
-  type RoutineScheduleDeliveryKind,
-  type RoutineScheduleKind,
-  type RoutineScheduleLiveRecord,
-  type RoutineSchedulePromotionPreview,
-  type RoutineSchedulePromotionResult,
-  type RoutineScheduleReceipt,
-  type RoutineScheduleReceiptDeliveryTarget,
-  type RoutineScheduleReceiptSnapshot,
-} from './routine-schedule-promotion.ts';
+import { ROUTINE_SCHEDULE_LIST_METHOD, ROUTINE_SCHEDULE_METHOD, ROUTINE_SCHEDULE_ROUTE } from '@goodvibes-jev/engine/terminal-shell/agent-turn/schedule-delivery-targets';
+import type { AgentConnectedHostConnection, RoutineScheduleCorrelation, RoutineScheduleCorrelationFailure, RoutineScheduleCorrelationResult, RoutineScheduleCorrelationSuccess, RoutineScheduleDeliveryKind, RoutineScheduleKind, RoutineScheduleLiveRecord, RoutineSchedulePromotionPreview, RoutineSchedulePromotionResult, RoutineScheduleReceipt, RoutineScheduleReceiptDeliveryTarget, RoutineScheduleReceiptSnapshot } from './routine-schedule-promotion.ts';
 
 type ScheduleCreateInput = RoutineSchedulePromotionPreview['payload'];
 type ScheduleDeliveryInput = NonNullable<ScheduleCreateInput['delivery']>;

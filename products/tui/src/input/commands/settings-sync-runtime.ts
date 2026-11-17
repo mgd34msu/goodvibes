@@ -17,10 +17,10 @@ import {
 } from '@/runtime/index.ts';
 import { RefusalError, refusal, toRefusal } from '@goodvibes-jev/engine/errors';
 import { type ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
-import { CONFIG_KEYS } from '@goodvibes-jev/engine/platform/platform/config';
+import { CONFIG_KEYS } from '@goodvibes-jev/engine/platform/platform/config/schema';
 import type { CommandRegistry } from '../command-registry.ts';
-import { requireShellPaths } from './runtime-services.ts';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { requireShellPaths } from '@goodvibes-jev/engine/terminal-shell/command-service-access';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 import { describeSetupTransferChanges, isSecurityBearingChange } from './local-setup-transfer.ts';
 
 /** Read a settings sync bundle, refusing in words (never a stack) a file that is unreadable, not JSON, or not shaped like a bundle. */

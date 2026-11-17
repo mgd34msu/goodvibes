@@ -21,7 +21,7 @@ import type { GatewayMethodCatalog } from '@goodvibes-jev/engine/platform/platfo
 import type { HostedSurfaceTurn } from '@goodvibes-jev/engine/platform/platform/hosted-sessions';
 import type { MemoryRegistry } from '@goodvibes-jev/engine/platform/platform/state';
 import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
-import { createShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+import { createShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell-paths';
 import { readTierPromptSupplement } from '@goodvibes-jev/engine/platform/platform/providers';
 import { factsFor } from '@goodvibes-jev/engine/platform/platform/routing';
 import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
@@ -49,7 +49,8 @@ import { registerAgentResearchReportTool } from './research-report-tool.js';
 import { registerAgentModelCompareTool } from './model-compare-tool.js';
 import type { AgentModelCompareToolDeps } from './model-compare-types.js';
 import { createAgentCredentialReader, createAgentResearchSourceOwner, createAgentSettingsReader } from './research-source-screening.js';
-import { createClassicProtectedSourceOwner, type ProtectedSourceOwner } from '@goodvibes-jev/engine/platform/platform/security';
+import { createClassicProtectedSourceOwner } from '@goodvibes-jev/engine/platform/platform/security/source-screening/classic-owner';
+import type { ProtectedSourceOwner } from '@goodvibes-jev/engine/platform/platform/security';
 import { randomUUID } from 'node:crypto';
 import { registerAgentOperatorActionTool } from './operator-action-tool.js';
 import { registerAgentOperatorBriefingTool } from './operator-briefing-tool.js';

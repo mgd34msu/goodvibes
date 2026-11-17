@@ -8,7 +8,7 @@
  * store reads, keeps what it cannot parse, and writes.
  */
 import { atomicWriteFileSync, type AtomicWriteOptions } from '@goodvibes-jev/engine/platform/platform/config';
-import { withProcessLock, withProcessLockSync } from '@goodvibes-jev/engine/platform/platform/utils';
+import { withProcessLock, withProcessLockSync } from '@goodvibes-jev/engine/platform/platform/utils/process-lock';
 import { copyFileSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 

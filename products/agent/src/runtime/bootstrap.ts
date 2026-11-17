@@ -54,14 +54,14 @@ import { initializeBootstrapCore } from './bootstrap-core.ts';
 import { ensureBootModelResolvable } from './provider-boot.ts';
 import { bindOrchestratorContextAccounting } from './context-accounting-source.ts';
 import { createBootstrapShell } from './bootstrap-shell.ts';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 import '@goodvibes-jev/engine/terminal-shell';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import { registerAgentTools } from './bootstrap-agent-tools.ts';
 import { foldLegacySpineStore } from '@goodvibes-jev/engine/platform/platform/runtime/session-spine';
 import { reconcileMemorySpineAdoption } from './memory-spine-adoption.ts';
 import { createAgentSessionInputsClient } from './client/session-inputs.ts';
-import { AgentPromptContextReceiptStore, composeRuntimePromptWithReceipt } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { AgentPromptContextReceiptStore, composeRuntimePromptWithReceipt } from '@goodvibes-jev/engine/terminal-shell/agent-turn/prompt-context-receipts';
 import { recordCompletedTurnAnchor } from './rewind-anchor-wiring.ts';
 import { createMemoryUsageTracker } from './memory-usage-wiring.ts';
 import { installOccasionsNudging } from './occasions-boot.ts';
@@ -70,9 +70,9 @@ import { createRuntimeShutdown } from './bootstrap-shutdown.ts';
 import { recordComposedPromptUsage } from './prompt-usage-record.ts';
 import { createMemorySpineRecheck, resolveMemorySpineRecheckMs } from './memory-spine-recheck.ts';
 import { capabilitySnapshot, refreshCapabilityIndex } from '../capabilities/capability-snapshot.ts';
-import { GOODVIBES_AGENT_OPERATOR_POLICY } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { GOODVIBES_AGENT_OPERATOR_POLICY } from '@goodvibes-jev/engine/terminal-shell/agent-turn/operator-policy';
 import { flushPendingChannelRows } from '../agent/channel-outbox-flush.ts';
-import { createDaemonOperatorInvoke, resolveDaemonOperatorConnection } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { createDaemonOperatorInvoke, resolveDaemonOperatorConnection } from '@goodvibes-jev/engine/terminal-shell/agent-turn/daemon-operator-client';
 
 // ── Bootstrap context type ──────────────────────────────────────────────────
 

@@ -5,7 +5,7 @@ import type { CommandContext, CommandRegistry } from '../input/command-registry.
 import { createSetupSmokeReferenceCapture, resolveSetupSmokeNativeEvidence } from './agent-setup-smoke-reference.ts';
 import { runSetupInstallSmoke } from './agent-harness-setup-posture.ts';
 import { effectOutput, requireConfirmedAction } from './agent-harness-tool-utils.ts';
-import { confirmParameter, requestParameter } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { confirmParameter, requestParameter } from '@goodvibes-jev/engine/terminal-shell/agent-turn/effect-admission';
 
 type AgentSetupAction =
   | 'status'

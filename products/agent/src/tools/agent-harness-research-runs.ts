@@ -1,19 +1,13 @@
 import { withResearchCatalog, rankResearchRecords, researchCheckpointRoute, researchRouteString as routeString } from './agent-harness-research-catalog-source.ts';
 import { selectHarnessCatalog } from './agent-harness-catalog-selection.ts';
 import type { CommandContext } from '../input/command-registry.ts';
-import {
-  AgentResearchRunRegistry,
-  researchRunLogTail,
-  researchRunReportLine,
-  type AgentResearchRunRecord,
-  type AgentResearchRunStatus,
-} from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { AgentResearchRunRegistry, researchRunLogTail, researchRunReportLine, type AgentResearchRunRecord, type AgentResearchRunStatus } from '@goodvibes-jev/engine/terminal-shell/agent-turn/research-run-registry';
 import { browserControlPosture, type BrowserControlPosture } from './agent-harness-browser-control.ts';
-import type { CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import type { CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-ranking';
 import { captureAsyncHarnessInput } from './agent-harness-async-input.ts';
 import { isCertifiedResearchLiveRecord, researchLiveReadModelSnapshot } from './agent-harness-research-live-read-models.ts';
-import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn/preview-text';
+import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn/read-helpers';
 
 interface AgentHarnessResearchRunArgs {
   readonly runId?: unknown;

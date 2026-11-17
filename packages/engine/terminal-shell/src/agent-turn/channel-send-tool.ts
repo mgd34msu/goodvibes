@@ -3,7 +3,7 @@ import { lstatSync, realpathSync } from 'node:fs';
 import { resolveAndValidatePath } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { Tool, ToolExecuteOptions } from '@goodvibes-jev/engine/platform/platform/types';
 import { assertCurrentToolEffect, assertCurrentToolExecution, ToolInputProjectionError, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
-import { snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
+import { snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate/judgment-input';
 import { evaluateOutwardEffect, getProcessUntrustedContentLedger as getSessionUntrustedContentLedger } from '@goodvibes-jev/engine/platform/platform/security';
 import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 import {

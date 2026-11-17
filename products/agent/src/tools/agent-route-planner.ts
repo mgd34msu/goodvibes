@@ -9,7 +9,7 @@ import {
 import type { JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
 import type { CommandContext } from '../input/command-registry.ts';
 import { listHarnessModes } from './agent-harness-mode-catalog.ts';
-import { prepareHarnessCatalog, rankHarnessCatalog, type CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { prepareHarnessCatalog, rankHarnessCatalog, type CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-ranking';
 import { captureModelReadingInput, withModelReadingSource } from './agent-harness-model-reading-source.ts';
 import { listWorkspaceActions } from './agent-harness-workspace-actions.ts';
 import { externalMemoryProviders } from './agent-harness-memory-external-providers.ts';

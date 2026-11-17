@@ -5,7 +5,8 @@
  * edit its items, approve and launch it as a contract). Each app adds its own
  * way to start work directly (`start`).
  */
-import { isTerminalContractStatus, type ContractOperatorService, type ContractView } from '@goodvibes-jev/engine/platform/platform/contract';
+import { isTerminalContractStatus } from '@goodvibes-jev/engine/platform/platform/contract/types';
+import type { ContractOperatorService, ContractView } from '@goodvibes-jev/engine/platform/platform/contract';
 import type { WorkstreamDraft, WorkstreamDraftService } from '@goodvibes-jev/engine/platform/platform/orchestration';
 
 export const WORKSTREAM_SHARED_USAGE = [

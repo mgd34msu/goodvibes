@@ -76,7 +76,7 @@ import { GOODVIBES_DAEMON_SURFACE_ROOT } from '../config/surface.js';
 import type { RuntimeServices } from './runtime-services-types.js';
 import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import { createWorkspaceCheckpointing, daemonWorkspaceCheckpoints } from './workspace-checkpointing.js';
-import { createAgentHostedTurn } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { createAgentHostedTurn } from '@goodvibes-jev/engine/terminal-shell/agent-turn/hosted-turn';
 
 /** The operator policy a session hosted by THIS daemon runs under. */
 function hostedSystemPrompt(input: { readonly workspaceRoot: string }): string {

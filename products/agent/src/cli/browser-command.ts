@@ -16,7 +16,7 @@
  * the whole path end to end without a provider, an API key, or a network round
  * trip to a model.
  */
-import { createAgentBrowserTool, BROWSER_TOOL_ACTIONS } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { createAgentBrowserTool, BROWSER_TOOL_ACTIONS } from '@goodvibes-jev/engine/terminal-shell/agent-turn/browser-tool';
 import { agentBrowserProfileRoot, agentBrowserScreenshotRoot, agentBrowserToolBackend, shutdownAgentBrowserSessions } from '../runtime/agent-browser.ts';
 import type { CliCommandOutput } from './types.ts';
 import type { CliCommandRuntime } from './management.ts';

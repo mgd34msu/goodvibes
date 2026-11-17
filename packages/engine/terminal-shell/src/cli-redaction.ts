@@ -32,7 +32,7 @@ import {
 } from '@goodvibes-jev/engine/platform/platform/config';
 import { mapLimit } from '@goodvibes-jev/judgment';
 import type { JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
-import { decisionOrClassic } from '@goodvibes-jev/engine/platform/platform/runtime';
+import { decisionOrClassic } from '@goodvibes-jev/engine/platform/platform/runtime/decision-policy';
 import { captureOwnedJson, retainStrictJudgmentJson } from '@goodvibes-jev/engine/platform/platform/gate';
 import { redactSensitiveDataAsync, redactStructuredDataAsync } from '@goodvibes-jev/engine/platform/platform/utils';
 import { supportBundleFields } from './support-bundle-fields.js';

@@ -1,6 +1,6 @@
 import type { McpApi, McpConfigScope, McpReloadResult, McpServerConfig } from '@goodvibes-jev/engine/platform/platform/mcp';
 import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 import { requireYesFlag, stripYesFlag, type CommandConfirmationContext } from './command-confirmation.js';
 import { maskLaunchArgs } from './renderer/mcp-form-rows.js';
 import { quoteSlashCommandArg } from './slash-command-parser.js';

@@ -11,7 +11,7 @@ import type { ConfigManager, HelperModel } from '@goodvibes-jev/engine/platform/
 import type { SharedSessionBroker } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import type { SessionSpineClient } from '@goodvibes-jev/engine/platform/platform/runtime/session-spine';
 import type { SessionManager } from '@goodvibes-jev/engine/platform/platform/sessions';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 import { resumeSessionCore, type SessionAgentRecordSink, type SessionResumeOutcome } from '../core/session-resume-core.ts';
 import type { SessionSurface } from '@/runtime/index.ts';
 

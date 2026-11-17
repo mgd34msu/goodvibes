@@ -1,10 +1,11 @@
 import { snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
 import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
-import { rankHarnessCatalog, captureCatalogData, type CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { rankHarnessCatalog, type CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-ranking';
+import { captureCatalogData } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-data';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { fullToolDefinition } from './tool-definition-compaction.ts';
-import { EFFECT_ADMISSION_SENTENCE } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { EFFECT_ADMISSION_SENTENCE } from '@goodvibes-jev/engine/terminal-shell/agent-turn/effect-admission';
+import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn/read-helpers';
 
 export interface AgentHarnessModelToolCatalogArgs {
   readonly query?: unknown;

@@ -1,12 +1,5 @@
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
-import {
-  buildOperatorActionRequest,
-  formatOperatorActionFailure,
-  formatOperatorActionPreview,
-  formatOperatorActionSuccess,
-  postOperatorAction,
-  type OperatorActionId,
-} from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { buildOperatorActionRequest, formatOperatorActionFailure, formatOperatorActionPreview, formatOperatorActionSuccess, postOperatorAction, type OperatorActionId } from '@goodvibes-jev/engine/terminal-shell/agent-turn/operator-actions';
 import { resolveAgentConnectedHostConnection } from '../../agent/routine-schedule-promotion.ts';
 import { requireShellPaths } from './runtime-services.ts';
 import { commandRefusal, stripYesFlag } from './confirmation.ts';

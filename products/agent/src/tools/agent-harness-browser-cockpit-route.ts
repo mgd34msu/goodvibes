@@ -1,8 +1,8 @@
-import type { CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import type { CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-ranking';
 import type { CommandContext } from '../input/command-registry.ts';
 import { resolveRuntimeEndpointBinding } from '../cli/endpoints.ts';
 import { readOnboardingCompletionMarker } from '../runtime/onboarding/index.ts';
-import { urlHostForConfiguredHost } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { urlHostForConfiguredHost } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-dial';
 
 /** This browser opens on THIS host, so a wildcard bind resolves to loopback. */
 const browserConnectHost = urlHostForConfiguredHost;

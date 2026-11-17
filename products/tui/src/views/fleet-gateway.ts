@@ -18,7 +18,7 @@
 
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { OperatorMethodOutput } from '@goodvibes-jev/engine/platform';
-import { resolveOperatorRpc } from '../input/commands/operator-rpc.ts';
+import { resolveOperatorRpc } from '../runtime/client/operator-endpoint.ts';
 
 /** fleet.attempts.list output, the held-merge groups awaiting a winner pick. */
 export type FleetAttemptsList = OperatorMethodOutput<'fleet.attempts.list'>;

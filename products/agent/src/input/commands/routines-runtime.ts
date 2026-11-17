@@ -1,7 +1,7 @@
 import { discoverRoutines, type DiscoveredRoutineRecord } from '../../agent/routine-discovery.ts';
-import { AgentRoutineRegistry, evaluateAgentRoutineReadiness, type AgentRoutineRecord } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { formatAgentRecordOrigin, formatAgentRecordReviewState } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { buildAgentSkillRequirements, formatAgentSkillRequirement } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { AgentRoutineRegistry, evaluateAgentRoutineReadiness, type AgentRoutineRecord } from '@goodvibes-jev/engine/terminal-shell/agent-turn/routine-registry';
+import { formatAgentRecordOrigin, formatAgentRecordReviewState } from '@goodvibes-jev/engine/terminal-shell/agent-turn/record-labels';
+import { buildAgentSkillRequirements, formatAgentSkillRequirement } from '@goodvibes-jev/engine/terminal-shell/agent-turn/skill-registry';
 import {
   buildRoutineSchedulePreview,
   promoteRoutineToConnectedSchedule,

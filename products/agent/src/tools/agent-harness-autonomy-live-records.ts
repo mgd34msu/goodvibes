@@ -4,12 +4,12 @@ import type { ArtifactDescriptor } from '@goodvibes-jev/engine/platform/platform
 import { isDeepStrictEqual } from 'node:util';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { redactSensitiveData } from '@goodvibes-jev/engine/platform/platform/utils';
-import { AgentResearchRunRegistry, researchRunStorePath, type AgentResearchRunRecord } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { AgentResearchRunRegistry, researchRunStorePath, type AgentResearchRunRecord } from '@goodvibes-jev/engine/terminal-shell/agent-turn/research-run-registry';
 import { summarizeResearchRunItem } from '../input/agent-workspace-local-library-snapshot.ts';
-import type { CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import type { CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-ranking';
 import { modelReadingServicePath } from './agent-harness-model-reading-source.ts';
 import { capturePersonalOpsData } from './agent-harness-personal-ops-source.ts';
-import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn/preview-text';
 import { researchCheckpointRoute, researchRouteString } from './agent-harness-research-catalog-source.ts';
 import type { UiAutomationSnapshot, UiTasksSnapshot, UiControlPlaneSnapshot } from '../runtime/ui-read-models.ts';
 import type { AutonomyQueueLiveRecord, AutonomyQueueRecordControl, AutonomyQueueRecordOutput, SnapshotReader } from './agent-harness-autonomy-queue-types.ts';

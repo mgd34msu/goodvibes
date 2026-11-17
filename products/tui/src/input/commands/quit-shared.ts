@@ -2,7 +2,7 @@ import type { StatusResult } from 'simple-git';
 import { basename } from 'path';
 import type { CommandContext } from '../command-registry.ts';
 import { GitService } from '@goodvibes-jev/engine/platform/platform/git';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 import { RefusalError, refusal } from '@goodvibes-jev/engine/errors';
 
 type GitLike = Pick<GitService, 'addAll' | 'status' | 'commit'>;

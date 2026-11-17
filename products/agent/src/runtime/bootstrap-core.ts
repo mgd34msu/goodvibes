@@ -24,7 +24,8 @@ import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import { getConfiguredSystemPrompt } from '../config/index.ts';
 import { buildAgentConfigRouting, installAgentDaemonConfigClient } from '../config/daemon-config-routing.ts';
 import { installAgentDaemonCredentialsClient } from '../config/daemon-credential-routing.ts';
-import { AGENT_PLATFORM_TOOL_ADMISSION, getProviderIdFromModel } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { AGENT_PLATFORM_TOOL_ADMISSION } from '@goodvibes-jev/engine/terminal-shell/agent-turn/read-modes';
+import { getProviderIdFromModel } from '@goodvibes-jev/engine/terminal-shell/agent-turn/provider-model';
 import { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { registerAllTools } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { PermissionManager } from '@goodvibes-jev/engine/platform/platform/permissions';
@@ -49,7 +50,7 @@ import { loadBootstrapSystemPrompt, syncConfiguredServices } from '@/runtime/ind
 import { registerBootstrapHookBridge } from '@/runtime/index.ts';
 import { createRuntimeServices, type RuntimeServices } from './services.ts';
 import { createHostPowerSeam } from '@goodvibes-jev/engine/platform/platform/power';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 import { createUiRuntimeServices, type UiRuntimeServices } from './ui-services.ts';
 import { getTerminalSize } from '../shell/terminal-size.ts';
 import { composeAgentToolRegistry, decorateAgentWorkerRegistry } from './agent-tool-registry.ts';

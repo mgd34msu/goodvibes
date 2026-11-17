@@ -1,21 +1,14 @@
 import { readFileSync } from 'node:fs';
 import { RefusalError, readRefusal } from '@goodvibes-jev/engine/errors';
-import {
-  AgentSkillRegistry,
-  buildAgentSkillRequirements,
-  evaluateAgentSkillBundleReadiness,
-  evaluateAgentSkillReadiness,
-  formatAgentSkillRequirement,
-  type AgentSkillBundleRecord,
-  type AgentSkillRecord,
-} from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { AgentSkillRegistry, buildAgentSkillRequirements, evaluateAgentSkillBundleReadiness, evaluateAgentSkillReadiness, formatAgentSkillRequirement } from '@goodvibes-jev/engine/terminal-shell/agent-turn/skill-registry';
+import { type AgentSkillBundleRecord, type AgentSkillRecord } from '@goodvibes-jev/engine/terminal-shell/agent-turn/skill-registry-types';
 import { discoverSkills, type SkillRecord } from '../../agent/skill-discovery.ts';
-import { parseSkillStandardMarkdown } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { formatAgentRecordOrigin, formatAgentRecordReviewState } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { parseSkillStandardMarkdown } from '@goodvibes-jev/engine/terminal-shell/agent-turn/skill-standard';
+import { formatAgentRecordOrigin, formatAgentRecordReviewState } from '@goodvibes-jev/engine/terminal-shell/agent-turn/record-labels';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { parseAgentLocalLibraryArgs, resolveCommandFilePath, type ParsedAgentLocalLibraryArgs } from './agent-local-library-args.ts';
 import { requireShellPaths } from './runtime-services.ts';
-import { assertActorMayEnable, assertActorMayMarkReviewed, type RegistryActor } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { assertActorMayEnable, assertActorMayMarkReviewed, type RegistryActor } from '@goodvibes-jev/engine/terminal-shell/agent-turn/review-authority';
 import { commandRefusal } from './confirmation.ts';
 
 const SKILL_VALUE_FLAGS = ['name', 'description', 'procedure', 'tags', 'triggers', 'requires-env', 'requires-command', 'requires-commands', 'skills'] as const;

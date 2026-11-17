@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { getContractGateTimeoutMs, projectTestCommandMissing, resolveProjectTestCommand } from '@goodvibes-jev/engine/platform/platform/contract';
 import type { ToolCall } from '@goodvibes-jev/engine/platform/platform/types';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
-import { requireShellPaths } from './runtime-services.ts';
+import { requireShellPaths } from '@goodvibes-jev/engine/terminal-shell/command-service-access';
 
 /**
  * The one /test run of a terminal. Esc and Ctrl-C stop it (the terminal's

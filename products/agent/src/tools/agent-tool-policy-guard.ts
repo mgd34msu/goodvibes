@@ -3,7 +3,7 @@ import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools
 import { wrapAgentContextToolForAgentPolicy } from './agent-context-policy.ts';
 import { validateAgentSettingsMechanics, type SettingsToolArgs } from '@goodvibes-jev/engine/platform/platform/gate/policy';
 import type { AgentToolPolicyInvocationExplanation } from './agent-tool-policy-guard-types.ts';
-import { agentReadModesFor, installAgentToolPolicy } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { agentReadModesFor, installAgentToolPolicy } from '@goodvibes-jev/engine/terminal-shell/agent-turn/read-modes';
 export type { AgentToolPolicyInvocationExplanation } from './agent-tool-policy-guard-types.ts';
 
 /**

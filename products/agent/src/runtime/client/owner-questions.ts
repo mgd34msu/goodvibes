@@ -29,7 +29,7 @@ import type { SessionManager } from '@goodvibes-jev/engine/platform/platform/ses
 import { sessionIdentityFile, type SessionSurface } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import type { OperatorMethodId, OperatorMethodInput } from '@goodvibes-jev/engine/platform/contracts';
 import { whenSessionOpens } from '@goodvibes-jev/engine/terminal-shell/session-resume';
-import { createConnectedHost, type ConnectedHost } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { createConnectedHost, type ConnectedHost } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-client';
 import { findSessionConversation, onSessionConversationChange } from '../conversation-rewind-port.ts';
 
 export interface ConnectedHostInboxOptions {

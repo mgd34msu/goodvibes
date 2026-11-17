@@ -14,7 +14,7 @@
  */
 
 import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
-import { getDisplayWidth } from '@goodvibes-jev/engine/platform/platform/utils';
+import { getDisplayWidth } from '@goodvibes-jev/engine/platform/platform/utils/terminal-width';
 import { activeTokens } from './theme.js';
 import {
   NARROW_MODAL_BREAKPOINT,

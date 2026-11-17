@@ -3,7 +3,7 @@ import { atomicWriteFileSync } from '@goodvibes-jev/engine/platform/platform/con
 import type { MemoryApi } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import type { MemoryBundle, MemorySearchFilter } from '@goodvibes-jev/engine/platform/platform/state';
 import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 import { VALID_CLASSES, VALID_SCOPES, isValidClass, isValidScope, readRecallFlags, resolveConfinedBundlePath, type RecallFlagKind } from './recall-shared.js';
 import { afterMemory, mutationArguments, type RecallQueryContext } from './recall-query.js';
 import { commandRefusal } from './command-confirmation.js';

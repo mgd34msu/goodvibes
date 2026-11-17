@@ -1,6 +1,6 @@
 import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
-import { createStyledCell } from '@goodvibes-jev/engine/platform/platform/types';
-import { getDisplayWidth, wrapText } from '@goodvibes-jev/engine/platform/platform/utils';
+import { createStyledCell } from '@goodvibes-jev/engine/platform/platform/types/grid';
+import { getDisplayWidth, wrapText } from '@goodvibes-jev/engine/platform/platform/utils/terminal-width';
 import { GLYPHS, STATE_GLYPHS, type StatusState } from '@goodvibes-jev/engine/platform/platform/presentation';
 import { buildViewLine, buildStyledViewLine, DEFAULT_VIEW_PALETTE, type ViewPalette, type StyledViewSegment } from './polish-core.js';
 export interface TerminalPolishPresentation {

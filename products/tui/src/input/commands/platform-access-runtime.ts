@@ -1,7 +1,7 @@
 import { createAuthBundleHandler } from '@goodvibes-jev/engine/terminal-shell/auth-review-command';
 import { createAuthReviewHandler } from '@goodvibes-jev/engine/terminal-shell/auth-review-command';
 import { buildUrl } from '@goodvibes-jev/engine/transport-http';
-import { isLoopbackHost } from '@goodvibes-jev/engine/platform/platform/pairing';
+import { isLoopbackHost } from '@goodvibes-jev/engine/platform/platform/utils/reachable-base-url';
 import { readDaemonSessionToken, writeDaemonSessionToken } from '../../runtime/client/connected-daemon-credentials.ts';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { VERSION } from '../../version.ts';

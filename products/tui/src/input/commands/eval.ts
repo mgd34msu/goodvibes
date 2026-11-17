@@ -16,8 +16,8 @@ import { formatScorecard } from '@/runtime/index.ts';
 import { loadBaseline, captureBaseline, formatBaselineComparison, writeBaseline } from '@/runtime/index.ts';
 import type { EvalRegistry } from '@goodvibes-jev/engine/platform/platform/observe';
 import { formatSuiteResult, formatGateResult } from '@/runtime/index.ts';
-import { requireShellPaths } from './runtime-services.ts';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { requireShellPaths } from '@goodvibes-jev/engine/terminal-shell/command-service-access';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 
 // ── Subcommand helpers ────────────────────────────────────────────────────────
 

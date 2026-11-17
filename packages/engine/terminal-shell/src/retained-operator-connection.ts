@@ -1,6 +1,6 @@
 import { createOperatorApiClient, type OperatorApiClient, type OperatorApiClientOptions } from '@goodvibes-jev/engine/operator-client';
 import { observeImportFile, assertImportFileCurrent, type ConfigManager, type ImportFileObservation } from '@goodvibes-jev/engine/platform/platform/config';
-import { OwnedSelectionObservation } from '@goodvibes-jev/engine/platform/platform/runtime/client';
+import { OwnedSelectionObservation } from '@goodvibes-jev/engine/platform/platform/runtime/client/selection-observation';
 import { createNativeHostFetch } from './native/native-host-fetch.js';
 
 /** Private selected credential. Never a public picker item, log field or cache key. */

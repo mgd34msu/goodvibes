@@ -14,7 +14,7 @@
 // ---------------------------------------------------------------------------
 
 import type { CommandRegistry } from '../command-registry.ts';
-import { requireShellPaths } from './runtime-services.ts';
+import { requireShellPaths } from '@goodvibes-jev/engine/terminal-shell/command-service-access';
 import { takeTargetFlag } from '../views.ts';
 import { describeOperatorRpcError, getOperatorRpc } from './operator-rpc.ts';
 

@@ -4,7 +4,7 @@ import type { ProviderRuntimeSnapshot } from '@goodvibes-jev/engine/platform/pla
 import { buildAccountPosture, isRouteUsable } from '../provider-health-routes.ts';
 import { buildProviderHealthDomainSummaries, type ProviderHealthDomainInputs } from '../provider-health-domains.ts';
 import { toneStyle, statusGlyph, pad, postureLine, kv, runModalCommand } from './modal-surface-helpers.ts';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 
 /** The slice of ProviderRuntimeInspectionQuery this surface consumes. */
 export interface ProviderRuntimeInspect {

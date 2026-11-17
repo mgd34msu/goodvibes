@@ -15,7 +15,7 @@ import type { LLMProvider } from '@goodvibes-jev/engine/platform/platform/provid
 import type { SecretScope } from '../config/secrets.ts';
 import type { ConcealedInputRequest } from './concealed-input.ts';
 import type { CommandContext } from './command-registry.ts';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 
 /** The intake decision derived purely from a provider's registration truth. */
 export interface ProviderKeyIntakeDecision {

@@ -38,12 +38,9 @@
  * latch is not a value the platform ships.
  */
 
-import {
-  evaluateClientCompatibility,
-  evaluateDaemonStatusCompatibility,
-  type ClientCompatibilityVerdict,
-  type DaemonCompatibilityVerdict,
-} from '@goodvibes-jev/engine/platform/platform/control-plane';
+import { evaluateClientCompatibility } from '@goodvibes-jev/engine/platform/platform/control-plane/build-compatibility';
+import { evaluateDaemonStatusCompatibility } from '@goodvibes-jev/engine/platform/platform/control-plane/daemon-compatibility';
+import type { ClientCompatibilityVerdict, DaemonCompatibilityVerdict } from '@goodvibes-jev/engine/platform/platform/control-plane';
 
 /**
  * The oldest daemon build this terminal will adopt.

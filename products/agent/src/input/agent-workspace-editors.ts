@@ -1,7 +1,7 @@
-import type { AgentPersonaRecord } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import type { AgentRoutineRecord } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import type { AgentSkillRecord } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import type { AgentNoteRecord } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import type { AgentPersonaRecord } from '@goodvibes-jev/engine/terminal-shell/agent-turn/persona-registry';
+import type { AgentRoutineRecord } from '@goodvibes-jev/engine/terminal-shell/agent-turn/routine-registry';
+import type { AgentSkillRecord } from '@goodvibes-jev/engine/terminal-shell/agent-turn/skill-registry-types';
+import type { AgentNoteRecord } from '@goodvibes-jev/engine/terminal-shell/agent-turn/note-registry';
 import type { MemoryRecord } from '@goodvibes-jev/engine/platform/platform/state';
 import type {
   AgentWorkspaceLocalEditor,

@@ -1,7 +1,7 @@
 import { closeSync, constants, fstatSync, lstatSync, openSync, readSync, type Stats } from 'node:fs';
 import { dirname, isAbsolute, resolve, sep } from 'node:path';
-import { resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/platform/platform/config';
-import { operatorTokenPath } from '@goodvibes-jev/engine/platform/platform/workspace';
+import { resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/platform/platform/config/goodvibes-home';
+import { operatorTokenPath } from '@goodvibes-jev/engine/platform/platform/pairing/companion-token';
 
 /** The daemon's operator token on this machine, read with every ancestor checked: the bootstrap of
  * explicit /host pair, and the credential native work presents to a daemon on this machine when

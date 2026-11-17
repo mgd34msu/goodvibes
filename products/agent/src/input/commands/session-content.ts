@@ -9,7 +9,7 @@ import { extractText } from '@goodvibes-jev/engine/platform/platform/export';
 import { requireSessionManager, requireShellPaths } from './runtime-services.ts';
 import { sessionCommand } from './session.ts';
 import { loadSavedSessionIntoLive } from './session-load.ts';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 import './confirmation.ts';
 import { readConversationMessageSnapshots } from '../../core/conversation-message-snapshot.ts';
 

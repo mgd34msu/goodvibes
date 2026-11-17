@@ -32,10 +32,7 @@ import {
   createDaemonServiceControl,
   type DaemonServiceControl,
 } from '@goodvibes-jev/engine/platform/platform/runtime/client';
-import {
-  connectedHostPort,
-  dialHostForConfiguredHost,
-} from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { connectedHostPort, dialHostForConfiguredHost } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-dial';
 import {
   createDaemonCliRunner,
   installDaemonService,

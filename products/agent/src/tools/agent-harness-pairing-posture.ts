@@ -3,18 +3,18 @@ import * as nativeOs from 'node:os';
 import type { CommandContext } from '../input/command-registry.ts';
 import { GOODVIBES_AGENT_PAIRING_SURFACE } from '../config/surface.ts';
 import { resolveRuntimeEndpointBinding, type RuntimeEndpointConfigReader } from '../cli/endpoints.ts';
-import { readConnectedHostOperatorToken } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { readConnectedHostOperatorToken } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-auth';
 import { buildAgentWorkspaceChannels } from '../input/agent-workspace-channels.ts';
 import { buildAgentWorkspaceVoiceMediaReadiness } from '../input/agent-workspace-voice-media.ts';
 import { requirePlatform, requireShellPaths } from '../input/commands/runtime-services.ts';
 import { browserControlPosture, type BrowserControlPosture } from './agent-harness-browser-control.ts';
 import { browserDeviceCatalogMatches } from './agent-harness-browser-device-readings.ts';
 import { captureCatalogNativeFacts, withModelReadingSource } from './agent-harness-model-reading-source.ts';
-import type { CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import type { CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-ranking';
 import { captureAsyncHarnessInput } from './agent-harness-async-input.ts';
 import { deviceLiveReadModelSnapshot, deviceLiveRecordsFor, SENSOR_DEVICE_CAPABILITY_IDS, type DeviceLiveCapabilityRecord } from './agent-harness-device-live-read-models.ts';
-import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn/preview-text';
+import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn/read-helpers';
 
 export interface AgentHarnessPairingArgs {
   readonly pairingRouteId?: unknown;

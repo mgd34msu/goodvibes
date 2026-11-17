@@ -25,7 +25,7 @@ import { createConnectedHost, isHostFailure, type ConnectedHostConfigReader } fr
 import { operatorRouteLabel, type FamilyGatewayRemote, type FamilyGatewayResult } from './family-gateway.js';
 import type { AgentInProcessHost } from './in-process-host.js';
 import { captureOperatorConnection } from './operator-connection-owner.js';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 
 export interface ConnectedHostFamilyRemoteOptions {
   /** Settings naming the connected host (`controlPlane.*`), read when the call is made. */

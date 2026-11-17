@@ -10,11 +10,11 @@ import { readExecutionMode } from '../permissions/execution-mode.ts';
 import { listAvailableSubscriptionProviders } from '@goodvibes-jev/engine/platform/platform/config';
 import type { ArtifactDescriptor } from '@goodvibes-jev/engine/platform/platform/artifacts';
 import type { CommandContext } from './command-registry.ts';
-import { AgentNoteRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { AgentPersonaRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { AgentResearchRunRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { AgentResearchSourceRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { AgentSkillRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { AgentNoteRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn/note-registry';
+import { AgentPersonaRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn/persona-registry';
+import { AgentResearchRunRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn/research-run-registry';
+import { AgentResearchSourceRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn/research-source-registry';
+import { AgentSkillRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn/skill-registry';
 import { RoutineScheduleReceiptStore } from '../agent/routine-schedule-receipts.ts';
 import {
   getAgentRuntimeProfilesRoot,
@@ -23,7 +23,7 @@ import {
   readAgentRuntimeProfileSelection,
 } from '../agent/runtime-profile.ts';
 import { GOODVIBES_AGENT_PAIRING_SURFACE } from '../config/surface.ts';
-import { readConnectedHostOperatorToken, type ConnectedHostOperatorToken } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { readConnectedHostOperatorToken, type ConnectedHostOperatorToken } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-auth';
 import { summarizePersonaItem, summarizeNoteItem, summarizeResearchRunItem, summarizeRoutineScheduleReceipt, summarizeSkillBundleItem, summarizeSkillItem } from './agent-workspace-local-library-snapshot.ts';
 import { isReviewerHandoffArtifact, summarizeReviewerHandoffArtifact } from './agent-workspace-review-packet-utils.ts';
 import { readMailboxStatus } from './commands/email-settings.ts';

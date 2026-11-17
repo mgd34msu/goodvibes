@@ -1,4 +1,4 @@
-import { isLoopbackHost } from '@goodvibes-jev/engine/platform/platform/pairing';
+import { isLoopbackHost } from '@goodvibes-jev/engine/platform/platform/utils/reachable-base-url';
 import { resolveConnectedHostConnection, type AgentDaemonVerbCallerOptions } from './client/daemon-verbs.ts';
 
 type ConnectedHostConnection = ReturnType<typeof resolveConnectedHostConnection>;

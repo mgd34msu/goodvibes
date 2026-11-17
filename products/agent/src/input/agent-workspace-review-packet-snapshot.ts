@@ -1,6 +1,7 @@
 import type { ArtifactDescriptor } from '@goodvibes-jev/engine/platform/platform/artifacts';
 import type { CommandContext } from './command-registry.ts';
-import { AgentDocumentRegistry, type AgentDocumentRecord } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { AgentDocumentRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn/document-registry';
+import { type AgentDocumentRecord } from '@goodvibes-jev/engine/terminal-shell/agent-turn/document-registry-types';
 import type { AgentWorkspaceReviewPacketDefaults, AgentWorkspaceReviewPacketTimeline, AgentWorkspaceReviewPacketTimelineEvent, AgentWorkspaceReviewPacketWizard, AgentWorkspaceReviewPacketWizardStep, AgentWorkspaceReviewPacketWizardStepStatus, AgentWorkspaceReviewerReadinessBadge } from './agent-workspace-types.ts';
 import { readArtifactMetadataNumber, readArtifactMetadataString, readArtifactMetadataStringList } from './agent-workspace-artifact-metadata.ts';
 import { AGENT_WORKSPACE_CATEGORIES } from './agent-workspace-categories.ts';

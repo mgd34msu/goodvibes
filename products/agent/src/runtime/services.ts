@@ -5,8 +5,9 @@ import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { shell as runtimeShell } from '@goodvibes-jev/engine/platform/platform/runtime';
 import type { shell as RuntimeShell, bootstrap as RuntimeBootstrap } from '@goodvibes-jev/engine/platform/platform/runtime';
 import { readCheckpointGuardSettings, readCheckpointRegistrationSetting } from '../config/checkpoint-settings.ts';
-import { createAgentResearchSourceOwner } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { createClassicProtectedSourceOwner, type ProtectedSourceOwner } from '@goodvibes-jev/engine/platform/platform/security';
+import { createAgentResearchSourceOwner } from '@goodvibes-jev/engine/terminal-shell/agent-turn/research-source-screening';
+import { createClassicProtectedSourceOwner } from '@goodvibes-jev/engine/platform/platform/security/source-screening/classic-owner';
+import type { ProtectedSourceOwner } from '@goodvibes-jev/engine/platform/platform/security';
 import { createWorkspaceRegistrationLiveChecker } from '../config/workspace-registration.ts';
 import { FocusTracker } from '@/runtime/index.ts';
 import { ServiceRegistry } from '@goodvibes-jev/engine/platform/platform/config';
@@ -25,7 +26,7 @@ import { createAgentFleetUnion, type AgentFleetUnion } from './client/fleet-unio
 import './client/session-inputs.ts';
 import { createHostedSessionRegistry, type HostedSessionRegistry } from './client/hosted-sessions.ts';
 import { HOSTED_HANDOFF_CLIENT_ID, createHostedConversationHandoff, createHostedHandoffFileStore, type HostedConversationHandoff } from './client/hosted-handoff.ts';
-import { readNotificationsMetadataOnly } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { readNotificationsMetadataOnly } from '@goodvibes-jev/engine/platform/platform/runtime/notification-privacy';
 import { readAgentHostSetting } from '../config/host-settings.ts';
 import { agentDaemonCredentialsClient, installAgentDaemonCredentialsClient } from '../config/daemon-credential-routing.ts';
 import { agentDaemonConfigClient, installAgentDaemonConfigClient } from '../config/daemon-config-routing.ts';
@@ -115,7 +116,7 @@ import { VERSION } from '../version.ts';
 import { ClientBuildGuard } from './client-build-compatibility.ts';
 import { AGENT_DAEMON_BUILD_FLOOR, DaemonBuildGuard, createDaemonAdoptionGate, readDaemonStatusPayload } from './daemon-build-compatibility.ts';
 import { composeRuntimeServices } from '@goodvibes-jev/engine/platform/platform/runtime/bootstrap';
-import { createShellPathService } from '@/runtime/index.ts';
+import { createShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell-paths';
 
 type WorktreeRegistry = RuntimeShell.WorktreeRegistry;
 // The platform's FULL runtime-services shape. This graph's TYPE narrows or leaves

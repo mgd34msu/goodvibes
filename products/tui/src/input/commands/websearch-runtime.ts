@@ -1,5 +1,5 @@
 import type { CommandRegistry } from '../command-registry.ts';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 
 interface ParsedSearchArgs {
   readonly query: string;

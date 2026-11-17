@@ -1,4 +1,4 @@
-import type { CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import type { CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-ranking';
 import { selectHarnessCatalog } from './agent-harness-catalog-selection.ts';
 /**
  * agent-harness-connected-host-capabilities.ts, the connected-host capability
@@ -13,13 +13,13 @@ import { selectHarnessCatalog } from './agent-harness-catalog-selection.ts';
 import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { CommandContext } from '../input/command-registry.ts';
 import { resolveAgentConnectedHostConnection } from '../agent/routine-schedule-promotion.ts';
-import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn/preview-text';
 import { agentHarnessModes, hostActions, settingsActions } from './agent-harness-route-format.ts';
-import { operatorBriefingRoutes } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { OPERATOR_ACTION_IDS } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { AGENT_KNOWLEDGE_INGEST_SOURCE_KINDS as SOURCE_KINDS } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { operatorBriefingRoutes } from '@goodvibes-jev/engine/terminal-shell/agent-turn/operator-briefing-tool';
+import { OPERATOR_ACTION_IDS } from '@goodvibes-jev/engine/terminal-shell/agent-turn/operator-actions';
+import { SOURCE_KINDS } from '@goodvibes-jev/engine/terminal-shell/agent-turn/knowledge-ingest-tool';
 import { harnessDisplayPath } from './agent-harness-display-path.ts';
-import { EFFECT_ADMISSION_SENTENCE } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { EFFECT_ADMISSION_SENTENCE } from '@goodvibes-jev/engine/terminal-shell/agent-turn/effect-admission';
 
 /**
  * The one statement of who manages connected-host lifecycle and listeners,

@@ -24,7 +24,7 @@ import { GitStatusProvider } from '../renderer/git-status.ts';
 import type { GitHeaderInfo } from '../renderer/git-status.ts';
 import type { PermissionRequestHandler } from '@goodvibes-jev/engine/platform/platform/permissions';
 import { createShellViews, type ShellViews } from '../views/builtin-views.ts';
-import { WorkspaceRegistrationManager } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { WorkspaceRegistrationManager } from '@goodvibes-jev/engine/platform/platform/runtime/workspace-registration';
 import { createSystemMessageRouter, type SystemMessageRouter } from '../core/system-message-router.ts';
 import { getConfigSnapshot } from '@goodvibes-jev/engine/platform/platform/config';
 import { createBootstrapCommandContext } from './bootstrap-command-context.ts';
@@ -39,7 +39,7 @@ import type { ForensicsRegistry } from '@/runtime/index.ts';
 import type { PolicyRuntimeState } from '@/runtime/index.ts';
 import type { TaskManager } from '@/runtime/index.ts';
 import type { UiRuntimeServices } from './ui-services.ts';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 import type { SessionSpineClient } from '@goodvibes-jev/engine/platform/platform/runtime/session-spine';
 import { seedCostBudgetFromEnv } from './cost-budget-seed.ts';
 

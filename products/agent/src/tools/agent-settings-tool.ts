@@ -1,5 +1,5 @@
 import { isHarnessSettingsQuery } from './agent-harness-settings-catalog.ts';
-import { captureCatalogData } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { captureCatalogData } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-data';
 import { createHarnessCatalogInputProjector, forwardHarnessCatalogCall, protectHarnessCatalogTool } from './agent-harness-catalog-ingress.ts';
 import { createPreferredSettingsProjector, executeAdmittedPreferredSettings, settingsThrownFailure } from './agent-settings-admission.ts';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
@@ -9,7 +9,7 @@ import { createAgentHarnessTool } from './agent-harness-tool.ts';
 import { createAgentSettingsImportTool } from './agent-settings-import-tool.ts';
 import { executeAdmittedAgentSettingsImport } from './agent-settings-import-admission.ts';
 import { readSettingsAction, SETTINGS_ACTION_WORDS } from './agent-settings-action.ts';
-import { confirmParameter } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { confirmParameter } from '@goodvibes-jev/engine/terminal-shell/agent-turn/effect-admission';
 
 interface AgentSettingsToolArgs {
   readonly action?: unknown;

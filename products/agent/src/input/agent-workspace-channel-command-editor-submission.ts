@@ -2,7 +2,7 @@ import type { AgentWorkspaceEditorKind, AgentWorkspaceLocalEditor } from './agen
 import type { AgentWorkspaceChannelCommandEditorKind } from './agent-workspace-channel-command-editors.ts';
 import { isAgentWorkspaceChannelCommandEditorKind } from './agent-workspace-channel-command-editors.ts';
 import { quoteSlashCommandArg } from './slash-command-parser.ts';
-import { buildAgentChannelDeliveryPreview } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { buildAgentChannelDeliveryPreview } from '@goodvibes-jev/engine/terminal-shell/agent-turn/channel-delivery';
 import type { AgentWorkspaceCommandEditorSubmission, AgentWorkspaceCommandSubmissionHandler, AgentWorkspaceFieldReader } from './agent-workspace-command-editor-engine.ts';
 import { buildCommandEditorSubmissionFromTable, dispatchCommandEditorSubmission, editorMessageSubmission, isAffirmative, redactWebhookForDisplay } from './agent-workspace-command-editor-engine.ts';
 

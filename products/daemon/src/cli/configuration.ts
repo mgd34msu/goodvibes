@@ -5,7 +5,7 @@ const installedDataWriter = process.platform === 'darwin' ? undefined : admitIns
 /** One home/tier resolution shared by command and explicit serving entrypoints. */
 import { resolve } from 'node:path';
 import { ConfigManager, daemonConfigPathForHome, resolveGoodVibesHomeOwnership } from '@goodvibes-jev/engine/platform/platform/config';
-import { readDaemonSetting } from '@goodvibes-jev/engine/platform/platform/workspace';
+import { readDaemonSetting } from '@goodvibes-jev/engine/platform/platform/workspace/daemon-home';
 import { GOODVIBES_DAEMON_SURFACE_ROOT } from '../config/surface.js';
 import type { DaemonCliFlags } from './types.js';
 

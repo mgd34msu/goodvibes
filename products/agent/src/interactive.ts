@@ -11,7 +11,6 @@ import { formatRefusal, refusal } from '@goodvibes-jev/engine/errors';
 import { routeNativeConversationInput, dispatchNativeConversationTurn, describeFailedNativeDispatch } from './runtime/native-conversation-ingress.ts';
 import { createNativeWorkLedgerView } from './runtime/native-work-ledger-host.ts';
 import { createAgentNativeHostSelection } from './runtime/agent-native-host-selection.ts';
-import { homedir } from 'node:os';
 import { SetupPairingController } from './shell/setup-pairing-controller.ts';
 import { parseSlashCommand } from './input/slash-command-parser.ts';
 import { runExitSequence } from './shell/exit-sequence.ts';
@@ -70,7 +69,7 @@ import { describePowerStatus } from './renderer/power-status.ts';
 import { buildPersistedSessionContextFromFacts } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { installFocusModeExitGuard, markFocusModeEnabled, wrapRequestPermissionWithApprovalAlert } from './shell/terminal-focus-mode.ts';
 import { createTerminalLifecycle, installTerminalExitGuards, makeFileEditorOpener } from '@goodvibes-jev/engine/terminal-shell';
-import { prepareShellCliRuntime } from './cli/entrypoint.ts';
+import type { PreparedShellCliRuntime } from './cli/entrypoint.ts';
 import { reachabilityAtLaunch } from './runtime/path-shadow-startup.ts';
 import { selfUpdateAtLaunch } from './cli/launch-auto-update.ts';
 import { startPeriodicSelfUpdate } from './runtime/periodic-update.ts';
@@ -89,7 +88,7 @@ import { createAutonomySurfacing, buildCalendarEventsLister, buildSkillDraftProp
 import { bindApprovals } from './shell/approvals-binding.ts';
 import { listAutomationRunsSince } from './agent/automation-runs-source.ts';
 import { listUpcomingSchedules } from './agent/automation-schedules-source.ts';
-import { createConnectedHost } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { createConnectedHost } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-client';
 import './core/hardware-profile.ts';
 import { readApprovalPostureFromConfig } from './permissions/approval-posture.ts';
 import { cancelConversationGeneration, installRemoteConversationRouting } from './shell/remote-conversation-wiring.ts';
@@ -106,18 +105,11 @@ let releaseFailedStartupSession: (() => Promise<void>) | undefined;
 // entry hands the screen back before its explanation is printed.
 let restoreTerminalAfterFailedStartup: (() => void) | undefined;
 
-async function main() {
+async function main(prepared: PreparedShellCliRuntime) {
   const stdout = process.stdout;
   const stdin = process.stdin;
   installFocusModeExitGuard(stdout); // see shell/terminal-focus-mode.ts
-  const { cli, configManager, bootstrapWorkingDir, bootstrapHomeDirectory } = await prepareShellCliRuntime(
-    process.argv.slice(2),
-    {
-      defaultWorkingDirectory: process.env['GOODVIBES_WORKING_DIR'] ?? process.cwd(),
-      homeDirectory: process.env['GOODVIBES_AGENT_HOME'] ?? homedir(),
-    },
-    'goodvibes-agent',
-  );
+  const { cli, configManager, bootstrapWorkingDir, bootstrapHomeDirectory } = prepared;
 
   const terminalLaunchError = getInteractiveTerminalLaunchError({
     binary: cli.binary,
@@ -1375,25 +1367,28 @@ async function main() {
   daemonRepairPrompt = followups.daemonRepairPrompt;
   render();
 }
-main().catch(async (err: unknown) => {
-  // Leave the alternate screen and input modes first, so the explanation below
-  // lands on the user's own screen and their shell is usable afterwards.
-  try { restoreTerminalAfterFailedStartup?.(); } catch { /* best effort before the fatal report */ }
-  await releaseFailedStartupSession?.();
-  reportFatalStartupError(
-    err,
-    {
-      binary: 'goodvibes-agent',
-      debug: envFlag(process.env['GOODVIBES_AGENT_DEBUG']),
-    },
-    {
-      logError: (message, context) => logger.error(message, context),
-      // NOT process.stderr.write: installFullScreenTerminalOutputGuard above
-      // replaces it, so a failure raised after that install had its explanation
-      // intercepted and swallowed, measured on a compiled binary as exit 1 with
-      // zero bytes on both streams. A descriptor write cannot be intercepted.
-      writeStderr: writeFatalLine,
-      exit: (code) => process.exit(code),
-    },
-  );
-});
+/** Runs the terminal UI for a command line that `prepareShellCliRuntime` left to it. */
+export function runInteractive(prepared: PreparedShellCliRuntime): Promise<void> {
+  return main(prepared).catch(async (err: unknown) => {
+    // Leave the alternate screen and input modes first, so the explanation below
+    // lands on the user's own screen and their shell is usable afterwards.
+    try { restoreTerminalAfterFailedStartup?.(); } catch { /* best effort before the fatal report */ }
+    await releaseFailedStartupSession?.();
+    reportFatalStartupError(
+      err,
+      {
+        binary: 'goodvibes-agent',
+        debug: envFlag(process.env['GOODVIBES_AGENT_DEBUG']),
+      },
+      {
+        logError: (message, context) => logger.error(message, context),
+        // NOT process.stderr.write: installFullScreenTerminalOutputGuard above
+        // replaces it, so a failure raised after that install had its explanation
+        // intercepted and swallowed, measured on a compiled binary as exit 1 with
+        // zero bytes on both streams. A descriptor write cannot be intercepted.
+        writeStderr: writeFatalLine,
+        exit: (code) => process.exit(code),
+      },
+    );
+  });
+}

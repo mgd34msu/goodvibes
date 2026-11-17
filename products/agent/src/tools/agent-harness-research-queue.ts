@@ -1,15 +1,11 @@
 import { withResearchCatalog, rankResearchRecords, researchRouteString as routeString, researchSourcePriority } from './agent-harness-research-catalog-source.ts';
 import { selectHarnessCatalog } from './agent-harness-catalog-selection.ts';
-import type { CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import type { CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-ranking';
 import { captureAsyncHarnessInput } from './agent-harness-async-input.ts';
 import type { CommandContext } from '../input/command-registry.ts';
-import {
-  AgentResearchSourceRegistry,
-  researchSourceReportLine,
-  type AgentResearchSourceRecord,
-} from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { AgentResearchSourceRegistry, researchSourceReportLine, type AgentResearchSourceRecord } from '@goodvibes-jev/engine/terminal-shell/agent-turn/research-source-registry';
+import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn/preview-text';
+import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn/read-helpers';
 
 interface AgentHarnessResearchQueueArgs {
   readonly sourceId?: unknown;

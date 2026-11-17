@@ -1,7 +1,7 @@
 import { installedDataWriter } from '../runtime/native-data-writer.ts';
 import { ConfigManager, daemonConfigPathForHome, resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/platform/platform/config';
-import { NOTIFICATIONS_METADATA_ONLY_KEY, NOTIFICATIONS_METADATA_ONLY_SETTING } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
-import { AGENT_HOSTED_RESEARCH_SCREENING_KEY, AGENT_HOSTED_RESEARCH_SCREENING_SETTING } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { NOTIFICATIONS_METADATA_ONLY_KEY, NOTIFICATIONS_METADATA_ONLY_SETTING } from '@goodvibes-jev/engine/platform/platform/runtime/notification-privacy';
+import { AGENT_HOSTED_RESEARCH_SCREENING_KEY, AGENT_HOSTED_RESEARCH_SCREENING_SETTING } from '@goodvibes-jev/engine/terminal-shell/agent-turn/research-source-screening';
 
 // The host key is validated and registered on each Agent instance before load.
 // platform ConfigKey covers only GoodVibesConfig fields; Agent uses a validated host handle.

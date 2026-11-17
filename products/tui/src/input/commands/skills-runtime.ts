@@ -1,16 +1,6 @@
 import type { CommandRegistry } from '../command-registry.ts';
 import { discoverSkills } from '../../views/skills-discovery.ts';
-import {
-  installEcosystemCatalogEntry,
-  listInstalledEcosystemEntries,
-  loadEcosystemCatalog,
-  removeEcosystemCatalogEntry,
-  reviewEcosystemCatalogEntry,
-  searchEcosystemCatalog,
-  uninstallEcosystemCatalogEntry,
-  updateInstalledEcosystemEntry,
-  upsertEcosystemCatalogEntry,
-} from '@/runtime/index.ts';
+import { installEcosystemCatalogEntry, listInstalledEcosystemEntries, loadEcosystemCatalog, removeEcosystemCatalogEntry, reviewEcosystemCatalogEntry, searchEcosystemCatalog, uninstallEcosystemCatalogEntry, updateInstalledEcosystemEntry, upsertEcosystemCatalogEntry } from '@goodvibes-jev/engine/platform/platform/runtime/ecosystem/catalog';
 import { openModalCommand, requireEcosystemCatalogPaths, requireShellPaths } from './runtime-services.ts';
 import { parseScope } from './marketplace-runtime.ts';
 

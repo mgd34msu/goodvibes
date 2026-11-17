@@ -14,18 +14,14 @@ export type {
 } from '@goodvibes-jev/engine/terminal-shell/service-posture';
 import { yesNo } from '@goodvibes-jev/engine/terminal-shell/cli-output';
 import { probeTcp as probe } from '@goodvibes-jev/engine/terminal-shell/service-io';
-import '@goodvibes-jev/judgment/decisions';
-import 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import { resolveConnectedHostDialEnabled, resolveDaemonEnabled } from '@goodvibes-jev/engine/platform/platform/config';
 import type { ConfigKey } from '../config/index.ts';
-import './endpoints.ts';
 import type { RuntimeEndpointId } from './endpoints.ts';
-import '@goodvibes-jev/engine/terminal-shell';
 import { captureJudgmentPort, type JudgmentPortCapture, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
-import { retainCliConfig } from '@goodvibes-jev/engine/terminal-shell';
-import { dialHostForConfiguredHost } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { isClassicOperation } from '@goodvibes-jev/engine/platform/platform/runtime';
+import { retainCliConfig } from '@goodvibes-jev/engine/terminal-shell/cli-config-owner';
+import { dialHostForConfiguredHost } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-dial';
+import { isClassicOperation } from '@goodvibes-jev/engine/platform/platform/runtime/decision-policy';
 
 export interface CliServicePosture {
   readonly config: {

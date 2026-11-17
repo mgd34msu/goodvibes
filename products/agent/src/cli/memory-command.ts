@@ -13,8 +13,8 @@ import {
   type ProvenanceLink,
   type ProvenanceLinkKind,
 } from '@goodvibes-jev/engine/platform/platform/state';
-import { assertNoSecretLikeMemoryText } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { formatAgentRecordReference, formatAgentRecordReviewState } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { assertNoSecretLikeMemoryText } from '@goodvibes-jev/engine/terminal-shell/agent-turn/memory-safety';
+import { formatAgentRecordReference, formatAgentRecordReviewState } from '@goodvibes-jev/engine/terminal-shell/agent-turn/record-labels';
 import type { CliCommandOutput } from './types.ts';
 import type { CliCommandRuntime } from './management.ts';
 // Which store a command uses (the host's over the wire, or this machine's file) is decided once there.

@@ -20,8 +20,8 @@
  */
 
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { readConnectedHostOperatorToken } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { connectedHostBaseUrl } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { readConnectedHostOperatorToken } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-auth';
+import { connectedHostBaseUrl } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-dial';
 
 export interface SessionRegistrationConnection {
   readonly baseUrl: string;

@@ -11,12 +11,13 @@
 import { createProviderStack } from '@goodvibes-jev/engine/platform/platform/runtime/bootstrap';
 import { composeJudgment } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { createAsyncDisposalScope } from '@goodvibes-jev/engine/platform/platform/runtime/disposal';
-import { createFeatureFlagManager, deriveFeatureStates } from '@goodvibes-jev/engine/platform/platform/runtime/feature-flags';
+import { createFeatureFlagManager } from '@goodvibes-jev/engine/platform/platform/runtime/feature-flags/manager';
+import { deriveFeatureStates } from '@goodvibes-jev/engine/platform/platform/runtime/feature-flags/feature-settings';
 import { ServiceRegistry, SubscriptionManager, createRuntimeSecretsManager, resolveGoodVibesDaemonHome, sharedSubscriptionsPath } from '@goodvibes-jev/engine/platform/platform/config';
 import type { ProviderCatalogOptions, ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
 import { SessionManager } from '@goodvibes-jev/engine/platform/platform/sessions';
 import { RuntimeEventBus, configureRuntimeEventBusDefaults, runtimeEventBusOptionsFrom, createShellPathService } from '@/runtime/index.ts';
-import { createRuntimeStore } from '../runtime/store/index.ts';
+import { createRuntimeStore } from '@goodvibes-jev/engine/platform/platform/runtime/store';
 import type { SecretsManager } from '../config/secrets.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import type { CliCommandRuntime } from './management.ts';

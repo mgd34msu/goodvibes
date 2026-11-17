@@ -2,7 +2,7 @@ import type { ConfigModalAction, ConfigModalActionContext, ConfigModalRow, Confi
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { buildSandboxReview, listSandboxProfiles } from '@/runtime/index.ts';
 import type { SandboxProfile, SandboxSession, SandboxSessionRegistry } from '@/runtime/index.ts';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 import { toneStyle, statusGlyph, pad, postureLine, kv, type Tone } from './modal-surface-helpers.ts';
 
 /** SandboxSessionRegistry has no event subscription, poll at the same 3s

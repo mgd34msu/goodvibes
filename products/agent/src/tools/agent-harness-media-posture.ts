@@ -1,16 +1,16 @@
 import { captureAsyncHarnessInput } from './agent-harness-async-input.ts';
-import type { CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import type { CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-ranking';
 import { browserDeviceCatalogMatches } from './agent-harness-browser-device-readings.ts';
 import { selectHarnessCatalog } from './agent-harness-catalog-selection.ts';
 import { captureCatalogNativeFacts, withModelReadingSource } from './agent-harness-model-reading-source.ts';
 import { buildAgentWorkspaceVoiceMediaReadiness } from '../input/agent-workspace-voice-media.ts';
 import type { AgentWorkspaceVoiceMediaProviderStatus } from '../input/agent-workspace-voice-media.ts';
 import type { CommandContext } from '../input/command-registry.ts';
-import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn/preview-text';
 import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { resolveWakeRuntimeSettings } from '@goodvibes-jev/engine/platform/platform/voice/wake/runtime';
 import { agentWakeCapabilities } from '../core/wake-provision-status.ts';
-import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn/read-helpers';
 
 export interface AgentHarnessMediaArgs {
   readonly mediaProviderId?: unknown;

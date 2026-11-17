@@ -29,7 +29,7 @@
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { readLifecycleMarker } from '@goodvibes-jev/engine/platform/platform/daemon';
+import { readLifecycleMarker } from '@goodvibes-jev/engine/platform/platform/daemon/lifecycle-marker';
 
 /** Enough receipts to explain a restart; a status page is not a log viewer. */
 const MAX_REPORTED_RECEIPTS = 10;

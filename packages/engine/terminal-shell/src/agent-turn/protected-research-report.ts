@@ -1,6 +1,7 @@
-import { snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
+import { snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate/judgment-input';
 import { SOURCE_SCREENING_LIMITS, type ProtectedSourceOwner, type ProtectedSource, type ProtectedResearchReference, type SourceScreeningHold } from '@goodvibes-jev/engine/platform/platform/security';
-import { ToolInputProjectionError, type ToolInputProjectionProblem, type ToolInputProjector, type ToolInputProjectionRequest, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools/input-projection';
+import type { ToolInputProjectionProblem, ToolInputProjector, ToolInputProjectionRequest, ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { prepareAgentResearchReportInput, omittedReferencePattern } from './research-report-input.js';
 import { RESEARCH_SCREENING_UNCONFIGURED_DETAIL } from './research-source-screening.js';
 

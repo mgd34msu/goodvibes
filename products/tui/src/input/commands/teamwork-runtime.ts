@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { AGENT_TEMPLATES } from '@goodvibes-jev/engine/platform/platform/tools';
 import { archetypeFamilyOf, readArchetypeListing, type AgentArchetype, type ArchetypeFamily, type ArchetypeFamilyReading } from '@goodvibes-jev/engine/platform/platform/agents';
 import { requireAgentManager, requireReadModels, requireShellPaths } from './runtime-services.ts';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 
 type TeamworkModeId =
   | 'local-engineer'

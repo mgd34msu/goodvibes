@@ -1,11 +1,11 @@
-import { OwnedSelectionObservation } from '@goodvibes-jev/engine/platform/platform/runtime/client';
+import { OwnedSelectionObservation } from '@goodvibes-jev/engine/platform/platform/runtime/client/selection-observation';
 import { createOperatorApiClient } from '@goodvibes-jev/engine/operator-client';
 import { createNativeHostFetch } from '@goodvibes-jev/engine/terminal-shell/native';
 import { realpathSync } from 'node:fs';
 import { openLegacyImportOperator, registerLegacyImportCommands, resolveLegacyImportJournalLocation, retainLegacyImportJournalOwner, type LegacyImportOperatorSession } from '@goodvibes-jev/engine/terminal-shell/legacy-work-ledger-import';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { resolveNativeHostCredential } from '../../runtime/client/native-host-credential.ts';
-import { requireShellPaths } from './runtime-services.ts';
+import { requireShellPaths } from '@goodvibes-jev/engine/terminal-shell/command-service-access';
 export type OpenTuiLegacyImportSession = (context: CommandContext, projectId: string) => Promise<LegacyImportOperatorSession>;
 export function registerTuiLegacyImportCommands(registry: CommandRegistry, _daemonHomeDirectory?: string, open: OpenTuiLegacyImportSession = async (context, projectId) => {
   const credentialObservation = new OwnedSelectionObservation();

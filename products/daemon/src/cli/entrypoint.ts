@@ -36,13 +36,12 @@ if (args[0] === '--internal-launchd-handover') {
   }
   // Service imports occur only after the compiled Darwin database owner is selected.
   const { runDaemonCli } = await import('./run.js');
-  const { resolveShippedServiceExecutable } = await import('./service-executable.js');
   process.exitCode = await runDaemonCli(args, {
     createRuntime: async () => {
       const { createProductionDaemonRuntime } = await import('./production-runtime.js');
       return createProductionDaemonRuntime();
     },
-    resolveServiceExecutable: resolveShippedServiceExecutable,
+    resolveServiceExecutable: async () => (await import('./service-executable.js')).resolveShippedServiceExecutable(),
     captureCrashes: true,
   });
 }

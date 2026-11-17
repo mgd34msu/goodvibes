@@ -39,9 +39,10 @@ import { requireDefined } from '@goodvibes-jev/engine/platform/platform/utils';
  * still emitted in full.
  */
 
-import { type Line, type Cell, createStyledCell } from '@goodvibes-jev/engine/platform/platform/types';
+import { createStyledCell } from '@goodvibes-jev/engine/platform/platform/types/grid';
+import type { Line, Cell } from '@goodvibes-jev/engine/platform/platform/types';
 import { stringToLine } from './string-to-line.js';
-import { getDisplayWidth } from '@goodvibes-jev/engine/platform/platform/utils';
+import { getDisplayWidth } from '@goodvibes-jev/engine/platform/platform/utils/terminal-width';
 import { activeTheme, activeTokens } from './theme.js';
 import { renderInlineMarkdown } from './markdown-inline.js';
 

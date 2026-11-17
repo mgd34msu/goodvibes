@@ -1,4 +1,4 @@
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools/input-projection';
 import { containsSecretLikeText } from './memory-safety.js';
 
 const NOT_PLAIN_DATA = 'The arguments must be plain JSON data: objects, arrays, strings, finite numbers, booleans and null, at most 64 levels deep.';

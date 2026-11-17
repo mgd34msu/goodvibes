@@ -1,6 +1,6 @@
 import type { MemoryApi } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import type { MemoryClass, MemoryRecord, MemoryScope } from '@goodvibes-jev/engine/platform/platform/state';
-import { assertNoSecretLikeMemoryText } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { assertNoSecretLikeMemoryText } from '@goodvibes-jev/engine/terminal-shell/agent-turn/memory-safety';
 import type { AgentWorkspaceLocalEditor } from './agent-workspace-types.ts';
 import { splitList } from './agent-workspace-editors.ts';
 import { isValidClass, isValidScope } from './commands/recall-shared.ts';

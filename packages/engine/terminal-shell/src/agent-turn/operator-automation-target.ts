@@ -1,4 +1,4 @@
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools/input-projection';
 import { createDaemonOperatorInvoke } from './daemon-operator-client.js';
 import type { captureOperatorConnection } from './operator-connection-owner.js';
 

@@ -1,5 +1,5 @@
 import { readRefusal } from '@goodvibes-jev/engine/errors';
-import { describeFatalFailure } from '@goodvibes-jev/engine/platform/platform/daemon';
+import { describeFatalFailure } from '@goodvibes-jev/engine/platform/platform/daemon/fatal-boot-report';
 
 /**
  * Lines printed when a command throws. A failure that carries a refusal gets

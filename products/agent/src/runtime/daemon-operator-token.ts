@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
-import { resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/platform/platform/config';
-import { operatorTokenPath } from '@goodvibes-jev/engine/platform/platform/workspace';
+import { resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/platform/platform/config/goodvibes-home';
+import { operatorTokenPath } from '@goodvibes-jev/engine/platform/platform/pairing/companion-token';
 
 /**
  * The bearer token this process's daemon serves with, read without creating anything.

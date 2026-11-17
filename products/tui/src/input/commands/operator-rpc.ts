@@ -23,7 +23,7 @@ export {
 import { resolveOperatorRpc } from '../../runtime/client/operator-endpoint.ts';
 import type { OperatorRpc } from '../../runtime/client/operator-endpoint.ts';
 import type { CommandContext } from '../command-registry.ts';
-import { requireShellPaths } from './runtime-services.ts';
+import { requireShellPaths } from '@goodvibes-jev/engine/terminal-shell/command-service-access';
 
 /**
  * Resolve (or honestly refuse to resolve) an operator platform client wired to this

@@ -36,7 +36,7 @@ import { readMailboxStatus } from '../input/commands/email-settings.ts';
 import { buildProbeContext } from '../capabilities/capability-boot-check.ts';
 import { resolveCapabilityIndex } from '../capabilities/capability-index.ts';
 import { configValueIsPresent, safeMcpServerPosture, secretValueIsPresent, servedOperatorMethodIds } from '../capabilities/capability-sources.ts';
-import type { CapabilityIndexReport, ResolvedCapability } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import type { CapabilityIndexReport, ResolvedCapability } from '@goodvibes-jev/engine/terminal-shell/agent-turn/capability-types';
 import { refreshCapabilityIndex, setCapabilitySnapshot } from '../capabilities/capability-snapshot.ts';
 import { describeGoogleConnection } from '../input/commands/google-connection-actions.ts';
 import { requirePlatform, requireShellPaths } from '../input/commands/runtime-services.ts';

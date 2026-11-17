@@ -35,19 +35,17 @@ import { createDaemonVerbCaller } from '../runtime/client/operator-endpoint.ts';
  * in this file, that would recreate the cycle.
  */
 
-import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { readFileSync } from 'node:fs';
 import net from 'node:net';
 import 'node:child_process';
 import 'node:os';
 import type { ConfigManager, GoodVibesConfig } from '@goodvibes-jev/engine/platform/platform/config';
-import { resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/platform/platform/config';
 import { REGULAR_KNOWLEDGE_DB_FILE, prepareConfiguredProjectContext } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import { createRuntimeServices } from '../runtime/services.ts';
 import { createRuntimeStore } from '@goodvibes-jev/engine/platform/platform/runtime/state';
 import type { RuntimeServices } from '../runtime/services.ts';
 import type { ProviderCatalogOptions } from '@goodvibes-jev/engine/platform/platform/providers';
-import { RuntimeEventBus, createShellPathService, configureRuntimeEventBusDefaults, runtimeEventBusOptionsFrom } from '@/runtime/index.ts';
+import { RuntimeEventBus, configureRuntimeEventBusDefaults, runtimeEventBusOptionsFrom } from '@/runtime/index.ts';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { resolveRuntimeEndpointBinding } from '@goodvibes-jev/engine/terminal-shell';
 import { applyRuntimeEndpointFlagOverrides } from '@goodvibes-jev/engine/terminal-shell';
@@ -208,23 +206,7 @@ export async function withRuntimeServices<T>(
   }
 }
 
-export function readAuthPaths(runtime: Pick<CliCommandRuntime, 'workingDirectory' | 'homeDirectory'>) {
-  const shellPaths = createShellPathService({
-    workingDirectory: runtime.workingDirectory,
-    homeDirectory: runtime.homeDirectory,
-  });
-  const userStorePath = shellPaths.resolveUserPath('tui', 'auth-users.json');
-  const bootstrapCredentialPath = shellPaths.resolveUserPath('tui', 'auth-bootstrap.txt');
-  const operatorTokenPath = join(resolveGoodVibesDaemonHome(runtime.homeDirectory), 'operator-tokens.json');
-  return {
-    userStorePath,
-    userStorePresent: existsSync(userStorePath),
-    bootstrapCredentialPath,
-    bootstrapCredentialPresent: existsSync(bootstrapCredentialPath),
-    operatorTokenPath,
-    operatorTokenPresent: existsSync(operatorTokenPath),
-  };
-}
+export { readAuthPaths } from './auth-paths.ts';
 
 export async function runNonInteractiveAgent(runtime: CliCommandRuntime): Promise<number> {
   return runNativeHeadlessCommand(runtime);

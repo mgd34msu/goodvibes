@@ -1,7 +1,7 @@
 import type { CommandContext } from './command-registry.ts';
-import type { PromptContextReceipt } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { discoverProjectContextFiles } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { discoverVibeFiles } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import type { PromptContextReceipt } from '@goodvibes-jev/engine/terminal-shell/agent-turn/prompt-context-receipts';
+import { discoverProjectContextFiles } from '@goodvibes-jev/engine/terminal-shell/agent-turn/project-context-files';
+import { discoverVibeFiles } from '@goodvibes-jev/engine/terminal-shell/agent-turn/vibe-file';
 import type { AgentWorkspaceProcessSupervisionSummary, AgentWorkspacePromptContextReceiptSummary, AgentWorkspacePromptContextReceiptTimeline, AgentWorkspaceProjectContextSummary, AgentWorkspaceResearchContractSummary, AgentWorkspaceVibeSummary } from './agent-workspace-types.ts';
 
 type WorkspaceMcpServerRecord = {

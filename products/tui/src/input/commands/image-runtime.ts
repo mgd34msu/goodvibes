@@ -4,7 +4,7 @@ import { dirname, extname, join, relative } from 'node:path';
 import type { CommandRegistry } from '../command-registry.ts';
 import type { MediaGenerationResult, MediaProviderTask } from '@goodvibes-jev/engine/platform/platform/media';
 import { externalUrlLaunchers, redactSensitiveDataAsync, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-import { requireShellPaths } from './runtime-services.ts';
+import { requireShellPaths } from '@goodvibes-jev/engine/terminal-shell/command-service-access';
 
 const USAGE = 'Usage: /imagine [--out <path>] <prompt>  |  /imagine [--out <path>] --collect <provider> <task-id> [key=value ...]';
 

@@ -1,5 +1,6 @@
 import { PREVIOUS_FILE_SUFFIX } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
-import { detectInstallKind, type InstallKind } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { detectInstallKind } from '@goodvibes-jev/engine/platform/platform/runtime/install-kind';
+import type { InstallKind } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import {
   compareVersions,
   suiteUpdateRequiresRecovery,

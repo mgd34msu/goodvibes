@@ -19,8 +19,8 @@
 // ---------------------------------------------------------------------------
 
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { GoodVibesError } from '@goodvibes-jev/engine/platform';
-import { resolveOperatorRpc, describeOperatorRpcError } from '../input/commands/operator-rpc.ts';
+import { GoodVibesError } from '@goodvibes-jev/engine/errors';
+import { resolveOperatorRpc, describeOperatorRpcError } from '../runtime/client/operator-endpoint.ts';
 import type { VoiceRuntimeStatusResult, VoiceLocalInstallResult } from './voice-provision-status.ts';
 import { voiceStatusLines, voiceInstallReceiptLines, voiceInstallComponentLine } from './voice-provision-status.ts';
 

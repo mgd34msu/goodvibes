@@ -8,7 +8,7 @@
  */
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { parseDaemonOrigin } from '@goodvibes-jev/engine/platform/platform/config';
+import { parseDaemonOrigin } from '@goodvibes-jev/engine/platform/platform/config/control-plane-base-url';
 import { writeFileAtomic } from '@goodvibes-jev/engine/platform/platform/utils';
 
 interface ConnectedDaemonCredentialStore {

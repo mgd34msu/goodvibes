@@ -1,4 +1,4 @@
-import { defineLifecycle } from '@goodvibes-jev/engine/platform/platform/utils';
+import { defineLifecycle } from '@goodvibes-jev/engine/platform/platform/utils/lifecycle-machine';
 
 /** The review state shared by notes, personas, routines, skills and skill bundles. */
 export type AgentReviewState = 'fresh' | 'reviewed' | 'stale';

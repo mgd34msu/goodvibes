@@ -1,4 +1,4 @@
-import { agentResearchReportSourceOwner } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { agentResearchReportSourceOwner } from '@goodvibes-jev/engine/terminal-shell/agent-turn/protected-research-report';
 import { submitProtectedAgentResearchReport } from './agent-workspace-research-report-editor.ts';
 import { settleEditorMessageTone } from './agent-workspace-editor-message.ts';
 import type { MemoryApi } from '@goodvibes-jev/engine/platform/platform/knowledge';
@@ -6,11 +6,11 @@ import type { MemoryRecord } from '@goodvibes-jev/engine/platform/platform/state
 import type { AgentConfigSetting } from '../config/settings-catalog.ts';
 import type { ShellPathService } from '@/runtime/index.ts';
 import type { CommandContext } from './command-registry.ts';
-import { AgentNoteRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { AgentPersonaRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { AgentRoutineRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { AgentNoteRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn/note-registry';
+import { AgentPersonaRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn/persona-registry';
+import { AgentRoutineRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn/routine-registry';
 import type { AgentRuntimeProfileInfo } from '../agent/runtime-profile.ts';
-import { AgentSkillRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { AgentSkillRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn/skill-registry';
 import { activateAgentWorkspaceSelection } from './agent-workspace-activation.ts';
 import { AGENT_WORKSPACE_CATEGORIES } from './agent-workspace-categories.ts';
 import { submitAgentResearchRunEditor } from './agent-workspace-research-run-editor.ts';

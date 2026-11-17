@@ -1,11 +1,7 @@
 import { discoverSkills, type SkillRecord } from '../agent/skill-discovery.ts';
-import { formatAgentRecordOrigin, formatAgentRecordReviewState } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import {
-  buildAgentSkillRequirements,
-  evaluateAgentSkillReadiness,
-  formatAgentSkillRequirement,
-  type AgentSkillRecord,
-} from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { formatAgentRecordOrigin, formatAgentRecordReviewState } from '@goodvibes-jev/engine/terminal-shell/agent-turn/record-labels';
+import { buildAgentSkillRequirements, evaluateAgentSkillReadiness, formatAgentSkillRequirement } from '@goodvibes-jev/engine/terminal-shell/agent-turn/skill-registry';
+import { type AgentSkillRecord } from '@goodvibes-jev/engine/terminal-shell/agent-turn/skill-registry-types';
 import type { CliCommandOutput } from './types.ts';
 import type { CliCommandRuntime } from './management.ts';
 import { handleSkillBundleCommand, renderBundleList } from './skill-bundle-command.ts';

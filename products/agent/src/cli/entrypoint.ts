@@ -8,21 +8,16 @@ import {
   type ShellEntrypointRoots,
 } from '@goodvibes-jev/engine/terminal-shell/cli-entrypoint';
 export type { ShellEntrypointRoots } from '@goodvibes-jev/engine/terminal-shell/cli-entrypoint';
-import { readConnectedHostReadiness } from '../runtime/connected-host-readiness.ts';
-import { canonicalizePairingHost, readAgentHostPairing } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { resolveConnectedHostBaseUrl } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+// Only what every command shares loads here: parsing, the configuration and
+// its overrides. Each command's own module graph loads when it is chosen, so
+// `status` never loads the headless turn and neither loads the terminal UI.
 import { extractNativeHeadlessOptions } from './native-headless-options.ts';
 import { headlessRunFlagErrors } from '@goodvibes-jev/engine/terminal-shell/headless-turn-events';
-import { runNativeHeadlessCommand } from './native-headless-command.ts';
-import { existsSync } from 'node:fs';
-import { connectedHostOperatorTokenPath, readConnectedHostOperatorToken } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { fetchDaemonCredentialAvailability } from '../config/credential-status.ts';
 import { join } from 'node:path';
-import { AgentConfigManager, type ConfigManager } from '../config/index.ts';
-import { formatProviderModel, getModelIdFromProviderModel, getProviderIdFromModel } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { readOnboardingCheckMarker } from '../runtime/onboarding/index.ts';
-import { GlobalNetworkTransportInstaller } from '@/runtime/index.ts';
-import { createShellPathService } from '@/runtime/index.ts';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { AgentConfigManager } from '../config/host-settings.ts';
+import { formatProviderModel, getModelIdFromProviderModel, getProviderIdFromModel } from '@goodvibes-jev/engine/platform/platform/providers/provider-model';
+import { GlobalNetworkTransportInstaller } from '@goodvibes-jev/engine/platform/platform/runtime/transport';
 import { configureActivityLogger } from '@goodvibes-jev/engine/platform/platform/utils';
 import {
   applyRuntimeCommandEndpointFlagOverrides,
@@ -30,24 +25,12 @@ import {
   applyRuntimeConfigValue,
   applyRuntimeFeatureOverrides,
   applyRuntimeUrlOverride,
-  buildCliStatusSnapshot,
-  handleGoodVibesCliCommand,
-  parseGoodVibesCli,
-  renderCliStatus,
-  renderCompletion,
-  renderGoodVibesCommandHelp,
-  renderGoodVibesHelp,
-  renderGoodVibesVersion,
-  renderOnboardingCliStatus,
-} from './index.ts';
-import { resolveDoctorExitCode } from './doctor-exit.ts';
-import { buildCliServicePosture } from './service-posture.ts';
-import { inspectCliExternalRuntime } from './external-runtime.ts';
-import { inspectConnectedHostMetrics } from './connected-host-metrics.ts';
+} from './config-overrides.ts';
+import { parseGoodVibesCli } from './parser.ts';
+import { renderCompletion } from './completion.ts';
+import { renderGoodVibesCommandHelp, renderGoodVibesHelp, renderGoodVibesVersion } from './help.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import { writeExitingStdoutLine, writeFatalLine } from '../utils/fatal-boot-write.ts';
-import { readCheckpointRegistrationSetting } from '../config/checkpoint-settings.ts';
-import { resolveCheckpointEligibilitySync } from '../config/workspace-registration.ts';
 import { AgentProfileUsageError, resolveAgentRuntimeProfileHome, resolveSelectedAgentRuntimeProfileHome } from '../agent/runtime-profile.ts';
 
 function readEnvRuntimeUrl(): { readonly source: string; readonly value: string } | null {
@@ -160,106 +143,23 @@ export async function prepareShellCliRuntime(
   const endpointOverrideErrors = applyRuntimeCommandEndpointFlagOverrides(configManager, cli.command, cli.flags);
   requireValidCliOverrides(endpointOverrideErrors, writeFatalLine, process.exit);
 
+  const commandRuntime = { cli, configManager, workingDirectory: bootstrapWorkingDir, homeDirectory: bootstrapHomeDirectory };
   if (cli.command === 'run') {
-    process.exit(
-      await runNativeHeadlessCommand(
-        { cli, configManager, workingDirectory: bootstrapWorkingDir, homeDirectory: bootstrapHomeDirectory },
-        native.mode,
-        native.run,
-      ),
-    );
+    const { runNativeHeadlessCommand } = await import('./native-headless-command.ts');
+    process.exit(await runNativeHeadlessCommand(commandRuntime, native.mode, native.run));
   }
 
   if (cli.command === 'onboarding' && cli.commandArgs[0] === 'status') {
-    const shellPaths = createShellPathService({ workingDirectory: bootstrapWorkingDir, homeDirectory: bootstrapHomeDirectory });
-    const selectedHost = canonicalizePairingHost(resolveConnectedHostBaseUrl(configManager)) ?? '(invalid endpoint)';
-    const nativeReadiness = await readConnectedHostReadiness({ configManager, homeDirectory: bootstrapHomeDirectory });
-    const pairingStatus = readAgentHostPairing(bootstrapHomeDirectory, selectedHost).status;
-    writeExitingStdoutLine(
-      renderOnboardingCliStatus({
-        configManager,
-        workingDirectory: bootstrapWorkingDir,
-        homeDirectory: bootstrapHomeDirectory,
-        onboardingMarker: readOnboardingCheckMarker(shellPaths),
-        nativeReadiness,
-        pairingStatus,
-        selectedHost,
-        outputFormat: cli.flags.outputFormat,
-      }),
-    );
-    process.exit(0);
+    const { runOnboardingStatusCommand } = await import('./status-command.ts');
+    process.exit(await runOnboardingStatusCommand(commandRuntime));
   }
 
   if (cli.command === 'status' || cli.command === 'doctor') {
-    const shellPaths = createShellPathService({
-      workingDirectory: bootstrapWorkingDir,
-      homeDirectory: bootstrapHomeDirectory,
-    });
-    const userStorePath = shellPaths.resolveUserPath(GOODVIBES_AGENT_SURFACE_ROOT, 'auth-users.json');
-    const bootstrapCredentialPath = shellPaths.resolveUserPath(GOODVIBES_AGENT_SURFACE_ROOT, 'auth-bootstrap.txt');
-    const operatorTokenPath = connectedHostOperatorTokenPath(bootstrapHomeDirectory);
-    const onboardingMarker = readOnboardingCheckMarker(shellPaths);
-    const service = await buildCliServicePosture({
-      configManager,
-      workingDirectory: bootstrapWorkingDir,
-      homeDirectory: bootstrapHomeDirectory,
-    });
-    const externalRuntime = await inspectCliExternalRuntime({
-      configManager,
-      homeDirectory: bootstrapHomeDirectory,
-    });
-    // Only probe host metrics when the host is actually reachable, otherwise
-    // the unreachability is already reported in the connected-host block above,
-    // and skipping the call avoids a second connect-timeout wait. When reachable,
-    // the probe classifies token/scope/route state honestly (including the
-    // read:telemetry scope-missing case) rather than rendering zeros.
-    const connectedHostMetrics = externalRuntime.reachable
-      ? await inspectConnectedHostMetrics({
-          configManager,
-          homeDirectory: bootstrapHomeDirectory,
-        })
-      : undefined;
-    // One bounded, secret-free read of what the host's store holds, beside the metrics.
-    const connectedHostCredentials = externalRuntime.reachable
-      ? await fetchDaemonCredentialAvailability({
-          baseUrl: externalRuntime.baseUrl,
-          token: readConnectedHostOperatorToken(bootstrapHomeDirectory, externalRuntime.baseUrl).token,
-        })
-      : undefined;
-    const effectiveOperatorTokenPath = externalRuntime.operatorToken.present ? externalRuntime.operatorToken.path : operatorTokenPath;
-    const checkpoints = {
-      // Honest to the checkpoint boundary: a workspace is "registered" for
-      // checkpoints only when it is checkpoint-ELIGIBLE (an explicit owner
-      // opt-in), not merely present in the shared store as a TUI self-record.
-      workspaceRegistered: resolveCheckpointEligibilitySync(shellPaths, bootstrapWorkingDir).status === 'covered',
-      unregisteredWorkspaceMode: readCheckpointRegistrationSetting(configManager),
-    };
-    const statusOptions = {
-      configManager,
-      workingDirectory: bootstrapWorkingDir,
-      homeDirectory: bootstrapHomeDirectory,
-      onboardingMarker,
-      checkpoints,
-      auth: {
-        userStorePath,
-        userStorePresent: existsSync(userStorePath),
-        bootstrapCredentialPath,
-        bootstrapCredentialPresent: existsSync(bootstrapCredentialPath),
-        operatorTokenPath: effectiveOperatorTokenPath,
-        operatorTokenPresent: externalRuntime.operatorToken.present,
-      },
-      service,
-      externalRuntime,
-      connectedHostMetrics,
-      ...(connectedHostCredentials ? { connectedHostCredentials } : {}),
-      doctor: cli.command === 'doctor',
-      outputFormat: cli.flags.outputFormat,
-    };
-    const snapshot = buildCliStatusSnapshot(statusOptions);
-    writeExitingStdoutLine(renderCliStatus(statusOptions, snapshot));
-    process.exit(cli.command === 'doctor' ? resolveDoctorExitCode(snapshot.findings, cli.commandArgs.includes('--strict')) : 0);
+    const { runStatusCommand } = await import('./status-command.ts');
+    process.exit(await runStatusCommand(commandRuntime));
   }
 
+  const { handleGoodVibesCliCommand } = await import('./management.ts');
   const cliCommandResult = await handleGoodVibesCliCommand({
     cli,
     configManager,

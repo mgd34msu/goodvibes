@@ -9,7 +9,7 @@ import type {
 } from '../../input/config-modal-types.ts';
 import { JudgmentAuthorityRetiredError } from '@goodvibes-jev/engine/errors';
 import type { KnowledgeService } from '@goodvibes-jev/engine/platform/platform/knowledge';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 
 // ---------------------------------------------------------------------------
 // Knowledge (graph) → config-modal surface (group-B port). Two tabs:

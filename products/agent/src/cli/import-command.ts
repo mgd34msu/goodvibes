@@ -1,7 +1,7 @@
 import { isAbsolute, resolve } from 'node:path';
-import { assertNoSecretLikeMemoryText } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { assertNoSecretLikeMemoryText } from '@goodvibes-jev/engine/terminal-shell/agent-turn/memory-safety';
 import { withMemoryCommandStore } from './memory-command-access.ts';
-import { buildAgentSkillRequirements } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { buildAgentSkillRequirements } from '@goodvibes-jev/engine/terminal-shell/agent-turn/skill-registry';
 import type { CliCommandOutput } from './types.ts';
 import type { CliCommandRuntime } from './management.ts';
 import { failure, personaRegistry, skillRegistry, success } from './local-library-command-shared.ts';

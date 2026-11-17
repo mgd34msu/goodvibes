@@ -1,11 +1,8 @@
 import { syncTerminalNotifierQueues } from '@goodvibes-jev/engine/terminal-shell/bootstrap-primitives';
 import type { ConfigManager, SecretsManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { Notifier, type WebhookNotifier } from '@goodvibes-jev/engine/platform/platform/integrations';
-import {
-  readNotificationsMetadataOnly,
-  type NotificationDelivery,
-  type TurnNotificationFacts,
-} from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { readNotificationsMetadataOnly } from '@goodvibes-jev/engine/platform/platform/runtime/notification-privacy';
+import type { NotificationDelivery, TurnNotificationFacts } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import type { RuntimeEventBus } from '@/runtime/index.ts';
 import { createUiRuntimeEvents } from '@goodvibes-jev/engine/platform/platform/runtime/ui';
 import { logger } from '@goodvibes-jev/engine/platform/platform/utils';

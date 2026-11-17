@@ -1,4 +1,4 @@
-import { catalogRoutingInput } from './agent-harness-catalog-ingress.ts';
+import { catalogRoutingInput } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-ingress';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { CommandContext, CommandRegistry } from '../input/command-registry.ts';

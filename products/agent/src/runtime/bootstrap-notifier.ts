@@ -5,7 +5,7 @@
  */
 import type { ConfigManager, SecretsManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { Notifier } from '@goodvibes-jev/engine/platform/platform/integrations';
-import { readNotificationsMetadataOnly } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { readNotificationsMetadataOnly } from '@goodvibes-jev/engine/platform/platform/runtime/notification-privacy';
 
 /**
  * The Slack and Discord notifier, built from the configured services. Its

@@ -11,10 +11,10 @@ import { describeWorkspaceEditor } from './agent-harness-workspace-actions.ts';
 import { runTranslatedWorkspaceCommand } from './agent-harness-command-runner.ts';
 import { captureHarnessLocalEffect } from './agent-harness-local-effect.ts';
 import { harnessCatalogExecutionGuard, retainHarnessCatalogCurrent } from './agent-harness-catalog-ingress.ts';
-import { agentResearchSourceOwner } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { personaStorePath } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { skillStorePath } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { routineStorePath } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { agentResearchSourceOwner } from '@goodvibes-jev/engine/terminal-shell/agent-turn/protected-research-report';
+import { personaStorePath } from '@goodvibes-jev/engine/terminal-shell/agent-turn/persona-registry';
+import { skillStorePath } from '@goodvibes-jev/engine/terminal-shell/agent-turn/skill-registry';
+import { routineStorePath } from '@goodvibes-jev/engine/terminal-shell/agent-turn/routine-registry';
 import type { AgentHarnessToolDeps } from './agent-harness-tool-types.ts';
 import { effectOutput, error, nestedToolOutput, output, readFieldMap, readString, requireConfirmedAction } from './agent-harness-tool-utils.ts';
 

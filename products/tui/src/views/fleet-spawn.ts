@@ -21,8 +21,8 @@
 
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { OperatorMethodOutput } from '@goodvibes-jev/engine/platform';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-import { resolveOperatorRpc } from '../input/commands/operator-rpc.ts';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
+import { resolveOperatorRpc } from '../runtime/client/operator-endpoint.ts';
 
 /** One discovered third-party ACP agent (acp.agents.list). */
 export type AcpDiscoveredAgent = OperatorMethodOutput<'acp.agents.list'>['agents'][number];

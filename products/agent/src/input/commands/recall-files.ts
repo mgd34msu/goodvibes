@@ -26,7 +26,7 @@ import {
   type MemoryProjectionFile,
   type MemoryProjectionProposal,
 } from '@goodvibes-jev/engine/platform/platform/state';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 import { resolveCommandFilePath } from './agent-local-library-args.ts';
 import { getMemorySpine as findMemorySpine } from './recall-query.ts';
 import { commandRefusal } from './confirmation.ts';

@@ -1,17 +1,17 @@
 import { captureCliStatusFacts, secretPolicyLabel } from '@goodvibes-jev/engine/terminal-shell/cli-status-facts';
 import { yesNo } from '@goodvibes-jev/engine/terminal-shell/cli-output';
-import { effectivePermissionMode, presetForMode } from '@goodvibes-jev/engine/platform/platform/gate';
+import { effectivePermissionMode, presetForMode } from '@goodvibes-jev/engine/platform/platform/gate/presets';
 import { describeConfiguredPermissions } from '../permissions/configured-posture.ts';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { resolveDaemonEnabled } from '@goodvibes-jev/engine/platform/platform/config';
 import type { OnboardingCheckMarkerState } from '../runtime/onboarding/index.ts';
-import { formatRuntimeEndpointBinding, resolveRuntimeEndpointBinding } from '@goodvibes-jev/engine/terminal-shell';
+import { formatRuntimeEndpointBinding, resolveRuntimeEndpointBinding } from '@goodvibes-jev/engine/terminal-shell/cli-endpoints';
 import type { RuntimeEndpointBinding, RuntimeEndpointId } from '@goodvibes-jev/engine/terminal-shell';
-import { classifyBindPosture, isNetworkFacing } from '@goodvibes-jev/engine/terminal-shell';
+import { classifyBindPosture, isNetworkFacing } from '@goodvibes-jev/engine/terminal-shell/cli-network-posture';
 import type { GoodVibesCliOutputFormat } from '@goodvibes-jev/engine/terminal-shell';
 import { serviceSettingsIssues, type CliServicePosture } from './service-posture.ts';
 import type { InstallSelfCheckFinding } from '../runtime/install-self-check.ts';
-import { getProviderIdFromModel } from '@goodvibes-jev/engine/platform/platform/providers';
+import { getProviderIdFromModel } from '@goodvibes-jev/engine/platform/platform/providers/provider-model';
 import { describeConfiguredEffort } from '../providers/reasoning-effort-surface.ts';
 
 /** The marker that decides first-run state: the user's marker when its file exists. */

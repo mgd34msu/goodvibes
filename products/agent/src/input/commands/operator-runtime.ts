@@ -3,10 +3,10 @@ import {
   createErrorNavigationCommands,
 } from '@goodvibes-jev/engine/terminal-shell/context-inspection-command';
 import { createInteractionModeCommand } from '@goodvibes-jev/engine/terminal-shell/interaction-mode-command';
-import { agentResearchSourceOwner } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { agentResearchSourceOwner } from '@goodvibes-jev/engine/terminal-shell/agent-turn/protected-research-report';
 import { captureTranscriptSource } from './transcript-reading.ts';
 import type { CommandContext, CommandRegistry, SlashCommand } from '../command-registry.ts';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools/input-projection';
 import '@goodvibes-jev/engine/platform/platform/utils';
 import '@goodvibes-jev/engine/platform/platform/utils';
 import { commandRefusal, requireYesFlag, stripYesFlag } from './confirmation.ts';

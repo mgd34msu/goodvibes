@@ -1,17 +1,7 @@
 import type { PluginStatus } from '@goodvibes-jev/engine/platform/platform/plugins';
 import { getPluginDirectories, getUserPluginDirectory } from '@goodvibes-jev/engine/platform/platform/plugins';
 import type { CommandRegistry } from '../command-registry.ts';
-import {
-  installEcosystemCatalogEntry,
-  listInstalledEcosystemEntries,
-  loadEcosystemCatalog,
-  removeEcosystemCatalogEntry,
-  reviewEcosystemCatalogEntry,
-  searchEcosystemCatalog,
-  updateInstalledEcosystemEntry,
-  upsertEcosystemCatalogEntry,
-  uninstallEcosystemCatalogEntry,
-} from '@/runtime/index.ts';
+import { installEcosystemCatalogEntry, listInstalledEcosystemEntries, loadEcosystemCatalog, removeEcosystemCatalogEntry, reviewEcosystemCatalogEntry, searchEcosystemCatalog, updateInstalledEcosystemEntry, upsertEcosystemCatalogEntry, uninstallEcosystemCatalogEntry } from '@goodvibes-jev/engine/platform/platform/runtime/ecosystem/catalog';
 import { openModalCommand, requireEcosystemCatalogPaths, requirePluginPathOptions } from './runtime-services.ts';
 import { parseScope } from './marketplace-runtime.ts';
 import { pluginTrustConfirmation, runPluginTrustSubcommand } from '@goodvibes-jev/engine/terminal-shell/plugin-trust-command';

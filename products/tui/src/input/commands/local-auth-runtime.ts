@@ -1,6 +1,6 @@
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { requireLocalUserAuthManager } from './runtime-services.ts';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 
 // An omitted roles argument must not grant the highest role; admin is always spelled out.
 const DEFAULT_NEW_USER_ROLES: readonly string[] = ['user'];

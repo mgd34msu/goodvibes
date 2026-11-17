@@ -1,15 +1,7 @@
-import {
-  ROUTINE_SCHEDULE_LIST_METHOD,
-  ROUTINE_SCHEDULE_METHOD,
-  type RoutineScheduleCorrelationResult,
-  type RoutineSchedulePromotionFailure,
-  type RoutineSchedulePromotionPreview,
-  type RoutineSchedulePromotionSuccess,
-  type RoutineScheduleReceipt,
-  type RoutineScheduleReceiptSnapshot,
-} from './routine-schedule-promotion.ts';
-import { deliveryTargetFlag } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { scheduleConfirmationRouteLines, scheduleNextRouteLines, scheduleRouteArg } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { ROUTINE_SCHEDULE_LIST_METHOD, ROUTINE_SCHEDULE_METHOD } from '@goodvibes-jev/engine/terminal-shell/agent-turn/schedule-delivery-targets';
+import type { RoutineScheduleCorrelationResult, RoutineSchedulePromotionFailure, RoutineSchedulePromotionPreview, RoutineSchedulePromotionSuccess, RoutineScheduleReceipt, RoutineScheduleReceiptSnapshot } from './routine-schedule-promotion.ts';
+import { deliveryTargetFlag } from '@goodvibes-jev/engine/terminal-shell/agent-turn/schedule-delivery-targets';
+import { scheduleConfirmationRouteLines, scheduleNextRouteLines, scheduleRouteArg } from '@goodvibes-jev/engine/terminal-shell/agent-turn/schedule-next-routes';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);

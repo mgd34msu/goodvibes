@@ -10,8 +10,9 @@
  * what you sent look alike.
  */
 
-import { type Line, createEmptyLine } from '@goodvibes-jev/engine/platform/platform/types';
-import { getDisplayWidth, wrapTextRows } from '@goodvibes-jev/engine/platform/platform/utils';
+import { createEmptyLine } from '@goodvibes-jev/engine/platform/platform/types/grid';
+import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
+import { getDisplayWidth, wrapTextRows } from '@goodvibes-jev/engine/platform/platform/utils/terminal-width';
 
 const USER_MESSAGE_BAR_X = 2;
 const USER_MESSAGE_FILL_X = 3;

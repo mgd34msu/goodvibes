@@ -28,8 +28,8 @@
  */
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { replaceHostedAttachment, detachHostedAttachments, forgetHostedAttachment, hasHostedAttachments } from '../../runtime/client/hosted-attachments.ts';
-import { describeOperatorRpcError } from './operator-rpc.ts';
-import { requireShellPaths } from './runtime-services.ts';
+import { describeOperatorRpcError } from '../../runtime/client/operator-endpoint.ts';
+import { requireShellPaths } from '@goodvibes-jev/engine/terminal-shell/command-service-access';
 import {
   createDaemonVerbCaller,
   resolveControlPlaneBaseUrl,

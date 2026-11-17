@@ -1,7 +1,8 @@
 import type { RuntimeEventProvenance } from '@goodvibes-jev/engine/platform/platform/runtime/bootstrap';
 import { readTreeGlyphSet, TREE_GLYPHS_CONFIG_KEY } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { InfiniteBuffer } from './conversation-history.js';
-import { createEmptyLine, type Line, type Cell } from '@goodvibes-jev/engine/platform/platform/types';
+import { createEmptyLine } from '@goodvibes-jev/engine/platform/platform/types/grid';
+import type { Line, Cell } from '@goodvibes-jev/engine/platform/platform/types';
 import type { SplashOptions } from './splash-lines.js';
 import type { ToolCall, ToolResult } from '@goodvibes-jev/engine/platform/platform/types';
 import type { ProviderMessage, ContentPart } from '@goodvibes-jev/engine/platform/platform/providers';
@@ -37,7 +38,7 @@ import { renderMarkdown } from './renderer/markdown.js';
 import type { WorkTreeSources } from './work-tree-sources.js';
 import { renderStreamingContinuation } from './work-tree-render.js';
 import { WorkTreeController } from './work-tree-focus.js';
-import { isWorkTreeFoldKey } from './work-tree-fold-store.js';
+import { isWorkTreeFoldKey } from './work-tree-focus.js';
 import { type TreeGlyphSetName } from './renderer/lane-graph-glyphs.js';
 import { probeUnicodeSupport } from './renderer/lane-graph-glyphs.js';
 /**

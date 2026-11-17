@@ -1,9 +1,9 @@
 import { captureJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { gateJudgmentRegistry } from '@goodvibes-jev/engine/platform/platform/gate';
-import { decisionOrClassic, isClassicOperation, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime';
+import { decisionOrClassic, isClassicOperation, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime/decision-policy';
 import { redactSensitiveData } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { Battery, YesNoItem } from '@goodvibes-jev/judgment';
-import type { CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import type { CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-ranking';
 
 /** Why a command's privilege needs are not known: Jev was not asked, or its reading did not settle. */
 export type PrivilegeAssessment = 'not-evaluated' | 'uncertain';

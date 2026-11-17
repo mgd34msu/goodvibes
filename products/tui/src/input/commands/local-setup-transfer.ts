@@ -5,7 +5,7 @@ import type { TerminalSetupReviewSnapshot } from '@goodvibes-jev/engine/terminal
 import type { ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
 import { CONFIG_SCHEMA, CONFIG_KEYS, configKeyFacts, isProtectedConfigValue, isSecretReferenceValue } from '@goodvibes-jev/engine/platform/platform/config';
 import { redactDiagnosticValue } from '@goodvibes-jev/engine/platform/platform/utils';
-import { requireShellPaths } from './runtime-services.ts';
+import { requireShellPaths } from '@goodvibes-jev/engine/terminal-shell/command-service-access';
 
 /** What a masked literal credential reads as in an exported file. */
 export const MASKED_VALUE = '[REDACTED]';

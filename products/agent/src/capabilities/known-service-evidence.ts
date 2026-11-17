@@ -1,5 +1,5 @@
 import { join } from 'node:path';
-import type { CapabilityProbe } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import type { CapabilityProbe } from '@goodvibes-jev/engine/terminal-shell/agent-turn/capability-types';
 
 /**
  * Footprints of services that are configured on this machine whether or not

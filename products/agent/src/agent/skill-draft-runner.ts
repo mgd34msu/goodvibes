@@ -1,10 +1,10 @@
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
-import { readJsonStore, runStoreFileUpdateSync, writeJsonStore, type JsonStoreSpec } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { readJsonStore, runStoreFileUpdateSync, writeJsonStore, type JsonStoreSpec } from '@goodvibes-jev/engine/terminal-shell/agent-turn/store-file';
 import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-import type { CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { type LearningCandidateCollection, type LearningCuratorNativeContext } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { buildLearningCandidates, assertLearningCandidateCollection } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { AgentSkillRegistry, skillStorePath } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import type { CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-ranking';
+import { type LearningCandidateCollection, type LearningCuratorNativeContext } from '@goodvibes-jev/engine/terminal-shell/agent-turn/learning-curator-source';
+import { buildLearningCandidates, assertLearningCandidateCollection } from '@goodvibes-jev/engine/terminal-shell/agent-turn/learning-curator-proposals';
+import { AgentSkillRegistry, skillStorePath } from '@goodvibes-jev/engine/terminal-shell/agent-turn/skill-registry';
 import { proposeSkillDrafts } from './skill-draft-proposer.ts';
 
 // ---------------------------------------------------------------------------

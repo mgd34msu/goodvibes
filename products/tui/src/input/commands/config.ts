@@ -1,6 +1,6 @@
 import { createConfigWorkspaceCommand } from '@goodvibes-jev/engine/terminal-shell/entry-workspace-commands';
 // The same text reader `--config key=value` and the daemon's `config set` use, so one line stores one value everywhere.
-import { parseConfigValueText } from '@goodvibes-jev/engine/terminal-shell';
+import { parseConfigValueText } from '@goodvibes-jev/engine/terminal-shell/cli-config-overrides';
 import { TUI_NOTIFICATIONS_METADATA_ONLY_KEY } from '../../config/host-settings.ts';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import type { ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
@@ -11,7 +11,7 @@ import {
   isSecretConfigKey,
   persistSecretBackedConfigValue,
 } from '../../config/secret-config.ts';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 
 export function registerConfigCommand(registry: CommandRegistry): void {
   registry.register(configWorkspaceCommand);

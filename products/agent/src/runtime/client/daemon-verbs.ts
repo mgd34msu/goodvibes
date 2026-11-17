@@ -39,16 +39,16 @@
  */
 import { statSync } from 'node:fs';
 import { OwnedSelectionObservation, captureRemoteSettingsPrecondition } from '@goodvibes-jev/engine/platform/platform/runtime/client';
-import { assertProjectionCurrent } from '@goodvibes-jev/engine/platform/platform/tools';
-import { agentHostPairingStorePath } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { connectedHostOperatorTokenPath } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { assertProjectionCurrent } from '@goodvibes-jev/engine/platform/platform/tools/input-projection';
+import { agentHostPairingStorePath } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-pairing-store';
+import { connectedHostOperatorTokenPath } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-auth';
 import { resolveConnectedHostDialEnabled, captureRemoteSettingsImportPrecondition, observeImportFile,
   assertImportFileCurrent } from '@goodvibes-jev/engine/platform/platform/config';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { DaemonReachability, DaemonVerbCaller } from '@goodvibes-jev/engine/platform/platform/runtime/client';
-import { readConnectedHostOperatorToken, connectedHostTokenRequiredMessage, type ConnectedHostCredentialSource } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { resolveConnectedHostBaseUrl } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { ConnectedHostVerbError } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { readConnectedHostOperatorToken, connectedHostTokenRequiredMessage, type ConnectedHostCredentialSource } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-auth';
+import { resolveConnectedHostBaseUrl } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-dial';
+import { ConnectedHostVerbError } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-verb-error';
 
 export interface AgentDaemonVerbCallerOptions {
   readonly configManager: ConfigManager;

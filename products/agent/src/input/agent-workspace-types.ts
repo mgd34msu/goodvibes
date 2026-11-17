@@ -5,7 +5,7 @@ import type { AgentWorkspaceVoiceMediaReadiness } from './agent-workspace-voice-
 import type { AgentBehaviorDiscoverySnapshot } from '../agent/behavior-discovery-summary.ts';
 import type { AgentSetupWizard } from '../agent/setup-wizard.ts';
 import type { AgentWorkspaceEditorKind, AgentWorkspaceLocalEditorKind } from './agent-workspace-editor-kinds.ts';
-import type { AgentWorkspaceLocalLibraryItem } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import type { AgentWorkspaceLocalLibraryItem } from '@goodvibes-jev/engine/terminal-shell/agent-turn/local-library-items';
 
 export type { AgentWorkspaceLocalLibraryItem };
 

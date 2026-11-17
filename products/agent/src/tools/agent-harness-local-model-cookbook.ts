@@ -1,6 +1,6 @@
 import type { CommandContext } from '../input/command-registry.ts';
 import { estimateModelBytes, fitAssessment, fitVerdictLabel, readHardwareProfileSync, REPRESENTATIVE_7B_PARAMS } from '../core/hardware-profile.ts';
-import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn/preview-text';
 import { readLocalModelRegistry, localModelDetection, localModelServerFacts, localModelServerHealthMap } from './agent-harness-local-model-endpoints.ts';
 import { deferredModelReadiness, deferredRecipeFit, localHardwareProfile, localRecipeReadinessScore, localRecipeStackId, scoreLocalModelRecipe } from './agent-harness-model-readiness.ts';
 import { localModelBenchmarkHistory, localModelBenchmarkHistoryFrom, localModelBenchmarkPlan, readLocalModelBenchmarkSnapshot, type LocalModelBenchmarkSnapshot, type LocalModelBenchmarkHistory } from './agent-harness-local-model-benchmarks.ts';

@@ -7,7 +7,7 @@ import { createKnowledgeLabels } from '@goodvibes-jev/engine/terminal-shell/know
 const { nodeLabel } = createKnowledgeLabels(' confidence=');
 import type { KnowledgeService } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import type { CommandContext, SlashCommand } from '../command-registry.ts';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 
 type KnowledgeAskInput = Parameters<KnowledgeService['ask']>[0];
 type KnowledgeAskResult = Awaited<ReturnType<KnowledgeService['ask']>>;

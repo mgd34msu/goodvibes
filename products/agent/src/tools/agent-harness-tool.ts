@@ -1,4 +1,4 @@
-import { captureCatalogData } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { captureCatalogData } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-data';
 import { captureAgentToolDefinition } from './tool-definition-compaction.ts';
 import { resolveSetupSmokeNativeEvidence } from './agent-setup-smoke-reference.ts';
 import { captureTranscriptSource } from '../input/commands/transcript-reading.ts';
@@ -8,9 +8,9 @@ import { catalogReadingOptions, modelReadingOptions, modelReadingServicePath, wi
 import { processClassificationOptions } from './agent-harness-process-launch.ts';
 import { createProcessInputProjector } from './agent-process-ingress.ts';
 import { createHarnessCatalogInputProjector, isHarnessCatalogQuery, protectHarnessCatalogTool, harnessCatalogExecutionGuard, harnessCatalogInvocationAuthority, retainHarnessCatalogCurrent } from './agent-harness-catalog-ingress.ts';
-import { createPersonalOpsInputProjector } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { createPersonalOpsInputProjector } from '@goodvibes-jev/engine/terminal-shell/agent-turn/personal-ops-ingress';
 import { createAgentHarnessResearchProjector, protectAgentHarnessResearchTool } from './agent-research-ingress.ts';
-import { snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
+import { snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate/judgment-input';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { CommandContext, CommandRegistry } from '../input/command-registry.ts';
@@ -20,11 +20,11 @@ import { autonomyQueueSummary, describeAutonomyQueueItem } from './agent-harness
 import { describeHarnessChannel, describeHarnessChannelDeliveries, describeHarnessChannelSetupGuide, describeHarnessChannelTriage, listHarnessChannels } from './agent-harness-channel-metadata.ts';
 import { blockedHarnessCliCommandTokens, describeHarnessCliCommand, listHarnessCliCommands, totalHarnessCliCommands } from './agent-harness-cli-metadata.ts';
 import { describeHarnessCommand, searchHarnessCommands } from './agent-harness-command-catalog.ts';
-import { describeLearningCandidate, learningCuratorSummary } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { runLearningCurationPass } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { describeLearningCandidate, learningCuratorSummary } from '@goodvibes-jev/engine/terminal-shell/agent-turn/learning-curator';
+import { runLearningCurationPass } from '@goodvibes-jev/engine/terminal-shell/agent-turn/learning-curator-proposals';
 import { runAutoPromoter, assertAutoPromoteResultCurrent, completedPromotionWrites } from './agent-harness-learning-auto-promote.ts';
 import { runSkillDraftProposer, assertSkillDraftRunResultCurrent } from '../agent/skill-draft-runner.ts';
-import { AgentSkillRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { AgentSkillRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn/skill-registry';
 import { delegationPostureSummary, describeHarnessDelegationRoute } from './agent-harness-delegation-posture.ts';
 import { describeHarnessKeybinding, listHarnessKeybindings, listHarnessShortcuts, resetHarnessKeybinding, runHarnessKeybinding, setHarnessKeybinding, totalHarnessKeybindings, totalHarnessShortcuts } from './agent-harness-keybinding-metadata.ts';
 import { describeHarnessMediaProvider, mediaPostureSummary } from './agent-harness-media-posture.ts';

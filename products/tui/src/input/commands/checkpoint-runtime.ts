@@ -11,7 +11,7 @@
 // completed turn, reusing this same checkpoint store for the files half.
 // ---------------------------------------------------------------------------
 
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 import type { WorkspaceCheckpoint } from '@goodvibes-jev/engine/platform/platform/workspace';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 

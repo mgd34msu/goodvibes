@@ -1,4 +1,4 @@
-import { defineLifecycle } from '@goodvibes-jev/engine/platform/platform/utils';
+import { defineLifecycle } from '@goodvibes-jev/engine/platform/platform/utils/lifecycle-machine';
 import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 import { readJsonStore, updateJsonStore, type JsonStoreSpec } from './store-file.js';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from './surface.js';

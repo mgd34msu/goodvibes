@@ -1,10 +1,10 @@
-import { readConnectedHostOperatorToken } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { readConnectedHostOperatorToken } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-auth';
 import { basename, sep } from 'node:path';
 import type { CommandContext } from './command-registry.ts';
-import { AgentRoutineRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { AgentRoutineRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn/routine-registry';
 import { memoryRecordTemporalStatus, resolveCanonicalMemoryDbPath } from '@goodvibes-jev/engine/platform/platform/state';
-import { storeFileChangeStamp } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { describeMemoryPromptEligibility, isPromptActiveMemory } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { storeFileChangeStamp } from '@goodvibes-jev/engine/terminal-shell/agent-turn/store-change-stamp';
+import { describeMemoryPromptEligibility, isPromptActiveMemory } from '@goodvibes-jev/engine/terminal-shell/agent-turn/memory-prompt';
 import { summarizeAgentBehaviorDiscovery } from '../agent/behavior-discovery-summary.ts';
 import { buildAgentWorkspaceChannelSetupGuide, buildAgentWorkspaceChannels } from './agent-workspace-channels.ts';
 import { buildAgentWorkspaceSetupChecklist } from './agent-workspace-setup.ts';
@@ -37,7 +37,7 @@ import {
   type AgentWorkspaceReadFailures,
 } from './agent-workspace-snapshot-builders.ts';
 import type { AgentWorkspaceLocalLibraryItem, AgentWorkspaceRuntimeSnapshot } from './agent-workspace-types.ts';
-import { connectedHostBaseUrl } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { connectedHostBaseUrl } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-dial';
 
 // Re-exported so this module's public surface still carries this builder,
 // whose body now lives in agent-workspace-snapshot-builders.ts.

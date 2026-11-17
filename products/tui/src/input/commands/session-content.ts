@@ -6,7 +6,7 @@ import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import type { SelectionItem } from '../selection-modal.ts';
 import { TemplateManager, parseTemplateArgs } from '@goodvibes-jev/engine/platform/platform/templates';
 import { requireSessionManager, requireSessionMemoryStore, requireShellPaths } from './runtime-services.ts';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 import { sessionCommand } from './session.ts';
 import { describeSessionLoad, loadSessionWithAgents } from './session-load.ts';
 import { undoLastRewind, redoLastRewind } from './rewind-runtime.ts';

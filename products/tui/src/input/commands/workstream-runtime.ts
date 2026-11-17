@@ -1,6 +1,6 @@
 import { routeNativeConversationInput } from '../../runtime/native-conversation-ingress.ts';
 import { renderContractStatus, runWorkstreamCommand, WORKSTREAM_SHARED_USAGE } from '@goodvibes-jev/engine/terminal-shell';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 import { directOwnerWorkstreamInput, type CommandContext, type CommandRegistry } from '../command-registry.ts';
 
 const USAGE = `start <request> | ${WORKSTREAM_SHARED_USAGE}`;

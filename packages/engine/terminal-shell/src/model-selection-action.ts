@@ -5,7 +5,7 @@ import {
   resolveRequestedEffortForServingModel,
   type EffortModelLike,
 } from '@goodvibes-jev/engine/platform/platform/providers/reasoning-effort-surface';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 import { activeTokens } from './renderer/theme.js';
 /** Keys a model selection writes that hold text. */
 type SelectionTextKey =

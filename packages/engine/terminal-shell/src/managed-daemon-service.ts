@@ -9,7 +9,8 @@ import { existsSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { DAEMON_SERVICE_NAME, DARWIN_DAEMON_SERVICE_LABEL, PlatformServiceManager, resolveDaemonServiceDefault } from '@goodvibes-jev/engine/platform/platform/daemon';
+import { DAEMON_SERVICE_NAME, DARWIN_DAEMON_SERVICE_LABEL, resolveDaemonServiceDefault } from '@goodvibes-jev/engine/platform/platform/daemon/daemon-service-default';
+import { PlatformServiceManager } from '@goodvibes-jev/engine/platform/platform/daemon/service-manager';
 
 /** Structurally derived from `PlatformServiceManager`'s own constructor, the
  * platform's public `platform/daemon` entry point only re-exports the class and

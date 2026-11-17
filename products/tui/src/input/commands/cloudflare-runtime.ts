@@ -10,8 +10,8 @@ import {
   type CloudflareProvisionStep,
 } from '../../runtime/cloudflare-control-plane.ts';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
-import { requireShellPaths } from './runtime-services.ts';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { requireShellPaths } from '@goodvibes-jev/engine/terminal-shell/command-service-access';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 import { parseDeclaredFlags, type DeclaredFlags, type ParsedDeclaredFlags } from './declared-flags.ts';
 
 type ParsedCloudflareArgs = ParsedDeclaredFlags;

@@ -15,23 +15,23 @@ export type {
 import { yesNo } from '@goodvibes-jev/engine/terminal-shell/cli-output';
 import { isExecutable } from '@goodvibes-jev/engine/terminal-shell/cli-environment';
 import { probeTcp as probe } from '@goodvibes-jev/engine/terminal-shell/service-io';
-import '@goodvibes-jev/judgment/decisions';
 import { spawnSync } from 'node:child_process';
 import { realpathSync } from 'node:fs';
 
 import { basename, delimiter, dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
-import { resolveDaemonServiceDefault, type PlatformServiceManager } from '@goodvibes-jev/engine/platform/platform/daemon';
+import { resolveDaemonServiceDefault } from '@goodvibes-jev/engine/platform/platform/daemon/daemon-service-default';
+import type { PlatformServiceManager } from '@goodvibes-jev/engine/platform/platform/daemon';
 import { buildManagedDaemonServiceManager, resolveConfiguredServiceName } from '@goodvibes-jev/engine/terminal-shell/managed-daemon-service';
 import { homedir } from 'node:os';
 import type { ManagedServiceStatus } from '@goodvibes-jev/engine/platform/platform/daemon';
 import { resolveDaemonEnabled } from '@goodvibes-jev/engine/platform/platform/config';
-import { resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/platform/platform/config';
+import { resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/platform/platform/config/goodvibes-home';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { formatRuntimeEndpointBinding } from '@goodvibes-jev/engine/terminal-shell';
+import { formatRuntimeEndpointBinding } from '@goodvibes-jev/engine/terminal-shell/cli-endpoints';
 import type { RuntimeEndpointId } from '@goodvibes-jev/engine/terminal-shell';
-import { redactText } from '@goodvibes-jev/engine/terminal-shell';
+import { redactText } from '@goodvibes-jev/engine/terminal-shell/cli-redaction';
 import type { JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
 import { captureStrictJudgmentJson } from '@goodvibes-jev/engine/platform/platform/gate';
 

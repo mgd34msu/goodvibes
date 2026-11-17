@@ -1,9 +1,9 @@
-import { decisionOrClassic, isClassicOperation } from '@goodvibes-jev/engine/platform/platform/runtime';
+import { decisionOrClassic, isClassicOperation } from '@goodvibes-jev/engine/platform/platform/runtime/decision-policy';
 import { arch, cpus, freemem, platform, totalmem } from 'node:os';
 import { captureJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { prepareJudgmentResult } from '@goodvibes-jev/engine/platform/platform/gate';
 import { routingRegistry, routeReadiness, localRecipeFit, routeReadinessFrom, localRecipeFitFrom } from '@goodvibes-jev/engine/platform/platform/routing';
-import { assertProjectionCurrent, ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
+import { assertProjectionCurrent, ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools/input-projection';
 import type { CommandContext } from '../input/command-registry.ts';
 import { readProviderHealthSignal } from './agent-harness-model-provider-health.ts';
 import { listProviderRegistryProviders } from './agent-harness-model-catalog.ts';

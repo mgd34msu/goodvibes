@@ -1,6 +1,6 @@
 import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { ToolDefinition } from '@goodvibes-jev/engine/platform/platform/types';
-import { captureCatalogData } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { captureCatalogData } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-data';
 
 const ownedDefinitions = new WeakSet<ToolDefinition>();
 

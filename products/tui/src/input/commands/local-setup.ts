@@ -17,7 +17,7 @@ import { buildSetupReviewSnapshot, exportSetupSupportBundle, renderSetupSandboxR
 import { setupReviewLines } from '@goodvibes-jev/engine/terminal-shell/setup-review';
 import { openOnboardingWizard, requireShellPaths } from './runtime-services.ts';
 import { DEEP_LINK_SURFACES, buildDeepLink, openDeepLink, parseDeepLink } from './deep-link.ts';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 
 type SetupSnapshot = Awaited<ReturnType<typeof buildSetupReviewSnapshot>>;
 

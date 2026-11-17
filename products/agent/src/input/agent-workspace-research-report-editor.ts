@@ -1,9 +1,9 @@
-import { prepareProtectedResearchReport, type ResearchReportOperation } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { prepareProtectedResearchReport, type ResearchReportOperation } from '@goodvibes-jev/engine/terminal-shell/agent-turn/protected-research-report';
 import type { ProtectedSourceOwner } from '@goodvibes-jev/engine/platform/platform/security';
-import { prepareAgentResearchReportInput } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { prepareAgentResearchReportInput } from '@goodvibes-jev/engine/terminal-shell/agent-turn/research-report-input';
 import type { AgentWorkspaceActionResult, AgentWorkspaceLocalEditor } from './agent-workspace-types.ts';
 import { isAffirmative } from './agent-workspace-command-editor-engine.ts';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools/input-projection';
 
 type AgentWorkspaceFieldReader = (fieldId: string) => string;
 

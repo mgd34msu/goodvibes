@@ -5,8 +5,8 @@ import { fetchModelContextWindows } from '@goodvibes-jev/engine/platform/platfor
 import type { CustomProviderConfig, ProviderApi } from '@goodvibes-jev/engine/platform/platform/providers';
 import type { SecretsManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
-import { formatProviderModel } from '@goodvibes-jev/engine/platform/platform/providers';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { formatProviderModel } from '@goodvibes-jev/engine/platform/platform/providers/provider-model';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 import type { TerminalCommandRegistry } from './command-registry.js';
 import type { ConcealedInputRequest } from './concealed-input.js';
 import { commandRefusal, requireYesFlag, stripYesFlag } from './command-confirmation.js';

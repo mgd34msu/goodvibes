@@ -1,11 +1,11 @@
-import { createPersonalOpsInputProjector } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { createPersonalOpsInputProjector } from '@goodvibes-jev/engine/terminal-shell/agent-turn/personal-ops-ingress';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { CommandContext, CommandRegistry } from '../input/command-registry.ts';
 import { facadeHarness } from './agent-harness-facade.ts';
-import { captureCatalogData } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { captureCatalogData } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-data';
 import { forwardHarnessCatalogCall, protectHarnessCatalogTool } from './agent-harness-catalog-ingress.ts';
-import { confirmParameter, requestParameter } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { confirmParameter, requestParameter } from '@goodvibes-jev/engine/terminal-shell/agent-turn/effect-admission';
 
 type AgentPersonalOpsAction = 'briefing' | 'status' | 'queue' | 'intake' | 'lane' | 'read';
 

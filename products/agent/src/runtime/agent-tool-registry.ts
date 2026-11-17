@@ -4,18 +4,14 @@ import { ToolRegistry, registerAllTools } from '@goodvibes-jev/engine/platform/p
 import { controlSurfacesFor } from './control-surfaces.ts';
 import { installAgentToolPolicyGuard } from '../tools/agent-tool-policy-guard.ts';
 import { agentBrowserProfileRoot, agentBrowserScreenshotRoot, agentBrowserToolBackend } from './agent-browser.ts';
-import {
-  connectedHostGoogleCalendar,
-  getOutwardApprovalStore,
-  OUTWARD_APPROVAL_GESTURE,
-  registerAgentTurnTools,
-  AGENT_PLATFORM_TOOL_ADMISSION,
-  decorateAgentWorkerRegistry as decorateAgentTurnWorkerRegistry,
-  type GoogleToolWiringDeps,
-} from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { connectedHostGoogleCalendar } from '@goodvibes-jev/engine/terminal-shell/agent-turn/google-tool';
+import { getOutwardApprovalStore, OUTWARD_APPROVAL_GESTURE } from '@goodvibes-jev/engine/terminal-shell/agent-turn/outward-approvals';
+import { registerAgentTurnTools } from '@goodvibes-jev/engine/terminal-shell/agent-turn/hosted-turn';
+import { AGENT_PLATFORM_TOOL_ADMISSION, decorateAgentWorkerRegistry as decorateAgentTurnWorkerRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn/read-modes';
+import { type GoogleToolWiringDeps } from '@goodvibes-jev/engine/terminal-shell/agent-turn/google-wiring';
 import { wrapAgentContextToolForAgentPolicy } from '../tools/agent-context-policy.ts';
 import { createDaemonExpectationClient } from '@goodvibes-jev/engine/terminal-shell/agent-turn/session-expectations';
-import { connectedHostFamilyRemote } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { connectedHostFamilyRemote } from '@goodvibes-jev/engine/terminal-shell/agent-turn/family-remote';
 import { compactRegisteredToolDefinitions } from '../tools/tool-definition-compaction.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';

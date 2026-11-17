@@ -1,5 +1,7 @@
-import { DEFAULT_CONFIG, type GoodVibesConfig } from '@goodvibes-jev/engine/platform/platform/config';
-import { BUILTIN_PROVIDER_ENV_KEYS, getProviderIdFromModel } from '@goodvibes-jev/engine/platform/platform/providers';
+import { DEFAULT_CONFIG } from '@goodvibes-jev/engine/platform/platform/config/schema';
+import type { GoodVibesConfig } from '@goodvibes-jev/engine/platform/platform/config';
+import { BUILTIN_PROVIDER_ENV_KEYS } from '@goodvibes-jev/engine/platform/platform/config/provider-credential-catalog';
+import { getProviderIdFromModel } from '@goodvibes-jev/engine/platform/platform/providers/provider-model';
 import { isDeepEqual } from './onboarding-values.js';
 import type {
   OnboardingAcknowledgementState,

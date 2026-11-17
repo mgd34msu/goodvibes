@@ -2,11 +2,11 @@ import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decision
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
 import { captureStrictJudgmentJson, judgmentInputBoundary } from '@goodvibes-jev/engine/platform/platform/gate';
 import { CONTENT_DERIVATION_SITE } from '@goodvibes-jev/engine/platform/platform/security';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools/input-projection';
 import { isDeepStrictEqual } from 'node:util';
 import { evaluateOutwardEffect, getProcessUntrustedContentLedger } from '@goodvibes-jev/engine/platform/platform/security';
 import { screenOutboundForCardMaterial } from './payments-channel-guard.js';
-import { decisionOrClassic } from '@goodvibes-jev/engine/platform/platform/runtime';
+import { decisionOrClassic } from '@goodvibes-jev/engine/platform/platform/runtime/decision-policy';
 import type { JudgmentPort } from '@goodvibes-jev/judgment/decisions';
 
 /** Retain the local source record; this does not mint execution or human authority. */

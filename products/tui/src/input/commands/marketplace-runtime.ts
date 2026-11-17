@@ -1,24 +1,8 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
-import {
-  exportEcosystemCatalogBundle,
-  importEcosystemCatalogBundle,
-  inspectEcosystemCatalogBundle,
-  inspectInstalledEcosystemEntry,
-  installEcosystemCatalogEntry,
-  listEcosystemInstallBackups,
-  listInstalledEcosystemEntries,
-  loadEcosystemCatalog,
-  rollbackInstalledEcosystemEntry,
-  reviewEcosystemCatalogEntry,
-  searchEcosystemCatalog,
-  uninstallEcosystemCatalogEntry,
-  updateInstalledEcosystemEntry,
-  type EcosystemCatalogBundle,
-  type EcosystemCatalogEntry,
-  type EcosystemEntryKind,
-} from '@/runtime/index.ts';
+import { exportEcosystemCatalogBundle, importEcosystemCatalogBundle, inspectEcosystemCatalogBundle, inspectInstalledEcosystemEntry, installEcosystemCatalogEntry, listEcosystemInstallBackups, listInstalledEcosystemEntries, loadEcosystemCatalog, rollbackInstalledEcosystemEntry, reviewEcosystemCatalogEntry, searchEcosystemCatalog, uninstallEcosystemCatalogEntry, updateInstalledEcosystemEntry } from '@goodvibes-jev/engine/platform/platform/runtime/ecosystem/catalog';
+import type { EcosystemCatalogBundle, EcosystemCatalogEntry, EcosystemEntryKind } from '@/runtime/index.ts';
 import { openModalCommand, requireEcosystemCatalogPaths, requireReadModels, requireShellPaths } from './runtime-services.ts';
 
 function resolveMarketplaceEntry(

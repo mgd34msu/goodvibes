@@ -14,10 +14,10 @@ import {
   resolveCredentialDeleteScope,
   resolveCredentialWriteScope,
 } from '../../config/credential-scope.ts';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 import { requireYesFlag, stripYesFlag } from './confirmation.ts';
 import { collectAgentMedia, mediaCollectCommand } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { formatAgentMediaGenerationResult, generateAgentMedia } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { formatAgentMediaGenerationResult, generateAgentMedia } from '@goodvibes-jev/engine/terminal-shell/agent-turn/media-generation';
 
 interface MediaGenerateArgs {
   readonly prompt: string;

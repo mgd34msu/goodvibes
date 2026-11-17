@@ -15,7 +15,8 @@ export {
  */
 
 import type { HostServiceStatus } from '@/runtime/index.ts';
-import { readConnectedDaemonOrigin, type ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { readConnectedDaemonOrigin } from '@goodvibes-jev/engine/platform/platform/config/control-plane-base-url';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 
 /** Which of the two background services a question is about. */
 import type { HostServiceName } from '@goodvibes-jev/engine/terminal-shell/host-service-status';

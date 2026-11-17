@@ -1,15 +1,16 @@
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
-import { captureCatalogSnapshot, rankHarnessCatalog, type CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { captureCatalogSnapshot } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-data';
+import { rankHarnessCatalog, type CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-ranking';
 import { captureCatalogReadRequest, selectHarnessCatalog } from './agent-harness-catalog-selection.ts';
 import { withModelReadingSource } from './agent-harness-model-reading-source.ts';
 import type { McpApi } from '@goodvibes-jev/engine/platform/platform/mcp';
-import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn/read-helpers';
 
 type McpCatalogContext = {
   readonly clients?: { readonly mcpApi?: Pick<McpApi, 'listServerSecurity' | 'listAllTools' | 'captureToolCatalog'> };
   readonly extensions?: { readonly mcpRegistry?: Pick<McpApi, 'listServerSecurity' | 'listAllTools' | 'captureToolCatalog'> };
 };
-import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn/preview-text';
 import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 
 // Server-supplied strings are shortened before they reach the model.

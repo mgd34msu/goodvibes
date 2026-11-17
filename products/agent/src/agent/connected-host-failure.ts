@@ -8,8 +8,8 @@
  * tell a host older than this Agent from nothing listening at all.
  */
 import { categoryForCode, categoryForStatus, EngineErrorCodes, GoodVibesError, httpStatusOf } from '@goodvibes-jev/engine/errors';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-import { isHostFailure } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
+import { isHostFailure } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-client';
 import type { AgentConnectedHostConnection } from './routine-schedule-promotion.ts';
 
 /** Why a connected-host call failed, shared by schedules and operator gateway callers. */

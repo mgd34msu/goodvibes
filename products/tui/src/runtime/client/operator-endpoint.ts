@@ -35,13 +35,13 @@
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { createGoodVibesPlatform, isOperatorMethodId } from '@goodvibes-jev/engine/platform';
 import type { GoodVibesPlatform } from '@goodvibes-jev/engine/platform';
-import { GoodVibesError } from '@goodvibes-jev/engine/platform';
+import { GoodVibesError } from '@goodvibes-jev/engine/errors';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { readConnectedDaemonOrigin, resolveDaemonEnabled } from '@goodvibes-jev/engine/platform/platform/config';
-import { resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/platform/platform/config';
+import { resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/platform/platform/config/goodvibes-home';
 import { getOrCreateCompanionToken } from '@goodvibes-jev/engine/platform/platform/pairing';
 import { readConnectedDaemonToken, readDaemonSessionToken } from './connected-daemon-credentials.ts';
-import { operatorTokenPath } from '@goodvibes-jev/engine/platform/platform/workspace';
+import { operatorTokenPath } from '@goodvibes-jev/engine/platform/platform/pairing/companion-token';
 import type { DaemonVerbCaller } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 
 /** Re-exported so this repo's importers keep one import site for the shape

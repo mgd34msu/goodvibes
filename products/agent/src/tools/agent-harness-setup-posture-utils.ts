@@ -1,13 +1,13 @@
 import { statSync } from 'node:fs';
 import { buildProviderAccountSnapshot } from '@/runtime/index.ts';
 import { requireLocalUserAuthManager, requirePlatform, requireProvider, requireSecretsManager, requireServiceRegistry, requireShellPaths, requireSubscriptionManager } from '../input/commands/runtime-services.ts';
-import { collectOnboardingSnapshot } from '../runtime/onboarding/index.ts';
+import { collectOnboardingSnapshot } from '../runtime/onboarding/snapshot.ts';
 import type { CommandContext } from '../input/command-registry.ts';
 import { buildCliServicePosture, type CliServicePosture } from '../cli/service-posture.ts';
 import type { AgentHarnessSetupArgs, SetupLookupSource, SetupPlanStatus, SurfaceRegistryLike, SetupSmokeArtifactStore } from './agent-harness-setup-posture-types.ts';
 import type { OnboardingStep1CapabilityItem } from '../runtime/onboarding/index.ts';
-import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn/preview-text';
+import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn/read-helpers';
 
 export function readString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';

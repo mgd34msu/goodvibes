@@ -36,7 +36,7 @@ import {
 } from './cluster-remote-daemon-target.js';
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
 import { clusterJoinGroup } from './batteries/cluster-join-group.js';
-import { decisionOrClassic } from '@goodvibes-jev/engine/platform/platform/runtime';
+import { decisionOrClassic } from '@goodvibes-jev/engine/platform/platform/runtime/decision-policy';
 import {
   describeAge,
   printableName,

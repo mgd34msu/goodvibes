@@ -2,7 +2,7 @@ import type { ConfigModalActionContext, ConfigModalSurface, ConfigModalView } fr
 import type { ServiceInspectionQuery, SubscriptionAccessQuery } from '@/runtime/index.ts';
 import type { ProviderSubscription, ServiceConfig, ServiceInspection, ServiceConnectionTestResult } from '@goodvibes-jev/engine/platform/platform/config';
 import { subscriptionState } from '@goodvibes-jev/engine/platform/platform/config';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 import { toneStyle, statusGlyph, pad, postureLine, kv, type Tone } from './modal-surface-helpers.ts';
 
 interface Entry {

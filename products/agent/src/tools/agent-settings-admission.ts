@@ -1,9 +1,9 @@
-import { agentResearchSourceOwner } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { agentResearchSourceOwner } from '@goodvibes-jev/engine/terminal-shell/agent-turn/protected-research-report';
 import { withModelReadingSource, captureModelReadingInput, assertModelReadingInputCurrent } from './agent-harness-model-reading-source.ts';
 /** Preferred settings and compatibility harness share one exact effect-owner plan. */
 import { settingsOutcomeError } from './agent-settings-outcome.ts';
 import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-import { snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
+import { snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate/judgment-input';
 import { agentSettingsWriteRefusal } from '@goodvibes-jev/engine/platform/platform/gate/policy';
 import { assertCurrentToolInvocation, assertProjectionExecution, claimCurrentToolSettingsDispatch,
   commitCurrentToolSettingsPlan, currentToolSettingsPresentation, ToolInputProjectionError,

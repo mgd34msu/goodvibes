@@ -1,4 +1,4 @@
-import { isLoopbackHost } from '@goodvibes-jev/engine/platform/platform/pairing';
+import { isLoopbackHost } from '@goodvibes-jev/engine/platform/platform/utils/reachable-base-url';
 import type { RuntimeEndpointBinding } from './cli-endpoints.js';
 
 export type BindPostureKind = 'local' | 'local-network' | 'custom-network';

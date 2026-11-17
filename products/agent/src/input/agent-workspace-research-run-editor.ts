@@ -1,5 +1,5 @@
 import type { ShellPathService } from '@/runtime/index.ts';
-import { AgentResearchRunRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { AgentResearchRunRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn/research-run-registry';
 import type { AgentWorkspaceActionResult, AgentWorkspaceLocalEditor } from './agent-workspace-types.ts';
 import { isAffirmative } from './agent-workspace-command-editor-engine.ts';
 

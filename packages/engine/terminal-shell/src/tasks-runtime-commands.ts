@@ -6,7 +6,7 @@ import {
 } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 import type { OpsApi } from '@goodvibes-jev/engine/platform/platform/runtime/bootstrap';
 import type { TaskKind } from '@goodvibes-jev/engine/platform/platform/runtime/state';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 import { sortUnionTasks } from './task-presentation.js';
 import type { TerminalCommandRegistry } from './command-registry.js';
 import { commandRefusal } from './command-confirmation.js';

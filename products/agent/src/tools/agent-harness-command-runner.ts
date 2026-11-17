@@ -1,4 +1,4 @@
-import type { CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import type { CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-ranking';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { formatRefusal, readRefusal, refusal, RefusalError, type Refusal } from '@goodvibes-jev/engine/errors';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';

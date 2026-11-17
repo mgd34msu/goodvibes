@@ -36,10 +36,32 @@ if (readerDescription !== undefined) {
   });
   process.exit(code);
 } else {
-  // `/remote dispatch` and delegation start copies of this program as ACP
-  // agents; only this entry knows how it was launched, so it says how.
-  const { registerSelfAcpAgentCommand } = await import('@goodvibes-jev/engine/platform/platform/acp');
-  const compiled = import.meta.path.startsWith('/$bunfs/') || /^[A-Za-z]:[\\/]~BUN[\\/]/.test(import.meta.path);
-  registerSelfAcpAgentCommand(compiled ? [process.execPath, 'acp'] : [process.execPath, 'run', import.meta.path, 'acp']);
-  await import('./interactive.ts');
+  // Commands (`status`, `run`, management) are answered by the CLI entry, which
+  // loads only the chosen command's modules and exits; the terminal UI's module
+  // graph loads only when no command took the launch.
+  const [{ prepareShellCliRuntime }, { resolveGoodVibesHome }] = await Promise.all([
+    import('./cli/entrypoint.ts'),
+    import('@goodvibes-jev/engine/platform/platform/config'),
+  ]);
+  let prepared: Awaited<ReturnType<typeof prepareShellCliRuntime>> | undefined;
+  try {
+    // Both roots come from the one resolver the daemon CLI also uses. This
+    // called homedir() unconditionally once, so a harness that redirected the
+    // tree got a client that wrote the real one, secret store included.
+    prepared = await prepareShellCliRuntime(
+      process.argv.slice(2),
+      {
+        defaultWorkingDirectory: process.env['GOODVIBES_WORKING_DIR'] ?? process.cwd(),
+        homeDirectory: resolveGoodVibesHome(),
+      },
+      'goodvibes',
+    );
+  } catch (error) {
+    const { reportFatalStartupError } = await import('./cli/tui-startup.ts');
+    reportFatalStartupError(error);
+  }
+  if (prepared !== undefined) {
+    const { runInteractive } = await import('./interactive.ts');
+    await runInteractive(prepared);
+  }
 }

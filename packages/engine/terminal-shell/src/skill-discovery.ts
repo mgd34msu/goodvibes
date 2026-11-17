@@ -1,9 +1,6 @@
 import { sep } from 'node:path';
-import {
-  listInstalledEcosystemEntries,
-  type EcosystemCatalogPathOptions,
-  type ShellPathService,
-} from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+import { listInstalledEcosystemEntries } from '@goodvibes-jev/engine/platform/platform/runtime/ecosystem/catalog';
+import type { EcosystemCatalogPathOptions, ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 import {
   compareSkillsByOrigin,
   listSkills,

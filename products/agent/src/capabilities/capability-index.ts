@@ -1,12 +1,5 @@
 import { runCapabilityProbe, type ProbeContext } from './capability-probe-runner.ts';
-import type {
-  CapabilityDeclaration,
-  CapabilityDisagreement,
-  CapabilityIndexReport,
-  CapabilityState,
-  ResolvedCapability,
-  ResolvedPrerequisite,
-} from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import type { CapabilityDeclaration, CapabilityDisagreement, CapabilityIndexReport, CapabilityState, ResolvedCapability, ResolvedPrerequisite } from '@goodvibes-jev/engine/terminal-shell/agent-turn/capability-types';
 import { knownServiceEvidence, type KnownServiceEvidence } from './known-service-evidence.ts';
 
 /**

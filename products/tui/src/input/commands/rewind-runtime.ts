@@ -36,7 +36,7 @@ import {
   type RewindScope as PlatformRewindScope,
   type RewindWorkspacePort,
 } from '@goodvibes-jev/engine/platform/platform/rewind';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 import { join } from 'node:path';
 import type { WorkspaceCheckpoint, WorkspaceCheckpointManager } from '@goodvibes-jev/engine/platform/platform/workspace';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';

@@ -1,6 +1,6 @@
 import type { CommandContext } from '../command-registry.ts';
 import type { CommandRegistry } from '../command-registry.ts';
-import { generateQrMatrix, renderQrToString } from '@goodvibes-jev/engine/platform/platform/pairing';
+import { generateQrMatrix, renderQrToString } from '@goodvibes-jev/engine/platform/platform/pairing/qr-generator';
 
 /**
  * Register the /relay command, the relay's configuration, its reachability

@@ -9,7 +9,8 @@
  *
  * Line numbers in the result are relative to the turn's first line.
  */
-import { createEmptyLine, type Line } from '@goodvibes-jev/engine/platform/platform/types';
+import { createEmptyLine } from '@goodvibes-jev/engine/platform/platform/types/grid';
+import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
 import { parseDiffForApply } from '@goodvibes-jev/engine/platform/platform/core';
 import { MARKDOWN_TEXT_COL, renderMarkdown, renderMarkdownTracked } from './renderer/markdown.js';
 import { renderSystemMessage } from './renderer/system-message.js';

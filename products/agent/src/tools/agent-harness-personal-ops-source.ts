@@ -2,13 +2,14 @@ import { isDeepStrictEqual } from 'node:util';
 import { redactStructuredDataAsync } from '@goodvibes-jev/engine/platform/platform/utils';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { captureOwnedJson } from '@goodvibes-jev/engine/platform/platform/gate';
-import { inspectCatalogData, captureCatalogSnapshotGuard, type CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { inspectCatalogData, captureCatalogSnapshotGuard } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-data';
+import { type CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-ranking';
 import { captureModelReadingSnapshotGuard } from './agent-harness-model-reading-source.ts';
 import { personalOpsNativeFields, personalOpsResultFields } from './agent-personal-ops-native-fields.ts';
-import { capturePersonalOpsData } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { capturePersonalOpsData } from '@goodvibes-jev/engine/terminal-shell/agent-turn/personal-ops-data';
 
 // The capture and JSON grammar are the shared Agent turn's (personal-ops-data.ts); the learning readings use the same ones.
-export { capturePersonalOpsData, personalOpsEntry, personalOpsJson } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+export { capturePersonalOpsData, personalOpsEntry, personalOpsJson } from '@goodvibes-jev/engine/terminal-shell/agent-turn/personal-ops-data';
 
 export function assertPersonalOpsDataCurrent(value: unknown, captured: unknown): void {
   if (!isDeepStrictEqual(capturePersonalOpsData(value), captured)) throw new ToolInputProjectionError('held');

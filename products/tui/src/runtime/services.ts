@@ -30,7 +30,7 @@ import { gateConsolidationToLocalWriter } from './memory-consolidation-gate.ts';
 import { createNotificationDispatcher, wireRuntimeNotificationBridge, wireMemoryPressureNotice } from './notification-dispatch.ts';
 import { resolveDaemonEnabled } from '@goodvibes-jev/engine/platform/platform/config';
 import { createWorkspaceCheckpointing } from './workspace-checkpointing.ts';
-import { createShellPathService } from '@/runtime/index.ts';
+import { createShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell-paths';
 import { createViewPanelAdapter } from '../views/view-panel-adapter.ts';
 import { createContractIntake } from '@goodvibes-jev/engine/platform/platform/contract';
 import { KeybindingsManager } from '../input/keybindings.ts';

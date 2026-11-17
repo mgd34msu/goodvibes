@@ -1,4 +1,4 @@
-import { rankHarnessCatalog, type CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { rankHarnessCatalog, type CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-ranking';
 import type { EffectResult } from './agent-harness-tool-utils.ts';
 import { harnessDisplayPath } from './agent-harness-display-path.ts';
 import type { Ranked } from '@goodvibes-jev/judgment';
@@ -10,7 +10,7 @@ import {
   type KeyCombo,
   type KeybindingsManager,
 } from '../input/keybindings.ts';
-import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn/read-helpers';
 
 /**
  * Keys the shell handles itself before configurable bindings are consulted, and

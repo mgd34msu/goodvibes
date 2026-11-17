@@ -1,8 +1,9 @@
 import { TerminalBuffer } from './buffer.js';
 import { DiffEngine } from './diff.js';
-import { type Line, createEmptyLine } from '@goodvibes-jev/engine/platform/platform/types';
+import { createEmptyLine } from '@goodvibes-jev/engine/platform/platform/types/grid';
+import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
 import type { SearchManager } from '../transcript-search.js';
-import { allowTerminalWrite } from '../terminal-output-guard.js';
+import { allowTerminalWrite } from '../terminal-write.js';
 import { probeTermCaps, type TermColorCaps } from '../term-caps.js';
 import { activeTheme, activeTokens } from './theme.js';
 import type { SurfaceLayer } from './surface-kit.js';

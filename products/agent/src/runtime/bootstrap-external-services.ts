@@ -38,7 +38,7 @@ import { DAEMON_INSTALL_COMMAND, DAEMON_START_COMMAND, readDaemonServiceState, t
 import type { SystemMessageRouter } from '../core/system-message-router.ts';
 import type { RuntimeServices } from './services.ts';
 import type { UiRuntimeServices } from './ui-services.ts';
-import { connectedHostBaseUrl } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { connectedHostBaseUrl } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-dial';
 
 /**
  * This is a PROBE address, so it goes through the same wildcard→loopback

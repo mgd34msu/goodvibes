@@ -19,10 +19,8 @@
  *    each produces an error line, and the caller exits 2 with the help. Nothing
  *    is accepted-and-ignored.
  */
-import {
-  findCatalogFlagArityConflicts as findConflictsIn,
-  parseWithCatalog,
-} from '@goodvibes-jev/engine/terminal-shell';
+import { findCatalogFlagArityConflicts as findConflictsIn } from '@goodvibes-jev/engine/terminal-shell/cli-catalog-types';
+import { parseWithCatalog } from '@goodvibes-jev/engine/terminal-shell/cli-parser-engine';
 import { DAEMON_CLI_CATALOG } from './command-catalog.ts';
 import type { DaemonCliParseResult } from './types.ts';
 

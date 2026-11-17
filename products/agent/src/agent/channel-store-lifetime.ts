@@ -1,4 +1,4 @@
-import type { DaemonInvokeOptions, DaemonOperatorInvoke } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import type { DaemonInvokeOptions, DaemonOperatorInvoke } from '@goodvibes-jev/engine/terminal-shell/agent-turn/daemon-operator-client';
 
 export interface ChannelStoreEffectOptions extends DaemonInvokeOptions {
   readonly invoke?: DaemonOperatorInvoke;

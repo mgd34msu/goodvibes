@@ -1,11 +1,5 @@
-import {
-  MCP_DEFAULT_TRUST_MODE,
-  type McpConfigScope,
-  type McpEffectiveConfig,
-  type McpServerConfig,
-  type McpServerConfigEntry,
-  type McpServerSecurityRecord,
-} from '@goodvibes-jev/engine/platform/platform/mcp';
+import { MCP_DEFAULT_TRUST_MODE } from '@goodvibes-jev/engine/platform/platform/mcp/config';
+import type { McpConfigScope, McpEffectiveConfig, McpServerConfig, McpServerConfigEntry, McpServerSecurityRecord } from '@goodvibes-jev/engine/platform/platform/mcp';
 export const MCP_WORKSPACE_MODAL_NAME = 'mcpWorkspace';
 export const MCP_ROLES = ['general', 'docs', 'filesystem', 'git', 'database', 'browser', 'automation', 'ops', 'remote'] as const;
 export const MCP_FORM_TRUST_MODES = ['constrained', 'ask-on-risk', 'blocked'] as const;

@@ -10,7 +10,7 @@ import type {
 } from '@goodvibes-jev/engine/platform/platform/media';
 import { mediaOutputKindOf } from '@goodvibes-jev/engine/platform/platform/media';
 import { RefusalError, refusal } from '@goodvibes-jev/engine/errors';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools/input-projection';
 import { assertDeliveryCurrent, type DeliveryLifetime } from '@goodvibes-jev/engine/platform/platform/utils';
 
 export interface AgentMediaGenerationInput {

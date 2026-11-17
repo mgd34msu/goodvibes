@@ -22,11 +22,8 @@
  */
 
 import { CONFIG_SCHEMA, type ConfigKey, type ConfigManager, type ConfigSetting } from '@goodvibes-jev/engine/platform/platform/config';
-import {
-  FEATURE_SETTINGS,
-  deriveFeatureState,
-  type FeatureSetting,
-} from '@goodvibes-jev/engine/platform/platform/runtime/state';
+import { FEATURE_SETTINGS, deriveFeatureState } from '@goodvibes-jev/engine/platform/platform/runtime/feature-flags/feature-settings';
+import type { FeatureSetting } from '@goodvibes-jev/engine/platform/platform/runtime/state';
 
 export type { FeatureSetting } from '@goodvibes-jev/engine/platform/platform/runtime/state';
 

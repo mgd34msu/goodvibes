@@ -12,10 +12,10 @@
  * when the typed id matches exactly, so a stray Enter cannot destroy a record.
  */
 import type { ShellPathService } from '@/runtime/index.ts';
-import { AgentNoteRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { AgentPersonaRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { AgentRoutineRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { AgentSkillRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { AgentNoteRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn/note-registry';
+import { AgentPersonaRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn/persona-registry';
+import { AgentRoutineRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn/routine-registry';
+import { AgentSkillRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn/skill-registry';
 import type { MemoryApi } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import { deleteAgentWorkspaceMemoryEditor } from './agent-workspace-memory-editor.ts';
 import type { AgentWorkspaceLocalEditor, AgentWorkspaceLocalEditorKind } from './agent-workspace-types.ts';

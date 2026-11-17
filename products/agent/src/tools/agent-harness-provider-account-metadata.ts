@@ -1,11 +1,12 @@
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
-import { captureCatalogSnapshot, rankHarnessCatalog, type CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { captureCatalogSnapshot } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-data';
+import { rankHarnessCatalog, type CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-ranking';
 import { captureCatalogReadRequest, selectHarnessCatalog } from './agent-harness-catalog-selection.ts';
 import { withModelReadingSource } from './agent-harness-model-reading-source.ts';
 import { captureServiceReadSource, captureSubscriptionReadSource, listBuiltinSubscriptionProviders } from '@goodvibes-jev/engine/platform/platform/config';
 import type { CommandContext } from '../input/command-registry.ts';
 import { buildProviderAccountSnapshot, type ProviderAccountRecord, type ProviderAccountSnapshot } from '@/runtime/index.ts';
-import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn/read-helpers';
 
 type ProviderCatalogContext = {
   readonly provider: Pick<CommandContext['provider'], 'providerRegistry'>;
@@ -13,7 +14,7 @@ type ProviderCatalogContext = {
   readonly platform: Pick<CommandContext['platform'], 'configManager' | 'serviceRegistry' | 'subscriptionManager'>
     & { readonly secretsManager?: { get(key: string): Promise<string | null> } | undefined };
 };
-import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn/preview-text';
 
 export interface AgentHarnessProviderAccountArgs {
   readonly providerId?: unknown;

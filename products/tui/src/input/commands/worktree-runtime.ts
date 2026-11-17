@@ -3,7 +3,7 @@ import type { ManagedWorktreeMeta, WorktreeRegistry } from '@/runtime/index.ts';
 import type { CommandRegistry } from '../command-registry.ts';
 import { openCommandView, requireShellPaths } from './runtime-services.ts';
 import { describeOperatorRpcError, getOperatorRpc } from './operator-rpc.ts';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 
 /** Compact per-row setup-state tag for /worktree review, absent when setup has never run; failure stands out. */
 export function formatSetupTag(setup: ManagedWorktreeMeta['setup']): string {

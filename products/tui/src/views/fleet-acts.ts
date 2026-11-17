@@ -16,9 +16,10 @@
 // ---------------------------------------------------------------------------
 
 import type { ProcessNode } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
-import { isTerminalContractStatus, type ContractView, type ContractUnitView } from '@goodvibes-jev/engine/platform/platform/contract';
+import { isTerminalContractStatus } from '@goodvibes-jev/engine/platform/platform/contract/types';
+import type { ContractView, ContractUnitView } from '@goodvibes-jev/engine/platform/platform/contract';
 import type { WorkItem } from '@goodvibes-jev/engine/platform/platform/orchestration';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 import { isViewSearchBackspace, isViewSearchCancel, isViewSearchCommit, isViewSearchPrintable } from './search-focus.ts';
 import { appendSteerText } from './fleet-session-tabs.ts';
 import { isObservedExternalNode, observedKindLabel, type ObservedNode } from './fleet-observed-render.ts';

@@ -10,7 +10,7 @@ import type { MutableRuntimeState } from '@/runtime/index.ts';
 import type { RuntimeStore } from './store/index.ts';
 import type { RuntimeServices } from './services.ts';
 import type { CommandContext } from '../input/command-registry.ts';
-import type { AgentPromptContextReceiptStore } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import type { AgentPromptContextReceiptStore } from '@goodvibes-jev/engine/terminal-shell/agent-turn/prompt-context-receipts';
 import { CommandRegistry } from '../input/command-registry.ts';
 import { registerBuiltinCommands } from '../input/commands.ts';
 import { InputHistory } from '../input/input-history.ts';

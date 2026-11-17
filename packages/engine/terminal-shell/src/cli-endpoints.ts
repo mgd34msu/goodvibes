@@ -3,7 +3,7 @@
  * for the three network endpoints a front-end's daemon exposes: the control
  * plane, the plain HTTP listener, and the web UI.
  */
-import { resolveWebPort } from '@goodvibes-jev/engine/platform/platform/daemon';
+import { resolveWebPort } from '@goodvibes-jev/engine/platform/platform/daemon/host-resolver';
 import type { ConfigKey, ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 
 export type RuntimeEndpointId = 'controlPlane' | 'httpListener' | 'web';

@@ -10,7 +10,7 @@ import {
   type SecretsManager,
   type SecretScope,
 } from '@goodvibes-jev/engine/platform/platform/config';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 import type { ConcealedInputRequest } from './concealed-input.js';
 import type { TerminalSlashCommand } from './command-registry.js';
 import { requireYesFlag, stripYesFlag, type ConfirmableCommand } from './command-confirmation.js';

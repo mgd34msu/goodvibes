@@ -1,9 +1,9 @@
 import { agentHostPairingStorePath, canonicalizePairingHost, readAgentHostPairing, type AgentHostPairing } from './connected-host-pairing-store.js';
-import { OwnedSelectionObservation } from '@goodvibes-jev/engine/platform/platform/runtime/client';
+import { OwnedSelectionObservation } from '@goodvibes-jev/engine/platform/platform/runtime/client/selection-observation';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/platform/platform/config';
-import { operatorTokenPath } from '@goodvibes-jev/engine/platform/platform/workspace';
+import { resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/platform/platform/config/goodvibes-home';
+import { operatorTokenPath } from '@goodvibes-jev/engine/platform/platform/pairing/companion-token';
 
 type JsonRecord = Record<string, unknown>;
 

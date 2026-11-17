@@ -4,7 +4,7 @@ import {
   loadSavedSessionIntoLive as loadSavedSession,
   type LoadSavedSessionOptions,
 } from '@goodvibes-jev/engine/terminal-shell/session-resume';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 import type { CommandContext } from '../command-registry.ts';
 
 export interface LoadedSavedSession {

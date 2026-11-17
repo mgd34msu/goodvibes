@@ -24,7 +24,7 @@
  * resolves to null instead of throwing, and the caller says so honestly rather
  * than pretending the conversation ended.
  */
-import { openRawServerSentEventStream } from '@/runtime/index.ts';
+import { openRawServerSentEventStream } from '@goodvibes-jev/engine/transport-http/sse-stream';
 import { buildUrl } from '@goodvibes-jev/engine/transport-http';
 import { createStreamTextAssembler } from '@goodvibes-jev/engine/transport-core';
 import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';

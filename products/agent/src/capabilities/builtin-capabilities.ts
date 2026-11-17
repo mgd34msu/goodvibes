@@ -4,7 +4,7 @@ import { GOOGLE_CONFIG_KEYS, GOOGLE_SECRET_KEYS } from '@goodvibes-jev/engine/pl
 import { driverRemediation } from '../runtime/browser-driver-profile.ts';
 import { agentDriverSearchDirectories } from '../runtime/agent-browser.ts';
 import { registerCapability, registerFallbackCapability } from './capability-index.ts';
-import type { CapabilityDeclaration, CapabilityPrerequisite, CapabilityProbe } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import type { CapabilityDeclaration, CapabilityPrerequisite, CapabilityProbe } from '@goodvibes-jev/engine/terminal-shell/agent-turn/capability-types';
 
 /**
  * The capabilities this build declares for itself.

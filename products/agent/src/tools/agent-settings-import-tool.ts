@@ -6,7 +6,7 @@ import {
 } from '../input/agent-workspace-settings.ts';
 import { settingsThrownFailure } from './agent-settings-admission.ts';
 import { createAgentSettingsImportProjector, executeAdmittedAgentSettingsImport, isAgentSettingsImportMutation } from './agent-settings-import-admission.ts';
-import { confirmParameter, requestParameter } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { confirmParameter, requestParameter } from '@goodvibes-jev/engine/terminal-shell/agent-turn/effect-admission';
 
 interface AgentSettingsImportArgs {
   readonly action?: unknown;

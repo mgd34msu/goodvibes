@@ -46,7 +46,7 @@ import {
   type LocalConfigWriter,
 } from '@goodvibes-jev/engine/platform/platform/config';
 import type { DaemonConfigClient } from '@goodvibes-jev/engine/platform/platform/runtime/client';
-import { readOperatorTokenFile, resolveDaemonHomeDir } from '@goodvibes-jev/engine/platform/platform/workspace';
+import { readOperatorTokenFile, resolveDaemonHomeDir } from '@goodvibes-jev/engine/platform/platform/workspace/daemon-home';
 import { join } from 'node:path';
 import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 

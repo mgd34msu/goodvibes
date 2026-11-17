@@ -2,7 +2,7 @@ import { createRecallQueryCommands } from '@goodvibes-jev/engine/terminal-shell/
 import type { CommandContext } from '../command-registry.ts';
 import type { MemoryApi } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import type { MemorySpineClient } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
-import { formatAgentRecordReference, formatAgentRecordReferences } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { formatAgentRecordReference, formatAgentRecordReferences } from '@goodvibes-jev/engine/terminal-shell/agent-turn/record-labels';
 
 export function getMemoryApi(context: CommandContext): MemoryApi | null {
   const memoryApi = context.clients?.agentKnowledgeApi?.memory;

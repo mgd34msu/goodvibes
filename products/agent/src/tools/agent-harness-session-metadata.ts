@@ -1,8 +1,8 @@
 import { captureTranscriptSource, readTranscriptIndex } from '../input/commands/transcript-reading.ts';
 import type { CommandContext } from '../input/command-registry.ts';
-import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn/preview-text';
 import { homeRelativePath } from './agent-harness-tool-utils.ts';
-import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn/read-helpers';
 
 export interface AgentHarnessSessionArgs {
   readonly sessionId?: unknown;

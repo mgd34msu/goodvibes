@@ -10,7 +10,7 @@ import {
   type MemoryConsolidationFetchFailure,
   type MemoryConsolidationGatewayResolution,
 } from '@goodvibes-jev/engine/platform/platform/knowledge';
-import { resolveOperatorRpc, describeOperatorRpcError } from '../input/commands/operator-rpc.ts';
+import { resolveOperatorRpc, describeOperatorRpcError } from '../runtime/client/operator-endpoint.ts';
 
 export type {
   MemoryConsolidationReceiptsResult,

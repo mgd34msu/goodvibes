@@ -9,7 +9,7 @@
  * failure resolves to a result naming why, so the caller can say "schedules
  * unavailable" instead of showing an empty list as if nothing were planned.
  */
-import { isHostFailure, type ConnectedHost } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { isHostFailure, type ConnectedHost } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-client';
 
 export const AUTOMATION_SCHEDULES_LIST_METHOD = 'automation.schedules.list';
 

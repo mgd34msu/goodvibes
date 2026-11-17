@@ -31,20 +31,13 @@
 
 import { channelDraftWireReference, createChannelDraftWireReference, historicalChannelDraftWireReference, isNativeDraftWireReference, matchesHistoricalDraftWireReference } from '@goodvibes-jev/engine/platform/platform/channels';
 import type { ShellPathService } from '@/runtime/index.ts';
-import {
-  prepareJsonStoreWrite,
-  readJsonStore,
-  runStoreFileUpdateSync,
-  writeStoreFile,
-  type JsonStoreContents,
-  type JsonStoreSpec,
-} from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
+import { prepareJsonStoreWrite, readJsonStore, runStoreFileUpdateSync, writeStoreFile, type JsonStoreContents, type JsonStoreSpec } from '@goodvibes-jev/engine/terminal-shell/agent-turn/store-file';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools/input-projection';
 import { retainChannelStoreSource, type ChannelStoreEffectOptions } from './channel-store-lifetime.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
-import type { AgentChannelDeliveryInput } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { defineLifecycle } from '@goodvibes-jev/engine/platform/platform/utils';
-import type { DaemonInvokeFailureKind, DaemonOperatorInvoke } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import type { AgentChannelDeliveryInput } from '@goodvibes-jev/engine/terminal-shell/agent-turn/channel-delivery';
+import { defineLifecycle } from '@goodvibes-jev/engine/platform/platform/utils/lifecycle-machine';
+import type { DaemonInvokeFailureKind, DaemonOperatorInvoke } from '@goodvibes-jev/engine/terminal-shell/agent-turn/daemon-operator-client';
 
 export const CHANNEL_DRAFTS_LIST_METHOD = 'channels.drafts.list';
 export const CHANNEL_DRAFTS_GET_METHOD = 'channels.drafts.get';

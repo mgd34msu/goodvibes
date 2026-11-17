@@ -11,7 +11,7 @@ import { captureUpdateFileIo, isCompiledBunModuleUrl, DAEMON_NATIVE_TARGETS, ins
   createNativeDataWriteOwner, createInstalledReaderCohort, type NativeDataWriteOwner, type DarwinDaemonInstallation,
   inspectDarwinDaemonInstallation,
   releaseAbandonedUpdateClaim, resolveDaemonNativePayloads, resolveDaemonNativeTargets, retainDaemonNativeFiles, UPDATE_TRANSACTION_SUFFIXES } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
-import { detectInstallKind } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { detectInstallKind } from '@goodvibes-jev/engine/platform/platform/runtime/install-kind';
 import { COMPILED_VERSION, VERSION } from '../version.js';
 import { installationRefused } from './installation-refusal.js';
 

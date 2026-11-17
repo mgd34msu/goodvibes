@@ -25,7 +25,7 @@ import {
 import { getOperatorRpc, describeOperatorRpcError } from './operator-rpc.ts';
 import { formatQuotaSnapshotLine, renderMetricMap, telemetryScopeRefusalLine } from './health-metrics-format.ts';
 import { createMemoryDiagnosticsGateway, renderMemoryDiagnostics } from '../../core/memory-diagnostics-gateway.ts';
-import { requireShellPaths } from './runtime-services.ts';
+import { requireShellPaths } from '@goodvibes-jev/engine/terminal-shell/command-service-access';
 
 function renderSandboxHealthSummary(configManager: ConfigManager): string[] {
   return renderSandboxDoctor(configManager).split('\n').slice(1);

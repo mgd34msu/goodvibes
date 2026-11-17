@@ -10,12 +10,12 @@ export { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 export { AgentConfigManager, AGENT_NOTIFICATIONS_METADATA_ONLY_KEY, AGENT_HOSTED_RESEARCH_SCREENING_KEY } from './host-settings.ts';
 export type { DeepReadonly } from '@goodvibes-jev/engine/platform/platform/config';
 export type { GoodVibesConfig, ConfigKey, ConfigValue, ConfigSetting, PermissionMode, PermissionAction, PermissionsToolConfig, NotificationsConfig } from '@goodvibes-jev/engine/platform/platform/config';
-export { DEFAULT_CONFIG, CONFIG_SCHEMA } from '@goodvibes-jev/engine/platform/platform/config';
+export { DEFAULT_CONFIG, CONFIG_SCHEMA } from '@goodvibes-jev/engine/platform/platform/config/schema';
 export { ConfigError } from '@goodvibes-jev/engine/platform/platform/types';
 
 import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { GoodVibesConfig } from '@goodvibes-jev/engine/platform/platform/config';
-import { getProviderIdFromModel } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { getProviderIdFromModel } from '@goodvibes-jev/engine/platform/platform/providers/provider-model';
 
 export function getConfigSnapshot(configManager: Pick<ConfigManager, 'getRaw'>): Readonly<GoodVibesConfig> {
   return configManager.getRaw();

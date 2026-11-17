@@ -13,8 +13,8 @@
 import type { OperatorMethodId, OperatorMethodInput } from '@goodvibes-jev/engine/platform/contracts';
 import type { GatewayMethodCatalog, GatewayMethodInvocation } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import { assertCurrentProfileDelegation, bindProfileMutationOptionsToInvocation, type ProfileMutationOptions } from '@goodvibes-jev/engine/platform/platform/owner-profile';
-import { assertProjectionCurrent } from '@goodvibes-jev/engine/platform/platform/tools';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { assertProjectionCurrent } from '@goodvibes-jev/engine/platform/platform/tools/input-projection';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 import { findOperatorHttpBinding } from './operator-contract-routes.js';
 
 export interface FamilyGatewayResult {

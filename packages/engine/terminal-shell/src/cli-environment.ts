@@ -1,6 +1,6 @@
 import { accessSync, constants } from 'node:fs';
 import { spawn } from 'node:child_process';
-import { stableUrlHostForBindHost } from '@goodvibes-jev/engine/platform/platform/pairing';
+import { stableUrlHostForBindHost } from '@goodvibes-jev/engine/platform/platform/pairing/stable-host';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 /** The host another device dials for this machine: the engine's one stable-host rule for a wildcard bind. */
 export function getLocalNetworkIp(): string {

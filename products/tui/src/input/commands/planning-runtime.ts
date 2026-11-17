@@ -2,7 +2,8 @@ import { directOwnerPlanningInput, type CommandRegistry } from '../command-regis
 import { routeNativeConversationInput } from '../../runtime/native-conversation-ingress.ts';
 import { captureNativeConversationInput } from '@goodvibes-jev/engine/terminal-shell/native';
 import { openModalCommand, requirePlanManager } from './runtime-services.ts';
-import { isPlanMode, togglePlanMode, permissionModeLabel, type PermissionModeValue } from '../../core/permission-mode.ts';
+import { isPlanMode, togglePlanMode, permissionModeLabel } from '@goodvibes-jev/engine/platform/platform/gate/presets';
+import type { PermissionModeValue } from '../../core/permission-mode.ts';
 
 /**
  * The closed set of /project-plan subcommands and how many words each takes

@@ -35,9 +35,9 @@
  * verbs mean. It resolves a target, makes a request, and returns the parsed
  * body. Every decision about what the answer MEANS belongs to the daemon.
  */
-import { readConnectedDaemonOrigin, readControlPlaneBinding } from '@goodvibes-jev/engine/platform/platform/config';
+import { readConnectedDaemonOrigin, readControlPlaneBinding } from '@goodvibes-jev/engine/platform/platform/config/control-plane-base-url';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { readOperatorTokenFile } from '@goodvibes-jev/engine/platform/platform/workspace';
+import { readOperatorTokenFile } from '@goodvibes-jev/engine/platform/platform/workspace/daemon-home';
 
 /** Where to send a verb, and what to authenticate with. */
 export interface RemoteDaemonTarget {

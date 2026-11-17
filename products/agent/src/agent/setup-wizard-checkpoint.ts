@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, rmSync } from 'node:fs';
 import type { ShellPathService } from '@/runtime/index.ts';
-import { writeStoreFile } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { writeStoreFile } from '@goodvibes-jev/engine/terminal-shell/agent-turn/store-file';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 
 export type AgentSetupWizardCheckpointSource = 'workspace' | 'harness';

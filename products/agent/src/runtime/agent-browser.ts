@@ -26,7 +26,7 @@ import {
 } from '@goodvibes-jev/engine/platform/platform/browser';
 import type { UntrustedContentPort } from '@goodvibes-jev/engine/platform/platform/browser';
 import { browserGatewayOverEngine } from '@goodvibes-jev/engine/platform/platform/control-plane';
-import type { BrowserToolBackend } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import type { BrowserToolBackend } from '@goodvibes-jev/engine/terminal-shell/agent-turn/browser-tool';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import { createAgentUntrustedContentPort } from '../trust/untrusted-content-port.ts';
 

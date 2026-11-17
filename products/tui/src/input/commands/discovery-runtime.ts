@@ -1,7 +1,7 @@
 import type { CommandRegistry } from '../command-registry.ts';
 import { scan, persistProviders } from '@goodvibes-jev/engine/platform/platform/discovery';
 import { requireProviderApi, requireShellPaths } from './runtime-services.ts';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 
 export function registerDiscoveryRuntimeCommands(registry: CommandRegistry, scanProviders: typeof scan = scan): void {
   registry.register({

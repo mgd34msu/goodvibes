@@ -6,7 +6,7 @@
  * here decides a grant or a retention window.
  */
 import type { DevicesClient } from '@goodvibes-jev/engine/platform/platform/runtime/client';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 import type { CommandConfirmation } from './command-confirmation.js';
 
 /** The subcommands this module answers, with their argument hints. */

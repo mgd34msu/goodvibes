@@ -13,9 +13,10 @@
  * gutter beside it. The focused row gets a fill from column 1 to W-2 and the
  * brand ┃ in column 0.
  */
-import { createEmptyLine, createStyledCell, type Line } from '@goodvibes-jev/engine/platform/platform/types';
+import { createEmptyLine, createStyledCell } from '@goodvibes-jev/engine/platform/platform/types/grid';
+import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
 import { activeTokens } from './theme.js';
-import { expandTabs, getDisplayWidth, truncateDisplay, wrapPreservingIndent, wrapPreservingIndentRows } from '@goodvibes-jev/engine/platform/platform/utils';
+import { expandTabs, getDisplayWidth, truncateDisplay, wrapPreservingIndent, wrapPreservingIndentRows } from '@goodvibes-jev/engine/platform/platform/utils/terminal-width';
 import { SurfaceCanvas } from './surface-kit.js';
 import { inset, type KitInset } from './surface-kit-parts.js';
 import { DIFF_GUTTER, buildDiffRows, drawDiffRow, semanticChips, type DiffRow } from './diff-rows.js';

@@ -1,7 +1,7 @@
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-import { readConnectedHostOperatorToken } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { connectedHostBaseUrl } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
+import { readConnectedHostOperatorToken } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-auth';
+import { connectedHostBaseUrl } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-dial';
 
 /**
  * Reads the connected daemon host's process-wide runtime metrics snapshot via

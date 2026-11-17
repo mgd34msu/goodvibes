@@ -4,7 +4,7 @@ import {
   createVoiceExperienceCommand,
 } from '@goodvibes-jev/engine/terminal-shell/experience-commands';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
-import { requireShellPaths } from './runtime-services.ts';
+import { requireShellPaths } from '@goodvibes-jev/engine/terminal-shell/command-service-access';
 import {
   createVoiceProvisionGateway,
   renderVoiceProvision,

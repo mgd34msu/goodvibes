@@ -8,47 +8,29 @@ import {
   type ShellEntrypointRoots,
 } from '@goodvibes-jev/engine/terminal-shell/cli-entrypoint';
 export type { ShellEntrypointRoots } from '@goodvibes-jev/engine/terminal-shell/cli-entrypoint';
-import { runTuiHostCommand } from './host-pair-command.ts';
+// Only what every command shares loads here: parsing, the configuration and
+// its overrides. Each command's own module graph loads when it is chosen, so
+// `status` never loads the headless turn and neither loads the terminal UI.
 import { extractNativeHeadlessOptions } from './native-headless-options.ts';
 import { headlessRunFlagErrors } from '@goodvibes-jev/engine/terminal-shell/headless-turn-events';
-import { runNativeHeadlessCommand } from './native-headless-command.ts';
-import { existsSync } from 'node:fs';
-import { readAuthPaths } from './management-utils.ts';
 import { join, resolve } from 'node:path';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { TuiConfigManager } from '../config/host-settings.ts';
-import { formatProviderModel, getModelIdFromProviderModel, getProviderIdFromModel } from '@goodvibes-jev/engine/platform/platform/providers';
-import { readOnboardingCheckMarker } from '../runtime/onboarding/index.ts';
-import { GlobalNetworkTransportInstaller } from '@/runtime/index.ts';
-import { createShellPathService } from '@/runtime/index.ts';
+import { formatProviderModel, getModelIdFromProviderModel, getProviderIdFromModel } from '@goodvibes-jev/engine/platform/platform/providers/provider-model';
+import { GlobalNetworkTransportInstaller } from '@goodvibes-jev/engine/platform/platform/runtime/transport';
 import { configureActivityLogger } from '@goodvibes-jev/engine/platform/platform/utils';
 import {
   applyRuntimeCommandEndpointFlagOverrides,
   applyRuntimeConfigOverrides,
   applyRuntimeConfigValue,
   applyRuntimeFeatureFlagOverrides,
-  buildCliStatusSnapshot,
-  handleDoctorSubcommand,
-  handleGoodVibesCliCommand,
-  parseGoodVibesCli,
-  renderCliStatus,
-  renderCompletion,
-  renderGoodVibesCommandHelp,
-  renderGoodVibesHelp,
-  renderGoodVibesVersion,
-  renderOnboardingCliStatus,
-  resolveDoctorExitCode,
-} from './index.ts';
-import { buildCliServicePosture, getGoodVibesPackageRoot, resolveGoodVibesDaemonExecutable } from './service-posture.ts';
-import { runInstallSelfCheck } from '../runtime/install-self-check.ts';
-import { readPersistedWorkspaceTrust } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
-import { WorkspaceRegistrationManager } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
-import type { CliWorkspaceStatus, CliSandboxStatus, CliRelayStatus } from './status.ts';
-import { detectSandboxAvailability, probeSandboxHost } from '@goodvibes-jev/engine/platform/platform/tools/exec/sandbox';
-import { createFeatureFlagManager, deriveFeatureStates } from '@/runtime/index.ts';
+} from '@goodvibes-jev/engine/terminal-shell/cli-config-overrides';
+import { parseGoodVibesCli } from '@goodvibes-jev/engine/terminal-shell/cli-parser';
+import { renderCompletion } from './completion.ts';
+import { renderGoodVibesCommandHelp, renderGoodVibesHelp, renderGoodVibesVersion } from './help.ts';
 import { ensureGoodvibesGitignore } from './ensure-goodvibes-gitignore.ts';
-import { GOODVIBES_TUI_SURFACE_ROOT } from '../config/surface.ts';
 import { parseDeepLink } from '../input/commands/deep-link.ts';
+import { registerSelfAcpCommand } from '../self-acp-command.ts';
 
 export type PreparedShellCliRuntime = {
   readonly cli: ReturnType<typeof parseGoodVibesCli>;
@@ -65,7 +47,10 @@ export async function prepareShellCliRuntime(
   binary = 'goodvibes',
 ): Promise<PreparedShellCliRuntime> {
   // Product-owned host pairing is isolated from shared CLI/model dispatch.
-  if (argv[0] === 'host') process.exit(await runTuiHostCommand(argv.slice(1), roots));
+  if (argv[0] === 'host') {
+    const { runTuiHostCommand } = await import('./host-pair-command.ts');
+    process.exit(await runTuiHostCommand(argv.slice(1), roots));
+  }
   const { native, cli } = parseNativeShellCli(argv, binary, extractNativeHeadlessOptions, parseGoodVibesCli);
   const errors = [...cli.errors, ...headlessRunFlagErrors(native.run ?? {}, cli.command, cli.flags.outputFormat)];
 
@@ -155,6 +140,7 @@ export async function prepareShellCliRuntime(
   }
 
   if (cli.command === 'doctor' && ['explain', 'routing', 'hooks'].includes(cli.commandArgs[0] ?? '')) {
+    const { handleDoctorSubcommand } = await import('./doctor.ts');
     const result = await handleDoctorSubcommand({
       subcommand: cli.commandArgs[0]!,
       args: cli.commandArgs.slice(1),
@@ -169,92 +155,20 @@ export async function prepareShellCliRuntime(
     }
   }
 
-  if (cli.command === 'run') {
-    process.exit(
-      await runNativeHeadlessCommand(
-        { cli, configManager, workingDirectory: bootstrapWorkingDir, homeDirectory: bootstrapHomeDirectory },
-        native.mode,
-        native.run,
-      ),
-    );
-  }
-
+  const commandRuntime = { cli, configManager, workingDirectory: bootstrapWorkingDir, homeDirectory: bootstrapHomeDirectory };
   if (isDiagnostic) {
-    const shellPaths = createShellPathService({
-      workingDirectory: bootstrapWorkingDir,
-      homeDirectory: bootstrapHomeDirectory,
-    });
-    const onboardingMarker = readOnboardingCheckMarker(shellPaths);
-    const service = await buildCliServicePosture({
-      configManager,
-      workingDirectory: bootstrapWorkingDir,
-      homeDirectory: bootstrapHomeDirectory,
-    });
-    // Read-only workspace posture for the report: the trust reader and
-    // registration resolve() never write, so `status`/`doctor` observe state
-    // without mutating it.
-    const trustView = readPersistedWorkspaceTrust(shellPaths, GOODVIBES_TUI_SURFACE_ROOT);
-    const registrationEvaluation = await new WorkspaceRegistrationManager({ shellPaths }).evaluate();
-    const workspaceStatus: CliWorkspaceStatus = {
-      trustLevel: trustView.level,
-      trustLegacyIgnored: trustView.legacyIgnored,
-      trustFault: trustView.fault,
-      registrationStatus: registrationEvaluation.status,
-      registrationRoot: registrationEvaluation.root,
-      registeredBy: registrationEvaluation.coveredBy,
-      viaWorktreeLink: registrationEvaluation.viaWorktreeLink,
-      registrationBroad: registrationEvaluation.broad,
-    };
-    // Honest per-command exec sandbox posture: the host probe (a bwrap spawn on
-    // Linux, a no-op elsewhere) is what makes "available" trustworthy.
-    const sandboxAvailability = detectSandboxAvailability(probeSandboxHost());
-    const sandboxFeatureFlags = createFeatureFlagManager();
-    sandboxFeatureFlags.loadFromConfig({ flags: deriveFeatureStates(configManager) });
-    const sandboxStatus: CliSandboxStatus = {
-      configEnabled: Boolean(configManager.getCategory('sandbox').enabled),
-      featureEnabled: sandboxFeatureFlags.isEnabled('exec-sandbox'),
-      available: sandboxAvailability.available,
-      backend: sandboxAvailability.backend,
-      reason: sandboxAvailability.reason,
-      networkIsolationGuaranteed: sandboxAvailability.networkIsolationGuaranteed,
-    };
-    // Reuses sandboxFeatureFlags (already derived from the same domain settings keys)
-    // for the relay-connect gate rather than constructing a second FeatureFlagManager.
-    const relayCategory = configManager.getCategory('relay');
-    const relayStatus: CliRelayStatus = {
-      configEnabled: relayCategory.enabled === true,
-      featureEnabled: sandboxFeatureFlags.isEnabled('relay-connect'),
-      url: String(relayCategory.url ?? ''),
-      rendezvousId: String(relayCategory.rendezvousId ?? ''),
-      requireStepUpForMutations: relayCategory.requireStepUpForMutations === true,
-    };
-    const statusOptions = {
-      configManager,
-      workingDirectory: bootstrapWorkingDir,
-      homeDirectory: bootstrapHomeDirectory,
-      onboardingMarker,
-      auth: readAuthPaths({ workingDirectory: bootstrapWorkingDir, homeDirectory: bootstrapHomeDirectory }),
-      service,
-      install: runInstallSelfCheck({
-        execPath: process.execPath,
-        packageRoot: getGoodVibesPackageRoot(),
-        daemon: resolveGoodVibesDaemonExecutable(),
-        fileExists: existsSync,
-      }),
-      doctor: cli.command === 'doctor',
-      outputFormat: cli.flags.outputFormat,
-      workspace: workspaceStatus,
-      sandbox: sandboxStatus,
-      relay: relayStatus,
-    };
-    const snapshot = buildCliStatusSnapshot(statusOptions);
-    console.log(cli.command === 'onboarding' ? renderOnboardingCliStatus(statusOptions) : renderCliStatus(statusOptions));
-    // Advisory findings are notes on an otherwise-usable install and must
-    // never make a healthy install report failure, only a must-fix finding
-    // exits non-zero; --strict (for CI) flips advisories to failures too.
-    process.exit(cli.command === 'doctor' ? resolveDoctorExitCode(snapshot.findings, cli.flags.strict) : 0);
+    const { runStatusCommand } = await import('./status-command.ts');
+    process.exit(await runStatusCommand(commandRuntime));
   }
 
+  // Everything from here on (a turn, management, the terminal UI) may start ACP agents.
+  await registerSelfAcpCommand();
+  if (cli.command === 'run') {
+    const { runNativeHeadlessCommand } = await import('./native-headless-command.ts');
+    process.exit(await runNativeHeadlessCommand(commandRuntime, native.mode, native.run));
+  }
+
+  const { handleGoodVibesCliCommand } = await import('./management.ts');
   const cliCommandResult = await handleGoodVibesCliCommand({
     cli,
     configManager,

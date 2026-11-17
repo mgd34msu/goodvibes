@@ -4,12 +4,7 @@
  * Agent turn's (`@goodvibes-jev/engine/terminal-shell/agent-turn`), re-exported
  * here for this file's importers.
  */
-import {
-  AUTONOMY_SCHEDULE_METHOD,
-  AUTONOMY_SCHEDULE_ROUTE,
-  type AutonomySchedulePreview,
-  type AutonomyScheduleResult,
-} from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { AUTONOMY_SCHEDULE_METHOD, AUTONOMY_SCHEDULE_ROUTE, type AutonomySchedulePreview, type AutonomyScheduleResult } from '@goodvibes-jev/engine/terminal-shell/agent-turn/autonomy-schedule';
 import { createConnectedSchedule } from './connected-schedule.ts';
 import {
   resolveAgentConnectedHostConnection,
@@ -17,19 +12,7 @@ import {
   type AgentConnectedHostConnection,
 } from './routine-schedule-promotion.ts';
 
-export {
-  AUTONOMY_SCHEDULE_METHOD,
-  AUTONOMY_SCHEDULE_ROUTE,
-  buildAutonomySchedulePayload,
-  buildAutonomySchedulePreview,
-  buildAutonomySchedulePrompt,
-  parseAutonomyScheduleArgs,
-  type AutonomyScheduleFailure,
-  type AutonomySchedulePreview,
-  type AutonomyScheduleResult,
-  type AutonomyScheduleSuccess,
-  type ParsedAutonomyScheduleArgs,
-} from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+export { AUTONOMY_SCHEDULE_METHOD, AUTONOMY_SCHEDULE_ROUTE, buildAutonomySchedulePayload, buildAutonomySchedulePreview, buildAutonomySchedulePrompt, parseAutonomyScheduleArgs, type AutonomyScheduleFailure, type AutonomySchedulePreview, type AutonomyScheduleResult, type AutonomyScheduleSuccess, type ParsedAutonomyScheduleArgs } from '@goodvibes-jev/engine/terminal-shell/agent-turn/autonomy-schedule';
 
 /**
  * Create the autonomous schedule on the connected host. A retry after a lost

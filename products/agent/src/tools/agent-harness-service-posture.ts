@@ -1,4 +1,4 @@
-import { type CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { type CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-ranking';
 import { selectHarnessCatalog } from './agent-harness-catalog-selection.ts';
 import { captureStatefulCatalogRequest } from './agent-harness-stateful-catalog-source.ts';
 import type { CommandContext } from '../input/command-registry.ts';

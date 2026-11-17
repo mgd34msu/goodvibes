@@ -1,7 +1,8 @@
 /** The actual local-turn producer shared by bootstrap and product regressions. */
 import { registerAllTools, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { PermissionManager, createPermissionConfigReader } from '@goodvibes-jev/engine/platform/platform/permissions';
-import { trustGatedAsk, type WorkspaceTrustLevel } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { trustGatedAsk } from '@goodvibes-jev/engine/platform/platform/runtime/workspace-trust';
+import type { WorkspaceTrustLevel } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { createSandboxExecAsk, sandboxExecAskDepsFromRuntime } from '../permissions/sandbox-exec-gate.ts';
 import { readDaemonOperatorToken } from './daemon-operator-token.ts';
 import { terminalOwnerQuestions } from './client/owner-questions.ts';

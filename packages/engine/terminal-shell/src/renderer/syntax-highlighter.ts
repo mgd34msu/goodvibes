@@ -16,7 +16,7 @@ import { requireDefined } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { Node } from 'web-tree-sitter';
 import { TreeSitterService } from '@goodvibes-jev/engine/platform/platform/intelligence';
 import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 import { syntaxStyles, type SyntaxRole, type SyntaxStyle } from './syntax-theme.js';
 
 // ─── Types ───────────────────────────────────────────────────────────────────

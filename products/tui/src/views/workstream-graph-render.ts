@@ -11,7 +11,7 @@
 // ---------------------------------------------------------------------------
 
 import type { OperatorMethodOutput } from '@goodvibes-jev/engine/platform';
-import { truncateDisplay, getDisplayWidth } from '../utils/terminal-width.ts';
+import { truncateDisplay, getDisplayWidth } from '@goodvibes-jev/engine/platform/platform/utils/terminal-width';
 
 export type WorkstreamGraphSnapshot = OperatorMethodOutput<'fleet.graph.get'>;
 export type WorkstreamGraphNode = WorkstreamGraphSnapshot['nodes'][number];

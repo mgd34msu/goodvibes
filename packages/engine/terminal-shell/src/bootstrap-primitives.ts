@@ -1,16 +1,14 @@
 import type { SessionEvent } from '@goodvibes-jev/engine/platform/events';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import {
-  createFeatureFlagManager,
-  deriveFeatureStates,
-  bindFeatureSettingsBridge,
-} from '@goodvibes-jev/engine/platform/platform/runtime/feature-flags';
+import { createFeatureFlagManager } from '@goodvibes-jev/engine/platform/platform/runtime/feature-flags/manager';
+import { deriveFeatureStates, bindFeatureSettingsBridge } from '@goodvibes-jev/engine/platform/platform/runtime/feature-flags/feature-settings';
 import {
   RuntimeEventBus,
   configureRuntimeEventBusDefaults,
   runtimeEventBusOptionsFrom,
 } from '@goodvibes-jev/engine/platform/platform/runtime/state';
-import { createRuntimeStore, createDomainDispatch, type DomainDispatch } from '@goodvibes-jev/engine/platform/platform/runtime/state';
+import { createRuntimeStore, createDomainDispatch } from '@goodvibes-jev/engine/platform/platform/runtime/store';
+import type { DomainDispatch } from '@goodvibes-jev/engine/platform/platform/runtime/state';
 import { attachSessionRecoveryState } from '@goodvibes-jev/engine/platform/platform/runtime/emitters';
 import type { OrchestratorUserInputOptions } from '@goodvibes-jev/engine/platform/platform/core';
 import type { Notifier } from '@goodvibes-jev/engine/platform/platform/integrations';

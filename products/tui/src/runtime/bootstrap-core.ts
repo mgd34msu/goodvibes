@@ -34,7 +34,7 @@ import { registerSessionConversation, unregisterSessionConversation } from './co
 import { SelectionManager } from '@goodvibes-jev/engine/terminal-shell';
 import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { getConfiguredSystemPrompt } from '@goodvibes-jev/engine/platform/platform/config';
-import { getProviderIdFromModel } from '@goodvibes-jev/engine/platform/platform/providers';
+import { getProviderIdFromModel } from '@goodvibes-jev/engine/platform/platform/providers/provider-model';
 import { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { registerAllTools } from '@goodvibes-jev/engine/platform/platform/tools';
 import { createSandboxContainmentNotice } from './daemon-attach-notices.ts';

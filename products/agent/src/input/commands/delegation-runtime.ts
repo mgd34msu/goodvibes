@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import type { SharedSessionParticipant } from '@goodvibes-jev/engine/platform/platform/control-plane';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 import { AgentDelegationRegistry, type AgentDelegationRecord } from '../../agent/delegation-registry.ts';
 import { commandRefusal } from './confirmation.ts';
 

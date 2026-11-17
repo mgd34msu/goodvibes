@@ -1,5 +1,5 @@
 import { createModelPickerCommandOpeners } from '@goodvibes-jev/engine/terminal-shell/model-picker-open';
-import { getProviderIdFromModel } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { getProviderIdFromModel } from '@goodvibes-jev/engine/terminal-shell/agent-turn/provider-model';
 import { createSettingsWorkspaceOpener } from '@goodvibes-jev/engine/terminal-shell/shell-ui-openers';
 import { modelPickerCatalogServices } from '@goodvibes-jev/engine/terminal-shell/model-picker-targets';
 import { createCommonShellUiOpeners } from '@goodvibes-jev/engine/terminal-shell/shell-ui-openers';
@@ -9,7 +9,6 @@ import {
   resolveSecretProviderIds as readSecretProviders,
 } from '@goodvibes-jev/engine/terminal-shell/model-picker-auth-facts';
 import type { ConfigManager } from '../config/index.ts';
-import '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import type { ConversationManager } from '../core/conversation';
 import type { CommandContext } from '../input/command-registry.ts';
 import type { InputHandler } from '../input/handler.ts';

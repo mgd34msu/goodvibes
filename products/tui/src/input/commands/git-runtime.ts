@@ -1,7 +1,7 @@
 import type { CommandRegistry } from '../command-registry.ts';
 import { GitService } from '@goodvibes-jev/engine/platform/platform/git';
-import { requireShellPaths } from './runtime-services.ts';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { requireShellPaths } from '@goodvibes-jev/engine/terminal-shell/command-service-access';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 
 export function registerGitRuntimeCommands(registry: CommandRegistry): void {
   registry.register({

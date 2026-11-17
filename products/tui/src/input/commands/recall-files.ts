@@ -38,8 +38,8 @@ import {
   type MemoryProjectionFile,
   type MemoryProjectionProposal,
 } from '@goodvibes-jev/engine/platform/platform/state';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-import { requireShellPaths } from './runtime-services.ts';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
+import { requireShellPaths } from '@goodvibes-jev/engine/terminal-shell/command-service-access';
 import { getMemorySpine } from './recall-query.ts';
 import { readMemoryProjectionDir } from './recall-files-config.ts';
 

@@ -3,8 +3,8 @@ import type { CommandContext } from '../input/command-registry.ts';
 import { readInteractiveRuntime, type InteractiveRuntimeSnapshot } from './agent-harness-interactive-runtime-records.ts';
 import { isAgentMcpCallRouteInstalled } from './agent-mcp-call-route.ts';
 import type { ToolCapability, ToolDefinition } from '@goodvibes-jev/engine/platform/platform/types';
-import type { CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-ranking';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools/input-projection';
 
 type BrowserControlStatus = 'ready' | 'attention' | 'setup-needed';
 /** A capability row: `unavailable` when no registered tool declares it, whatever else is configured. */

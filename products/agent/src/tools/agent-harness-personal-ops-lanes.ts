@@ -1,8 +1,8 @@
 import { withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime';
-import type { CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import type { CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-ranking';
 import type { CommandContext } from '../input/command-registry.ts';
 import { buildAgentWorkspaceRuntimeSnapshot } from '../input/agent-workspace-snapshot.ts';
-import { googleConnectionState, type AgentGoogleConnectionState } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { googleConnectionState, type AgentGoogleConnectionState } from '@goodvibes-jev/engine/terminal-shell/agent-turn/google-tool';
 import { calendarWorkflows, connectorSignals, contractLaneMethods, inboxWorkflows, NO_CONNECTORS, readConnectorInventory, reminderWorkflows, taskWorkflows, type ConnectorInventory, type GoogleLaneRoute } from './agent-harness-personal-ops-discovery.ts';
 import { NOTE_CAPTURE_ROUTE } from './agent-harness-personal-ops-routes.ts';
 import { cappedCount, channelRecords, connectorRecords, localRecord, NO_SAVED_ARTIFACTS, readPersonalOpsSavedArtifacts, refreshableSavedRecordCount, reminderOperationRecords, routineReceiptRecord, SAVED_ARTIFACT_SCAN_WINDOW_SIGNAL, savedProviderEffectReceiptRecords, savedReviewArtifactRecords, savedReviewQueueRecords, taskOperationRecords, type PersonalOpsSavedArtifacts } from './agent-harness-personal-ops-records.ts';

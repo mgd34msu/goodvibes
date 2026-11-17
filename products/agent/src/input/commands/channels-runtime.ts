@@ -5,17 +5,8 @@ import type { AgentWorkspaceChannelSetupGuide, AgentWorkspaceChannelStatus } fro
 import { buildAgentWorkspaceChannelTriage, formatAgentWorkspaceChannelTriage } from '../agent-workspace-channel-triage.ts';
 import { buildAgentWorkspaceChannelSetupGuide, buildAgentWorkspaceChannels } from '../agent-workspace-channels.ts';
 import { formatConnectedHostRouteFailure, readConnectedHostMethod } from '../connected-host-routes.ts';
-import {
-  buildAgentChannelDeliveryPreview,
-  deliverAgentChannelMessage,
-  formatAgentChannelDeliveryPreview,
-  formatAgentChannelDeliveryResult,
-} from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import {
-  formatAgentChannelDeliveryReceiptLine,
-  readAgentChannelDeliveryReceipts,
-  recordAgentChannelDeliveryReceipt,
-} from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { buildAgentChannelDeliveryPreview, deliverAgentChannelMessage, formatAgentChannelDeliveryPreview, formatAgentChannelDeliveryResult } from '@goodvibes-jev/engine/terminal-shell/agent-turn/channel-delivery';
+import { formatAgentChannelDeliveryReceiptLine, readAgentChannelDeliveryReceipts, recordAgentChannelDeliveryReceipt } from '@goodvibes-jev/engine/terminal-shell/agent-turn/channel-delivery-receipts';
 import { readRefusal } from '@goodvibes-jev/engine/errors';
 import { commandRefusal, requireYesFlag, stripYesFlag } from './confirmation.ts';
 

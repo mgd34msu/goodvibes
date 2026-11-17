@@ -11,7 +11,7 @@ import type { ReplaySnapshotInput } from '@/runtime/index.ts';
 import '@goodvibes-jev/engine/platform/platform/utils';
 import { registerLegacyPanelCommand } from './legacy-panel-command.ts';
 import { requireOpsApi, requireProfileManager, requireReplayEngine, requireShellPaths } from './runtime-services.ts';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 import { estimateConversationTokens } from '@goodvibes-jev/engine/platform/platform/core';
 import { handleContextWindowSubcommand } from './context-window.ts';
 

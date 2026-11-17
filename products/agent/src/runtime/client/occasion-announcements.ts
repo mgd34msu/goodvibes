@@ -13,7 +13,8 @@
  * next idle pass.
  */
 
-import { buildUrl, openRawServerSentEventStream } from '@/runtime/index.ts';
+import { buildUrl } from '@goodvibes-jev/engine/transport-http/paths';
+import { openRawServerSentEventStream } from '@goodvibes-jev/engine/transport-http/sse-stream';
 import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 
 export interface OccasionAnnouncementWatch {

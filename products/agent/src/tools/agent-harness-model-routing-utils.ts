@@ -1,4 +1,4 @@
-import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn/read-helpers';
 export function readString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }

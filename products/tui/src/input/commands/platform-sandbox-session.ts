@@ -1,7 +1,7 @@
 import type { CommandContext } from '../command-registry.ts';
 import { inspectSandboxSessionArtifact, listSandboxProfiles, renderSandboxSessions } from '@goodvibes-jev/engine/platform/platform/runtime/sandbox';
-import { requireShellPaths } from './runtime-services.ts';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { requireShellPaths } from '@goodvibes-jev/engine/terminal-shell/command-service-access';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 
 const SANDBOX_PROFILE_IDS = ['command', 'mcp-server'] as const;
 

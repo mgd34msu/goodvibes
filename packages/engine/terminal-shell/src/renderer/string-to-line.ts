@@ -1,6 +1,7 @@
 import { requireDefined } from '@goodvibes-jev/engine/platform/platform/utils';
-import { createEmptyLine, type Line, type Cell } from '@goodvibes-jev/engine/platform/platform/types';
-import { getDisplayWidth } from '@goodvibes-jev/engine/platform/platform/utils';
+import { createEmptyLine } from '@goodvibes-jev/engine/platform/platform/types/grid';
+import type { Line, Cell } from '@goodvibes-jev/engine/platform/platform/types';
+import { getDisplayWidth } from '@goodvibes-jev/engine/platform/platform/utils/terminal-width';
 
 export function stringToLine(text: string, width: number, style: Partial<Cell> = {}): Line {
     const line = createEmptyLine(width);

@@ -22,7 +22,8 @@ import {
   type AutomationManager,
   type AutomationScheduleDefinition,
 } from '@goodvibes-jev/engine/platform/platform/automation';
-import { GoodVibesError, type OperatorMethodInput } from '@goodvibes-jev/engine/platform';
+import { GoodVibesError } from '@goodvibes-jev/engine/errors';
+import type { OperatorMethodInput } from '@goodvibes-jev/engine/platform';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { resolveDaemonEnabled } from '@goodvibes-jev/engine/platform/platform/config';
 import { writeJsonFileAtomic } from '@goodvibes-jev/engine/platform/platform/state/durable-file-io';

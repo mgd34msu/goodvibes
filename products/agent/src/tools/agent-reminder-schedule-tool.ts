@@ -1,1 +1,1 @@
-export { createAgentReminderScheduleTool, registerAgentReminderScheduleTool, type AgentReminderScheduleToolArgs } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+export { createAgentReminderScheduleTool, registerAgentReminderScheduleTool, type AgentReminderScheduleToolArgs } from '@goodvibes-jev/engine/terminal-shell/agent-turn/reminder-schedule-tool';

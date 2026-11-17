@@ -39,7 +39,8 @@
  */
 
 import { BeadContentCache } from './bead-content-cache.js';
-import { createEmptyLine, type Line } from '@goodvibes-jev/engine/platform/platform/types';
+import { createEmptyLine } from '@goodvibes-jev/engine/platform/platform/types/grid';
+import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
 import { compactLine, expandLine, type CompactLine } from './conversation-history.js';
 import type { BlockMeta } from './work-tree-types.js';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';

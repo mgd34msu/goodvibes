@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
-import type { CapabilityProbe } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import type { CapabilityProbe } from '@goodvibes-jev/engine/terminal-shell/agent-turn/capability-types';
 
 /**
  * Executes capability probes. This is the ONLY place a capability check runs

@@ -29,7 +29,7 @@ import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { subscriptionRegistryForWrite } from './calendar-subscription-runtime.ts';
 import { requireSecretsManager, requireShellPaths } from './runtime-services.ts';
 import { routeConfigWrite } from '../../config/daemon-config-routing.ts';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 import { CREDENTIAL_VERB, READ_VERB, ownerOnlyVerb, withCommandVerbs, type CommandVerbs } from './command-verbs.ts';
 import { renderGoogleSetupReport } from '@goodvibes-jev/engine/platform/platform/google';
 import { renderGoogleSetupRunbook } from '@goodvibes-jev/engine/platform/platform/google';
@@ -48,7 +48,7 @@ import {
   runGoogleSetup,
 } from './google-connection-actions.ts';
 import type { GoogleProgressPort, GoogleSetupPath, GoogleSetupStepSpec, GoogleStepResult } from '@goodvibes-jev/engine/platform/platform/google';
-import { getOutwardApprovalStore, listRefusedOutwardActions, takeRefusedOutwardAction, type PendingOutwardAction } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { getOutwardApprovalStore, listRefusedOutwardActions, takeRefusedOutwardAction, type PendingOutwardAction } from '@goodvibes-jev/engine/terminal-shell/agent-turn/outward-approvals';
 import { commandRefusal } from './confirmation.ts';
 
 const USAGE = [

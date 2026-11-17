@@ -21,15 +21,11 @@ export {
   type UpdateFetchLike,
 } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
 
-export {
-  detectInstallKind,
-  type InstallKind,
-} from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+export { detectInstallKind } from '@goodvibes-jev/engine/platform/platform/runtime/install-kind';
+export type { InstallKind } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 
-import {
-  fallbackUpdateCommand as platformFallbackUpdateCommand,
-  type InstallKind as PlatformInstallKind,
-} from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { fallbackUpdateCommand as platformFallbackUpdateCommand } from '@goodvibes-jev/engine/platform/platform/runtime/install-kind';
+import type { InstallKind as PlatformInstallKind } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 
 /** The package a package-managed install of this terminal is upgraded through. */
 const TERMINAL_PACKAGE_NAME = '@goodvibes-jev/tui';

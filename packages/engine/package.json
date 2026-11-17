@@ -106,6 +106,11 @@
       "types": "./contracts/dist/generated/runtime-event-domains.d.ts",
       "import": "./contracts/dist/generated/runtime-event-domains.js"
     },
+    "./contracts/provider-catalog": {
+      "bun": "./contracts/src/provider-catalog.ts",
+      "types": "./contracts/dist/provider-catalog.d.ts",
+      "import": "./contracts/dist/provider-catalog.js"
+    },
     "./contracts/generated/webui-facade": {
       "bun": "./contracts/src/generated/webui-facade.ts",
       "types": "./contracts/dist/generated/webui-facade.d.ts",
@@ -1031,6 +1036,226 @@
       "bun": "./platform/src/platform/runtime/install-kind.ts",
       "types": "./platform/dist/platform/runtime/install-kind.d.ts",
       "import": "./platform/dist/platform/runtime/install-kind.js"
+    },
+    "./platform/platform/config/secret-bearing-config-keys": {
+      "bun": "./platform/src/platform/config/secret-bearing-config-keys.ts",
+      "types": "./platform/dist/platform/config/secret-bearing-config-keys.d.ts",
+      "import": "./platform/dist/platform/config/secret-bearing-config-keys.js"
+    },
+    "./platform/platform/runtime/network/outbound": {
+      "bun": "./platform/src/platform/runtime/network/outbound.ts",
+      "types": "./platform/dist/platform/runtime/network/outbound.d.ts",
+      "import": "./platform/dist/platform/runtime/network/outbound.js"
+    },
+    "./platform/platform/workspace/registration/worktree-link": {
+      "bun": "./platform/src/platform/workspace/registration/worktree-link.ts",
+      "types": "./platform/dist/platform/workspace/registration/worktree-link.d.ts",
+      "import": "./platform/dist/platform/workspace/registration/worktree-link.js"
+    },
+    "./platform/platform/gate/judgment-input": {
+      "bun": "./platform/src/platform/gate/judgment-input.ts",
+      "types": "./platform/dist/platform/gate/judgment-input.d.ts",
+      "import": "./platform/dist/platform/gate/judgment-input.js"
+    },
+    "./platform/platform/config/schema": {
+      "bun": "./platform/src/platform/config/schema.ts",
+      "types": "./platform/dist/platform/config/schema.d.ts",
+      "import": "./platform/dist/platform/config/schema.js"
+    },
+    "./platform/platform/types/grid": {
+      "bun": "./platform/src/platform/types/grid.ts",
+      "types": "./platform/dist/platform/types/grid.d.ts",
+      "import": "./platform/dist/platform/types/grid.js"
+    },
+    "./platform/platform/daemon/lifecycle-marker": {
+      "bun": "./platform/src/platform/daemon/lifecycle-marker.ts",
+      "types": "./platform/dist/platform/daemon/lifecycle-marker.d.ts",
+      "import": "./platform/dist/platform/daemon/lifecycle-marker.js"
+    },
+    "./platform/platform/daemon/service-manager": {
+      "bun": "./platform/src/platform/daemon/service-manager.ts",
+      "types": "./platform/dist/platform/daemon/service-manager.d.ts",
+      "import": "./platform/dist/platform/daemon/service-manager.js"
+    },
+    "./platform/platform/runtime/workspace-registration": {
+      "bun": "./platform/src/platform/runtime/workspace-registration.ts",
+      "types": "./platform/dist/platform/runtime/workspace-registration.d.ts",
+      "import": "./platform/dist/platform/runtime/workspace-registration.js"
+    },
+    "./platform/platform/mcp/config": {
+      "bun": "./platform/src/platform/mcp/config.ts",
+      "types": "./platform/dist/platform/mcp/config.d.ts",
+      "import": "./platform/dist/platform/mcp/config.js"
+    },
+    "./platform/platform/workspace/checkpoint/root-guard": {
+      "bun": "./platform/src/platform/workspace/checkpoint/root-guard.ts",
+      "types": "./platform/dist/platform/workspace/checkpoint/root-guard.d.ts",
+      "import": "./platform/dist/platform/workspace/checkpoint/root-guard.js"
+    },
+    "./platform/platform/utils/native-error-summary": {
+      "bun": "./platform/src/platform/utils/native-error-summary.ts",
+      "types": "./platform/dist/platform/utils/native-error-summary.d.ts",
+      "import": "./platform/dist/platform/utils/native-error-summary.js"
+    },
+    "./platform/platform/daemon/fatal-boot-report": {
+      "bun": "./platform/src/platform/daemon/fatal-boot-report.ts",
+      "types": "./platform/dist/platform/daemon/fatal-boot-report.d.ts",
+      "import": "./platform/dist/platform/daemon/fatal-boot-report.js"
+    },
+    "./platform/platform/daemon/daemon-service-default": {
+      "bun": "./platform/src/platform/daemon/daemon-service-default.ts",
+      "types": "./platform/dist/platform/daemon/daemon-service-default.d.ts",
+      "import": "./platform/dist/platform/daemon/daemon-service-default.js"
+    },
+    "./platform/platform/runtime/feature-flags/manager": {
+      "bun": "./platform/src/platform/runtime/feature-flags/manager.ts",
+      "types": "./platform/dist/platform/runtime/feature-flags/manager.d.ts",
+      "import": "./platform/dist/platform/runtime/feature-flags/manager.js"
+    },
+    "./platform/platform/runtime/workspace-trust": {
+      "bun": "./platform/src/platform/runtime/workspace-trust.ts",
+      "types": "./platform/dist/platform/runtime/workspace-trust.d.ts",
+      "import": "./platform/dist/platform/runtime/workspace-trust.js"
+    },
+    "./platform/platform/workspace/registration/checkpoint-eligibility": {
+      "bun": "./platform/src/platform/workspace/registration/checkpoint-eligibility.ts",
+      "types": "./platform/dist/platform/workspace/registration/checkpoint-eligibility.d.ts",
+      "import": "./platform/dist/platform/workspace/registration/checkpoint-eligibility.js"
+    },
+    "./platform/platform/tools/input-projection": {
+      "bun": "./platform/src/platform/tools/input-projection.ts",
+      "types": "./platform/dist/platform/tools/input-projection.d.ts",
+      "import": "./platform/dist/platform/tools/input-projection.js"
+    },
+    "./platform/platform/security/source-screening/owner": {
+      "bun": "./platform/src/platform/security/source-screening/owner.ts",
+      "types": "./platform/dist/platform/security/source-screening/owner.d.ts",
+      "import": "./platform/dist/platform/security/source-screening/owner.js"
+    },
+    "./platform/platform/security/source-screening/classic-owner": {
+      "bun": "./platform/src/platform/security/source-screening/classic-owner.ts",
+      "types": "./platform/dist/platform/security/source-screening/classic-owner.d.ts",
+      "import": "./platform/dist/platform/security/source-screening/classic-owner.js"
+    },
+    "./platform/platform/runtime/notification-privacy": {
+      "bun": "./platform/src/platform/runtime/notification-privacy.ts",
+      "types": "./platform/dist/platform/runtime/notification-privacy.d.ts",
+      "import": "./platform/dist/platform/runtime/notification-privacy.js"
+    },
+    "./platform/platform/types/errors": {
+      "bun": "./platform/src/platform/types/errors.ts",
+      "types": "./platform/dist/platform/types/errors.d.ts",
+      "import": "./platform/dist/platform/types/errors.js"
+    },
+    "./platform/platform/pairing/stable-host": {
+      "bun": "./platform/src/platform/pairing/stable-host.ts",
+      "types": "./platform/dist/platform/pairing/stable-host.d.ts",
+      "import": "./platform/dist/platform/pairing/stable-host.js"
+    },
+    "./platform/platform/utils/lifecycle-machine": {
+      "bun": "./platform/src/platform/utils/lifecycle-machine.ts",
+      "types": "./platform/dist/platform/utils/lifecycle-machine.d.ts",
+      "import": "./platform/dist/platform/utils/lifecycle-machine.js"
+    },
+    "./platform/platform/utils/process-lock": {
+      "bun": "./platform/src/platform/utils/process-lock.ts",
+      "types": "./platform/dist/platform/utils/process-lock.d.ts",
+      "import": "./platform/dist/platform/utils/process-lock.js"
+    },
+    "./platform/platform/runtime/ecosystem/catalog": {
+      "bun": "./platform/src/platform/runtime/ecosystem/catalog.ts",
+      "types": "./platform/dist/platform/runtime/ecosystem/catalog.d.ts",
+      "import": "./platform/dist/platform/runtime/ecosystem/catalog.js"
+    },
+    "./platform/platform/providers/provider-model": {
+      "bun": "./platform/src/platform/providers/provider-model.ts",
+      "types": "./platform/dist/platform/providers/provider-model.d.ts",
+      "import": "./platform/dist/platform/providers/provider-model.js"
+    },
+    "./platform/platform/pairing/qr-generator": {
+      "bun": "./platform/src/platform/pairing/qr-generator.ts",
+      "types": "./platform/dist/platform/pairing/qr-generator.d.ts",
+      "import": "./platform/dist/platform/pairing/qr-generator.js"
+    },
+    "./platform/platform/workspace/daemon-home": {
+      "bun": "./platform/src/platform/workspace/daemon-home.ts",
+      "types": "./platform/dist/platform/workspace/daemon-home.d.ts",
+      "import": "./platform/dist/platform/workspace/daemon-home.js"
+    },
+    "./platform/platform/config/control-plane-base-url": {
+      "bun": "./platform/src/platform/config/control-plane-base-url.ts",
+      "types": "./platform/dist/platform/config/control-plane-base-url.d.ts",
+      "import": "./platform/dist/platform/config/control-plane-base-url.js"
+    },
+    "./platform/platform/daemon/host-resolver": {
+      "bun": "./platform/src/platform/daemon/host-resolver.ts",
+      "types": "./platform/dist/platform/daemon/host-resolver.d.ts",
+      "import": "./platform/dist/platform/daemon/host-resolver.js"
+    },
+    "./platform/platform/runtime/feature-flags/feature-settings": {
+      "bun": "./platform/src/platform/runtime/feature-flags/feature-settings.ts",
+      "types": "./platform/dist/platform/runtime/feature-flags/feature-settings.d.ts",
+      "import": "./platform/dist/platform/runtime/feature-flags/feature-settings.js"
+    },
+    "./platform/platform/utils/reachable-base-url": {
+      "bun": "./platform/src/platform/utils/reachable-base-url.ts",
+      "types": "./platform/dist/platform/utils/reachable-base-url.d.ts",
+      "import": "./platform/dist/platform/utils/reachable-base-url.js"
+    },
+    "./platform/platform/utils/terminal-width": {
+      "bun": "./platform/src/platform/utils/terminal-width.ts",
+      "types": "./platform/dist/platform/utils/terminal-width.d.ts",
+      "import": "./platform/dist/platform/utils/terminal-width.js"
+    },
+    "./platform/platform/contract/types": {
+      "bun": "./platform/src/platform/contract/types.ts",
+      "types": "./platform/dist/platform/contract/types.d.ts",
+      "import": "./platform/dist/platform/contract/types.js"
+    },
+    "./platform/platform/runtime/decision-policy": {
+      "bun": "./platform/src/platform/runtime/decision-policy.ts",
+      "types": "./platform/dist/platform/runtime/decision-policy.d.ts",
+      "import": "./platform/dist/platform/runtime/decision-policy.js"
+    },
+    "./platform/platform/pairing/companion-token": {
+      "bun": "./platform/src/platform/pairing/companion-token.ts",
+      "types": "./platform/dist/platform/pairing/companion-token.d.ts",
+      "import": "./platform/dist/platform/pairing/companion-token.js"
+    },
+    "./platform/platform/config/goodvibes-home": {
+      "bun": "./platform/src/platform/config/goodvibes-home.ts",
+      "types": "./platform/dist/platform/config/goodvibes-home.d.ts",
+      "import": "./platform/dist/platform/config/goodvibes-home.js"
+    },
+    "./platform/platform/runtime/client/selection-observation": {
+      "bun": "./platform/src/platform/runtime/client/selection-observation.ts",
+      "types": "./platform/dist/platform/runtime/client/selection-observation.d.ts",
+      "import": "./platform/dist/platform/runtime/client/selection-observation.js"
+    },
+    "./platform/platform/workspace/registration/resolution": {
+      "bun": "./platform/src/platform/workspace/registration/resolution.ts",
+      "types": "./platform/dist/platform/workspace/registration/resolution.d.ts",
+      "import": "./platform/dist/platform/workspace/registration/resolution.js"
+    },
+    "./platform/platform/workspace/registration/shared-register-path": {
+      "bun": "./platform/src/platform/workspace/registration/shared-register-path.ts",
+      "types": "./platform/dist/platform/workspace/registration/shared-register-path.d.ts",
+      "import": "./platform/dist/platform/workspace/registration/shared-register-path.js"
+    },
+    "./platform/platform/workspace/registration/store": {
+      "bun": "./platform/src/platform/workspace/registration/store.ts",
+      "types": "./platform/dist/platform/workspace/registration/store.d.ts",
+      "import": "./platform/dist/platform/workspace/registration/store.js"
+    },
+    "./platform/platform/config/checkpoint-settings": {
+      "bun": "./platform/src/platform/config/checkpoint-settings.ts",
+      "types": "./platform/dist/platform/config/checkpoint-settings.d.ts",
+      "import": "./platform/dist/platform/config/checkpoint-settings.js"
+    },
+    "./platform/platform/runtime/shell-paths": {
+      "bun": "./platform/src/platform/runtime/shell-paths.ts",
+      "types": "./platform/dist/platform/runtime/shell-paths.d.ts",
+      "import": "./platform/dist/platform/runtime/shell-paths.js"
     },
     "./platform/platform/runtime/self-update": {
       "bun": "./platform/src/platform/runtime/self-update.ts",
@@ -3157,6 +3382,61 @@
       "types": "./terminal-shell/dist/cli-entrypoint.d.ts",
       "import": "./terminal-shell/dist/cli-entrypoint.js"
     },
+    "./terminal-shell/raw-reply-route": {
+      "bun": "./terminal-shell/src/raw-reply-route.ts",
+      "types": "./terminal-shell/dist/raw-reply-route.d.ts",
+      "import": "./terminal-shell/dist/raw-reply-route.js"
+    },
+    "./terminal-shell/cluster-remote-daemon-target": {
+      "bun": "./terminal-shell/src/cluster-remote-daemon-target.ts",
+      "types": "./terminal-shell/dist/cluster-remote-daemon-target.d.ts",
+      "import": "./terminal-shell/dist/cluster-remote-daemon-target.js"
+    },
+    "./terminal-shell/cli-catalog-types": {
+      "bun": "./terminal-shell/src/cli-catalog-types.ts",
+      "types": "./terminal-shell/dist/cli-catalog-types.d.ts",
+      "import": "./terminal-shell/dist/cli-catalog-types.js"
+    },
+    "./terminal-shell/cli-redaction": {
+      "bun": "./terminal-shell/src/cli-redaction.ts",
+      "types": "./terminal-shell/dist/cli-redaction.d.ts",
+      "import": "./terminal-shell/dist/cli-redaction.js"
+    },
+    "./terminal-shell/cli-network-posture": {
+      "bun": "./terminal-shell/src/cli-network-posture.ts",
+      "types": "./terminal-shell/dist/cli-network-posture.d.ts",
+      "import": "./terminal-shell/dist/cli-network-posture.js"
+    },
+    "./terminal-shell/cli-endpoints": {
+      "bun": "./terminal-shell/src/cli-endpoints.ts",
+      "types": "./terminal-shell/dist/cli-endpoints.d.ts",
+      "import": "./terminal-shell/dist/cli-endpoints.js"
+    },
+    "./terminal-shell/cluster-commands": {
+      "bun": "./terminal-shell/src/cluster-commands.ts",
+      "types": "./terminal-shell/dist/cluster-commands.d.ts",
+      "import": "./terminal-shell/dist/cluster-commands.js"
+    },
+    "./terminal-shell/cli-config-owner": {
+      "bun": "./terminal-shell/src/cli-config-owner.ts",
+      "types": "./terminal-shell/dist/cli-config-owner.d.ts",
+      "import": "./terminal-shell/dist/cli-config-owner.js"
+    },
+    "./terminal-shell/cli-parser": {
+      "bun": "./terminal-shell/src/cli-parser.ts",
+      "types": "./terminal-shell/dist/cli-parser.d.ts",
+      "import": "./terminal-shell/dist/cli-parser.js"
+    },
+    "./terminal-shell/cli-config-overrides": {
+      "bun": "./terminal-shell/src/cli-config-overrides.ts",
+      "types": "./terminal-shell/dist/cli-config-overrides.d.ts",
+      "import": "./terminal-shell/dist/cli-config-overrides.js"
+    },
+    "./terminal-shell/cli-types": {
+      "bun": "./terminal-shell/src/cli-types.ts",
+      "types": "./terminal-shell/dist/cli-types.d.ts",
+      "import": "./terminal-shell/dist/cli-types.js"
+    },
     "./terminal-shell/cli-parser-engine": {
       "bun": "./terminal-shell/src/cli-parser-engine.ts",
       "types": "./terminal-shell/dist/cli-parser-engine.d.ts",
@@ -3241,6 +3521,596 @@
       "bun": "./terminal-shell/src/agent-turn/index.ts",
       "types": "./terminal-shell/dist/agent-turn/index.d.ts",
       "import": "./terminal-shell/dist/agent-turn/index.js"
+    },
+    "./terminal-shell/agent-turn/accounts-tool": {
+      "bun": "./terminal-shell/src/agent-turn/accounts-tool.ts",
+      "types": "./terminal-shell/dist/agent-turn/accounts-tool.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/accounts-tool.js"
+    },
+    "./terminal-shell/agent-turn/agent-call-credential": {
+      "bun": "./terminal-shell/src/agent-turn/agent-call-credential.ts",
+      "types": "./terminal-shell/dist/agent-turn/agent-call-credential.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/agent-call-credential.js"
+    },
+    "./terminal-shell/agent-turn/agent-delegation-credential": {
+      "bun": "./terminal-shell/src/agent-turn/agent-delegation-credential.ts",
+      "types": "./terminal-shell/dist/agent-turn/agent-delegation-credential.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/agent-delegation-credential.js"
+    },
+    "./terminal-shell/agent-turn/artifact-effect": {
+      "bun": "./terminal-shell/src/agent-turn/artifact-effect.ts",
+      "types": "./terminal-shell/dist/agent-turn/artifact-effect.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/artifact-effect.js"
+    },
+    "./terminal-shell/agent-turn/artifacts-tool": {
+      "bun": "./terminal-shell/src/agent-turn/artifacts-tool.ts",
+      "types": "./terminal-shell/dist/agent-turn/artifacts-tool.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/artifacts-tool.js"
+    },
+    "./terminal-shell/agent-turn/autonomy-schedule": {
+      "bun": "./terminal-shell/src/agent-turn/autonomy-schedule.ts",
+      "types": "./terminal-shell/dist/agent-turn/autonomy-schedule.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/autonomy-schedule.js"
+    },
+    "./terminal-shell/agent-turn/autonomy-schedule-tool": {
+      "bun": "./terminal-shell/src/agent-turn/autonomy-schedule-tool.ts",
+      "types": "./terminal-shell/dist/agent-turn/autonomy-schedule-tool.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/autonomy-schedule-tool.js"
+    },
+    "./terminal-shell/agent-turn/browser-tool": {
+      "bun": "./terminal-shell/src/agent-turn/browser-tool.ts",
+      "types": "./terminal-shell/dist/agent-turn/browser-tool.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/browser-tool.js"
+    },
+    "./terminal-shell/agent-turn/capability-summary-prompt": {
+      "bun": "./terminal-shell/src/agent-turn/capability-summary-prompt.ts",
+      "types": "./terminal-shell/dist/agent-turn/capability-summary-prompt.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/capability-summary-prompt.js"
+    },
+    "./terminal-shell/agent-turn/capability-types": {
+      "bun": "./terminal-shell/src/agent-turn/capability-types.ts",
+      "types": "./terminal-shell/dist/agent-turn/capability-types.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/capability-types.js"
+    },
+    "./terminal-shell/agent-turn/catalog-data": {
+      "bun": "./terminal-shell/src/agent-turn/catalog-data.ts",
+      "types": "./terminal-shell/dist/agent-turn/catalog-data.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/catalog-data.js"
+    },
+    "./terminal-shell/agent-turn/catalog-ingress": {
+      "bun": "./terminal-shell/src/agent-turn/catalog-ingress.ts",
+      "types": "./terminal-shell/dist/agent-turn/catalog-ingress.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/catalog-ingress.js"
+    },
+    "./terminal-shell/agent-turn/catalog-ranking": {
+      "bun": "./terminal-shell/src/agent-turn/catalog-ranking.ts",
+      "types": "./terminal-shell/dist/agent-turn/catalog-ranking.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/catalog-ranking.js"
+    },
+    "./terminal-shell/agent-turn/channel-delivery": {
+      "bun": "./terminal-shell/src/agent-turn/channel-delivery.ts",
+      "types": "./terminal-shell/dist/agent-turn/channel-delivery.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/channel-delivery.js"
+    },
+    "./terminal-shell/agent-turn/channel-delivery-receipts": {
+      "bun": "./terminal-shell/src/agent-turn/channel-delivery-receipts.ts",
+      "types": "./terminal-shell/dist/agent-turn/channel-delivery-receipts.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/channel-delivery-receipts.js"
+    },
+    "./terminal-shell/agent-turn/channel-send-tool": {
+      "bun": "./terminal-shell/src/agent-turn/channel-send-tool.ts",
+      "types": "./terminal-shell/dist/agent-turn/channel-send-tool.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/channel-send-tool.js"
+    },
+    "./terminal-shell/agent-turn/connected-host-auth": {
+      "bun": "./terminal-shell/src/agent-turn/connected-host-auth.ts",
+      "types": "./terminal-shell/dist/agent-turn/connected-host-auth.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/connected-host-auth.js"
+    },
+    "./terminal-shell/agent-turn/connected-host-client": {
+      "bun": "./terminal-shell/src/agent-turn/connected-host-client.ts",
+      "types": "./terminal-shell/dist/agent-turn/connected-host-client.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/connected-host-client.js"
+    },
+    "./terminal-shell/agent-turn/connected-host-dial": {
+      "bun": "./terminal-shell/src/agent-turn/connected-host-dial.ts",
+      "types": "./terminal-shell/dist/agent-turn/connected-host-dial.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/connected-host-dial.js"
+    },
+    "./terminal-shell/agent-turn/connected-host-pairing-store": {
+      "bun": "./terminal-shell/src/agent-turn/connected-host-pairing-store.ts",
+      "types": "./terminal-shell/dist/agent-turn/connected-host-pairing-store.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/connected-host-pairing-store.js"
+    },
+    "./terminal-shell/agent-turn/connected-host-verb-error": {
+      "bun": "./terminal-shell/src/agent-turn/connected-host-verb-error.ts",
+      "types": "./terminal-shell/dist/agent-turn/connected-host-verb-error.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/connected-host-verb-error.js"
+    },
+    "./terminal-shell/agent-turn/conversational-capture": {
+      "bun": "./terminal-shell/src/agent-turn/conversational-capture.ts",
+      "types": "./terminal-shell/dist/agent-turn/conversational-capture.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/conversational-capture.js"
+    },
+    "./terminal-shell/agent-turn/daemon-operator-client": {
+      "bun": "./terminal-shell/src/agent-turn/daemon-operator-client.ts",
+      "types": "./terminal-shell/dist/agent-turn/daemon-operator-client.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/daemon-operator-client.js"
+    },
+    "./terminal-shell/agent-turn/document-registry": {
+      "bun": "./terminal-shell/src/agent-turn/document-registry.ts",
+      "types": "./terminal-shell/dist/agent-turn/document-registry.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/document-registry.js"
+    },
+    "./terminal-shell/agent-turn/document-registry-types": {
+      "bun": "./terminal-shell/src/agent-turn/document-registry-types.ts",
+      "types": "./terminal-shell/dist/agent-turn/document-registry-types.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/document-registry-types.js"
+    },
+    "./terminal-shell/agent-turn/effect-admission": {
+      "bun": "./terminal-shell/src/agent-turn/effect-admission.ts",
+      "types": "./terminal-shell/dist/agent-turn/effect-admission.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/effect-admission.js"
+    },
+    "./terminal-shell/agent-turn/family-remote": {
+      "bun": "./terminal-shell/src/agent-turn/family-remote.ts",
+      "types": "./terminal-shell/dist/agent-turn/family-remote.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/family-remote.js"
+    },
+    "./terminal-shell/agent-turn/google-tool": {
+      "bun": "./terminal-shell/src/agent-turn/google-tool.ts",
+      "types": "./terminal-shell/dist/agent-turn/google-tool.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/google-tool.js"
+    },
+    "./terminal-shell/agent-turn/google-wiring": {
+      "bun": "./terminal-shell/src/agent-turn/google-wiring.ts",
+      "types": "./terminal-shell/dist/agent-turn/google-wiring.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/google-wiring.js"
+    },
+    "./terminal-shell/agent-turn/home-path": {
+      "bun": "./terminal-shell/src/agent-turn/home-path.ts",
+      "types": "./terminal-shell/dist/agent-turn/home-path.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/home-path.js"
+    },
+    "./terminal-shell/agent-turn/hosted-turn": {
+      "bun": "./terminal-shell/src/agent-turn/hosted-turn.ts",
+      "types": "./terminal-shell/dist/agent-turn/hosted-turn.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/hosted-turn.js"
+    },
+    "./terminal-shell/agent-turn/inventory-disclosure": {
+      "bun": "./terminal-shell/src/agent-turn/inventory-disclosure.ts",
+      "types": "./terminal-shell/dist/agent-turn/inventory-disclosure.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/inventory-disclosure.js"
+    },
+    "./terminal-shell/agent-turn/knowledge-format": {
+      "bun": "./terminal-shell/src/agent-turn/knowledge-format.ts",
+      "types": "./terminal-shell/dist/agent-turn/knowledge-format.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/knowledge-format.js"
+    },
+    "./terminal-shell/agent-turn/knowledge-ingest-tool": {
+      "bun": "./terminal-shell/src/agent-turn/knowledge-ingest-tool.ts",
+      "types": "./terminal-shell/dist/agent-turn/knowledge-ingest-tool.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/knowledge-ingest-tool.js"
+    },
+    "./terminal-shell/agent-turn/knowledge-methods": {
+      "bun": "./terminal-shell/src/agent-turn/knowledge-methods.ts",
+      "types": "./terminal-shell/dist/agent-turn/knowledge-methods.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/knowledge-methods.js"
+    },
+    "./terminal-shell/agent-turn/knowledge-runtime": {
+      "bun": "./terminal-shell/src/agent-turn/knowledge-runtime.ts",
+      "types": "./terminal-shell/dist/agent-turn/knowledge-runtime.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/knowledge-runtime.js"
+    },
+    "./terminal-shell/agent-turn/knowledge-tool": {
+      "bun": "./terminal-shell/src/agent-turn/knowledge-tool.ts",
+      "types": "./terminal-shell/dist/agent-turn/knowledge-tool.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/knowledge-tool.js"
+    },
+    "./terminal-shell/agent-turn/learning-consolidation-core": {
+      "bun": "./terminal-shell/src/agent-turn/learning-consolidation-core.ts",
+      "types": "./terminal-shell/dist/agent-turn/learning-consolidation-core.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/learning-consolidation-core.js"
+    },
+    "./terminal-shell/agent-turn/learning-consolidation-tool": {
+      "bun": "./terminal-shell/src/agent-turn/learning-consolidation-tool.ts",
+      "types": "./terminal-shell/dist/agent-turn/learning-consolidation-tool.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/learning-consolidation-tool.js"
+    },
+    "./terminal-shell/agent-turn/learning-curator": {
+      "bun": "./terminal-shell/src/agent-turn/learning-curator.ts",
+      "types": "./terminal-shell/dist/agent-turn/learning-curator.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/learning-curator.js"
+    },
+    "./terminal-shell/agent-turn/learning-curator-common": {
+      "bun": "./terminal-shell/src/agent-turn/learning-curator-common.ts",
+      "types": "./terminal-shell/dist/agent-turn/learning-curator-common.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/learning-curator-common.js"
+    },
+    "./terminal-shell/agent-turn/learning-curator-consolidation": {
+      "bun": "./terminal-shell/src/agent-turn/learning-curator-consolidation.ts",
+      "types": "./terminal-shell/dist/agent-turn/learning-curator-consolidation.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/learning-curator-consolidation.js"
+    },
+    "./terminal-shell/agent-turn/learning-curator-proposals": {
+      "bun": "./terminal-shell/src/agent-turn/learning-curator-proposals.ts",
+      "types": "./terminal-shell/dist/agent-turn/learning-curator-proposals.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/learning-curator-proposals.js"
+    },
+    "./terminal-shell/agent-turn/learning-curator-readings": {
+      "bun": "./terminal-shell/src/agent-turn/learning-curator-readings.ts",
+      "types": "./terminal-shell/dist/agent-turn/learning-curator-readings.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/learning-curator-readings.js"
+    },
+    "./terminal-shell/agent-turn/learning-curator-source": {
+      "bun": "./terminal-shell/src/agent-turn/learning-curator-source.ts",
+      "types": "./terminal-shell/dist/agent-turn/learning-curator-source.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/learning-curator-source.js"
+    },
+    "./terminal-shell/agent-turn/learning-curator-types": {
+      "bun": "./terminal-shell/src/agent-turn/learning-curator-types.ts",
+      "types": "./terminal-shell/dist/agent-turn/learning-curator-types.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/learning-curator-types.js"
+    },
+    "./terminal-shell/agent-turn/local-library-items": {
+      "bun": "./terminal-shell/src/agent-turn/local-library-items.ts",
+      "types": "./terminal-shell/dist/agent-turn/local-library-items.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/local-library-items.js"
+    },
+    "./terminal-shell/agent-turn/local-registry-args": {
+      "bun": "./terminal-shell/src/agent-turn/local-registry-args.ts",
+      "types": "./terminal-shell/dist/agent-turn/local-registry-args.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/local-registry-args.js"
+    },
+    "./terminal-shell/agent-turn/local-registry-memory": {
+      "bun": "./terminal-shell/src/agent-turn/local-registry-memory.ts",
+      "types": "./terminal-shell/dist/agent-turn/local-registry-memory.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/local-registry-memory.js"
+    },
+    "./terminal-shell/agent-turn/local-registry-tool": {
+      "bun": "./terminal-shell/src/agent-turn/local-registry-tool.ts",
+      "types": "./terminal-shell/dist/agent-turn/local-registry-tool.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/local-registry-tool.js"
+    },
+    "./terminal-shell/agent-turn/local-state-admission": {
+      "bun": "./terminal-shell/src/agent-turn/local-state-admission.ts",
+      "types": "./terminal-shell/dist/agent-turn/local-state-admission.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/local-state-admission.js"
+    },
+    "./terminal-shell/agent-turn/media-generation": {
+      "bun": "./terminal-shell/src/agent-turn/media-generation.ts",
+      "types": "./terminal-shell/dist/agent-turn/media-generation.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/media-generation.js"
+    },
+    "./terminal-shell/agent-turn/memory-input-guard": {
+      "bun": "./terminal-shell/src/agent-turn/memory-input-guard.ts",
+      "types": "./terminal-shell/dist/agent-turn/memory-input-guard.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/memory-input-guard.js"
+    },
+    "./terminal-shell/agent-turn/memory-prompt": {
+      "bun": "./terminal-shell/src/agent-turn/memory-prompt.ts",
+      "types": "./terminal-shell/dist/agent-turn/memory-prompt.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/memory-prompt.js"
+    },
+    "./terminal-shell/agent-turn/memory-safety": {
+      "bun": "./terminal-shell/src/agent-turn/memory-safety.ts",
+      "types": "./terminal-shell/dist/agent-turn/memory-safety.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/memory-safety.js"
+    },
+    "./terminal-shell/agent-turn/model-compare-handoff": {
+      "bun": "./terminal-shell/src/agent-turn/model-compare-handoff.ts",
+      "types": "./terminal-shell/dist/agent-turn/model-compare-handoff.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/model-compare-handoff.js"
+    },
+    "./terminal-shell/agent-turn/model-compare-judgment": {
+      "bun": "./terminal-shell/src/agent-turn/model-compare-judgment.ts",
+      "types": "./terminal-shell/dist/agent-turn/model-compare-judgment.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/model-compare-judgment.js"
+    },
+    "./terminal-shell/agent-turn/model-compare-run": {
+      "bun": "./terminal-shell/src/agent-turn/model-compare-run.ts",
+      "types": "./terminal-shell/dist/agent-turn/model-compare-run.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/model-compare-run.js"
+    },
+    "./terminal-shell/agent-turn/model-compare-themes": {
+      "bun": "./terminal-shell/src/agent-turn/model-compare-themes.ts",
+      "types": "./terminal-shell/dist/agent-turn/model-compare-themes.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/model-compare-themes.js"
+    },
+    "./terminal-shell/agent-turn/model-compare-tool": {
+      "bun": "./terminal-shell/src/agent-turn/model-compare-tool.ts",
+      "types": "./terminal-shell/dist/agent-turn/model-compare-tool.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/model-compare-tool.js"
+    },
+    "./terminal-shell/agent-turn/model-compare-types": {
+      "bun": "./terminal-shell/src/agent-turn/model-compare-types.ts",
+      "types": "./terminal-shell/dist/agent-turn/model-compare-types.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/model-compare-types.js"
+    },
+    "./terminal-shell/agent-turn/model-reading": {
+      "bun": "./terminal-shell/src/agent-turn/model-reading.ts",
+      "types": "./terminal-shell/dist/agent-turn/model-reading.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/model-reading.js"
+    },
+    "./terminal-shell/agent-turn/note-registry": {
+      "bun": "./terminal-shell/src/agent-turn/note-registry.ts",
+      "types": "./terminal-shell/dist/agent-turn/note-registry.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/note-registry.js"
+    },
+    "./terminal-shell/agent-turn/occasions-gateway": {
+      "bun": "./terminal-shell/src/agent-turn/occasions-gateway.ts",
+      "types": "./terminal-shell/dist/agent-turn/occasions-gateway.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/occasions-gateway.js"
+    },
+    "./terminal-shell/agent-turn/occasions-types": {
+      "bun": "./terminal-shell/src/agent-turn/occasions-types.ts",
+      "types": "./terminal-shell/dist/agent-turn/occasions-types.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/occasions-types.js"
+    },
+    "./terminal-shell/agent-turn/operator-action-tool": {
+      "bun": "./terminal-shell/src/agent-turn/operator-action-tool.ts",
+      "types": "./terminal-shell/dist/agent-turn/operator-action-tool.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/operator-action-tool.js"
+    },
+    "./terminal-shell/agent-turn/operator-actions": {
+      "bun": "./terminal-shell/src/agent-turn/operator-actions.ts",
+      "types": "./terminal-shell/dist/agent-turn/operator-actions.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/operator-actions.js"
+    },
+    "./terminal-shell/agent-turn/operator-briefing-tool": {
+      "bun": "./terminal-shell/src/agent-turn/operator-briefing-tool.ts",
+      "types": "./terminal-shell/dist/agent-turn/operator-briefing-tool.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/operator-briefing-tool.js"
+    },
+    "./terminal-shell/agent-turn/operator-connection-owner": {
+      "bun": "./terminal-shell/src/agent-turn/operator-connection-owner.ts",
+      "types": "./terminal-shell/dist/agent-turn/operator-connection-owner.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/operator-connection-owner.js"
+    },
+    "./terminal-shell/agent-turn/operator-contract-routes": {
+      "bun": "./terminal-shell/src/agent-turn/operator-contract-routes.ts",
+      "types": "./terminal-shell/dist/agent-turn/operator-contract-routes.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/operator-contract-routes.js"
+    },
+    "./terminal-shell/agent-turn/operator-input-projector": {
+      "bun": "./terminal-shell/src/agent-turn/operator-input-projector.ts",
+      "types": "./terminal-shell/dist/agent-turn/operator-input-projector.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/operator-input-projector.js"
+    },
+    "./terminal-shell/agent-turn/operator-method-receipt": {
+      "bun": "./terminal-shell/src/agent-turn/operator-method-receipt.ts",
+      "types": "./terminal-shell/dist/agent-turn/operator-method-receipt.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/operator-method-receipt.js"
+    },
+    "./terminal-shell/agent-turn/operator-method-tool": {
+      "bun": "./terminal-shell/src/agent-turn/operator-method-tool.ts",
+      "types": "./terminal-shell/dist/agent-turn/operator-method-tool.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/operator-method-tool.js"
+    },
+    "./terminal-shell/agent-turn/operator-policy": {
+      "bun": "./terminal-shell/src/agent-turn/operator-policy.ts",
+      "types": "./terminal-shell/dist/agent-turn/operator-policy.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/operator-policy.js"
+    },
+    "./terminal-shell/agent-turn/outward-approvals": {
+      "bun": "./terminal-shell/src/agent-turn/outward-approvals.ts",
+      "types": "./terminal-shell/dist/agent-turn/outward-approvals.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/outward-approvals.js"
+    },
+    "./terminal-shell/agent-turn/payments-channel-guard": {
+      "bun": "./terminal-shell/src/agent-turn/payments-channel-guard.ts",
+      "types": "./terminal-shell/dist/agent-turn/payments-channel-guard.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/payments-channel-guard.js"
+    },
+    "./terminal-shell/agent-turn/persona-registry": {
+      "bun": "./terminal-shell/src/agent-turn/persona-registry.ts",
+      "types": "./terminal-shell/dist/agent-turn/persona-registry.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/persona-registry.js"
+    },
+    "./terminal-shell/agent-turn/personal-ops-data": {
+      "bun": "./terminal-shell/src/agent-turn/personal-ops-data.ts",
+      "types": "./terminal-shell/dist/agent-turn/personal-ops-data.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/personal-ops-data.js"
+    },
+    "./terminal-shell/agent-turn/personal-ops-effect-receipt": {
+      "bun": "./terminal-shell/src/agent-turn/personal-ops-effect-receipt.ts",
+      "types": "./terminal-shell/dist/agent-turn/personal-ops-effect-receipt.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/personal-ops-effect-receipt.js"
+    },
+    "./terminal-shell/agent-turn/personal-ops-ingress": {
+      "bun": "./terminal-shell/src/agent-turn/personal-ops-ingress.ts",
+      "types": "./terminal-shell/dist/agent-turn/personal-ops-ingress.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/personal-ops-ingress.js"
+    },
+    "./terminal-shell/agent-turn/preview-text": {
+      "bun": "./terminal-shell/src/agent-turn/preview-text.ts",
+      "types": "./terminal-shell/dist/agent-turn/preview-text.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/preview-text.js"
+    },
+    "./terminal-shell/agent-turn/profile-gateway": {
+      "bun": "./terminal-shell/src/agent-turn/profile-gateway.ts",
+      "types": "./terminal-shell/dist/agent-turn/profile-gateway.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/profile-gateway.js"
+    },
+    "./terminal-shell/agent-turn/profile-types": {
+      "bun": "./terminal-shell/src/agent-turn/profile-types.ts",
+      "types": "./terminal-shell/dist/agent-turn/profile-types.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/profile-types.js"
+    },
+    "./terminal-shell/agent-turn/project-context-files": {
+      "bun": "./terminal-shell/src/agent-turn/project-context-files.ts",
+      "types": "./terminal-shell/dist/agent-turn/project-context-files.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/project-context-files.js"
+    },
+    "./terminal-shell/agent-turn/prompt-context-receipts": {
+      "bun": "./terminal-shell/src/agent-turn/prompt-context-receipts.ts",
+      "types": "./terminal-shell/dist/agent-turn/prompt-context-receipts.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/prompt-context-receipts.js"
+    },
+    "./terminal-shell/agent-turn/protected-research-report": {
+      "bun": "./terminal-shell/src/agent-turn/protected-research-report.ts",
+      "types": "./terminal-shell/dist/agent-turn/protected-research-report.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/protected-research-report.js"
+    },
+    "./terminal-shell/agent-turn/provider-model": {
+      "bun": "./terminal-shell/src/agent-turn/provider-model.ts",
+      "types": "./terminal-shell/dist/agent-turn/provider-model.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/provider-model.js"
+    },
+    "./terminal-shell/agent-turn/read-helpers": {
+      "bun": "./terminal-shell/src/agent-turn/read-helpers.ts",
+      "types": "./terminal-shell/dist/agent-turn/read-helpers.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/read-helpers.js"
+    },
+    "./terminal-shell/agent-turn/read-modes": {
+      "bun": "./terminal-shell/src/agent-turn/read-modes.ts",
+      "types": "./terminal-shell/dist/agent-turn/read-modes.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/read-modes.js"
+    },
+    "./terminal-shell/agent-turn/record-labels": {
+      "bun": "./terminal-shell/src/agent-turn/record-labels.ts",
+      "types": "./terminal-shell/dist/agent-turn/record-labels.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/record-labels.js"
+    },
+    "./terminal-shell/agent-turn/reminder-schedule": {
+      "bun": "./terminal-shell/src/agent-turn/reminder-schedule.ts",
+      "types": "./terminal-shell/dist/agent-turn/reminder-schedule.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/reminder-schedule.js"
+    },
+    "./terminal-shell/agent-turn/reminder-schedule-tool": {
+      "bun": "./terminal-shell/src/agent-turn/reminder-schedule-tool.ts",
+      "types": "./terminal-shell/dist/agent-turn/reminder-schedule-tool.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/reminder-schedule-tool.js"
+    },
+    "./terminal-shell/agent-turn/research-report-input": {
+      "bun": "./terminal-shell/src/agent-turn/research-report-input.ts",
+      "types": "./terminal-shell/dist/agent-turn/research-report-input.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/research-report-input.js"
+    },
+    "./terminal-shell/agent-turn/research-report-tool": {
+      "bun": "./terminal-shell/src/agent-turn/research-report-tool.ts",
+      "types": "./terminal-shell/dist/agent-turn/research-report-tool.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/research-report-tool.js"
+    },
+    "./terminal-shell/agent-turn/research-run-registry": {
+      "bun": "./terminal-shell/src/agent-turn/research-run-registry.ts",
+      "types": "./terminal-shell/dist/agent-turn/research-run-registry.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/research-run-registry.js"
+    },
+    "./terminal-shell/agent-turn/research-runs-tool": {
+      "bun": "./terminal-shell/src/agent-turn/research-runs-tool.ts",
+      "types": "./terminal-shell/dist/agent-turn/research-runs-tool.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/research-runs-tool.js"
+    },
+    "./terminal-shell/agent-turn/research-source-registry": {
+      "bun": "./terminal-shell/src/agent-turn/research-source-registry.ts",
+      "types": "./terminal-shell/dist/agent-turn/research-source-registry.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/research-source-registry.js"
+    },
+    "./terminal-shell/agent-turn/research-source-screening": {
+      "bun": "./terminal-shell/src/agent-turn/research-source-screening.ts",
+      "types": "./terminal-shell/dist/agent-turn/research-source-screening.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/research-source-screening.js"
+    },
+    "./terminal-shell/agent-turn/research-sources-tool": {
+      "bun": "./terminal-shell/src/agent-turn/research-sources-tool.ts",
+      "types": "./terminal-shell/dist/agent-turn/research-sources-tool.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/research-sources-tool.js"
+    },
+    "./terminal-shell/agent-turn/review-authority": {
+      "bun": "./terminal-shell/src/agent-turn/review-authority.ts",
+      "types": "./terminal-shell/dist/agent-turn/review-authority.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/review-authority.js"
+    },
+    "./terminal-shell/agent-turn/review-packet-presets-core": {
+      "bun": "./terminal-shell/src/agent-turn/review-packet-presets-core.ts",
+      "types": "./terminal-shell/dist/agent-turn/review-packet-presets-core.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/review-packet-presets-core.js"
+    },
+    "./terminal-shell/agent-turn/routine-registry": {
+      "bun": "./terminal-shell/src/agent-turn/routine-registry.ts",
+      "types": "./terminal-shell/dist/agent-turn/routine-registry.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/routine-registry.js"
+    },
+    "./terminal-shell/agent-turn/schedule-delivery-targets": {
+      "bun": "./terminal-shell/src/agent-turn/schedule-delivery-targets.ts",
+      "types": "./terminal-shell/dist/agent-turn/schedule-delivery-targets.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/schedule-delivery-targets.js"
+    },
+    "./terminal-shell/agent-turn/schedule-edit": {
+      "bun": "./terminal-shell/src/agent-turn/schedule-edit.ts",
+      "types": "./terminal-shell/dist/agent-turn/schedule-edit.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/schedule-edit.js"
+    },
+    "./terminal-shell/agent-turn/schedule-edit-tool": {
+      "bun": "./terminal-shell/src/agent-turn/schedule-edit-tool.ts",
+      "types": "./terminal-shell/dist/agent-turn/schedule-edit-tool.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/schedule-edit-tool.js"
+    },
+    "./terminal-shell/agent-turn/schedule-effect": {
+      "bun": "./terminal-shell/src/agent-turn/schedule-effect.ts",
+      "types": "./terminal-shell/dist/agent-turn/schedule-effect.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/schedule-effect.js"
+    },
+    "./terminal-shell/agent-turn/schedule-next-routes": {
+      "bun": "./terminal-shell/src/agent-turn/schedule-next-routes.ts",
+      "types": "./terminal-shell/dist/agent-turn/schedule-next-routes.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/schedule-next-routes.js"
+    },
+    "./terminal-shell/agent-turn/schedule-tool": {
+      "bun": "./terminal-shell/src/agent-turn/schedule-tool.ts",
+      "types": "./terminal-shell/dist/agent-turn/schedule-tool.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/schedule-tool.js"
+    },
+    "./terminal-shell/agent-turn/service-lifecycle": {
+      "bun": "./terminal-shell/src/agent-turn/service-lifecycle.ts",
+      "types": "./terminal-shell/dist/agent-turn/service-lifecycle.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/service-lifecycle.js"
+    },
+    "./terminal-shell/agent-turn/session-expectations": {
+      "bun": "./terminal-shell/src/agent-turn/session-expectations.ts",
+      "types": "./terminal-shell/dist/agent-turn/session-expectations.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/session-expectations.js"
+    },
+    "./terminal-shell/agent-turn/skill-registry": {
+      "bun": "./terminal-shell/src/agent-turn/skill-registry.ts",
+      "types": "./terminal-shell/dist/agent-turn/skill-registry.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/skill-registry.js"
+    },
+    "./terminal-shell/agent-turn/skill-registry-types": {
+      "bun": "./terminal-shell/src/agent-turn/skill-registry-types.ts",
+      "types": "./terminal-shell/dist/agent-turn/skill-registry-types.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/skill-registry-types.js"
+    },
+    "./terminal-shell/agent-turn/skill-standard": {
+      "bun": "./terminal-shell/src/agent-turn/skill-standard.ts",
+      "types": "./terminal-shell/dist/agent-turn/skill-standard.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/skill-standard.js"
+    },
+    "./terminal-shell/agent-turn/store-change-stamp": {
+      "bun": "./terminal-shell/src/agent-turn/store-change-stamp.ts",
+      "types": "./terminal-shell/dist/agent-turn/store-change-stamp.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/store-change-stamp.js"
+    },
+    "./terminal-shell/agent-turn/store-file": {
+      "bun": "./terminal-shell/src/agent-turn/store-file.ts",
+      "types": "./terminal-shell/dist/agent-turn/store-file.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/store-file.js"
+    },
+    "./terminal-shell/agent-turn/surface": {
+      "bun": "./terminal-shell/src/agent-turn/surface.ts",
+      "types": "./terminal-shell/dist/agent-turn/surface.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/surface.js"
+    },
+    "./terminal-shell/agent-turn/vibe-file": {
+      "bun": "./terminal-shell/src/agent-turn/vibe-file.ts",
+      "types": "./terminal-shell/dist/agent-turn/vibe-file.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/vibe-file.js"
+    },
+    "./terminal-shell/agent-turn/work-plan-tool": {
+      "bun": "./terminal-shell/src/agent-turn/work-plan-tool.ts",
+      "types": "./terminal-shell/dist/agent-turn/work-plan-tool.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/work-plan-tool.js"
     },
     "./terminal-shell/host-service-status": {
       "bun": "./terminal-shell/src/host-service-status.ts",

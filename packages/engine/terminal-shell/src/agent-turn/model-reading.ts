@@ -14,8 +14,8 @@
  * checked once by `snapshotJudgmentEvidence` (card data, attached secrets,
  * malformed input).
  */
-import { snapshotJudgmentEvidence, snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
-import { assertProjectionCurrent, ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
+import { snapshotJudgmentEvidence, snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate/judgment-input';
+import { assertProjectionCurrent, ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools/input-projection';
 import type { ProtectedSourceOwner } from '@goodvibes-jev/engine/platform/platform/security';
 import type { ArtifactDescriptor } from '@goodvibes-jev/engine/platform/platform/artifacts';
 

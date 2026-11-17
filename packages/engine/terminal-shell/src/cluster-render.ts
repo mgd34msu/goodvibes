@@ -9,7 +9,7 @@
  * own way.
  */
 import { stripDangerousAnsi } from './ansi-sanitize.js';
-import { generateQrMatrix, renderQrToString } from '@goodvibes-jev/engine/platform/platform/pairing';
+import { generateQrMatrix, renderQrToString } from '@goodvibes-jev/engine/platform/platform/pairing/qr-generator';
 import type {
   RotateKeyResult,
   CreateGroupResult,

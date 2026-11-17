@@ -4,8 +4,8 @@ import { getDefaultAcpAgentCommand } from '@goodvibes-jev/engine/platform/platfo
 import { resolveDaemonEnabled } from '@goodvibes-jev/engine/platform/platform/config';
 import type { CommandContext } from '../command-registry.ts';
 import type { PeerClient, RemoteSessionBundle } from '@/runtime/index.ts';
-import { requireShellPaths } from './runtime-services.ts';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { requireShellPaths } from '@goodvibes-jev/engine/terminal-shell/command-service-access';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 
 type RemoteRegistryLike = Pick<PeerClient['runners'], 'listContracts' | 'exportSessionBundle' | 'importSessionBundle' | 'describeSessionBundleImport'>;
 

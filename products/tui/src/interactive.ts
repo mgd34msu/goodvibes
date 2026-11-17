@@ -14,7 +14,7 @@ import type { NativeConversationIntakeState } from './runtime/native-conversatio
 import { captureNativeConversationInput, type ProductInputContext } from '@goodvibes-jev/engine/terminal-shell/native';
 import { dispatchNativeConversationTurn, describeFailedNativeDispatch } from './runtime/native-conversation-ingress.ts';
 import { readTuiConfigValue, subscribeTuiConfigValue } from './config/host-settings.ts';
-import { resolveGoodVibesDaemonHome, resolveGoodVibesHome } from '@goodvibes-jev/engine/platform/platform/config';
+import { resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/platform/platform/config';
 import './renderer/compositor.ts';
 
 import { UIFactory } from './renderer/ui-factory.ts';
@@ -87,7 +87,7 @@ import { deriveComposerState } from './core/composer-state.ts';
 import { runNativeTurnDispatch } from './core/native-turn-dispatch.ts';
 import { resolveFoldedBookmarkLine } from './core/bookmark-navigation.ts';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-import { prepareShellCliRuntime } from './cli/entrypoint.ts';
+import type { PreparedShellCliRuntime } from './cli/entrypoint.ts';
 import { applyInitialTuiCliState, reportFatalStartupError } from './cli/tui-startup.ts';
 import { applyConfiguredHitlMode, applyTerminalRuntimeConfigDefaults } from '@goodvibes-jev/engine/terminal-shell';
 import { installVoiceCapture } from './shell/voice-capture-shell.ts';
@@ -138,20 +138,10 @@ import { SessionViews } from './shell/session-views.ts';
 
 let releaseFailedStartupSession: (() => Promise<void>) | undefined;
 
-async function main() {
+async function main(prepared: PreparedShellCliRuntime) {
   const stdout = process.stdout;
   const stdin = process.stdin;
-  // Both roots come from the one resolver the daemon CLI also uses. This line
-  // called homedir() unconditionally, so a harness that redirected the tree got
-  // a client that wrote the real one, secret store included.
-  const { cli, configManager, bootstrapWorkingDir, bootstrapHomeDirectory } = await prepareShellCliRuntime(
-    process.argv.slice(2),
-    {
-      defaultWorkingDirectory: process.env['GOODVIBES_WORKING_DIR'] ?? process.cwd(),
-      homeDirectory: resolveGoodVibesHome(),
-    },
-    'goodvibes',
-  );
+  const { cli, configManager, bootstrapWorkingDir, bootstrapHomeDirectory } = prepared;
 
   // Between binary start and the first frame, boot used to be silent (config
   // load, trust manager, memory init, hooks). One honest pre-alt-screen line,
@@ -1556,7 +1546,10 @@ async function main() {
   recoveryInterval = startRecoveryAutosave({ conversation, runtime, surface: ctx.services.surface, buildSessionContinuityHints });
 }
 
-main().catch(async (error: unknown) => {
-  await releaseFailedStartupSession?.();
-  reportFatalStartupError(error);
-});
+/** Runs the terminal UI for a command line that `prepareShellCliRuntime` left to it. */
+export function runInteractive(prepared: PreparedShellCliRuntime): Promise<void> {
+  return main(prepared).catch(async (error: unknown) => {
+    await releaseFailedStartupSession?.();
+    reportFatalStartupError(error);
+  });
+}

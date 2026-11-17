@@ -23,17 +23,8 @@
  * to match. The vocabulary below is exactly the set of things this binary
  * actually does, and the engine refuses everything else.
  */
-import {
-  catalogFlagArity,
-  catalogFlagsForCommand,
-  resolveCatalogCommand,
-  type CliCatalog,
-  type CliFlagKind,
-  type CommandFlagSpec,
-  type CommandSpec,
-  type EngineParseResult,
-  type RejectedFlagSpec,
-} from '@goodvibes-jev/engine/terminal-shell';
+import { catalogFlagArity, catalogFlagsForCommand, resolveCatalogCommand } from '@goodvibes-jev/engine/terminal-shell/cli-catalog-types';
+import type { CliCatalog, CliFlagKind, CommandFlagSpec, CommandSpec, EngineParseResult, RejectedFlagSpec } from '@goodvibes-jev/engine/terminal-shell';
 import type { DaemonCliFlags } from './types.ts';
 import { WEBUI_BINDING_QUERY } from './machine-contracts.ts';
 

@@ -1,25 +1,14 @@
 import type { ShellPathService } from '@/runtime/index.ts';
 import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-import {
-  openWorkspaceRegistrationStore,
-  type WorkspaceRegistrationStore,
-  readWorkspaceRegisterSync,
-  readCheckpointEligibilitySync,
-  createCheckpointEligibilityChecker,
-  broadRootReason,
-  type CheckpointEligibility,
-  type RegisterWorkspaceResult,
-  resolveWorkspaceRegistration,
-  normalizeWorkspaceRoot,
-  probeWorktreeLink,
-  type RegisteredWorkspaceRecord,
-  type DeclinedWorkspaceRecord,
-  type WorkspaceGitMetadata,
-  type WorkspaceResolution,
-} from '@goodvibes-jev/engine/platform/platform/workspace';
-import { sharedWorkspaceRegisterPath } from '@goodvibes-jev/engine/platform/platform/workspace';
+import { openWorkspaceRegistrationStore, readWorkspaceRegisterSync } from '@goodvibes-jev/engine/platform/platform/workspace/registration/store';
+import { readCheckpointEligibilitySync, createCheckpointEligibilityChecker } from '@goodvibes-jev/engine/platform/platform/workspace/registration/checkpoint-eligibility';
+import { broadRootReason } from '@goodvibes-jev/engine/platform/platform/workspace/checkpoint/root-guard';
+import { resolveWorkspaceRegistration, normalizeWorkspaceRoot } from '@goodvibes-jev/engine/platform/platform/workspace/registration/resolution';
+import { probeWorktreeLink } from '@goodvibes-jev/engine/platform/platform/workspace/registration/worktree-link';
+import type { WorkspaceRegistrationStore, CheckpointEligibility, RegisterWorkspaceResult, RegisteredWorkspaceRecord, DeclinedWorkspaceRecord, WorkspaceGitMetadata, WorkspaceResolution } from '@goodvibes-jev/engine/platform/platform/workspace';
+import { sharedWorkspaceRegisterPath } from '@goodvibes-jev/engine/platform/platform/workspace/registration/shared-register-path';
 
-export { normalizeWorkspaceRoot } from '@goodvibes-jev/engine/platform/platform/workspace';
+export { normalizeWorkspaceRoot } from '@goodvibes-jev/engine/platform/platform/workspace/registration/resolution';
 export type {
   DeclinedWorkspaceRecord,
   RegisteredWorkspaceRecord,

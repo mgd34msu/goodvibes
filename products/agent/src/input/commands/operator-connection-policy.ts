@@ -2,8 +2,8 @@ import type { PaymentWindowCommandPolicy } from '@goodvibes-jev/engine/terminal-
 import { requireShellPaths } from '@goodvibes-jev/engine/terminal-shell/command-service-access';
 import type { CommandContext } from '../command-registry.ts';
 import { resolveConnectedHostConnection } from '../../runtime/client/daemon-verbs.ts';
-import { agentHostPairingStorePath } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { connectedHostOperatorTokenPath } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { agentHostPairingStorePath } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-pairing-store';
+import { connectedHostOperatorTokenPath } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-auth';
 
 
 /** Product host selection only; interactive owner controllers share this exact policy. */

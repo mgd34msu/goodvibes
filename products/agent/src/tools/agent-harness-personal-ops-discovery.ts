@@ -1,12 +1,13 @@
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
-import { findOperatorContractMethod, operatorContractMethods as contractMethodIndex } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools/input-projection';
+import { findOperatorContractMethod, operatorContractMethods as contractMethodIndex } from '@goodvibes-jev/engine/terminal-shell/agent-turn/operator-contract-routes';
 import type { CommandContext } from '../input/command-registry.ts';
-import { captureCatalogData, type CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { EFFECT_ADMISSION_SENTENCE } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { captureCatalogData } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-data';
+import { type CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-ranking';
+import { EFFECT_ADMISSION_SENTENCE } from '@goodvibes-jev/engine/terminal-shell/agent-turn/effect-admission';
 import { modelReadingServicePath } from './agent-harness-model-reading-source.ts';
 import { mcpSchemaRoute } from './agent-harness-personal-ops-routes.ts';
 import type { McpSchemaSummary, McpToolRecord, McpToolSchema, OperatorContractMethod, PersonalOpsConnectorSignal, PersonalOpsConnectorTool, PersonalOpsWorkflow, PersonalOpsWorkflowStatus } from './agent-harness-personal-ops-types.ts';
-import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn/read-helpers';
 
 export function readString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';

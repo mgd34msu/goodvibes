@@ -1,4 +1,4 @@
-import { isClassicOperation, requireDecisionFeature, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime';
+import { isClassicOperation, requireDecisionFeature, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime/decision-policy';
 import { rankHarnessCatalog, type CatalogRankingOptions } from './catalog-ranking.js';
 import { previewHarnessText } from './preview-text.js';
 import { buildLearningCandidates, candidateSearchText } from './learning-curator-proposals.js';

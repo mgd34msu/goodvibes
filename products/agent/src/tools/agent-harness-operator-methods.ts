@@ -1,12 +1,12 @@
 import { snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
-import { operatorContractMethods as contractMethodIndex, operatorMethodIsReadOnly, type OperatorContractMethodEntry } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { rankHarnessCatalog, type CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { operatorContractMethods as contractMethodIndex, operatorMethodIsReadOnly, type OperatorContractMethodEntry } from '@goodvibes-jev/engine/terminal-shell/agent-turn/operator-contract-routes';
+import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn/preview-text';
+import { rankHarnessCatalog, type CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-ranking';
 import { CATALOG_QUERIES } from './agent-harness-catalog-filters.ts';
 import { CATALOG_PAGE_MAX, CATALOG_PAGE_SIZE, catalogEnvelope, catalogFilters, readOffset } from './agent-harness-tool-utils.ts';
-import { EFFECT_ADMISSION_SENTENCE } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { operatorMethodIsOutward } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { EFFECT_ADMISSION_SENTENCE } from '@goodvibes-jev/engine/terminal-shell/agent-turn/effect-admission';
+import { operatorMethodIsOutward } from '@goodvibes-jev/engine/terminal-shell/agent-turn/operator-input-projector';
+import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn/read-helpers';
 
 export interface AgentHarnessOperatorMethodArgs {
   readonly methodId?: unknown;

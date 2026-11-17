@@ -24,7 +24,7 @@ import {
   type DriverRemediationOptions,
 } from '@goodvibes-jev/engine/platform/platform/browser';
 import { DAEMON_REPO_RELEASES_LATEST_URL } from '@goodvibes-jev/engine/platform/platform/runtime/client';
-import { detectInstallKind } from './update-check.ts';
+import { detectInstallKind } from '@goodvibes-jev/engine/platform/platform/runtime/install-kind';
 import { BROWSER_DRIVER_ARCHIVE_NAME, BROWSER_DRIVER_DIR_NAME } from './release-artifacts.ts';
 
 export const RELEASES_LATEST_URL = DAEMON_REPO_RELEASES_LATEST_URL;

@@ -21,7 +21,8 @@ import { ownerInputFor } from './owner-input.ts';
  *   - lifecycle.ts: save/shutdown helpers
  */
 import { join } from 'node:path';
-import { readConnectedDaemonOrigin, resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/platform/platform/config';
+import { readConnectedDaemonOrigin } from '@goodvibes-jev/engine/platform/platform/config/control-plane-base-url';
+import { resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/platform/platform/config/goodvibes-home';
 import '@goodvibes-jev/engine/platform/platform/core';
 import { AcpManager } from '@goodvibes-jev/engine/platform/platform/acp';
 import { readTierPromptSupplement } from '@goodvibes-jev/engine/platform/platform/providers';

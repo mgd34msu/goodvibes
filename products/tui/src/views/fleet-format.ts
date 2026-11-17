@@ -13,10 +13,10 @@ import { buildViewLine, DEFAULT_VIEW_PALETTE, type ColumnSpec, type ViewPalette 
 import { fleetAttentionText, fleetNodeAttention, fleetStallMarker, fleetUsageTokens, hasFleetCost, type FleetStateTone } from './fleet-read-model.ts';
 import { fleetStateDisplay } from './fleet-stop.ts';
 import { formatElapsed } from '../utils/format-elapsed.ts';
-import { truncateDisplay } from '../utils/terminal-width.ts';
+import { truncateDisplay } from '@goodvibes-jev/engine/platform/platform/utils/terminal-width';
 import { contractTree, type ContractView } from '@goodvibes-jev/engine/platform/platform/contract';
 import { cellText } from '../renderer/lane-graph/bead.ts';
-import { wrapText } from '../utils/terminal-width.ts';
+import { wrapText } from '@goodvibes-jev/engine/platform/platform/utils/terminal-width';
 import { buildAlignedRow } from './polish.ts';
 import { fleetKindTag } from './fleet-read-model.ts';
 import { steerBadgeGlyph, steerBadgeTone } from './fleet-steer.ts';

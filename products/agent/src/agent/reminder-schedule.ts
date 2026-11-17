@@ -7,13 +7,8 @@
 import { parseEveryInterval } from '@goodvibes-jev/engine/platform/platform/automation';
 import { createBrowserGoodVibesPlatform } from '@goodvibes-jev/engine/platform/browser';
 import type { OperatorMethodInput, OperatorMethodOutput } from '@goodvibes-jev/engine/platform/contracts';
-import {
-  REMINDER_SCHEDULE_METHOD,
-  REMINDER_SCHEDULE_ROUTE,
-  ROUTINE_SCHEDULE_LIST_METHOD,
-  type ReminderSchedulePreview,
-  type ReminderScheduleResult,
-} from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { REMINDER_SCHEDULE_METHOD, REMINDER_SCHEDULE_ROUTE, type ReminderSchedulePreview, type ReminderScheduleResult } from '@goodvibes-jev/engine/terminal-shell/agent-turn/reminder-schedule';
+import { ROUTINE_SCHEDULE_LIST_METHOD } from '@goodvibes-jev/engine/terminal-shell/agent-turn/schedule-delivery-targets';
 import {
   classifyConnectedHostScheduleError,
   resolveAgentConnectedHostConnection,
@@ -21,19 +16,7 @@ import {
   type AgentConnectedHostConnection,
 } from './routine-schedule-promotion.ts';
 
-export {
-  REMINDER_SCHEDULE_METHOD,
-  REMINDER_SCHEDULE_ROUTE,
-  buildReminderSchedulePayload,
-  buildReminderSchedulePreview,
-  buildReminderSchedulePrompt,
-  parseReminderScheduleArgs,
-  type ParsedReminderScheduleArgs,
-  type ReminderScheduleFailure,
-  type ReminderSchedulePreview,
-  type ReminderScheduleResult,
-  type ReminderScheduleSuccess,
-} from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+export { REMINDER_SCHEDULE_METHOD, REMINDER_SCHEDULE_ROUTE, buildReminderSchedulePayload, buildReminderSchedulePreview, buildReminderSchedulePrompt, parseReminderScheduleArgs, type ParsedReminderScheduleArgs, type ReminderScheduleFailure, type ReminderSchedulePreview, type ReminderScheduleResult, type ReminderScheduleSuccess } from '@goodvibes-jev/engine/terminal-shell/agent-turn/reminder-schedule';
 
 type ScheduleCreateInput = OperatorMethodInput<'automation.schedules.create'>;
 type ScheduleCreateOutput = OperatorMethodOutput<'automation.schedules.create'>;

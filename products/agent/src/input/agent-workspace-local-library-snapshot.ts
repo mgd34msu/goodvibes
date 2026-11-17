@@ -1,7 +1,7 @@
-import { AgentResearchRunRegistry, researchRunLogTail } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { AgentResearchRunRegistry, researchRunLogTail } from '@goodvibes-jev/engine/terminal-shell/agent-turn/research-run-registry';
 import { RoutineScheduleReceiptStore } from '../agent/routine-schedule-receipts.ts';
 // The record summaries are the shared Agent turn's (local-library-items.ts); the curator reads the same ones.
-export { summarizeMemoryItem, summarizeNoteItem, summarizePersonaItem, summarizeRoutineItem, summarizeSkillBundleItem, summarizeSkillItem } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+export { summarizeMemoryItem, summarizeNoteItem, summarizePersonaItem, summarizeRoutineItem, summarizeSkillBundleItem, summarizeSkillItem } from '@goodvibes-jev/engine/terminal-shell/agent-turn/local-library-items';
 import type { listAgentRuntimeProfiles, listAgentRuntimeProfileTemplates } from '../agent/runtime-profile.ts';
 import type { AgentWorkspaceResearchRunSummary, AgentWorkspaceRoutineScheduleReceiptSummary, AgentWorkspaceRuntimeProfileItem, AgentWorkspaceRuntimeStarterTemplateItem } from './agent-workspace-types.ts';
 

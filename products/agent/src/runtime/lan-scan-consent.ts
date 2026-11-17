@@ -21,7 +21,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 import {
   startBackgroundProviderRegistration,
   type BackgroundProviderDiscoveryOptions,

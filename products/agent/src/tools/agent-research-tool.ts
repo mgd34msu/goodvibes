@@ -1,16 +1,16 @@
-import { snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
-import { prepareProtectedResearchReport, agentResearchReportSourceOwner, createAgentResearchReportProjector, inheritPreparedResearchReport, type PreparedResearchReport } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate/judgment-input';
+import { prepareProtectedResearchReport, agentResearchReportSourceOwner, createAgentResearchReportProjector, inheritPreparedResearchReport, type PreparedResearchReport } from '@goodvibes-jev/engine/terminal-shell/agent-turn/protected-research-report';
 import type { ProtectedSourceOwner } from '@goodvibes-jev/engine/platform/platform/security';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { assertCurrentToolInvocation, assertCurrentToolExecution, assertCurrentToolEffect, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { CommandContext, CommandRegistry } from '../input/command-registry.ts';
-import { createAgentArtifactsTool } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { createAgentArtifactsTool } from '@goodvibes-jev/engine/terminal-shell/agent-turn/artifacts-tool';
 import { createAgentHarnessTool } from './agent-harness-tool.ts';
-import { createAgentResearchReportTool } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { createAgentResearchRunsTool } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { createAgentResearchReportTool } from '@goodvibes-jev/engine/terminal-shell/agent-turn/research-report-tool';
+import { createAgentResearchRunsTool } from '@goodvibes-jev/engine/terminal-shell/agent-turn/research-runs-tool';
 import { runAdmittedResearchRunner, runPublicSearch } from './agent-research-runner.ts';
-import { createAgentResearchSourcesTool } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { confirmParameter, requestParameter } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { createAgentResearchSourcesTool } from '@goodvibes-jev/engine/terminal-shell/agent-turn/research-sources-tool';
+import { confirmParameter, requestParameter } from '@goodvibes-jev/engine/terminal-shell/agent-turn/effect-admission';
 
 type AgentResearchAction =
   | 'briefing'

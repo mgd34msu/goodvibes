@@ -13,11 +13,7 @@
  * - constant bindings have no separate off switch, so the request fails with
  *   the real settings keys to configure instead.
  */
-import {
-  FEATURE_SETTINGS,
-  deriveFeatureState,
-  getFeatureSettingsBinding,
-} from '@goodvibes-jev/engine/platform/platform/runtime/state';
+import { FEATURE_SETTINGS, deriveFeatureState, getFeatureSettingsBinding } from '@goodvibes-jev/engine/platform/platform/runtime/feature-flags/feature-settings';
 import type { FeatureSetting } from '@goodvibes-jev/engine/platform/platform/runtime/state';
 import { CONFIG_SCHEMA } from '@goodvibes-jev/engine/platform/platform/config';
 import type { ConfigKey, ConfigManager, ConfigSetting } from '../config/index.ts';

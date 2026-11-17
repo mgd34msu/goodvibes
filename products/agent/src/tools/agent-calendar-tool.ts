@@ -28,7 +28,7 @@ import {
   type CalendarConfigReader,
   type CalendarSecretSlice,
 } from '../agent/calendar/calendar-oauth-service.ts';
-import { CardMaterialRefusedError, screenOutboundForCardMaterial } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { CardMaterialRefusedError, screenOutboundForCardMaterial } from '@goodvibes-jev/engine/terminal-shell/agent-turn/payments-channel-guard';
 import { evaluateOutwardEffect, getSessionUntrustedContentLedger } from '../trust/untrusted-content.ts';
 
 const ACTIONS = ['calendars', 'create'] as const;

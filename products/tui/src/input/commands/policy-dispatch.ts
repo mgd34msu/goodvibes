@@ -1,6 +1,6 @@
 import type { PolicyFrontDoorContext } from '@goodvibes-jev/engine/platform/platform/gate/policy';
 import type { CommandContext } from '../command-registry.ts';
-import { requireShellPaths } from './runtime-services.ts';
+import { requireShellPaths } from '@goodvibes-jev/engine/terminal-shell/command-service-access';
 
 /** Bind only surface services; policy decisions and workflow stay in the engine. */
 export function createPolicyCommandContext(context: CommandContext): PolicyFrontDoorContext {

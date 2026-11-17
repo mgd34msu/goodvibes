@@ -1,5 +1,5 @@
 import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
-import { getDisplayWidth, truncateDisplay } from '@goodvibes-jev/engine/platform/platform/utils';
+import { getDisplayWidth, truncateDisplay } from '@goodvibes-jev/engine/platform/platform/utils/terminal-width';
 import { GLYPHS } from '@goodvibes-jev/engine/platform/platform/presentation';
 import { activeUiTones, registerThemeRefresh } from './theme.js';
 // Build on the leaf primitives in ./polish-core.ts (palette + base line

@@ -16,9 +16,9 @@ import {
   formatTaskSuiteResult,
   runTaskSuite,
 } from '@goodvibes-jev/engine/platform/platform/runtime/observability';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 import type { CommandContext, SlashCommand } from '../command-registry.ts';
-import { requireShellPaths } from './runtime-services.ts';
+import { requireShellPaths } from '@goodvibes-jev/engine/terminal-shell/command-service-access';
 
 /** Where `/eval tasks` looks when no suite directory is named, relative to the project. */
 export const DEFAULT_TASK_SUITE_DIR = join('.goodvibes', 'eval', 'tasks');

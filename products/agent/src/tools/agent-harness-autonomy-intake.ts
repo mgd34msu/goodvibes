@@ -1,7 +1,7 @@
 import type { AutonomyIntakeOptions, AutonomyIntakeSchedule, AutonomyIntents } from '@goodvibes-jev/engine/platform/platform/routing';
 import { getOperatorContract } from '@goodvibes-jev/engine/platform/contracts';
 import type { CommandContext } from '../input/command-registry.ts';
-import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn/preview-text';
 import { watcherReadModelPublication } from './agent-harness-autonomy-watcher-read-models.ts';
 
 interface AgentHarnessAutonomyIntakeArgs {

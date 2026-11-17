@@ -6,17 +6,8 @@
  * principal and a failure names which credential source was used.
  */
 import { homedir } from 'node:os';
-import {
-  createConnectedHost,
-  isHostFailure,
-  resolveConnectedHost,
-  type ConnectedHostInvokeOptions,
-  type ConnectedHostSelection,
-  type ConnectedHostSource,
-  type ConnectedHostUnavailable,
-  type HostFailureKind,
-} from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { operatorContractMethods } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { createConnectedHost, isHostFailure, resolveConnectedHost, type ConnectedHostInvokeOptions, type ConnectedHostSelection, type ConnectedHostSource, type ConnectedHostUnavailable, type HostFailureKind } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-client';
+import { operatorContractMethods } from '@goodvibes-jev/engine/terminal-shell/agent-turn/operator-contract-routes';
 import type { CommandContext } from './command-registry.ts';
 
 export interface ConnectedHostConnection {

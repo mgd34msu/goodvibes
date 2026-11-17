@@ -5,7 +5,7 @@
  */
 import type { ConfigKey, ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { featureEnablementWrite, getFeatureSetting } from './cli-feature-settings.js';
-import { FEATURE_SETTINGS } from '@goodvibes-jev/engine/platform/platform/runtime/state';
+import { FEATURE_SETTINGS } from '@goodvibes-jev/engine/platform/platform/runtime/feature-flags/feature-settings';
 import type { GoodVibesCliCommand, GoodVibesCliFlags } from './cli-types.js';
 import { RUNTIME_ENDPOINT_CONFIG_KEYS, hostModeForHostname } from './cli-endpoints.js';
 import type { RuntimeEndpointId } from './cli-endpoints.js';

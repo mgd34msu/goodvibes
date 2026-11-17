@@ -1,7 +1,7 @@
 import { DEFAULT_VIEW_PALETTE } from '../polish.ts';
 import type { ModalSectionStyle } from '../../input/config-modal-types.ts';
 import type { ConfigModalActionContext, ConfigModalRow } from '../../input/config-modal-types.ts';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 import { formatRefusal, readRefusal } from '@goodvibes-jev/engine/errors';
 
 /**

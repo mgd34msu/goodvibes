@@ -17,7 +17,7 @@ import type { CallOptions } from '@goodvibes-jev/judgment';
 // the URL can view it).
 // ---------------------------------------------------------------------------
 
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 
 export type UploadResult =
   | { ok: true; url: string }

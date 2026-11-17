@@ -18,7 +18,7 @@
  */
 import { classifyFailure, httpStatusOf } from '@goodvibes-jev/engine/errors';
 import { createBrowserAgentPlatform, type BrowserAgentPlatform } from '@goodvibes-jev/engine/platform/browser/agent';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 import { normalizeAgentKnowledgeScopeAliases } from './knowledge-scope-alias.js';
 import { resolveConnectedHost } from './connected-host-client.js';
 import type { AgentInProcessHost } from './in-process-host.js';

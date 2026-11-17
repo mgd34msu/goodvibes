@@ -1,14 +1,14 @@
 import type { AgentHarnessToolArgs } from './agent-harness-tool-types.ts';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
-import { harnessCatalogInvocationAuthority } from './agent-harness-catalog-ingress.ts';
-import { inventoryDisclosure, withInventoryDisclosure } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { harnessCatalogInvocationAuthority } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-ingress';
+import { inventoryDisclosure, withInventoryDisclosure } from '@goodvibes-jev/engine/terminal-shell/agent-turn/inventory-disclosure';
 
 /**
  * Shows a path under the home directory as `~/...`. The account name and
  * layout of the home directory are not needed by a model or a provider log;
  * the owner can still find the file.
  */
-export { homeRelativePath } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+export { homeRelativePath } from '@goodvibes-jev/engine/terminal-shell/agent-turn/home-path';
 
 export function readString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';

@@ -1,5 +1,5 @@
 import type { BackgroundProcess, ProcessManager } from '@goodvibes-jev/engine/platform/platform/tools';
-import type { CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import type { CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-ranking';
 import type { CommandContext } from '../input/command-registry.ts';
 import { redactedHarnessPreview } from './agent-harness-secret-redaction.ts';
 import { sudoExecutionPosture } from './agent-harness-sudo-posture.ts';

@@ -1,4 +1,5 @@
-import { captureCatalogSnapshot, type CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { captureCatalogSnapshot } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-data';
+import { type CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-ranking';
 import type { EffectResult } from './agent-harness-tool-utils.ts';
 import { selectHarnessCatalog } from './agent-harness-catalog-selection.ts';
 import { withModelReadingSource } from './agent-harness-model-reading-source.ts';
@@ -12,7 +13,7 @@ import { connectedBrowserCockpitRoute } from './agent-harness-browser-cockpit-ro
 import { AGENT_WORKSPACE_CATEGORIES } from '../input/agent-workspace-categories.ts';
 import { isKnownAgentWorkspaceCategory } from '../input/agent-workspace-navigation.ts';
 import type { AgentHarnessUiSurfaceArgs, UiSurfaceDefinition, UiSurfaceLookup, UiSurfaceResolution } from './agent-harness-ui-surface-types.ts';
-import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn/read-helpers';
 export type { AgentHarnessUiSurfaceArgs } from './agent-harness-ui-surface-types.ts';
 
 function agentHarnessModes(...modes: readonly string[]): string { return `agent_harness ${modes.map((mode) => `mode:"${mode}"`).join(', ')}`; }

@@ -48,6 +48,8 @@ export const PERMISSION_DECISION_REASON_CODES = [
   'boundary_surface_authority',
   'boundary_card_details',
   'boundary_outward_effect',
+  // A model's call of something only the owner does himself (gate/classify.ts owner-act)
+  'owner_act',
   // The active preset allowed or denied the call on its stakes
   'preset_allow',
   'preset_deny',

@@ -29,6 +29,7 @@ import { extractForwardedClientIp } from '../runtime/network/index.js';
 import { clientAddressOf, isLocalOrigin, resolveClientAddress } from './client-address.js';
 import { resolveGatewayPathTemplate } from './helpers.js';
 import { catalogGrantedScopes, narrowGatewayGrant, pairingTokenCaller, refuseGatewayInvocation } from './http/gateway-binding-gate.js';
+import { browserOriginAllowed, originNotAllowedResponse } from './http/browser-origin.js';
 import { createAuthFailureAudit, type AuthFailureAudit } from './auth-failure-audit.js';
 import type { RuntimeEventBus } from '../runtime/events/index.js';
 import { summarizeError } from '../utils/error-display.js';
@@ -221,6 +222,8 @@ interface GatewayMethodCallInput {
     readonly admin?: boolean | undefined;
     readonly scopes?: readonly string[] | undefined;
     readonly clientKind?: string | undefined;
+    /** Which credential the call authenticated with, taken from the principal the daemon verified. */
+    readonly credentialKind?: CredentialKind | undefined;
     /** The daemon-assigned id of the connection the call arrived on; separates one client's untrusted-content window from another's under the same principal. */
     readonly connectionId?: string | undefined;
     /**
@@ -710,6 +713,7 @@ export class DaemonControlPlaneHelper {
       readonly principalKind?: 'user' | 'bot' | 'service' | 'token' | 'remote-peer' | undefined;
       readonly scopes?: readonly string[] | undefined;
       readonly admin?: boolean | undefined;
+      readonly credentialKind?: CredentialKind | null | undefined;
     },
   ): { status: number; ok: false; body: Record<string, unknown> } | null {
     return refuseGatewayInvocation(descriptor, context);
@@ -736,11 +740,8 @@ export class DaemonControlPlaneHelper {
     const bearer = /^Bearer\s+\S+/i.test(req.headers.get('authorization') ?? '');
     const originAllowed = origin === null
       ? bearer
-      : origin === url.origin || (origin !== 'null' && (this.context.allowedBrowserOrigins?.() ?? []).includes(origin));
-    if (!originAllowed) {
-      return jsonErrorResponse({ error: 'This browser origin is not allowed to connect', code: 'ORIGIN_NOT_ALLOWED',
-        state: `the origin ${origin ?? '(none)'} is not on the allowed list`, next: ['Open the web UI from the daemon address, or add this origin to controlPlane.cors.allowedOrigins'] }, { status: 403 });
-    }
+      : browserOriginAllowed(req, origin, this.context.allowedBrowserOrigins?.() ?? []);
+    if (!originAllowed) return originNotAllowedResponse(origin, 'connect');
     const rawDomains = url.searchParams.get('domains');
     const requested = parseRuntimeDomains(rawDomains);
     if (requested instanceof Response) return requested;
@@ -1218,6 +1219,7 @@ export class DaemonControlPlaneHelper {
       context = {
         ...context, principalId: principal.principalId, principalKind: principal.principalKind,
         admin: (context === undefined || context.admin === true) && principal.admin, scopes,
+        ...(principal.credentialKind ? { credentialKind: principal.credentialKind } : {}),
       };
     }
     const denied = this.validateGatewayInvocation(descriptor, context);

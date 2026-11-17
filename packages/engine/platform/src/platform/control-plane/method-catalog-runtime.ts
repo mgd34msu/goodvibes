@@ -185,6 +185,7 @@ export const builtinGatewayRuntimeMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'mcp.servers.upsert',
+    ownerOnly: true,
     title: 'Upsert MCP Server',
     description: 'Persist a project/global MCP server config and reconnect the changed runtime server without daemon restart.',
     category: 'mcp',
@@ -236,6 +237,7 @@ export const builtinGatewayRuntimeMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'remote.pair.requests.approve',
+    ownerOnly: true,
     title: 'Approve Remote Pair Request',
     description: 'Approve a pending remote pair request.',
     category: 'remote',
@@ -248,6 +250,7 @@ export const builtinGatewayRuntimeMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'remote.pair.requests.reject',
+    ownerOnly: true,
     title: 'Reject Remote Pair Request',
     description: 'Reject a pending remote pair request.',
     category: 'remote',
@@ -279,6 +282,7 @@ export const builtinGatewayRuntimeMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'remote.peers.token.rotate',
+    ownerOnly: true,
     title: 'Rotate Remote Peer Token',
     description: 'Rotate the active token for a remote peer.',
     category: 'remote',
@@ -290,6 +294,7 @@ export const builtinGatewayRuntimeMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'remote.peers.token.revoke',
+    ownerOnly: true,
     title: 'Revoke Remote Peer Token',
     description: 'Revoke the active token for a remote peer.',
     category: 'remote',

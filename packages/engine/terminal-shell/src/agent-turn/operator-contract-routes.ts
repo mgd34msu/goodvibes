@@ -37,6 +37,8 @@ export interface OperatorContractMethodEntry {
   } | undefined;
   readonly inputSchema?: Record<string, unknown> | undefined;
   readonly invokable?: boolean | undefined;
+  /** The owner's own act: a model's call of it is refused (the catalog's `ownerOnly`). */
+  readonly ownerOnly?: boolean | undefined;
 }
 
 /** A method's HTTP binding, exactly as the contract states it. */
@@ -83,6 +85,14 @@ function operatorMethodIndex(): Map<string, OperatorContractMethodEntry> {
 /** Every method the contract publishes, by id. Read-only view; callers filter it. */
 export function operatorContractMethods(): readonly OperatorContractMethodEntry[] {
   return [...operatorMethodIndex().values()];
+}
+
+let ownerOnlyIds: readonly string[] | null = null;
+
+/** The ids of the methods the contract publishes as the owner's own acts (`ownerOnly`). Built once. */
+export function ownerOnlyOperatorMethodIds(): readonly string[] {
+  ownerOnlyIds ??= Object.freeze(operatorContractMethods().filter((method) => method.ownerOnly === true).map((method) => method.id));
+  return ownerOnlyIds;
 }
 
 /** The contract entry for a method id, or null when the contract has no such id. */

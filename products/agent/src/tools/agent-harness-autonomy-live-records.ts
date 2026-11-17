@@ -510,8 +510,8 @@ function approvalLiveRecords(snapshot: UiControlPlaneSnapshot | null): readonly 
     .map((approval) => {
       const active = approval.status === 'pending' || approval.status === 'claimed';
       const label = `${approval.request.tool}: ${approval.request.analysis.summary}`;
-      const approveRoute = `agent_operator_action action:"approvals.approve" approvalId:"${approval.id}"`;
-      const denyRoute = `agent_operator_action action:"approvals.deny" approvalId:"${approval.id}"`;
+      // Answering an approval put to the owner is his own act: the model is shown where he answers it, never a route to answer it.
+      const ownerAnswers = `only the owner answers approval ${approval.id}: the approval prompt, /approval approve|deny ${approval.id} --yes, or the web UI`;
       const cancelRoute = `agent_operator_action action:"approvals.cancel" approvalId:"${approval.id}"`;
       return {
         id: approval.id,
@@ -534,8 +534,7 @@ function approvalLiveRecords(snapshot: UiControlPlaneSnapshot | null): readonly 
           cancelRoute,
         } : {}),
         nextSteps: active ? [
-          approveRoute,
-          denyRoute,
+          `tell the owner: ${ownerAnswers}`,
           cancelRoute,
         ] : [commandRoute('/approval matrix')],
         sourceIds: [
@@ -553,10 +552,10 @@ function approvalLiveRecords(snapshot: UiControlPlaneSnapshot | null): readonly 
         controls: [
           availableControl('inspect', 'Inspect approval matrix', 'read-only', commandRoute('/approval matrix')),
           active
-            ? availableControl('approve', 'Approve approval', 'confirmed-effect', approveRoute)
+            ? unavailableControl('approve', 'Approve approval', `It was put to the owner; ${ownerAnswers}.`)
             : unavailableControl('approve', 'Approve approval', `Approval is ${approval.status}; only pending or claimed approvals can be approved.`),
           active
-            ? availableControl('deny', 'Deny approval', 'confirmed-effect', denyRoute)
+            ? unavailableControl('deny', 'Deny approval', `It was put to the owner; ${ownerAnswers}.`)
             : unavailableControl('deny', 'Deny approval', `Approval is ${approval.status}; only pending or claimed approvals can be denied.`),
           active
             ? availableControl('cancel', 'Cancel approval', 'confirmed-effect', cancelRoute)

@@ -91,6 +91,7 @@ export const builtinGatewayAdminMethodDescriptors: readonly GatewayMethodDescrip
   }),
   methodDescriptor({
     id: 'local_auth.users.create',
+    ownerOnly: true,
     title: 'Create Local Auth User',
     description: 'Create a local auth user. roles: omitted creates an admin. scopes: the operator scopes the user holds (for example read:sessions, read:transcripts and write:sessions for someone who only chats); omitted, the user holds its role\'s default set. A narrowed user is not an admin, whatever its roles.',
     category: 'auth',
@@ -107,6 +108,7 @@ export const builtinGatewayAdminMethodDescriptors: readonly GatewayMethodDescrip
   }),
   methodDescriptor({
     id: 'local_auth.users.scopes.set',
+    ownerOnly: true,
     title: 'Set Local Auth User Scopes',
     description: 'Give a local auth user a narrower list of operator scopes, or return it to its role\'s default set with scopes: null. Takes effect on the user\'s next request. An unknown user is 400; a scopes value that is neither a nonempty list nor null is 400 INVALID_ARGUMENT naming scopes.',
     category: 'auth',
@@ -121,6 +123,7 @@ export const builtinGatewayAdminMethodDescriptors: readonly GatewayMethodDescrip
   }),
   methodDescriptor({
     id: 'local_auth.users.delete',
+    ownerOnly: true,
     title: 'Delete Local Auth User',
     description: 'Delete a local auth user.',
     category: 'auth',
@@ -132,6 +135,7 @@ export const builtinGatewayAdminMethodDescriptors: readonly GatewayMethodDescrip
   }),
   methodDescriptor({
     id: 'local_auth.users.password.rotate',
+    ownerOnly: true,
     title: 'Rotate Local Auth Password',
     description: 'Rotate a local auth user password.',
     category: 'auth',
@@ -143,6 +147,7 @@ export const builtinGatewayAdminMethodDescriptors: readonly GatewayMethodDescrip
   }),
   methodDescriptor({
     id: 'local_auth.sessions.delete',
+    ownerOnly: true,
     title: 'Revoke Local Auth Session',
     description: 'Revoke a local auth session.',
     category: 'auth',
@@ -154,6 +159,7 @@ export const builtinGatewayAdminMethodDescriptors: readonly GatewayMethodDescrip
   }),
   methodDescriptor({
     id: 'local_auth.bootstrap.delete',
+    ownerOnly: true,
     title: 'Delete Bootstrap File',
     description: 'Delete the local-auth bootstrap credential file.',
     category: 'auth',
@@ -211,6 +217,7 @@ export const builtinGatewayAdminMethodDescriptors: readonly GatewayMethodDescrip
   }),
   methodDescriptor({
     id: 'credentials.set',
+    ownerOnly: true,
     title: 'Set Credential',
     description: 'Store a credential for a secret-bearing config key THROUGH the daemon, so a surface no longer has to write it into its own on-disk secret store, the write counterpart to credentials.get, and the reason a client on another machine can now finish a settings modal at all. `key` is the config path (e.g. surfaces.telegram.botToken); the secret-store name is derived from it. The value goes into the encrypted store at the scope the ownership rules resolve (a daemon-needed credential lands in the daemon tier whoever asked), is read BACK and compared, and only then does the config key take its goodvibes://secrets/goodvibes/<KEY> reference. A read-back mismatch fails the call and leaves the setting exactly as it was, because a reference resolving to nothing reads as a configured-but-broken credential. The response is secret-free: key names, the resolved scope, the reference now in config, and two plain sentences about where the setting and the credential are filed, never the value. Refuses a key that is not credential-bearing (use config.set) and refuses a value that is itself a goodvibes:// reference. ws-only invoke verb; no REST binding. Mutating, so a relay call is covered by relay.requireStepUpForMutations exactly as config.set is.',
     category: 'config',
@@ -222,6 +229,7 @@ export const builtinGatewayAdminMethodDescriptors: readonly GatewayMethodDescrip
   }),
   methodDescriptor({
     id: 'credentials.delete',
+    ownerOnly: true,
     title: 'Delete Credential',
     description: 'Remove a credential: the stored secret first, then the config reference pointing at it. That order is deliberate, clearing the config first would strand a secret nothing points at and nothing reaps, while this order leaves, for an instant, a reference resolving to nothing, which every reader already treats as configured-but-broken (the honest state for a credential mid-removal). `cleared: false` means nothing was stored under that key: a miss, not an error, because asking for a credential to be gone when it already is has succeeded. ws-only invoke verb; no REST binding. Mutating, so a relay call is covered by relay.requireStepUpForMutations exactly as config.set is.',
     category: 'config',

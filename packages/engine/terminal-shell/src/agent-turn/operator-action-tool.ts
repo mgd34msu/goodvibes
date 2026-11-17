@@ -7,22 +7,30 @@ import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/r
 import type { ConnectedHostConfigReader as AgentConnectedHostConfigReader } from './connected-host-client.js';
 import type { AgentInProcessHost } from './in-process-host.js';
 import { assertOperatorEffect } from './operator-connection-owner.js';
-import { assertSafeOperatorPathValue, findOperatorContractMethod } from './operator-contract-routes.js';
+import { assertSafeOperatorPathValue, findOperatorContractMethod, ownerOnlyOperatorMethodIds } from './operator-contract-routes.js';
 import { createOperatorInputProjector, operatorExecutionConnection, operatorExecutionWireInput, operatorExecutionRequestPolicy, operatorMethodIsOutward } from './operator-input-projector.js';
 import {
   buildOperatorActionRequest,
   formatOperatorActionFailure,
   formatOperatorActionSuccess,
   getOperatorActions,
+  OPERATOR_ACTION_IDS,
   postOperatorAction,
   renderOperatorActionPath,
 } from './operator-actions.js';
 import { confirmParameter, requestParameter } from './effect-admission.js';
 
+/** The actions whose method the contract publishes as the owner's own act (answering an approval put to him). */
+function ownerActionIds(): readonly string[] {
+  const ownerOnly = new Set(ownerOnlyOperatorMethodIds());
+  return OPERATOR_ACTION_IDS.filter((action) => ownerOnly.has(action));
+}
+
 export function createAgentOperatorActionTool(
   shellPaths: ShellPathService,
   configManager: AgentConnectedHostConfigReader,
 ): Tool {
+  const ownerActs = ownerActionIds();
   return {
     definition: {
       name: 'agent_operator_action',
@@ -33,8 +41,8 @@ export function createAgentOperatorActionTool(
         properties: {
           action: {
             type: 'string',
-            enum: Object.keys(getOperatorActions()),
-            description: 'Exact allowlisted public operator method id to execute.',
+            enum: Object.keys(getOperatorActions()).filter((action) => !ownerActs.includes(action)),
+            description: 'Exact allowlisted public operator method id to execute. Answering an approval put to the owner is his own act, not an action here.',
           },
           targetId: {
             type: 'string',
@@ -42,7 +50,7 @@ export function createAgentOperatorActionTool(
           },
           approvalId: {
             type: 'string',
-            description: 'Approval id for approvals.approve, approvals.deny, or approvals.cancel.',
+            description: 'Approval id for approvals.cancel.',
           },
           jobId: {
             type: 'string',
@@ -71,6 +79,7 @@ export function createAgentOperatorActionTool(
         additionalProperties: false,
       },
       sideEffects: ['network', 'state'],
+      ownerActs: { field: 'action', values: ownerActs },
     },
     execute: async (rawArgs, options) => {
       // Set once the host's answer to the request has been received or the request has failed in flight.
@@ -79,6 +88,9 @@ export function createAgentOperatorActionTool(
         const parsed = buildOperatorActionRequest(captureStrictJudgmentJson(rawArgs));
         if (!parsed.ok) return { success: false, error: parsed.error };
         const descriptor = parsed.descriptor;
+        if (ownerActs.includes(descriptor.action)) {
+          return { success: false, error: `${descriptor.action} answers an approval that was put to the owner, which only he does; a call the model makes is refused whatever approved it. Nothing was sent. Tell the owner approval ${parsed.targetId} is waiting: he answers it in the approval prompt, with /approval, or in the web UI.` };
+        }
         assertSafeOperatorPathValue(parsed.targetId, descriptor.targetField);
         const request = captureStrictJudgmentJson(parsed);
         const method = findOperatorContractMethod(request.descriptor.action);

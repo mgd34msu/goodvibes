@@ -27,7 +27,7 @@ import { analyzePermissionRequest, withReading } from './analysis.js';
 
 import { effectivePermissionMode, presetForMode, type GatePreset, type GatePresetName } from '../gate/presets.js';
 import { permissionDecisionModelReady } from './decision-model-readiness.js';
-import { judgmentInputBoundary, runBoundary } from '../gate/boundary.js';
+import { judgmentInputBoundary, runBoundary, type BoundaryCheckName } from '../gate/boundary.js';
 import { readToolCall, shellCommandsIn } from '../gate/reading.js';
 import { currentExecutionMode, currentExecutionModeForReadDecision, currentExecutionModeOwner, isInvocationAdmitted, withExecutionMode, type ExecutionModeOwner } from '../gate/execution-context.js';
 import type { UntrustedContentLedger } from '../security/untrusted-content.js';
@@ -305,6 +305,14 @@ function sameSource(now: unknown, then: SourceFingerprint): boolean {
 function ownerOnlySessionKey(kind: OwnerOnlyKind, key: string, args: Record<string, unknown>): string {
   return `owner-only:${kind}|${key}|${stableStringify(args)}`;
 }
+
+/** The reason code each boundary refusal is reported under (a judgment-input refusal has its own path). */
+const BOUNDARY_REFUSAL_CODES: Readonly<Record<Exclude<BoundaryCheckName, 'judgment-input'>, PermissionDecisionReasonCode>> = {
+  catastrophic: 'boundary_catastrophic',
+  'surface-authority': 'boundary_surface_authority',
+  'card-details': 'boundary_card_details',
+  'outward-effect': 'boundary_outward_effect',
+};
 
 /** A settings projector's stand-in for a value it could not see (a daemon-owned key, a credential's posture). */
 function unseenPrevious(value: unknown): boolean {
@@ -1209,6 +1217,8 @@ export class PermissionManager {
     readonly boundary?: GateBoundaryRecord | undefined;
     readonly preset?: GatePresetRecord | undefined;
     readonly revisedDetail: string;
+    /** The answer covers this one call only: nothing is offered to remember. */
+    readonly single?: boolean | undefined;
   }): Promise<SafetyOutcome> {
     const reply = await awaitPermission(() => this.requestPermission({
       callId: input.callId, tool: input.toolName, args: input.args, category: input.category,
@@ -1216,7 +1226,7 @@ export class PermissionManager {
       workingDirectory: input.workingDirectory,
       ...(input.attribution ? { attribution: input.attribution } : {}),
       // A channel's request is approved one call at a time: no remembered answer can stand in for the owner there.
-      rememberOptions: o.ownerOnly === 'channel-request' ? [] : buildRememberOptions(input.toolName, input.args, this.rememberedRulesHere()),
+      rememberOptions: o.ownerOnly === 'channel-request' || o.single === true ? [] : buildRememberOptions(input.toolName, input.args, this.rememberedRulesHere()),
       ...(o.ownerOnly ? { ownerOnly: o.ownerOnly } : {}),
     }, { signal: input.signal }), input.signal);
     input.assertCurrent();
@@ -1315,6 +1325,29 @@ export class PermissionManager {
       passed: boundary.passed, checks: boundary.checks,
       ...(!boundary.passed ? { refusedBy: boundary.refusedBy } : {}),
     };
+    // A refusal by the boundary is not Jev's to overrule in any mode. Wholesale destruction and
+    // card details are refused outright; a refusal the boundary marks approvable (card details it
+    // is unsure of, content that may repeat untrusted text) is cleared only by the owner's answer
+    // for these exact arguments: asked now, or held for him in just-vibes.
+    if (!boundary.passed && boundary.refusedBy !== 'judgment-input') {
+      const code = BOUNDARY_REFUSAL_CODES[boundary.refusedBy];
+      if (!boundary.approvable) {
+        return { result: this.result(false, false, 'boundary', code, analysis, { boundary: boundaryResult, detail: boundary.reason }) };
+      }
+      const heldKey = ownerOnlySessionKey('untrusted-derived-send', this.getApprovalKey(input.toolName, input.args), input.args);
+      if (this.sessionApprovals.get(heldKey) === true) {
+        // The owner approved this exact held call at the end of a run: good for that one run.
+        this.sessionApprovals.delete(heldKey);
+        this.sessionApprovalRevision++;
+        return { result: this.result(true, false, 'user_prompt', 'owner_approved_outward', analysis,
+          { boundary: boundaryResult, detail: 'The owner approved this exact call after the boundary held it.' }) };
+      }
+      if (input.mode === 'just-vibes') return this.queuedForOwner(input, analysis, `held for you: ${boundary.reason}`, 'untrusted-derived-send');
+      return this.askOwner(input, analysis, {
+        reasons: [boundary.reason], boundary: boundaryResult, single: true,
+        preset: { preset: input.mode, action: 'ask' }, revisedDetail: 'Prepare the exact action revised and approved by the owner.',
+      });
+    }
     if (input.mode === 'ask-me') {
       if (boundary.passed && reading?.stakes !== 'critical' && reading?.irreversible !== true && reading?.weakensSecurity !== true) {
         return { result: this.result(true, false, 'stakes_preset', 'preset_allow', analysis,
@@ -1429,6 +1462,7 @@ export class PermissionManager {
     const decision = decided.decision;
     switch (decided.basis) {
       case 'surface': return this.result(false, false, 'boundary', 'boundary_surface_authority', analysis, { decision, detail: decision.reason });
+      case 'owner-act': return this.result(false, false, 'safety_check', 'owner_act', analysis, { decision, detail: decision.reason });
       case 'plan': return this.result(false, false, 'runtime_mode', 'plan_mode', analysis, { decision });
       case 'mode': return this.result(true, false, 'runtime_mode', 'mode_allow_all', analysis, { decision, preset: { preset: 'yolo', action: 'allow' } });
       case 'declared-effect': return this.result(true, false, 'config_policy', 'config_allow', analysis, { decision, detail: decision.reason });

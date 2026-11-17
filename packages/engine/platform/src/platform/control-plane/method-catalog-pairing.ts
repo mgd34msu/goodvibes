@@ -89,6 +89,7 @@ export const builtinGatewayPairingMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'pairing.tokens.create',
+    ownerOnly: true,
     title: 'Mint Paired Device Token',
     description: 'Mint a new named per-device operator token and return its plaintext secret EXACTLY ONCE (for a QR / pairing hand-off). Only a hash is persisted; the secret is never listed or returned again. The name is user-visible and editable. When a paired device asks, the new token records that device (mintedBy) and is revoked with it; a device whose own pairing is gone is refused with 403 PAIRING_TOKEN_NOT_FOUND. client "agent" mints the GoodVibes Agent\'s credential for the calls it makes on the owner\'s behalf: the daemon reports it as credential "agent" and judges every call made with it; it is listed with client "agent" and does not count toward device.nodes.maxPaired. Send an attemptId and send the same one again when a reply is lost: while the token that attempt produced is unused, the repeat returns that token (same id) under a new secret. scopes limits the device to that list of operator scopes (for example read:sessions, read:transcripts and write:sessions for a phone that only chats); left out, the device holds full operator authority. A caller grants only scopes it holds: a narrowed caller\'s token inherits its list when scopes is left out, and naming a scope the caller does not hold is 403 MISSING_SCOPE.',
     category: 'pairing',
@@ -109,6 +110,7 @@ export const builtinGatewayPairingMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'pairing.tokens.delete',
+    ownerOnly: true,
     title: 'Revoke Paired Device Token',
     description: 'Revoke (permanently delete) one paired device token. Revocation is immediate: the token fails the very next request with a 401, and every token this device minted is revoked with it (listed in alsoRevoked); every other paired device keeps working. An unknown id is a 404 PAIRING_TOKEN_NOT_FOUND, never a 200-noop.',
     category: 'pairing',
@@ -119,6 +121,7 @@ export const builtinGatewayPairingMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'pairing.tokens.migrate',
+    ownerOnly: true,
     title: 'Migrate Off The Shared Token',
     description: 'A client currently authenticated with the legacy single shared token mints its OWN named per-device token and receives the plaintext secret once, the honest migration path. Send an attemptId and send the same one again when a reply is lost: while the token that attempt produced is unused, the repeat returns that token (same id) under a new secret instead of minting a second one. This does NOT revoke the shared token; that is a separate explicit step (pairing.tokens.revokeShared).',
     category: 'pairing',
@@ -129,6 +132,7 @@ export const builtinGatewayPairingMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'pairing.tokens.revokeShared',
+    ownerOnly: true,
     title: 'Revoke The Legacy Shared Token',
     description: 'Revoke the shared operator token by replacing it: every copy handed to another device stops working immediately, and the daemon writes the new value to its operator-tokens.json, where the apps on its own machine read it, so they stay signed in. Other devices use per-device pairing tokens (or user sessions). Refused with SHARED_TOKEN_NOT_REPLACEABLE (409) when the daemon serves a token set by GOODVIBES_DAEMON_TOKEN. Idempotent.',
     category: 'pairing',
@@ -138,6 +142,7 @@ export const builtinGatewayPairingMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'pairing.handoff.create',
+    ownerOnly: true,
     title: 'Create Pairing Hand-off',
     description: 'Mint a per-device token AND assemble the set-up OFFER SET this daemon can satisfy (notifications, carrying the VAPID public key; relay; passkey step-up), so a freshly-paired surface can complete them in one pass. Returns the offer set, the `#pair=<token>` deep-link fragment (the exact URL-fragment shape the web app consumes, token in `pair=`, offers in `offers=`), a full deep link when a web origin is configured, and that origin\'s honest TLS/capability POSTURE: the one plain-http-on-LAN notice line (stated here, never a nag) plus per-capability availability labels so surfaces render "needs https, available via tailscale" instead of dead buttons. The token secret is returned exactly once. When a paired device asks, the new token records that device (mintedBy) and is revoked with it; a device whose own pairing is gone is refused with 403 PAIRING_TOKEN_NOT_FOUND. Each offer is independently declinable at completion.',
     category: 'pairing',
@@ -171,6 +176,7 @@ export const builtinGatewayPairingMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'pairing.handoff.complete',
+    ownerOnly: true,
     title: 'Complete Pairing Hand-off',
     description: 'Apply the surface\'s per-offer decisions in ONE pass: an accepted notifications offer registers the browser push subscription (endpoint + keys, optional deviceId), an accepted passkey offer registers the WebAuthn credential, an accepted relay offer is acknowledged. Each offer returns an honest per-offer result (completed / declined / unavailable / failed); an omitted or false offer is reported as declined, never silently half-applied.',
     category: 'pairing',

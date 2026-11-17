@@ -52,6 +52,7 @@ import { emitBatchJobSettled } from '../runtime/emitters/providers.js';
 import { DaemonSurfaceActionHelper } from './surface-actions.js';
 import { DaemonTransportEventsHelper } from './transport-events.js';
 import { DaemonHttpRouter } from './http/router.js';
+import { configuredBrowserOrigins } from './http/browser-origin.js';
 import { DaemonBatchManager } from '../batch/index.js';
 import { CloudflareTunnelConnector } from '../cloudflare/tunnel-connector.js';
 import { CompanionChatManager } from '../companion/companion-chat-manager.js';
@@ -703,7 +704,7 @@ export function createDaemonFacadeCollaborators(
     distributedRuntime: runtime.distributedRuntime,
     trustProxyEnabled: options.trustProxyEnabled,
     runtimeBus: runtime.runtimeBus,
-    allowedBrowserOrigins: () => String(runtime.configManager.get('controlPlane.cors.allowedOrigins') ?? '').split(',').map(origin => origin.trim()).filter(Boolean),
+    allowedBrowserOrigins: () => configuredBrowserOrigins(runtime.configManager),
     dispatchApiRoutes: options.dispatchApiRoutes,
     parseJsonBody: options.parseJsonBody,
     requireAuthenticatedSession: options.requireAuthenticatedSession,

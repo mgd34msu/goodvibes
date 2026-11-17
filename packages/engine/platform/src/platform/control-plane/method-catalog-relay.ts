@@ -69,6 +69,7 @@ export const builtinGatewayRelayMethodDescriptors: readonly GatewayMethodDescrip
   }),
   methodDescriptor({
     id: 'relay.pairing.mint',
+    ownerOnly: true,
     title: 'Mint A Relay Pairing Payload',
     description: 'Return the pairing payload a surface scans to reach this daemon through the relay: the relay URL to dial, the rendezvous id the daemon registered under, and the daemon\'s static public key. `pairing` is null, not an error, when there is no live registration to mint against, which is the honest answer for a daemon whose relay is off or has not connected yet, and is the same value the in-process capability returns. Minting does not create a second identity or a second registration; it describes the one that exists.',
     category: 'control-plane',

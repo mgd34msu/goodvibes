@@ -98,6 +98,17 @@ export function readModeCategory(readModes: ToolReadModes, args: Record<string, 
   return reads ? 'read' : own === 'read' ? 'write' : own;
 }
 
+/**
+ * The argument values that make a call an act only the owner performs himself
+ * (gate/classify.ts `owner-act`): a model's call carrying one is refused in
+ * every mode. `values` are read from the published declaration of what is
+ * named (the operator catalog's `ownerOnly`), not written by hand.
+ */
+export interface ToolOwnerActs {
+  readonly field: ToolArgumentPath;
+  readonly values: readonly string[];
+}
+
 /** A tool whose changes are recorded where the owner can undo them, except when a listed argument is present. */
 export interface ToolRecoverability {
   readonly unless?: readonly ToolArgumentPath[] | undefined;
@@ -165,6 +176,8 @@ export interface ToolDefinition {
    * is remembered when he chooses; only yolo runs it unasked.
    */
   dangerous?: boolean | undefined;
+  /** Calls of this tool that only the owner makes himself; see {@link ToolOwnerActs}. */
+  ownerActs?: ToolOwnerActs | undefined;
   /**
    * Top-level argument names the host writes into a call after the model made
    * it (left out of the schema the model sees). They are the host's own, so a

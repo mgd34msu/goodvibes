@@ -2,26 +2,43 @@ import type { GatewayMethodCatalog, GatewayMethodDescriptor } from '../../contro
 import { grantedGatewayScopes } from '../../control-plane/method-catalog.js';
 import { missingScopeRefusal } from '@goodvibes-jev/engine/daemon-api/error-response';
 import { EngineErrorCodes } from '@goodvibes-jev/engine/errors';
-import type { AuthenticatedPrincipal } from '../http-policy.js';
+import type { AuthenticatedPrincipal, CredentialKind } from '../http-policy.js';
 
 /** Who is calling, as the access and scope check reads it. */
 export interface GatewayAccessCaller {
   readonly principalKind?: AuthenticatedPrincipal['principalKind'] | 'remote-peer' | undefined;
   readonly scopes?: readonly string[] | undefined;
   readonly admin?: boolean | undefined;
+  /** Which credential the transport authenticated; `agent` is the Agent's model calling on the owner's behalf. */
+  readonly credentialKind?: CredentialKind | null | undefined;
 }
 
 /**
- * The one access and scope check for a cataloged method: its declared access
- * level, then every scope it lists. Returns the refusal, or null when allowed.
+ * The one access and scope check for a cataloged method: who may call an
+ * owner-only method, its declared access level, then every scope it lists.
+ * Returns the refusal, or null when allowed.
  * Method dispatch adds its own "is this invokable" check in front of it; a
  * REST binding of a method that is not invokable through dispatch is still
  * held to this.
  */
 export function refuseGatewayAccess(
-  descriptor: Pick<GatewayMethodDescriptor, 'id' | 'access' | 'scopes'>,
+  descriptor: Pick<GatewayMethodDescriptor, 'id' | 'access' | 'scopes' | 'ownerOnly'>,
   caller: GatewayAccessCaller | undefined,
 ): { status: number; ok: false; body: Record<string, unknown> } | null {
+  // The owner's own act (answering what was put to him, granting or withdrawing access) is never
+  // taken from the Agent's model, whatever it was approved by.
+  if (descriptor.ownerOnly === true && caller?.credentialKind === 'agent') {
+    return {
+      status: 403,
+      ok: false,
+      body: {
+        error: `${descriptor.id} is the owner's own act; a call the Agent makes for him is refused. The owner does it from his own app.`,
+        code: 'OWNER_ONLY',
+        category: 'authorization',
+        status: 403,
+      },
+    };
+  }
   if (descriptor.access === 'public') return null;
   if (descriptor.access === 'admin' && !caller?.admin) {
     return {
@@ -55,7 +72,7 @@ export function refuseGatewayAccess(
  * handler asks for. Returns the refusal, or null when allowed.
  */
 export function refuseGatewayInvocation(
-  descriptor: Pick<GatewayMethodDescriptor, 'id' | 'access' | 'scopes' | 'invokable'>,
+  descriptor: Pick<GatewayMethodDescriptor, 'id' | 'access' | 'scopes' | 'invokable' | 'ownerOnly'>,
   caller: GatewayAccessCaller | undefined,
   requiredScopes: readonly string[] = [],
 ): { status: number; ok: false; body: Record<string, unknown> } | null {
@@ -115,7 +132,7 @@ export function pairingTokenCaller(
 interface GatewayBindingGateDeps {
   readonly gatewayMethods: Pick<GatewayMethodCatalog, 'findByHttpBinding'>;
   /** The request's principal, authenticated once at the router's auth gate. */
-  readonly authenticateRequest: (req: Request) => { readonly principal: AuthenticatedPrincipal } | null;
+  readonly authenticateRequest: (req: Request) => { readonly principal: AuthenticatedPrincipal & { readonly credentialKind?: CredentialKind | null | undefined } } | null;
 }
 
 /**

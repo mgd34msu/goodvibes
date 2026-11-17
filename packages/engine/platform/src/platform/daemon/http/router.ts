@@ -94,6 +94,7 @@ import { dispatchCompanionChatRoutes, isCompanionChatPath } from '../../companio
 import { dispatchModelRoutes } from './model-routes.js';
 import { dispatchBatchRoutes } from './batch-routes.js';
 import { gateGatewayBinding } from './gateway-binding-gate.js';
+import { configuredBrowserOrigins, refuseCookieWriteFromOtherOrigin } from './browser-origin.js';
 import { isSurfaceIngressEnabled } from '../surface-policy.js';
 import { dispatchCloudflareRoutes } from './cloudflare-routes.js';
 import { dispatchMcpRoutes } from './mcp-routes.js';
@@ -286,7 +287,8 @@ export class DaemonHttpRouter {
       routes: () => buildDaemonRouteTable(this.routeFamilies()),
       preAuth: (req) => this.dispatchPreAuthRoutes(req),
       refuseUnauthenticated: (req) => this.refuseUnauthenticated(req),
-      admit: (req) => gateGatewayBinding(req, context),
+      // A write made with the sign-in cookie is checked for the page's origin as the socket is, then for access.
+      admit: (req) => refuseCookieWriteFromOtherOrigin(req, () => configuredBrowserOrigins(context.configManager)) ?? gateGatewayBinding(req, context),
     });
     this.authFailures = createAuthFailureAudit(context.runtimeBus);
     const settingsConfigOwner = context.configManager;

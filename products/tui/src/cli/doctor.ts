@@ -122,6 +122,7 @@ function reasonExplanation(result: PermissionCheckResult, mode: string, autoAppr
     case 'boundary_surface_authority':
     case 'boundary_card_details':
     case 'boundary_outward_effect': return `The boundary refused this call (${result.boundary?.refusedBy ?? result.reasonCode}).`;
+    case 'owner_act': return 'Only the owner does this himself; a model\'s call of it is refused in every mode.';
     case 'user_approved':
     case 'user_denied': return 'This reaches a Human-in-the-Loop approval prompt; the outcome depends on your response at the prompt.';
     default: return 'Decided by the platform permission machinery.';

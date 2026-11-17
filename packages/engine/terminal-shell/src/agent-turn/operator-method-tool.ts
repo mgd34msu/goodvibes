@@ -11,7 +11,7 @@ import { assertOperatorEffect, captureOperatorConnection } from './operator-conn
 import { forgetDelegatedCredential } from './agent-delegation-credential.js';
 import { agentCallConnection } from './agent-call-credential.js';
 import { publishOperatorMethodReceipt } from './operator-method-receipt.js';
-import { appendOperatorQuery, operatorMethodIsReadOnly, READ_ONLY_HTTP_METHODS, resolveOperatorContractMethod, substituteOperatorPath } from './operator-contract-routes.js';
+import { appendOperatorQuery, operatorMethodIsReadOnly, ownerOnlyOperatorMethodIds, READ_ONLY_HTTP_METHODS, resolveOperatorContractMethod, substituteOperatorPath } from './operator-contract-routes.js';
 import { createOperatorInputProjector, operatorExecutionConnection, operatorExecutionWireInput, operatorExecutionRequestPolicy, operatorMethodIsOutward, operatorMethodIsOwnerOnly } from './operator-input-projector.js';
 import { confirmParameter, requestParameter } from './effect-admission.js';
 import { readFlag, readString } from './tool-args.js';
@@ -348,6 +348,7 @@ export function createAgentOperatorMethodTool(
         additionalProperties: false,
       },
       sideEffects: ['network', 'state'],
+      ownerActs: { field: 'methodId', values: ownerOnlyOperatorMethodIds() },
     },
     execute: async (rawArgs, options) => {
       let args: OperatorMethodToolArgs;
@@ -364,6 +365,12 @@ export function createAgentOperatorMethodTool(
         };
       }
       // The owner's own acts (the method descriptor's ownerOnly) are refused with the way the owner does each one.
+      if (operatorMethodIsOwnerOnly(method.id) && !method.id.startsWith('payments.')) {
+        return {
+          success: false,
+          error: `operator method '${method.id}' (${method.title ?? method.id}) is the owner's own act: answering what was put to him, or granting or withdrawing access, so a call the model makes is refused whatever approved it. Nothing was sent. Tell the owner what is waiting; he does it from his own app (an approval prompt, /approval, the web UI).`,
+        };
+      }
       if (operatorMethodIsOwnerOnly(method.id)) {
         return {
           success: false,

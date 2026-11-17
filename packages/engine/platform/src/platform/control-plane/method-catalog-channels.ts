@@ -318,6 +318,7 @@ export const builtinGatewayChannelMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'channels.allowlist.edit',
+    ownerOnly: true,
     title: 'Edit Channel Allowlist',
     description: 'Apply allowlist additions or removals for a channel surface.',
     category: 'channels',
@@ -348,6 +349,7 @@ export const builtinGatewayChannelMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'channels.policies.update',
+    ownerOnly: true,
     title: 'Update Channel Policy',
     description: 'Update ingress policy configuration for a channel surface.',
     category: 'channels',

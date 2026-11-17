@@ -513,6 +513,7 @@ export const builtinGatewayControlCoreMethodDescriptors: readonly GatewayMethodD
   }),
   methodDescriptor({
     id: 'sessions.permissionMode.set',
+    ownerOnly: true,
     title: 'Set Session Permission Mode',
     description: 'Set ask-me, jev-decides, just-vibes, or yolo execution, or enter the read-only plan posture. Admin only, because it can loosen security: yolo runs every action without safety denials, and for the local runtime session (no hosted or channel mode of its own) it rewrites the daemon-wide permissions.mode. A hosted session and a channel session with its own mode change only that session. Emits runtime.gate (PRESET_CHANGED) so every surface stays in sync. Other session ids answer 404 SESSION_NOT_LOCAL.',
     category: 'sessions',
@@ -861,6 +862,7 @@ export const builtinGatewayControlCoreMethodDescriptors: readonly GatewayMethodD
   }),
   methodDescriptor({
     id: 'approvals.approve',
+    ownerOnly: true,
     title: 'Approve Approval',
     description: 'Approve a pending approval. Optionally pass selectedHunks (edit-tool approvals only): the daemon filters the approval\'s own edit list to those hunk indices server-side, so every surface produces identical modified-edit args. Omitting selectedHunks approves the whole request (back-compat). An out-of-range index or a non-edit approval is rejected with a 400. rememberTier generalizes the decision (a generalizing tier persists a durable rule and sweeps queued asks it covers); modifiedArgs carries an argument-modifying approval, e.g. the typed answer to a command\'s terminal prompt, to the waiting call (selectedHunks supersedes it when both are present). The response\'s recorded block reports what the broker actually recorded. An approval that already ended is returned unchanged with `applied: false` and a `refusal` naming its state (still 200, so a raced or retried decision does not fail).',
     category: 'approvals',
@@ -872,6 +874,7 @@ export const builtinGatewayControlCoreMethodDescriptors: readonly GatewayMethodD
   }),
   methodDescriptor({
     id: 'approvals.deny',
+    ownerOnly: true,
     title: 'Deny Approval',
     description: 'Deny a pending approval. rememberTier generalizes the denial (a generalizing tier persists a durable deny rule and sweeps queued asks it covers); reason is the user\'s free-text feedback, which rides the structured declined result so the model adapts instead of guessing. The response\'s recorded block reports what the broker actually recorded. An approval that already ended is returned unchanged with `applied: false` and a `refusal` naming its state (still 200, so a raced or retried decision does not fail).',
     category: 'approvals',

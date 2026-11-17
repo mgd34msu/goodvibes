@@ -105,6 +105,7 @@ export const builtinGatewayPrincipalsMethodDescriptors: readonly GatewayMethodDe
   }),
   methodDescriptor({
     id: 'principals.create',
+    ownerOnly: true,
     title: 'Create Principal',
     description: 'Create a named principal from a name, kind, and optional channel identities. Fails with a conflict when any identity is already mapped to a different principal.',
     category: 'principals',
@@ -115,6 +116,7 @@ export const builtinGatewayPrincipalsMethodDescriptors: readonly GatewayMethodDe
   }),
   methodDescriptor({
     id: 'principals.update',
+    ownerOnly: true,
     title: 'Update Principal',
     description: 'Update a principal\'s name, kind, identities, and/or metadata. Absent fields are left unchanged; supplying identities replaces the set. Fails with a conflict when an identity is already mapped to a different principal.',
     category: 'principals',
@@ -125,6 +127,7 @@ export const builtinGatewayPrincipalsMethodDescriptors: readonly GatewayMethodDe
   }),
   methodDescriptor({
     id: 'principals.delete',
+    ownerOnly: true,
     title: 'Delete Principal',
     description: 'Permanently delete a principal. Returns { deleted: false } when no principal with that id existed, an honest boolean, never a 200 that pretends a phantom principal was removed.',
     category: 'principals',

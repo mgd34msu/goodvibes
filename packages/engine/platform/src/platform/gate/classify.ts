@@ -7,6 +7,10 @@
  * standing rule that matched, where the instruction came from, whether the
  * turn read untrusted text) and this function applies one order:
  *
+ *   0. an act only the owner performs himself (answering an approval put to
+ *      him, granting access through an operator method) is refused to a
+ *      model's call in every mode, yolo included: whoever approved the call,
+ *      the daemon refuses it from a model;
  *   1. surface authority (a change asked for on a channel the owner set up is
  *      his to approve; on a surface anyone can write to it is refused), then
  *      the plan posture;
@@ -55,7 +59,13 @@ export type OwnerOnlyKind =
   /** The owner's own standing "always ask me" rule matched. */
   | 'standing-ask'
   /** A change asked for on a channel the owner set up, where a message cannot direct one by itself. */
-  | 'channel-request';
+  | 'channel-request'
+  /**
+   * An act the owner performs himself: answering an approval or a purchase window
+   * put to him, granting or withdrawing access through an operator method the
+   * catalog declares `ownerOnly`. A model's call is refused, not asked about.
+   */
+  | 'owner-act';
 
 /** Plain words for each owner-only kind, as the owner and the asking agent read them. */
 const OWNER_ONLY_REASONS: Readonly<Record<OwnerOnlyKind, string>> = {
@@ -70,6 +80,7 @@ const OWNER_ONLY_REASONS: Readonly<Record<OwnerOnlyKind, string>> = {
   'irreversible-operator': 'it is an operator action that cannot be undone',
   'standing-ask': 'your rule says to ask you about this',
   'channel-request': 'it was asked for in a channel conversation, where a message cannot direct a change by itself',
+  'owner-act': 'only you do this yourself, in your own app',
 };
 
 export function ownerOnlyReason(kind: OwnerOnlyKind): string {
@@ -125,7 +136,7 @@ export interface CallFacts {
 }
 
 /** What settled a fact, for the caller's own records. */
-export type FactBasis = 'surface' | 'plan' | 'mode' | 'rule' | 'owner-rule' | 'declared-effect';
+export type FactBasis = 'surface' | 'plan' | 'mode' | 'rule' | 'owner-rule' | 'declared-effect' | 'owner-act';
 
 export type CallClass =
   | { readonly kind: 'fact'; readonly allow: boolean; readonly basis: FactBasis; readonly decision: ToolDecision; readonly rule?: CallRuleFact | undefined }
@@ -154,6 +165,13 @@ function ruleDecision(rule: CallRuleFact, allow: boolean): ToolDecision {
 
 /** Classify one call. The first step that settles it decides; see the module comment for the order. */
 export function classifyCall(mode: GatePresetName, facts: CallFacts): CallClass {
+  if (facts.ownerOnly === 'owner-act') {
+    return { kind: 'fact', allow: false, basis: 'owner-act', decision: {
+      state: 'refused', decidedBy: 'code',
+      reason: `${facts.tool} would do something only the owner does himself (answer what was put to him, or grant or withdraw access)`,
+      next: ['do not call it again', 'tell the owner what is waiting; he answers it in his own app (the approval prompt, /approval, the web UI)'],
+    } };
+  }
   if (facts.surface !== undefined && facts.category !== 'read' && !surfaceCarriesCommandAuthority(facts.surface)) {
     // A channel the owner set up: the request becomes his approval, answered on a command surface.
     // Plan mode still refuses below; yolo does not skip it (the surface, not the mode, lacks authority).
@@ -299,7 +317,15 @@ export interface OwnerOnlyCallFacts {
 
 /** The owner-only kind a call is, from its tool, mode, arguments and the facts its caller read; undefined when it is none. */
 export function recognizeOwnerOnly(toolName: string, args: Record<string, unknown>,
-  definition?: Pick<ToolDefinition, 'dangerous'> | undefined, facts: OwnerOnlyCallFacts = {}): OwnerOnlyKind | undefined {
+  definition?: Pick<ToolDefinition, 'dangerous' | 'ownerActs'> | undefined, facts: OwnerOnlyCallFacts = {}): OwnerOnlyKind | undefined {
+  const acts = definition?.ownerActs;
+  if (acts !== undefined) {
+    // A value that cannot be read is taken as an owner act: the declaration fails closed. Ids are
+    // compared ignoring case and spaces, as the tools that take them resolve them.
+    const named = argumentValues(args, acts.field);
+    const declared = new Set(acts.values.map((value) => value.toLowerCase()));
+    if (named === undefined || named.some((value) => declared.has(value.trim().toLowerCase()))) return 'owner-act';
+  }
   if (definition?.dangerous === true || changesMcpTrust(toolName, args)) return 'grant-access';
   if (facts.loosensSetting === true) return 'loosen-security';
   return undefined;

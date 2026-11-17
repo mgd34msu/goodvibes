@@ -239,6 +239,14 @@ export function createDaemonSystemRouteHandlers(
     approvalAction: (approvalId, action, req) => {
       const admin = context.requireAdmin(req);
       if (admin) return admin;
+      // Answering an approval put to the owner is his own act: the Agent's credential, which its
+      // model's calls on his behalf present, never gives the answer, whatever approved the call.
+      if ((action === 'approve' || action === 'deny') && context.resolveAuthenticatedPrincipal?.(req)?.credentialKind === 'agent') {
+        return context.recordApiResponse(req, `/api/approvals/${approvalId}/${action}`, jsonErrorResponse({
+          error: `Approval ${approvalId} was put to the owner; only he answers it. Nothing was answered. Tell the owner it is waiting: he answers it in the approval prompt, with /approval, or in the web UI.`,
+          code: 'OWNER_ONLY',
+        }, { status: 403 }));
+      }
       return handleApprovalAction(context, approvalId, action, req);
     },
     getConfig: (req) => {

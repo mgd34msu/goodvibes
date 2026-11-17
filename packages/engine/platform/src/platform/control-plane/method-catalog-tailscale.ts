@@ -54,6 +54,7 @@ export const builtinGatewayTailscaleMethodDescriptors: readonly GatewayMethodDes
   }),
   methodDescriptor({
     id: 'tailscale.serve.run',
+    ownerOnly: true,
     title: 'Set Up Tailscale Serve For The Daemon',
     description: 'The one-action https affordance: run `tailscale serve --bg <web port>` so tailscale fronts the daemon\'s web surface at its https MagicDNS URL. Run only from this explicit user-initiated verb. The serve persists in tailscaled, also after the daemon stops or restarts, until tailscale.serve.stop runs. The attempt is recorded with an honest receipt either way (when tailscale prints a link to turn Serve on for the tailnet, the receipt carries it as enableUrl); on success web.publicBaseUrl is updated to the https URL from the same resolution and the value it replaced is kept for the stop. The daemon never mints certificates, TLS is terminated by tailscale.',
     category: 'remote-access',

@@ -1,6 +1,7 @@
 /** Fixed metadata-only project selector; no writable handle escapes to callers. */
 import type { SqlDatabase } from '../../state/sqlite-store.js';
 import { KNOWLEDGE_SCHEMA_VERSION } from '../store-schema-version.js';
+import { listWorkPlanTaskSpaces } from '../store-work-plan-tasks.js';
 const projectTables = ['work_ledgers', 'native_conversation_captures', 'native_work_executions', 'native_work_execution_intents', 'native_work_execution_settlements', 'native_ci_continuations'] as const;
 export class PlanningProjectInspectionError extends Error {
   override readonly name = 'PlanningProjectInspectionError';
@@ -9,7 +10,7 @@ export class PlanningProjectInspectionError extends Error {
 export function queryPersistedPlanningProjects(database: Pick<SqlDatabase, 'exec'>): readonly string[] {
   const version = database.exec('PRAGMA user_version')[0]?.values[0]?.[0];
   if (typeof version !== 'number' || !Number.isSafeInteger(version) || version < 0 || version > KNOWLEDGE_SCHEMA_VERSION) throw new PlanningProjectInspectionError();
-  const rows = database.exec("SELECT name,type FROM sqlite_master WHERE name IN ('knowledge_sources','work_ledgers','native_conversation_captures','native_work_executions','native_work_execution_intents','native_work_execution_settlements','native_ci_continuations')")[0]?.values ?? [];
+  const rows = database.exec("SELECT name,type FROM sqlite_master WHERE name IN ('knowledge_sources','project_work_plan_tasks','work_ledgers','native_conversation_captures','native_work_executions','native_work_execution_intents','native_work_execution_settlements','native_ci_continuations')")[0]?.values ?? [];
   const tables = new Set<string>(); for (const row of rows) { if (typeof row[0] !== 'string' || row[1] !== 'table') throw new PlanningProjectInspectionError(); tables.add(row[0]); }
   if (!tables.has('knowledge_sources')) throw new PlanningProjectInspectionError();
   const sourceColumns = database.exec('PRAGMA table_info(knowledge_sources)')[0]?.values ?? [];
@@ -32,6 +33,13 @@ export function queryPersistedPlanningProjects(database: Pick<SqlDatabase, 'exec
       if (uri.protocol !== 'goodvibes:' || uri.host !== 'planning' || !selectedSpace.startsWith('project:')) throw new PlanningProjectInspectionError();
       add(selectedSpace.slice(8));
     } catch { throw new PlanningProjectInspectionError(); }
+  }
+  // Work-plan task rows name their project space, not a project column.
+  if (tables.has('project_work_plan_tasks')) {
+    for (const space of listWorkPlanTaskSpaces(database)) {
+      if (!space.startsWith('project:') || space.length === 8) throw new PlanningProjectInspectionError();
+      add(space.slice(8));
+    }
   }
   for (const table of projectTables) {
     if (!tables.has(table)) continue;

@@ -66,20 +66,8 @@ export interface WorkPlanEventBase {
   readonly projectId: string;
   readonly knowledgeSpaceId: string;
   readonly workPlanId: string;
-}
-
-export interface WorkPlanSnapshotEventRecord extends WorkPlanEventBase {
-  readonly tasks: readonly WorkPlanTaskEventRecord[];
-  readonly counts: {
-    readonly total: number;
-    readonly pending: number;
-    readonly in_progress: number;
-    readonly blocked: number;
-    readonly done: number;
-    readonly failed: number;
-    readonly cancelled: number;
-  };
-  readonly updatedAt: number;
+  /** The plan's revision after the commit the event reports; it only moves up. */
+  readonly revision: number;
 }
 
 export type PlannerEvent =
@@ -115,7 +103,8 @@ export type PlannerEvent =
   | ({
     type: 'WORK_PLAN_SNAPSHOT_INVALIDATED';
     reason: string;
-    snapshot: WorkPlanSnapshotEventRecord;
+    /** When the commit was made. A snapshot read at an older revision is stale. */
+    updatedAt: number;
   } & WorkPlanEventBase);
 
 export type PlannerEventType = PlannerEvent['type'];

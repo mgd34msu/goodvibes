@@ -10,6 +10,7 @@ import { createArtifactReferenceIndexes, artifactReferenceIndexes } from './stor
 import type { SqlDatabase } from '../state/sqlite-store.js';
 import { knowledgeRecordTableSql } from './store-schema-validation-data.js';
 import { planningSourceIdentityIndexSql } from './store-planning-source-selector.js';
+import { createProjectWorkPlanTaskTable } from './store-work-plan-tasks.js';
 import { knowledgeClockNumber, knowledgeNodeMetadataView, knowledgeSourceMetadataView, retainKnowledgeRepresentation } from './store-record-representation.js';
 import { createNativeCiContinuationTable } from './store-native-ci-continuation.js';
 import { createKnowledgeEdgeChanges } from './store-edge-generations.js';
@@ -122,6 +123,7 @@ export function createSchema(db: Pick<SqlDatabase, 'run'> & Partial<Pick<SqlData
   db.run(`CREATE INDEX IF NOT EXISTS idx_knowledge_sources_canonical_uri ON knowledge_sources(canonical_uri)`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_knowledge_sources_updated_at ON knowledge_sources(updated_at)`);
   db.run(planningSourceIdentityIndexSql);
+  createProjectWorkPlanTaskTable(db);
   db.run(knowledgeRecordTableSql.knowledge_nodes);
   db.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_knowledge_nodes_kind_slug ON knowledge_nodes(kind, slug)`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_knowledge_nodes_updated_at ON knowledge_nodes(updated_at)`);

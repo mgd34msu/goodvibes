@@ -99,7 +99,6 @@ export type {
   PlannerEventType,
   StrategyCandidate,
   WorkPlanEventBase,
-  WorkPlanSnapshotEventRecord,
   WorkPlanTaskEventRecord,
   WorkPlanTaskStatus,
 } from './planner.js';

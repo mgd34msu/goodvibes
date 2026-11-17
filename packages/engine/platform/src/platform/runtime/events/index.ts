@@ -27,7 +27,6 @@ export type {
   PlannerEvent,
   PlannerEventType,
   WorkPlanEventBase,
-  WorkPlanSnapshotEventRecord,
   WorkPlanTaskEventRecord,
   WorkPlanTaskStatus,
 } from '../../../events/planner.js';

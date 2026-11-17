@@ -68,16 +68,40 @@ routes instead of reading TUI-local files. TUI-local work-plan storage can be
 used as a migration/fallback cache, but the platform store is the shared product
 model.
 
+Each task is stored as its own row in the project's knowledge database, in a
+table of its own: changing one task writes that one row, whatever the size of
+the plan, and tasks never appear in knowledge search, listings, enrichment or
+answers. Every committed edit moves the plan's `revision` up by one. An edit
+returns what it changed and the revision, not the plan: create, update and
+status return `task` (and `previousTask`), delete returns `deletedTask`,
+clear-completed returns `clearedTaskIds`, reorder returns `tasks` (only the
+tasks whose position changed); every result has `changed`, `revision` and
+`updatedAt`. An edit that changes nothing returns `changed: false` and writes
+and announces nothing. `projectPlanning.workPlan.task.get` returns one task and
+the revision. A client that shows the whole plan reads
+`projectPlanning.workPlan.snapshot`, which carries the same `revision`.
+
+A plan saved by an earlier version as one stored record is read as it is, and
+its first edit writes its tasks as rows and removes the old record, in the same
+transaction.
+
 Task changes emit planner-domain events so clients can refresh snapshots or
-apply deltas instead of polling.
+apply deltas instead of polling. Every event carries the plan's `revision`. One
+edit announces only the tasks it changed, then one
+`WORK_PLAN_SNAPSHOT_INVALIDATED` with the new revision and no tasks: a snapshot
+read at an older revision is stale.
 
 | Event | When it fires |
 | --- | --- |
 | `WORK_PLAN_TASK_CREATED` | A new task was created |
-| `WORK_PLAN_TASK_UPDATED` | A task's fields were patched |
-| `WORK_PLAN_TASK_STATUS_CHANGED` | A task moved through the status route |
-| `WORK_PLAN_TASK_DELETED` | A task was removed |
-| `WORK_PLAN_SNAPSHOT_INVALIDATED` | A bulk change made cached snapshots stale, such as a reorder or clear-completed |
+| `WORK_PLAN_TASK_UPDATED` | A task's fields were patched, or a reorder moved it |
+| `WORK_PLAN_TASK_STATUS_CHANGED` | A task's status changed, by the status route or a patch |
+| `WORK_PLAN_TASK_DELETED` | A task was removed, by delete or clear-completed |
+| `WORK_PLAN_SNAPSHOT_INVALIDATED` | Once after every committed edit |
+
+The work-ledger legacy import (`workLedger.prepareLegacyImport`) captures the
+project's work-plan tasks itself, each as one record of kind `work-plan-task`,
+in addition to the planning sources the client names.
 
 The contract runner keeps the work plan in step with each contract
 (`contract/plan-sync.ts`). Each contract gets a task `contract-<contractId>`

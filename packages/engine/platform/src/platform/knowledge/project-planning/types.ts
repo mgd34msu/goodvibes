@@ -75,6 +75,8 @@ export interface ProjectWorkPlanSnapshot {
   readonly projectId: string;
   readonly knowledgeSpaceId: string;
   readonly workPlanId: string;
+  /** The plan's revision when it was read (0: never written). Every committed edit moves it up. */
+  readonly revision: number;
   readonly tasks: readonly ProjectWorkPlanTask[];
   readonly counts: ProjectWorkPlanCounts;
   readonly updatedAt: number;
@@ -150,25 +152,35 @@ export interface ProjectWorkPlanClearCompletedInput extends ProjectPlanningSpace
   readonly statuses?: readonly ProjectWorkPlanTaskStatus[] | undefined;
 }
 
+/** One task and the plan's revision; read the snapshot for the whole plan. */
 export interface ProjectWorkPlanTaskResult {
   readonly ok: true;
   readonly projectId: string;
   readonly knowledgeSpaceId: string;
   readonly workPlanId: string;
+  readonly revision: number;
   readonly task: ProjectWorkPlanTask | null;
-  readonly snapshot: ProjectWorkPlanSnapshot;
 }
 
+/**
+ * What an edit changed and the plan's revision after it. It does not carry the
+ * plan: a caller that shows the whole plan reads the snapshot.
+ */
 export interface ProjectWorkPlanMutationResult {
   readonly ok: true;
   readonly projectId: string;
   readonly knowledgeSpaceId: string;
   readonly workPlanId: string;
+  /** False when the edit changed nothing; nothing was written or announced. */
+  readonly changed: boolean;
+  readonly revision: number;
+  readonly updatedAt: number;
   readonly task?: ProjectWorkPlanTask | undefined;
   readonly previousTask?: ProjectWorkPlanTask | undefined;
   readonly deletedTask?: ProjectWorkPlanTask | undefined;
   readonly clearedTaskIds?: readonly string[] | undefined;
-  readonly snapshot: ProjectWorkPlanSnapshot;
+  /** Reorder: the tasks whose position changed, as written. */
+  readonly tasks?: readonly ProjectWorkPlanTask[] | undefined;
 }
 
 export interface ProjectPlanningQuestion {

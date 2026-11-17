@@ -7,7 +7,6 @@ import type { EmitterContext } from './index.js';
 import type { PlannerDecision, ExecutionStrategy } from '../../core/adaptive-planner.js';
 import type {
   WorkPlanEventBase,
-  WorkPlanSnapshotEventRecord,
   WorkPlanTaskEventRecord,
   WorkPlanTaskStatus,
 } from '../../../events/planner.js';
@@ -76,7 +75,7 @@ export function emitWorkPlanSnapshotInvalidated(
   ctx: EmitterContext,
   data: WorkPlanEventBase & {
     readonly reason: string;
-    readonly snapshot: WorkPlanSnapshotEventRecord;
+    readonly updatedAt: number;
   },
 ): void {
   bus.emit('planner', createEventEnvelope('WORK_PLAN_SNAPSHOT_INVALIDATED', { type: 'WORK_PLAN_SNAPSHOT_INVALIDATED', ...data }, ctx));

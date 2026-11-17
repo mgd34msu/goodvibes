@@ -163,31 +163,35 @@ export const PROJECT_WORK_PLAN_SNAPSHOT_SCHEMA = objectSchema({
   projectId: STRING_SCHEMA,
   knowledgeSpaceId: STRING_SCHEMA,
   workPlanId: STRING_SCHEMA,
+  revision: NUMBER_SCHEMA,
   tasks: arraySchema(PROJECT_WORK_PLAN_TASK_SCHEMA),
   counts: PROJECT_WORK_PLAN_COUNTS_SCHEMA,
   updatedAt: NUMBER_SCHEMA,
-}, ['ok', 'projectId', 'knowledgeSpaceId', 'workPlanId', 'tasks', 'counts', 'updatedAt'], { additionalProperties: true });
+}, ['ok', 'projectId', 'knowledgeSpaceId', 'workPlanId', 'revision', 'tasks', 'counts', 'updatedAt'], { additionalProperties: true });
 
 export const PROJECT_WORK_PLAN_TASK_OUTPUT_SCHEMA = objectSchema({
   ok: BOOLEAN_SCHEMA,
   projectId: STRING_SCHEMA,
   knowledgeSpaceId: STRING_SCHEMA,
   workPlanId: STRING_SCHEMA,
+  revision: NUMBER_SCHEMA,
   task: nullableSchema(PROJECT_WORK_PLAN_TASK_SCHEMA),
-  snapshot: PROJECT_WORK_PLAN_SNAPSHOT_SCHEMA,
-}, ['ok', 'projectId', 'knowledgeSpaceId', 'workPlanId', 'task', 'snapshot'], { additionalProperties: true });
+}, ['ok', 'projectId', 'knowledgeSpaceId', 'workPlanId', 'revision', 'task'], { additionalProperties: true });
 
 export const PROJECT_WORK_PLAN_MUTATION_OUTPUT_SCHEMA = objectSchema({
   ok: BOOLEAN_SCHEMA,
   projectId: STRING_SCHEMA,
   knowledgeSpaceId: STRING_SCHEMA,
   workPlanId: STRING_SCHEMA,
+  changed: BOOLEAN_SCHEMA,
+  revision: NUMBER_SCHEMA,
+  updatedAt: NUMBER_SCHEMA,
   task: PROJECT_WORK_PLAN_TASK_SCHEMA,
   previousTask: PROJECT_WORK_PLAN_TASK_SCHEMA,
   deletedTask: PROJECT_WORK_PLAN_TASK_SCHEMA,
   clearedTaskIds: STRING_LIST_SCHEMA,
-  snapshot: PROJECT_WORK_PLAN_SNAPSHOT_SCHEMA,
-}, ['ok', 'projectId', 'knowledgeSpaceId', 'workPlanId', 'snapshot'], { additionalProperties: true });
+  tasks: arraySchema(PROJECT_WORK_PLAN_TASK_SCHEMA),
+}, ['ok', 'projectId', 'knowledgeSpaceId', 'workPlanId', 'changed', 'revision', 'updatedAt'], { additionalProperties: true });
 
 export const PROJECT_PLANNING_STATUS_SCHEMA = objectSchema({
   ok: BOOLEAN_SCHEMA,

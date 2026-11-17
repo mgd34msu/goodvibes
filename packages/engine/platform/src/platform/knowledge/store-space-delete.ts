@@ -1,5 +1,6 @@
 import { SQLiteStore } from '../state/sqlite-store.js';
 import { getKnowledgeSpaceId, normalizeKnowledgeSpaceId } from './spaces.js';
+import { deleteWorkPlanTasksInSpace } from './store-work-plan-tasks.js';
 import type {
   KnowledgeConsolidationCandidateRecord,
   KnowledgeConsolidationReportRecord,
@@ -96,6 +97,7 @@ export function deleteKnowledgeSpaceRows(
     deleteRows(sqlite, 'knowledge_nodes', ids.nodes, stores.nodes, commit);
     deleteRows(sqlite, 'knowledge_sources', ids.sources, stores.sources, commit);
     deleteRows(sqlite, 'knowledge_schedules', ids.schedules, stores.schedules, commit);
+    deleteWorkPlanTasksInSpace(sqlite, normalizeKnowledgeSpaceId(spaceId));
     sqlite.run('RELEASE SAVEPOINT knowledge_space_delete');
   } catch (error) {
     sqlite.run('ROLLBACK TO SAVEPOINT knowledge_space_delete');

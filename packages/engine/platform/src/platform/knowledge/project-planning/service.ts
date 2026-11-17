@@ -4,13 +4,12 @@ export class WorkPlanTaskExistsError extends Error {
 }
 import { snapshotJudgmentInput } from '../../gate/judgment-input.js';
 import type { ConfigManager } from '../../config/manager.js';
-import { SQLiteObservationRetiredError } from '../../state/sqlite-store.js';
 import { randomUUID } from 'node:crypto';
 import { knowledgeSpaceMetadata, normalizeProjectId } from '../spaces.js';
 import type { KnowledgeSourceRecord, KnowledgeSourceUpsertInput } from '../types.js';
-import { KnowledgeSourcePublicationHeldError, type KnowledgeSourceSnapshot } from '../store-source-generation.js';
+import type { KnowledgeSourceSnapshot } from '../store-source-generation.js';
 import type { KnowledgeStore } from '../store.js';
-import { KnowledgeStoreConflictError } from '../store-conflict.js';
+import type { StoredWorkPlanTask, WorkPlanTaskView, WorkPlanTaskWrite } from '../store-work-plan-tasks.js';
 import { defineLifecycle } from '../../utils/lifecycle-machine.js';
 import type { RuntimeEventBus } from '../../runtime/events/index.js';
 import {
@@ -53,7 +52,6 @@ import type {
   ProjectWorkPlanTaskDeleteInput,
   ProjectWorkPlanTaskGetInput,
   ProjectWorkPlanTaskListInput,
-  ProjectWorkPlanTaskMutationSource,
   ProjectWorkPlanTaskReorderInput,
   ProjectWorkPlanTaskResult,
   ProjectWorkPlanTaskStatus,
@@ -97,24 +95,11 @@ export const projectWorkPlanTaskLifecycle = defineLifecycle<ProjectWorkPlanTaskS
   cancelled: ['pending', 'in_progress', 'blocked', 'done', 'failed', 'cancelled'],
 });
 
-const WORK_PLAN_MUTATION_ATTEMPTS = 3;
-
-/** Refusals raised before anything was written because the store moved under the read. */
-function isRetryableWorkPlanConflict(error: unknown): boolean {
-  return error instanceof SQLiteObservationRetiredError
-    || error instanceof KnowledgeSourcePublicationHeldError
-    || (error instanceof KnowledgeStoreConflictError && error.reloaded);
-}
-
 export class ProjectPlanningService {
   private readonly defaultProjectId: string;
   private readonly waitForStartup: (() => Promise<void>) | undefined;
   private runtimeBus: RuntimeEventBus | null;
   private runtimeBusEpoch = 0;
-  /** Tail of the edit chain for each work plan; see mutateWorkPlan(). */
-  private readonly workPlanMutations = new Map<string, Promise<void>>();
-  /** The stored row each work plan read came from, so its edit is published against that row. */
-  private readonly workPlanReads = new WeakMap<ProjectWorkPlanArtifact, KnowledgeSourceSnapshot>();
 
   /**
    * Native composition. The default project is the configured workspace's:
@@ -156,6 +141,9 @@ export class ProjectPlanningService {
     await this.initialize();
     const space = this.resolveSpace(input);
     const sources = this.sourcesForSpace(space.knowledgeSpaceId);
+    // Plans written since tasks have rows, plus any plan still stored as one source.
+    const rows = await this.store.countWorkPlanTasks(space.knowledgeSpaceId);
+    const legacyPlans = sources.filter((source) => artifactKind(source) === 'work-plan');
     return {
       ok: true,
       projectId: space.projectId,
@@ -165,10 +153,8 @@ export class ProjectPlanningService {
         states: sources.filter((source) => artifactKind(source) === 'state').length,
         decisions: sources.filter((source) => artifactKind(source) === 'decision').length,
         languageArtifacts: sources.filter((source) => artifactKind(source) === 'language').length,
-        workPlans: sources.filter((source) => artifactKind(source) === 'work-plan').length,
-        workPlanTasks: sources
-          .filter((source) => artifactKind(source) === 'work-plan')
-          .reduce((count, source) => count + (readWorkPlan(source)?.tasks.length ?? 0), 0),
+        workPlans: rows.workPlans + legacyPlans.length,
+        workPlanTasks: legacyPlans.reduce((count, source) => count + (readWorkPlan(source)?.tasks?.length ?? 0), rows.tasks),
       },
       capabilities: [
         'project-scoped-storage',
@@ -277,74 +263,68 @@ export class ProjectPlanningService {
   async getWorkPlanSnapshot(input: ProjectWorkPlanTaskListInput = {}): Promise<ProjectWorkPlanSnapshot> {
     await this.initialize();
     const space = this.resolveSpace(input);
-    const workPlan = this.getWorkPlanArtifact(space, normalizeWorkPlanId(input.workPlanId));
-    return snapshotFromWorkPlan(space, workPlan, {
-      status: input.status,
-      parentTaskId: input.parentTaskId,
-      contractId: input.contractId,
-      owner: input.owner,
-      limit: input.limit,
+    const workPlanId = normalizeWorkPlanId(input.workPlanId);
+    return this.store.readWorkPlan(space.knowledgeSpaceId, workPlanId, (view) => {
+      const plan = workPlanEditView(space, workPlanId, view);
+      return snapshotFromTasks(space, workPlanId, plan, {
+        status: input.status,
+        parentTaskId: input.parentTaskId,
+        contractId: input.contractId,
+        owner: input.owner,
+        limit: input.limit,
+      });
     });
   }
 
+  /** One task and the plan's revision: one row read. */
   async getWorkPlanTask(input: ProjectWorkPlanTaskGetInput): Promise<ProjectWorkPlanTaskResult> {
     await this.initialize();
-    const snapshot = await this.getWorkPlanSnapshot(input);
-    return {
-      ok: true,
-      projectId: snapshot.projectId,
-      knowledgeSpaceId: snapshot.knowledgeSpaceId,
-      workPlanId: snapshot.workPlanId,
-      task: snapshot.tasks.find((task) => task.taskId === input.taskId) ?? null,
-      snapshot,
-    };
-  }
-
-  async createWorkPlanTask(input: ProjectWorkPlanTaskCreateInput): Promise<ProjectWorkPlanMutationResult> {
-    input = snapshotJudgmentInput(input) as ProjectWorkPlanTaskCreateInput;
-    return this.mutateWorkPlan(input, async () => {
-      await this.initialize();
-      const space = this.resolveSpace(input);
-      const workPlanId = normalizeWorkPlanId(input.workPlanId);
-      const existing = this.getWorkPlanArtifact(space, workPlanId);
-      const now = Date.now();
-      const task = normalizeWorkPlanTask(input.task, {
-        projectId: space.projectId,
-        knowledgeSpaceId: space.knowledgeSpaceId,
-        now,
-        fallbackOrder: nextWorkPlanOrder(existing.tasks),
-      });
-      if (existing.tasks.some((entry) => entry.taskId === task.taskId)) {
-        throw new WorkPlanTaskExistsError(task.taskId);
-      }
-      const workPlan = await this.saveWorkPlanArtifact(space, {
-        ...existing,
-        tasks: sortWorkPlanTasks([...existing.tasks, task]),
-        updatedAt: now,
-      }, existing);
-      const snapshot = snapshotFromWorkPlan(space, workPlan);
-      this.emitWorkPlanTaskCreated(snapshot, task);
+    const space = this.resolveSpace(input);
+    const workPlanId = normalizeWorkPlanId(input.workPlanId);
+    return this.store.readWorkPlan<ProjectWorkPlanTaskResult>(space.knowledgeSpaceId, workPlanId, (view) => {
+      const plan = workPlanEditView(space, workPlanId, view);
       return {
         ok: true,
         projectId: space.projectId,
         knowledgeSpaceId: space.knowledgeSpaceId,
         workPlanId,
-        task,
-        snapshot,
+        revision: plan.revision,
+        task: plan.task(input.taskId),
       };
     });
   }
 
+  async createWorkPlanTask(input: ProjectWorkPlanTaskCreateInput): Promise<ProjectWorkPlanMutationResult> {
+    input = snapshotJudgmentInput(input) as ProjectWorkPlanTaskCreateInput;
+    await this.initialize();
+    const space = this.resolveSpace(input);
+    const workPlanId = normalizeWorkPlanId(input.workPlanId);
+    const commit = await this.commitWorkPlan(space, workPlanId, (plan, at) => {
+      const explicitOrder = typeof input.task.order === 'number' && Number.isFinite(input.task.order);
+      const task = normalizeWorkPlanTask(input.task, {
+        projectId: space.projectId,
+        knowledgeSpaceId: space.knowledgeSpaceId,
+        now: at,
+        fallbackOrder: explicitOrder ? 0 : plan.nextOrder(),
+      });
+      if (plan.task(task.taskId)) throw new WorkPlanTaskExistsError(task.taskId);
+      return { value: task, put: [task], remove: [] };
+    });
+    const task = commit.value;
+    const event = workPlanEvent(space, workPlanId, commit.revision);
+    this.emitWorkPlanTaskCreated(event, task);
+    this.emitWorkPlanSnapshotInvalidated(event, 'task-created', commit.updatedAt);
+    return { ...mutationResult(space, workPlanId, commit), task };
+  }
+
   async updateWorkPlanTask(input: ProjectWorkPlanTaskUpdateInput): Promise<ProjectWorkPlanMutationResult> {
     input = snapshotJudgmentInput(input) as ProjectWorkPlanTaskUpdateInput;
-    return this.mutateWorkPlan(input, async () => {
-      await this.initialize();
-      const space = this.resolveSpace(input);
-      const workPlanId = normalizeWorkPlanId(input.workPlanId);
-      const existing = this.getWorkPlanArtifact(space, workPlanId);
-      const previousTask = existing.tasks.find((task) => task.taskId === input.taskId);
+    await this.initialize();
+    const space = this.resolveSpace(input);
+    const workPlanId = normalizeWorkPlanId(input.workPlanId);
+    const commit = await this.commitWorkPlan(space, workPlanId, (plan, at) => {
+      const previousTask = plan.task(input.taskId);
       if (!previousTask) throw new Error(`Work plan task not found: ${input.taskId}`);
-      const now = Date.now();
       // A new status starts a new explanation and completion time: the old reason and
       // completedAt described the previous status.
       const statusChanging = input.patch.status !== undefined && normalizeWorkPlanStatus(input.patch.status) !== previousTask.status;
@@ -360,46 +340,26 @@ export class ProjectPlanningService {
         },
         taskId: previousTask.taskId,
         createdAt: previousTask.createdAt,
-        updatedAt: now,
+        updatedAt: at,
       }, {
         projectId: space.projectId,
         knowledgeSpaceId: space.knowledgeSpaceId,
-        now,
+        now: at,
         fallbackOrder: previousTask.order,
       });
       projectWorkPlanTaskLifecycle.assert(previousTask.status, task.status);
-      if (sameWorkPlanTask(task, previousTask)) {
-        // Nothing changed: no write, no new update time, no change notice.
-        return {
-          ok: true,
-          projectId: space.projectId,
-          knowledgeSpaceId: space.knowledgeSpaceId,
-          workPlanId,
-          task: previousTask,
-          previousTask,
-          snapshot: snapshotFromWorkPlan(space, existing),
-        };
-      }
-      const workPlan = await this.saveWorkPlanArtifact(space, {
-        ...existing,
-        tasks: sortWorkPlanTasks(existing.tasks.map((entry) => entry.taskId === input.taskId ? task : entry)),
-        updatedAt: now,
-      }, existing);
-      const snapshot = snapshotFromWorkPlan(space, workPlan);
-      this.emitWorkPlanTaskUpdated(snapshot, task, previousTask);
-      if (previousTask.status !== task.status) {
-        this.emitWorkPlanTaskStatusChanged(snapshot, task, previousTask);
-      }
-      return {
-        ok: true,
-        projectId: space.projectId,
-        knowledgeSpaceId: space.knowledgeSpaceId,
-        workPlanId,
-        task,
-        previousTask,
-        snapshot,
-      };
+      // Nothing changed: no write, no new update time, no change notice.
+      if (sameWorkPlanTask(task, previousTask)) return { value: { task: previousTask, previousTask }, put: [], remove: [] };
+      return { value: { task, previousTask }, put: [task], remove: [] };
     });
+    const { task, previousTask } = commit.value;
+    if (commit.changed) {
+      const event = workPlanEvent(space, workPlanId, commit.revision);
+      this.emitWorkPlanTaskUpdated(event, task, previousTask);
+      if (previousTask.status !== task.status) this.emitWorkPlanTaskStatusChanged(event, task, previousTask);
+      this.emitWorkPlanSnapshotInvalidated(event, 'task-updated', commit.updatedAt);
+    }
+    return { ...mutationResult(space, workPlanId, commit), task, previousTask };
   }
 
   async setWorkPlanTaskStatus(input: ProjectWorkPlanTaskStatusInput): Promise<ProjectWorkPlanMutationResult> {
@@ -419,146 +379,102 @@ export class ProjectPlanningService {
     });
   }
 
-  async reorderWorkPlanTasks(input: ProjectWorkPlanTaskReorderInput): Promise<ProjectWorkPlanSnapshot> {
+  /** Writes and announces only the tasks whose position changed. */
+  async reorderWorkPlanTasks(input: ProjectWorkPlanTaskReorderInput): Promise<ProjectWorkPlanMutationResult> {
     input = snapshotJudgmentInput(input) as ProjectWorkPlanTaskReorderInput;
-    return this.mutateWorkPlan(input, async () => {
-      await this.initialize();
-      const space = this.resolveSpace(input);
-      const workPlanId = normalizeWorkPlanId(input.workPlanId);
-      const existing = this.getWorkPlanArtifact(space, workPlanId);
-      const previousById = new Map(existing.tasks.map((task) => [task.taskId, task]));
+    await this.initialize();
+    const space = this.resolveSpace(input);
+    const workPlanId = normalizeWorkPlanId(input.workPlanId);
+    const commit = await this.commitWorkPlan(space, workPlanId, (plan, at) => {
+      const tasks = plan.tasks();
+      const known = new Set(tasks.map((task) => task.taskId));
       const orderById = new Map(input.orderedTaskIds.map((taskId, index) => [taskId, index]));
       for (const taskId of orderById.keys()) {
-        if (!previousById.has(taskId)) throw new Error(`Work plan task not found: ${taskId}`);
+        if (!known.has(taskId)) throw new Error(`Work plan task not found: ${taskId}`);
       }
-      const now = Date.now();
-      const tasks = sortWorkPlanTasks(existing.tasks.map((task) => {
+      const moved: { readonly task: ProjectWorkPlanTask; readonly previousTask: ProjectWorkPlanTask }[] = [];
+      for (const task of tasks) {
         const order = orderById.get(task.taskId) ?? task.order + input.orderedTaskIds.length;
         // Only a task that actually moved gets a new update time.
-        return order === task.order ? task : { ...task, order, updatedAt: now };
-      }));
-      if (tasks.every((task) => previousById.get(task.taskId)?.order === task.order)) return snapshotFromWorkPlan(space, existing);
-      const workPlan = await this.saveWorkPlanArtifact(space, {
-        ...existing,
-        tasks,
-        updatedAt: now,
-      }, existing);
-      const snapshot = snapshotFromWorkPlan(space, workPlan);
-      for (const task of tasks) {
-        const previousTask = previousById.get(task.taskId);
-        if (previousTask && previousTask.order !== task.order) {
-          this.emitWorkPlanTaskUpdated(snapshot, task, previousTask, true);
-        }
+        if (order !== task.order) moved.push({ task: { ...task, order, updatedAt: at }, previousTask: task });
       }
-      this.emitWorkPlanSnapshotInvalidated(snapshot, 'reordered');
-      return snapshot;
+      return { value: moved, put: moved.map((entry) => entry.task), remove: [] };
     });
+    if (commit.changed) {
+      const event = workPlanEvent(space, workPlanId, commit.revision);
+      for (const { task, previousTask } of commit.value) this.emitWorkPlanTaskUpdated(event, task, previousTask);
+      this.emitWorkPlanSnapshotInvalidated(event, 'reordered', commit.updatedAt);
+    }
+    return { ...mutationResult(space, workPlanId, commit), tasks: commit.value.map((entry) => entry.task) };
   }
 
   async deleteWorkPlanTask(input: ProjectWorkPlanTaskDeleteInput): Promise<ProjectWorkPlanMutationResult> {
     input = snapshotJudgmentInput(input) as ProjectWorkPlanTaskDeleteInput;
-    return this.mutateWorkPlan(input, async () => {
-      await this.initialize();
-      const space = this.resolveSpace(input);
-      const workPlanId = normalizeWorkPlanId(input.workPlanId);
-      const existing = this.getWorkPlanArtifact(space, workPlanId);
-      const deletedTask = existing.tasks.find((task) => task.taskId === input.taskId);
+    await this.initialize();
+    const space = this.resolveSpace(input);
+    const workPlanId = normalizeWorkPlanId(input.workPlanId);
+    const commit = await this.commitWorkPlan(space, workPlanId, (plan) => {
+      const deletedTask = plan.task(input.taskId);
       if (!deletedTask) throw new Error(`Work plan task not found: ${input.taskId}`);
-      const now = Date.now();
-      const workPlan = await this.saveWorkPlanArtifact(space, {
-        ...existing,
-        tasks: existing.tasks.filter((task) => task.taskId !== input.taskId),
-        updatedAt: now,
-      }, existing);
-      const snapshot = snapshotFromWorkPlan(space, workPlan);
-      this.emitWorkPlanTaskDeleted(snapshot, deletedTask);
-      return {
-        ok: true,
-        projectId: space.projectId,
-        knowledgeSpaceId: space.knowledgeSpaceId,
-        workPlanId,
-        deletedTask,
-        snapshot,
-      };
+      return { value: deletedTask, put: [], remove: [deletedTask.taskId] };
     });
+    const deletedTask = commit.value;
+    const event = workPlanEvent(space, workPlanId, commit.revision);
+    this.emitWorkPlanTaskDeleted(event, deletedTask);
+    this.emitWorkPlanSnapshotInvalidated(event, 'task-deleted', commit.updatedAt);
+    return { ...mutationResult(space, workPlanId, commit), deletedTask };
   }
 
   async clearCompletedWorkPlanTasks(input: ProjectWorkPlanClearCompletedInput = {}): Promise<ProjectWorkPlanMutationResult> {
     input = snapshotJudgmentInput(input) as ProjectWorkPlanClearCompletedInput;
-    return this.mutateWorkPlan(input, async () => {
-      await this.initialize();
-      const space = this.resolveSpace(input);
-      const workPlanId = normalizeWorkPlanId(input.workPlanId);
-      const existing = this.getWorkPlanArtifact(space, workPlanId);
-      const statuses = new Set(input.statuses?.length ? input.statuses.map(normalizeWorkPlanStatus) : ['done']);
-      const cleared = existing.tasks.filter((task) => statuses.has(task.status));
-      if (cleared.length === 0) {
-        return {
-          ok: true,
-          projectId: space.projectId,
-          knowledgeSpaceId: space.knowledgeSpaceId,
-          workPlanId,
-          clearedTaskIds: [],
-          snapshot: snapshotFromWorkPlan(space, existing),
-        };
-      }
-      const now = Date.now();
-      const workPlan = await this.saveWorkPlanArtifact(space, {
-        ...existing,
-        tasks: existing.tasks.filter((task) => !statuses.has(task.status)),
-        updatedAt: now,
-      }, existing);
-      const snapshot = snapshotFromWorkPlan(space, workPlan);
-      for (const task of cleared) {
-        this.emitWorkPlanTaskDeleted(snapshot, task, true);
-      }
-      this.emitWorkPlanSnapshotInvalidated(snapshot, 'cleared-completed');
-      return {
-        ok: true,
-        projectId: space.projectId,
-        knowledgeSpaceId: space.knowledgeSpaceId,
-        workPlanId,
-        clearedTaskIds: cleared.map((task) => task.taskId),
-        snapshot,
-      };
+    await this.initialize();
+    const space = this.resolveSpace(input);
+    const workPlanId = normalizeWorkPlanId(input.workPlanId);
+    const statuses: ProjectWorkPlanTaskStatus[] = [...new Set<ProjectWorkPlanTaskStatus>(input.statuses?.length ? input.statuses.map(normalizeWorkPlanStatus) : ['done'])];
+    const commit = await this.commitWorkPlan(space, workPlanId, (plan) => {
+      // Reads only the tasks being cleared.
+      const cleared = plan.tasks(statuses);
+      return { value: cleared, put: [], remove: cleared.map((task) => task.taskId) };
     });
+    if (commit.changed) {
+      const event = workPlanEvent(space, workPlanId, commit.revision);
+      for (const task of commit.value) this.emitWorkPlanTaskDeleted(event, task);
+      this.emitWorkPlanSnapshotInvalidated(event, 'cleared-completed', commit.updatedAt);
+    }
+    return { ...mutationResult(space, workPlanId, commit), clearedTaskIds: commit.value.map((task) => task.taskId) };
   }
 
   /**
-   * Work-plan edits are whole-artifact read-modify-writes published against the
-   * observation taken at read time, so any other write to the store in between
-   * (another task's status change, a job run, a usage record) retires it. Edits
-   * to one plan run one at a time in this process, and an edit refused because
-   * the store moved is re-read and retried; each attempt re-runs its own checks,
-   * so a duplicate create still reports the existing task.
+   * One edit of a plan: `decide` runs inside the store's immediate transaction
+   * against the rows as stored (no other writer can commit in between, in this
+   * process or another), so an edit is never built on a stale read and needs no
+   * retry. Only the tasks it returns are written. The first edit that writes to
+   * a plan still stored as one knowledge source also writes that plan's other
+   * tasks as rows, once; the store then deletes the source.
    */
-  private async mutateWorkPlan<T>(input: ProjectPlanningSpaceInput & { readonly workPlanId?: string | undefined }, mutate: () => Promise<T>,
-    chain?: string): Promise<T> {
-    await this.initialize();
-    const run = async (): Promise<T> => {
-      for (let attempt = 1; ; attempt++) {
-        try {
-          return await mutate();
-        } catch (error) {
-          if (attempt >= WORK_PLAN_MUTATION_ATTEMPTS || !isRetryableWorkPlanConflict(error)) throw error;
-          await new Promise<void>((resolve) => { setTimeout(resolve, 20 * attempt).unref?.(); });
-        }
+  private async commitWorkPlan<T>(
+    space: WorkPlanSpace,
+    workPlanId: string,
+    decide: (plan: WorkPlanEditView, at: number) => { readonly value: T; readonly put: readonly ProjectWorkPlanTask[]; readonly remove: readonly string[] },
+  ): Promise<WorkPlanCommit<T>> {
+    let unchanged = { revision: 0, updatedAt: 0 };
+    const result = await this.store.commitWorkPlan(space.knowledgeSpaceId, workPlanId, (view) => {
+      const plan = workPlanEditView(space, workPlanId, view);
+      unchanged = { revision: plan.revision, updatedAt: plan.updatedAt };
+      const at = Date.now();
+      const edit = decide(plan, at);
+      if (edit.put.length === 0 && edit.remove.length === 0) return { value: edit.value, put: [], remove: [], at };
+      let put = edit.put;
+      if (plan.legacyTasks.length > 0) {
+        const named = new Set([...edit.put.map((task) => task.taskId), ...edit.remove]);
+        const current = new Map(plan.tasks().map((task) => [task.taskId, task]));
+        put = [...put, ...plan.legacyTasks.filter((task) => !named.has(task.taskId) && current.get(task.taskId) === task)];
       }
-    };
-    let key: string;
-    try {
-      const space = this.resolveSpace(input);
-      key = JSON.stringify([space.projectId, space.knowledgeSpaceId, chain ?? normalizeWorkPlanId(input.workPlanId)]);
-    } catch {
-      // The mutation reports its own resolution failure.
-      return run();
-    }
-    const previous = this.workPlanMutations.get(key) ?? Promise.resolve();
-    const next = previous.then(run, run);
-    const settled = next.then(() => {}, () => {});
-    this.workPlanMutations.set(key, settled);
-    void settled.then(() => { if (this.workPlanMutations.get(key) === settled) this.workPlanMutations.delete(key); });
-    return next;
+      return { value: edit.value, put: put.map(workPlanTaskWrite), remove: edit.remove, at };
+    });
+    return result.changed
+      ? { value: result.value, changed: true, revision: result.head.revision, updatedAt: result.head.updatedAt ?? Date.now() }
+      : { value: result.value, changed: false, ...unchanged };
   }
 
   private resolveSpace(input: ProjectPlanningSpaceInput = {}) {
@@ -580,63 +496,15 @@ export class ProjectPlanningService {
     return this.getArtifactSnapshot(spaceId, kind, id).source;
   }
 
-  /**
-   * The work plan as stored, read once with the row generation it was read at.
-   * The edit that follows is published against that generation, so a write by
-   * another process in between is refused and retried, never overwritten.
-   */
-  private getWorkPlanArtifact(
-    space: { readonly projectId: string; readonly knowledgeSpaceId: string },
-    workPlanId: string,
-  ): ProjectWorkPlanArtifact {
-    return this.readWorkPlanArtifact(space, workPlanId).plan;
-  }
-
-  private readWorkPlanArtifact(
-    space: { readonly projectId: string; readonly knowledgeSpaceId: string },
-    workPlanId: string,
-  ): { readonly plan: ProjectWorkPlanArtifact; readonly snapshot: KnowledgeSourceSnapshot } {
-    const snapshot = this.getArtifactSnapshot(space.knowledgeSpaceId, 'work-plan', workPlanId);
-    const value = snapshot.source ? readWorkPlan(snapshot.source) : null;
-    if (value && typeof value === 'object' && !Array.isArray(value)) {
-      const plan = normalizeWorkPlanArtifact(value as Partial<ProjectWorkPlanArtifact>, space, workPlanId);
-      this.workPlanReads.set(plan, snapshot);
-      return { plan, snapshot };
-    }
-    const now = Date.now();
-    const plan: ProjectWorkPlanArtifact = {
-      id: workPlanId,
-      projectId: space.projectId,
-      knowledgeSpaceId: space.knowledgeSpaceId,
-      tasks: [],
-      createdAt: now,
-      updatedAt: now,
-    };
-    this.workPlanReads.set(plan, snapshot);
-    return { plan, snapshot };
-  }
-
-  /** Publishes the edited plan against the row generation `read` was taken at. */
-  private async saveWorkPlanArtifact(
-    space: { readonly projectId: string; readonly knowledgeSpaceId: string },
-    workPlan: ProjectWorkPlanArtifact,
-    read: ProjectWorkPlanArtifact,
-  ): Promise<ProjectWorkPlanArtifact> {
-    const normalized = normalizeWorkPlanArtifact(workPlan, space, workPlan.id);
-    await this.upsertArtifactSource(space, 'work-plan', normalized.id, normalized, undefined, this.workPlanReads.get(read));
-    return normalized;
-  }
-
   private async upsertArtifactSource(
     space: { readonly projectId: string; readonly knowledgeSpaceId: string },
     kind: ProjectPlanningArtifactKind,
     id: string,
     value: ProjectPlanningState | ProjectPlanningDecision | ProjectPlanningLanguageArtifact | ProjectWorkPlanArtifact,
     observation = planningRowsObservation(),
-    read?: KnowledgeSourceSnapshot,
   ): Promise<KnowledgeSourceRecord> {
     observation();
-    const previous = read ?? this.getArtifactSnapshot(space.knowledgeSpaceId, kind, id);
+    const previous = this.getArtifactSnapshot(space.knowledgeSpaceId, kind, id);
     const current = observation;
     let durable = false;
     try {
@@ -679,49 +547,20 @@ export class ProjectPlanningService {
     };
   }
 
-  private emitWorkPlanTaskCreated(snapshot: ProjectWorkPlanSnapshot, task: ProjectWorkPlanTask, assertCurrent?: () => void): void {
-    assertCurrent?.();
+  private emitWorkPlanTaskCreated(event: WorkPlanEvent, task: ProjectWorkPlanTask): void {
     if (!this.runtimeBus) return;
-    emitWorkPlanTaskCreated(this.runtimeBus, workPlanEmitterContext(snapshot), {
-      projectId: snapshot.projectId,
-      knowledgeSpaceId: snapshot.knowledgeSpaceId,
-      workPlanId: snapshot.workPlanId,
-      task,
-    });
-    assertCurrent?.();
-    this.emitWorkPlanSnapshotInvalidated(snapshot, 'task-created');
+    emitWorkPlanTaskCreated(this.runtimeBus, workPlanEmitterContext(event), { ...event, task });
   }
 
-  private emitWorkPlanTaskUpdated(
-    snapshot: ProjectWorkPlanSnapshot,
-    task: ProjectWorkPlanTask,
-    previousTask: ProjectWorkPlanTask,
-    skipSnapshotInvalidation = false,
-    assertCurrent?: () => void,
-  ): void {
-    assertCurrent?.();
+  private emitWorkPlanTaskUpdated(event: WorkPlanEvent, task: ProjectWorkPlanTask, previousTask: ProjectWorkPlanTask): void {
     if (!this.runtimeBus) return;
-    emitWorkPlanTaskUpdated(this.runtimeBus, workPlanEmitterContext(snapshot), {
-      projectId: snapshot.projectId,
-      knowledgeSpaceId: snapshot.knowledgeSpaceId,
-      workPlanId: snapshot.workPlanId,
-      task,
-      previousTask,
-    });
-    assertCurrent?.();
-    if (!skipSnapshotInvalidation) this.emitWorkPlanSnapshotInvalidated(snapshot, 'task-updated');
+    emitWorkPlanTaskUpdated(this.runtimeBus, workPlanEmitterContext(event), { ...event, task, previousTask });
   }
 
-  private emitWorkPlanTaskStatusChanged(
-    snapshot: ProjectWorkPlanSnapshot,
-    task: ProjectWorkPlanTask,
-    previousTask: ProjectWorkPlanTask,
-  ): void {
+  private emitWorkPlanTaskStatusChanged(event: WorkPlanEvent, task: ProjectWorkPlanTask, previousTask: ProjectWorkPlanTask): void {
     if (!this.runtimeBus) return;
-    emitWorkPlanTaskStatusChanged(this.runtimeBus, workPlanEmitterContext(snapshot), {
-      projectId: snapshot.projectId,
-      knowledgeSpaceId: snapshot.knowledgeSpaceId,
-      workPlanId: snapshot.workPlanId,
+    emitWorkPlanTaskStatusChanged(this.runtimeBus, workPlanEmitterContext(event), {
+      ...event,
       taskId: task.taskId,
       status: task.status,
       previousStatus: previousTask.status,
@@ -729,32 +568,101 @@ export class ProjectPlanningService {
     });
   }
 
-  private emitWorkPlanTaskDeleted(
-    snapshot: ProjectWorkPlanSnapshot,
-    task: ProjectWorkPlanTask,
-    skipSnapshotInvalidation = false,
-  ): void {
+  private emitWorkPlanTaskDeleted(event: WorkPlanEvent, task: ProjectWorkPlanTask): void {
     if (!this.runtimeBus) return;
-    emitWorkPlanTaskDeleted(this.runtimeBus, workPlanEmitterContext(snapshot), {
-      projectId: snapshot.projectId,
-      knowledgeSpaceId: snapshot.knowledgeSpaceId,
-      workPlanId: snapshot.workPlanId,
-      taskId: task.taskId,
-      task,
-    });
-    if (!skipSnapshotInvalidation) this.emitWorkPlanSnapshotInvalidated(snapshot, 'task-deleted');
+    emitWorkPlanTaskDeleted(this.runtimeBus, workPlanEmitterContext(event), { ...event, taskId: task.taskId, task });
   }
 
-  private emitWorkPlanSnapshotInvalidated(snapshot: ProjectWorkPlanSnapshot, reason: string): void {
+  /** One per committed edit: a snapshot read at an older revision is stale. Carries no tasks. */
+  private emitWorkPlanSnapshotInvalidated(event: WorkPlanEvent, reason: string, updatedAt: number): void {
     if (!this.runtimeBus) return;
-    emitWorkPlanSnapshotInvalidated(this.runtimeBus, workPlanEmitterContext(snapshot), {
-      projectId: snapshot.projectId,
-      knowledgeSpaceId: snapshot.knowledgeSpaceId,
-      workPlanId: snapshot.workPlanId,
-      reason,
-      snapshot,
-    });
+    emitWorkPlanSnapshotInvalidated(this.runtimeBus, workPlanEmitterContext(event), { ...event, reason, updatedAt });
   }
+}
+
+interface WorkPlanSpace {
+  readonly projectId: string;
+  readonly knowledgeSpaceId: string;
+}
+
+interface WorkPlanEvent extends WorkPlanSpace {
+  readonly workPlanId: string;
+  readonly revision: number;
+}
+
+interface WorkPlanCommit<T> {
+  readonly value: T;
+  readonly changed: boolean;
+  readonly revision: number;
+  readonly updatedAt: number;
+}
+
+/** A plan as one read or one commit sees it; tasks come from their rows, and from a plan still stored as one source. */
+interface WorkPlanEditView {
+  readonly revision: number;
+  readonly updatedAt: number;
+  /** Tasks of a plan still stored as one knowledge source; empty once its first commit wrote them as rows. */
+  readonly legacyTasks: readonly ProjectWorkPlanTask[];
+  task(taskId: string): ProjectWorkPlanTask | null;
+  tasks(statuses?: readonly ProjectWorkPlanTaskStatus[]): ProjectWorkPlanTask[];
+  nextOrder(): number;
+}
+
+function workPlanEditView(space: WorkPlanSpace, workPlanId: string, view: WorkPlanTaskView): WorkPlanEditView {
+  const legacyPlan = view.legacy ? readLegacyWorkPlan(space, workPlanId, view.legacy) : null;
+  const legacy = new Map((legacyPlan?.tasks ?? []).map((task) => [task.taskId, task]));
+  // Rows were admitted when they were written; they are read as stored.
+  const stored = (row: StoredWorkPlanTask): ProjectWorkPlanTask => row.task as unknown as ProjectWorkPlanTask;
+  // A task in both places (an older build wrote the source after the rows existed) is read from the newer copy.
+  const newer = (row: ProjectWorkPlanTask | null, old: ProjectWorkPlanTask | undefined): ProjectWorkPlanTask | null =>
+    !old ? row : !row || old.updatedAt > row.updatedAt ? old : row;
+  return {
+    revision: view.head.revision,
+    updatedAt: Math.max(view.head.updatedAt ?? 0, legacyPlan?.updatedAt ?? 0) || Date.now(),
+    legacyTasks: [...legacy.values()],
+    task: (taskId) => {
+      const row = view.task(taskId);
+      return newer(row ? stored(row) : null, legacy.get(taskId));
+    },
+    tasks: (statuses) => {
+      if (legacy.size === 0) return sortWorkPlanTasks(view.tasks(statuses).map(stored));
+      const merged = new Map(view.tasks().map((row) => [row.taskId, stored(row)] as const));
+      for (const [taskId, old] of legacy) merged.set(taskId, newer(merged.get(taskId) ?? null, old)!);
+      return sortWorkPlanTasks([...merged.values()].filter((task) => !statuses || statuses.includes(task.status)));
+    },
+    nextOrder: () => {
+      let max = view.maxOrder() ?? -1;
+      for (const task of legacy.values()) max = Math.max(max, task.order);
+      return max + 1;
+    },
+  };
+}
+
+function readLegacyWorkPlan(space: WorkPlanSpace, workPlanId: string, source: KnowledgeSourceRecord): ProjectWorkPlanArtifact | null {
+  const value = readWorkPlan(source);
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? normalizeWorkPlanArtifact(value as Partial<ProjectWorkPlanArtifact>, space, workPlanId)
+    : null;
+}
+
+function workPlanTaskWrite(task: ProjectWorkPlanTask): WorkPlanTaskWrite {
+  return { taskId: task.taskId, status: task.status, order: task.order, task };
+}
+
+function workPlanEvent(space: WorkPlanSpace, workPlanId: string, revision: number): WorkPlanEvent {
+  return { projectId: space.projectId, knowledgeSpaceId: space.knowledgeSpaceId, workPlanId, revision };
+}
+
+function mutationResult(space: WorkPlanSpace, workPlanId: string, commit: WorkPlanCommit<unknown>) {
+  return {
+    ok: true as const,
+    projectId: space.projectId,
+    knowledgeSpaceId: space.knowledgeSpaceId,
+    workPlanId,
+    changed: commit.changed,
+    revision: commit.revision,
+    updatedAt: commit.updatedAt,
+  };
 }
 
 function normalizeWorkPlanArtifact(
@@ -868,17 +776,14 @@ function stringList(value: unknown): string[] {
   return [...new Set(value.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0).map((entry) => entry.trim()))];
 }
 
-function nextWorkPlanOrder(tasks: readonly ProjectWorkPlanTask[]): number {
-  return tasks.reduce((max, task) => Math.max(max, task.order), -1) + 1;
-}
-
 function sortWorkPlanTasks(tasks: readonly ProjectWorkPlanTask[]): ProjectWorkPlanTask[] {
   return [...tasks].sort((a, b) => a.order - b.order || a.createdAt - b.createdAt || a.taskId.localeCompare(b.taskId));
 }
 
-function snapshotFromWorkPlan(
-  space: { readonly projectId: string; readonly knowledgeSpaceId: string },
-  workPlan: ProjectWorkPlanArtifact,
+function snapshotFromTasks(
+  space: WorkPlanSpace,
+  workPlanId: string,
+  plan: WorkPlanEditView,
   filter: {
     readonly status?: ProjectWorkPlanTaskStatus | undefined;
     readonly parentTaskId?: string | undefined;
@@ -887,7 +792,8 @@ function snapshotFromWorkPlan(
     readonly limit?: number | undefined;
   } = {},
 ): ProjectWorkPlanSnapshot {
-  const tasks = sortWorkPlanTasks(workPlan.tasks).filter((task) => {
+  const all = plan.tasks();
+  const tasks = all.filter((task) => {
     if (filter.status && task.status !== filter.status) return false;
     if (filter.parentTaskId && task.parentTaskId !== filter.parentTaskId) return false;
     if (filter.contractId && task.contractId !== filter.contractId) return false;
@@ -901,10 +807,11 @@ function snapshotFromWorkPlan(
     ok: true,
     projectId: space.projectId,
     knowledgeSpaceId: space.knowledgeSpaceId,
-    workPlanId: workPlan.id,
+    workPlanId,
+    revision: plan.revision,
     tasks: limit ? tasks.slice(0, limit) : tasks,
-    counts: countWorkPlanTasks(workPlan.tasks),
-    updatedAt: workPlan.updatedAt,
+    counts: countWorkPlanTasks(all),
+    updatedAt: plan.updatedAt,
   };
 }
 
@@ -924,14 +831,14 @@ function countWorkPlanTasks(tasks: readonly ProjectWorkPlanTask[]): ProjectWorkP
   return counts;
 }
 
-function workPlanEmitterContext(snapshot: ProjectWorkPlanSnapshot): {
+function workPlanEmitterContext(event: WorkPlanEvent): {
   readonly traceId: string;
   readonly sessionId: string;
   readonly source: string;
 } {
   return {
-    traceId: `project-planning:work-plan:${snapshot.workPlanId}:${snapshot.updatedAt}`,
-    sessionId: `project:${snapshot.projectId}`,
+    traceId: `project-planning:work-plan:${event.workPlanId}:${event.revision}`,
+    sessionId: `project:${event.projectId}`,
     source: 'project-planning.work-plan',
   };
 }

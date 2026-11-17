@@ -800,7 +800,7 @@ export const builtinGatewayKnowledgeMethodDescriptors: readonly GatewayMethodDes
   methodDescriptor({
     id: 'projectPlanning.workPlan.task.get',
     title: 'Get Project Work Plan Task',
-    description: 'Fetch one durable project-scoped work-plan task by id.',
+    description: 'Fetch one durable project-scoped work-plan task by id, with the plan revision.',
     category: 'knowledge',
     scopes: ['read:knowledge'],
     http: { method: 'GET', path: '/api/projects/planning/work-plan/tasks/{taskId}' },
@@ -831,7 +831,7 @@ export const builtinGatewayKnowledgeMethodDescriptors: readonly GatewayMethodDes
   methodDescriptor({
     id: 'projectPlanning.workPlan.task.update',
     title: 'Update Project Work Plan Task',
-    description: 'Patch a durable project-scoped work-plan task.',
+    description: 'Patch a durable project-scoped work-plan task. Returns the task before and after and the plan revision; read the snapshot for the whole plan.',
     category: 'knowledge',
     access: 'admin',
     scopes: ['write:knowledge'],
@@ -867,7 +867,7 @@ export const builtinGatewayKnowledgeMethodDescriptors: readonly GatewayMethodDes
   methodDescriptor({
     id: 'projectPlanning.workPlan.tasks.reorder',
     title: 'Reorder Project Work Plan Tasks',
-    description: 'Replace task ordering for the current project work plan.',
+    description: 'Replace task ordering for the current project work plan. Returns the tasks whose position changed and the plan revision.',
     category: 'knowledge',
     access: 'admin',
     scopes: ['write:knowledge'],
@@ -878,7 +878,7 @@ export const builtinGatewayKnowledgeMethodDescriptors: readonly GatewayMethodDes
       workPlanId: STRING_SCHEMA,
       orderedTaskIds: STRING_LIST_SCHEMA,
     }, ['orderedTaskIds']),
-    outputSchema: PROJECT_WORK_PLAN_SNAPSHOT_SCHEMA,
+    outputSchema: PROJECT_WORK_PLAN_MUTATION_OUTPUT_SCHEMA,
   }),
   methodDescriptor({
     id: 'projectPlanning.workPlan.task.delete',

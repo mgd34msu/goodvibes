@@ -68,6 +68,12 @@ import { registerEmailExpectationGatewayMethods } from '../../platform/src/platf
 import { registerOccasionsGatewayMethods } from '../../platform/src/platform/control-plane/routes/occasions.ts';
 import { registerOwnerProfileGatewayMethods } from '../../platform/src/platform/control-plane/routes/owner-profile.ts';
 import { registerFlagsGraduationGatewayMethods } from '../../platform/src/platform/control-plane/routes/flags-graduation.js';
+import { registerFlagsStatusGatewayMethods } from '../../platform/src/platform/control-plane/routes/flags-status.js';
+import { registerFleetControlGatewayMethods } from '../../platform/src/platform/control-plane/routes/fleet-control.js';
+import { registerMemorySnapshotGatewayMethods } from '../../platform/src/platform/control-plane/routes/memory-snapshot-verbs.js';
+import { registerNotificationDeadLetterGatewayMethods } from '../../platform/src/platform/control-plane/routes/notification-dead-letters.js';
+import { registerRuntimeStateGatewayMethods } from '../../platform/src/platform/control-plane/routes/runtime-state.js';
+import { registerPaymentsMethods } from '../../platform/src/platform/payments/host/register.js';
 import { registerFleetCheckpointsSearchGatewayMethods } from '../../platform/src/platform/control-plane/routes/register-fleet-checkpoints-search.js';
 import { registerMemoryGatewayMethods } from '../../platform/src/platform/control-plane/routes/memory.js';
 import { registerMemoryProjectionsGatewayMethods } from '../../platform/src/platform/control-plane/routes/memory-projections.js';
@@ -143,6 +149,13 @@ const ROUTE_REGISTRARS: ReadonlyArray<readonly [string, (catalog: GatewayMethodC
   ['owner-profile', (catalog) => registerOwnerProfileGatewayMethods(catalog, stubDeps())],
   ['email-composition', (catalog) => registerDaemonEmailVerbs(catalog, stubDeps())],
   ['flags-graduation', (catalog) => registerFlagsGraduationGatewayMethods(catalog)],
+  ['flags-status', (catalog) => registerFlagsStatusGatewayMethods(catalog, stubDeps())],
+  ['fleet-control', (catalog) => registerFleetControlGatewayMethods(catalog, stubDeps())],
+  ['memory-snapshot-verbs', (catalog) => registerMemorySnapshotGatewayMethods(catalog, stubDeps())],
+  ['notification-dead-letters', (catalog) => registerNotificationDeadLetterGatewayMethods(catalog, stubDeps())],
+  ['runtime-state', (catalog) => registerRuntimeStateGatewayMethods(catalog, stubDeps())],
+  // The payment verbs are attached by the payments host, outside routes/; its handlers attach after boot recovery settles.
+  ['payments', async (catalog) => { await registerPaymentsMethods(catalog, stubDeps()).ready; }],
   ['fleet-checkpoints-search', (catalog) => registerFleetCheckpointsSearchGatewayMethods(catalog, stubDeps())],
   ['memory', (catalog) => registerMemoryGatewayMethods(catalog, stubDeps())],
   ['memory-projections', (catalog) => registerMemoryProjectionsGatewayMethods(catalog, stubDeps())],
@@ -185,15 +198,10 @@ const ROUTE_REGISTRARS: ReadonlyArray<readonly [string, (catalog: GatewayMethodC
  * / `registerContractGatewayMethods` are reached through
  * `registerFleetCheckpointsSearchGatewayMethods`.
  * `registerWorkLedgerImportGatewayMethods` requires a trusted selected host,
- * opaque actor authority and a live authorization callback; probing it with
- * generic stubs would stop at FORBIDDEN before validating any input. Its
- * required-field conformance is exercised through authenticated real-host
- * prepare/import requests in work-ledger-import-transport.test.ts instead.
- * The four native registrars similarly require live paired-token authority
- * before inspecting input. gateway-native-required-conformance.test.ts probes
- * every one of their handlers with authenticated descriptor-required-only
- * input and verifies host entry, plus per-field omission and auth refusals;
- * putting them in this user-principal probe would only exercise FORBIDDEN.
+ * opaque actor authority and a live authorization callback, and the four
+ * native registrars require live paired-token authority, before any of them
+ * inspects input: probed with generic stubs as a user principal they would
+ * only exercise FORBIDDEN, so they are listed here and not probed.
  */
 export const EXPECTED_ROUTE_REGISTRARS: readonly string[] = [
   'registerAcpGatewayMethods',
@@ -203,7 +211,7 @@ export const EXPECTED_ROUTE_REGISTRARS: readonly string[] = [
   'registerChannelProfilesGatewayMethods',
   'registerChannelTestGatewayMethods',
   'registerCheckinGatewayMethods',
-  // Same four probed handlers; real runtime wiring is exercised by checkin-composed.test.ts.
+  // Attaches the same four handlers registerCheckinGatewayMethods attaches, which are probed.
   'registerComposedCheckinGatewayMethods',
   'registerCheckpointGatewayMethods',
   'registerCiGatewayMethods',
@@ -217,16 +225,20 @@ export const EXPECTED_ROUTE_REGISTRARS: readonly string[] = [
   'registerOccasionsGatewayMethods',
   'registerOwnerProfileGatewayMethods',
   'registerFlagsGraduationGatewayMethods',
+  'registerFlagsStatusGatewayMethods',
+  'registerFleetControlGatewayMethods',
   'registerFleetCheckpointsSearchGatewayMethods',
   'registerFleetGatewayMethods',
   'registerGatewayVerbGroups',
   'registerHostedSessionGatewayMethods',
   'registerMemoryGatewayMethods',
   'registerMemoryProjectionsGatewayMethods',
+  'registerMemorySnapshotGatewayMethods',
   'registerNativeConversationIntakeGatewayMethods',
   'registerNativeHostedTurnGatewayMethods',
   'registerNativeWorkExecutionGatewayMethods',
   'registerNativeWorkSubmissionGatewayMethods',
+  'registerNotificationDeadLetterGatewayMethods',
   'registerPairingGatewayMethods',
   'registerPairingHandoffGatewayMethods',
   'registerPermissionRulesGatewayMethods',
@@ -238,6 +250,7 @@ export const EXPECTED_ROUTE_REGISTRARS: readonly string[] = [
   'registerRewindConversationHostGatewayMethods',
   'registerRewindGatewayMethods',
   'registerRuntimeMetricsGatewayMethods',
+  'registerRuntimeStateGatewayMethods',
   'registerSessionRuntimeGatewayMethods',
   'registerSkillsGatewayMethods',
   'registerStepUpGatewayMethods',

@@ -116,7 +116,7 @@ export interface PaymentsHandlerDeps {
 // ---------------------------------------------------------------------------
 
 function invalid(field: string, requirement: string): HandlerError {
-  return new HandlerError(`${field} ${requirement}`, 'INVALID_ARGUMENT', 400);
+  return new HandlerError(`${field} ${requirement}`, 'INVALID_ARGUMENT', 400, field);
 }
 
 /**

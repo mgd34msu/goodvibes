@@ -16,7 +16,7 @@ function authorizedFor(context: HandlerContextEnvelope, required: string): boole
 }
 function field(value: unknown, name: string): string {
   if (typeof value !== 'string' || value.trim().length === 0 || value.length > 256) {
-    throw new HandlerError(`${name} must be a nonempty purchase/window reference.`, 'INVALID_ARGUMENT', 400);
+    throw new HandlerError(`${name} must be a nonempty purchase/window reference.`, 'INVALID_ARGUMENT', 400, name);
   }
   return value;
 }

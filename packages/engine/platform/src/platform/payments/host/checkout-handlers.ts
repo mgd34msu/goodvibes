@@ -139,7 +139,7 @@ export interface RestoredCheckoutWindow {
 }
 
 function invalid(field: string, requirement: string): HandlerError {
-  return new HandlerError(`${field} ${requirement}`, 'INVALID_ARGUMENT', 400);
+  return new HandlerError(`${field} ${requirement}`, 'INVALID_ARGUMENT', 400, field);
 }
 
 function asRecord(body: unknown): Record<string, unknown> {
@@ -249,7 +249,7 @@ function parseBeginCheckoutInput(params: Record<string, unknown>, settings: Begi
     orderSummaryText: typeof params['orderSummaryText'] === 'string' ? params['orderSummaryText'] : '',
   };
   const checkedReading = readCheckoutReadingInput(reading);
-  if (!checkedReading.ok) throw new HandlerError(`${checkedReading.field}: ${checkedReading.reason}`, 'INVALID_ARGUMENT', 400);
+  if (!checkedReading.ok) throw new HandlerError(`${checkedReading.field}: ${checkedReading.reason}`, 'INVALID_ARGUMENT', 400, checkedReading.field);
   const requestedMax = params['requestedMax'] === undefined ? undefined : requireString(params['requestedMax'], 'requestedMax');
   if (requestedMax !== undefined && parseRequestedMaximum(requestedMax, settings.budgetCurrency) === null) {
     throw invalid('requestedMax', `must be a plain amount in ${settings.budgetCurrency} such as ${plainAmountExample(settings.budgetCurrency)}.`);

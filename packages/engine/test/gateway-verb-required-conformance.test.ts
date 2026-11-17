@@ -89,8 +89,10 @@ function collectExportedRegistrars(directory: string): Set<string> {
  * stay closed, or "no field" becomes a way to opt out of the gate.
  */
 const ALLOWED_UNATTRIBUTED_REFUSALS: Readonly<Record<string, string>> = {
-  'fleet.observed.steer':
-    'Refuses on the target row\'s kind (only observed-external rows are steerable), not on a missing or malformed input field.',
+  'calendar.events.update':
+    'Takes any one or more of title, start, end, description, location or attendees. The refusal is that '
+    + 'none was sent, a statement about the combination: no single field is missing, and declaring any one '
+    + 'of them required would refuse an update that changes only another.',
   'profile.forget':
     'Takes EITHER a fieldId OR a section plus the exact text of the line. The refusal is about the '
     + 'combination, so no single field name is the honest answer and no single entry in the descriptor\'s '

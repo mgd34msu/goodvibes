@@ -41,7 +41,7 @@ export async function buildSetupPlan(
 ): Promise<readonly SetupPlanItem[]> {
   const { snapshot, capabilities, smoke } = sources;
   const browserControl = once(() => browserControlPosture(context, context.extensions?.toolRegistry, options));
-  const capability = (id: string) => capabilityById(capabilities, id);
+  const capability = (id: OnboardingStep1CapabilityItem['id']) => capabilityById(capabilities, id);
   const settingsImport = once(() => previewAgentWorkspaceTuiSettingsImport(context));
   const localModels = once(() => localModelCookbook(context, true));
   const serviceProbe = once(async () => connectedHostServiceProbe(await sources.probeServices(), servicePostureFailure(context)));

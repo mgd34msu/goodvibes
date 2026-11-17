@@ -23,8 +23,12 @@
  *  5. Disclose what was reaped, every sweep returns an itemised report.
  */
 import { randomUUID } from 'node:crypto';
-import { promises as fs } from 'node:fs';
+import { closeSync, constants, existsSync, fsyncSync, openSync, promises as fs } from 'node:fs';
+import { dirname } from 'node:path';
 import { PersistentStore, type PersistentStoreCorruption } from '../../state/persistent-store.js';
+import { openRecordLog, type RecordLog } from '../../state/record-log.js';
+import { logger } from '../../utils/logger.js';
+import { summarizeError } from '../../utils/error-display.js';
 import { findCardNumberShapes } from '../../security/card-shapes.js';
 import {
   clampDeliveryAddress,
@@ -179,7 +183,9 @@ export type InboundMailRecord = ImapInboundMailRecord | GmailInboundMailRecord;
  * what an IMAP-shaped field would have to do) tells the owner nothing while
  * looking like it told them something.
  */
-export function describeRecordIdentity(record: InboundMailRecord): string {
+export function describeRecordIdentity(
+  record: DistributivePick<InboundMailRecord, 'source' | 'uidValidity' | 'uid' | 'resourceId'>,
+): string {
   return record.source === 'gmail'
     ? `gmail:${record.resourceId}`
     : `imap:${String(record.uidValidity)}:${String(record.uid)}`;
@@ -213,15 +219,11 @@ export type InboundMailMessageKey = DistributivePick<
   'source' | 'account' | 'mailbox' | 'uidValidity' | 'uid' | 'resourceId'
 >;
 
-/** Whether a stored record is a record OF the message this key names. */
-function isSameMessage(record: InboundMailRecord, key: InboundMailMessageKey): boolean {
-  if (record.account !== key.account || record.mailbox !== key.mailbox) return false;
-  if (record.source === 'gmail') {
-    return key.source === 'gmail' && record.resourceId === key.resourceId;
-  }
-  return key.source === 'imap'
-    && record.uidValidity === key.uidValidity
-    && record.uid === key.uid;
+/** A message key as one string, so "the record of this message" is a map lookup. */
+function messageKeyOf(key: InboundMailMessageKey): string {
+  return key.source === 'gmail'
+    ? JSON.stringify(['gmail', key.account, key.mailbox, key.resourceId])
+    : JSON.stringify(['imap', key.account, key.mailbox, key.uidValidity, key.uid]);
 }
 
 /** `file-unreadable` is the whole-file counterpart of `malformed`, see `CursorDiscardReason`. */
@@ -285,11 +287,39 @@ export const DEFAULT_INBOUND_MAIL_RECORD_POLICY: InboundMailRecordPolicy = {
   maxBodyExcerptChars: MAX_BODY_EXCERPT_CHARS,
 };
 
+/** The whole-file store this one replaced. Read once, to bring its records into the log. */
 interface InboundMailSnapshot extends Record<string, unknown> {
   readonly version: 1;
   readonly records: readonly InboundMailRecord[];
 }
 
+/**
+ * One line of the record log: the record of one message as of that write
+ * (`put`) and the ids that write bounded out (`drop`). `seq` rises with every
+ * line, so compaction can tell a record's newest line from the ones it replaced.
+ * `imported` marks that every record of the whole-file store is in the log, so
+ * that file is never read into it a second time.
+ */
+interface InboundMailLogLine {
+  readonly seq: number;
+  readonly put?: unknown;
+  readonly drop?: readonly string[] | undefined;
+  readonly imported?: true | undefined;
+}
+
+/** What memory holds per record: everything but the body excerpt, which stays in the log until someone asks for it. */
+type IndexedInboundMailRecord = DistributiveOmit<InboundMailRecord, 'bodyExcerpt'>;
+
+/** Superseded lines a log may carry before a write compacts it (or as many as it has live records, when that is more). */
+const COMPACT_SLACK_LINES = 256;
+
+/** The id of the record a line carries, or '' for a line that carries none. */
+function lineRecordId(line: InboundMailLogLine): string {
+  const put = (line as { readonly put?: unknown } | null)?.put;
+  if (put === null || typeof put !== 'object') return '';
+  const id = (put as { readonly id?: unknown }).id;
+  return typeof id === 'string' ? id : '';
+}
 
 export interface InboundMailStoreOptions {
   readonly policy?: Partial<InboundMailRecordPolicy> | undefined;
@@ -312,20 +342,54 @@ export type InboundMailRecordInput =
 /**
  * Durable inbound-mail record store, named to match `InboundMailContext`
  * (docs/decisions/2026-07-27-inbound-email-design.md §2.1), which carries it as `records`.
+ *
+ * The records live in a record log beside the path the store was given
+ * (`<name>.log.jsonl`): a message is one appended line, whatever the log
+ * already holds. Memory holds one small entry per record (no body excerpt) and
+ * the message-key lookup, loaded once; a read is one `stat` to notice lines
+ * another process appended.
  */
 export class InboundMailStore {
-  private readonly store: PersistentStore<InboundMailSnapshot>;
+  /** The whole-file store at the given path: its lock orders writers across processes, and its records are imported once. */
+  private readonly legacy: PersistentStore<InboundMailSnapshot>;
+  private readonly legacyPath: string | null;
+  private readonly logPath: string | null;
+  private log: RecordLog<InboundMailLogLine> | null = null;
+  private opened = false;
+  private readonly index = new Map<string, IndexedInboundMailRecord>();
+  /** Message key to record id. */
+  private readonly byMessage = new Map<string, string>();
+  /** The `seq` of each record's newest line. */
+  private readonly seqOf = new Map<string, number>();
+  /** Body excerpts of a store that has no file. */
+  private readonly memoryExcerpts = new Map<string, string>();
+  private seq = 0;
+  /** Log lines already folded into the index. */
+  private consumed = 0;
+  /** Lines in the log whose record did not validate. */
+  private malformed = 0;
+  /** Entries of the imported whole-file store that did not validate, until a sweep has reported them. */
+  private importedMalformed = 0;
+  /** The log carries the line that says the whole-file store was imported. */
+  private importDone = false;
+  /** Such lines in the log; compaction keeps them, so they are not superseded lines. */
+  private importLines = 0;
   private readonly policy: InboundMailRecordPolicy;
   private readonly now: () => number;
   private writeChain: Promise<void> = Promise.resolve();
   /** The last unreadable-file event, latched so status can name it. */
   private corruption: PersistentStoreCorruption | null = null;
+  /** The same event until a sweep has itemised it. */
+  private unreportedCorruption: PersistentStoreCorruption | null = null;
   private writeReapedExpired = 0;
   private writeReapedOverCap = 0;
   private readonly tallySince: number;
 
   constructor(storeOrPath: PersistentStore<InboundMailSnapshot> | string, options: InboundMailStoreOptions = {}) {
-    this.store = typeof storeOrPath === 'string' ? new PersistentStore<InboundMailSnapshot>(storeOrPath) : storeOrPath;
+    this.legacy = typeof storeOrPath === 'string' ? new PersistentStore<InboundMailSnapshot>(storeOrPath) : storeOrPath;
+    const lockPath = this.legacy.lockPath;
+    this.legacyPath = lockPath === null ? null : lockPath.slice(0, -'.lock'.length);
+    this.logPath = this.legacyPath === null ? null : `${this.legacyPath.replace(/\.json$/, '')}.log.jsonl`;
     const merged = { ...DEFAULT_INBOUND_MAIL_RECORD_POLICY, ...(options.policy ?? {}) };
     this.policy = { ...merged, maxBodyExcerptChars: Math.min(merged.maxBodyExcerptChars, MAX_BODY_EXCERPT_CHARS) };
     this.now = options.now ?? (() => Date.now());
@@ -351,66 +415,202 @@ export class InboundMailStore {
   }
 
   /**
-   * The validated record set from the last load or write, with the file
-   * identity it was read from. This process is the writer, so a read is one
-   * `stat`: the set is reloaded only when another process changed the file.
+   * Bring the index up to date. The first call opens the log, and brings in
+   * the records of the whole-file store this one replaced; every later call is
+   * one `stat`, and reads lines only when another process appended some.
+   * `locked` says the caller already holds the cross-process write lock.
    */
-  private loaded: { readonly records: InboundMailRecord[]; readonly malformed: number; readonly stamp: string } | null = null;
+  private async current(locked: boolean): Promise<void> {
+    const logPath = this.logPath;
+    if (logPath === null) return;
+    if (!this.opened) {
+      const open = async (): Promise<void> => {
+        if (this.opened) return;
+        const log = this.log ?? openRecordLog<InboundMailLogLine>(logPath, { fsync: 'batch', key: lineRecordId });
+        this.log = log;
+        log.refresh();
+        this.rebuild(log);
+        // Only the holder of the write lock imports, so two processes starting together import once.
+        await this.importWholeFileStore(log);
+        this.opened = true;
+      };
+      await (locked ? open() : withInboundStoreWriteLock(this.legacy.lockPath, open));
+      return;
+    }
+    const log = this.log;
+    if (log === null) return;
+    const found = log.refresh();
+    if (found === 0) return;
+    if (log.size === this.consumed + found) {
+      for (const line of log.scan(this.consumed)) this.fold(line);
+      this.consumed = log.size;
+    } else {
+      // Another process compacted the log: its lines were renumbered.
+      this.rebuild(log);
+    }
+  }
 
-  /** The file's identity (inode, size, mtime); renamed-in writes always change it. */
-  private async fileStamp(): Promise<string> {
-    const lockPath = this.store.lockPath;
-    if (lockPath === null) return 'memory';
+  /**
+   * Bring the records of the whole-file store this one replaced into the log,
+   * once: every valid record is appended, then the `imported` line, and only
+   * once both are on disk is the file removed, so the log is the one copy.
+   *
+   * Safe to run again at any point. Until the `imported` line is in the log the
+   * import has not happened as far as any open is concerned, so a crash part way
+   * through appends the same records again under the same ids at the next open,
+   * which fold into the same entries (nothing else writes before an import
+   * finishes: every write opens the store first). Once the line is there the
+   * file is never read again, only removed if it is still present.
+   *
+   * A file that cannot be read refuses the open with the file untouched
+   * (store-read.ts). One that does not parse is reported; it is removed only
+   * when `PersistentStore` kept a copy of it, the copy the report names.
+   */
+  private async importWholeFileStore(log: RecordLog<InboundMailLogLine>): Promise<void> {
+    const legacyPath = this.legacyPath;
+    if (legacyPath === null) return;
+    if (!this.importDone) {
+      const { data, corruption } = await loadStoreForWrite(this.legacy);
+      if (corruption !== null) {
+        this.corruption = corruption;
+        this.unreportedCorruption = corruption;
+        // Without a kept copy the unreadable file is the only evidence; it stays, and the next open tries again.
+        if (corruption.quarantinedTo === undefined) return;
+      } else if (data === null) {
+        return; // No whole-file store: nothing to import.
+      }
+      const entries: readonly unknown[] = data !== null && Array.isArray(data.records) ? data.records : [];
+      for (const entry of entries) {
+        const record = validateInboundMailRecord(entry);
+        if (record === null) {
+          this.importedMalformed += 1;
+          continue;
+        }
+        this.seq += 1;
+        log.append({ seq: this.seq, put: record });
+      }
+      this.seq += 1;
+      log.append({ seq: this.seq, imported: true });
+      await log.flush();
+      for (const line of log.scan(this.consumed)) this.fold(line);
+      this.consumed = log.size;
+    } else if (!existsSync(legacyPath)) {
+      return;
+    }
     try {
-      const stat = await fs.stat(lockPath.slice(0, -'.lock'.length));
-      return `${String(stat.ino)}:${String(stat.size)}:${String(stat.mtimeMs)}`;
+      // The log file's own directory entry must be on disk before the only other copy goes.
+      syncDirectory(dirname(legacyPath));
+      await fs.rm(legacyPath, { force: true });
     } catch (error) {
-      // An unreadable stat must not serve the held set: load and let the load say why.
-      return (error as { code?: unknown }).code === 'ENOENT' ? 'absent' : `unknown:${randomUUID()}`;
+      // The records are in the log; every later open finds the `imported` line and only retries this removal.
+      logger.warn('[inbound-mail] the imported record file could not be removed', { path: legacyPath, error: summarizeError(error) });
     }
   }
 
-  private async readWithDrops(forWrite = false): Promise<{
-    records: InboundMailRecord[];
-    malformed: number;
-    corrupt: PersistentStoreCorruption | null;
-  }> {
-    const stamp = await this.fileStamp();
-    if (this.loaded !== null && this.loaded.stamp === stamp) {
-      return { records: this.loaded.records, malformed: this.loaded.malformed, corrupt: null };
-    }
-    // A write must not replace a file it only failed to read; see store-read.ts.
-    const { data: raw, corruption } = forWrite
-      ? await loadStoreForWrite(this.store)
-      : await this.store.loadOrDiscard();
-    if (corruption !== null) this.corruption = corruption;
-    if (!raw || typeof raw !== 'object') {
-      this.loaded = corruption === null ? { records: [], malformed: 0, stamp } : null;
-      return { records: [], malformed: 0, corrupt: corruption };
-    }
-    const rawRecords = Array.isArray(raw.records) ? raw.records : [];
-    const records = rawRecords.map(validateInboundMailRecord).filter((r): r is InboundMailRecord => r !== null);
-    const malformed = rawRecords.length - records.length;
-    this.loaded = { records, malformed, stamp };
-    return { records, malformed, corrupt: null };
+  private rebuild(log: RecordLog<InboundMailLogLine>): void {
+    this.index.clear();
+    this.byMessage.clear();
+    this.seqOf.clear();
+    this.malformed = 0;
+    this.importLines = 0;
+    for (const line of log.scan(0)) this.fold(line);
+    this.consumed = log.size;
   }
 
+  private fold(line: InboundMailLogLine): void {
+    if (line === null || typeof line !== 'object') return;
+    const seq = typeof line.seq === 'number' && Number.isFinite(line.seq) ? line.seq : 0;
+    if (seq > this.seq) this.seq = seq;
+    if (line.imported === true) {
+      this.importDone = true;
+      this.importLines += 1;
+    }
+    if (line.put !== undefined) {
+      const record = validateInboundMailRecord(line.put);
+      if (record === null) this.malformed += 1;
+      else this.place(record, seq);
+    }
+    if (Array.isArray(line.drop)) {
+      for (const id of line.drop as readonly unknown[]) if (typeof id === 'string') this.remove(id);
+    }
+  }
+
+  private place(record: InboundMailRecord, seq: number): void {
+    const { bodyExcerpt, ...rest } = record;
+    const indexed = rest as IndexedInboundMailRecord;
+    const previous = this.index.get(indexed.id);
+    if (previous !== undefined) this.byMessage.delete(messageKeyOf(previous));
+    this.index.set(indexed.id, indexed);
+    this.byMessage.set(messageKeyOf(indexed), indexed.id);
+    this.seqOf.set(indexed.id, seq);
+    if (this.logPath === null) this.memoryExcerpts.set(indexed.id, bodyExcerpt);
+  }
+
+  private remove(id: string): void {
+    const indexed = this.index.get(id);
+    if (indexed === undefined) return;
+    const key = messageKeyOf(indexed);
+    if (this.byMessage.get(key) === id) this.byMessage.delete(key);
+    this.index.delete(id);
+    this.seqOf.delete(id);
+    this.memoryExcerpts.delete(id);
+  }
+
+  /** The whole record, its body excerpt read from the log (one positioned read). */
+  private full(indexed: IndexedInboundMailRecord): InboundMailRecord {
+    if (this.log === null) {
+      return { ...indexed, bodyExcerpt: this.memoryExcerpts.get(indexed.id) ?? '' } as InboundMailRecord;
+    }
+    return validateInboundMailRecord(this.log.get(indexed.id)?.put)
+      ?? ({ ...indexed, bodyExcerpt: '' } as InboundMailRecord);
+  }
+
+  /**
+   * Run one change as the only writer. The index is brought current, `change`
+   * decides, and what it decided is ONE appended line; nothing already in the
+   * log is rewritten. The log is compacted only once its superseded lines
+   * outnumber its live records (or at a sweep, when it has any).
+   */
   private async mutate<T>(
-    fn: (
-      records: InboundMailRecord[],
-      malformed: number,
-      corrupt: PersistentStoreCorruption | null,
-    ) => Promise<{ next: InboundMailRecord[]; result: T }>,
+    change: () => {
+      readonly put?: InboundMailRecord | undefined;
+      readonly drop: readonly string[];
+      readonly compactNow?: boolean | undefined;
+      readonly result: T;
+    },
   ): Promise<T> {
     // The chain orders writers inside THIS process; the lock orders them
     // across processes. Both, because neither alone is "one writer at a time"
     //, see store-write-lock.ts for why a second daemon is reachable here.
-    const run = this.writeChain.then(async () => withInboundStoreWriteLock(this.store.lockPath, async () => {
-      const { records, malformed, corrupt } = await this.readWithDrops(true);
-      const { next, result } = await fn(records, malformed, corrupt);
-      this.loaded = null;
-      await this.store.persist({ version: 1, records: next });
-      this.loaded = { records: next, malformed: 0, stamp: await this.fileStamp() };
+    const run = this.writeChain.then(async () => withInboundStoreWriteLock(this.legacy.lockPath, async () => {
+      await this.current(true);
+      const { put, drop, compactNow, result } = change();
+      const log = this.log;
+      if (put !== undefined || drop.length > 0) {
+        const seq = this.seq + 1;
+        if (log !== null) {
+          log.append({ seq, ...(put !== undefined ? { put } : {}), ...(drop.length > 0 ? { drop } : {}) });
+          this.consumed = log.size;
+        }
+        this.seq = seq;
+        if (put !== undefined) this.place(put, seq);
+        for (const id of drop) this.remove(id);
+        // The write is acknowledged only once it is on disk.
+        if (log !== null) await log.flush();
+      }
+      if (log !== null) {
+        const superseded = log.size - this.index.size - this.importLines;
+        if (compactNow === true ? superseded > 0 : superseded > Math.max(COMPACT_SLACK_LINES, this.index.size)) {
+          await log.compact((line) => {
+            // The import line stays: it is what keeps a whole-file store from being read in twice.
+            if (line.imported === true) return true;
+            const id = lineRecordId(line);
+            return id !== '' && this.seqOf.get(id) === line.seq;
+          });
+          this.consumed = log.size;
+          this.malformed = 0;
+        }
+      }
       return result;
     }));
     this.writeChain = run.then(() => undefined, () => undefined);
@@ -418,78 +618,70 @@ export class InboundMailStore {
   }
 
   /**
-   * WHAT THE FILE HOLDS, not what a read is willing to serve.
+   * WHAT THE STORE HOLDS, not what a read is willing to serve.
    *
    * `list()` filters by age and by count, so a caller counting its result was
-   * counting a VIEW: with `maxRecords: 2`, ten writes left ten records on disk
-   * and `list()` answered 2. `email.inbound.status` computed its
-   * `retention.records.kept` that way, so the owner was told their store was
-   * bounded while the file grew without limit, a disclosure that reads as
-   * reassurance and is not one.
-   *
-   * `stored` counts EVERY entry in the file, malformed ones included: they
-   * occupy the file, so a count that skipped them would be the same class of
-   * comfortable answer. `live` is what a read serves. Both are returned
-   * because the GAP between them is itself the fact worth disclosing,
-   * records past their window that no write or sweep has reached yet.
+   * counting a VIEW. `stored` counts every record the log holds, the ones that
+   * do not validate included: they occupy the file. `live` is what a read
+   * serves. Both are returned because the GAP between them is itself the fact
+   * worth disclosing, records past their window that no write or sweep has
+   * reached yet.
    */
   async count(): Promise<{ readonly stored: number; readonly live: number }> {
+    await this.current(false);
     const cutoff = this.now() - this.policy.retentionMs;
-    const { records, malformed } = await this.readWithDrops();
-    const live = records.filter((r) => Date.parse(r.receivedAt) >= cutoff);
-    return { stored: records.length + malformed, live: Math.min(live.length, this.policy.maxRecords) };
+    let live = 0;
+    for (const record of this.index.values()) if (Date.parse(record.receivedAt) >= cutoff) live += 1;
+    return { stored: this.index.size + this.malformed, live: Math.min(live, this.policy.maxRecords) };
   }
 
   /**
-   * Apply BOTH policy bounds to the set about to be written.
+   * Apply BOTH policy bounds to the set a write would leave.
    *
-   * This is the fix for the finding this store existed for six weeks without:
-   * `record()` wrote `[...records, entry]` and nothing else, so the bounds
-   * lived only in `sweep()`, and `facade-inbound-mail.ts` runs the sweep every
-   * SIX HOURS. Between two sweeps the file was unbounded in both axes, and
-   * every read hid it.
-   *
-   * Age first, then count, so the reason a record went is the bound that
-   * actually bound first, the same order and the same precedence `sweep()`
-   * uses, because two orders would mean two answers to "why is this gone".
+   * The bounds hold on every write, not only at the six-hourly sweep. Age
+   * first, then count, so the reason a record went is the bound that actually
+   * bound first, the same order and the same precedence `sweep()` uses,
+   * because two orders would mean two answers to "why is this gone".
    */
-  private applyBounds(
-    records: readonly InboundMailRecord[],
+  private applyBounds<R extends { readonly receivedAt: string }>(
+    records: readonly R[],
     now: number,
-  ): { kept: InboundMailRecord[]; expired: number; overCap: number } {
+  ): { kept: R[]; expired: number; overCap: number } {
     const cutoff = now - this.policy.retentionMs;
-    const withinAge = records.filter((r) => Date.parse(r.receivedAt) >= cutoff);
+    // Each time parsed once: this runs on every write over the whole set.
+    const withinAge = records.map((record) => ({ record, at: Date.parse(record.receivedAt) })).filter((entry) => entry.at >= cutoff);
     const expired = records.length - withinAge.length;
     if (withinAge.length <= this.policy.maxRecords) {
-      return { kept: withinAge, expired, overCap: 0 };
+      return { kept: withinAge.map((entry) => entry.record), expired, overCap: 0 };
     }
     // Oldest-first, drop from the front: the same "oldest by receivedAt goes
     // first" rule `sweep()` applies.
-    const oldestFirst = [...withinAge].sort((a, b) => Date.parse(a.receivedAt) - Date.parse(b.receivedAt));
+    const oldestFirst = withinAge.sort((x, y) => x.at - y.at);
     const overCap = oldestFirst.length - this.policy.maxRecords;
-    return { kept: oldestFirst.slice(overCap), expired, overCap };
+    return { kept: oldestFirst.slice(overCap).map((entry) => entry.record), expired, overCap };
   }
 
   /**
    * Live, content-validated records, newest first. Read-time filter for age
    * and count (does not persist the drop, `sweep()` does that), so a read
-   * between sweeps never serves a record past either bound.
+   * between sweeps never serves a record past either bound. Pass `limit` when
+   * only the newest few are wanted: each record returned is one read of its line.
    */
   async list(input?: { readonly account?: string | undefined; readonly limit?: number | undefined }): Promise<readonly InboundMailRecord[]> {
-    const now = this.now();
-    const cutoff = now - this.policy.retentionMs;
-    const { records } = await this.readWithDrops();
-    const live = records
+    await this.current(false);
+    const cutoff = this.now() - this.policy.retentionMs;
+    const live = [...this.index.values()]
       .filter((r) => Date.parse(r.receivedAt) >= cutoff)
       .filter((r) => !input?.account || r.account === input.account)
       .sort((a, b) => Date.parse(b.receivedAt) - Date.parse(a.receivedAt));
     const bounded = live.slice(0, this.policy.maxRecords);
-    return input?.limit ? bounded.slice(0, input.limit) : bounded;
+    return (input?.limit ? bounded.slice(0, input.limit) : bounded).map((indexed) => this.full(indexed));
   }
 
   async get(id: string): Promise<InboundMailRecord | null> {
-    const { records } = await this.readWithDrops();
-    return records.find((r) => r.id === id) ?? null;
+    await this.current(false);
+    const indexed = this.index.get(id);
+    return indexed === undefined ? null : this.full(indexed);
   }
 
   /**
@@ -500,7 +692,7 @@ export class InboundMailStore {
    * across a restart, because it is a `Map` in a process that just died. The
    * intake asks it before announcing, so a message redelivered because the
    * cursor had not advanced when the daemon restarted is not announced to the
-   * owner a second time (§6).
+   * owner a second time (§6). It is a map lookup.
    *
    * Bounded by the same age filter `list()` applies: a record past the
    * retention window is not a live fact about this message, and answering with
@@ -513,14 +705,13 @@ export class InboundMailStore {
    * inconsistency between two methods.
    */
   async findByMessage(key: InboundMailMessageKey): Promise<InboundMailRecord | null> {
+    await this.current(false);
     const cutoff = this.now() - this.policy.retentionMs;
-    const { records } = await this.readWithDrops();
     // Same clamp the write applied, so a long account is one string on both
     // sides of the comparison rather than two.
-    const scoped = { ...key, ...clampRecordScope(key) };
-    return records.find(
-      (record) => isSameMessage(record, scoped) && Date.parse(record.receivedAt) >= cutoff,
-    ) ?? null;
+    const id = this.byMessage.get(messageKeyOf({ ...key, ...clampRecordScope(key) }));
+    const indexed = id === undefined ? undefined : this.index.get(id);
+    return indexed !== undefined && Date.parse(indexed.receivedAt) >= cutoff ? this.full(indexed) : null;
   }
 
   /**
@@ -596,39 +787,46 @@ export class InboundMailStore {
       bodyExcerpt: maskCardNumbers(maskCardNumbers(input.body).slice(0, this.policy.maxBodyExcerptChars)),
       receivedAt: input.receivedAt,
     };
-    return this.mutate(async (records) => {
+    return this.mutate(() => {
       // Matched on the CLAMPED scope, the same one `entry` was built with:
       // comparing a stored (clamped) account against an unclamped input is how
       // a retry stops recognising its own earlier row.
-      const key = { ...input, ...clampRecordScope(input) };
-      const index = records.findIndex((existing) => isSameMessage(existing, key));
-      const appended = index < 0 ? [...records, entry] : records.map((existing, at) => (
-        at === index ? { ...entry, id: existing.id } : existing
-      ));
-      const result = index < 0 ? entry : appended[index]!;
-      // BOUNDS ON THE WRITE, not only on the sweep. `record()` used to write
-      // `[...records, entry]` and nothing more, so between two six-hourly
-      // sweeps the file was bounded by neither `maxRecords` nor `retentionMs`.
-      // Applying them here is what makes the file itself bounded; the sweep
-      // stays because it also itemises, reaps malformed rows, and reaches
-      // records this process never wrote.
-      const { kept, expired, overCap } = this.applyBounds(appended, this.now());
+      const existingId = this.byMessage.get(messageKeyOf({ ...input, ...clampRecordScope(input) }));
+      const stored: InboundMailRecord = existingId === undefined ? entry : { ...entry, id: existingId };
+      // BOUNDS ON THE WRITE, not only on the sweep, so the store itself is
+      // bounded; the sweep stays because it also itemises, drops lines that do
+      // not validate, and compacts the log.
+      const candidates: { readonly id: string; readonly receivedAt: string }[] = [];
+      for (const record of this.index.values()) if (record.id !== stored.id) candidates.push(record);
+      candidates.push(stored);
+      const { kept, expired, overCap } = this.applyBounds(candidates, this.now());
       this.writeReapedExpired += expired;
       this.writeReapedOverCap += overCap;
-      return { next: kept, result };
+      if (expired + overCap === 0) return { put: stored, drop: [], result: stored };
+      const keptIds = new Set(kept.map((record) => record.id));
+      const keepsStored = keptIds.has(stored.id);
+      // A write already past a bound leaves no record; an earlier record of the same message goes with it.
+      const drop = candidates
+        .filter((record) => !keptIds.has(record.id) && (record.id !== stored.id || existingId !== undefined))
+        .map((record) => record.id);
+      return { ...(keepsStored ? { put: stored } : {}), drop, result: stored };
     });
   }
 
   /**
-   * One housekeeping pass: drop malformed records, drop records past the age
-   * bound, and enforce the count bound (oldest by `receivedAt` first).
-   * Whichever bound removes a record first is the reason recorded.
+   * One housekeeping pass: drop records that do not validate, drop records
+   * past the age bound, and enforce the count bound (oldest by `receivedAt`
+   * first). Whichever bound removes a record first is the reason recorded.
+   * The log is compacted here, so superseded lines do not outlive a sweep.
    */
   async sweep(trigger: HousekeepingTrigger = 'manual'): Promise<InboundMailRecordSweepReport> {
+    void trigger;
     const now = this.now();
     const cutoff = now - this.policy.retentionMs;
-    return this.mutate(async (records, malformed, corrupt) => {
+    return this.mutate(() => {
       const removed: InboundMailDiscard[] = [];
+      const corrupt = this.unreportedCorruption;
+      this.unreportedCorruption = null;
       if (corrupt !== null) {
         removed.push({
           id: '(unreadable)',
@@ -641,39 +839,49 @@ export class InboundMailStore {
             + 'contents were discarded',
         });
       }
-      if (malformed > 0) {
+      if (this.malformed + this.importedMalformed > 0) {
         removed.push({ id: '(unreadable)', account: '(unknown)', mailbox: '(unknown)', messageRef: '(unreadable)', reason: 'malformed', removedAt: now });
       }
+      this.importedMalformed = 0;
 
-      const withinAge: InboundMailRecord[] = [];
-      for (const record of records) {
+      const withinAge: IndexedInboundMailRecord[] = [];
+      const drop: string[] = [];
+      for (const record of this.index.values()) {
         if (Date.parse(record.receivedAt) < cutoff) {
           removed.push({ id: record.id, account: record.account, mailbox: record.mailbox, messageRef: describeRecordIdentity(record), reason: 'expired', removedAt: now });
+          drop.push(record.id);
           continue;
         }
         withinAge.push(record);
       }
 
-      const sorted = [...withinAge].sort((a, b) => Date.parse(a.receivedAt) - Date.parse(b.receivedAt));
+      const sorted = withinAge.sort((a, b) => Date.parse(a.receivedAt) - Date.parse(b.receivedAt));
       const overflow = sorted.length - this.policy.maxRecords;
-      const final: InboundMailRecord[] = [];
+      let retained = 0;
       for (let index = 0; index < sorted.length; index += 1) {
         const record = sorted[index];
         if (!record) continue;
         if (index < overflow) {
           removed.push({ id: record.id, account: record.account, mailbox: record.mailbox, messageRef: describeRecordIdentity(record), reason: 'over-cap', removedAt: now });
+          drop.push(record.id);
           continue;
         }
-        final.push(record);
+        retained += 1;
       }
 
-      return { next: final, result: { sweptAt: now, removed, retained: final.length } satisfies InboundMailRecordSweepReport };
+      return { drop, compactNow: true, result: { sweptAt: now, removed, retained } satisfies InboundMailRecordSweepReport };
     });
   }
 
   async runRecoverySweep(): Promise<InboundMailRecordSweepReport> {
     return this.sweep('recovery');
   }
+}
+
+/** Make the entries of a directory durable (a file created or removed in it). */
+function syncDirectory(directory: string): void {
+  const fd = openSync(directory, constants.O_RDONLY | constants.O_DIRECTORY);
+  try { fsyncSync(fd); } finally { closeSync(fd); }
 }
 
 /** Replace each card-number shape with the marker `redactCardShapes` uses. Local, no model. */

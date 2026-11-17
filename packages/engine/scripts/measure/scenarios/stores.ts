@@ -208,8 +208,8 @@ const MAIL_RECORDS = 1000;
 
 const inboundEmailStore: Scenario = {
   name: 'inbound-email-store',
-  drives: `InboundMailStore.record of one new IMAP message into <home>/.goodvibes/daemon/email-inbound-records.json holding ${MAIL_RECORDS} records (seeded as test/inbound-mail-record-store.test.ts seeds), default policy.`,
-  entries: [`${P}/email/inbound/record-store.ts:515 InboundMailStore.record`, `${P}/daemon/facade-inbound-mail.ts:292 (product path)`],
+  drives: `InboundMailStore.record of one new IMAP message into the record log <home>/.goodvibes/daemon/email-inbound-records.log.jsonl holding ${MAIL_RECORDS} records (seeded as the whole-file store email-inbound-records.json, imported once at setup), default policy.`,
+  entries: [`${P}/email/inbound/record-store.ts:731 InboundMailStore.record`, `${P}/daemon/facade-inbound-mail.ts:292 (product path)`],
   async setup(env): Promise<Instance> {
     const path = join(env.home, '.goodvibes', 'daemon', 'email-inbound-records.json');
     mkdirSync(dirname(path), { recursive: true });
@@ -223,6 +223,9 @@ const inboundEmailStore: Scenario = {
     }));
     writeFileSync(path, `${JSON.stringify({ version: 1, records }, null, 2)}\n`, 'utf-8');
     const store = new InboundMailStore(path);
+    // The one-time import of the seeded file happens here, so each run measures a steady-state write.
+    await store.count();
+    const logPath = path.replace(/\.json$/, '.log.jsonl');
     return {
       async op(run) {
         const input: InboundMailRecordInput = {
@@ -232,7 +235,7 @@ const inboundEmailStore: Scenario = {
           body: 'hello world', receivedAt: new Date().toISOString(),
         } as InboundMailRecordInput;
         await store.record(input);
-        return { storeBytes: Bun.file(path).size };
+        return { storeBytes: Bun.file(logPath).size };
       },
     };
   },

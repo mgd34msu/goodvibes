@@ -99,6 +99,7 @@ export {
   MAX_GROUP_TOMBSTONES,
   mergeGroupState,
   nextMembershipGeneration,
+  normalizeDisplayName,
   readGroupStateDocument,
   readmitMember,
   removeMember,

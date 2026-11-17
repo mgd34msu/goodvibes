@@ -461,7 +461,8 @@ export function groupNodes(context: GroupOperationsContext): GroupOperationResul
         const heard = isThisMachine ? context.now() : context.runtime.lastHeardFrom(member.nodeId);
         return {
           nodeId: member.nodeId,
-          displayName: member.displayName,
+          // This machine's own row shows its configured name (cluster.nodeName), which other machines learn when it joins.
+          displayName: isThisMachine ? context.nodeDisplayName : member.displayName,
           admittedAt: member.admittedAt,
           lastSeenAt: heard ?? context.runtime.listeningStartedAt ?? context.now(),
           heardSinceStart: heard !== null,

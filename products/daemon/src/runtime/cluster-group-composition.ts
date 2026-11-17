@@ -20,6 +20,7 @@ import {
   ClusterGroupRuntime,
   createClusterGroupVerbs,
   createSystemClusterClock,
+  normalizeDisplayName,
   readClusterSettings,
   rejoinGroup,
   resolveClusterGroupSettings,
@@ -55,16 +56,15 @@ export interface ClusterGroupComposition {
 }
 
 /**
- * A label for THIS machine in the member list.
+ * A label for THIS machine in the member list: `cluster.nodeName` when set.
  *
- * Deliberately NOT the hostname. The roster replicates to every member and the
- * group name reaches the network in a beacon, so defaulting to a hostname would
- * quietly publish "mikes-laptop" to anything listening. A short slice of the
- * node id is meaningless and safe, and `cluster nodes` shows it plainly so an
- * operator who wants a real name can see there is one to set.
+ * Deliberately NOT the hostname by default. The roster replicates to every
+ * member and the group name reaches the network in a beacon, so defaulting to
+ * a hostname would quietly publish "mikes-laptop" to anything listening. A
+ * short slice of the node id is meaningless and safe.
  */
-function defaultNodeDisplayName(nodeId: string): string {
-  return `machine ${nodeId.slice(0, 8)}`;
+function nodeDisplayNameFor(configManager: ConfigManager, nodeId: string): string {
+  return normalizeDisplayName(configManager.get('cluster.nodeName'), `machine ${nodeId.slice(0, 8)}`);
 }
 
 /** Gaps between further return announcements when nobody answered; then it waits for a restart. */
@@ -115,6 +115,7 @@ export function createClusterGroupComposition(options: {
   // other durable state.
   const stateDirectory = options.shellPaths.resolveProjectPath(GOODVIBES_DAEMON_SURFACE_ROOT, 'cluster');
   const nodeId = resolveNodeIdentity({ stateDirectory, logger }).nodeId;
+  const nodeDisplayName = nodeDisplayNameFor(options.configManager, nodeId);
   const clock = options.clock ?? createSystemClusterClock();
 
   let requestRejoin: () => void = () => {};
@@ -137,7 +138,7 @@ export function createClusterGroupComposition(options: {
     },
     stateDirectory,
     nodeId,
-    nodeDisplayName: defaultNodeDisplayName(nodeId),
+    nodeDisplayName,
     version: VERSION,
     clock,
     logger,
@@ -165,7 +166,7 @@ export function createClusterGroupComposition(options: {
     },
     settings: groupSettings,
     nodeId,
-    nodeDisplayName: defaultNodeDisplayName(nodeId),
+    nodeDisplayName,
     version: VERSION,
     now: () => clock.now(),
   };

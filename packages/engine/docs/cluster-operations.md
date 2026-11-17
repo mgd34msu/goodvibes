@@ -8,6 +8,8 @@ A membership change that has already received a successful storage acknowledgeme
 
 When a save of the group key during a rotation, a key sweep or the adoption of another machine's rotation is refused, the secrets store is read back once. If it holds the new key, the machine continues with it. If it still holds the previous key, the machine keeps that key and the save is tried again by the next pass; the cause is logged once when the failures start and again when a save succeeds. Only when the store cannot be read back is the membership reported as `unreadable-key-material`, recovered as above.
 
+Each machine is listed as `machine` and the first 8 characters of its node id unless it has a name: `goodvibes-daemon config set cluster.nodeName desktop` (up to 48 characters, kept on that machine, applied at the next daemon start). The name goes into the roster when the machine creates or joins a group, and `cluster nodes` on the machine itself always shows its current name.
+
 The member list file changes only when a machine is added or removed, the group is renamed or the group signing key is replaced. When each machine was last heard is kept in memory: `cluster nodes` shows it as `lastSeenAt`, with `heardSinceStart: false` for a machine nothing has been heard from since this daemon started listening.
 
 A saved configuration replica is used only with its own group ID. Changing groups does not cause a previous group's replica to become the new group's configuration after restart.

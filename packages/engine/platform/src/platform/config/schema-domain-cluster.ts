@@ -38,6 +38,8 @@ export interface ClusterConfig {
   beaconSeconds: number;
   /** How often the member list is shared with the group, in seconds. */
   rosterGossipSeconds: number;
+  /** This machine's name in the group's member list; empty uses a slice of its node id. */
+  nodeName: string;
 }
 
 
@@ -62,6 +64,7 @@ export const clusterConfigDefaults: { cluster: ClusterConfig } = {
     keyRotationGraceMinutes: 5,
     beaconSeconds: 15,
     rosterGossipSeconds: 60,
+    nodeName: '',
   },
 };
 
@@ -151,6 +154,15 @@ const clusterSettingRows: ConfigSettingDefinition[] = [
       'How often this machine shares the group\'s member list with the others, in seconds. This is how a rename, a newly added machine or a removal reaches every machine in the group, including ones that were switched off when it happened. The member list is checked on a 30 second timer, so any value below 30 behaves as 30. Higher means changes settle more slowly.',
     ...intRange(10, 3_600),
   },
+  {
+    key: 'cluster.nodeName',
+    type: 'string',
+    default: '',
+    description:
+      'A name for THIS machine in the group\'s member list (`cluster nodes` and the web UI), such as "desktop" or "laptop", so you can tell the machines apart when removing one or reading which machine holds a surface. Up to 48 characters. Empty, the default, shows "machine" and the first 8 characters of its node id; the hostname is never used, because the member list replicates and the group is advertised on the network. Kept on this machine only. Other machines record the name this machine had when it created or joined the group.',
+    validate: (v) => typeof v === 'string' && v.trim().length <= 48,
+    validationHint: 'up to 48 characters',
+  },
 ];
 
 /**
@@ -168,6 +180,7 @@ export const CLUSTER_STARTUP_ONLY_KEYS: ReadonlySet<string> = new Set([
   'cluster.rosterGossipSeconds',
   'cluster.keyRotationHours',
   'cluster.keyRotationGraceMinutes',
+  'cluster.nodeName',
 ]);
 
 export const CLUSTER_RESTART_NOTE = 'Applies after the daemon restarts.';

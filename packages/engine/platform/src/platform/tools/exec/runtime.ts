@@ -121,15 +121,20 @@ function normalizeExecInput(input: ExecInput): ExecInput {
  * Each stream's share of the execute result ceiling (the output policy's one
  * owner of ceilings): stdout and stderr of one command together, with room for
  * the result's own fields, stay under it, so a finished command's output is
- * cut and saved once here and not cut again by the policy.
+ * cut and saved once here and not cut again by the policy. Read when a command
+ * finishes, not when this module loads: the output policy sits on an import
+ * cycle with this module, and in the published build (Node loading the
+ * JavaScript) this module can evaluate before the policy's ceilings exist.
  */
-const EXEC_STREAM_MAX_CHARS = Math.floor((DEFAULT_CEILING_TOKENS.execute * 4) * 0.45);
+function execStreamMaxChars(): number {
+  return Math.floor((DEFAULT_CEILING_TOKENS.execute * 4) * 0.45);
+}
 
 async function truncate(
   overflowHandler: OverflowHandler,
   s: string,
   label: string,
-  maxChars: number = EXEC_STREAM_MAX_CHARS,
+  maxChars: number = execStreamMaxChars(),
 ): Promise<{ text: string; truncated: boolean }> {
   const result = await overflowHandler.handle(s, { maxChars, label });
   return { text: result.content, truncated: result.overflowRef !== undefined };

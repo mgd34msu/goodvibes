@@ -147,7 +147,9 @@ export const CONFIG_DOMAIN_OWNERS: Readonly<Record<ConfigDomain, 'daemon' | 'cli
 };
 
 /** Subtrees the daemon owns inside a client domain: local voice provisioning is model files on the daemon's disk. */
-const DAEMON_OWNED_SUBTREES: readonly string[] = ['voice.local.'];
+// `storage.secretProviders.`: how this machine runs its password managers, one
+// value every product and the daemon resolve secret references with.
+const DAEMON_OWNED_SUBTREES: readonly string[] = ['voice.local.', 'storage.secretProviders.'];
 
 /**
  * The daemon-owned prefixes, derived from {@link CONFIG_DOMAIN_OWNERS}: every

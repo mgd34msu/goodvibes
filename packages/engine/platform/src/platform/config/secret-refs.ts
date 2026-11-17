@@ -58,7 +58,6 @@ export interface OnePasswordSecretRef {
   readonly item?: string | undefined;
   readonly field?: string | undefined;
   readonly account?: string | undefined;
-  readonly cli?: string | undefined;
   readonly timeoutMs?: number | undefined;
 }
 
@@ -67,9 +66,6 @@ export interface BitwardenSecretRef {
   readonly item: string;
   readonly field?: BitwardenSecretField | undefined;
   readonly customField?: string | undefined;
-  readonly cli?: string | undefined;
-  readonly appDataDir?: string | undefined;
-  readonly sessionEnv?: string | undefined;
   readonly server?: string | undefined;
   readonly serverEnv?: string | undefined;
   readonly validateServer?: boolean | undefined;
@@ -81,13 +77,50 @@ export interface BitwardenSecretsManagerRef {
   readonly source: 'bitwarden-secrets-manager' | 'bws';
   readonly id: string;
   readonly field?: string | undefined;
-  readonly cli?: string | undefined;
-  readonly accessTokenEnv?: string | undefined;
   readonly accessToken?: string | undefined;
   readonly profile?: string | undefined;
-  readonly configFile?: string | undefined;
-  readonly serverUrl?: string | undefined;
   readonly timeoutMs?: number | undefined;
+}
+
+/**
+ * How this machine reaches each password manager: the program to run, its data
+ * directory or config file, its server, and the environment variable that holds
+ * its session or access token. These come from the owner's own settings
+ * (`storage.secretProviders.*`), never from a reference: a reference is data
+ * that can arrive in a repository or an imported file, and letting it name a
+ * program or a token variable would let that data run a command or hand a token
+ * to a server of its choosing. Empty fields use the provider's own defaults
+ * (`op`, `bw`, `bws` on the PATH, their own environment variables).
+ */
+export interface SecretProviderHostConfig {
+  readonly onePassword?: { readonly cli?: string | undefined } | undefined;
+  readonly bitwarden?: {
+    readonly cli?: string | undefined;
+    readonly appDataDir?: string | undefined;
+    readonly sessionEnv?: string | undefined;
+  } | undefined;
+  readonly bitwardenSecretsManager?: {
+    readonly cli?: string | undefined;
+    readonly accessTokenEnv?: string | undefined;
+    readonly configFile?: string | undefined;
+    readonly serverUrl?: string | undefined;
+  } | undefined;
+}
+
+let hostConfigSource: () => SecretProviderHostConfig = () => ({});
+
+/**
+ * Install where the provider host settings are read from. The credential owner
+ * (`SecretsManager`) installs a reader of its settings; a process that has none
+ * uses the providers' defaults.
+ */
+export function useSecretProviderHostConfig(read: () => SecretProviderHostConfig): void {
+  hostConfigSource = read;
+}
+
+function hostConfig(options: SecretRefResolutionOptions): SecretProviderHostConfig {
+  if (options.providers) return options.providers;
+  try { return hostConfigSource(); } catch { return {}; }
 }
 
 export type SecretRef =
@@ -129,6 +162,8 @@ export interface SecretRefResolutionOptions {
   readonly configKey?: string | undefined;
   /** Assert a reference-SHAPED value is a literal. Off by default; secret-ref-refusal.ts. */
   readonly treatUnparseableRefAsLiteral?: boolean | undefined;
+  /** Provider host settings for this resolution; defaults to the installed reader. */
+  readonly providers?: SecretProviderHostConfig | undefined;
 }
 
 export interface SecretRefResolution {
@@ -311,7 +346,6 @@ function parseGoodVibesSecretsUri(url: URL): SecretRef | null {
       item,
       field,
       account: readSearchString(params, 'account'),
-      cli: readSearchString(params, 'cli'),
       timeoutMs: readSearchNumber(params, 'timeoutMs'),
     };
   }
@@ -324,9 +358,6 @@ function parseGoodVibesSecretsUri(url: URL): SecretRef | null {
       item,
       field: rest[1] ?? readSearchString(params, 'field') ?? 'password',
       customField: readSearchString(params, 'customField'),
-      cli: readSearchString(params, 'cli'),
-      appDataDir: readSearchString(params, 'appDataDir'),
-      sessionEnv: readSearchString(params, 'sessionEnv'),
       server: readSearchString(params, 'server', 'serverUrl'),
       serverEnv: readSearchString(params, 'serverEnv'),
       validateServer: readSearchBoolean(params, 'validateServer'),
@@ -342,11 +373,7 @@ function parseGoodVibesSecretsUri(url: URL): SecretRef | null {
       source,
       id,
       field: rest[1] ?? readSearchString(params, 'field') ?? 'value',
-      cli: readSearchString(params, 'cli'),
-      accessTokenEnv: readSearchString(params, 'accessTokenEnv'),
       profile: readSearchString(params, 'profile'),
-      configFile: readSearchString(params, 'configFile'),
-      serverUrl: readSearchString(params, 'serverUrl'),
       timeoutMs: readSearchNumber(params, 'timeoutMs'),
     };
   }
@@ -386,8 +413,6 @@ function parseProviderUri(value: string): SecretRef | null {
       customField: url.searchParams.get('customField') ?? undefined,
       server: url.searchParams.get('server') ?? undefined,
       serverEnv: url.searchParams.get('serverEnv') ?? undefined,
-      appDataDir: url.searchParams.get('appDataDir') ?? undefined,
-      sessionEnv: url.searchParams.get('sessionEnv') ?? undefined,
     };
   }
 
@@ -400,8 +425,6 @@ function parseProviderUri(value: string): SecretRef | null {
       customField: url.searchParams.get('customField') ?? undefined,
       server: url.searchParams.get('server') ?? undefined,
       serverEnv: url.searchParams.get('serverEnv') ?? undefined,
-      appDataDir: url.searchParams.get('appDataDir') ?? undefined,
-      sessionEnv: url.searchParams.get('sessionEnv') ?? undefined,
     };
   }
 
@@ -412,9 +435,6 @@ function parseProviderUri(value: string): SecretRef | null {
       id: host,
       field: segments[0]! ?? url.searchParams.get('field') ?? 'value',
       profile: url.searchParams.get('profile') ?? undefined,
-      configFile: url.searchParams.get('configFile') ?? undefined,
-      serverUrl: url.searchParams.get('serverUrl') ?? undefined,
-      accessTokenEnv: url.searchParams.get('accessTokenEnv') ?? undefined,
     };
   }
 
@@ -441,8 +461,6 @@ function parseProviderUri(value: string): SecretRef | null {
       customField: url.searchParams.get('customField') ?? undefined,
       server: url.searchParams.get('server') ?? undefined,
       serverEnv: url.searchParams.get('serverEnv') ?? undefined,
-      appDataDir: url.searchParams.get('appDataDir') ?? undefined,
-      sessionEnv: url.searchParams.get('sessionEnv') ?? undefined,
     };
   }
   if (source === 'bws' || source === 'bitwarden-secrets-manager') {
@@ -452,9 +470,6 @@ function parseProviderUri(value: string): SecretRef | null {
       id: first,
       field: segments[1]! ?? url.searchParams.get('field') ?? 'value',
       profile: url.searchParams.get('profile') ?? undefined,
-      configFile: url.searchParams.get('configFile') ?? undefined,
-      serverUrl: url.searchParams.get('serverUrl') ?? undefined,
-      accessTokenEnv: url.searchParams.get('accessTokenEnv') ?? undefined,
     };
   }
   return null;
@@ -516,7 +531,6 @@ export function normalizeSecretRef(input: unknown): SecretRef | null {
       item,
       field,
       account: readString(raw.account),
-      cli: readString(raw.cli),
       timeoutMs: readNumber(raw.timeoutMs),
     };
   }
@@ -529,9 +543,6 @@ export function normalizeSecretRef(input: unknown): SecretRef | null {
       item,
       field: readString(raw.field) ?? 'password',
       customField: readString(raw.customField),
-      cli: readString(raw.cli),
-      appDataDir: readString(raw.appDataDir),
-      sessionEnv: readString(raw.sessionEnv),
       server: readString(raw.server ?? raw.serverUrl),
       serverEnv: readString(raw.serverEnv),
       validateServer: readBoolean(raw.validateServer),
@@ -547,12 +558,8 @@ export function normalizeSecretRef(input: unknown): SecretRef | null {
       source,
       id,
       field: readString(raw.field) ?? 'value',
-      cli: readString(raw.cli),
-      accessTokenEnv: readString(raw.accessTokenEnv),
       accessToken: readString(raw.accessToken),
       profile: readString(raw.profile),
-      configFile: readString(raw.configFile),
-      serverUrl: readString(raw.serverUrl),
       timeoutMs: readNumber(raw.timeoutMs),
     };
   }
@@ -703,15 +710,20 @@ function buildOnePasswordRef(ref: OnePasswordSecretRef): string {
 async function resolveOnePasswordRef(ref: OnePasswordSecretRef, options: SecretRefResolutionOptions): Promise<string | null> {
   const args = ['read', buildOnePasswordRef(ref)];
   if (ref.account) args.push('--account', ref.account);
-  const output = await runChecked(ref, ref.cli ?? 'op', args, options, { timeoutMs: ref.timeoutMs ?? 10_000 });
+  const output = await runChecked(ref, hostConfig(options).onePassword?.cli || 'op', args, options, { timeoutMs: ref.timeoutMs ?? 10_000 });
   return output.length > 0 ? output : null;
 }
 
-function bitwardenEnv(ref: BitwardenSecretRef, options: SecretRefResolutionOptions): Record<string, string> {
+function bitwardenEnv(options: SecretRefResolutionOptions): Record<string, string> {
+  const host = hostConfig(options).bitwarden;
   const env: Record<string, string> = {};
-  if (ref.appDataDir) env.BITWARDENCLI_APPDATA_DIR = expandUserPath(ref.appDataDir, options.homeDirectory);
-  if (ref.sessionEnv && process.env[ref.sessionEnv]) env.BW_SESSION = process.env[ref.sessionEnv]!;
+  if (host?.appDataDir) env.BITWARDENCLI_APPDATA_DIR = expandUserPath(host.appDataDir, options.homeDirectory);
+  if (host?.sessionEnv && process.env[host.sessionEnv]) env.BW_SESSION = process.env[host.sessionEnv]!;
   return env;
+}
+
+function bitwardenCli(options: SecretRefResolutionOptions): string {
+  return hostConfig(options).bitwarden?.cli || 'bw';
 }
 
 function expectedBitwardenServer(ref: BitwardenSecretRef): string | null {
@@ -728,8 +740,8 @@ async function validateBitwardenStatus(ref: BitwardenSecretRef, options: SecretR
   const expectedServer = expectedBitwardenServer(ref);
   const shouldValidate = ref.source === 'vaultwarden' || ref.validateServer === true || Boolean(expectedServer);
   if (!shouldValidate) return;
-  const output = await runChecked(ref, ref.cli ?? 'bw', ['status', '--nointeraction'], options, {
-    env: bitwardenEnv(ref, options),
+  const output = await runChecked(ref, bitwardenCli(options), ['status', '--nointeraction'], options, {
+    env: bitwardenEnv(options),
     timeoutMs: ref.timeoutMs ?? 10_000,
   });
   const status = JSON.parse(output || '{}') as { serverUrl?: string; status?: string };
@@ -775,22 +787,22 @@ function extractBitwardenItemField(rawItem: string, ref: BitwardenSecretRef): st
 
 async function resolveBitwardenRef(ref: BitwardenSecretRef, options: SecretRefResolutionOptions): Promise<string | null> {
   await validateBitwardenStatus(ref, options);
-  const env = bitwardenEnv(ref, options);
+  const env = bitwardenEnv(options);
   if (ref.syncBeforeRead) {
-    await runChecked(ref, ref.cli ?? 'bw', ['sync', '--nointeraction'], options, { env, timeoutMs: ref.timeoutMs ?? 20_000 });
+    await runChecked(ref, bitwardenCli(options), ['sync', '--nointeraction'], options, { env, timeoutMs: ref.timeoutMs ?? 20_000 });
   }
 
   const field = ref.field ?? 'password';
   const canUseDirectGet = !ref.customField && (field === 'password' || field === 'username' || field === 'notes' || field === 'totp');
   if (canUseDirectGet) {
-    const output = await runChecked(ref, ref.cli ?? 'bw', ['get', field, ref.item, '--raw', '--nointeraction'], options, {
+    const output = await runChecked(ref, bitwardenCli(options), ['get', field, ref.item, '--raw', '--nointeraction'], options, {
       env,
       timeoutMs: ref.timeoutMs ?? 10_000,
     });
     return output.length > 0 ? output : null;
   }
 
-  const itemJson = await runChecked(ref, ref.cli ?? 'bw', ['get', 'item', ref.item, '--raw', '--nointeraction'], options, {
+  const itemJson = await runChecked(ref, bitwardenCli(options), ['get', 'item', ref.item, '--raw', '--nointeraction'], options, {
     env,
     timeoutMs: ref.timeoutMs ?? 10_000,
   });
@@ -801,16 +813,17 @@ async function resolveBitwardenSecretsManagerRef(
   ref: BitwardenSecretsManagerRef,
   options: SecretRefResolutionOptions,
 ): Promise<string | null> {
+  const host = hostConfig(options).bitwardenSecretsManager;
   const env: Record<string, string> = {};
   if (ref.accessToken) env.BWS_ACCESS_TOKEN = ref.accessToken;
-  else if (ref.accessTokenEnv && process.env[ref.accessTokenEnv]) env.BWS_ACCESS_TOKEN = process.env[ref.accessTokenEnv]!;
+  else if (host?.accessTokenEnv && process.env[host.accessTokenEnv]) env.BWS_ACCESS_TOKEN = process.env[host.accessTokenEnv]!;
 
   const args = ['secret', 'get', ref.id, '--output', 'json', '--color', 'no'];
   if (ref.profile) args.push('--profile', ref.profile);
-  if (ref.configFile) args.push('--config-file', expandUserPath(ref.configFile, options.homeDirectory));
-  if (ref.serverUrl) args.push('--server-url', ref.serverUrl);
+  if (host?.configFile) args.push('--config-file', expandUserPath(host.configFile, options.homeDirectory));
+  if (host?.serverUrl) args.push('--server-url', host.serverUrl);
 
-  const output = await runChecked(ref, ref.cli ?? 'bws', args, options, { env, timeoutMs: ref.timeoutMs ?? 10_000 });
+  const output = await runChecked(ref, host?.cli || 'bws', args, options, { env, timeoutMs: ref.timeoutMs ?? 10_000 });
   const parsed = JSON.parse(output) as unknown;
   const secret = Array.isArray(parsed) ? parsed[0] : parsed;
   const record = asRecord(secret);

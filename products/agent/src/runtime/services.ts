@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import type { SecretsManager } from '../config/secrets.ts';
 import { registerTerminalKnowledgeCleanup } from '@goodvibes-jev/engine/terminal-shell/bootstrap-lifecycle';
 import { createTerminalMemoryAdmission } from '@goodvibes-jev/engine/terminal-shell/bootstrap-lifecycle';
 import { join } from 'node:path';
@@ -12,7 +13,6 @@ import { shell as runtimeShell, operations as runtimeOperations } from '@goodvib
 // this fork's graph later cannot compile without being named for teardown.
 import { createAsyncDisposalScope, createRuntimeStopRequests, registerRuntimePollers } from '@goodvibes-jev/engine/platform/platform/runtime/disposal';
 import type { shell as RuntimeShell, bootstrap as RuntimeBootstrap } from '@goodvibes-jev/engine/platform/platform/runtime';
-import { applyRawSecretLiteralHandling, type SecretsManager } from '../config/secrets.ts';
 import { readCheckpointGuardSettings, readCheckpointRegistrationSetting } from '../config/checkpoint-settings.ts';
 import { createAgentResearchSourceOwner } from './research-source-screening.ts';
 import { createClassicProtectedSourceOwner, type ProtectedSourceOwner } from '@goodvibes-jev/engine/platform/platform/security';
@@ -312,27 +312,11 @@ export function shouldRefreshModels(mode: ModelDiscoveryMode | undefined): boole
 }
 
 /**
- * How the client floor builds this product's provider registry: the registry
- * itself, as the terminal app builds it (an absent key is an unconfigured
- * provider, never a construction failure), plus the raw-literal pair.
- *
- * THE RAW-LITERAL PAIR on the credential store. The floor builds its own
- *    `SecretsManager` and hands this same instance to the provider stack, the
- *    service registry and the agent orchestrator; it takes no secrets-manager
- *    option, so this callback is the only point at which that instance is in
- *    this product's hands. It is also early enough: the floor's boot
- *    credential refresh reads the store inside the synchronous prefix of
- *    `refreshProviderCredentials()`, which runs immediately AFTER this
- *    callback returns. See applyRawSecretLiteralHandling for what the pair
- *    does and the platform option that would retire this.
+ * How the client floor builds this product's provider registry, as the terminal
+ * app builds it: an absent key is an unconfigured provider, never a
+ * construction failure.
  */
 function buildAgentProviderRegistry(options: ProviderRegistryConstructionOptions): ProviderRegistry {
-  // The registry's own option bag narrows the credential store to the two
-  // methods the registry itself calls. The OBJECT is the floor's full
-  // `SecretsManager`, `createProviderStack` passes its own field straight
-  // through, and the pair has to go on the whole thing, so the widening is
-  // stated here.
-  applyRawSecretLiteralHandling(options.secretsManager as SecretsManager);
   return new ProviderRegistry(options);
 }
 

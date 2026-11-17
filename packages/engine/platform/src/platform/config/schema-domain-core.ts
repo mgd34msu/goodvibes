@@ -44,6 +44,16 @@ export const coreConfigDefaults = {
     artifacts: {
       maxBytes: 512 * 1024 * 1024,
     },
+    secretProviders: {
+      onePasswordCli: '',
+      bitwardenCli: '',
+      bitwardenAppDataDir: '',
+      bitwardenSessionEnv: '',
+      bwsCli: '',
+      bwsAccessTokenEnv: '',
+      bwsConfigFile: '',
+      bwsServerUrl: '',
+    },
   },
   permissions: {
     mode: 'safe-owner',
@@ -343,6 +353,54 @@ export const coreHeadConfigSettings: (ConfigSettingDefinition | ConfigSetting)[]
     default: 512 * 1024 * 1024,
     description: 'Maximum stored artifact size for file, URL, multipart, and raw upload ingest in bytes',
     ...intRange(1 * 1024 * 1024, 10 * 1024 * 1024 * 1024),
+  },
+  {
+    key: 'storage.secretProviders.onePasswordCli',
+    type: 'string',
+    default: '',
+    description: 'The 1Password CLI program to run for op:// and 1password references. Empty runs `op` from your PATH.',
+  },
+  {
+    key: 'storage.secretProviders.bitwardenCli',
+    type: 'string',
+    default: '',
+    description: 'The Bitwarden CLI program to run for bitwarden and vaultwarden references. Empty runs `bw` from your PATH.',
+  },
+  {
+    key: 'storage.secretProviders.bitwardenAppDataDir',
+    type: 'string',
+    default: '',
+    description: "The Bitwarden CLI data directory (BITWARDENCLI_APPDATA_DIR) for bitwarden and vaultwarden references, for example a separate login for GoodVibes. Empty uses the CLI's own.",
+  },
+  {
+    key: 'storage.secretProviders.bitwardenSessionEnv',
+    type: 'string',
+    default: '',
+    description: 'The environment variable holding your unlocked Bitwarden session, passed to the CLI as BW_SESSION. Empty passes BW_SESSION through as it is.',
+  },
+  {
+    key: 'storage.secretProviders.bwsCli',
+    type: 'string',
+    default: '',
+    description: 'The Bitwarden Secrets Manager CLI program to run for bws references. Empty runs `bws` from your PATH.',
+  },
+  {
+    key: 'storage.secretProviders.bwsAccessTokenEnv',
+    type: 'string',
+    default: '',
+    description: 'The environment variable holding your Bitwarden Secrets Manager access token, passed to the CLI as BWS_ACCESS_TOKEN. Empty passes BWS_ACCESS_TOKEN through as it is.',
+  },
+  {
+    key: 'storage.secretProviders.bwsConfigFile',
+    type: 'string',
+    default: '',
+    description: "The Bitwarden Secrets Manager CLI config file. Empty uses the CLI's own.",
+  },
+  {
+    key: 'storage.secretProviders.bwsServerUrl',
+    type: 'string',
+    default: '',
+    description: "The Bitwarden Secrets Manager server the CLI talks to, for a self-hosted server. Empty uses the CLI's own.",
   },
   {
     key: 'permissions.mode',

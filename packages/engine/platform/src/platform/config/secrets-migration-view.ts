@@ -5,7 +5,8 @@
  * Resolution walks ONE surface root, and that is correct: the agent has no
  * business resolving a credential out of the TUI's silo at read time, and a
  * daemon that did would be reading a value nobody asked it to. Revoke walks the
- * same set, for the same reason.
+ * same set, except that revoking a daemon-needed key also sweeps the other
+ * surfaces' stores, so the migration cannot promote an older copy back.
  *
  * Migration is the single exception, and the owner's machine is why it has to
  * exist. Their Telegram token sat in `~/.goodvibes/agent/secrets.enc` while the

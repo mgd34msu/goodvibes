@@ -5,10 +5,11 @@
  * daemon's `credentials.get` wire method (config sharing, see CHANGELOG 1.0.0).
  *
  * The returned provider reports whether each credential in the shared store is
- * configured and usable, it NEVER exposes the plaintext value. `usable` is a
- * real in-process resolution attempt (env → store → secret-ref), reported only
- * as a boolean, so a configured-but-unresolvable reference (e.g. a broken
- * `op://` ref) is honestly `configured: true, usable: false`.
+ * configured and usable, it NEVER exposes the plaintext value. For a stored
+ * value `usable` is an in-process read (env → store), reported only as a
+ * boolean. For a stored reference it means the reference parses: a listing
+ * starts no password-manager process, and `/secrets test <secret-ref>` is the
+ * live check. A project-store key not yet confirmed is `usable: false`.
  *
  * Enumeration is never a `process.env` dump. It covers STORED keys, plus the
  * env-backed keys whose names are KNOWN credential names, the provider env
@@ -30,7 +31,7 @@ import type {
   CredentialStatusRecord,
 } from '@goodvibes-jev/engine/daemon-api';
 import { BUILTIN_PROVIDER_ENV_KEYS } from './provider-credential-catalog.js';
-import type { SecretsManager } from './secrets.js';
+import type { SecretRecord, SecretsManager } from './secrets.js';
 
 function declaredProviders(key: string): readonly string[] {
   return Object.entries(BUILTIN_PROVIDER_ENV_KEYS).filter(([, names]) => names.includes(key)).map(([id]) => id);
@@ -54,7 +55,9 @@ function knownCredentialEnvNames(): ReadonlySet<string> {
 /** The SecretsManager surface this adapter needs (keeps callers free to inject a stub). */
 type SecretsMetadataSource = Pick<SecretsManager, 'get' | 'list' | 'listDetailed'>;
 
-async function resolveUsable(secrets: SecretsMetadataSource, key: string): Promise<boolean> {
+async function resolveUsable(secrets: SecretsMetadataSource, key: string, record?: SecretRecord): Promise<boolean> {
+  if (record?.unconfirmed) return false;
+  if (record?.refSource && !record.overriddenByEnv) return true;
   try {
     const value = await secrets.get(key);
     return value !== null && value.length > 0;
@@ -94,7 +97,7 @@ export function createCredentialStatusProvider(
           key: record.key,
           providerIds: declaredProviders(record.key),
           configured: true,
-          usable: await resolveUsable(secrets, record.key),
+          usable: await resolveUsable(secrets, record.key, record),
           source: record.source,
           scope: record.scope,
           secure: record.secure,
@@ -119,7 +122,7 @@ export function createCredentialStatusProvider(
         key: match.key,
         providerIds: declaredProviders(match.key),
         configured: true,
-        usable: await resolveUsable(secrets, key),
+        usable: await resolveUsable(secrets, key, match),
         source: match.source,
         scope: match.scope,
         secure: match.secure,

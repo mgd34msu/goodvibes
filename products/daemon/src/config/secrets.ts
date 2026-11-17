@@ -10,14 +10,14 @@ export type {
 } from '@goodvibes-jev/engine/platform/platform/config';
 
 import {
-  LiteralSecretsManager,
+  SecretsManager as PlatformSecretsManager,
   type SecretsManagerOptions as PlatformSecretsManagerOptions,
 } from '@goodvibes-jev/engine/platform/platform/config';
 import { GOODVIBES_DAEMON_SURFACE_ROOT } from './surface.ts';
 
 export type SecretsManagerOptions = Omit<PlatformSecretsManagerOptions, 'surfaceRoot'>;
 
-export class SecretsManager extends LiteralSecretsManager {
+export class SecretsManager extends PlatformSecretsManager {
   constructor(options: SecretsManagerOptions) {
     super({
       ...options,

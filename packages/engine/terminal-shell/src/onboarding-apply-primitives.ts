@@ -1,6 +1,5 @@
 import {
   isMalformedGoodVibesSecretReferenceValue,
-  type LiteralSecretsManager,
   type SecretsManager,
   type SecretScope,
 } from '@goodvibes-jev/engine/platform/platform/config';
@@ -21,7 +20,7 @@ export interface OnboardingApplyPrimitiveDependencies {
    * through until it names them).
    */
   readonly secrets?:
-    | (Pick<LiteralSecretsManager, 'set' | 'get' | 'delete' | 'inspect'> &
+    | (Pick<SecretsManager, 'set' | 'get' | 'delete' | 'inspect'> &
         Partial<Pick<SecretsManager, 'getWriteScopeEntry' | 'deleteWriteScopeEntry'>>)
     | undefined;
   readonly shellPaths: OnboardingShellPaths;

@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readdirSync } from 'node:fs';
 import { unlink, writeFile } from 'node:fs/promises';
 import { fetchModelContextWindows } from '@goodvibes-jev/engine/platform/platform/discovery';
 import type { CustomProviderConfig, ProviderApi } from '@goodvibes-jev/engine/platform/platform/providers';
-import type { LiteralSecretsManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { SecretsManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 import { formatProviderModel } from '@goodvibes-jev/engine/platform/platform/providers';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
@@ -32,14 +32,14 @@ function discoveredModelIds(body: unknown): string[] {
     .filter(Boolean);
 }
 /** Custom provider names are owner-defined, so their credentials explicitly belong to the daemon tier. */
-async function storeProviderKey(manager: Pick<LiteralSecretsManager, 'set'>, name: string, value: string): Promise<void> {
+async function storeProviderKey(manager: Pick<SecretsManager, 'set'>, name: string, value: string): Promise<void> {
   await manager.set(customProviderKeyName(name), value, { scope: 'daemon', medium: 'secure' });
 }
 export function createLocalProviderCommands<Context extends LocalProviderCommandContext>(
   services: {
     readonly requireProviderApi: (context: Context) => ProviderApi;
     readonly requireShellPaths: (context: Context) => ShellPathService;
-    readonly requireSecretsManager: (context: Context) => Pick<LiteralSecretsManager, 'set' | 'delete'>;
+    readonly requireSecretsManager: (context: Context) => Pick<SecretsManager, 'set' | 'delete'>;
   },
   policy: {
     readonly surfaceRoot: string;

@@ -7,7 +7,7 @@ import {
   BUILTIN_SECRET_PROVIDER_SOURCES,
   describeSecretRef,
   resolveSecretRef,
-  type LiteralSecretsManager,
+  type SecretsManager,
   type SecretScope,
 } from '@goodvibes-jev/engine/platform/platform/config';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
@@ -23,7 +23,7 @@ interface SecretsCommandContext {
 const SET_OPTIONS: ReadonlySet<string> = new Set(['--user', '--project', '--secure', '--plaintext', '--yes']);
 /** Values stay redacted; each product supplies its credential ownership and confirmation policy. */
 export function createSecretsCommand<Context extends SecretsCommandContext>(
-  manager: (context: Context) => Pick<LiteralSecretsManager, 'get' | 'set' | 'delete' | 'listDetailed'>,
+  manager: (context: Context) => Pick<SecretsManager, 'get' | 'set' | 'delete' | 'listDetailed'> & Partial<Pick<SecretsManager, 'confirmProjectSecret'>>,
   policy: {
     readonly hidden: boolean;
     readonly description: string;
@@ -42,12 +42,13 @@ export function createSecretsCommand<Context extends SecretsCommandContext>(
   const mutationUsage = (operation: string) =>
     `/secrets ${operation} <KEY> <${operation === 'link' ? 'secret-ref' : 'value'}> ${storageFlags}${suffix}`;
   const deletionUsage = `/secrets delete <KEY> ${storageFlags}${suffix}`;
-  const usage = `set <KEY> <value> ${storageFlags}${suffix} | link <KEY> <secret-ref> ${storageFlags}${suffix} | get <KEY> | test <secret-ref> | providers | list | delete <KEY> ${storageFlags}${suffix}`;
+  const trustUsage = `/secrets trust <KEY>${suffix}`;
+  const usage = `set <KEY> <value> ${storageFlags}${suffix} | link <KEY> <secret-ref> ${storageFlags}${suffix} | get <KEY> | test <secret-ref> | providers | list | trust <KEY>${suffix} | delete <KEY> ${storageFlags}${suffix}`;
   const referenceExamples = [
     'OPENAI_API_KEY goodvibes://secrets/env/OPENAI_API_KEY',
-    'SLACK_BOT_TOKEN goodvibes://secrets/bitwarden?item=GoodVibes%20Slack&field=password&sessionEnv=BW_SESSION',
+    'SLACK_BOT_TOKEN goodvibes://secrets/bitwarden?item=GoodVibes%20Slack&field=password',
     'SLACK_BOT_TOKEN goodvibes://secrets/vaultwarden?item=GoodVibes%20Slack&field=password&server=https%3A%2F%2Fvault.example.test',
-    'STRIPE_TOKEN goodvibes://secrets/bws/00000000-0000-0000-0000-000000000000?field=value&accessTokenEnv=BWS_ACCESS_TOKEN',
+    'STRIPE_TOKEN goodvibes://secrets/bws/00000000-0000-0000-0000-000000000000?field=value',
     'OPENAI_API_KEY goodvibes://secrets/1password?vault=Private&item=GoodVibes%20OpenAI&field=API%20Key',
   ];
   return {
@@ -55,7 +56,7 @@ export function createSecretsCommand<Context extends SecretsCommandContext>(
     description: policy.description,
     hidden: policy.hidden,
     usage,
-    argsHint: '<set|link|get|test|providers|list|delete> [KEY]',
+    argsHint: '<set|link|get|test|providers|list|trust|delete> [KEY]',
     secretArgs: { subcommands: { set: { from: 2 } } },
     subcommands: {
       set: `<KEY> <value> ${storageFlags}${suffix}`,
@@ -64,16 +65,18 @@ export function createSecretsCommand<Context extends SecretsCommandContext>(
       test: '<secret-ref>',
       providers: '',
       list: '',
+      trust: `<KEY>${suffix}`,
       delete: `<KEY> ${storageFlags}${suffix}`,
     },
     // A product that asks with --yes (confirmMutations) has its own question; otherwise the registry asks once.
     confirm: policy.confirmMutations
       ? undefined
       : (args) => {
-          const key = args[0] === 'delete' ? args.slice(1).find((value) => !value.startsWith('--')) : undefined;
-          return key
-            ? { title: `Delete secret ${key}?`, detail: `The stored value of ${key} is removed and cannot be recovered; anything that reads it stops working until it is set again.`, confirmLabel: 'Delete' }
-            : undefined;
+          const key = args[0] === 'delete' || args[0] === 'trust' ? args.slice(1).find((value) => !value.startsWith('--')) : undefined;
+          if (!key) return undefined;
+          return args[0] === 'trust'
+            ? { title: `Use ${key} from this project's secret store?`, detail: `A project's secret store is part of the checkout, so whoever wrote the repository may have put ${key} there. Once confirmed, ${key} from this project's store is used whenever you have not set it yourself.`, confirmLabel: 'Use it' }
+            : { title: `Delete secret ${key}?`, detail: `The stored value of ${key} is removed and cannot be recovered; anything that reads it stops working until it is set again.`, confirmLabel: 'Delete' };
         },
     async handler(args, context) {
       const store = manager(context);
@@ -89,7 +92,7 @@ export function createSecretsCommand<Context extends SecretsCommandContext>(
                 '[secrets] Stored keys:',
                 ...records.map(
                   (record) =>
-                    `  ${record.key} (${record.source}${record.refSource ? `, ref:${record.refSource}` : ''}${record.overriddenByEnv ? ', env override' : ''})`,
+                    `  ${record.key} (${record.source}${record.refSource ? `, ref:${record.refSource}` : ''}${record.overriddenByEnv ? ', env override' : ''}${record.unconfirmed ? `, not used until confirmed: /secrets trust ${record.key}${suffix}` : ''})`,
                 ),
               ].join('\n'),
         );
@@ -199,6 +202,26 @@ export function createSecretsCommand<Context extends SecretsCommandContext>(
             ? `[secrets] Linked: ${key} -> ${describeSecretRef(value)} (${scope}, ${medium})`
             : `[secrets] Stored: ${key} (${scope}, ${medium})`) + policy.relocationNote(key, requestedScope),
         );
+        return;
+      }
+      if (subcommand === 'trust') {
+        const key = rest.find((value) => !value.startsWith('--'));
+        if (!key) {
+          context.print(`[secrets] Usage: ${trustUsage}`);
+          return;
+        }
+        if (!parsed.yes) {
+          requireYesFlag(context, `use ${key} from this project's secret store`, trustUsage);
+          return;
+        }
+        if (!store.confirmProjectSecret) {
+          context.print(`[secrets] Nothing was confirmed: this app does not read this project's secret store. Store ${key} with /secrets set ${key} <value> --user${suffix}.`);
+          return;
+        }
+        const confirmed = store.confirmProjectSecret(key);
+        context.print(confirmed.length
+          ? `[secrets] ${key} from this project's secret store is used from now on (${confirmed.join(', ')}).`
+          : `[secrets] Nothing was confirmed: ${key} is not in this project's secret store. /secrets list shows what is stored.`);
         return;
       }
       if (subcommand === 'get') {

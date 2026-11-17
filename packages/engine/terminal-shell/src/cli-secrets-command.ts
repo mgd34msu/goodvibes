@@ -3,7 +3,7 @@ import {
   describeSecretRef,
   isSecretRefInput,
   resolveSecretRef,
-  type LiteralSecretsManager,
+  type SecretsManager,
   type SecretScope,
 } from '@goodvibes-jev/engine/platform/platform/config';
 import { formatJsonOrText, yesNo } from './cli-output.js';
@@ -30,7 +30,7 @@ interface CliSecretRuntime {
   readonly cli: { readonly commandArgs: readonly string[]; readonly flags: { readonly outputFormat?: string | undefined } };
 }
 export function createCliSecretsCommand<Runtime extends CliSecretRuntime>(policy: {
-  readonly createSecrets: (runtime: Runtime) => Pick<LiteralSecretsManager, 'get' | 'set' | 'delete' | 'inspect' | 'listDetailed'>;
+  readonly createSecrets: (runtime: Runtime) => Pick<SecretsManager, 'get' | 'set' | 'delete' | 'inspect' | 'listDetailed'>;
   readonly binary: (runtime: Runtime) => string;
   readonly inline: boolean;
   readonly writeScope: (key: string, requested: SecretScope) => SecretScope;

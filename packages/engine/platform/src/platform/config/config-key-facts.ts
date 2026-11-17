@@ -148,6 +148,8 @@ for (const key of OPENING_SWITCHES) declareLoosening(key, OPENING);
 declareLoosening('fetch.blockedHosts', BLOCKED_HOSTS);
 declareLoosening('relay.requireStepUpForMutations', STEP_UP);
 for (const key of [...PINNED_NETWORK, ...PINNED_SAFETY_GATE]) declareLoosening(key, PINNED);
+// Each names a program the host runs or a token variable it hands over when a secret reference resolves.
+declareLoosening('storage.secretProviders.', { loosening: 'change the program or token a password manager runs with', loosens: changes });
 
 function looseningFor(key: string): Loosening | undefined {
   const exact = EXACT_LOOSENING.get(key);

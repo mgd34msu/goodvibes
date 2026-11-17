@@ -78,6 +78,14 @@ export type ConfigValue<K extends ConfigKey> =
   K extends 'behavior.guidanceMode' ? 'off' | 'minimal' | 'guided' :
   K extends 'storage.secretPolicy' ? 'plaintext_allowed' | 'preferred_secure' | 'require_secure' :
   K extends 'storage.artifacts.maxBytes' ? number :
+  K extends 'storage.secretProviders.onePasswordCli' ? string :
+  K extends 'storage.secretProviders.bitwardenCli' ? string :
+  K extends 'storage.secretProviders.bitwardenAppDataDir' ? string :
+  K extends 'storage.secretProviders.bitwardenSessionEnv' ? string :
+  K extends 'storage.secretProviders.bwsCli' ? string :
+  K extends 'storage.secretProviders.bwsAccessTokenEnv' ? string :
+  K extends 'storage.secretProviders.bwsConfigFile' ? string :
+  K extends 'storage.secretProviders.bwsServerUrl' ? string :
   K extends 'permissions.mode' ? PermissionMode :
   K extends 'permissions.backgroundAgents' ? BackgroundAgentsMode :
   K extends 'permissions.engine' ? 'baseline' | 'policy-engine' :

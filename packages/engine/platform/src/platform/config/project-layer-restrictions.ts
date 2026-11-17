@@ -26,13 +26,19 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
-function isExecSecretRef(value: unknown): boolean {
+/**
+ * A secret reference other than a name in the owner's store. Every other source
+ * reads a file, an environment variable or runs a program, which repository
+ * content must not choose.
+ */
+function isForeignSecretRef(value: unknown): boolean {
   if (typeof value !== 'string' && !(isPlainObject(value) && ('source' in value || 'provider' in value || 'type' in value))) return false;
-  return normalizeSecretRef(value)?.source === 'exec';
+  const source = normalizeSecretRef(value)?.source;
+  return source !== undefined && source !== 'goodvibes';
 }
 
 function collectLeaves(value: unknown, path: string, out: Array<{ path: string; value: unknown }>): void {
-  if (isPlainObject(value) && !isExecSecretRef(value)) {
+  if (isPlainObject(value) && !isForeignSecretRef(value)) {
     for (const [field, child] of Object.entries(value)) collectLeaves(child, path ? `${path}.${field}` : field, out);
     return;
   }
@@ -110,8 +116,8 @@ export function restrictProjectLayer(
     }
     if (facts.loosens?.(userValue(key), readDotPath(layer, key).value)) {
       refuse(key, `a project settings file cannot ${facts.loosening ?? 'loosen this setting'}`);
-    } else if (isExecSecretRef(leaf.value)) {
-      refuse(key, 'a project settings file cannot reference a secret read by running a command', elsewhere);
+    } else if (isForeignSecretRef(leaf.value)) {
+      refuse(key, 'a project settings file can reference only a named key in your secret store (goodvibes://secrets/goodvibes/<KEY>), never a file, an environment variable or a password-manager command', elsewhere);
     }
   }
   return { layer, notices };

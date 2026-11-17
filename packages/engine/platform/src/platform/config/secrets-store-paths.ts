@@ -4,8 +4,10 @@
  * Three tiers, and the difference between them is a real directory rather than
  * a label:
  *
- *   project, `<root>/.goodvibes/<surface>/secrets.enc`, walked up the ancestor
- *             chain nearest-first. A credential that belongs to one checkout.
+ *   project, `<root>/.goodvibes/<surface>/secrets.enc` at the project root the
+ *             user opened, never a parent directory. A credential that belongs
+ *             to one checkout; a key first seen there is used only after the
+ *             user confirms it once (project-secret-approvals.ts).
  *
  *   user   , `<home>/.goodvibes/<surface>/secrets.enc`. This operator's own
  *             credential, on this machine, for this surface.
@@ -27,7 +29,7 @@
  * The environment still wins over all three.
  */
 
-import { dirname, join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { DAEMON_CONFIG_ROOT } from './daemon-config-tier.js';
 import {
   resolveSharedDirectory,
@@ -79,18 +81,10 @@ export function defaultDaemonSecretHome(globalHome: string): string {
 }
 
 /**
- * Deduplicate by FILE, not by (tier, file).
- *
- * A project root inside the home directory, `~/Projects/thing` under `~`, has
- * the home among its ancestors, so `<home>/.goodvibes/<surface>/secrets.enc`
- * is produced once as a project store (from the ancestor walk) and again as the
- * user store. One physical file, two entries.
- *
- * Keying on `source:path` kept both, because the sources differ. Reading twice
- * is harmless; ENUMERATING twice is not, the credential migration walks these
- * stores, so one credential was processed and receipted as two, in two tiers,
- * one of which does not exist. Whichever entry comes first wins, which
- * preserves the existing precedence exactly.
+ * Deduplicate by FILE, not by (tier, file). A project opened at the home
+ * directory names the user's own store twice; enumerating it twice would make
+ * the credential migration process one credential as two. Whichever entry comes
+ * first wins, which keeps the precedence.
  */
 function uniquePaths(paths: readonly SecretStorePath[]): SecretStorePath[] {
   const seen = new Set<string>();
@@ -101,18 +95,6 @@ function uniquePaths(paths: readonly SecretStorePath[]): SecretStorePath[] {
     ordered.push(path);
   }
   return ordered;
-}
-
-function collectAncestorRoots(start: string): string[] {
-  const roots: string[] = [];
-  let current = resolve(start);
-  while (true) {
-    roots.push(current);
-    const parent = dirname(current);
-    if (parent === current) break;
-    current = parent;
-  }
-  return roots;
 }
 
 function daemonStore(layout: SecretStoreLayout, medium: SecretStorageMedium): SecretStorePath {
@@ -149,13 +131,13 @@ function userStore(layout: SecretStoreLayout, medium: SecretStorageMedium): Secr
 }
 
 /**
- * An ancestor-walk entry, except that the user's own store keeps its user tier.
- * A project under the home directory reaches `<home>/.goodvibes/...` through the
- * walk; labelling it `project` would make the operator's own references look
- * like untrusted checkout data. The entry stays at its walk position.
+ * The project-root store, except that the user's own store keeps its user tier:
+ * a project opened at the home directory reaches `<home>/.goodvibes/...`, and
+ * labelling it `project` would make the operator's own credentials look like
+ * untrusted checkout data.
  */
-function ancestorStore(layout: SecretStoreLayout, root: string, medium: SecretStorageMedium): SecretStorePath {
-  const project = projectStore(layout, root, medium);
+function rootStore(layout: SecretStoreLayout, medium: SecretStorageMedium): SecretStorePath {
+  const project = projectStore(layout, layout.projectRoot, medium);
   const user = userStore(layout, medium);
   return project.path === user.path ? user : project;
 }
@@ -242,14 +224,14 @@ export function secretReadOrder(layout: SecretStoreLayout, includePlaintext: boo
   const ordered: SecretStorePath[] = [daemonStore(layout, 'secure')];
   if (includePlaintext) ordered.push(daemonStore(layout, 'plaintext'));
 
-  // Project stores sit in a checkout that may have come from anywhere, so they
-  // fill a gap and never shadow a credential the user or daemon already set.
+  // The project store sits in a checkout that may have come from anywhere, so
+  // it fills a gap and never shadows a credential the user or daemon already
+  // set. Parent directories are never read: a shared directory above the
+  // project is not the project.
   const projectStores: SecretStorePath[] = [];
-  for (const root of collectAncestorRoots(layout.projectRoot)) {
-    const walked = [ancestorStore(layout, root, 'secure')];
-    if (includePlaintext) walked.push(ancestorStore(layout, root, 'plaintext'));
-    for (const store of walked) (store.scope === 'project' ? projectStores : ordered).push(store);
-  }
+  const atRoot = [rootStore(layout, 'secure')];
+  if (includePlaintext) atRoot.push(rootStore(layout, 'plaintext'));
+  for (const store of atRoot) (store.scope === 'project' ? projectStores : ordered).push(store);
 
   ordered.push(userStore(layout, 'secure'));
   if (includePlaintext) ordered.push(userStore(layout, 'plaintext'));
@@ -259,11 +241,9 @@ export function secretReadOrder(layout: SecretStoreLayout, includePlaintext: boo
 
 /** Every store this manager could touch, policy aside. Used by delete/inspect. */
 export function allSecretStores(layout: SecretStoreLayout): SecretStorePath[] {
-  const ordered: SecretStorePath[] = [daemonStore(layout, 'secure'), daemonStore(layout, 'plaintext')];
-  for (const root of collectAncestorRoots(layout.projectRoot)) {
-    ordered.push(ancestorStore(layout, root, 'secure'), ancestorStore(layout, root, 'plaintext'));
-  }
-  ordered.push(userStore(layout, 'secure'), userStore(layout, 'plaintext'));
+  const ordered: SecretStorePath[] = [daemonStore(layout, 'secure'), daemonStore(layout, 'plaintext'),
+    rootStore(layout, 'secure'), rootStore(layout, 'plaintext'),
+    userStore(layout, 'secure'), userStore(layout, 'plaintext')];
   return uniquePaths(ordered);
 }
 

@@ -92,6 +92,17 @@ export interface GoodVibesConfig {
     artifacts: {
       maxBytes: number;          // default: 512 MiB
     };
+    /** How this machine runs each password manager a secret reference names; never set by a reference itself. */
+    secretProviders: {
+      onePasswordCli: string;
+      bitwardenCli: string;
+      bitwardenAppDataDir: string;
+      bitwardenSessionEnv: string;
+      bwsCli: string;
+      bwsAccessTokenEnv: string;
+      bwsConfigFile: string;
+      bwsServerUrl: string;
+    };
   };
   permissions: {
     mode: PermissionMode;       // default: 'prompt'
@@ -265,6 +276,14 @@ export type ConfigKey =
   | 'behavior.guidanceMode'
   | 'storage.secretPolicy'
   | 'storage.artifacts.maxBytes'
+  | 'storage.secretProviders.onePasswordCli'
+  | 'storage.secretProviders.bitwardenCli'
+  | 'storage.secretProviders.bitwardenAppDataDir'
+  | 'storage.secretProviders.bitwardenSessionEnv'
+  | 'storage.secretProviders.bwsCli'
+  | 'storage.secretProviders.bwsAccessTokenEnv'
+  | 'storage.secretProviders.bwsConfigFile'
+  | 'storage.secretProviders.bwsServerUrl'
   | 'permissions.mode'
   | 'permissions.backgroundAgents'
   | 'permissions.engine'

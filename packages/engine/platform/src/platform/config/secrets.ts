@@ -6,11 +6,16 @@ import { assertSecurityReadSource, captureSecurityReadBindings, captureSecurityR
  * Resolution order:
  *   1. Environment variable (process.env[key])
  *   2. Daemon stores (~/.goodvibes/daemon/secrets.enc, then secrets.json)
- *   3. Project/ancestor secure stores (.goodvibes/<surface>/secrets.enc), nearest first
- *   4. Project/ancestor plaintext stores (.goodvibes/<surface>.secrets.json), nearest first
- *   5. User secure store (~/.goodvibes/<surface>/secrets.enc)
- *   6. User plaintext store (~/.goodvibes/<surface>.secrets.json)
- *   7. If a resolved value is a SecretRef, resolve through the referenced provider
+ *   3. User secure store (~/.goodvibes/<surface>/secrets.enc)
+ *   4. User plaintext store (~/.goodvibes/<surface>.secrets.json)
+ *   5. The project root's stores (<root>/.goodvibes/<surface>/secrets.enc, then
+ *      <root>/.goodvibes/<surface>.secrets.json), never a parent directory's, and
+ *      a key there only once the user stored or confirmed it
+ *   6. If a resolved value is a SecretRef, resolve through the referenced provider
+ *      (a password-manager reference once per credential revision)
+ *
+ * Each store file is read once and kept; a lookup costs one `stat` per store,
+ * and a file another process rewrote is noticed by that `stat` or the store watch.
  *
  * The three scopes and the files behind them are documented in
  * secrets-store-paths.ts. The daemon tier leads because a credential the daemon
@@ -33,10 +38,10 @@ import { assertSecurityReadSource, captureSecurityReadBindings, captureSecurityR
  * Secret values are never logged.
  */
 
-import { dirname } from 'path';
+import { dirname, join, basename } from 'path';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
-import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readFileSync, statSync, writeFileSync, type Stats } from 'fs';
+import { existsSync, mkdirSync, readFileSync, statSync, watch, writeFileSync, type FSWatcher, type Stats } from 'fs';
 import { captureStrictJudgmentJson } from '../gate/judgment-result.js';
 import { observeImportFile, assertImportFileCurrent, type ImportFileObservation, type PreparedImportTransitionFacts } from './prepared-import.js';
 import type { PreparedConfigMutationReceipt } from './prepared-mutation.js';
@@ -57,8 +62,9 @@ import {
 export { SecretStoreUnreadableError } from './secrets-keyfile.js';
 import { requireAbsoluteOwnedPath } from './manager-bootstrap.js';
 import { decodeLiteralSecret, encodeLiteralSecret, shouldStoreAsLiteral } from './secret-literal-codec.js';
-import { getSecretRefSource, isSecretRefInput, normalizeSecretRef, resolveSecretRef } from './secret-refs.js';
+import { getSecretRefSource, isSecretRefInput, normalizeSecretRef, resolveSecretRef, useSecretProviderHostConfig, type SecretProviderHostConfig } from './secret-refs.js';
 import { listMigratableSecrets, migratableStores } from './secrets-migration-view.js';
+import { ProjectSecretApprovals } from './project-secret-approvals.js';
 import { logger } from '../utils/logger.js';
 import { requireSurfaceRoot, resolveSharedDirectory } from '../runtime/surface-root.js';
 import { summarizeError } from '../utils/error-display.js';
@@ -89,6 +95,8 @@ export interface SecretRecord {
   readonly path?: string | undefined;
   readonly overriddenByEnv: boolean;
   readonly refSource?: string | undefined;
+  /** A key in this project's store that is not used until the user confirms it (`/secrets trust`). */
+  readonly unconfirmed?: true | undefined;
 }
 
 export class SecretWriteCommittedError extends Error {
@@ -163,12 +171,12 @@ export interface SecretStorageReview {
 }
 
 type SecureStoreReadResult =
-  | { readonly status: 'ok'; readonly secrets: Record<string, string> }
+  | { readonly status: 'ok'; readonly secrets: Readonly<Record<string, string>> }
   | { readonly status: 'missing' }
   | { readonly status: 'unreadable'; readonly reason: string };
 
 type PlaintextStoreReadResult =
-  | { readonly status: 'ok'; readonly secrets: Record<string, string> }
+  | { readonly status: 'ok'; readonly secrets: Readonly<Record<string, string>> }
   | { readonly status: 'missing' }
   | { readonly status: 'unreadable'; readonly reason: string };
 
@@ -204,6 +212,21 @@ export interface SecretsManagerOptions {
 
 function normalizeOptionalOwnedPath(path: string | undefined, name: string): string | undefined {
   return requireAbsoluteOwnedPath(path, name, 'SecretsManager');
+}
+
+/** The owner's password-manager host settings (`storage.secretProviders.*`); empty fields fall back to each provider's defaults. */
+export function readSecretProviderHostConfig(configManager: Pick<ConfigManager, 'get'>): SecretProviderHostConfig {
+  const read = (key: 'onePasswordCli' | 'bitwardenCli' | 'bitwardenAppDataDir' | 'bitwardenSessionEnv' | 'bwsCli' | 'bwsAccessTokenEnv' | 'bwsConfigFile' | 'bwsServerUrl'): string | undefined => {
+    try {
+      const value = configManager.get(`storage.secretProviders.${key}`);
+      return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+    } catch { return undefined; }
+  };
+  return {
+    onePassword: { cli: read('onePasswordCli') },
+    bitwarden: { cli: read('bitwardenCli'), appDataDir: read('bitwardenAppDataDir'), sessionEnv: read('bitwardenSessionEnv') },
+    bitwardenSecretsManager: { cli: read('bwsCli'), accessTokenEnv: read('bwsAccessTokenEnv'), configFile: read('bwsConfigFile'), serverUrl: read('bwsServerUrl') },
+  };
 }
 
 function loadConfiguredSecretPolicy(configManager?: Pick<ConfigManager, 'get'>): SecretStorageMode {
@@ -302,6 +325,9 @@ export function captureSecretsReadSource(owner: SecretsManager): () => void {
   return capture();
 }
 
+/** Reference sources that run a password-manager or other command to resolve. */
+const COMMAND_BACKED_SOURCES: ReadonlySet<string> = new Set(['exec', '1password', 'onepassword', 'bitwarden', 'vaultwarden', 'bitwarden-secrets-manager', 'bws']);
+
 /** An environment value only when `key` is really a variable, so names such as `__proto__` never read an inherited property. */
 function ownEnvValue(key: string): string | undefined {
   return Object.hasOwn(process.env, key) ? process.env[key] : undefined;
@@ -361,22 +387,84 @@ export class SecretsManager {
   }
 
   #noteOwnWrite(filePath: string): void {
+    this.#storeCache.delete(filePath);
     try { this.#observeStore(filePath, storeIdentity(statSync(filePath)), true); }
     catch { this.#storeIdentities.delete(filePath); }
   }
 
-  /** Reads through one descriptor, so the identity costs no extra system call. */
-  #readStoreText(filePath: string): string {
-    let fd: number;
-    try { fd = openSync(filePath, 'r'); }
-    catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') this.#observeStore(filePath, 'absent', false);
-      throw error;
-    }
+  /** Parsed contents per store file, valid while the file keeps the identity it was read with. */
+  readonly #storeCache = new Map<string, { readonly identity: string; readonly secrets: Readonly<Record<string, string>> }>();
+
+  /**
+   * One `stat` of a store file. Its contents are re-read only when the identity
+   * moved, which is also how a write by another process is noticed.
+   */
+  #statStore(filePath: string): { readonly status: 'present'; readonly identity: string } | { readonly status: 'missing' } | { readonly status: 'unreadable'; readonly reason: string } {
     try {
-      this.#observeStore(filePath, storeIdentity(fstatSync(fd)), false);
-      return readFileSync(fd, 'utf-8');
-    } finally { closeSync(fd); }
+      const identity = storeIdentity(statSync(filePath));
+      this.#observeStore(filePath, identity, false);
+      return { status: 'present', identity };
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return { status: 'unreadable', reason: summarizeError(error) };
+      this.#observeStore(filePath, 'absent', false);
+      this.#storeCache.delete(filePath);
+      return { status: 'missing' };
+    }
+  }
+
+  #cachedStore(filePath: string, identity: string): Readonly<Record<string, string>> | undefined {
+    const cached = this.#storeCache.get(filePath);
+    return cached && cached.identity === identity ? cached.secrets : undefined;
+  }
+
+  #keepStore(filePath: string, identity: string, secrets: Record<string, string>): Readonly<Record<string, string>> {
+    const kept = Object.freeze(secrets);
+    this.#storeCache.set(filePath, { identity, secrets: kept });
+    return kept;
+  }
+
+  /**
+   * Watches the store directories, so a store another process rewrites moves
+   * this owner's revision and tells its subscribers at once, instead of every
+   * holder re-reading the disk to find out. Started on the first subscription
+   * or capture; the watches never keep the process alive. A directory that
+   * does not exist yet is not watched; the `stat` on the next read notices it.
+   */
+  #watchers: FSWatcher[] | null = null;
+  #startWatching(): void {
+    if (this.#watchers) return;
+    this.#watchers = [];
+    const directories = new Map<string, Set<string>>();
+    for (const path of [...this.getAllCandidateStores().map((store) => store.path), this.keyFilePath]) {
+      const names = directories.get(dirname(path)) ?? new Set<string>();
+      names.add(basename(path));
+      directories.set(dirname(path), names);
+    }
+    for (const [directory, names] of directories) {
+      try {
+        const watcher = watch(directory, { persistent: false }, (_event, name) => {
+          const changed = !name ? [...names] : names.has(String(name)) ? [String(name)] : [];
+          if (changed.length) this.#noticeStoreChange(changed.map((entry) => join(directory, entry)));
+        });
+        watcher.on('error', () => { try { watcher.close(); } catch { /* already closed */ } });
+        (watcher as FSWatcher & { unref?: () => void }).unref?.();
+        this.#watchers.push(watcher);
+      } catch { /* not watchable now; reads still compare identities */ }
+    }
+  }
+
+  #noticeStoreChange(paths: readonly string[]): void {
+    const before = this.#foreignStoreWrites;
+    for (const path of paths) {
+      if (path === this.keyFilePath) { this.#foreignStoreWrites++; continue; }
+      const known = this.#storeIdentities.get(path);
+      let identity = 'absent';
+      try { identity = storeIdentity(statSync(path)); } catch { /* removed */ }
+      if (known === undefined || known === identity) continue;
+      this.#storeCache.delete(path);
+      this.#observeStore(path, identity, false);
+    }
+    if (this.#foreignStoreWrites !== before) this.notifyCredentialInvalidation();
   }
 
   /** Value-free local owner state; no credential names, paths, bytes or hashes. */
@@ -386,12 +474,14 @@ export class SecretsManager {
 
   /** Pre-effect and settlement notifications, including failed or no-op writes. */
   onDidInvalidateCredentials(listener: () => void): () => void {
+    this.#startWatching();
     this.credentialInvalidationListeners.add(listener);
     return () => { this.credentialInvalidationListeners.delete(listener); };
   }
 
   private notifyCredentialInvalidation(): void {
     this.#credentialSnapshots.clear();
+    this.#resolvedReferences.clear();
     for (const listener of [...this.credentialInvalidationListeners]) {
       try { listener(); } catch { /* An observer cannot defeat credential revocation. */ }
     }
@@ -413,18 +503,17 @@ export class SecretsManager {
   private readonly preparedScopedDeletions = new WeakMap<PreparedScopedSecretDeletion, ScopedDeletionRecord>();
   private readonly preparedImports = new WeakMap<PreparedSecretImport, SecretImportRecord>();
 
-  /** Value-free private restriction over every native local credential source. */
+  /**
+   * A check that the stored credentials are still the ones read now: integer
+   * compares of this owner's revision (its own writes, and another process's
+   * writes seen by the store watch) and the storage policy. No disk access.
+   */
   captureLocalCredentialReadset(): () => void {
-    const state = this.getCredentialMutationState(), policy = this.getPolicy();
-    if (state.pending) throw new Error('Credential owner is busy.');
-    const methods = [this.getPolicy, this.getAllCandidateStores, this.getCredentialMutationState];
-    const observations = [...new Set([this.keyFilePath, ...this.getAllCandidateStores().map(store => store.path)])]
-      .map(path => ({ path, observation: observeImportFile(path) }));
+    if (this.pendingLocalMutations.size) throw new Error('Credential owner is busy.');
+    this.#startWatching();
+    const revision = this.#revisionSource.revision(), policy = this.getPolicy();
     return () => {
-      const current = this.getCredentialMutationState();
-      if (current.pending || current.generation !== state.generation || this.getPolicy() !== policy
-        || [this.getPolicy, this.getAllCandidateStores, this.getCredentialMutationState].some((method, index) => method !== methods[index])) throw new Error('Credential source changed.');
-      for (const entry of observations) assertImportFileCurrent(entry.path, entry.observation);
+      if (this.pendingLocalMutations.size || this.#revisionSource.revision() !== revision || this.getPolicy() !== policy) throw new Error('Credential source changed.');
     };
   }
 
@@ -600,6 +689,10 @@ export class SecretsManager {
         record.observations.find(observation => observation.path === publication.path)!.observation = observeImportFile(publication.path);
       }
       record.phase = 'committed'; uncertainPath = undefined;
+      const projectKeys = record.facts.items.filter(item => item.scope === 'project' && item.configured).map(item => item.key);
+      for (const destination of record.facts.destinations) {
+        if (destination.tier === 'project') this.#approveProjectWrite({ source: 'project-secure', path: destination.path, secure: true, scope: 'project' }, projectKeys);
+      }
     } catch { record.phase = 'failed'; }
     finally { this.settlePreparedImport(record); }
     return Object.freeze({ status: record.phase === 'committed' ? 'committed' : completedPaths.length ? 'partial' : 'unknown',
@@ -724,6 +817,14 @@ export class SecretsManager {
   private readonly reportedUnreadableStores = new Set<string>();
 
   private readonly layout: SecretStoreLayout;
+  /** Keys of this project's store the user confirmed, kept beside the user store. */
+  readonly #approvals: ProjectSecretApprovals;
+  readonly #reportedUnconfirmed = new Set<string>();
+  /**
+   * Values of references that run a password-manager command, resolved once per
+   * credential revision. Any set, delete, import or store change clears them.
+   */
+  readonly #resolvedReferences = new Map<string, string>();
 
   constructor(options: SecretsManagerOptions) {
     this.surfaceRoot = requireSurfaceRoot(options.surfaceRoot, 'SecretsManager surfaceRoot');
@@ -755,6 +856,10 @@ export class SecretsManager {
     };
     this.keyFilePath = normalizeOptionalOwnedPath(options.keyFilePath, 'keyFilePath')
       ?? resolveSharedDirectory(this.options.globalHome, 'secrets.key');
+    const configManager = this.options.configManager;
+    // References resolved anywhere in this process run the password managers this owner's settings name.
+    if (configManager) useSecretProviderHostConfig(() => readSecretProviderHostConfig(configManager));
+    this.#approvals = new ProjectSecretApprovals(join(dirname(secretWriteTarget(this.layout, 'user', 'secure').path), 'project-secret-approvals.json'));
     setSecretsReadSources(this, () => {
       const binding = captureSecurityReadBindings(this, ['credentialMutationGeneration', 'pendingLocalMutations', 'options', 'layout', 'keyFilePath', 'getPolicy', 'getCredentialMutationState', 'getAllCandidateStores', 'getReadOrder', 'get', 'getGlobalHome', 'getInternal', 'resolveMaybeReferencedValue', 'readEncryptedStore', 'readPlaintextStore', 'readEncryptedFile', 'readPlaintextFile', 'inspect', 'listDetailed', 'captureReadSource']);
       const state = this.getCredentialMutationState(); assertSecurityReadSource(!state.pending);
@@ -785,6 +890,51 @@ export class SecretsManager {
 
   getGlobalHome(): string {
     return this.options.globalHome;
+  }
+
+  /** True unless `store` is this project's store and `key` in it was never confirmed. */
+  #usable(store: SecretStorePath, key: string, report = false): boolean {
+    if (store.scope !== 'project' || this.#approvals.isApproved(store.path, key)) return true;
+    const id = `${store.path}\0${key}`;
+    if (report && !this.#reportedUnconfirmed.has(id)) {
+      this.#reportedUnconfirmed.add(id);
+      logger.warn('SecretsManager: a key in this project\'s secret store is not used until you confirm it', {
+        key, path: store.path, next: `/secrets trust ${key} --yes, or store it in your user store`,
+      });
+    }
+    return false;
+  }
+
+  #approveProjectWrite(store: SecretStorePath, keys: readonly string[]): void {
+    if (store.scope !== 'project' || keys.length === 0) return;
+    try { this.#approvals.approve(store.path, keys); }
+    catch (error) {
+      logger.warn('SecretsManager: stored in the project store, but the confirmation could not be recorded; confirm it with /secrets trust', {
+        keys, path: store.path, error: summarizeError(error),
+      });
+    }
+  }
+
+  /**
+   * The user confirms `key` found in this project's secret store, so it is used
+   * from now on. Returns the store files it was confirmed in; empty when this
+   * project's store does not hold the key.
+   */
+  confirmProjectSecret(key: string): readonly string[] {
+    const confirmed: string[] = [];
+    for (const store of this.getAllCandidateStores()) {
+      if (store.scope !== 'project') continue;
+      const values = store.secure ? this.readEncryptedFile(store.path) : this.readPlaintextFile(store.path);
+      if (!values || !Object.hasOwn(values, key)) continue;
+      this.#approvals.approve(store.path, [key]);
+      confirmed.push(store.path);
+    }
+    if (confirmed.length) {
+      this.credentialMutationGeneration += 2;
+      this.notifyCredentialInvalidation();
+      this.notifyChanged(key);
+    }
+    return confirmed;
   }
 
   async get(key: string): Promise<string | null> {
@@ -843,7 +993,7 @@ export class SecretsManager {
     for (const path of this.getReadOrder()) {
       const result = path.secure ? this.readEncryptedStore(path.path) : this.readPlaintextStore(path.path);
       if (result.status === 'unreadable') return { state: 'unsupported' };
-      if (result.status === 'ok' && Object.hasOwn(result.secrets, key)) return capture(result.secrets[key]);
+      if (result.status === 'ok' && Object.hasOwn(result.secrets, key) && this.#usable(path, key)) return capture(result.secrets[key]);
     }
     return { state: 'absent' };
   }
@@ -872,7 +1022,7 @@ export class SecretsManager {
       for (const path of this.getReadOrder()) {
         const result = path.secure ? this.readEncryptedStore(path.path) : this.readPlaintextStore(path.path);
         if (result.status === 'unreadable') return { state: 'unsupported' };
-        const found = result.status === 'ok' && Object.hasOwn(result.secrets, current);
+        const found = result.status === 'ok' && Object.hasOwn(result.secrets, current) && this.#usable(path, current);
         chain.push([current, path.path, path.secure, found]);
         if (found) { value = result.secrets[current]; break; }
       }
@@ -949,6 +1099,8 @@ export class SecretsManager {
     const envValue = ownEnvValue(key);
     if (envValue !== undefined) {
       logger.debug('SecretsManager: resolved from env', { key });
+      // An environment value is the credential itself; only a goodvibes:// pointer is followed.
+      if (shouldStoreAsLiteral(envValue)) return decodeLiteralSecret(envValue) ?? envValue;
       return this.resolveMaybeReferencedValue(key, envValue, seen);
     }
 
@@ -957,6 +1109,7 @@ export class SecretsManager {
         ? this.readEncryptedFile(path.path)
         : this.readPlaintextFile(path.path);
       if (secrets !== null && Object.hasOwn(secrets, key)) {
+        if (!this.#usable(path, key, true)) continue;
         logger.debug('SecretsManager: resolved from store', { key, source: path.source });
         const value = secrets[key]!;
         if (value === undefined) return null;
@@ -991,6 +1144,11 @@ export class SecretsManager {
       return null;
     }
 
+    const commandBacked = refSource !== null && COMMAND_BACKED_SOURCES.has(refSource);
+    const cacheKey = `${key}\0${value}`;
+    const cached = commandBacked ? this.#resolvedReferences.get(cacheKey) : undefined;
+    if (cached !== undefined) return cached;
+    const revision = this.#revisionSource.revision();
     try {
       const resolved = await resolveSecretRef(value, {
         resolveLocalSecret: async (nextKey) => {
@@ -1007,6 +1165,10 @@ export class SecretsManager {
       });
       assertCurrent();
       logger.debug('SecretsManager: resolved secret reference', { key, refSource: resolved.source });
+      if (commandBacked && resolved.value !== null && this.#revisionSource.revision() === revision) {
+        if (this.#resolvedReferences.size >= 256) this.#resolvedReferences.clear();
+        this.#resolvedReferences.set(cacheKey, resolved.value);
+      }
       return resolved.value;
     } catch (error) {
       assertCurrent();
@@ -1156,7 +1318,11 @@ export class SecretsManager {
     const target = this.resolveWriteTarget(scope, medium);
     const existing = this.readStoreForWrite(target);
     const replacesSecureCopy = target.secure && Object.hasOwn(existing, key);
-    existing[key] = value;
+    // A credential whose text merely looks like a reference (`op://…`, a JSON
+    // ref) is stored wrapped, so every read hands back the credential instead of
+    // running a password-manager command; `goodvibes://secrets/…` stays a pointer.
+    const stored = shouldStoreAsLiteral(value) ? encodeLiteralSecret(value) : value;
+    existing[key] = stored;
 
     try {
       effect?.beforeWrite();
@@ -1167,6 +1333,7 @@ export class SecretsManager {
       }
       effect?.committed();
       logger.debug('SecretsManager: stored secret', { key, source: target.source });
+      this.#approveProjectWrite(target, [key]);
       this.notifyChanged(key);
       return;
     } catch (error) {
@@ -1183,10 +1350,11 @@ export class SecretsManager {
           );
         }
         const fallbackExisting = this.readStoreForWrite(fallback);
-        fallbackExisting[key] = value;
+        fallbackExisting[key] = stored;
         effect?.beforeWrite();
         this.writePlaintextFile(fallback.path, fallbackExisting);
         effect?.committed();
+        this.#approveProjectWrite(fallback, [key]);
         logger.warn('SecretsManager: secure write failed, fell back to plaintext', {
           key,
           path: fallback.path,
@@ -1257,6 +1425,7 @@ export class SecretsManager {
           path: path.path,
           overriddenByEnv: envKeys.has(key),
           ...(refSource ? { refSource } : {}),
+          ...(this.#usable(path, key) ? {} : { unconfirmed: true as const }),
         });
       }
     }
@@ -1298,6 +1467,10 @@ export class SecretsManager {
         warnings.push(`store at ${store.path} exists but cannot be read (${result.reason})`);
       }
     }
+    const unconfirmed = storedRecords.filter((record) => record.unconfirmed);
+    if (unconfirmed.length) {
+      warnings.push(`${unconfirmed.length} key(s) in this project's store are not used until confirmed with /secrets trust <KEY>: ${unconfirmed.map((record) => record.key).join(', ')}`);
+    }
     if (policy === 'preferred_secure' && storedRecords.some((record) => !record.secure)) {
       warnings.push('plaintext fallback secrets are present');
     }
@@ -1332,10 +1505,16 @@ export class SecretsManager {
    * so the sweep ran and destroyed the daemon copy it had just written and
    * read back. Both stores ended empty while the report said `migrated: 1,
    * failed: 0`. Use `deleteFromScope` to remove ONE physical copy.
+   *
+   * A daemon-needed key is also removed from every other product's store under
+   * this home (the stores the start-up migration reads), so an older copy left
+   * in another product cannot be promoted back to the daemon at the next start.
    */
   async delete(key: string, options: SecretDeleteOptions = {}): Promise<void> {
-    const scopeFilter = isDaemonNeededSecretKey(key) ? undefined : options.scope;
-    const stores = this.getAllCandidateStores().filter((store) => {
+    const daemonNeeded = isDaemonNeededSecretKey(key);
+    const scopeFilter = daemonNeeded ? undefined : options.scope;
+    const candidates = daemonNeeded ? this.getMigratableStores() : this.getAllCandidateStores();
+    const stores = candidates.filter((store) => {
       if (scopeFilter && store.scope !== scopeFilter) return false;
       if (options.medium && (options.medium === 'secure') !== store.secure) return false;
       return existsSync(store.path) && this.storeContainsKey(store, key);
@@ -1354,12 +1533,13 @@ export class SecretsManager {
     let removed = false;
     try {
       for (const store of stores) {
-        const values = store.secure
+        const current = store.secure
           ? this.readEncryptedFile(store.path)
           : this.readPlaintextFile(store.path);
-        if (!values || !Object.hasOwn(values, key)) continue;
+        if (!current || !Object.hasOwn(current, key)) continue;
+        const values = Object.assign(Object.create(null) as Record<string, string>, current);
         // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
-        delete (values as Record<string, unknown>)[key];
+        delete values[key];
         if (store.secure) this.writeEncryptedFile(store.path, values);
         else this.writePlaintextFile(store.path, values);
         logger.debug('SecretsManager: deleted secret', { key, source: store.source });
@@ -1389,10 +1569,11 @@ export class SecretsManager {
     let removed = false;
     try {
       for (const store of stores) {
-        const values = store.secure ? this.readEncryptedFile(store.path) : this.readPlaintextFile(store.path);
-        if (!values || !Object.hasOwn(values, key)) continue;
+        const current = store.secure ? this.readEncryptedFile(store.path) : this.readPlaintextFile(store.path);
+        if (!current || !Object.hasOwn(current, key)) continue;
+        const values = Object.assign(Object.create(null) as Record<string, string>, current);
         // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
-        delete (values as Record<string, unknown>)[key];
+        delete values[key];
         if (store.secure) this.writeEncryptedFile(store.path, values);
         else this.writePlaintextFile(store.path, values);
         logger.debug('SecretsManager: removed one tier copy', { key, source: store.source });
@@ -1446,9 +1627,13 @@ export class SecretsManager {
    * never destroyed.
    */
   private readEncryptedStore(filePath: string): SecureStoreReadResult {
+    const observed = this.#statStore(filePath);
+    if (observed.status !== 'present') return observed;
+    const cached = this.#cachedStore(filePath, observed.identity);
+    if (cached) return { status: 'ok', secrets: cached };
     let raw: string;
     try {
-      raw = this.#readStoreText(filePath);
+      raw = readFileSync(filePath, 'utf-8');
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') return { status: 'missing' };
       return { status: 'unreadable', reason: summarizeError(err) };
@@ -1484,7 +1669,7 @@ export class SecretsManager {
         };
       }
       const secrets = JSON.parse(decrypt(envelope as EncryptedStoreEnvelope, readKey)) as Record<string, string>;
-      return { status: 'ok', secrets };
+      return { status: 'ok', secrets: this.#keepStore(filePath, observed.identity, secrets) };
     } catch (err) {
       return {
         status: 'unreadable',
@@ -1498,7 +1683,7 @@ export class SecretsManager {
    * An unreadable store logs one honest error per file per process; it is
    * never mistaken for an empty store on the write path (see set/delete).
    */
-  private readEncryptedFile(filePath: string): Record<string, string> | null {
+  private readEncryptedFile(filePath: string): Readonly<Record<string, string>> | null {
     const result = this.readEncryptedStore(filePath);
     if (result.status === 'ok') return result.secrets;
     if (result.status === 'unreadable') this.reportUnreadableStore(filePath, result.reason);
@@ -1529,9 +1714,13 @@ export class SecretsManager {
   }
 
   private readPlaintextStore(filePath: string): PlaintextStoreReadResult {
+    const observed = this.#statStore(filePath);
+    if (observed.status !== 'present') return observed;
+    const cached = this.#cachedStore(filePath, observed.identity);
+    if (cached) return { status: 'ok', secrets: cached };
     let raw: string;
     try {
-      raw = this.#readStoreText(filePath);
+      raw = readFileSync(filePath, 'utf-8');
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') return { status: 'missing' };
       return { status: 'unreadable', reason: summarizeError(err) };
@@ -1548,13 +1737,13 @@ export class SecretsManager {
     if ('version' in parsed && 'secrets' in parsed) {
       const secrets = (parsed as PlaintextStore).secrets;
       return secrets && typeof secrets === 'object'
-        ? { status: 'ok', secrets }
+        ? { status: 'ok', secrets: this.#keepStore(filePath, observed.identity, secrets) }
         : { status: 'unreadable', reason: 'store file has an unrecognized shape' };
     }
-    return { status: 'ok', secrets: parsed as Record<string, string> };
+    return { status: 'ok', secrets: this.#keepStore(filePath, observed.identity, parsed as Record<string, string>) };
   }
 
-  private readPlaintextFile(filePath: string): Record<string, string> | null {
+  private readPlaintextFile(filePath: string): Readonly<Record<string, string>> | null {
     const result = this.readPlaintextStore(filePath);
     if (result.status === 'ok') return result.secrets;
     if (result.status === 'unreadable') this.reportUnreadableStore(filePath, result.reason);
@@ -1570,5 +1759,5 @@ export class SecretsManager {
 }
 
 function storeIdentity(stat: Stats): string {
-  return `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeMs}`;
+  return `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}`;
 }

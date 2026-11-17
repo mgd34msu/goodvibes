@@ -53,9 +53,29 @@ prefix, alongside the canonical shape above:
   shorthand host-based forms of the `goodvibes://secrets/bitwarden/...`,
   `goodvibes://secrets/vaultwarden/...`, and `goodvibes://secrets/bws/...` shapes. The item
   (or secret id) is the URI host, the field is the first path segment or a `?field=`
-  parameter, and the same query parameters (`server`, `serverEnv`, `customField`,
-  `appDataDir`, `sessionEnv` for Bitwarden; `profile`, `configFile`, `serverUrl`,
-  `accessTokenEnv` for Bitwarden Secrets Manager) apply.
+  parameter, and the same query parameters (`server`, `serverEnv`, `customField`
+  for Bitwarden; `profile` for Bitwarden Secrets Manager) apply.
+
+A reference names only what to read. Which program runs it, the Bitwarden data
+directory, the variable holding a session or access token, and the Bitwarden
+Secrets Manager config file and server are this machine's settings, never part
+of a reference, so a reference that arrives in a repository or an imported file
+cannot choose a program to run or a server to hand a token to:
+
+| Setting | Used for | Empty means |
+| --- | --- | --- |
+| `storage.secretProviders.onePasswordCli` | `op://` and `1password` references | `op` on your PATH |
+| `storage.secretProviders.bitwardenCli` | `bitwarden` and `vaultwarden` references | `bw` on your PATH |
+| `storage.secretProviders.bitwardenAppDataDir` | `BITWARDENCLI_APPDATA_DIR` for `bw` | the CLI's own |
+| `storage.secretProviders.bitwardenSessionEnv` | the variable passed to `bw` as `BW_SESSION` | `BW_SESSION` as it is |
+| `storage.secretProviders.bwsCli` | `bws` references | `bws` on your PATH |
+| `storage.secretProviders.bwsAccessTokenEnv` | the variable passed to `bws` as `BWS_ACCESS_TOKEN` | `BWS_ACCESS_TOKEN` as it is |
+| `storage.secretProviders.bwsConfigFile` | `bws --config-file` | the CLI's own |
+| `storage.secretProviders.bwsServerUrl` | `bws --server-url` | the CLI's own |
+
+A project settings file, which is repository content, may carry only
+`goodvibes://secrets/goodvibes/<KEY>` references (a named key in your own
+store); any other reference in it is skipped with a notice.
 
 ```text
 op://Private/OpenAI/password
@@ -73,8 +93,14 @@ Hosts can provide:
 - `resolveLocalSecret` for `goodvibes` refs.
 - `runCommand` for CLI-backed providers.
 - `homeDirectory` for `~` expansion in file refs.
+- `providers` for the password-manager host settings above (otherwise the
+  settings the process's credential store reads).
 
-CLI-backed refs support timeouts and provider-specific options. Command
+The credential store resolves a password-manager reference once and keeps the
+value until a credential is set, deleted or imported, or a store file changes;
+`/secrets test <secret-ref>` always asks the password manager.
+
+CLI-backed refs support timeouts. Command
 execution is host-owned so embedders can apply their own permission prompts,
 logging, and sandboxing.
 
@@ -85,7 +111,34 @@ Worker/client tokens, Tunnel tokens, Access service tokens, webhook secrets,
 and other daemon-owned integration credentials.
 
 Store secret refs in config; store the secret values in the backing secret
-provider.
+provider. A setting that holds a credential (a channel token, `cluster.secret`,
+a Cloudflare token reference and the rest of the declared list) takes only a
+`goodvibes://secrets/` reference: a plain value is refused with the command that
+stores it (`/secrets set <KEY> <value>`, or the settings screen, which stores the
+value and writes the reference for you). Card number, expiry, CVV and cardholder
+name are never settings; cards are kept in the daemon's card store through
+`/payments card` or the web UI.
+
+## Where stored secrets are read from
+
+A lookup reads the environment, then the daemon's store, then your own store
+(`~/.goodvibes/<surface>/secrets.enc`, then the plaintext file), and last the
+store of the project you opened (`<project>/.goodvibes/<surface>/secrets.enc`).
+Directories above the project are never read. A project's store is part of the
+checkout, so a key in it is used only after you stored it there yourself or
+confirmed it once with `/secrets trust <KEY>`; until then `/secrets list` marks
+it "not used until confirmed". The confirmation is kept beside your own store,
+outside every checkout. A reference found in a project's store is followed only
+when it names a key in your store (`goodvibes://secrets/goodvibes/<KEY>`).
+
+A value you store is the credential itself, even when its text looks like a
+reference (`op://...`, a JSON reference): it is stored wrapped and handed back
+as typed. Only `/secrets link` (a `goodvibes://secrets/` reference) stores a
+pointer.
+
+Each store file is read once and kept until it changes; a lookup costs one
+`stat` per store file, and a change another process makes is noticed by that
+`stat` or by the watch on the store directories.
 
 ## Live provider credentials
 

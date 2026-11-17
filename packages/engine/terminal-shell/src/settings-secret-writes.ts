@@ -1,7 +1,7 @@
 import type { ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
-import type { LiteralSecretsManager as SecretsManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { SecretsManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { buildSecretBackedConfigUpdate, defaultSecretBackedScope, getSecretWriteMedium } from '@goodvibes-jev/engine/platform/platform/config';
 export type SettingsSecretsManager = Pick<SecretsManager, 'delete' | 'set'>;
 /**

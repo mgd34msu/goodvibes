@@ -91,9 +91,9 @@ For self-hosted or external secret managers, link a GoodVibes key to a
 provider-backed secret reference:
 
 ```sh
-/secrets link OPENAI_API_KEY goodvibes://secrets/bitwarden?item=GoodVibes%20OpenAI&field=password&sessionEnv=BW_SESSION
+/secrets link OPENAI_API_KEY goodvibes://secrets/bitwarden?item=GoodVibes%20OpenAI&field=password
 /secrets link SLACK_BOT_TOKEN goodvibes://secrets/vaultwarden?item=GoodVibes%20Slack&field=password&server=https%3A%2F%2Fvault.example.test
-/secrets link STRIPE_TOKEN goodvibes://secrets/bws/00000000-0000-0000-0000-000000000000?field=value&accessTokenEnv=BWS_ACCESS_TOKEN
+/secrets link STRIPE_TOKEN goodvibes://secrets/bws/00000000-0000-0000-0000-000000000000?field=value
 /secrets link OPENAI_API_KEY goodvibes://secrets/1password?vault=Private&item=GoodVibes%20OpenAI&field=API%20Key
 ```
 
@@ -194,7 +194,7 @@ The specific files worth knowing:
 | `.goodvibes/tui/settings.json` | Project settings overriding the global layer |
 | `~/.goodvibes/tui/secrets.enc` or `.goodvibes/tui/secrets.enc` | Encrypted secrets, global or per project |
 | `~/.goodvibes/goodvibes.secrets.json` | Compatibility secrets read by older suite components |
-| `.goodvibes/tui/services.json` | The service registry |
+| `~/.goodvibes/tui/services.json` | The service registry (a project's file adds only services naming keys in your store) |
 | `~/.goodvibes/daemon` | The daemon's own home and state directory |
 | `~/.goodvibes/tui/providers/*.json` | Custom provider definitions, hot-reloaded |
 | `.goodvibes/tui/automation-jobs.json` | Scheduled and automation jobs |

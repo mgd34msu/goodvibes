@@ -1053,27 +1053,7 @@ export class SettingsModal extends TerminalSettingsModalState<
       this.lastSettingEffectMessage = 'Saving on the connected host…';
       return true;
     }
-    const opened = this.secretWriteSession;
-    const write: { next?: { readonly value: unknown } } = {};
-    const routed = routeSettingWriteToConnectedHost(key, value, (update) => {
-      // The modal may have been closed or reopened while the host answered.
-      if (!this.active || opened !== this.secretWriteSession) return;
-      this.lastSettingEffectMessage = update.message;
-      if (update.applied) {
-        this._applyRoutedValue(key, update.applied.value);
-        // Same warning as a local write, set after the host's report so the report does not replace it.
-        if (key === 'payments.cvvHandling' && update.applied.value === 'prompt') this.lastSettingEffectMessage = CVV_PROMPT_TRADEOFF_WARNING;
-      }
-      if (update.settled) {
-        this.routedWrites.delete(key);
-        if (write.next && !isDeepStrictEqual(write.next.value, value)) this._setValue(key, write.next.value);
-      }
-      this.requestHostSettingRender?.();
-    });
-    if (routed) {
-      this.routedWrites.set(key, write);
-      return true;
-    }
+    if (this._routeHostWrite(key, value, this.secretWriteSession)) return true;
     try {
       this.configManager.setDynamic(key, value);
       for (const entries of this.groups.values()) {
@@ -1103,6 +1083,38 @@ export class SettingsModal extends TerminalSettingsModalState<
       this.lastSettingEffectMessage = `Save failed: ${summarizeError(e)}`;
       return false;
     }
+  }
+
+  /**
+   * Sends one write of a host-owned key and, when it settles, the newest value
+   * asked for while it was in flight. That follow-up is sent even when the
+   * modal was closed or reopened meanwhile, so the owner's last change is never
+   * dropped; only the row update and the message need the modal still open.
+   */
+  private _routeHostWrite(key: AgentSettingKey, value: unknown, opened: number): boolean {
+    const write: { next?: { readonly value: unknown } } = {};
+    const live = () => this.active && opened === this.secretWriteSession;
+    const routed = routeSettingWriteToConnectedHost(key, value, (update) => {
+      if (live()) {
+        this.lastSettingEffectMessage = update.message;
+        if (update.applied) {
+          this._applyRoutedValue(key, update.applied.value);
+          // Same warning as a local write, set after the host's report so the report does not replace it.
+          if (key === 'payments.cvvHandling' && update.applied.value === 'prompt') this.lastSettingEffectMessage = CVV_PROMPT_TRADEOFF_WARNING;
+        }
+      }
+      if (update.settled) {
+        if (this.routedWrites.get(key) === write) this.routedWrites.delete(key);
+        const next = write.next;
+        if (next && !isDeepStrictEqual(next.value, value)) {
+          if (live()) this._setValue(key, next.value);
+          else this._routeHostWrite(key, next.value, opened);
+        }
+      }
+      if (live()) this.requestHostSettingRender?.();
+    });
+    if (routed && live()) this.routedWrites.set(key, write);
+    return routed;
   }
 
   private _hostPolicyMetadataError(): string | undefined {

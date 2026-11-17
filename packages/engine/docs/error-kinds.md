@@ -159,14 +159,14 @@ Every error thrown by the platform's public surface is an instance of `GoodVibes
 
 Daemon HTTP routes return structured error bodies with a `code` string that is separate from the platform-layer `kind` discriminant. These codes appear in route-specific error responses and are not `GoodVibesError` instances. They are HTTP error body fields returned by the daemon before the platform maps them to a `GoodVibesError`.
 
-Route-level codes are not standardized across the daemon. Different routes emit different strings for the same HTTP status, and some 401 responses omit a `code` field entirely (a bare `{ error: 'Unauthorized' }`). Treat this as a sample of codes actually in use, not an exhaustive or normalized catalog:
+Route-level codes are not standardized across the daemon, except a missing or invalid credential: every route and listener answers it with the same 401 body, code `AUTH_REQUIRED`, category `authentication` and guidance. Treat the table as a sample of codes actually in use, not an exhaustive or normalized catalog:
 
 | Code | HTTP Status | Meaning |
 |------|-------------|----------|
 | `INVALID_KIND` | 400 | The `kind` field in a shared-session message body is not `task`, `message`, or `followup`. |
 | `INVALID_REQUEST` | 400 | The request body failed a required-field or schema check. |
 | `PROVIDER_NOT_CONFIGURED` | 409 | The requested media (voice/TTS) provider is not registered with the daemon's provider registry. |
-| `AUTH_REQUIRED` | 401 | No valid bearer token or session cookie was present. Some routes return this code; others return a bare `{ error: 'Unauthorized' }` with no `code` field at all. |
+| `AUTH_REQUIRED` | 401 | No valid bearer token or session cookie was present, or the credential is no longer valid. Every route returns this code for it. |
 | `MISSING_SCOPE` | 403 | The caller's principal authenticated but lacks the scope the route requires. |
 | `NOT_FOUND` | 404 | The resource (session, artifact, job, etc.) does not exist. |
 | `RATE_LIMITED` | 429 | The request was rejected by an upstream rate-limit policy. |

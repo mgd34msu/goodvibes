@@ -413,16 +413,9 @@ async function runDependencies(
     });
   }
 
-  // A name is a name, never a path: it cannot reach outside the skill directories.
-  if (/[\\/]/.test(skillName) || skillName === '.' || skillName === '..') {
-    return {
-      success: false,
-      error: `"skillName" must be a skill name, not a path (got "${skillName}"). Use mode=search to list skill names, or mode=content with a path.`,
-    };
-  }
-
   // Same scan as search, so a name that search returns (frontmatter name,
-  // file name, or the directory of a SKILL.md) resolves here too.
+  // file name, or the directory of a SKILL.md) resolves here too. The name is
+  // only compared with what the scan found, never joined into a path.
   let found: RegistryMatch | undefined;
   for (const dir of getSkillDirs(roots)) {
     found = (await scanDirectoryAll(dir, 'skill', source)).find((match) => {
@@ -436,7 +429,7 @@ async function runDependencies(
   if (!found) {
     return {
       success: false,
-      error: `Skill not found: ${skillName}. Use mode=search type=skills to list the available skill names.`,
+      error: `Skill not found: ${skillName}. Use mode=search type=skills to list the available skill names${/[\\/]/.test(skillName) ? ', or mode=content to read a skill file by its path' : ''}.`,
     };
   }
 

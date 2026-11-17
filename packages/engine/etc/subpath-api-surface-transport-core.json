@@ -499,7 +499,7 @@
     {
       "name": "RelayErrorCode",
       "kind": "type",
-      "text": "export type RelayErrorCode = 'daemon-offline' | 'rid-taken' | 'capacity' | 'protocol-version' | 'malformed' | 'rate-limited' | 'unauthorized' | 'internal';"
+      "text": "export type RelayErrorCode = 'daemon-offline' | 'rid-taken' | 'replaced' | 'capacity' | 'protocol-version' | 'malformed' | 'rate-limited' | 'unauthorized' | 'internal';"
     },
     {
       "name": "RelayErrorFrame",

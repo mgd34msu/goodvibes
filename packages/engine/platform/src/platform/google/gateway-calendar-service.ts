@@ -124,6 +124,7 @@ function toSummary(record: CalendarEventRecord): CalendarGatewayEventSummary {
     title: record.summary,
     start: record.start,
     end: record.end,
+    allDay: record.allDay,
     ...(record.location.length > 0 ? { location: record.location } : {}),
     ...(record.description.length > 0 ? { description: record.description } : {}),
     ...(record.attendees === undefined || record.attendees.length === 0 ? {} : { attendees: record.attendees }),

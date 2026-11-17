@@ -678,11 +678,8 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
     hookDispatcher: services.hookDispatcher,
     providerRegistry: services.providerRegistry,
     sessionOrchestration: services.sessionOrchestration,
-    persistenceOptions: {
-      workingDirectory: services.workingDirectory,
-      homeDirectory: services.homeDirectory,
-      sessionManager: services.sessionManager,
-    },
+    // The surface every save of this session goes through, so the exit save lands where the turn saves do.
+    persistenceOptions: { surface: services.surface },
   });
 
   const ctx: BootstrapContext = {

@@ -73,36 +73,15 @@ export interface IntegrationHelpersServices {
 }
 
 /**
- * Legacy construction scope: the loose `workingDirectory` / `homeDirectory`
- * pair, passed straight through to session-persistence's legacy call form.
- * Unchanged, byte-for-byte, for every existing caller. `surface` is declared
- * as `undefined` here purely so this shape and the surface shape below are
- * mutually exclusive at the type level, the same discriminated-union pattern
- * session-persistence-scope.ts uses for its own options.
- */
-export interface IntegrationHelpersLegacyScope {
-  readonly workingDirectory: string;
-  readonly homeDirectory: string;
-  readonly surface?: undefined;
-}
-
-/**
- * Surface construction scope: a declare-once `SessionSurface`. Every
- * persistence read this service performs then resolves through the SAME
- * surface-scoped paths the product writes with, which is the whole point.
- * A surface-scoped product constructed with the loose fields instead got its
- * continuity answers from the unscoped legacy directories, i.e. from paths
- * nothing had written to.
+ * The service's storage scope: a declare-once `SessionSurface`. Every
+ * persistence read this service performs resolves through the SAME
+ * surface-scoped paths the product writes with.
  */
 export interface IntegrationHelpersSurfaceScope {
   readonly surface: SessionSurface;
-  readonly workingDirectory?: undefined;
-  readonly homeDirectory?: undefined;
 }
 
-export type IntegrationHelpersContext =
-  | (IntegrationHelpersServices & IntegrationHelpersLegacyScope)
-  | (IntegrationHelpersServices & IntegrationHelpersSurfaceScope);
+export type IntegrationHelpersContext = IntegrationHelpersServices & IntegrationHelpersSurfaceScope;
 
 export interface PanelSnapshot {
   readonly id: string;
@@ -168,31 +147,14 @@ export class IntegrationHelperService {
     return this.context;
   }
 
-  /**
-   * The scope every session-persistence call in this service passes along:
-   * the construction-time `SessionSurface` when there is one, otherwise the
-   * legacy `workingDirectory` / `homeDirectory` pair verbatim. Resolved in one
-   * place so no call site can reach for the wrong pair of paths.
-   */
+  /** The scope every session-persistence call in this service passes along: the construction-time surface. */
   private persistenceOptions(): SessionPersistenceOptions {
-    if (this.context.surface !== undefined) {
-      return { surface: this.context.surface };
-    }
-    return {
-      workingDirectory: this.context.workingDirectory,
-      homeDirectory: this.context.homeDirectory,
-    };
+    return { surface: this.context.surface };
   }
 
-  /**
-   * The project root, from whichever construction shape was used. A
-   * `SessionSurface` carries its own `workingDirectory`, so surface-scoped
-   * callers do not pass one separately.
-   */
+  /** The project root, carried by the surface. */
   private projectWorkingDirectory(): string {
-    return this.context.surface !== undefined
-      ? this.context.surface.workingDirectory
-      : this.context.workingDirectory;
+    return this.context.surface.workingDirectory;
   }
 
   buildReview(): {

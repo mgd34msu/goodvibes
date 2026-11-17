@@ -39,7 +39,6 @@ export { IntegrationHelperService } from './integration/helpers.js';
 export type {
   ContinuitySnapshot,
   IntegrationHelpersContext,
-  IntegrationHelpersLegacyScope,
   IntegrationHelpersServices,
   IntegrationHelpersSurfaceScope,
   PanelSnapshot,

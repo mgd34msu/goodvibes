@@ -38,7 +38,6 @@ export {
   getUserSessionsDir,
   type CrashSnapshotTurn,
   type CrashSnapshotTurnMoment,
-  type SessionPersistenceLegacyOptions,
   type SessionPersistenceOptions,
   type SessionPersistencePaths,
   type SessionPersistenceSurfaceOptions,
@@ -221,18 +220,13 @@ export function readLastSessionPointer(options?: SessionPersistenceOptions): str
  * file. Best-effort, and ENOENT is success.
  */
 /**
- * The store file the pointer refers to, or null when these options cannot
- * honestly resolve one. Two cases return null: a legacy call that injected its
- * own SessionManager (that manager owns its sessions directory, which need not
- * be the one these options resolve to, second-guessing it would retire a
- * perfectly good pointer), and a legacy call with no workingDirectory at all.
- * A null here means "no referent check", never "referent missing".
+ * The store file the pointer refers to, or null when the options carry no
+ * usable surface. A null here means "no referent check", never "referent missing".
  */
 function resolveLastSessionStorePathIfKnown(
   sessionId: string,
   options?: SessionPersistenceOptions,
 ): string | null {
-  if (options?.sessionManager) return null;
   try {
     return resolveSessionStorePath(resolveSessionsDirPath(options), sessionId);
   } catch {

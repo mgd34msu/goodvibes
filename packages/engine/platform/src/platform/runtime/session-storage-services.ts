@@ -18,8 +18,9 @@
  * six months later as missing state.
  */
 import type { NativeDataWriteOwner } from './native-reader-compatibility.js';
-import { SessionManager } from '../sessions/index.js';
+import type { SessionManager } from '../sessions/index.js';
 import { createSessionSurface, type SessionSurface } from './session-surface.js';
+import { surfaceSessionManager } from './session-persistence-scope.js';
 
 export interface SessionStorageServices {
   readonly surface: SessionSurface;
@@ -41,5 +42,6 @@ export function createSessionStorageServices(input: {
     workingDirectory: input.workingDirectory,
     homeDirectory: input.homeDirectory,
   });
-  return { surface, sessionManager: new SessionManager(input.workingDirectory, { surface }) };
+  // The same manager every save, load and pointer write through this surface uses.
+  return { surface, sessionManager: surfaceSessionManager(surface) };
 }

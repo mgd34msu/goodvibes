@@ -44,7 +44,7 @@ import {
 import { join } from 'path';
 import { writeFileAtomic } from '../utils/atomic-json-store.js';
 import { fileObservationIdentity, readFileObservation } from '../utils/file-observation.js';
-import { publishRecoveryPath, readRecoveryHeaderObservation, recoveryPathResolver, RECOVERY_HEADER_LIMIT } from './recovery-path.js';
+import { publishRecoveryPath, readRecoveryHeaderObservation, RECOVERY_HEADER_LIMIT } from './recovery-path.js';
 import { isSessionOpenElsewhere } from './session-open-lock.js';
 
 import { logger } from '../utils/logger.js';
@@ -53,7 +53,6 @@ import type { ConversationTitleSource } from '../core/conversation.js';
 import { summarizeError } from '../utils/error-display.js';
 import type { SessionSurface } from './session-surface.js';
 import {
-  isSurfaceOptions,
   requireSurface,
   resolveRecoveryDirPath,
   resolveRecoveryFilePath,
@@ -88,9 +87,7 @@ function readSnapshotTurn(value: unknown): CrashSnapshotTurn | undefined {
 
 /**
  * All per-session recovery files currently on disk under `dir`, newest-first
- * by mtime. Takes an already-resolved recovery directory so both the
- * per-call (`getRecoveryDir(homeDirectory, surfaceRoot)`) and surface
- * (`surface.recoveryDir`) call forms share one implementation.
+ * by mtime. Takes an already-resolved recovery directory (`surface.recoveryDir`).
  */
 function listRecoveryFiles(dir: string): Array<{ path: string; mtimeNs: bigint }> {
   if (!existsSync(dir)) return [];
@@ -176,7 +173,7 @@ export function writeRecoveryFile(
     }
     if (Buffer.byteLength(lines[0]!, 'utf8') > RECOVERY_HEADER_LIMIT) throw new Error('Recovery header exceeds its supported limit');
     const directory = resolveRecoveryDirPath(options);
-    const resolve = isSurfaceOptions(options) ? requireSurface(options).recoveryFile : recoveryPathResolver(directory);
+    const resolve = requireSurface(options).recoveryFile;
     publishRecoveryPath(directory, sessionId, resolve, (path, assertCurrent) => {
       writeFileAtomic(path, `${lines.join('\n')}\n`, { assertCurrent, cleanupStaleTemps: false });
     });
@@ -362,7 +359,7 @@ function findLiveRecoveryCandidate(
 ): { path: string; info: RecoveryFileInfo; physical: string } | null {
   try {
     const sessionsDir = resolveSessionsDirPath(options);
-    const surface = isSurfaceOptions(options) ? requireSurface(options) : undefined;
+    const surface = requireSurface(options);
     for (const entry of listRecoveryCandidates(options)) {
       // Newest-first; the first snapshot no running process holds open and its
       // own session has not already superseded is the one to offer.

@@ -2,9 +2,8 @@
  * Shared types and scope resolution for session persistence.
  *
  * "Scope" is the question every persistence call answers before it touches a
- * file: WHICH directory does this call mean? There are two answers, the
- * legacy per-call `workingDirectory` / `homeDirectory` / `surfaceRoot` triple,
- * and a declare-once `SessionSurface`, and both the durable-store half
+ * file: WHICH directory does this call mean? The answer is always a
+ * declare-once `SessionSurface`, and both the durable-store half
  * (session-persistence.ts) and the crash-snapshot half (session-recovery.ts)
  * route every path through the resolvers here, so the two sibling modules can
  * never disagree about where a file lives.
@@ -18,7 +17,6 @@ import type { ContractView } from '../contract/types.js';
 import { join } from 'path';
 
 import { SessionManager, sanitizeSessionName } from '../sessions/manager.js';
-import { logger } from '../utils/logger.js';
 import type { SessionReturnContextSummary } from './session-return-context.js';
 import type { ConversationTitleSource } from '../core/conversation.js';
 import { resolveScopedDirectory } from './surface-root.js';
@@ -57,77 +55,31 @@ export type SessionSnapshot = {
 };
 
 /**
- * Legacy per-call scope: `workingDirectory` / `homeDirectory` / `surfaceRoot`
- * resolved independently on every call. Existing saved filenames are retained
- * by their original headers (an omitted `surfaceRoot` still silently falls back to the shared, unscoped
- * `.goodvibes/` directory), this is the compat path. Every call through this
- * shape emits a one-time-per-process deprecation warning recommending a
- * `SessionSurface` instead. `surface` is declared here only so it can be typed
- * as `undefined`, making this shape and `SessionPersistenceSurfaceOptions`
- * mutually exclusive at the type level (mixing the two is a compile error).
- */
-export type SessionPersistenceLegacyOptions = {
-  workingDirectory?: string | undefined;
-  homeDirectory?: string | undefined;
-  sessionManager?: SessionManager | undefined;
-  surfaceRoot?: string | undefined;
-  readonly surface?: undefined;
-};
-
-/**
- * Surface-based scope: every path is read directly off a declare-once
- * `SessionSurface` (see session-surface.ts), no per-call scope argument is
- * accepted alongside it, so there is no unscoped fallback to silently resolve
- * to and no way for a writer and a reader to disagree about a path as long as
- * they share the same surface.
+ * Where a persistence call reads and writes: every path is read directly off a
+ * declare-once `SessionSurface` (see session-surface.ts), so there is no
+ * unscoped directory to fall back to and no way for a writer and a reader to
+ * disagree about a path as long as they share the same surface.
  */
 export type SessionPersistenceSurfaceOptions = {
   readonly surface: SessionSurface;
-  readonly workingDirectory?: undefined;
-  readonly homeDirectory?: undefined;
-  readonly sessionManager?: undefined;
-  readonly surfaceRoot?: undefined;
 };
 
-export type SessionPersistenceOptions = SessionPersistenceLegacyOptions | SessionPersistenceSurfaceOptions;
+export type SessionPersistenceOptions = SessionPersistenceSurfaceOptions;
 
 export type SessionPersistencePaths = {
   readonly workingDirectory: string;
   readonly homeDirectory: string;
 };
 
-/** True once the legacy-options deprecation warning has fired for this process. */
-let legacyOptionsWarned = false;
-
 /**
- * Emit the legacy-options deprecation warning exactly once per process,
- * regardless of how many legacy-shaped calls occur (including internal calls
- * chaining through, e.g. persistConversation -> saveSession -> writeLastSessionPointer).
- */
-export function warnLegacyOptionsOnce(): void {
-  if (legacyOptionsWarned) return;
-  legacyOptionsWarned = true;
-  logger.warn(
-    'Session persistence called with legacy workingDirectory/homeDirectory/surfaceRoot options, pass a SessionSurface instead (see platform/runtime/session-surface.ts, createSessionSurface).',
-  );
-}
-
-/** True when `options` uses the surface-based call form. */
-export function isSurfaceOptions(
-  options: SessionPersistenceOptions | undefined,
-): options is SessionPersistenceOptions & { readonly surface: SessionSurface } {
-  return !!options && (options as { surface?: SessionSurface }).surface !== undefined;
-}
-
-/**
- * Read the `SessionSurface` off surface-form options, throwing synchronously
- * with a clear message if it is missing a required path. This is what makes
+ * Read the `SessionSurface` off the options, throwing synchronously with a
+ * clear message if it is absent or missing a required path. This is what makes
  * the arity-bug class (a mis-called function silently resolving an unscoped
- * path because an options argument came through undefined) impossible in the
- * surface form: there is no fallback branch here to silently resolve to.
+ * path because an options argument came through undefined) impossible: there
+ * is no fallback branch here to silently resolve to.
  */
-export function requireSurface(options: SessionPersistenceOptions): SessionSurface {
-  const surface = (options as { surface?: SessionSurface }).surface;
+export function requireSurface(options: SessionPersistenceOptions | undefined): SessionSurface {
+  const surface = options?.surface;
   if (
     !surface
     || !surface.workingDirectory
@@ -140,52 +92,36 @@ export function requireSurface(options: SessionPersistenceOptions): SessionSurfa
     || typeof surface.recoveryFile !== 'function'
   ) {
     throw new Error(
-      'Session persistence surface form requires a fully-resolved SessionSurface (build one with createSessionSurface).',
+      'Session persistence requires a fully-resolved SessionSurface (build one with createSessionSurface).',
     );
   }
   return surface;
 }
 
-/** Resolve the last-session pointer path for either call form. */
+/** Resolve the last-session pointer path. */
 export function resolveLastSessionPointerPath(options?: SessionPersistenceOptions): string {
-  if (isSurfaceOptions(options)) {
-    return requireSurface(options).lastSessionPointer;
-  }
-  warnLegacyOptionsOnce();
-  return getLastSessionPointerPath(requireWorkingDirectory(options), options?.surfaceRoot);
+  return requireSurface(options).lastSessionPointer;
 }
 
-/** Resolve the recovery directory for either call form. */
+/** Resolve the recovery directory. */
 export function resolveRecoveryDirPath(options?: SessionPersistenceOptions): string {
-  if (isSurfaceOptions(options)) {
-    return requireSurface(options).recoveryDir;
-  }
-  warnLegacyOptionsOnce();
-  return getRecoveryDir(requireHomeDirectory(options), options?.surfaceRoot);
+  return requireSurface(options).recoveryDir;
 }
 
-/** Resolve a specific session's recovery file path for either call form. */
+/** Resolve a specific session's recovery file path. */
 export function resolveRecoveryFilePath(options: SessionPersistenceOptions | undefined, sessionId: string): string {
-  if (isSurfaceOptions(options)) {
-    return requireSurface(options).recoveryFile(sessionId);
-  }
-  warnLegacyOptionsOnce();
-  return getRecoveryFilePath(requireHomeDirectory(options), sessionId, options?.surfaceRoot);
+  return requireSurface(options).recoveryFile(sessionId);
 }
 
 /**
  * Resolve the DURABLE session-store directory (the one holding
- * `<sessionId>.jsonl` files SessionManager writes) for either call form. This
+ * `<sessionId>.jsonl` files SessionManager writes). This
  * is the directory the recovery layer compares a snapshot against to decide
  * whether that snapshot's own session already saved something newer, see
  * `sessionStoreMtimeMs` in session-recovery.ts.
  */
 export function resolveSessionsDirPath(options?: SessionPersistenceOptions): string {
-  if (isSurfaceOptions(options)) {
-    return requireSurface(options).sessionsDir;
-  }
-  warnLegacyOptionsOnce();
-  return getUserSessionsDir(requireWorkingDirectory(options), options?.surfaceRoot);
+  return requireSurface(options).sessionsDir;
 }
 
 /**
@@ -198,22 +134,6 @@ export function resolveSessionStorePath(sessionsDir: string, sessionId: string):
   return join(sessionsDir, `${sanitizeSessionName(sessionId)}.jsonl`);
 }
 
-export function requireWorkingDirectory(options?: Pick<SessionPersistenceOptions, 'workingDirectory'>): string {
-  const workingDirectory = options?.workingDirectory;
-  if (!workingDirectory) {
-    throw new Error('Session persistence requires an explicit workingDirectory.');
-  }
-  return workingDirectory;
-}
-
-export function requireHomeDirectory(options?: Pick<SessionPersistenceOptions, 'homeDirectory'>): string {
-  const homeDirectory = options?.homeDirectory;
-  if (!homeDirectory) {
-    throw new Error('Session persistence requires an explicit homeDirectory.');
-  }
-  return homeDirectory;
-}
-
 /**
  * The one SessionManager of each surface, built on first use. Building it
  * sweeps the sessions directory for temp files a crashed write left; that is a
@@ -221,21 +141,18 @@ export function requireHomeDirectory(options?: Pick<SessionPersistenceOptions, '
  */
 const surfaceSessionManagers = new WeakMap<SessionSurface, SessionManager>();
 
+/** The surface's one SessionManager: the composition's session store and every persistence call share it. */
+export function surfaceSessionManager(surface: SessionSurface): SessionManager {
+  let manager = surfaceSessionManagers.get(surface);
+  if (!manager) {
+    manager = new SessionManager(surface.workingDirectory, { surface });
+    surfaceSessionManagers.set(surface, manager);
+  }
+  return manager;
+}
+
 export function resolveSessionManager(options?: SessionPersistenceOptions): SessionManager {
-  if (isSurfaceOptions(options)) {
-    const surface = requireSurface(options);
-    let manager = surfaceSessionManagers.get(surface);
-    if (!manager) {
-      manager = new SessionManager(surface.workingDirectory, { surface });
-      surfaceSessionManagers.set(surface, manager);
-    }
-    return manager;
-  }
-  warnLegacyOptionsOnce();
-  if (options?.sessionManager) {
-    return options.sessionManager;
-  }
-  return new SessionManager(requireWorkingDirectory(options), { surfaceRoot: options?.surfaceRoot });
+  return surfaceSessionManager(requireSurface(options));
 }
 
 export function getUserSessionsDir(workingDirectory: string, surfaceRoot?: string): string {

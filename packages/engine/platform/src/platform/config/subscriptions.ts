@@ -1,3 +1,4 @@
+import { rmSync } from 'node:fs';
 import { assertSecurityReadSource, fileIdentity } from '../security/read-source.js';
 import { readJsonFileOrQuarantine, writeJsonFileAtomic } from '../utils/atomic-json-store.js';
 import { logger } from '../utils/logger.js';
@@ -443,14 +444,26 @@ export class SubscriptionManager {
   public constructor(path: string, options: SubscriptionManagerOptions = {}) {
     this.path = path;
     this.secrets = options.secrets;
-    if (this.secrets) void this.moveInlineTokens();
+    // Nothing is read at construction: a token left in the file by an older
+    // build is moved the first time that provider's sign-in is read.
   }
+
+  /** Providers whose record this process found holding its tokens inline and has moved (or is moving). */
+  private readonly movedInline = new Set<string>();
 
   /** The record with its tokens, or null when they are not where it says (signed out). */
   private withTokens(record: StoredSubscription | undefined): ProviderSubscription | null {
     if (!record) return null;
-    if (typeof record.accessToken === 'string' && record.accessToken) return record as ProviderSubscription;
-    if (!this.secrets || record.tokenRevision === undefined) return null;
+    if (record.tokenRevision === undefined || !this.secrets) {
+      if (typeof record.accessToken !== 'string' || !record.accessToken) return null;
+      // An entry written before the secret store held tokens: usable as it is,
+      // and moved into the secret store once, off this read.
+      if (this.secrets && !this.movedInline.has(record.provider)) {
+        this.movedInline.add(record.provider);
+        void this.moveInlineTokens(record as ProviderSubscription);
+      }
+      return record as ProviderSubscription;
+    }
     const secret = this.readTokenSecret(record.provider);
     const entry = secret?.revision === record.tokenRevision ? secret
       : secret?.previous?.revision === record.tokenRevision ? secret.previous : undefined;
@@ -507,26 +520,25 @@ export class SubscriptionManager {
   }
 
   /**
-   * Move tokens a file written before the secret store held them still keeps
-   * inline into the secret store, then drop them from the file; a record that
-   * changed meanwhile is left for the next pass.
+   * Move one provider's tokens an older build left inline in the file into the
+   * secret store, then drop them from its record. A record that changed
+   * meanwhile (a new sign-in, a renewal) already has its tokens in the store.
    */
-  private async moveInlineTokens(): Promise<void> {
+  private async moveInlineTokens(inline: ProviderSubscription): Promise<void> {
     try {
-      for (const record of Object.values(this.read().subscriptions)) {
-        if (typeof record.accessToken !== 'string' || !record.accessToken) continue;
-        const inline = record as ProviderSubscription;
-        const revision = await this.storeTokens(inline, record.tokenRevision);
-        this.mutate((store) => {
-          const current = store.subscriptions[inline.provider];
-          if (!current || current.accessToken !== inline.accessToken || current.refreshToken !== inline.refreshToken) return false;
-          store.subscriptions[inline.provider] = storedForm({ ...(current as ProviderSubscription) }, revision);
-          return true;
-        }, (moved) => moved);
-      }
+      const revision = await this.storeTokens(inline, inline.tokenRevision);
+      this.mutate((store) => {
+        const current = store.subscriptions[inline.provider];
+        if (!current || current.tokenRevision !== inline.tokenRevision
+          || current.accessToken !== inline.accessToken || current.refreshToken !== inline.refreshToken) return false;
+        store.subscriptions[inline.provider] = storedForm({ ...(current as ProviderSubscription) }, revision);
+        return true;
+      }, (moved) => moved);
     } catch (error) {
-      logger.warn('SubscriptionManager: sign-in tokens could not be moved into the secret store yet; they stay in the subscriptions file until the next start', {
-        error: summarizeError(error),
+      // Not moved: the tokens stay usable from the file, and a later process moves them.
+      this.movedInline.delete(inline.provider);
+      logger.warn('SubscriptionManager: a sign-in\'s tokens could not be moved into the secret store yet; they stay in the subscriptions file for now', {
+        provider: inline.provider, error: summarizeError(error),
       });
     }
   }
@@ -575,9 +587,13 @@ export class SubscriptionManager {
     );
   }
 
+  /** Write the store, or remove the file when it holds no sign-in and no pending login, so nothing is left behind. */
   private write(store: SubscriptionStore): void {
     this.importGeneration++;
-    try { writeJsonFileAtomic(this.path, store); } finally { this.importGeneration++; }
+    try {
+      if (Object.keys(store.subscriptions).length === 0 && Object.keys(store.pending).length === 0) rmSync(this.path, { force: true });
+      else writeJsonFileAtomic(this.path, store);
+    } finally { this.importGeneration++; }
   }
 
   /**

@@ -381,6 +381,8 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
     // Best-effort, never let the resume notice block or crash boot.
   });
   announceInstallHealth(systemMessageRouter);
+  // Retention for worktrees earlier runs left (the daemon runs the same pass at its start).
+  void services.worktreeRegistry.startupSweep().then((notice) => { if (notice) systemMessageRouter.low(`[Worktrees] ${notice}`); });
   const { gitStatusProvider, inputHistory, lastGitInfoRef } = shell;
   // FIX 2: dispose the header's live-repo-state poll (git-status.ts
   // startPolling) on shutdown, same pattern as acpTaskSyncInterval above.

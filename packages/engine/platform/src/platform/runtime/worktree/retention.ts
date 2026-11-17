@@ -1,4 +1,4 @@
-import { existsSync, lstatSync, realpathSync, statSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 
 /**
@@ -8,9 +8,13 @@ import { join, relative, sep } from 'node:path';
  * - Clean but carrying commits the base does not have: kept until the retention
  *   period after the owner ended, then the DIRECTORY is removed and the branch
  *   stays, so the commits remain reachable.
- * - Uncommitted changes, ignored files (`.env`, local databases, build output:
- *   removing a worktree deletes them and git keeps no copy), or git state that
- *   cannot be read: never removed here.
+ * - Ignored files only (`.env`, local databases, build output: removing a
+ *   worktree deletes them and git keeps no copy): they delay removal, they do not
+ *   forbid it. The worktree is kept for the retention period after its owner
+ *   ended, listed with its size, then removed. Files that are copies of the main
+ *   checkout's (a carried-over `.env` that still matches) and the dependency
+ *   folders setup installs (`node_modules`, `.venv`) are not local state at all.
+ * - Uncommitted changes, or git state that cannot be read: never removed here.
  * - No created-by record (made by a version before the record existed): removed
  *   once no running owner holds it, whatever it holds; its branch is kept unless
  *   every commit on it is already in its base.
@@ -33,8 +37,9 @@ export interface WorktreeOwnerInfo {
 
 /** What git says is in a worktree. */
 export type WorktreeAssessment =
-  | { readonly kind: 'nothing-unique'; readonly branch: string | null }
-  | { readonly kind: 'unmerged'; readonly branch: string | null; readonly commits: number; readonly base: string }
+  /** `ignored`: ignored files or folders that are this worktree's own (not copies, not installed dependencies). */
+  | { readonly kind: 'nothing-unique'; readonly branch: string | null; readonly ignored?: number | undefined }
+  | { readonly kind: 'unmerged'; readonly branch: string | null; readonly commits: number; readonly base: string; readonly ignored?: number | undefined }
   | { readonly kind: 'uncommitted'; readonly changes: number; readonly ignored: number }
   | { readonly kind: 'unreadable'; readonly reason: string };
 
@@ -43,6 +48,8 @@ export type WorktreeKeepReason =
   | { readonly why: 'running'; readonly detail: string }
   | { readonly why: 'uncommitted'; readonly detail: string }
   | { readonly why: 'unmerged'; readonly detail: string; readonly pruneInDays: number | null }
+  /** Only ignored files of its own: kept for the retention period, then removed. */
+  | { readonly why: 'ignored'; readonly detail: string; readonly pruneInDays: number | null }
   | { readonly why: 'unreadable'; readonly detail: string }
   | { readonly why: 'protected'; readonly detail: string }
   | { readonly why: 'owner-unknown'; readonly detail: string; readonly pruneInDays: number | null }
@@ -95,11 +102,11 @@ export async function assessWorktree(path: string, rootDir: string, baseBranch?:
   }
   const status = await runGit(path, ['status', '--porcelain=v1', '--untracked-files=all', '--ignored']);
   if (!status.ok) return { kind: 'unreadable', reason: 'git status failed' };
-  if (status.out.length > 0) {
-    const lines = status.out.split('\n');
-    const ignored = lines.filter((line) => line.startsWith('!! ')).length;
-    return { kind: 'uncommitted', changes: lines.length - ignored, ignored };
-  }
+  const lines = status.out.length > 0 ? status.out.split('\n') : [];
+  const ignoredEntries = lines.filter((line) => line.startsWith('!! ')).map((line) => line.slice(3));
+  const changes = lines.length - ignoredEntries.length;
+  const ignored = ignoredEntries.filter((entry) => !regenerable(entry, path, rootDir)).length;
+  if (changes > 0) return { kind: 'uncommitted', changes, ignored };
 
   const head = await runGit(path, ['rev-parse', '--verify', '-q', 'HEAD']);
   if (!head.ok || head.out.length === 0) return { kind: 'unreadable', reason: 'git could not read HEAD' };
@@ -112,8 +119,28 @@ export async function assessWorktree(path: string, rootDir: string, baseBranch?:
   const branchResult = await runGit(path, ['symbolic-ref', '-q', '--short', 'HEAD']);
   const branch = branchResult.ok && branchResult.out.length > 0 ? branchResult.out : null;
   const baseLabel = baseBranch ?? 'the current branch';
-  if (commits === 0) return { kind: 'nothing-unique', branch };
-  return { kind: 'unmerged', branch, commits, base: baseLabel };
+  const own = ignored > 0 ? { ignored } : {};
+  if (commits === 0) return { kind: 'nothing-unique', branch, ...own };
+  return { kind: 'unmerged', branch, commits, base: baseLabel, ...own };
+}
+
+/** Folders the derived setup commands install (bun/npm/pnpm/yarn, uv): rebuilt by running setup again. */
+const INSTALLED_DEPENDENCY_DIRS: ReadonlySet<string> = new Set(['node_modules/', '.venv/']);
+
+/**
+ * An ignored entry that is not this worktree's own state: an installed
+ * dependency folder, or a file whose bytes equal the main checkout's file at
+ * the same path (what setup carried over and nothing changed since).
+ */
+function regenerable(entry: string, worktree: string, rootDir: string): boolean {
+  if (INSTALLED_DEPENDENCY_DIRS.has(entry) || [...INSTALLED_DEPENDENCY_DIRS].some((dir) => entry.endsWith(`/${dir}`))) return true;
+  if (entry.endsWith('/')) return false;
+  try {
+    const own = statSync(join(worktree, entry)), source = statSync(join(rootDir, entry));
+    return own.isFile() && source.isFile() && own.size === source.size && readFileSync(join(worktree, entry)).equals(readFileSync(join(rootDir, entry)));
+  } catch {
+    return false;
+  }
 }
 
 /** The local state a worktree holds that no commit does, in words: "2 uncommitted change(s) and 1 ignored file(s)". */
@@ -212,10 +239,14 @@ export async function evaluateWorktree(input: {
   if (!ended && !due) {
     return keep({ why: 'owner-unknown', detail: 'its owner is not known to have ended; considered again once it has been idle for the retention period', pruneInDays: daysUntilPrune(sinceMs, now, retentionMs) });
   }
-  if (assessment.kind === 'nothing-unique') {
-    return { action: 'remove-all', reason: { why: 'removable', detail: 'clean, and every commit is already in its base' }, assessment, sinceMs };
-  }
   const pruneInDays = daysUntilPrune(sinceMs, now, retentionMs);
+  if (assessment.kind === 'nothing-unique') {
+    const local = assessment.ignored ?? 0;
+    if (local === 0) return { action: 'remove-all', reason: { why: 'removable', detail: 'clean, and every commit is already in its base' }, assessment, sinceMs };
+    // Ignored files delay removal for the retention period; they do not forbid it.
+    if (!ended || !due) return keep({ why: 'ignored', detail: `${describeLocalState(0, local)}; removed in ${pruneInDays} day(s)`, pruneInDays });
+    return { action: 'remove-all', reason: { why: 'removable', detail: `every commit is in its base; past retention, removed with ${describeLocalState(0, local)}` }, assessment, sinceMs };
+  }
   if (!due) {
     return keep({ why: 'unmerged', detail: `${assessment.commits} commit(s) not in ${assessment.base}; the directory is pruned in ${pruneInDays} day(s), the branch is kept`, pruneInDays });
   }

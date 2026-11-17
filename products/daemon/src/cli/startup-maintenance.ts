@@ -64,9 +64,7 @@ export function persistDaemonStartupPublicUrl(
  */
 export async function sweepDaemonWorktrees(configuration: DaemonCliConfiguration): Promise<string | null> {
   try {
-    const registry = new WorktreeRegistry(configuration.workingDirectory);
-    await registry.sweepRetention();
-    return await registry.keptWorktreeNotice();
+    return await new WorktreeRegistry(configuration.workingDirectory).startupSweep();
   } catch {
     return null;
   }

@@ -1,6 +1,6 @@
 import { acquireProcessLock, withProcessLock, withProcessLockSync, type HeldProcessLock } from '../../utils/process-lock.js';
 import { existsSync, readFileSync, readdirSync, realpathSync, renameSync, statSync, unlinkSync } from 'node:fs';
-import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { GitService } from '../../git/service.js';
 import { isMarkedProductWorktree } from '../../git/product-worktree-marker.js';
 import { logger } from '../../utils/logger.js';
@@ -679,7 +679,9 @@ export class WorktreeRegistry {
    * unique go at once, clean ones with unmerged commits lose their directory
    * after the retention period with the branch kept, and anything with
    * uncommitted changes, a running owner or unreadable git state is left
-   * alone, as is one with ignored files (removal would delete them). A
+   * alone. Ignored files of its own (not installed dependencies, not unchanged
+   * copies of the main checkout) keep a worktree for the retention period after
+   * its owner ended, then it is removed with them. A
    * worktree in one of the product's own shapes that carries no created-by
    * marker was made before the marker existed and is removed, whatever it
    * holds, once no running owner holds it. Nothing marked kept, paused or
@@ -861,12 +863,33 @@ export class WorktreeRegistry {
     return infos;
   }
 
-  /** One line for startup when kept worktrees hold more than `thresholdBytes` in total, else null. */
+  /**
+   * One line for startup when kept worktrees hold more than `thresholdBytes` in
+   * total, else null. It names the largest few with their size and why each is
+   * kept (for one holding only ignored files, when it is removed).
+   */
   public async keptWorktreeNotice(options: { readonly thresholdBytes?: number; readonly owner?: WorktreeRetentionOptions['owner'] } = {}): Promise<string | null> {
     const infos = await this.describeKept(options.owner ? { owner: options.owner } : {});
     const total = infos.reduce((sum, info) => sum + (info.sizeBytes ?? 0), 0);
     if (total <= (options.thresholdBytes ?? DEFAULT_KEPT_WORKTREE_NOTICE_BYTES) || infos.length === 0) return null;
-    return `${infos.length} kept worktree(s) under .goodvibes use ${formatBytes(total)}; review with /worktree review, discard one with /worktree discard <path>.`;
+    const largest = [...infos].sort((a, b) => (b.sizeBytes ?? 0) - (a.sizeBytes ?? 0)).slice(0, 3)
+      .map((info) => `${relative(this.workingDirectory, info.path)} ${info.sizeBytes !== undefined ? formatBytes(info.sizeBytes) : 'size unknown'} (${info.reason.detail})`);
+    return `${infos.length} kept worktree(s) under .goodvibes use ${formatBytes(total)}; largest: ${largest.join('; ')}. Review with /worktree review, discard one with /worktree discard <path>.`;
+  }
+
+  /**
+   * The start-up pass every program runs (the daemon and both terminal apps):
+   * apply retention to leftovers from earlier runs, then return the kept-worktree
+   * notice, or null. Never throws: start-up must not fail on it.
+   */
+  public async startupSweep(): Promise<string | null> {
+    try {
+      await this.sweepRetention();
+      return await this.keptWorktreeNotice();
+    } catch (error) {
+      logger.warn('worktree retention: the start-up pass did not complete', { error: summarizeError(error) });
+      return null;
+    }
   }
 
   public attach(path: string, target: { sessionId?: string; taskId?: string }): void {

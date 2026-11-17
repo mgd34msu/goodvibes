@@ -477,6 +477,8 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
     logger.info(announcement.text, { announcement: announcement.id });
     systemMessageRouter.low(`[Startup] ${announcement.text}`);
   }
+  // Retention for worktrees earlier runs left (the daemon runs the same pass at its start).
+  void services.worktreeRegistry.startupSweep().then((notice) => { if (notice) systemMessageRouter.low(`[Worktrees] ${notice}`); });
   const commandRegistry = shell.commandRegistry;
   const commandContext = shell.commandContext;
   const inputHistory = shell.inputHistory;

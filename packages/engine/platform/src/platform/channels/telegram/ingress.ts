@@ -36,6 +36,7 @@ import { logger } from '../../utils/logger.js';
 import { summarizeError } from '../../utils/error-display.js';
 import { IngressProcessingHealth, ingressOutcome, type ChannelIngressAlarm } from '../ingress-alarm.js';
 import { TelegramApiError, TelegramBotApi, TelegramUpdateResponseError, type TelegramBotIdentity, type TelegramUpdate } from './api.js';
+import { channelCredentials } from '../credential-holder.js';
 import { TelegramPollingReceiveProgress, TelegramReceiveCoverageError, type TelegramReceiveScope } from './receive-progress.js';
 import { bindEarlierTelegramCursor, TelegramOffsetStore, TelegramOffsetStoreError, type TelegramPollingCursor } from './offset-store.js';
 import { CONFLICT_ESCALATION_ATTEMPTS, classifyTelegramConflict } from './conflict-policy.js';
@@ -544,6 +545,8 @@ export class TelegramIngressSupervisor {
         // reasons below name the failure class and never quote the provider.
         if (error instanceof TelegramApiError && error.isUnauthorized) {
           lifetime.abort();
+          // A token rotated in a password manager is read afresh by the next start, send and retest.
+          channelCredentials.release();
           return this.settle('inactive', 'Telegram webhook registration failed: the bot token was rejected. '
             + 'Check surfaces.telegram.botToken; retrying cannot fix a revoked or mistyped token.');
         }
@@ -918,6 +921,8 @@ export class TelegramIngressSupervisor {
     }
 
     if (error instanceof TelegramApiError && error.isUnauthorized) {
+      // A token rotated in a password manager is read afresh by the next start, send and retest.
+      channelCredentials.release();
       const reason = 'Telegram polling stopped: the bot token was rejected '
         + `(${error.message}). Check surfaces.telegram.botToken, a revoked or mistyped token `
         + 'cannot be recovered by retrying.';
@@ -1216,6 +1221,7 @@ export class TelegramIngressSupervisor {
     try {
       identity = await api.getMe();
     } catch (error) {
+      if (error instanceof TelegramApiError && error.isUnauthorized) channelCredentials.release();
       if (!current()) return;
       logger.warn('Telegram ingress: could not resolve the bot username from its token', {
         botId: api.botId,

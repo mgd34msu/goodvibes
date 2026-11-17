@@ -3,6 +3,7 @@ import type { ConfigKey } from '../config/schema-types.js';
 import type { SecretsManager } from '../config/secrets.js';
 import type { ServiceRegistry } from '../config/service-registry.js';
 import { resolveSurfaceSecret } from './builtin/surface-secrets.js';
+import { channelCredentials } from './credential-holder.js';
 import {
   DiscordGatewayClient,
   DiscordIntegration,
@@ -101,6 +102,7 @@ const DEFAULT_STATE: RuntimeState = {
 // 4004 bad token, 4010-4012 bad shard or API version, 4013/4014 intents: reconnecting
 // with the same credentials and settings is refused again.
 const DISCORD_PERMANENT_CLOSE_CODES: ReadonlySet<number> = new Set([4004, 4010, 4011, 4012, 4013, 4014]);
+const DISCORD_BAD_TOKEN_CLOSE_CODE = 4004;
 
 const NTFY_MESSAGE_ATTEMPTS = 3;
 /** Failed-message counts kept at once; the oldest are forgotten first. */
@@ -362,6 +364,8 @@ export class ChannelProviderRuntimeManager {
       if (!connection.ok) {
         this.slackClient = null;
         const message = connection.error ?? 'Slack Socket Mode connection failed.';
+        // A refused app token is read afresh by the next start, so a rotated one is picked up.
+        channelCredentials.releaseOnAuthDetail(message);
         if (generation === this.slackGeneration) this.markError('slack', message);
         return this.result('slack', false, message);
       }
@@ -370,6 +374,7 @@ export class ChannelProviderRuntimeManager {
     } catch (error) {
       if (this.slackClient === client) this.slackClient = null;
       const message = summarizeError(error);
+      if (!channelCredentials.releaseOnRefusal(error)) channelCredentials.releaseOnAuthDetail(message);
       // A start that stop() already cancelled must not repaint the newer state.
       if (generation === this.slackGeneration) this.markError('slack', message);
       return this.result('slack', false, message);
@@ -404,7 +409,11 @@ export class ChannelProviderRuntimeManager {
       integration: discord,
       resume,
       onDispatch: (dispatch) => this.handleDiscordDispatch(dispatch, discord),
-      onClosed: (reason, code) => this.reportSocketLost('discord', reason, client, code !== undefined && DISCORD_PERMANENT_CLOSE_CODES.has(code)),
+      onClosed: (reason, code) => {
+        // 4004: Discord refused the bot token; the next start reads it afresh.
+        if (code === DISCORD_BAD_TOKEN_CLOSE_CODE) channelCredentials.release();
+        this.reportSocketLost('discord', reason, client, code !== undefined && DISCORD_PERMANENT_CLOSE_CODES.has(code));
+      },
     });
     // Reachable by stop() from here on, not only after start() resolves.
     this.discordClient = client;
@@ -419,6 +428,7 @@ export class ChannelProviderRuntimeManager {
     } catch (error) {
       if (this.discordClient === client) this.discordClient = null;
       const message = summarizeError(error);
+      channelCredentials.releaseOnRefusal(error);
       if (generation === this.discordGeneration) this.markError('discord', message);
       return this.result('discord', false, message);
     }

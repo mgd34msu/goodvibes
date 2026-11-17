@@ -15,11 +15,12 @@
  */
 import { DiscordIntegration, SlackIntegration } from '../../integrations/index.js';
 import { fetchWithTimeout } from '../../utils/fetch-with-timeout.js';
-import { TelegramBotApi } from '../telegram/api.js';
+import { TelegramApiError, TelegramBotApi } from '../telegram/api.js';
 import { resolveMSTeamsAccessToken } from '../delivery/shared.js';
 import type { ChannelSurface } from '../types.js';
 import type { BuiltinChannelRuntimeDeps } from './shared.js';
 import { resolveSurfaceSecret } from './surface-secrets.js';
+import { channelCredentials, isCredentialRefusal } from '../credential-holder.js';
 
 export interface CredentialProbeResult {
   /** The provider accepted the credentials (or, when nothing could be probed, the surface is configured). */
@@ -30,6 +31,8 @@ export interface CredentialProbeResult {
   readonly reason: string;
   /** The identity the provider reported, when it reported one. */
   readonly identity?: string | undefined;
+  /** The provider refused the credential itself (not unreachable, not some other error). */
+  readonly refused?: boolean | undefined;
 }
 
 const PROBE_TIMEOUT_MS = 10_000;
@@ -67,7 +70,7 @@ async function probeHttp(
   } catch { /* A non-JSON answer is quoted by status below. */ }
   if (response.status === 401 || response.status === 403) {
     const detail = text(body['message']) || text(body['error']) || text(body['detail']) || raw.slice(0, 160);
-    return { ok: false, probed: true, reason: `${label} refused the credentials (HTTP ${response.status}${detail ? `: ${detail}` : ''}).` };
+    return { ok: false, probed: true, refused: true, reason: `${label} refused the credentials (HTTP ${response.status}${detail ? `: ${detail}` : ''}).` };
   }
   if (!response.ok) {
     return { ok: false, probed: true, reason: `${label} answered HTTP ${response.status}${raw ? `: ${raw.slice(0, 160)}` : ''}.` };
@@ -84,8 +87,24 @@ function missing(label: string, what: string): CredentialProbeResult {
   return { ok: false, probed: false, reason: `${label} has no ${what} that resolves here, so there is nothing to test. Run setup to store it.` };
 }
 
-/** Ask the provider whether the surface's credentials work. */
+/**
+ * Ask the provider whether the surface's credentials work. A refusal of a
+ * credential this process held (one resolved from a password manager earlier)
+ * releases what is held and asks once more with the value resolved now, so a
+ * token rotated in the vault is tested as it is, not as it was.
+ */
 export async function probeBuiltinCredentials(
+  deps: BuiltinChannelRuntimeDeps,
+  surface: ChannelSurface,
+): Promise<CredentialProbeResult> {
+  const held = channelCredentials.size > 0;
+  const probe = await probeOnce(deps, surface);
+  if (probe.refused !== true || !held) return probe;
+  channelCredentials.release();
+  return probeOnce(deps, surface);
+}
+
+async function probeOnce(
   deps: BuiltinChannelRuntimeDeps,
   surface: ChannelSurface,
 ): Promise<CredentialProbeResult> {
@@ -103,7 +122,7 @@ export async function probeBuiltinCredentials(
       }
       try {
         const answer = await new SlackIntegration(undefined, token).authTest(token);
-        if (!answer.ok) return { ok: false, probed: true, reason: `Slack refused the bot token: ${answer.error ?? 'no reason given'}.` };
+        if (!answer.ok) return { ok: false, probed: true, refused: true, reason: `Slack refused the bot token: ${answer.error ?? 'no reason given'}.` };
         const identity = [text(answer.user), text(answer.team)].filter(Boolean).join(' in ');
         return { ok: true, probed: true, reason: `Slack accepted the bot token${identity ? ` (${identity})` : ''}.`, ...(identity ? { identity } : {}) };
       } catch (error) {
@@ -122,7 +141,7 @@ export async function probeBuiltinCredentials(
         const identity = text(user['username']);
         return { ok: true, probed: true, reason: `Discord accepted the bot token${identity ? ` (${identity})` : ''}.`, ...(identity ? { identity } : {}) };
       } catch (error) {
-        return { ok: false, probed: true, reason: `Discord refused the bot token: ${errorText(error)}` };
+        return { ok: false, probed: true, refused: isCredentialRefusal(error), reason: `Discord refused the bot token: ${errorText(error)}` };
       }
     }
     case 'telegram': {
@@ -133,7 +152,7 @@ export async function probeBuiltinCredentials(
         const identity = bot.username ? `@${bot.username}` : `bot ${bot.id}`;
         return { ok: true, probed: true, reason: `Telegram accepted the bot token (${identity}).`, identity };
       } catch (error) {
-        return { ok: false, probed: true, reason: `Telegram refused the bot token: ${errorText(error)}` };
+        return { ok: false, probed: true, refused: error instanceof TelegramApiError && error.isUnauthorized, reason: `Telegram refused the bot token: ${errorText(error)}` };
       }
     }
     case 'ntfy': {
@@ -199,7 +218,7 @@ export async function probeBuiltinCredentials(
         await resolveMSTeamsAccessToken(config, deps.serviceRegistry, deps.secretsManager);
         return { ok: true, probed: true, reason: 'Microsoft issued a Bot Framework token for the Teams app id and password.' };
       } catch (error) {
-        return { ok: false, probed: true, reason: `Microsoft refused the Teams app credentials: ${errorText(error)}` };
+        return { ok: false, probed: true, refused: isCredentialRefusal(error), reason: `Microsoft refused the Teams app credentials: ${errorText(error)}` };
       }
     case 'bluebubbles': {
       const base = text(config.get('surfaces.bluebubbles.serverUrl'));

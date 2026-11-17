@@ -12,8 +12,12 @@
  *   the key, so a changed setting is a different entry;
  * - the secret store changes (`SecretsManager.onDidChange` and its credential
  *   invalidation), which clears every entry;
- * - a provider refuses a send as unauthorised (401/403, or Slack's auth error
- *   codes), which clears every entry so the next send resolves afresh.
+ * - a provider refuses the credential itself (HTTP 401, a 403 whose words say
+ *   the token is bad, Slack's auth error codes, Discord's bad-token close):
+ *   on a send, an inbound connection (Telegram polling, the Slack and Discord
+ *   sockets) or a retest, which clears every entry so the next read resolves
+ *   afresh. A 403 that refuses the message, not the token (Telegram's "bot
+ *   was blocked by the user", a missing permission), keeps them.
  *
  * A literal value, an environment reference and a GoodVibes secret-store
  * reference are read through each time: they start nothing, and a store file
@@ -37,6 +41,11 @@ function hasStoreEvents(value: unknown): value is CredentialStoreEvents {
 
 /** Slack answers HTTP 200 with one of these when the token itself is refused. */
 const SLACK_AUTH_ERROR = /\b(invalid_auth|not_authed|token_revoked|token_expired|account_inactive)\b/;
+/**
+ * A 403 is most often a refusal of the message or a missing permission; it is
+ * a refusal of the credential only when the provider says so in these words.
+ */
+const TOKEN_REFUSED_403 = /\b(?:invalid|expired|revoked|unknown|bad)[ _-]?(?:token|credentials?|api[ _-]?key|access[ _-]?token|auth)\b|\btoken[ _-]?(?:invalid|expired|revoked)\b|\bM_UNKNOWN_TOKEN\b/i;
 
 export class ChannelCredentialHolder {
   readonly #held = new Map<string, Promise<string | null>>();
@@ -81,6 +90,13 @@ export class ChannelCredentialHolder {
     return true;
   }
 
+  /** Release when a provider's own error text (Slack's error codes) says the token was refused. */
+  releaseOnAuthDetail(detail: string | undefined): boolean {
+    if (!detail || !SLACK_AUTH_ERROR.test(detail)) return false;
+    this.release();
+    return true;
+  }
+
   /** How many credentials are held now. */
   get size(): number {
     return this.#held.size;
@@ -116,7 +132,8 @@ export function isCredentialRefusal(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
   const fields = error as { readonly status?: unknown; readonly statusCode?: unknown };
   const status = typeof fields.status === 'number' ? fields.status : typeof fields.statusCode === 'number' ? fields.statusCode : undefined;
-  if (status === 401 || status === 403) return true;
+  if (status === 401) return true;
+  if (status === 403) return TOKEN_REFUSED_403.test(error.message);
   return (error instanceof DeliveryError || error instanceof HttpStatusError) && SLACK_AUTH_ERROR.test(error.message);
 }
 

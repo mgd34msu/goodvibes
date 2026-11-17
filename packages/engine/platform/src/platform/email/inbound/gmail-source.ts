@@ -876,6 +876,7 @@ export class GmailMailSource implements InboundMailSource {
       deliveredTo: message.deliveredTo,
       unverifiedToHeaderClaim: message.to,
       resourceId: message.id,
+      ...(message.receivedAt === undefined ? {} : { arrivedAt: message.receivedAt }),
       historyId,
       // `''` on the metadata arm because there is no text to put there, the
       // argument type has no field for one. `bodyAvailability` below is what

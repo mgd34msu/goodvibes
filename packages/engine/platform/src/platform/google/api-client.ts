@@ -165,6 +165,11 @@ export interface GmailMessageSummary {
   readonly to: string;
   readonly subject: string;
   readonly date: string;
+  /**
+   * When Google received the message (`internalDate`), epoch ms. Unlike `date`
+   * the sender cannot write it. Absent when Google sent none readable.
+   */
+  readonly receivedAt?: number;
   readonly snippet: string;
   readonly unread: boolean;
   /** Always `'untrusted-external'`. Present so it cannot be forgotten downstream. */
@@ -364,6 +369,17 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function readString(value: unknown, fallback = ''): string {
   return typeof value === 'string' ? value : fallback;
+}
+
+/**
+ * `internalDate` (an int64 string of epoch ms) as a number. Epoch milliseconds
+ * stay far below 2^53, so this one is safe to parse; anything else is dropped.
+ */
+function receivedAtOf(record: Record<string, unknown>): { readonly receivedAt?: number } {
+  const value = record.internalDate;
+  if (typeof value !== 'string' || !/^[1-9][0-9]{0,15}$/.test(value)) return {};
+  const ms = Number(value);
+  return Number.isSafeInteger(ms) ? { receivedAt: ms } : {};
 }
 
 /**
@@ -632,6 +648,7 @@ export class GoogleApiClient {
         to: headerValue(headers, 'To'),
         subject: headerValue(headers, 'Subject'),
         date: headerValue(headers, 'Date'),
+        ...receivedAtOf(record),
         // Blanked unconditionally rather than carried. A snippet is body-derived
         // text; Google should not send one to a metadata-only grant, but this
         // path's whole promise is "no body reached us", and a promise that
@@ -669,6 +686,7 @@ export class GoogleApiClient {
         to: headerValue(headers, 'To'),
         subject: headerValue(headers, 'Subject'),
         date: headerValue(headers, 'Date'),
+        ...receivedAtOf(record),
         snippet: readString(record.snippet),
         unread: labelIds.some((label) => label === 'UNREAD'),
         provenance: MAIL_CONTENT_PROVENANCE,

@@ -466,6 +466,8 @@ export interface GmailInboundMessage extends InboundMessageCommon {
   readonly source: 'gmail';
   /** Gmail's opaque message resource id. Not a number, never coerced to one. */
   readonly resourceId: string;
+  /** When Google received it (`internalDate`), epoch ms; written by Google, not the sender. Absent when Google sent none. */
+  readonly arrivedAt?: number;
   /**
    * The delta's high-water mark, a decimal uint64 STRING. Never parsed to a
    * number, see the header of `source-cursor.ts` for the precision loss that

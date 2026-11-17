@@ -87,7 +87,7 @@ function senderDomainOf(from: string): string | undefined {
 }
 /**
  * The message's time for display order, retention and "arrived after"
- * questions: when the server received it (IMAP INTERNALDATE), which the sender
+ * questions: when the server received it (IMAP INTERNALDATE, Gmail internalDate), which the sender
  * cannot set; otherwise its Date header. A missing, unreadable or far-future
  * time falls back to when it was read here.
  */
@@ -266,7 +266,7 @@ export function createEmailInboxOwner(options: EmailInboxOwnerOptions): EmailInb
       ? message.body
       : 'The connected Google account does not grant message bodies, so only the subject is shown here.';
     await screenAndStage({
-      id, from: message.from, subject: message.subject, body, sentAt: messageTime(message.claimedDate, Date.now()), unread: true,
+      id, from: message.from, subject: message.subject, body, sentAt: messageTime(message.claimedDate, Date.now(), message.arrivedAt), unread: true,
       parts: [`From: ${message.from}\r\nSubject: ${message.subject}\r\n\r\n`, '', message.bodyAvailability === 'full' ? message.body : ''],
     });
   };

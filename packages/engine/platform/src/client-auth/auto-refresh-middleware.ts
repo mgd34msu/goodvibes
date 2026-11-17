@@ -10,8 +10,9 @@
  *      `coordinator.currentToken()`, which reads the token store once and
  *      refreshes a token inside the leeway window first, so the header is
  *      already current when this middleware runs. When that refresh was
- *      rejected for good and the store cleared, any caller-supplied
- *      Authorization header is dropped rather than sent.
+ *      rejected for good and the store cleared, an Authorization header from
+ *      the transport's default headers is dropped rather than sent; one the
+ *      caller set on the request itself is sent as given.
  *   2. Reactive 401: if `next()` throws a 401-shaped error, trigger a refresh
  *      via `coordinator.refreshAndRetryOnce()` and set `ctx.parsedBody` to the
  *      retry result so the transport can return it to the caller.
@@ -84,12 +85,15 @@ export function createAutoRefreshMiddleware(
     // ── Pre-flight ───────────────────────────────────────────────────────────
     // The header already carries the token `coordinator.currentToken()` read
     // (refreshed first when it was inside the leeway window). When that read
-    // found the store empty because a refresh was rejected for good, a
-    // caller-supplied Authorization header would only be refused, so drop it.
-    // (A store that simply has no token is left alone: a caller-supplied
-    // Authorization header is not ours to remove.)
+    // found the store empty because a refresh was rejected for good, an
+    // Authorization header left over from the transport's default headers
+    // would only be refused, so drop it. One the caller set on THIS request
+    // (`options.headers`, a bootstrap or pairing token) is the caller's own
+    // credential: it is sent as given, and its 401 is reported as is. (A store
+    // that simply has no token is left alone.)
     const usedToken = bearerTokenOf(ctx.headers);
-    const sessionCleared = coordinator.sessionCleared;
+    const callerAuthorization = setsAuthorization(ctx.options['headers']);
+    const sessionCleared = coordinator.sessionCleared && !callerAuthorization;
     if (sessionCleared) {
       for (const key of Object.keys(ctx.headers)) {
         if (key.toLowerCase() === 'authorization') delete ctx.headers[key];
@@ -120,6 +124,12 @@ export function createAutoRefreshMiddleware(
     if (!is401Error(caughtErr)) {
       // Non-401 error (e.g. 5xx, network), place on ctx.error so it exits
       // the middleware chain without triggering middleware-error wrapping.
+      ctx.error = caughtErr;
+      return;
+    }
+
+    if (callerAuthorization && coordinator.sessionCleared) {
+      // The caller's own credential was refused; no stored token can stand in.
       ctx.error = caughtErr;
       return;
     }
@@ -206,6 +216,17 @@ export function createAutoRefreshMiddleware(
 // is401Error is shared, import from auto-refresh.ts to avoid divergence.
 
 /** The bearer token a request's headers carry, or null. */
+/** Whether per-request headers (a record, a `Headers`, or name/value pairs) set Authorization. */
+function setsAuthorization(headers: unknown): boolean {
+  if (headers === undefined || headers === null) return false;
+  if (typeof Headers !== 'undefined' && headers instanceof Headers) return headers.has('authorization');
+  if (Array.isArray(headers)) {
+    return headers.some((entry) => Array.isArray(entry) && typeof entry[0] === 'string' && entry[0].toLowerCase() === 'authorization');
+  }
+  if (typeof headers !== 'object') return false;
+  return Object.entries(headers).some(([key, value]) => key.toLowerCase() === 'authorization' && typeof value === 'string' && value.length > 0);
+}
+
 function bearerTokenOf(headers: Readonly<Record<string, string>>): string | null {
   for (const [key, value] of Object.entries(headers)) {
     if (key.toLowerCase() !== 'authorization') continue;

@@ -56,7 +56,7 @@ Auth: `Authorization: Bearer <token>` or the login session cookie. Errors are `{
 
 | Method id | Route | Scopes | Replay key | Does |
 | --- | --- | --- | --- | --- |
-| `contracts.budget` | invoke / WebSocket only | write:fleet |  | Replace a running contract's token and cost ceiling (`maxCostUsd`, `maxTokens`, or both). |
+| `contracts.budget` | invoke / WebSocket only | write:fleet |  | Replace a running contract's token and cost ceiling (`maxCostUsd`, `maxTokens`, or both); a limit left out ke… |
 | `contracts.cancel` | `POST /api/contracts/{contractId}/cancel` | write:fleet |  | Stop a contract and every unit agent it runs; its status line records how many files were already changed and… |
 | `contracts.dispatch` | invoke / WebSocket only | write:fleet |  | Start a contract for `ask` (the person's words verbatim) in a hosted session created for it, in `workspaceRoo… |
 | `contracts.get` | `GET /api/contracts/{contractId}` | read:fleet |  | One contract with its whole tree, running or ended. |

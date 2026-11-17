@@ -4,7 +4,7 @@ Generated from the synced GoodVibes operator contract artifact.
 
 ## Summary
 
-- Methods: `629`
+- Methods: `630`
 - Events: `36`
 - Auth modes: `shared-bearer`, `session-login`
 - HTTP status path: `/status`
@@ -21687,7 +21687,7 @@ Read named fields out of elements matched by a snapshot ref or a CSS selector. T
 - Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/browser/extract`
-- Scopes: `read:browser`
+- Scopes: `read:browser-content`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -22176,7 +22176,7 @@ Read the page as text, including open shadow roots and embedded frames, each fra
 - Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/browser/read-text`
-- Scopes: `read:browser`
+- Scopes: `read:browser-content`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -22279,7 +22279,7 @@ Write a PNG of the visible area or the whole scrollable page and report the exac
 - Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/browser/screenshot`
-- Scopes: `read:browser`
+- Scopes: `read:browser-content`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -23223,7 +23223,7 @@ Return addressable element refs for the current page. Element names come from th
 - Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/browser/snapshot`
-- Scopes: `read:browser`
+- Scopes: `read:browser-content`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -23723,7 +23723,7 @@ Return every open page in a session, with which one is active.
 - Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `GET /api/browser/tabs`
-- Scopes: `read:browser`
+- Scopes: `read:browser-content`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -23952,7 +23952,7 @@ Wait for text to become visible, for the URL to match, or for the network to set
 - Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/browser/wait-for`
-- Scopes: `read:browser`
+- Scopes: `read:browser-content`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -38277,6 +38277,12 @@ Return secret-free credential status (configured/usable) for the shared store. N
           },
           "refSource": {
             "type": "string"
+          },
+          "reference": {
+            "type": "string",
+            "enum": [
+              "not-checked"
+            ]
           }
         },
         "required": [
@@ -38560,7 +38566,7 @@ Return the continuity integration snapshot.
 
 #### `contracts.budget`
 
-Replace a running contract's token and cost ceiling (`maxCostUsd`, `maxTokens`, or both). Each running group's remaining allowance moves by the same amount, and a unit waiting because the budget was used up starts. Returns the new `budget`. 400 with INVALID_ARGUMENT when neither limit is given or one is negative; 404 with CONTRACT_NOT_FOUND for an unknown id; 409 with CONTRACT_ENDED once the contract has ended; 409 with CONTRACT_NATIVE for native work.
+Replace a running contract's token and cost ceiling (`maxCostUsd`, `maxTokens`, or both); a limit left out keeps its current value. Each running group's remaining allowance moves by the same amount, and a unit waiting because the budget was used up starts. Returns the new `budget`, both limits as they now stand. 400 with INVALID_ARGUMENT when neither limit is given or one is negative; 404 with CONTRACT_NOT_FOUND for an unknown id; 409 with CONTRACT_ENDED once the contract has ended; 409 with CONTRACT_NATIVE for native work.
 
 - Title: `Set a Running Contract's Budget`
 - Source: `builtin`
@@ -71917,6 +71923,47 @@ Authenticate a local control-plane user and create a session token.
 }
 ```
 
+#### `control.auth.logout`
+
+End the sign-in session that authenticates this request (its bearer or session cookie) and expire the session cookie. Any signed-in user may end their own session; ending another session is local_auth.sessions.delete (admin). A credential that is not a live sign-in session is answered 401 SESSION_UNKNOWN.
+
+- Title: `Logout`
+- Source: `builtin`
+- Access: `public`
+- Transport: `http`
+- HTTP: `POST /logout`
+- Scopes: none
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `no`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {},
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "revoked": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "revoked"
+  ],
+  "additionalProperties": false
+}
+```
+
 #### `control.clients.list`
 
 Return authenticated and recently connected control-plane clients.
@@ -85814,7 +85861,7 @@ Search a Home Graph knowledge space and return a source-backed answer.
 - Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/homeassistant/home-graph/ask`
-- Scopes: `read:knowledge`
+- Scopes: `read:knowledge-content`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -85947,7 +85994,7 @@ Return namespace-filtered Home Graph sources, nodes, edges, and issues.
 - Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `GET /api/homeassistant/home-graph/browse`
-- Scopes: `read:knowledge`
+- Scopes: `read:knowledge-content`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -86398,7 +86445,7 @@ Export a complete Home Graph knowledge space.
 - Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/homeassistant/home-graph/export`
-- Scopes: `read:knowledge`
+- Scopes: `read:knowledge-content`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -89289,7 +89336,7 @@ Return Home Graph data quality, review, and maintenance issues.
 - Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `GET /api/homeassistant/home-graph/issues`
-- Scopes: `read:knowledge`
+- Scopes: `read:knowledge-content`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -89427,7 +89474,7 @@ Return a visual Home Graph node/edge map with deterministic layout data and SVG,
 - Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/homeassistant/home-graph/map`
-- Scopes: `read:knowledge`
+- Scopes: `read:knowledge-content`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -90122,7 +90169,7 @@ Return generated Home Graph wiki pages with optional markdown content.
 - Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `GET /api/homeassistant/home-graph/pages`
-- Scopes: `read:knowledge`
+- Scopes: `read:knowledge-content`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -90650,7 +90697,7 @@ Return one Home Graph refinement task and its trace.
 - Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `GET /api/homeassistant/home-graph/refinement/tasks/{id}`
-- Scopes: `read:knowledge`
+- Scopes: `read:knowledge-content`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -90917,7 +90964,7 @@ Return durable Home Graph refinement tasks with states, traces, source assessmen
 - Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `GET /api/homeassistant/home-graph/refinement/tasks`
-- Scopes: `read:knowledge`
+- Scopes: `read:knowledge-content`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -92401,7 +92448,7 @@ Return source inventory for a Home Graph space.
 - Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `GET /api/homeassistant/home-graph/sources`
-- Scopes: `read:knowledge`
+- Scopes: `read:knowledge-content`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -93619,7 +93666,7 @@ Search, semantically synthesize, and return a source-backed answer from the stru
 - Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/knowledge/ask`
-- Scopes: `read:knowledge`
+- Scopes: `read:knowledge-content`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -94713,7 +94760,7 @@ Return a single consolidation candidate.
 - Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `GET /api/knowledge/candidates/{id}`
-- Scopes: `read:knowledge`
+- Scopes: `read:knowledge-content`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -94852,7 +94899,7 @@ Return scored consolidation candidates for durable memory promotion, review, or 
 - Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `GET /api/knowledge/candidates`
-- Scopes: `read:knowledge`
+- Scopes: `read:knowledge-content`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -95698,7 +95745,7 @@ Return a single knowledge extraction record.
 - Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `GET /api/knowledge/extractions/{id}`
-- Scopes: `read:knowledge`
+- Scopes: `read:knowledge-content`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -95861,7 +95908,7 @@ Return structured extraction records for ingested sources.
 - Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `GET /api/knowledge/extractions`
-- Scopes: `read:knowledge`
+- Scopes: `read:knowledge-content`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -96033,7 +96080,7 @@ Execute a GraphQL query or mutation against the dedicated knowledge domain endpo
 - Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/knowledge/graphql`
-- Scopes: `read:knowledge`
+- Scopes: `read:knowledge-content`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -98372,7 +98419,7 @@ Return current knowledge lint and health issues.
 - Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `GET /api/knowledge/issues`
-- Scopes: `read:knowledge`
+- Scopes: `read:knowledge-content`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -98493,7 +98540,7 @@ Return a single structured knowledge source, node, or issue with linked relation
 - Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `GET /api/knowledge/items/{id}`
-- Scopes: `read:knowledge`
+- Scopes: `read:knowledge-content`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -101130,7 +101177,7 @@ Return a deterministic visual map of structured knowledge nodes, sources, edges,
 - Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `GET /api/knowledge/map`
-- Scopes: `read:knowledge`
+- Scopes: `read:knowledge-content`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -101711,7 +101758,7 @@ Return compiled knowledge nodes. Without ?limit/?cursor returns { nodes: [...] }
 - Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `GET /api/knowledge/nodes`
-- Scopes: `read:knowledge`
+- Scopes: `read:knowledge-content`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -102049,7 +102096,7 @@ Build a compact structured knowledge packet for a task and write scope.
 - Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/knowledge/packet`
-- Scopes: `read:knowledge`
+- Scopes: `read:knowledge-content`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -102821,7 +102868,7 @@ Render a markdown/wiki projection from the canonical structured knowledge store.
 - Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/knowledge/projections/render`
-- Scopes: `read:knowledge`
+- Scopes: `read:knowledge-content`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -103609,7 +103656,7 @@ Return one semantic refinement task and its trace.
 - Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `GET /api/knowledge/refinement/tasks/{id}`
-- Scopes: `read:knowledge`
+- Scopes: `read:knowledge-content`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -103852,7 +103899,7 @@ Return durable semantic refinement tasks with state, traces, accepted/rejected s
 - Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `GET /api/knowledge/refinement/tasks`
-- Scopes: `read:knowledge`
+- Scopes: `read:knowledge-content`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -104284,7 +104331,7 @@ Return a single knowledge consolidation report.
 - Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `GET /api/knowledge/reports/{id}`
-- Scopes: `read:knowledge`
+- Scopes: `read:knowledge-content`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -104403,7 +104450,7 @@ Return deterministic knowledge consolidation reports.
 - Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `GET /api/knowledge/reports`
-- Scopes: `read:knowledge`
+- Scopes: `read:knowledge-content`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -105462,7 +105509,7 @@ Search structured knowledge sources and nodes with compact ranked results.
 - Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/knowledge/search`
-- Scopes: `read:knowledge`
+- Scopes: `read:knowledge-content`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -105814,7 +105861,7 @@ Return the structured extraction record for a single knowledge source.
 - Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `GET /api/knowledge/sources/{id}/extraction`
-- Scopes: `read:knowledge`
+- Scopes: `read:knowledge-content`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -105977,7 +106024,7 @@ Return ingested structured knowledge sources. Without ?limit/?cursor returns { s
 - Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `GET /api/knowledge/sources`
-- Scopes: `read:knowledge`
+- Scopes: `read:knowledge-content`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -106382,7 +106429,7 @@ Return the recent knowledge usage ledger for packet hits, search hits, and item 
 - Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `GET /api/knowledge/usage`
-- Scopes: `read:knowledge`
+- Scopes: `read:knowledge-content`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -106501,7 +106548,7 @@ Return durable decision records from the current project planning knowledge spac
 - Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `GET /api/projects/planning/decisions`
-- Scopes: `read:knowledge`
+- Scopes: `read:knowledge-content`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -106925,7 +106972,7 @@ Return the saved historical project vocabulary and resolved ambiguity records fr
 - Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `GET /api/projects/planning/language`
-- Scopes: `read:knowledge`
+- Scopes: `read:knowledge-content`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -107203,7 +107250,7 @@ Return a saved historical planning state record. Planning state is read-only his
 - Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `GET /api/projects/planning/state`
-- Scopes: `read:knowledge`
+- Scopes: `read:knowledge-content`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -108663,7 +108710,7 @@ Return the durable project-scoped work-plan snapshot, including tasks and status
 - Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `GET /api/projects/planning/work-plan`
-- Scopes: `read:knowledge`
+- Scopes: `read:knowledge-content`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -110373,7 +110420,7 @@ Fetch one durable project-scoped work-plan task by id, with the plan revision.
 - Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `GET /api/projects/planning/work-plan/tasks/{taskId}`
-- Scopes: `read:knowledge`
+- Scopes: `read:knowledge-content`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -111991,7 +112038,7 @@ List durable project-scoped work-plan tasks with optional status, owner, parent,
 - Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `GET /api/projects/planning/work-plan/tasks`
-- Scopes: `read:knowledge`
+- Scopes: `read:knowledge-content`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -129300,11 +129347,11 @@ The model this daemon would use for a turn right now, with whether its provider 
 
 #### `models.current.set`
 
-Switch the daemon's current model live, by the registry key `models.list` returns. The switch applies to the next turn on every surface this daemon serves and is persisted, so it survives a restart; `persisted` says whether the write to settings succeeded. An unknown key is refused with MODEL_NOT_FOUND and a provider with no usable credentials with PROVIDER_NOT_CONFIGURED, naming the environment variables it looked for, a caller must not have to guess which of the two happened. An optional `effort` persists a reasoning level with the selection: it is validated against the known severity ladder here, and each turn maps it onto the active model's real options, snapping down and never promoting.
+Switch the daemon's current model live, by the registry key `models.list` returns. The switch applies to the next turn on every surface this daemon serves and is persisted, so it survives a restart; `persisted` says whether the write to settings succeeded. An unknown key is refused with MODEL_NOT_FOUND and a provider with no usable credentials with PROVIDER_NOT_CONFIGURED, naming the environment variables it looked for, a caller must not have to guess which of the two happened. An optional `effort` persists a reasoning level with the selection: it is validated against the known severity ladder here, and each turn maps it onto the active model's real options, snapping down and never promoting. It changes the model for every surface, so it needs an admin.
 
 - Title: `Switch the Current Model`
 - Source: `builtin`
-- Access: `authenticated`
+- Access: `admin`
 - Transport: `http`, `ws`
 - HTTP: `PATCH /api/models/current`
 - Scopes: `write:providers`

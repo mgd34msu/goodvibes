@@ -1750,18 +1750,22 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
       const run = runs.get(contractId);
       if (run === undefined || run.terminal) return false;
       const previous = run.contract.budget;
+      // A limit the owner did not name keeps its value: raising the cost ceiling never drops the token ceiling.
+      const tokens = ceiling.maxTokens ?? previous?.maxTokens;
+      const cost = ceiling.maxCostUsd ?? previous?.maxCostUsd;
+      const budget: BudgetCeiling = { ...(tokens === undefined ? {} : { maxTokens: tokens }), ...(cost === undefined ? {} : { maxCostUsd: cost }) };
       // Each running group was given what remained of the old ceiling; it gets the difference on top.
       const moved = (now: number | undefined, before: number | undefined, next: number | undefined): number | undefined =>
         next === undefined ? undefined : now === undefined || before === undefined ? next : Math.max(0, now + (next - before));
       for (const workstream of run.engine?.listWorkstreams() ?? []) {
-        const maxTokens = moved(workstream.budget?.maxTokens, previous?.maxTokens, ceiling.maxTokens);
-        const maxCostUsd = moved(workstream.budget?.maxCostUsd, previous?.maxCostUsd, ceiling.maxCostUsd);
+        const maxTokens = moved(workstream.budget?.maxTokens, previous?.maxTokens, budget.maxTokens);
+        const maxCostUsd = moved(workstream.budget?.maxCostUsd, previous?.maxCostUsd, budget.maxCostUsd);
         const next: BudgetCeiling | undefined = maxTokens === undefined && maxCostUsd === undefined ? undefined
           : { ...(maxTokens === undefined ? {} : { maxTokens }), ...(maxCostUsd === undefined ? {} : { maxCostUsd }) };
         run.engine!.updateBudget(workstream.id, next);
       }
-      Object.assign(run.contract, { budget: { ...ceiling } });
-      run.decide('owner-replied', run.id, `budget set to ${[ceiling.maxCostUsd === undefined ? '' : `$${ceiling.maxCostUsd}`, ceiling.maxTokens === undefined ? '' : `${ceiling.maxTokens} tokens`].filter(Boolean).join(' and ') || 'no ceiling'} by the owner`);
+      Object.assign(run.contract, { budget });
+      run.decide('owner-replied', run.id, `budget set to ${[budget.maxCostUsd === undefined ? '' : `$${budget.maxCostUsd}`, budget.maxTokens === undefined ? '' : `${budget.maxTokens} tokens`].filter(Boolean).join(' and ') || 'no ceiling'} by the owner`);
       if (run.contract.statusLine?.includes('its budget is used up') === true) run.contract.statusLine = undefined;
       deps.store.put(run.contract);
       return true;

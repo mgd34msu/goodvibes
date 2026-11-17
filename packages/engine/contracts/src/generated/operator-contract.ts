@@ -21741,7 +21741,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "ws"
         ],
         "scopes": [
-          "read:browser"
+          "read:browser-content"
         ],
         "http": {
           "method": "POST",
@@ -22214,7 +22214,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "ws"
         ],
         "scopes": [
-          "read:browser"
+          "read:browser-content"
         ],
         "http": {
           "method": "POST",
@@ -22314,7 +22314,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "ws"
         ],
         "scopes": [
-          "read:browser"
+          "read:browser-content"
         ],
         "http": {
           "method": "POST",
@@ -23237,7 +23237,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "ws"
         ],
         "scopes": [
-          "read:browser"
+          "read:browser-content"
         ],
         "http": {
           "method": "POST",
@@ -23725,7 +23725,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "ws"
         ],
         "scopes": [
-          "read:browser"
+          "read:browser-content"
         ],
         "http": {
           "method": "GET",
@@ -23946,7 +23946,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "ws"
         ],
         "scopes": [
-          "read:browser"
+          "read:browser-content"
         ],
         "http": {
           "method": "POST",
@@ -37926,6 +37926,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   },
                   "refSource": {
                     "type": "string"
+                  },
+                  "reference": {
+                    "type": "string",
+                    "enum": [
+                      "not-checked"
+                    ]
                   }
                 },
                 "required": [
@@ -38197,7 +38203,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "contracts.budget",
         "title": "Set a Running Contract's Budget",
-        "description": "Replace a running contract's token and cost ceiling (`maxCostUsd`, `maxTokens`, or both). Each running group's remaining allowance moves by the same amount, and a unit waiting because the budget was used up starts. Returns the new `budget`. 400 with INVALID_ARGUMENT when neither limit is given or one is negative; 404 with CONTRACT_NOT_FOUND for an unknown id; 409 with CONTRACT_ENDED once the contract has ended; 409 with CONTRACT_NATIVE for native work.",
+        "description": "Replace a running contract's token and cost ceiling (`maxCostUsd`, `maxTokens`, or both); a limit left out keeps its current value. Each running group's remaining allowance moves by the same amount, and a unit waiting because the budget was used up starts. Returns the new `budget`, both limits as they now stand. 400 with INVALID_ARGUMENT when neither limit is given or one is negative; 404 with CONTRACT_NOT_FOUND for an unknown id; 409 with CONTRACT_ENDED once the contract has ended; 409 with CONTRACT_NATIVE for native work.",
         "category": "contracts",
         "source": "builtin",
         "access": "authenticated",
@@ -71647,6 +71653,41 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "invokable": false
       },
       {
+        "id": "control.auth.logout",
+        "title": "Logout",
+        "description": "End the sign-in session that authenticates this request (its bearer or session cookie) and expire the session cookie. Any signed-in user may end their own session; ending another session is local_auth.sessions.delete (admin). A credential that is not a live sign-in session is answered 401 SESSION_UNKNOWN.",
+        "category": "control-plane",
+        "source": "builtin",
+        "access": "public",
+        "transport": [
+          "http"
+        ],
+        "scopes": [],
+        "http": {
+          "method": "POST",
+          "path": "/logout"
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object",
+          "properties": {
+            "revoked": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "revoked"
+          ],
+          "additionalProperties": false
+        },
+        "effect": "write",
+        "invokable": false
+      },
+      {
         "id": "control.clients.list",
         "title": "List Control-Plane Clients",
         "description": "Return authenticated and recently connected control-plane clients.",
@@ -85173,7 +85214,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "ws"
         ],
         "scopes": [
-          "read:knowledge"
+          "read:knowledge-content"
         ],
         "http": {
           "method": "POST",
@@ -85303,7 +85344,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "ws"
         ],
         "scopes": [
-          "read:knowledge"
+          "read:knowledge-content"
         ],
         "http": {
           "method": "GET",
@@ -85751,7 +85792,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "ws"
         ],
         "scopes": [
-          "read:knowledge"
+          "read:knowledge-content"
         ],
         "http": {
           "method": "POST",
@@ -88627,7 +88668,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "ws"
         ],
         "scopes": [
-          "read:knowledge"
+          "read:knowledge-content"
         ],
         "http": {
           "method": "GET",
@@ -88762,7 +88803,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "ws"
         ],
         "scopes": [
-          "read:knowledge"
+          "read:knowledge-content"
         ],
         "http": {
           "method": "POST",
@@ -89454,7 +89495,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "ws"
         ],
         "scopes": [
-          "read:knowledge"
+          "read:knowledge-content"
         ],
         "http": {
           "method": "GET",
@@ -89973,7 +90014,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "ws"
         ],
         "scopes": [
-          "read:knowledge"
+          "read:knowledge-content"
         ],
         "http": {
           "method": "GET",
@@ -90237,7 +90278,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "ws"
         ],
         "scopes": [
-          "read:knowledge"
+          "read:knowledge-content"
         ],
         "http": {
           "method": "GET",
@@ -91707,7 +91748,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "ws"
         ],
         "scopes": [
-          "read:knowledge"
+          "read:knowledge-content"
         ],
         "http": {
           "method": "GET",
@@ -92913,7 +92954,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "ws"
         ],
         "scopes": [
-          "read:knowledge"
+          "read:knowledge-content"
         ],
         "http": {
           "method": "POST",
@@ -94001,7 +94042,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "ws"
         ],
         "scopes": [
-          "read:knowledge"
+          "read:knowledge-content"
         ],
         "http": {
           "method": "GET",
@@ -94137,7 +94178,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "ws"
         ],
         "scopes": [
-          "read:knowledge"
+          "read:knowledge-content"
         ],
         "http": {
           "method": "GET",
@@ -94971,7 +95012,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "ws"
         ],
         "scopes": [
-          "read:knowledge"
+          "read:knowledge-content"
         ],
         "http": {
           "method": "GET",
@@ -95131,7 +95172,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "ws"
         ],
         "scopes": [
-          "read:knowledge"
+          "read:knowledge-content"
         ],
         "http": {
           "method": "GET",
@@ -95300,7 +95341,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "ws"
         ],
         "scopes": [
-          "read:knowledge"
+          "read:knowledge-content"
         ],
         "http": {
           "method": "POST",
@@ -97624,7 +97665,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "ws"
         ],
         "scopes": [
-          "read:knowledge"
+          "read:knowledge-content"
         ],
         "http": {
           "method": "GET",
@@ -97742,7 +97783,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "ws"
         ],
         "scopes": [
-          "read:knowledge"
+          "read:knowledge-content"
         ],
         "http": {
           "method": "GET",
@@ -100364,7 +100405,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "ws"
         ],
         "scopes": [
-          "read:knowledge"
+          "read:knowledge-content"
         ],
         "http": {
           "method": "GET",
@@ -100942,7 +100983,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "ws"
         ],
         "scopes": [
-          "read:knowledge"
+          "read:knowledge-content"
         ],
         "http": {
           "method": "GET",
@@ -101277,7 +101318,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "ws"
         ],
         "scopes": [
-          "read:knowledge"
+          "read:knowledge-content"
         ],
         "http": {
           "method": "POST",
@@ -102043,7 +102084,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "ws"
         ],
         "scopes": [
-          "read:knowledge"
+          "read:knowledge-content"
         ],
         "http": {
           "method": "POST",
@@ -102819,7 +102860,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "ws"
         ],
         "scopes": [
-          "read:knowledge"
+          "read:knowledge-content"
         ],
         "http": {
           "method": "GET",
@@ -103059,7 +103100,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "ws"
         ],
         "scopes": [
-          "read:knowledge"
+          "read:knowledge-content"
         ],
         "http": {
           "method": "GET",
@@ -103485,7 +103526,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "ws"
         ],
         "scopes": [
-          "read:knowledge"
+          "read:knowledge-content"
         ],
         "http": {
           "method": "GET",
@@ -103601,7 +103642,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "ws"
         ],
         "scopes": [
-          "read:knowledge"
+          "read:knowledge-content"
         ],
         "http": {
           "method": "GET",
@@ -104642,7 +104683,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "ws"
         ],
         "scopes": [
-          "read:knowledge"
+          "read:knowledge-content"
         ],
         "http": {
           "method": "POST",
@@ -104991,7 +105032,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "ws"
         ],
         "scopes": [
-          "read:knowledge"
+          "read:knowledge-content"
         ],
         "http": {
           "method": "GET",
@@ -105151,7 +105192,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "ws"
         ],
         "scopes": [
-          "read:knowledge"
+          "read:knowledge-content"
         ],
         "http": {
           "method": "GET",
@@ -105550,7 +105591,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "ws"
         ],
         "scopes": [
-          "read:knowledge"
+          "read:knowledge-content"
         ],
         "http": {
           "method": "GET",
@@ -105666,7 +105707,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "ws"
         ],
         "scopes": [
-          "read:knowledge"
+          "read:knowledge-content"
         ],
         "http": {
           "method": "GET",
@@ -106084,7 +106125,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "ws"
         ],
         "scopes": [
-          "read:knowledge"
+          "read:knowledge-content"
         ],
         "http": {
           "method": "GET",
@@ -106359,7 +106400,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "ws"
         ],
         "scopes": [
-          "read:knowledge"
+          "read:knowledge-content"
         ],
         "http": {
           "method": "GET",
@@ -107810,7 +107851,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "ws"
         ],
         "scopes": [
-          "read:knowledge"
+          "read:knowledge-content"
         ],
         "http": {
           "method": "GET",
@@ -109511,7 +109552,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "ws"
         ],
         "scopes": [
-          "read:knowledge"
+          "read:knowledge-content"
         ],
         "http": {
           "method": "GET",
@@ -111120,7 +111161,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "ws"
         ],
         "scopes": [
-          "read:knowledge"
+          "read:knowledge-content"
         ],
         "http": {
           "method": "GET",
@@ -128091,10 +128132,10 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "models.current.set",
         "title": "Switch the Current Model",
-        "description": "Switch the daemon's current model live, by the registry key `models.list` returns. The switch applies to the next turn on every surface this daemon serves and is persisted, so it survives a restart; `persisted` says whether the write to settings succeeded. An unknown key is refused with MODEL_NOT_FOUND and a provider with no usable credentials with PROVIDER_NOT_CONFIGURED, naming the environment variables it looked for, a caller must not have to guess which of the two happened. An optional `effort` persists a reasoning level with the selection: it is validated against the known severity ladder here, and each turn maps it onto the active model's real options, snapping down and never promoting.",
+        "description": "Switch the daemon's current model live, by the registry key `models.list` returns. The switch applies to the next turn on every surface this daemon serves and is persisted, so it survives a restart; `persisted` says whether the write to settings succeeded. An unknown key is refused with MODEL_NOT_FOUND and a provider with no usable credentials with PROVIDER_NOT_CONFIGURED, naming the environment variables it looked for, a caller must not have to guess which of the two happened. An optional `effort` persists a reasoning level with the selection: it is validated against the known severity ladder here, and each turn maps it onto the active model's real options, snapping down and never promoting. It changes the model for every surface, so it needs an admin.",
         "category": "providers",
         "source": "builtin",
-        "access": "authenticated",
+        "access": "admin",
         "transport": [
           "http",
           "ws"
@@ -179550,10 +179591,10 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       }
     ],
     "schemaCoverage": {
-      "methods": 629,
-      "typedInputs": 624,
+      "methods": 630,
+      "typedInputs": 625,
       "genericInputs": 5,
-      "typedOutputs": 627,
+      "typedOutputs": 628,
       "genericOutputs": 2
     },
     "eventCoverage": {
@@ -179562,8 +179603,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       "withWireEvents": 36
     },
     "validationCoverage": {
-      "methods": 629,
-      "validated": 622,
+      "methods": 630,
+      "validated": 623,
       "skippedGeneric": 0,
       "skippedUntyped": 7
     }

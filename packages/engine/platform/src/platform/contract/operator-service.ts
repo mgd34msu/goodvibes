@@ -547,7 +547,7 @@ export function createContractOperatorService(deps: ContractOperatorServiceDeps)
       if (isTerminalContractStatus(contract.status)) throw new ContractOperatorError(`Contract ${contractId} has ended (${contract.status}); its budget can no longer change.`, 'CONTRACT_ENDED', 409);
       const raise = (runner as OperatorContractRunner).raiseBudget;
       if (raise === undefined || !raise.call(runner, contractId, ceiling)) throw notRunning(contractId, contract.status);
-      return { budget: { ...ceiling } };
+      return { budget: { ...(runner.get(contractId)?.budget ?? ceiling) } };
     },
     attachHosted(hosted) {
       hostedRunners = hosted;

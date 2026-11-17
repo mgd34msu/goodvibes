@@ -185,7 +185,7 @@ export const builtinGatewayContractMethodDescriptors: readonly GatewayMethodDesc
   methodDescriptor({
     id: 'contracts.budget',
     title: 'Set a Running Contract\'s Budget',
-    description: 'Replace a running contract\'s token and cost ceiling (`maxCostUsd`, `maxTokens`, or both). Each running group\'s remaining allowance moves by the same amount, and a unit waiting because the budget was used up starts. Returns the new `budget`. 400 with INVALID_ARGUMENT when neither limit is given or one is negative; 404 with CONTRACT_NOT_FOUND for an unknown id; 409 with CONTRACT_ENDED once the contract has ended; 409 with CONTRACT_NATIVE for native work.',
+    description: 'Replace a running contract\'s token and cost ceiling (`maxCostUsd`, `maxTokens`, or both); a limit left out keeps its current value. Each running group\'s remaining allowance moves by the same amount, and a unit waiting because the budget was used up starts. Returns the new `budget`, both limits as they now stand. 400 with INVALID_ARGUMENT when neither limit is given or one is negative; 404 with CONTRACT_NOT_FOUND for an unknown id; 409 with CONTRACT_ENDED once the contract has ended; 409 with CONTRACT_NATIVE for native work.',
     category: 'contracts',
     scopes: ['write:fleet'],
     effect: 'write',

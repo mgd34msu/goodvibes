@@ -46,17 +46,7 @@ export {
   buildPluginSecurityMemoryAddOptions,
   buildPolicyPreflightMemoryAddOptions,
 } from './memory-ingest.js';
-export {
-  resolveCanonicalMemoryDbPath,
-  foldMemoryStores,
-  formatMemoryFoldReport,
-} from './canonical-memory.js';
-export type {
-  LegacyMemorySource,
-  MemoryFoldSourceReport,
-  MemoryFoldReport,
-  FoldMemoryStoresOptions,
-} from './canonical-memory.js';
+export { resolveCanonicalMemoryDbPath } from './canonical-memory.js';
 export {
   MIN_PROMPT_MEMORY_CONFIDENCE,
   describeMemoryPromptEligibility,

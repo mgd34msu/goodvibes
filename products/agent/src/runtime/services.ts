@@ -163,8 +163,7 @@ import { FileUndoManager } from '@goodvibes-jev/engine/platform/platform/state';
 import { MemoryRegistry } from '@goodvibes-jev/engine/platform/platform/state';
 import { MemoryStore } from '@goodvibes-jev/engine/platform/platform/state';
 // One canonical cross-surface memory store + no-loss legacy fold.
-import { resolveCanonicalMemoryDbPath, foldMemoryStores } from '@goodvibes-jev/engine/platform/platform/state';
-import type { LegacyMemorySource, MemoryFoldReport } from '@goodvibes-jev/engine/platform/platform/state';
+import { resolveCanonicalMemoryDbPath } from '@goodvibes-jev/engine/platform/platform/state';
 import type { RuntimeEventBus } from '@/runtime/index.ts';
 import type { DomainDispatch, RuntimeStore } from './store/index.ts';
 import { DistributedRuntimeManager } from '@/runtime/index.ts';
@@ -1325,9 +1324,7 @@ function composeRuntimeServices(options: RuntimeServicesOptions, disposalScope: 
   });
   const memoryEmbeddingRegistry = new MemoryEmbeddingProviderRegistry({ configManager });
   // The ONE canonical cross-surface store, not a private per-surface
-  // memory.sqlite, so a fact learned here recalls in the TUI and vice-versa. An
-  // agent-global path from an earlier layout is folded in at boot with no loss
-  // (see foldAgentLegacyMemory), then left in place, migration never deletes.
+  // memory.sqlite, so a fact learned here recalls in the TUI and vice-versa.
   const memoryDbPath = resolveCanonicalMemoryDbPath(shellPaths.homeDirectory);
   const memoryStore = new MemoryStore(memoryDbPath, {
     embeddingRegistry: memoryEmbeddingRegistry,
@@ -2334,21 +2331,4 @@ function composeRuntimeServices(options: RuntimeServicesOptions, disposalScope: 
     integrationHelpers,
   };
   return graph;
-}
-
-/**
- * Fold the agent's legacy per-surface memory store into the canonical
- * cross-surface store. Called once at boot AFTER `memoryStore.init()` so any records
- * written before unification survive. Id-keyed and idempotent, a re-run imports
- * nothing new and never deletes the legacy file. Returns the report so boot can log
- * exactly what moved (nothing is silently dropped).
- */
-export async function foldAgentLegacyMemory(
-  memoryStore: MemoryStore,
-  memoryEmbeddingRegistry: MemoryEmbeddingProviderRegistry,
-  shellPaths: ShellPathService,
-): Promise<MemoryFoldReport> {
-  const legacyAgentGlobal = shellPaths.resolveUserPath(GOODVIBES_AGENT_SURFACE_ROOT, 'memory.sqlite');
-  const sources: LegacyMemorySource[] = [{ label: 'agent-global (pre-E6)', dbPath: legacyAgentGlobal }];
-  return foldMemoryStores(memoryStore, sources, { embeddingRegistry: memoryEmbeddingRegistry });
 }

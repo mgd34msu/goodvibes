@@ -7,7 +7,6 @@ import { resolveDaemonEnabled } from '../config/index.js';
 import { RuntimeEventBus, configureRuntimeEventBusDefaults, runtimeEventBusOptionsFrom } from '../runtime/events/index.js';
 import { createRuntimeStore } from '../runtime/store/index.js';
 import { composeRuntimeServices } from '../runtime/services.js';
-import { foldMemoryStores } from '../state/canonical-memory.js';
 import { createHostPowerSeam } from '../power/runtime-wiring.js';
 import { DaemonServer } from './server.js';
 import { createHostShutdown, settleDaemonStart } from './cli-shutdown.js';
@@ -171,15 +170,6 @@ async function main(): Promise<void> {
   });
   process.on('SIGINT', () => void shutdown());
   process.on('SIGTERM', () => void shutdown());
-
-  // Memory this daemon kept in its per-project file before it opened the home
-  // store. Id-keyed and idempotent: an absent file is one existence check, and a
-  // re-run imports nothing new. The old file is never deleted.
-  const legacyMemory = join(workingDir, '.goodvibes', 'goodvibes', 'memory.sqlite');
-  await foldMemoryStores(runtimeServices.memoryStore, [{ label: `${workingDir} (per-project store)`, dbPath: legacyMemory }],
-    { embeddingRegistry: runtimeServices.memoryEmbeddingRegistry })
-    .then(report => { if (report.totalImported > 0 || report.failedSources.length > 0) logger.info('memory fold', { imported: report.totalImported, failed: report.failedSources.length }); })
-    .catch(error => logger.warn('memory fold failed; the home store serves on', { error: summarizeError(error) }));
 
   const [startOutcome] = await Promise.all([
     daemon.start(),

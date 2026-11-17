@@ -1,7 +1,7 @@
 /** Awaited ownership for the product-only work started after the server opens. */
 import { createDisposalScope } from './disposal-wiring.js';
 
-export type DaemonBootStep = 'memory-fold' | 'provider-watch' | 'webhooks' | 'notifier' | 'configured-services' | 'plugins';
+export type DaemonBootStep = 'provider-watch' | 'webhooks' | 'notifier' | 'configured-services' | 'plugins';
 export type DaemonBootStepState = 'pending' | 'running' | 'ready' | 'failed' | 'skipped';
 
 /** An acquired notification owner, before any runtime-bus attachment. */
@@ -16,7 +16,6 @@ export interface DaemonBootAttachment {
  * empty boot step. Tests supply explicit owned fixtures through this seam.
  */
 export interface DaemonBootOperations {
-  foldMemory(): Promise<void>;
   startProviderWatch(): void;
   stopProviderWatch(): void | Promise<void>;
   createWebhooks(): DaemonBootAttachment | Promise<DaemonBootAttachment>;
@@ -42,7 +41,7 @@ export interface DaemonBootController {
 }
 
 const STEPS: readonly DaemonBootStep[] = [
-  'memory-fold', 'provider-watch', 'webhooks', 'notifier', 'configured-services', 'plugins',
+  'provider-watch', 'webhooks', 'notifier', 'configured-services', 'plugins',
 ];
 
 // Identity comparison cannot invoke getters/prototype traps on arbitrary
@@ -122,7 +121,6 @@ export function createDaemonBootController(operations: DaemonBootOperations): Da
   }
 
   async function run(): Promise<DaemonBootSnapshot> {
-    await runStep('memory-fold', () => operations.foldMemory());
     await runStep('provider-watch', async () => {
       own('provider watch', () => operations.stopProviderWatch());
       try { operations.startProviderWatch(); }

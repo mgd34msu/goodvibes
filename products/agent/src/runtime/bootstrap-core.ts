@@ -48,9 +48,8 @@ import { ForensicsCollector, ForensicsRegistry } from '@/runtime/index.ts';
 import { generateUserSessionId } from '@/runtime/index.ts';
 import { loadBootstrapSystemPrompt, syncConfiguredServices } from '@/runtime/index.ts';
 import { registerBootstrapHookBridge } from '@/runtime/index.ts';
-import { createRuntimeServices, foldAgentLegacyMemory, type RuntimeServices } from './services.ts';
+import { createRuntimeServices, type RuntimeServices } from './services.ts';
 import { createHostPowerSeam } from '@goodvibes-jev/engine/platform/platform/power';
-import { formatMemoryFoldReport } from '@goodvibes-jev/engine/platform/platform/state';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { createUiRuntimeServices, type UiRuntimeServices } from './ui-services.ts';
 import { getTerminalSize } from '../shell/terminal-size.ts';
@@ -283,17 +282,6 @@ export async function initializeBootstrapCore(
   // Registered here (after declaration) rather than inside the watcher block above.
 
   await initializeTerminalMemory(memoryStore, bootstrapUnsubs);
-
-  // Fold the agent's legacy per-surface memory into the canonical
-  // cross-surface store (id-keyed, idempotent, never deletes the legacy file) and
-  // SURFACE the fold report, migration honesty requires that what moved is visible,
-  // not silently swallowed. Non-fatal: a fold failure must never block startup.
-  try {
-    const foldReport = await foldAgentLegacyMemory(services.memoryStore, services.memoryEmbeddingRegistry, services.shellPaths);
-    logger.info('agent legacy memory fold report', { report: formatMemoryFoldReport(foldReport) });
-  } catch (err) {
-    logger.warn('agent legacy memory fold failed (non-fatal)', { error: summarizeError(err) });
-  }
 
   const {
     renderRequestRef,

@@ -3,7 +3,7 @@ import type { ServiceRegistry } from '@goodvibes-jev/engine/platform/platform/co
 import { Notifier } from '@goodvibes-jev/engine/platform/platform/integrations';
 import { controlPlaneStorePath, registerNotificationDeadLetterGatewayMethods } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import { synchronizeConfiguredServices } from '@goodvibes-jev/engine/platform/platform/runtime/bootstrap';
-import { foldLegacyProjectMemory, NOTIFICATIONS_METADATA_ONLY_KEY, readNotificationsMetadataOnly } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { NOTIFICATIONS_METADATA_ONLY_KEY, readNotificationsMetadataOnly } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { DaemonBootOperations } from './boot-tasks.js';
 import { createDaemonPluginLoaderDeps } from './plugin-composition.js';
@@ -71,10 +71,6 @@ export function createDaemonBootOperations(runtime: RuntimeServices): DaemonBoot
     },
   };
   return {
-    async foldMemory() {
-      const report = await foldLegacyProjectMemory(runtime.memoryStore, runtime.memoryEmbeddingRegistry, runtime.workingDirectory);
-      if (report.failedSources.length > 0) throw new Error('Daemon legacy memory fold failed');
-    },
     startProviderWatch: () => runtime.providerRegistry.startWatching(runtime.runtimeBus),
     stopProviderWatch: () => runtime.providerRegistry.closeWatching(),
     createWebhooks() {

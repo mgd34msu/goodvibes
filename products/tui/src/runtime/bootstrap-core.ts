@@ -62,7 +62,6 @@ import {
 import { createRuntimeServices, type RuntimeServices } from './services.ts';
 import { registerClientPhoneTool } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 import { createHostPowerSeam } from '@goodvibes-jev/engine/platform/platform/power';
-import { runBootMemoryFold } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { wireCostPricing } from '@goodvibes-jev/engine/platform/platform/providers';
 import { createUiRuntimeServices, type UiRuntimeServices } from './ui-services.ts';
 import { join } from 'node:path';
@@ -358,8 +357,6 @@ export async function initializeBootstrapCore(
   bootstrapUnsubs.push(() => disposeTerminalFeatureFlags(featureFlags));
   bootstrapUnsubs.push(() => conversation.setNoticeSink(null));
   await initializeTerminalMemory(memoryStore, bootstrapUnsubs);
-  // Fold this project's legacy per-project TUI memory into the home-scoped canonical store, ONCE, AFTER init(). Idempotent and non-fatal.
-  await runBootMemoryFold(memoryStore, services.memoryEmbeddingRegistry, workingDir, logger);
 
   const {
     renderRequestRef,

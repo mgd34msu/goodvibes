@@ -309,9 +309,6 @@ export {
   bindProviderOptimizerFeatureFlag,
 } from './provider-optimizer-wiring.js';
 
-export { foldLegacyProjectMemory, runBootMemoryFold } from './memory-fold.js';
-export type { BootFoldLogger } from './memory-fold.js';
-
 export {
   CONTROL_PLANE_FEATURE_FLAG,
   DELIVERY_ENGINE_FEATURE_FLAG,

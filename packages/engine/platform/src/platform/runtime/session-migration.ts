@@ -69,10 +69,8 @@
  *    that legacy shared directory directly, session-id-keyed, as a
  *    standing one-time-offer (see that module's header for the cross-project
  *    caveat this accepts).
- *  - KVState (tools/index.ts's session_*.json store) dual-reads the legacy
- *    unscoped state dir directly (see state/kv-state.ts's `legacyStateDir`)
- *    and copies forward lazily, per session, on first read, no bulk move is
- *    performed here.
+ *  - KVState (tools/index.ts's session_*.json store) reads only its scoped
+ *    state directory; nothing from the old unscoped state dir is carried.
  *  - The dead `.goodvibes/state/events.jsonl` + `event-archives/` store is
  *    reclaimed by the append-only retention sweep (legacy-event-store), not
  *    by migration, it has no live reader to migrate FOR.

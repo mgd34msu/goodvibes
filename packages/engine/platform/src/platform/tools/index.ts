@@ -1,7 +1,6 @@
 import type { LocalhostFetchApproval } from '../runtime/permissions/localhost-fetch-approval.js';
 import { createCapturedAutoHealBackend } from './shared/captured-auto-heal.js';
 import { createCapturedValidatorRunner } from './shared/captured-validators.js';
-import { join } from 'node:path';
 import { resolveScopedDirectory } from '../runtime/surface-root.js';
 import { ToolRegistry } from './registry.js';
 import type { Tool } from '../types/tools.js';
@@ -692,16 +691,9 @@ export function registerAllTools(
       ...(deps.providerRegistry ? { getSelectedModel: () => deps.providerRegistry!.getCurrentModel() } : {}),
     }),
   );
-  // Scoped under the surface (surfaceRoot is required above, so this is
-  // always the scoped form); dual-reads the old unscoped .goodvibes/state
-  // for a pre-existing session_*.json exactly once, then copies it forward
-  // into the scoped location, see KVStateOptions.legacyStateDir.
-  //
-  // This is also the store's retention point: KVState reaps stale
-  // session_*.json files from BOTH directories at its first load and then on a
-  // timer, so no call is needed here. Passing legacyStateDir is what lets the
-  // age-bounded sweep reach the old unscoped directory, whose copy-forward
-  // sources nothing else reclaims.
+  // Scoped under the surface (surfaceRoot is required above). KVState reads and
+  // writes only its own session file there and reaps stale session files at its
+  // first load and then on a timer, so no retention call is needed here.
   // The host's real session id keys the file, and follows the host when it resumes or forks a session, so
   // state set before a restart is read back when that session resumes; a registry with no host session
   // (a worker's) gets a generated id, as before.
@@ -709,7 +701,6 @@ export function registerAllTools(
   const kvBinding = createSessionBoundKvState(
     {
       stateDir: resolveScopedDirectory(workingDirectory, deps.surfaceRoot, 'state'),
-      legacyStateDir: join(workingDirectory, '.goodvibes', 'state'),
       ...(reclaimCheck ? { canReclaimKeyedState: reclaimCheck } : {}),
     },
     deps.resolveSessionId,

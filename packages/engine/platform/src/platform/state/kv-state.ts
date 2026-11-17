@@ -59,9 +59,9 @@ const SESSION_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000;
 /** How often the housekeeping pass repeats while a surface stays up. */
 const SWEEP_INTERVAL_MS = 30 * 60 * 1000;
 
-/** The two bounds a single reap pass applies. `keepCount: null` means "age bound only". */
+/** The two bounds a single reap pass applies. */
 interface ReapBounds {
-  readonly keepCount: number | null;
+  readonly keepCount: number;
   readonly maxAgeMs: number;
 }
 
@@ -166,7 +166,7 @@ function reapSessionFiles(
   for (const candidate of candidates) {
     const tooOld = now - candidate.mtimeMs > bounds.maxAgeMs;
     if (!candidate.keyed) generatedSeen += 1;
-    const beyondCap = !candidate.keyed && bounds.keepCount !== null && generatedSeen > bounds.keepCount;
+    const beyondCap = !candidate.keyed && generatedSeen > bounds.keepCount;
     if (!tooOld && !beyondCap) continue;
     if (!removeSessionFile(candidate.path, candidate.name)) continue;
     filesRemoved += 1;
@@ -199,26 +199,6 @@ function discloseReap(stateDir: string, outcome: ReapOutcome): void {
 export interface KVStateOptions {
   readonly sessionId?: string | undefined;
   readonly stateDir: string;
-  /**
-   * A legacy, unscoped stateDir to fall back to for reads when the scoped
-   * `stateDir` has no file yet for this session id (dual-read, one release
-   * only, see the session-surface migration, runtime/session-migration.ts).
-   * Consulted ONLY when the scoped file is absent; a hit is copied forward
-   * into the scoped location on the next persist, so subsequent reads never
-   * need the fallback again. Copy-forward never moves or deletes its source, so
-   * this directory's `session_*.json` files would otherwise strand there
-   * permanently, nothing else in the platform reclaims them. The housekeeping sweep
-   * therefore applies the AGE bound (and only the age bound) here as well; see
-   * `KVState.sweep` for why a count bound would be unsafe in a directory that is
-   * shared with other products.
-   *
-   * A legacy file that cannot be read or parsed, or that parses to something
-   * other than a state object, is treated as ABSENT (logged, then ignored): the
-   * fallback may only ever recover data, never turn junk in the old unscoped
-   * directory into a failure for a session that would otherwise have started
-   * clean.
-   */
-  readonly legacyStateDir?: string | undefined;
   /**
    * Whether the state file of a caller-supplied (`session-<id>`) session may be
    * reclaimed once it is past the age bound. Receives the file's id part.
@@ -254,10 +234,6 @@ export class KVState {
   private data: Record<string, unknown> | null = null;
   private loadPromise: Promise<void> | null = null;
   private readonly store: JsonFileStore<Record<string, unknown>>;
-  /** Legacy unscoped store to fall back to for reads only; undefined when no legacyStateDir was given or it is identical to the scoped stateDir. */
-  private readonly legacyStore: JsonFileStore<Record<string, unknown>> | undefined;
-  /** The legacy unscoped state DIRECTORY, kept for the age-bounded sweep; undefined whenever legacyStore is. */
-  private readonly legacyStateDir: string | undefined;
   private readonly canReclaimKeyedState: ((sessionToken: string) => boolean) | undefined;
   private sweepTimer: ReturnType<typeof setInterval> | null = null;
   private housekeepingStarted = false;
@@ -273,11 +249,6 @@ export class KVState {
     this.fileName = sessionFileName(this.sessionId);
     this.filePath = join(this.stateDir, this.fileName);
     this.store = new JsonFileStore(this.filePath);
-    const legacyDir = options.legacyStateDir && options.legacyStateDir !== this.stateDir
-      ? options.legacyStateDir
-      : undefined;
-    this.legacyStore = legacyDir === undefined ? undefined : new JsonFileStore(join(legacyDir, this.fileName));
-    this.legacyStateDir = legacyDir;
     this.canReclaimKeyedState = options.canReclaimKeyedState;
   }
 
@@ -343,43 +314,12 @@ export class KVState {
     // the caller's synchronous construction path.
     this.startHousekeeping();
 
-    const loaded = this.validateLoaded(await this.store.load(), this.filePath, 'throw');
+    const loaded = this.validateLoaded(await this.store.load());
     if (loaded) {
       this.data = loaded;
       if (!this.data.id) this.data.id = this.sessionId;
       if (!this.data.started_at) this.data.started_at = new Date().toISOString();
       return;
-    }
-
-    if (this.legacyStore) {
-      // A corrupt/unreadable legacy file is treated as ABSENT, not as an
-      // error: before this dual-read existed, that file was never opened at
-      // all and a new session simply started clean. Letting JsonFileStore's
-      // throw escape here would turn "there is junk in the old unscoped state
-      // dir" into a hard failure of an unrelated new session. Logged once (a
-      // KVState instance loads at most once) so the junk is still visible.
-      let legacyLoaded: Record<string, unknown> | null = null;
-      try {
-        legacyLoaded = this.validateLoaded(await this.legacyStore.load(), 'legacy state file', 'absent');
-      } catch (err) {
-        logger.warn('KVState: legacy state file unreadable, ignoring it and starting clean', {
-          sessionId: this.sessionId,
-          error: summarizeError(err),
-        });
-        legacyLoaded = null;
-      }
-      if (legacyLoaded) {
-        this.data = legacyLoaded;
-        if (!this.data.id) this.data.id = this.sessionId;
-        if (!this.data.started_at) this.data.started_at = new Date().toISOString();
-        // Copy forward into the scoped location so a future load never needs
-        // the legacy fallback again. The legacy file is left in place and still
-        // holds the data, so this write is not awaited by the read that loaded it.
-        this.persist().catch((err: unknown) => {
-          logger.warn('KVState: copying legacy session state forward failed', { filePath: this.filePath, error: summarizeError(err) });
-        });
-        return;
-      }
     }
 
     this.data = {
@@ -458,29 +398,13 @@ export class KVState {
    * `123`, `"…"`. A crash can leave any of those, and every one of them would
    * otherwise be installed as `this.data` and served to callers as if it were
    * their session state, `list()` would spread an array, `get()` would read
-   * properties off a number.
-   *
-   * `onInvalid: 'throw'` is used for the SCOPED file, matching this class's
-   * existing contract that a corrupt current-session file is a hard failure
-   * rather than a silently substituted blank session. `'absent'` is used for the
-   * LEGACY fallback, matching its documented rule that the fallback may only
-   * ever recover data, never turn junk in the old unscoped directory into a
-   * failure for a session that would otherwise have started clean.
+   * properties off a number. A corrupt session file is a hard failure rather
+   * than a silently substituted blank session.
    */
-  private validateLoaded(
-    loaded: Record<string, unknown> | null,
-    label: string,
-    onInvalid: 'throw' | 'absent',
-  ): Record<string, unknown> | null {
+  private validateLoaded(loaded: Record<string, unknown> | null): Record<string, unknown> | null {
     if (loaded === null || loaded === undefined) return null;
     if (typeof loaded === 'object' && !Array.isArray(loaded)) return loaded;
-    if (onInvalid === 'throw') {
-      throw new Error(`KVState failed to load ${label}: parsed content is not a session state object. Move or delete that file to start this session's state clean.`);
-    }
-    logger.warn('KVState: legacy state file is not a session state object, ignoring it and starting clean', {
-      sessionId: this.sessionId,
-    });
-    return null;
+    throw new Error(`KVState failed to load ${this.filePath}: parsed content is not a session state object. Move or delete that file to start this session's state clean.`);
   }
 
   /**
@@ -507,38 +431,16 @@ export class KVState {
   }
 
   /**
-   * One housekeeping pass over the scoped directory and, when configured, the
-   * legacy unscoped one.
-   *
-   * The legacy directory gets the AGE bound only, never the count bound. That
-   * directory is unscoped and therefore SHARED: a second product working in the
-   * same working directory dual-reads its own `session_<id>.json` out of it and
-   * has not necessarily copied it forward yet. A count bound orders files by
-   * recency across all of those products at once, so it could delete a
-   * two-day-old file belonging to a session another surface resumes tomorrow.
-   * The age bound cannot: a file untouched for the full TTL belongs to a session
-   * no surface has resumed in that whole window, and the dual-read only ever
-   * fires for the exact session id being resumed. Leaving the legacy directory
-   * entirely unswept was the other option and is not acceptable, copy-forward
-   * never deletes the source, so those files strand there permanently and
-   * nothing else in the platform reclaims them.
-   *
-   * Never throws: a housekeeping problem must not become a failure of the
-   * session that triggered it.
+   * One housekeeping pass over this instance's state directory. Never throws:
+   * a housekeeping problem must not become a failure of the session that
+   * triggered it.
    */
   private sweep(): void {
     try {
-      const now = Date.now();
       discloseReap(
         this.stateDir,
-        reapSessionFiles(this.stateDir, this.fileName, { keepCount: SESSION_KEEP_COUNT, maxAgeMs: SESSION_MAX_AGE_MS }, now, this.canReclaimKeyedState),
+        reapSessionFiles(this.stateDir, this.fileName, { keepCount: SESSION_KEEP_COUNT, maxAgeMs: SESSION_MAX_AGE_MS }, Date.now(), this.canReclaimKeyedState),
       );
-      if (this.legacyStateDir !== undefined) {
-        discloseReap(
-          this.legacyStateDir,
-          reapSessionFiles(this.legacyStateDir, this.fileName, { keepCount: null, maxAgeMs: SESSION_MAX_AGE_MS }, now, this.canReclaimKeyedState),
-        );
-      }
     } catch (err) {
       logger.debug('KVState: session state housekeeping pass failed', { error: summarizeError(err) });
     }

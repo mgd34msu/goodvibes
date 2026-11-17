@@ -13,9 +13,6 @@ export interface ReadObservation extends ReadLineObservation {
   schemaVersion: 2;
   contentCharacters: number;
 }
-interface SavedReadObservation extends ReadLineObservation {
-  contentSha256: string;
-}
 
 /** Describes actual formatted text, never credits the requested end or file total. */
 export function observeReadContent(content: string, startLine: number, completeLines: number, numbered: boolean): ReadObservation {
@@ -37,24 +34,16 @@ export function clipReadContent(file: { content?: string | undefined; readObserv
  * never hash the text already retained in their original tool result.
  */
 export function validatedReadContent(file: { content: string; readObservation?: unknown }): {
-  readonly observation: ReadObservation | SavedReadObservation;
+  readonly observation: ReadObservation;
   readonly rows: string[];
 } | undefined {
   const value = file.readObservation;
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
-  const observed = value as ReadLineObservation & { schemaVersion?: unknown; contentCharacters?: unknown; contentSha256?: unknown };
+  const observed = value as ReadLineObservation & { schemaVersion?: unknown; contentCharacters?: unknown };
   if (!Number.isSafeInteger(observed.startLine) || observed.startLine < 1 || !Number.isSafeInteger(observed.completeLines)
     || observed.completeLines < 0 || !Number.isSafeInteger(observed.startLine + observed.completeLines)
     || typeof observed.numbered !== 'boolean' || typeof observed.truncated !== 'boolean') return undefined;
-  if (observed.schemaVersion === 2) {
-    if (observed.contentCharacters !== file.content.length || Object.hasOwn(observed, 'contentSha256')) return undefined;
-  } else if (observed.schemaVersion === undefined && Object.hasOwn(observed, 'contentSha256')) {
-    // This checksum rode alongside the same serialized text; it was never an
-    // independent expected original. Keep its saved shape as line metadata,
-    // without hashing. The native owner still qualifies each returned row
-    // against the immutable input before crediting it as source evidence.
-    if (typeof observed.contentSha256 !== 'string' || !/^[0-9a-f]{64}$/.test(observed.contentSha256)) return undefined;
-  } else return undefined;
+  if (observed.schemaVersion !== 2 || observed.contentCharacters !== file.content.length) return undefined;
   const rows = file.content.split('\n');
   let complete: string[] = [];
   if (observed.completeLines <= rows.length && (!observed.truncated || observed.completeLines < rows.length)) {
@@ -62,7 +51,7 @@ export function validatedReadContent(file: { content: string; readObservation?: 
     if (!observed.numbered) complete = selected.map((row, index) => `${String(observed.startLine + index).padStart(5)} | ${row}`);
     else if (selected.every((row, index) => Number(/^[ \t]*(\d+) \|/.exec(row)?.[1]) === observed.startLine + index)) complete = selected;
   }
-  return { observation: observed as ReadObservation | SavedReadObservation, rows: complete };
+  return { observation: observed as ReadObservation, rows: complete };
 }
 
 /** Normalize host-bound complete rows for evidence and immutable-input checking. */

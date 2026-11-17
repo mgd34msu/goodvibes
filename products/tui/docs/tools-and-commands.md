@@ -282,7 +282,7 @@ Representative slash-command families, with a one-line summary of each:
 
 `/editor` (alias `/ed`) opens the current composer draft in your `$VISUAL`/`$EDITOR`, suspends the TUI while the editor runs, and loads the edited text back into the composer when you save and quit. Set `$EDITOR` (e.g. `export EDITOR=nvim`) for it to work.
 
-Composer capture markers: a single line beginning with `#` saves the rest as a session-memory note and does NOT send a turn (a quick "jot this down"), and a confirmation names what was saved and where. (`## ...` markdown headings and multi-line text that starts with `#` are left alone and sent normally.) The existing `!# <text>` still pins to session memory and also sends the text as a prompt.
+Composer capture markers: a single line beginning with `# ` (a hash and a space) saves the rest as a session-memory note and does NOT send a turn (a quick "jot this down"), and a confirmation names what was saved and where. (`#482 is failing` (no space), `## ...` markdown headings and multi-line text that starts with `#` are left alone and sent normally.) A prompt that starts with `@model:<id>` switches model exactly as `/model <id>` does (same label, reasoning effort and missing-key prompt) and then sends the rest; when the switch does not land, the rest stays in the composer instead of going to the old model. The existing `!# <text>` still pins to session memory and also sends the text as a prompt.
 
 A typed line that starts with `!` runs the rest as a shell command in the working directory, beside the composer: the output is shown and goes in front of your next message as context, and `Esc` stops a command that is still running. Spoken input is never run as a shell command.
 
@@ -290,7 +290,7 @@ A typed line that starts with `!` runs the rest as a shell command in the workin
 
 `/search <query> [--limit <n>]` runs a provider-backed web search directly (bypassing the agent-tool JSON wrapper) and renders ranked results, an instant answer, and the source label into the transcript; it degrades honestly using the web-search service's own status note.
 
-`/imagine <prompt>` generates an image through the first configured provider that makes images; a provider that only makes video is never sent the request. Built-in providers stream the result into the artifact store, so the saved image keeps opening after the provider's own link expires. When no configured provider makes images, it prints each generation provider's status, what it makes, and the key it needs. A job the provider accepted but had not finished when the wait ended is reported with the command that collects it later: `/imagine --collect <provider> <task-id> [key=value ...]`. (`/image` is a different command; it attaches a local image file to the next message for multimodal analysis.)
+`/imagine <prompt>` generates an image through the first configured provider that makes images; a provider that only makes video is never sent the request. Each image is written to a file, `generated/<prompt words>-<time>.<ext>` under the working directory or the path given with `--out <path>` (a file already there is never replaced), the path is printed, and the system image viewer opens it where there is a desktop. The artifact store keeps a second copy, so the image stays available after the provider's own link expires. When no configured provider makes images, it prints each generation provider's status, what it makes, and the key it needs. A job the provider accepted but had not finished when the wait ended is reported with the command that collects it later: `/imagine --collect <provider> <task-id> [key=value ...]`. (`/image` is a different command; it attaches a local image file to the next message for multimodal analysis.)
 
 `/session` is the single front-door for all session work, split across two domains. The lifecycle subcommands operate on sessions themselves:
 
@@ -369,7 +369,7 @@ Four keys are fixed and are not in the rebindable table: `F2` (open or close Age
 | `PageUp / PageDown` | Scroll by page |
 | `Ctrl+R` | Reverse input history search |
 | `Ctrl+E` | Move to end of line / next error |
-| `Ctrl+A` | Move to start of line / apply nearest diff |
+| `Ctrl+A` | Move to start of line |
 | `Mouse wheel` | Scroll the conversation (or the open modal) |
 | `Click drag` | Select text |
 | `Middle click` | Paste |
@@ -418,6 +418,8 @@ The recovery offer, session picker, profile picker, and config rows are all pick
 | `Backspace` | Clear the in-progress search query one character at a time |
 
 In a searchable modal, `/` focuses the filter, and any keystroke that no row hotkey claims also arms the filter and starts the query with that character.
+
+The config modals (`/memory`, `/work-plan`, `/marketplace`, `/plugins`, `/services`, `/subscription` and the others built on the config-modal host) have an always-live search row: every typed character goes into the search and never fires an action. An action fires from `Enter`, from `Ctrl` plus its letter (the hint bar shows `^d delete`), or from `Ctrl+G` followed by its key (the hint bar shows `^G c` for the keys a terminal cannot send as a Ctrl chord: `c`, `h`, `i`, `j`, `m`, digits and capitals). An action that deletes, uninstalls or clears asks for the same keys a second time; `Esc` cancels it.
 
 ### System
 

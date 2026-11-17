@@ -12,7 +12,7 @@ type Modes<T> = { [K in keyof T]-?: NonNullable<T[K]> extends (...args: never[])
 type Track = <T>(call: () => T) => T;
 type Transform = (result: unknown) => unknown;
 
-const providerMethods = { name: 'value', models: 'value', adapterKind: 'value', batch: 'value', capabilities: 'value', modelSource: 'value', credentialAuthority: 'value', chat: 'async', embed: 'async', describeRuntime: 'either', isConfigured: 'sync', describeAuthState: 'sync' } satisfies Modes<LLMProvider>;
+const providerMethods = { name: 'value', models: 'value', adapterKind: 'value', batch: 'value', capabilities: 'value', modelSource: 'value', credentialAuthority: 'value', chat: 'async', embed: 'async', describeRuntime: 'either', isConfigured: 'sync', describeAuthState: 'sync', dispose: 'async' } satisfies Modes<LLMProvider>;
 const batchMethods = { kind: 'value', endpoints: 'value', createChatBatch: 'async', retrieveBatch: 'async', cancelBatch: 'async', getResults: 'async' } satisfies Modes<ProviderBatchAdapter>;
 const channelMethods = {
   id: 'value', surface: 'value', displayName: 'value', capabilities: 'value', setupVersion: 'value', webhookPath: 'value',

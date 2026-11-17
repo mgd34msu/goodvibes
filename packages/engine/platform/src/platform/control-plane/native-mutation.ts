@@ -14,6 +14,7 @@ import type { MutationPublication } from '../utils/file-mutation.js';
 import type { ToolExecutionEffect } from '../tools/registry.js';
 import type { RetainedAutomationJobTarget } from '../automation/job-mutations.js';
 import { projectAutomationTargetRequest } from '../automation/job-mutations.js';
+import { missingScopes } from '@goodvibes-jev/engine/daemon-api/route-helpers';
 
 export type NativeMutationHost = ExternalPermissionHost;
 export interface NativeMutationAdmission { readonly kind: 'native-recorded-mutation'; }
@@ -100,8 +101,8 @@ export async function runNativeMutation<T>(input: {
   const effect = input.effect ?? 'write';
   if (!host || host.workspaceTrust === undefined || !authority || !expected || !context.admin || context.principalKind !== 'token'
     || context.principalId !== expected.principalId || expected.kind !== 'pairing-token'
-    || !scopes.every(scope => context.scopes.includes('*') || context.scopes.includes(scope))
-    || !scopes.every(scope => expected.scopes.includes('*') || expected.scopes.includes(scope))
+    || missingScopes(context.scopes, scopes).length > 0
+    || missingScopes(expected.scopes, scopes).length > 0
     || context.isAuthorized?.(scopes) !== true) {
     throw new HandlerError('Native mutation requires current paired owner access and native write scopes', 'NATIVE_MUTATION_FORBIDDEN', 403);
   }
@@ -126,7 +127,7 @@ export async function runNativeMutation<T>(input: {
   const assertPaired = () => {
     const fresh = authority.current();
     if (!fresh || fresh.tokenId !== expected.tokenId || fresh.authorityRevision !== expected.authorityRevision
-      || !scopes.every(scope => fresh.scopes.includes('*') || fresh.scopes.includes(scope))) {
+      || missingScopes(fresh.scopes, scopes).length > 0) {
       throw new HandlerError('Native mutation paired owner changed', 'NATIVE_MUTATION_STALE', 409);
     }
   };

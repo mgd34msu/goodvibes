@@ -15,6 +15,7 @@
 
 import type { RuntimeEventDomain } from '../runtime/events/index.js';
 import { builtinGatewayEventDescriptors, gatewayEventAccess } from './method-catalog-events.js';
+import { missingScopes } from '@goodvibes-jev/engine/daemon-api/route-helpers';
 
 /** The subset of a live client this decision needs. */
 export interface ScopedClientView {
@@ -69,12 +70,11 @@ export const CHANNEL_REQUIRED_SCOPE: Readonly<Record<string, string>> = Object.f
  */
 export function resolveEventGrant(client: Omit<ScopedClientView, 'kind'>): EventGrant {
   if (client.admin || client.scopes === undefined || client.scopes.includes('*')) return FULL_EVENT_GRANT;
-  const held = new Set(client.scopes);
   const domains = new Set<RuntimeEventDomain>();
   const wireEvents = new Set<string>();
   for (const descriptor of builtinGatewayEventDescriptors) {
     if (gatewayEventAccess(descriptor) === 'admin') continue;
-    if (!descriptor.scopes.every((scope) => held.has(scope))) continue;
+    if (missingScopes(client.scopes, descriptor.scopes).length > 0) continue;
     if (descriptor.category === 'runtime-domain') {
       for (const domain of descriptor.domains ?? []) domains.add(domain);
     } else {
@@ -117,7 +117,7 @@ export function clientMaySeeScopedChannel(client: ScopedClientView, requiredScop
   if (client.kind !== 'web') return true;
   if (client.admin) return true;
   if (client.scopes === undefined) return true;
-  return client.scopes.includes(requiredScope) || client.scopes.includes('*');
+  return missingScopes(client.scopes, [requiredScope]).length === 0;
 }
 
 /**

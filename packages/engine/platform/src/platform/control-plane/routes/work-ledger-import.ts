@@ -8,6 +8,7 @@ import { GatewayVerbError } from './gateway-verb-error.js';
 import { readInvocationParams } from './invocation-params.js';
 import { requireNativeOwner } from './native-owner.js';
 import { LEGACY_IMPORT_MAX_BYTES, prepareLegacyWorkLedgerMigration, workLedgerCommandSchema } from '../../workflow/work-ledger/index.js';
+import { missingScopes } from '@goodvibes-jev/engine/daemon-api/route-helpers';
 
 /** Trusted selected-host composition only. No path, authority or actor from request data. */
 export function registerWorkLedgerImportGatewayMethods(catalog: GatewayMethodCatalog, host: NativeLegacyImportDependencies): { close(): Promise<void> } {
@@ -20,8 +21,7 @@ export function registerWorkLedgerImportGatewayMethods(catalog: GatewayMethodCat
   const run = async (invocation: GatewayMethodInvocation, prepare: boolean): Promise<unknown> => {
     const context = invocation.context;
     const operationScope = prepare ? WORK_LEDGER_READ_SCOPE : WORK_LEDGER_IMPORT_SCOPE;
-    if (!context.admin || !context.principalId || !context.scopes?.some(scope => scope === '*' || scope === operationScope)
-      || !context.scopes?.some(scope => scope === '*' || scope === 'read:knowledge')
+    if (!context.admin || !context.principalId || missingScopes(context.scopes, [operationScope, 'read:knowledge']).length > 0
       || typeof invocation.isAuthorized !== 'function' || invocation.isAuthorized([operationScope, 'read:knowledge']) !== true) throw new GatewayVerbError(`Legacy import requires current admin authorization, ${operationScope} and read:knowledge`, 'FORBIDDEN', 403);
     const input = readInvocationParams(invocation);
     if (new TextEncoder().encode(JSON.stringify(input)).byteLength > LEGACY_IMPORT_MAX_BYTES) throw new GatewayVerbError('Legacy import exceeds request limit', 'WORK_LEDGER_IMPORT_LIMIT', 413);

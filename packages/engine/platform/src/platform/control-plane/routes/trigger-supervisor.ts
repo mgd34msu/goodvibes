@@ -3,8 +3,9 @@ import { builtinTriggerSupervisorMethodDescriptors } from '../method-catalog-tri
 import { triggerOperatorStatus, TriggerOperatorError, type TriggerOperatorSupervisor } from '../../triggers/operator.js';
 import type { GatewayMethodInvocation } from '../method-catalog-shared.js';
 import { GatewayVerbError } from './gateway-verb-error.js';
+import { missingScopes } from '@goodvibes-jev/engine/daemon-api/route-helpers';
 function authenticate(invocation: GatewayMethodInvocation, scope: string): void {
-  if (!invocation.context.principalId || invocation.context.admin !== true || !(invocation.context.scopes?.includes('*') || invocation.context.scopes?.includes(scope))
+  if (!invocation.context.principalId || invocation.context.admin !== true || missingScopes(invocation.context.scopes, [scope]).length > 0
     || invocation.isAuthorized && !invocation.isAuthorized([scope])) throw new GatewayVerbError('Reading supervised triggers requires a current administrative operator with watcher access.', 'TRIGGER_OPERATOR_REQUIRED', 403);
   invocation.signal?.throwIfAborted();
 }

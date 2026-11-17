@@ -21,6 +21,7 @@ import { recoverInterruptedWindow } from '../windows.js';
 import { daemonNoticeRouter, purchaseInboxKey } from './notifier.js';
 import { prepareRestoredPaymentReplyWindow, type RestoredInboxWindow } from './restored-reply-window.js';
 import type { CheckoutComposition } from './checkout-handlers.js';
+import { missingScopes } from '@goodvibes-jev/engine/daemon-api/route-helpers';
 
 const telegramNumber = (value: string | undefined, negative = false): boolean => value !== undefined
   && (negative ? /^-?[1-9]\d{0,15}$/ : /^[1-9]\d{0,15}$/).test(value) && Number.isSafeInteger(Number(value));
@@ -61,7 +62,7 @@ export function createNativeCheckoutWindowRestorer(options: NativeCheckoutWindow
       if (seamFor() !== seam || !leader() || !readPaymentsEnabled(config) || !issued
         || !isDeepStrictEqual(issued, expected)
         || !isDeepStrictEqual(captureOwnedJson(readPaymentsServiceConfig(config)), request.host.configuration)
-        || !expected.scopes.includes('*') && expected.scopes.some(scope => !available.includes(scope))) throw new CheckoutOwnershipError();
+        || !expected.scopes.includes('*') && missingScopes(available, expected.scopes).length > 0) throw new CheckoutOwnershipError();
       owner.signal.throwIfAborted();
     };
     // The pairing writer is held for short admission only, never a browser

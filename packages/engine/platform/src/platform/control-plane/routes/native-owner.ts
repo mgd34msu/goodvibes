@@ -5,6 +5,7 @@
 import type { NativeExecutionAuthority } from '../../security/http-auth.js';
 import type { GatewayMethodInvocation } from '../method-catalog-shared.js';
 import { GatewayVerbError } from './gateway-verb-error.js';
+import { missingScopes } from '@goodvibes-jev/engine/daemon-api/route-helpers';
 
 /** The one refusal code for a caller that is not a current paired owner. */
 export const PAIRED_OWNER_REQUIRED = 'PAIRED_OWNER_REQUIRED';
@@ -12,7 +13,7 @@ export const PAIRED_OWNER_REQUIRED = 'PAIRED_OWNER_REQUIRED';
 const PAIR_STEP = 'On the daemon\'s own machine the apps use the operator token they already hold; from any other device, pair it with the daemon (web app: Settings, Devices and pairing; terminal: /devices migrate-shared), then retry.';
 
 function holds(scopes: readonly string[] | undefined, needed: readonly string[]): boolean {
-  return scopes !== undefined && (scopes.includes('*') || needed.every(scope => scopes.includes(scope)));
+  return scopes !== undefined && missingScopes(scopes, needed).length === 0;
 }
 
 /**

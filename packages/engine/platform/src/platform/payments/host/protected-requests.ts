@@ -25,6 +25,7 @@ import { captureCheckoutWindowCheckpoint, type CheckoutWindowCheckpoint } from '
 import { atomicWriteFileSync } from '../../config/atomic-write.js';
 import { capturePaymentReplyHistory, capturePaymentReplyHistoryEntry, capturePaymentReplyReceiveCoverage, capturePaymentReplyReceiveSpans, paymentReplyHistoryBinding, historyEntryIdentity,
   type PaymentReplyHistory, type PaymentReplyHistoryBinding, type PaymentReplyHistoryEntry, type PaymentReplyReceiveCoverage, type PaymentReplyReceiveSpan } from '../reply-history.js';
+import { missingScopes } from '@goodvibes-jev/engine/daemon-api/route-helpers';
 
 export interface PaymentRequestHostFacts {
   readonly authority: NativePairedSnapshot;
@@ -138,7 +139,7 @@ function own(value: unknown): ProtectedPaymentRequest {
   const authority = host['authority'];
   if (authority['kind'] !== 'pairing-token' || authority['principalId'] !== row['principalId'] || !text(authority['tokenId'])
     || !text(authority['authorityId']) || !text(authority['authorityRevision']) || !Array.isArray(authority['scopes'])
-    || authority['scopes'].some(scope => !text(scope)) || !(authority['scopes'].includes('*') || authority['scopes'].includes('write:payments'))) throw new ProtectedPaymentRequestError();
+    || authority['scopes'].some(scope => !text(scope)) || missingScopes(authority['scopes'], ['write:payments']).length > 0) throw new ProtectedPaymentRequestError();
   const config = host['configuration'], limits = config['limits'];
   if (!object(limits) || !amount(limits['dailyItemMinorUnits']) || !amount(limits['dailyOverageMinorUnits'])
     || !object(limits['perPurchaseCeiling']) || typeof limits['perPurchaseCeiling']['enabled'] !== 'boolean' || !amount(limits['perPurchaseCeiling']['minorUnits'])

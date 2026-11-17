@@ -2,6 +2,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { assertConfirmed, HandlerError, type TypedHandler } from './handler-plumbing.js';
 import { PurchaseReconciliationError, type PurchaseReconciliations } from './purchase-reconciliation.js';
 import { PaymentOperationStoreError } from './operation-store.js';
+import { missingScopes } from '@goodvibes-jev/engine/daemon-api/route-helpers';
 
 /** An explicit observation of merchant history, with the same current paired
  * admin authority as answering a window. Classic policy may settle old funds;
@@ -21,7 +22,7 @@ export function purchaseReconciliationHandler(owner: PurchaseReconciliations): T
     const snapshot = () => ({ principalId: context.principalId, principalKind: context.principalKind,
       admin: context.admin, scopes: [...context.scopes], explicitUserRequest: context.explicitUserRequest });
     const expected = (() => { try { return authority?.current(); } catch { throw forbidden(); } })();
-    const has = (scopes: readonly string[]) => scopes.includes('*') || scopes.includes('write:payments');
+    const has = (scopes: readonly string[]) => missingScopes(scopes, ['write:payments']).length === 0;
     if (!authority || !expected || expected.kind !== 'pairing-token' || !context.admin || context.principalKind !== 'token'
       || expected.principalId !== context.principalId || !has(expected.scopes) || !has(context.scopes)) throw forbidden();
     const paired = structuredClone(expected), original = snapshot(), signal = context.signal, isAuthorized = context.isAuthorized;

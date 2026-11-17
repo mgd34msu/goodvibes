@@ -24,6 +24,7 @@ import type { ContractIntegrationInspection } from '../../contract/integration-i
 import { isTerminalContractStatus, type ContractView, type StartContractInput } from '../../contract/types.js';
 import type { NativeContractCompositionOwner } from '../../runtime/contract-composition.js';
 import { NativeWorkExecutionError, parseNativeWorkExecutionRecord, parseNativeWorkExecutionIntent, nativeExecutionOwnerMatches, nativeExecutionTargetRevision, bindNativeExecutionRequest, type NativeExecutionOwnerFacts, type NativeWorkExecutionIntent, type NativeWorkExecutionRecord, type NativeWorkExecutionStorage, type NativeWorkExecutionTarget, type NativeWorkExecutionTransaction } from './native-execution-types.js';
+import { missingScopes } from '@goodvibes-jev/engine/daemon-api/route-helpers';
 
 export interface NativePairedExecutionSnapshot {
   /** `local`: the owner's own machine, whose apps use the operator token they already hold. */
@@ -37,7 +38,7 @@ export interface NativePairedExecutionSnapshot {
  */
 export function holdsNativeOwnership(value: NativePairedExecutionSnapshot | null | undefined, scopes: readonly string[]): value is NativePairedExecutionSnapshot {
   return !!value && (value.kind === 'pairing-token' || value.kind === 'local') && value.principalId === value.authorityId
-    && value.authorityRevision === value.tokenId && scopes.every(scope => value.scopes.includes('*') || value.scopes.includes(scope));
+    && value.authorityRevision === value.tokenId && missingScopes(value.scopes, scopes).length === 0;
 }
 /** Nonserialized transport-created capability. Keep the credential inside its authenticated owner. */
 export interface NativePairedExecutionAuthority {

@@ -11,6 +11,7 @@ import { paymentContinuationBinding } from './continuation-binding.js';
 import { BrowserPageConnectionError } from '../../browser/browser-page-connection-data.js';
 import type { BeginCheckoutInput } from '../payments-gateway-service.js';
 import type { DetachedCheckoutOwner } from './checkout-operations.js';
+import { missingScopes } from '@goodvibes-jev/engine/daemon-api/route-helpers';
 
 function frame(context: HandlerContextEnvelope) {
   return { principalId: context.principalId, principalKind: context.principalKind, admin: context.admin,
@@ -36,7 +37,7 @@ export function retainCheckoutInvocation(deps: PaymentsHandlerDeps, seam: Browse
       signal?.throwIfAborted();
       if (context.signal !== signal || context.isAuthorized !== authorized || context.nativeExecutionAuthority !== native
         || !isDeepStrictEqual(captureOwnedJson(frame(context)), original) || !context.principalId
-        || !(context.scopes.includes('*') || context.scopes.includes('write:payments'))
+        || missingScopes(context.scopes, ['write:payments']).length > 0
         || authorized?.(['write:payments']) !== true || deps.checkout.seam() !== seam
         || !readPaymentsEnabled(deps.config) || !deps.isPaymentsLeader()
         || !isDeepStrictEqual(captureOwnedJson(readPaymentsServiceConfig(deps.config)), config)
@@ -63,8 +64,8 @@ export function retainDetachedCheckout(deps: PaymentsHandlerDeps, seam: BrowserC
   const paired = native?.current();
   if (!native || !native.issueContinuation || !native.revokeContinuation || !authorized || !paired || paired.kind !== 'pairing-token' || !context.admin || context.principalKind !== 'token'
     || (options.ownerRequest && !context.explicitUserRequest) || context.principalId !== paired.principalId
-    || !(context.scopes.includes('*') || context.scopes.includes('write:payments'))
-    || !(paired.scopes.includes('*') || paired.scopes.includes('write:payments'))
+    || missingScopes(context.scopes, ['write:payments']).length > 0
+    || missingScopes(paired.scopes, ['write:payments']).length > 0
     || authorized?.(['write:payments']) !== true) {
     throw new HandlerError(options.ownerRequest
       ? 'Checkout admission requires an explicit request from the current paired administrative owner with write:payments. '

@@ -8,6 +8,7 @@ import {
 } from '../method-catalog-work-ledger.js';
 import { GatewayVerbError } from './gateway-verb-error.js';
 import { readInvocationParams } from './invocation-params.js';
+import { missingScopes } from '@goodvibes-jev/engine/daemon-api/route-helpers';
 
 
 function invalid(field: string): never {
@@ -51,7 +52,7 @@ async function read<T>(operation: () => Promise<T>): Promise<T> {
 }
 
 function provenance(invocation: GatewayMethodInvocation): 'available' | 'requires_read_knowledge' {
-  return invocation.context.scopes?.some(scope => scope === '*' || scope === 'read:knowledge')
+  return missingScopes(invocation.context.scopes, ['read:knowledge']).length === 0
     && invocation.isAuthorized?.(['read:knowledge']) === true ? 'available' : 'requires_read_knowledge';
 }
 

@@ -23,6 +23,7 @@ import { nativeConversationIntakeCaptureRequestSchema, nativeConversationIntakeL
   nativeConversationIntakeTransitionRequestSchema, nativeConversationIntakeResultSchema, nativeConversationIntakeWorkReceiptSchema,
   type NativeConversationIntakeCaptureRequest, type NativeConversationIntakeLookupRequest, type NativeConversationIntakeTransitionRequest,
   type NativeConversationIntakeResult, type NativeConversationIntakeLookupResult, type NativeConversationIntakeWorkReceipt } from './native-intake-wire.js';
+import { missingScopes } from '@goodvibes-jev/engine/daemon-api/route-helpers';
 
 type NativeConversationIntakeErrorCode = 'invalid' | 'unsupported-authority' | 'forbidden' | 'stale' | 'conflict' | 'request-conflict' | 'not-found' | 'recovery-required' | 'indeterminate' | 'unavailable' | 'closed';
 const NEXT_STEP: Record<NativeConversationIntakeErrorCode, string> = {
@@ -74,6 +75,11 @@ function paired(authority: NativePairedExecutionAuthority): NativePairedExecutio
   return Object.freeze({ ...value, scopes: Object.freeze([...value.scopes].sort()) });
 }
 const contextReadScope = (selectedDiff: NativeSelectedDiffSelector | undefined) => selectedDiff ? selectedDiff.kind === 'session' ? 'read:sessions' : 'read:checkpoints' : undefined;
+/** The scopes continuing a session needs: write:sessions, plus the read scope of the diff it carries. */
+const continuationScopes = (selectedDiff: NativeSelectedDiffSelector | undefined): string[] => {
+  const read = contextReadScope(selectedDiff);
+  return read === undefined ? ['write:sessions'] : ['write:sessions', read];
+};
 /**
  * The owners one call established, once, when it started: the pairing it was
  * authorised under and the workspace scope. Every later write runs inside
@@ -113,8 +119,7 @@ export function createNativeConversationIntakeHost(deps: {
     if (record.projectId !== deps.projectId || record.principalId !== current.identity.principalId || record.sessionId !== deps.sessionId
       || !isDeepStrictEqual(record.owner, current.facts)) throw new NativeConversationIntakeError('stale');
     if (record.continuation) {
-      if (!current.identity.scopes.includes('*') && (!current.identity.scopes.includes('write:sessions')
-        || (contextReadScope(record.continuation.selectedDiff) !== undefined && !current.identity.scopes.includes(contextReadScope(record.continuation.selectedDiff)!)))) throw new NativeConversationIntakeError('forbidden');
+      if (missingScopes(current.identity.scopes, continuationScopes(record.continuation.selectedDiff)).length > 0) throw new NativeConversationIntakeError('forbidden');
     }
   }
   function assertContinuation(record: NativeConversationCapture): void {
@@ -421,8 +426,7 @@ export function createNativeConversationIntakeHost(deps: {
       if (!parsed.success) return Promise.reject(new NativeConversationIntakeError('invalid'));
       return track(async () => {
         options.signal?.throwIfAborted(); const current = owner(authority, options); const { continuation: selection, ...original } = parsed.data;
-        if (selection && !current.identity.scopes.includes('*') && (!current.identity.scopes.includes('write:sessions')
-          || (contextReadScope(selection.selectedDiff) !== undefined && !current.identity.scopes.includes(contextReadScope(selection.selectedDiff)!)))) throw new NativeConversationIntakeError('forbidden');
+        if (selection && missingScopes(current.identity.scopes, continuationScopes(selection.selectedDiff)).length > 0) throw new NativeConversationIntakeError('forbidden');
         const key = { principalId: current.identity.principalId, inputId: original.inputId };
         const matches = (existing: NativeConversationCapture) => existing.requestId === original.requestId && existing.text === original.text
           && isDeepStrictEqual(existing.unsupportedSources, original.unsupportedSources) && existing.continuation?.sessionId === selection?.sessionId

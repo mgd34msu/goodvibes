@@ -1,5 +1,5 @@
 import type { Tool, ToolDefinition } from '@goodvibes-jev/engine/platform/platform/types';
-import type { ToolExecuteOptions, ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { ToolExecuteOptions, ToolInputProjector, ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { CommandContext, CommandRegistry } from '../input/command-registry.ts';
 import { createAgentHarnessTool } from './agent-harness-tool.ts';
 import { captureModelReadingInput } from './agent-harness-model-reading-source.ts';
@@ -28,6 +28,8 @@ export interface HarnessFacadeSpec<A> {
   readonly definition: ToolDefinition;
   /** Which inputs carry free text the catalog ingress screens; defaults to the shared catalog rule. */
   readonly selected?: (input: Record<string, unknown>) => boolean;
+  /** A further boundary the facade's body sits behind, inside the catalog ingress (a research report editor's, for one). */
+  readonly protect?: (tool: Tool) => Tool;
   route(call: HarnessFacadeCall<A>): Promise<FacadeResult> | FacadeResult;
 }
 
@@ -59,12 +61,16 @@ export function createHarnessFacade<A extends object>(deps: HarnessFacadeDeps, s
         forward: (translated, additionalGuard) => forwardHarnessCatalogCall(harness(), rawArgs, translated, options, additionalGuard) });
     },
   };
-  return protectHarnessCatalogTool(tool, deps.toolRegistry, selected, deps.commandContext);
+  return protectHarnessCatalogTool(spec.protect ? spec.protect(tool) : tool, deps.toolRegistry, selected, deps.commandContext);
 }
 
-/** Register a facade with the same catalog input projection its execute path applies. */
+/**
+ * Register a facade with the same catalog input projection its execute path
+ * applies; `fallback` projects the calls the catalog ingress does not select
+ * (a settings write's admission, a research report's screening).
+ */
 export function registerHarnessFacade(registry: ToolRegistry, tool: Tool, context: CommandContext,
-  selected: (input: Record<string, unknown>) => boolean = isHarnessCatalogQuery): void {
+  selected: (input: Record<string, unknown>) => boolean = isHarnessCatalogQuery, fallback?: ToolInputProjector): void {
   if (registry.has(tool.definition.name)) return;
-  registry.register(tool, { inputProjection: createHarnessCatalogInputProjector(registry, undefined, selected, context) });
+  registry.register(tool, { inputProjection: createHarnessCatalogInputProjector(registry, fallback, selected, context) });
 }

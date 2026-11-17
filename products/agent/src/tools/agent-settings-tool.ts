@@ -1,11 +1,10 @@
 import { isHarnessSettingsQuery } from './agent-harness-settings-catalog.ts';
 import { captureCatalogData } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-data';
-import { createHarnessCatalogInputProjector, forwardHarnessCatalogCall, protectHarnessCatalogTool } from './agent-harness-catalog-ingress.ts';
+import { createHarnessFacade, registerHarnessFacade, type HarnessFacadeDeps } from './agent-harness-facade.ts';
 import { createPreferredSettingsProjector, executeAdmittedPreferredSettings, settingsThrownFailure } from './agent-settings-admission.ts';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { CommandContext, CommandRegistry } from '../input/command-registry.ts';
-import { createAgentHarnessTool } from './agent-harness-tool.ts';
 import { createAgentSettingsImportTool } from './agent-settings-import-tool.ts';
 import { executeAdmittedAgentSettingsImport } from './agent-settings-import-admission.ts';
 import { readSettingsAction, SETTINGS_ACTION_WORDS } from './agent-settings-action.ts';
@@ -28,11 +27,7 @@ interface AgentSettingsToolArgs {
   readonly confirm?: unknown;
 }
 
-interface AgentSettingsToolDeps {
-  readonly commandRegistry: CommandRegistry;
-  readonly commandContext: CommandContext;
-  readonly toolRegistry: ToolRegistry;
-  readonly harnessTool?: Tool;
+interface AgentSettingsToolDeps extends HarnessFacadeDeps {
   readonly settingsImportTool?: Tool;
 }
 
@@ -42,10 +37,6 @@ function error(message: string): { readonly success: false; readonly error: stri
 
 function readString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
-}
-
-function readBoolean(value: unknown): boolean {
-  return value === true || (typeof value === 'string' && ['true', 'yes', 'apply', 'run'].includes(value.trim().toLowerCase()));
 }
 
 function compactArgs(entries: Record<string, unknown>): Record<string, unknown> {
@@ -98,14 +89,9 @@ function isSettingsQuery(input: Record<string, unknown>, context: CommandContext
 }
 
 export function createAgentSettingsTool(deps: AgentSettingsToolDeps): Tool {
-  const harnessTool = deps.harnessTool ?? createAgentHarnessTool({
-    commandRegistry: deps.commandRegistry,
-    commandContext: deps.commandContext,
-    toolRegistry: deps.toolRegistry,
-  });
   const settingsImportTool = deps.settingsImportTool ?? createAgentSettingsImportTool(deps.commandContext);
 
-  return protectHarnessCatalogTool({
+  return createHarnessFacade<AgentSettingsToolArgs>(deps, {
     definition: {
       name: 'settings',
       activity: {
@@ -139,26 +125,27 @@ export function createAgentSettingsTool(deps: AgentSettingsToolDeps): Tool {
       sideEffects: ['state'],
       concurrency: 'serial',
     },
-    execute: async (rawArgs: unknown, options) => {
-      const args = (rawArgs && typeof rawArgs === 'object' && !Array.isArray(rawArgs) ? rawArgs : {}) as AgentSettingsToolArgs;
+    selected: input => isSettingsQuery(input, deps.commandContext),
+    async route({ args, rawArgs, options, forward }) {
       const action = readSettingsAction(args as Record<string, unknown>);
       if (!action) return error(`Unknown settings action "${readString(args.action) || readString(args.mode)}". Use one of: ${SETTINGS_ACTION_WORDS.join(', ')}.`);
 
-      if (action === 'list') return forwardHarnessCatalogCall(harnessTool, rawArgs as Record<string, unknown>, settingsListArgs(args), options);
-      if (action === 'get') return forwardHarnessCatalogCall(harnessTool, rawArgs as Record<string, unknown>, settingsLookupArgs('get_setting', args), options);
+      if (action === 'list') return forward(settingsListArgs(args));
+      if (action === 'get') return forward(settingsLookupArgs('get_setting', args));
+      // Writes and the import carry their own admission (registered as this tool's fallback projection).
       if (action === 'set' || action === 'reset') {
-        try { return await executeAdmittedPreferredSettings(rawArgs as Record<string, unknown>, options); }
+        try { return await executeAdmittedPreferredSettings(rawArgs, options); }
         catch (thrown) { return settingsThrownFailure('mutation', thrown); }
       }
       if (action === 'preview_import') return settingsImportTool.execute({ action: 'preview' }, options);
       if (action === 'import') {
-        try { return await executeAdmittedAgentSettingsImport(deps.commandContext, rawArgs as Record<string, unknown>, options); }
+        try { return await executeAdmittedAgentSettingsImport(deps.commandContext, rawArgs, options); }
         catch (thrown) { return settingsThrownFailure('import', thrown); }
       }
 
       return error(`Unknown settings action. Use one of: ${SETTINGS_ACTION_WORDS.join(', ')}.`);
     },
-  }, deps.toolRegistry, input => isSettingsQuery(input, deps.commandContext), deps.commandContext);
+  });
 }
 
 export function registerAgentSettingsTool(
@@ -166,9 +153,7 @@ export function registerAgentSettingsTool(
   commandRegistry: CommandRegistry,
   commandContext: CommandContext,
 ): void {
-  if (!registry.has('settings')) registry.register(createAgentSettingsTool({ commandRegistry, commandContext, toolRegistry: registry }), {
-    inputProjection: createHarnessCatalogInputProjector(registry,
-      createPreferredSettingsProjector(commandContext.platform, undefined, { registry, context: commandContext }),
-      input => isSettingsQuery(input, commandContext), commandContext),
-  });
+  if (!registry.has('settings')) registerHarnessFacade(registry, createAgentSettingsTool({ commandRegistry, commandContext, toolRegistry: registry }), commandContext,
+    input => isSettingsQuery(input, commandContext),
+    createPreferredSettingsProjector(commandContext.platform, undefined, { registry, context: commandContext }));
 }

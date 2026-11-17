@@ -1,9 +1,8 @@
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { CommandContext, CommandRegistry } from '../input/command-registry.ts';
-import { createAgentHarnessTool } from './agent-harness-tool.ts';
 import { captureModelReadingInput } from './agent-harness-model-reading-source.ts';
-import { createHarnessCatalogInputProjector, protectHarnessCatalogTool, forwardHarnessCatalogCall } from './agent-harness-catalog-ingress.ts';
+import { createHarnessFacade, registerHarnessFacade, type HarnessFacadeDeps } from './agent-harness-facade.ts';
 import { confirmParameter, requestParameter } from '@goodvibes-jev/engine/terminal-shell/agent-turn/effect-admission';
 
 type AgentMemoryAction =
@@ -52,12 +51,7 @@ interface AgentMemoryToolArgs {
   readonly explicitUserRequest?: unknown;
 }
 
-interface AgentMemoryToolDeps {
-  readonly commandRegistry: CommandRegistry;
-  readonly commandContext: CommandContext;
-  readonly toolRegistry: ToolRegistry;
-  readonly harnessTool?: Tool;
-}
+type AgentMemoryToolDeps = HarnessFacadeDeps;
 
 function error(message: string): { readonly success: false; readonly error: string } {
   return { success: false, error: message };
@@ -139,13 +133,7 @@ function localMemoryArgs(action: AgentMemoryAction, args: AgentMemoryToolArgs): 
 }
 
 export function createAgentMemoryTool(deps: AgentMemoryToolDeps): Tool {
-  const harnessTool = deps.harnessTool ?? createAgentHarnessTool({
-    commandRegistry: deps.commandRegistry,
-    commandContext: deps.commandContext,
-    toolRegistry: deps.toolRegistry,
-  });
-
-  const tool: Tool = {
+  return createHarnessFacade<AgentMemoryToolArgs>(deps, {
     definition: {
       name: 'memory',
       activity: {
@@ -195,9 +183,8 @@ export function createAgentMemoryTool(deps: AgentMemoryToolDeps): Tool {
       sideEffects: ['state'],
       concurrency: 'serial',
     },
-    execute: async (rawArgs, options) => {
-      const args = captureModelReadingInput(rawArgs);
-      const forward = (translated: Record<string, unknown>) => forwardHarnessCatalogCall(harnessTool, rawArgs, translated, options);
+    selected: isMemoryCatalogCall,
+    route({ args, options, forward }) {
       const unrecognised = unrecognisedAction(args);
       if (unrecognised) return error(`Unknown memory action "${unrecognised}". Valid actions: status, provider, refinement, run_refinement, curator, curate, candidate, list, search, get, create, update, review, stale, delete.`);
       const action = readAction(args);
@@ -271,8 +258,7 @@ export function createAgentMemoryTool(deps: AgentMemoryToolDeps): Tool {
       }
       return deps.toolRegistry.executeNested(`memory-record-${action}-${++recordCallSequence}`, 'agent_local_registry', localMemoryArgs(action, args), options);
     },
-  };
-  return protectHarnessCatalogTool(tool, deps.toolRegistry, isMemoryCatalogCall, deps.commandContext);
+  });
 }
 
 function isMemoryCatalogCall(input: Record<string, unknown>): boolean {
@@ -287,5 +273,5 @@ export function registerAgentMemoryTool(
   commandRegistry: CommandRegistry,
   commandContext: CommandContext,
 ): void {
-  if (!registry.has('memory')) registry.register(createAgentMemoryTool({ commandRegistry, commandContext, toolRegistry: registry }), { inputProjection: createHarnessCatalogInputProjector(registry, undefined, isMemoryCatalogCall, commandContext) });
+  if (!registry.has('memory')) registerHarnessFacade(registry, createAgentMemoryTool({ commandRegistry, commandContext, toolRegistry: registry }), commandContext, isMemoryCatalogCall);
 }

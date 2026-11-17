@@ -1,9 +1,9 @@
-import { catalogRoutingInput, createHarnessCatalogInputProjector, forwardHarnessCatalogCall, protectHarnessCatalogTool } from './agent-harness-catalog-ingress.ts';
+import { catalogRoutingInput } from './agent-harness-catalog-ingress.ts';
+import { createHarnessFacade, registerHarnessFacade, type HarnessFacadeDeps } from './agent-harness-facade.ts';
 import { createAgentHarnessResearchProjector, protectAgentHarnessResearchTool, isResearchReportEditor } from './agent-research-ingress.ts';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { CommandContext, CommandRegistry } from '../input/command-registry.ts';
-import { createAgentHarnessTool } from './agent-harness-tool.ts';
 import { captureModelReadingInput } from './agent-harness-model-reading-source.ts';
 import { confirmParameter, requestParameter } from '@goodvibes-jev/engine/terminal-shell/agent-turn/effect-admission';
 
@@ -56,12 +56,7 @@ interface AgentWorkspaceToolArgs {
   readonly explicitUserRequest?: unknown;
 }
 
-interface AgentWorkspaceToolDeps {
-  readonly commandRegistry: CommandRegistry;
-  readonly commandContext: CommandContext;
-  readonly toolRegistry: ToolRegistry;
-  readonly harnessTool?: Tool;
-}
+type AgentWorkspaceToolDeps = HarnessFacadeDeps;
 
 function error(message: string): { readonly success: false; readonly error: string } {
   return { success: false, error: message };
@@ -217,13 +212,7 @@ function isWorkspaceCatalogQuery(input: Record<string, unknown>): boolean {
 }
 
 export function createAgentWorkspaceTool(deps: AgentWorkspaceToolDeps): Tool {
-  const harnessTool = deps.harnessTool ?? createAgentHarnessTool({
-    commandRegistry: deps.commandRegistry,
-    commandContext: deps.commandContext,
-    toolRegistry: deps.toolRegistry,
-  });
-
-  const tool: Tool = {
+  return createHarnessFacade<AgentWorkspaceToolArgs>(deps, {
     definition: {
       name: 'workspace',
       activity: { doing: 'Driving', did: 'drove', object: 'the workspace' },
@@ -264,9 +253,9 @@ export function createAgentWorkspaceTool(deps: AgentWorkspaceToolDeps): Tool {
       sideEffects: ['state'],
       concurrency: 'serial',
     },
-    execute: async (rawArgs, options) => {
-      const dispatch = (input: Record<string, unknown>) => forwardHarnessCatalogCall(harnessTool, rawArgs, input, options);
-      const args = captureModelReadingInput(rawArgs);
+    selected: isWorkspaceCatalogQuery,
+    protect: (tool) => protectAgentHarnessResearchTool(tool, deps.toolRegistry, isWorkspaceReport),
+    route({ args, forward: dispatch }) {
       const action = readAction(args);
       if (!action) return error(`Unknown workspace action "${readString(args.action) || readString(args.mode)}". Use one of: ${WORKSPACE_ACTION_WORDS.join(', ')}.`);
 
@@ -291,8 +280,7 @@ export function createAgentWorkspaceTool(deps: AgentWorkspaceToolDeps): Tool {
 
       return error(`Unknown workspace action. Use one of: ${WORKSPACE_ACTION_WORDS.join(', ')}.`);
     },
-  };
-  return protectHarnessCatalogTool(protectAgentHarnessResearchTool(tool, deps.toolRegistry, isWorkspaceReport), deps.toolRegistry, isWorkspaceCatalogQuery, deps.commandContext);
+  });
 }
 
 export function registerAgentWorkspaceTool(
@@ -300,7 +288,6 @@ export function registerAgentWorkspaceTool(
   commandRegistry: CommandRegistry,
   commandContext: CommandContext,
 ): void {
-  if (!registry.has('workspace')) registry.register(createAgentWorkspaceTool({ commandRegistry, commandContext, toolRegistry: registry }), {
-    inputProjection: createHarnessCatalogInputProjector(registry, createAgentHarnessResearchProjector(registry, isWorkspaceReport), isWorkspaceCatalogQuery, commandContext),
-  });
+  if (!registry.has('workspace')) registerHarnessFacade(registry, createAgentWorkspaceTool({ commandRegistry, commandContext, toolRegistry: registry }), commandContext,
+    isWorkspaceCatalogQuery, createAgentHarnessResearchProjector(registry, isWorkspaceReport));
 }

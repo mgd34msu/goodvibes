@@ -1,9 +1,8 @@
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { CommandContext, CommandRegistry } from '../input/command-registry.ts';
-import { createAgentHarnessTool } from './agent-harness-tool.ts';
 import { captureModelReadingInput } from './agent-harness-model-reading-source.ts';
-import { createHarnessCatalogInputProjector, protectHarnessCatalogTool, forwardHarnessCatalogCall } from './agent-harness-catalog-ingress.ts';
+import { createHarnessFacade, registerHarnessFacade, type HarnessFacadeDeps } from './agent-harness-facade.ts';
 
 type AgentExecutionAction =
   | 'status'
@@ -33,12 +32,7 @@ interface AgentExecutionToolArgs {
   readonly limit?: unknown;
 }
 
-interface AgentExecutionToolDeps {
-  readonly commandRegistry: CommandRegistry;
-  readonly commandContext: CommandContext;
-  readonly toolRegistry: ToolRegistry;
-  readonly harnessTool?: Tool;
-}
+type AgentExecutionToolDeps = HarnessFacadeDeps;
 
 function error(message: string): { readonly success: false; readonly error: string } {
   return { success: false, error: message };
@@ -166,13 +160,7 @@ function recoveryArgs(args: AgentExecutionToolArgs): Record<string, unknown> {
 }
 
 export function createAgentExecutionTool(deps: AgentExecutionToolDeps): Tool {
-  const harnessTool = deps.harnessTool ?? createAgentHarnessTool({
-    commandRegistry: deps.commandRegistry,
-    commandContext: deps.commandContext,
-    toolRegistry: deps.toolRegistry,
-  });
-
-  const tool: Tool = {
+  return createHarnessFacade<AgentExecutionToolArgs>(deps, {
     definition: {
       name: 'execution',
       activity: { doing: 'Managing', did: 'managed', object: 'background work' },
@@ -204,9 +192,8 @@ export function createAgentExecutionTool(deps: AgentExecutionToolDeps): Tool {
       sideEffects: [],
       concurrency: 'parallel',
     },
-    execute: async (rawArgs, options) => {
-      const args = captureModelReadingInput(rawArgs);
-      const forward = (translated: Record<string, unknown>) => forwardHarnessCatalogCall(harnessTool, rawArgs, translated, options);
+    selected: isExecutionCatalogCall,
+    route({ args, forward }) {
       const action = readAction(args);
       if (!action) return error('Unknown execution action. Use action:"status" for local route posture or action:"history" for recent work.');
 
@@ -221,8 +208,7 @@ export function createAgentExecutionTool(deps: AgentExecutionToolDeps): Tool {
 
       return error('Unknown execution action. Use action:"status" for local route posture or action:"history" for recent work.');
     },
-  };
-  return protectHarnessCatalogTool(tool, deps.toolRegistry, isExecutionCatalogCall, deps.commandContext);
+  });
 }
 
 function isExecutionCatalogCall(input: Record<string, unknown>): boolean {
@@ -235,5 +221,5 @@ export function registerAgentExecutionTool(
   commandRegistry: CommandRegistry,
   commandContext: CommandContext,
 ): void {
-  if (!registry.has('execution')) registry.register(createAgentExecutionTool({ commandRegistry, commandContext, toolRegistry: registry }), { inputProjection: createHarnessCatalogInputProjector(registry, undefined, isExecutionCatalogCall, commandContext) });
+  if (!registry.has('execution')) registerHarnessFacade(registry, createAgentExecutionTool({ commandRegistry, commandContext, toolRegistry: registry }), commandContext, isExecutionCatalogCall);
 }

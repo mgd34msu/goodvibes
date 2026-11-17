@@ -2,8 +2,7 @@ import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { CommandContext, CommandRegistry } from '../input/command-registry.ts';
 import { captureModelReadingInput } from './agent-harness-model-reading-source.ts';
-import { createHarnessCatalogInputProjector, protectHarnessCatalogTool, forwardHarnessCatalogCall } from './agent-harness-catalog-ingress.ts';
-import { createAgentHarnessTool } from './agent-harness-tool.ts';
+import { createHarnessFacade, registerHarnessFacade, type HarnessFacadeDeps } from './agent-harness-facade.ts';
 import { confirmParameter, requestParameter } from '@goodvibes-jev/engine/terminal-shell/agent-turn/effect-admission';
 
 type AgentModelsAction =
@@ -30,12 +29,7 @@ interface AgentModelsToolArgs {
   readonly explicitUserRequest?: unknown;
 }
 
-interface AgentModelsToolDeps {
-  readonly commandRegistry: CommandRegistry;
-  readonly commandContext: CommandContext;
-  readonly toolRegistry: ToolRegistry;
-  readonly harnessTool?: Tool;
-}
+type AgentModelsToolDeps = HarnessFacadeDeps;
 
 function error(message: string): { readonly success: false; readonly error: string } {
   return { success: false, error: message };
@@ -150,13 +144,7 @@ function smokeArgs(args: AgentModelsToolArgs): Record<string, unknown> {
 }
 
 export function createAgentModelsTool(deps: AgentModelsToolDeps): Tool {
-  const harnessTool = deps.harnessTool ?? createAgentHarnessTool({
-    commandRegistry: deps.commandRegistry,
-    commandContext: deps.commandContext,
-    toolRegistry: deps.toolRegistry,
-  });
-
-  const tool: Tool = {
+  return createHarnessFacade<AgentModelsToolArgs>(deps, {
     definition: {
       name: 'models',
       activity: { doing: 'Checking', did: 'checked', object: 'models' },
@@ -186,9 +174,8 @@ export function createAgentModelsTool(deps: AgentModelsToolDeps): Tool {
       sideEffects: ['state'],
       concurrency: 'serial',
     },
-    execute: async (rawArgs, options) => {
-      const args = captureModelReadingInput(rawArgs) as AgentModelsToolArgs;
-      const forward = (translated: Record<string, unknown>) => forwardHarnessCatalogCall(harnessTool, rawArgs, translated, options);
+    selected: isModelsReadinessCall,
+    route({ args, forward }) {
       for (const value of [args.action, args.mode]) {
         if (readString(value) && normalizeModelsAction(value) === null) {
           return error(`Unknown models action "${readString(value)}". Valid actions: status, route, local, providers, provider, smoke.`);
@@ -205,8 +192,7 @@ export function createAgentModelsTool(deps: AgentModelsToolDeps): Tool {
 
       return error('Unknown models action. Use action:"status" for model routing readiness.');
     },
-  };
-  return protectHarnessCatalogTool(tool, deps.toolRegistry, isModelsReadinessCall, deps.commandContext);
+  });
 }
 
 export function isModelsReadinessCall(input: Record<string, unknown>): boolean {
@@ -220,5 +206,5 @@ export function registerAgentModelsTool(
   commandRegistry: CommandRegistry,
   commandContext: CommandContext,
 ): void {
-  if (!registry.has('models')) registry.register(createAgentModelsTool({ commandRegistry, commandContext, toolRegistry: registry }), { inputProjection: createHarnessCatalogInputProjector(registry, undefined, isModelsReadinessCall, commandContext) });
+  if (!registry.has('models')) registerHarnessFacade(registry, createAgentModelsTool({ commandRegistry, commandContext, toolRegistry: registry }), commandContext, isModelsReadinessCall);
 }

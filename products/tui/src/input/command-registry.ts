@@ -9,7 +9,7 @@ import type {
   TerminalCommandExtensionRegistryServices,
 } from '@goodvibes-jev/engine/terminal-shell/command-context-contracts';
 
-import { createTerminalCommandRegistry, type TerminalSlashCommand } from '@goodvibes-jev/engine/terminal-shell/command-registry';
+import { createTerminalCommandRegistry, reportDaemonWriteRefusals, type TerminalSlashCommand } from '@goodvibes-jev/engine/terminal-shell/command-registry';
 import { withOwnerConfirmation, type ConfirmableCommand } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
 import type { CommandSubcommandHints } from '@goodvibes-jev/engine/terminal-shell/command-args-hint';
 import { SHARED_COMMAND_CONFIRMATIONS } from './shared-command-confirmations.ts';
@@ -420,7 +420,7 @@ export const COMMON_COMMAND_NAMES: ReadonlySet<string> = new Set([
  * undone or change access, which the registry asks about once before running.
  */
 export type SlashCommand = TerminalSlashCommand<CommandContext> & CommandSubcommandHints & Pick<ConfirmableCommand<CommandContext>, 'confirm' | 'leadingFlagsOnly'>;
-const platformCommands = createTerminalCommandRegistry<CommandContext>({ commonNames: COMMON_COMMAND_NAMES });
+const platformCommands = createTerminalCommandRegistry<CommandContext>({ commonNames: COMMON_COMMAND_NAMES, afterCommand: (context) => reportDaemonWriteRefusals(context) });
 export class CommandRegistry extends platformCommands.CommandRegistry {
   /**
    * Every registration passes through the one confirmation rule

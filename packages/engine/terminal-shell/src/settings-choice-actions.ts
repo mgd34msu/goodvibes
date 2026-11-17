@@ -2,6 +2,7 @@ import type { ConfigChange, ConfigKey, ConfigManager, JudgmentFallbackSettings, 
 import { CONFIG_SCHEMA } from '@goodvibes-jev/engine/platform/platform/config';
 import { DECISION_MODEL_PROFILES, captureJudgmentBackendSettings, validEndpointURL, type DecisionModelProfile } from '@goodvibes-jev/judgment';
 import type { OpenSelection, SelectionItem } from './selection-modal.js';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 
 export type SettingsChoiceAction = 'judgment-provider' | 'judgment-model' | 'decision-policy' | 'permission-mode' | 'decision-router' | 'judgment-fallbacks';
 export interface SettingsChoiceContext {
@@ -73,7 +74,9 @@ export function openSettingsChoice(
   const fallbackChain = (): readonly JudgmentFallbackSettings[] => config.get('judgment.fallbacks');
   const editingFallback = () => action === 'judgment-fallbacks' && fallbackIndex !== null ? fallbackChain()[fallbackIndex] : undefined;
   // One choice is one settings write: every key is checked first and written
-  // together, or nothing is written and the refusal says why.
+  // together, or nothing is written and the refusal says why. Keys the daemon
+  // owns go to it as one update it takes whole; its refusal is printed when it
+  // answers, with the keys already back at their previous values.
   const save = (patch: ReadonlyArray<readonly [ConfigKey, unknown]>) => {
     if (!current()) return;
     const changes: ConfigChange[] = patch.map(([key, value]) => ({ key, value }));
@@ -81,6 +84,20 @@ export function openSettingsChoice(
     if (!result.ok) ctx.print(`Not saved: ${result.refusal.reason} ${result.refusal.next.join(' ')}`.trim());
     if (result.saved.length > 0) changed();
     ctx.renderRequest();
+    if (!result.pending) return;
+    void result.pending.settle().then((refused) => {
+      if (refused.length === 0) return;
+      const byReason = new Map<string, string[]>();
+      for (const refusal of refused) {
+        const reason = summarizeError(refusal.error);
+        byReason.set(reason, [...(byReason.get(reason) ?? []), refusal.key]);
+      }
+      for (const [reason, keys] of byReason) {
+        ctx.print(`Not saved: the daemon refused ${keys.join(', ')} (${reason}); ${keys.length === 1 ? 'it is' : 'they are'} back at the previous value.`);
+      }
+      changed();
+      ctx.renderRequest();
+    });
   };
   if (action === 'decision-policy' || action === 'permission-mode') {
     const key = action === 'decision-policy' ? 'judgment.policy' : 'permissions.mode';

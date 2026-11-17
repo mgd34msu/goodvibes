@@ -207,9 +207,31 @@ export interface DaemonWriteRoute {
   /** Whether the daemon can take a write now; no request is made. */
   reachable(): boolean;
   write(key: string, value: unknown): Promise<void>;
+  /**
+   * Several keys as one request the daemon admits whole (`config.setMany`):
+   * every key is written or none is. Without it, the keys of one update go
+   * one request each.
+   */
+  writeMany?(changes: readonly { readonly key: string; readonly value: unknown }[]): Promise<void>;
   reset?(key: string): Promise<void>;
   /** The daemon refused a forwarded write; this process's view of the key was put back. */
   refused?(key: string, error: unknown): void;
+}
+
+/** A daemon-owned write the daemon refused; this process's view of the key is back at what it was. */
+export interface DaemonWriteRefusal {
+  readonly key: string;
+  readonly error: unknown;
+}
+
+/**
+ * Keys an update sent to the daemon and shows already: `settle()` resolves
+ * once the daemon has answered, to the keys it refused (empty when it took
+ * them all). A refusal returned here counts as reported to the caller.
+ */
+export interface DaemonWritePending {
+  readonly keys: readonly ConfigKey[];
+  settle(): Promise<readonly DaemonWriteRefusal[]>;
 }
 
 /** One setting in a {@link ConfigManager.setMany} update. */
@@ -233,12 +255,14 @@ export type WriteOrigin =
 
 /**
  * The outcome of {@link ConfigManager.setMany}. `saved` names every key that
- * reached its settings file; on a refusal it is empty unless a later file
- * could not be written after an earlier one was.
+ * reached its settings file or was sent to the daemon; on a refusal it is
+ * empty unless a later file could not be written after an earlier one was.
+ * `pending`, present when keys went to the daemon, is what a caller reporting
+ * to a person awaits: those keys stand only once its answer has none refused.
  */
 export type SetResult =
-  | { readonly ok: true; readonly revision: number; readonly saved: readonly ConfigKey[] }
-  | { readonly ok: false; readonly refusal: Refusal; readonly saved: readonly ConfigKey[] };
+  | { readonly ok: true; readonly revision: number; readonly saved: readonly ConfigKey[]; readonly pending?: DaemonWritePending | undefined }
+  | { readonly ok: false; readonly refusal: Refusal; readonly saved: readonly ConfigKey[]; readonly pending?: DaemonWritePending | undefined };
 
 type SetTier = 'daemon' | 'shared' | 'project' | 'global';
 const SET_TIER_ORDER: readonly SetTier[] = ['daemon', 'shared', 'project', 'global'];
@@ -1226,32 +1250,54 @@ export class ConfigManager {
 
   /** Set one key in the in-memory view only (no file), publish, and notify like a persisted change. */
   #applyInView(key: ConfigKey, value: unknown, tier: 'daemon' | undefined): void {
-    const previousValue = readDotPath(this.#config, key).value;
-    const staged = this.runtimeState.fork();
-    const { parent, field } = this.#resolvePath(key, staged.nonRuntime);
-    parent[field] = structuredClone(value);
-    staged.retire(key);
-    staged.mark(key, tier);
-    this.publishState(staged, staged.compose());
-    this.notifyPersistedChange(key, previousValue);
+    this.#applyAllInView([{ key, value }], tier);
   }
 
-  /** Daemon writes sent from this process whose answer has not arrived; each settles to its refusal, if any. */
-  readonly #forwarding = new Set<Promise<{ readonly key: string; readonly error: unknown } | null>>();
+  /** Set keys in the in-memory view only (no file), publish once, and notify each like a persisted change. */
+  #applyAllInView(changes: readonly { readonly key: ConfigKey; readonly value: unknown }[], tier: 'daemon' | undefined): void {
+    const previous = changes.map(change => readDotPath(this.#config, change.key).value);
+    const staged = this.runtimeState.fork();
+    for (const change of changes) {
+      const { parent, field } = this.#resolvePath(change.key, staged.nonRuntime);
+      parent[field] = structuredClone(change.value);
+      staged.retire(change.key);
+      staged.mark(change.key, tier);
+    }
+    this.publishState(staged, staged.compose());
+    changes.forEach((change, index) => this.notifyPersistedChange(change.key, previous[index]));
+  }
 
-  /** Send one daemon-owned write through the daemon; on refusal put the previous value back if it is still the one sent. */
-  #forwardDaemonWrite(route: DaemonWriteRoute, key: ConfigKey, value: unknown, previous: unknown, reset: boolean): void {
-    this.#applyInView(key, value, reset ? undefined : 'daemon');
-    const sent = reset && route.reset ? route.reset(key) : route.write(key, value);
-    const outcome = sent.then(() => null, (error: unknown) => {
-      if (JSON.stringify(readDotPath(this.#config, key).value) === JSON.stringify(value)) {
-        try { this.#applyInView(key, previous, 'daemon'); } catch { /* the reload from the daemon's file reconciles */ }
+  /** Daemon writes sent from this process whose answer has not arrived; each settles to its refusals. */
+  readonly #forwarding = new Set<Promise<readonly DaemonWriteRefusal[]>>();
+  /** Open {@link watchDaemonWrites} watches; each collects the writes sent while it is open. */
+  readonly #forwardWatches = new Set<Promise<readonly DaemonWriteRefusal[]>[]>();
+
+  /**
+   * Send daemon-owned writes through the daemon and show them in this process
+   * at once. Several keys go as one request the daemon admits whole when the
+   * route can; a refusal puts each refused key back if it still holds the
+   * value sent. Settles to the refusals.
+   */
+  #forwardDaemonWrites(route: DaemonWriteRoute, changes: readonly { readonly key: ConfigKey; readonly value: unknown }[], reset: boolean): Promise<readonly DaemonWriteRefusal[]> {
+    const previous = changes.map(change => readDotPath(this.#config, change.key).value);
+    this.#applyAllInView(changes, reset ? undefined : 'daemon');
+    const refuse = (index: number, error: unknown): DaemonWriteRefusal => {
+      const change = changes[index]!;
+      if (JSON.stringify(readDotPath(this.#config, change.key).value) === JSON.stringify(change.value)) {
+        try { this.#applyInView(change.key, previous[index], 'daemon'); } catch { /* the reload from the daemon's file reconciles */ }
       }
-      try { route.refused?.(key, error); } catch { /* reporting cannot change the outcome */ }
-      return { key, error };
-    });
+      try { route.refused?.(change.key, error); } catch { /* reporting cannot change the outcome */ }
+      return { key: change.key, error };
+    };
+    const outcome: Promise<readonly DaemonWriteRefusal[]> = changes.length > 1 && !reset && route.writeMany
+      ? route.writeMany(changes).then(() => [], (error: unknown) => changes.map((_, index) => refuse(index, error)))
+      : Promise.all(changes.map((change, index) => (reset && route.reset ? route.reset(change.key) : route.write(change.key, change.value))
+        .then(() => null, (error: unknown) => refuse(index, error))))
+        .then(results => results.filter((result): result is DaemonWriteRefusal => result !== null));
     this.#forwarding.add(outcome);
+    for (const watch of this.#forwardWatches) watch.push(outcome);
     void outcome.finally(() => { this.#forwarding.delete(outcome); });
+    return outcome;
   }
 
   /**
@@ -1260,9 +1306,34 @@ export class ConfigManager {
    * back in this process's view). For a command that wrote through code which
    * cannot await, so it can report what the daemon did.
    */
-  async settleDaemonWrites(): Promise<readonly { readonly key: string; readonly error: unknown }[]> {
+  async settleDaemonWrites(): Promise<readonly DaemonWriteRefusal[]> {
     const results = await Promise.all([...this.#forwarding]);
-    return results.filter((result): result is { readonly key: string; readonly error: unknown } => result !== null);
+    return this.#markReported(results.flat());
+  }
+
+  /** Refusals a caller has been given, so a dispatcher's watch does not report them a second time. */
+  readonly #reportedRefusals = new WeakSet<DaemonWriteRefusal>();
+
+  #markReported(refusals: readonly DaemonWriteRefusal[]): readonly DaemonWriteRefusal[] {
+    for (const refusal of refusals) this.#reportedRefusals.add(refusal);
+    return refusals;
+  }
+
+  /**
+   * Start collecting the daemon-owned writes sent from now on. The returned
+   * function stops collecting, waits for the daemon's answer to each one
+   * collected and returns the refusals: a command dispatcher calls it after a
+   * handler ran so the person is told what the daemon refused, and only that.
+   * Costs nothing while no write is sent.
+   */
+  watchDaemonWrites(): () => Promise<readonly DaemonWriteRefusal[]> {
+    const collected: Promise<readonly DaemonWriteRefusal[]>[] = [];
+    this.#forwardWatches.add(collected);
+    return async () => {
+      this.#forwardWatches.delete(collected);
+      const refusals = (await Promise.all(collected)).flat();
+      return this.#markReported(refusals.filter(refusal => !this.#reportedRefusals.has(refusal)));
+    };
   }
 
   validateDynamic(key: ConfigKey, value: unknown, options: ConfigSetOptions = {}): void {
@@ -1342,7 +1413,7 @@ export class ConfigManager {
     value = this.validateSetValue(key, value, options, false) as ConfigValue<K>;
     const route = this.#routedDaemonWrite(key, options);
     if (route) {
-      this.#forwardDaemonWrite(route, key, value, readDotPath(this.#config, key).value, false);
+      void this.#forwardDaemonWrites(route, [{ key, value }], false);
       return;
     }
     this.#refuseDaemonFileWrite(key, options);
@@ -1507,13 +1578,16 @@ export class ConfigManager {
     }
     this.invalidateLifetimes();
     const forwarded: ConfigKey[] = [];
+    let pending: DaemonWritePending | undefined;
     if (route) {
-      for (const change of admitted.filter(entry => entry.tier === 'daemon')) {
-        this.#forwardDaemonWrite(route, change.key, change.value, readDotPath(this.#config, change.key).value, false);
-        forwarded.push(change.key);
-      }
+      // One request for every daemon key of this update, admitted whole by the daemon.
+      const daemonChanges = admitted.filter(entry => entry.tier === 'daemon').map(({ key, value }) => ({ key, value }));
+      forwarded.push(...daemonChanges.map(change => change.key));
+      const answer = this.#forwardDaemonWrites(route, daemonChanges, false);
+      pending = { keys: [...forwarded], settle: async () => this.#markReported(await answer) };
       admitted.splice(0, admitted.length, ...admitted.filter(entry => entry.tier !== 'daemon'));
     }
+    const withPending = (result: SetResult): SetResult => pending ? { ...result, pending } : result;
 
     const previousHost = admitted.some(change => this.hostSettings.has(change.key)) ? this.hostSettings.snapshot(this.#config) : null;
     const previous = new Map(admitted.map(change => [change.key, readDotPath(this.#config, change.key).value] as const));
@@ -1548,18 +1622,18 @@ export class ConfigManager {
     if (failedTier !== undefined) {
       const unsaved = admitted.filter(change => !written.includes(change)).map(change => change.key);
       if (busy) {
-        return refuse({ code: 'CONFIG_BUSY', reason: `Another process is saving the ${SET_TIER_LABEL[failedTier]} settings file right now; ${unsaved.join(', ')} ${unsaved.length === 1 ? 'was' : 'were'} not applied.`,
-          next: ['Send the unsaved settings again in a moment.'], retryable: true, status: 409 }, saved);
+        return withPending(refuse({ code: 'CONFIG_BUSY', reason: `Another process is saving the ${SET_TIER_LABEL[failedTier]} settings file right now; ${unsaved.join(', ')} ${unsaved.length === 1 ? 'was' : 'were'} not applied.`,
+          next: ['Send the unsaved settings again in a moment.'], retryable: true, status: 409 }, saved));
       }
-      return refuse({ code: 'CONFIG_WRITE_FAILED',
+      return withPending(refuse({ code: 'CONFIG_WRITE_FAILED',
         reason: `Could not save the ${SET_TIER_LABEL[failedTier]} settings file; ${unsaved.join(', ')} ${unsaved.length === 1 ? 'was' : 'were'} not applied.`,
-        next: ['Check that the settings directory is writable, then send the unsaved settings again.'], status: 500 }, saved);
+        next: ['Check that the settings directory is writable, then send the unsaved settings again.'], status: 500 }, saved));
     }
     if (hostRefreshFailed) {
-      return refuse({ code: 'CONFIG_HOST_READ_FAILED', reason: 'The settings were saved, but this surface could not read its own settings back; its registered settings use their restrictive defaults.',
-        next: ['Check the settings file named in the startup notice, then reload settings.'], status: 500 }, saved);
+      return withPending(refuse({ code: 'CONFIG_HOST_READ_FAILED', reason: 'The settings were saved, but this surface could not read its own settings back; its registered settings use their restrictive defaults.',
+        next: ['Check the settings file named in the startup notice, then reload settings.'], status: 500 }, saved));
     }
-    return { ok: true, revision: this.#permissionIncarnation, saved };
+    return withPending({ ok: true, revision: this.#permissionIncarnation, saved });
   }
 
   /** Write one settings file with every change of one update that lands in it. */
@@ -2232,7 +2306,7 @@ export class ConfigManager {
       const lock = getManagedSettingLock(key, this.configDir);
       if (lock) throw new ConfigError(`Setting ${key} is locked by ${lock.source}: ${lock.reason}`);
       this.invalidateLifetimes();
-      this.#forwardDaemonWrite(route, key, structuredClone(readDotPath(DEFAULT_CONFIG_SNAPSHOT, key).value), readDotPath(this.#config, key).value, true);
+      void this.#forwardDaemonWrites(route, [{ key, value: structuredClone(readDotPath(DEFAULT_CONFIG_SNAPSHOT, key).value) }], true);
       return;
     }
     // A managed-policy lock refuses a reset the same way it refuses a write.

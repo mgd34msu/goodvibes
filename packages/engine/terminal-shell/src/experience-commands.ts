@@ -160,6 +160,14 @@ export function createVoiceExperienceCommand<Context extends ExperienceContext>(
               ctx.print(`Voice bundle not applied: ${result.refusal.reason} ${result.refusal.next.join(' ')}`.trim());
               return;
             }
+            // The daemon's settings in the bundle went to it as one update; it is applied only once the daemon took it.
+            const refused = result.pending ? await result.pending.settle() : [];
+            if (refused.length > 0) {
+              const first = refused[0]!;
+              const kept = result.saved.length - refused.length;
+              ctx.print(`Voice bundle not fully applied: the daemon refused ${refused.map(refusal => refusal.key).join(', ')} (${first.error instanceof Error ? first.error.message : String(first.error)}), which keep their previous values${kept > 0 ? `; the other ${kept} setting${kept === 1 ? ' was' : 's were'} saved` : ''}.`);
+              return;
+            }
             ctx.print(`Voice bundle applied: ${result.saved.length} setting${result.saved.length === 1 ? '' : 's'} from ${target}.`);
             return;
           }

@@ -9,7 +9,7 @@ import type {
   TerminalCommandExtensionRegistryServices,
 } from '@goodvibes-jev/engine/terminal-shell/command-context-contracts';
 
-import { createTerminalCommandRegistry, type TerminalSlashCommand } from '@goodvibes-jev/engine/terminal-shell/command-registry';
+import { createTerminalCommandRegistry, reportDaemonWriteRefusals, type TerminalSlashCommand } from '@goodvibes-jev/engine/terminal-shell/command-registry';
 import type { CommandSubcommandHints } from '@goodvibes-jev/engine/terminal-shell/command-args-hint';
 import type { ProductInputContext } from '@goodvibes-jev/engine/terminal-shell/native';
 import type { NativeConversationIntakeActions, NativeConversationIntakeState } from '../runtime/native-conversation-intake.ts';
@@ -275,7 +275,7 @@ export interface CommandContext extends CommandUiActions, CommandShellUiOpeners 
 
 /** A command as this app registers it. `subcommands` gives the composer's argument hint for each subcommand. */
 export type SlashCommand = TerminalSlashCommand<CommandContext> & CommandSubcommandHints;
-const platformCommands = createTerminalCommandRegistry<CommandContext>();
+const platformCommands = createTerminalCommandRegistry<CommandContext>({ afterCommand: (context) => reportDaemonWriteRefusals(context) });
 export class CommandRegistry extends platformCommands.CommandRegistry {
   override register(command: SlashCommand): void {
     super.register(command);

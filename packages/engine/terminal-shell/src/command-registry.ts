@@ -2,6 +2,27 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import type { SlashCommandRawRest } from './slash-command-parser.js';
 import { captureNativeConversationInput, type NativeConversationInput } from './native/native-conversation-input.js';
+import type { DaemonWriteRefusal } from '@goodvibes-jev/engine/platform/platform/config';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
+
+/**
+ * The `afterCommand` both terminal apps give their registry: a setting a
+ * command sent to the daemon shows at once, and each one the daemon then
+ * refused is printed with its reason before the command counts as done. No
+ * wait when the command sent nothing.
+ */
+export function reportDaemonWriteRefusals(context: {
+  readonly print: (message: string) => void;
+  readonly platform?: { readonly configManager?: { watchDaemonWrites?(): () => Promise<readonly DaemonWriteRefusal[]> } | undefined } | undefined;
+}): (() => Promise<void>) | undefined {
+  const finish = context.platform?.configManager?.watchDaemonWrites?.();
+  if (!finish) return undefined;
+  return async () => {
+    for (const refusal of await finish()) {
+      context.print(`Not saved: the daemon refused ${refusal.key} (${summarizeError(refusal.error)}); it is back at its previous value.`);
+    }
+  };
+}
 export interface TerminalSlashCommand<Context> {
   name: string;
   aliases?: string[] | undefined;
@@ -128,6 +149,14 @@ export function createTerminalCommandRegistry<
 >(
   options: {
     readonly commonNames?: ReadonlySet<string> | undefined;
+    /**
+     * Called as an outermost command starts; the function it returns runs once
+     * the handler has finished (or thrown), so what a command started but could
+     * not wait for (a setting the daemon has not answered on) is reported
+     * before the command counts as done. Nested dispatch is covered by the
+     * outermost one.
+     */
+    readonly afterCommand?: ((context: Context) => (() => Promise<void>) | undefined) | undefined;
   } = {},
 ): TerminalCommandRegistryFactory<Context> {
   const commonNames = new Set(options.commonNames ?? []);
@@ -279,7 +308,12 @@ export function createTerminalCommandRegistry<
     async execute(rawName: string, args: string[], context: Context): Promise<boolean> {
       const cmd = this.get(rawName);
       if (!cmd) return false;
-      await commandDispatchScope.run(true, () => cmd.handler(args, directOwnerCommands.has(context) ? { ...context } : context));
+      const after = commandDispatchScope.getStore() ? undefined : options.afterCommand?.(context);
+      try {
+        await commandDispatchScope.run(true, () => cmd.handler(args, directOwnerCommands.has(context) ? { ...context } : context));
+      } finally {
+        if (after) await after().catch(() => { /* reporting cannot change the command's outcome */ });
+      }
       return true;
     }
     /** Reserved for the terminal's direct key-input route, not tools or startup. */
@@ -290,11 +324,13 @@ export function createTerminalCommandRegistry<
       if (context.invokedByModel !== true && !commandDispatchScope.getStore() && !directOwnerCommands.has(context)) {
         directOwnerCommands.set(owned, { name: cmd.name, rawInput });
       }
+      const after = commandDispatchScope.getStore() ? undefined : options.afterCommand?.(context);
       try {
         await commandDispatchScope.run(true, () => cmd.handler(args, owned));
         return true;
       } finally {
         directOwnerCommands.delete(owned);
+        if (after) await after().catch(() => { /* reporting cannot change the command's outcome */ });
       }
     }
   }

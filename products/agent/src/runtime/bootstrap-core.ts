@@ -197,6 +197,7 @@ export async function initializeBootstrapCore(
   configManager.attachDaemonRoute({
     reachable: () => daemonConfigClient.reachable(),
     write: (key, value) => daemonConfigClient.set(key, value),
+    writeMany: (changes) => daemonConfigClient.setMany(changes),
     ...(daemonConfigClient.reset ? { reset: (key: string) => daemonConfigClient.reset!(key) } : {}),
     refused: (key, error) => logger.warn('The connected host refused a setting written from the Agent; the previous value is back', { key, error: summarizeError(error) }),
   });

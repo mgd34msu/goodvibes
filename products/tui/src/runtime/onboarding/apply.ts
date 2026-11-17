@@ -77,6 +77,24 @@ const { applyConfigOperation, buildConfigRollbackAction, validateConfigOperation
   unset: (deps, key) => deps.config.reset(key as never),
 });
 
+/**
+ * A setting the daemon owns goes to it and counts as applied only once it
+ * took it: a refusal fails this step, so the whole apply is rolled back and
+ * reported instead of "applied". Nothing is awaited when nothing was sent.
+ */
+async function applyConfigAndConfirm(
+  deps: OnboardingApplyDependencies,
+  operation: Extract<OnboardingApplyOperation, { kind: 'set-config' }>,
+): Promise<OnboardingAppliedOperation> {
+  const finish = deps.config.watchDaemonWrites?.();
+  const applied = applyConfigOperation(deps, operation);
+  const refused = finish ? await finish() : [];
+  if (refused.length > 0) {
+    throw new Error(refused.map((entry) => `the daemon refused ${entry.key} (${summarizeError(entry.error)})`).join('; '));
+  }
+  return applied;
+}
+
 function applyAuthOperation(
   deps: OnboardingApplyDependencies,
   operation: Extract<OnboardingApplyOperation, { kind: 'ensure-auth-user' }>,
@@ -204,7 +222,7 @@ export const { applyOnboardingRequest } = createOnboardingApplyPipeline<
   verificationFailureKind: getVerificationFailureKind,
   describeError: summarizeError,
   apply(deps, request, operation) {
-    if (operation.kind === 'set-config') return applyConfigOperation(deps, operation);
+    if (operation.kind === 'set-config') return applyConfigAndConfirm(deps, operation);
     if (operation.kind === 'set-secret') return applySecretOperation(deps, operation);
     if (operation.kind === 'ensure-auth-user') return applyAuthOperation(deps, operation);
     if (operation.kind === 'acknowledge') return applyAcknowledgementOperation(deps, request, operation);

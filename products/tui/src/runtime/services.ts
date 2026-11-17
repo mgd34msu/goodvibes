@@ -281,6 +281,7 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
       scope.registry.add('daemon settings route', configManager.attachDaemonRoute({
         reachable: () => daemonConfig.reachable(),
         write: (key, value) => daemonConfig.set(key, value),
+        writeMany: (changes) => daemonConfig.setMany(changes),
         ...(daemonConfig.reset ? { reset: (key: string) => daemonConfig.reset!(key) } : {}),
         refused: (key, error) => logger.warn('The daemon refused a setting written from the terminal; the previous value is back', { key, error: summarizeError(error) }),
       }));

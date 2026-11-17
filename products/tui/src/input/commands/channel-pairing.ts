@@ -141,7 +141,7 @@ function missingRequired(schema: ChannelSetupSchema, configManager: ConfigManage
  * Enable the surface when every required field has a value, or say which are
  * missing. Optional fields never block it.
  */
-function finishPairing(ctx: CommandContext, schema: ChannelSetupSchema, storedAny: boolean): void {
+async function finishPairing(ctx: CommandContext, schema: ChannelSetupSchema, storedAny: boolean): Promise<void> {
   const configManager = ctx.platform.configManager;
   const missing = missingRequired(schema, configManager);
   if (missing.length > 0) {
@@ -152,26 +152,46 @@ function finishPairing(ctx: CommandContext, schema: ChannelSetupSchema, storedAn
   }
   const enabledKey = enabledConfigKey(schema);
   const wasEnabled = enabledKey !== undefined && configManager.get(enabledKey) === true;
-  if (enabledKey !== undefined && !wasEnabled) configManager.setDynamic(enabledKey, true);
+  if (enabledKey !== undefined && !wasEnabled) {
+    configManager.setDynamic(enabledKey, true);
+    // The switch is the daemon's: it counts as on only once the daemon took it.
+    const refused = await daemonRefusal(configManager, enabledKey);
+    if (refused) {
+      ctx.print(`\n${schema.label}: every required value is set${storedAny ? ' and the new ones are stored' : ''}, but the surface was NOT enabled: the daemon refused ${enabledKey} (${refused}). Fix that, then run /channel pair ${schema.surface} again.`);
+      ctx.renderRequest();
+      return;
+    }
+  }
   const state = enabledKey === undefined ? '' : wasEnabled ? ' The surface was already enabled.' : ' The surface is enabled.';
   ctx.print(`\n${schema.label}: every required value is set${storedAny ? ' and the new ones are stored' : ''}.${state} Verify with: /channel pair ${schema.surface} verify`);
   ctx.renderRequest();
 }
 
-/** Store one entered value: secrets through the secret store (config keeps a reference), plain values in config. */
+/** The daemon's refusal of `key` among the writes sent and not yet answered, or null when it took it (or nothing was sent). */
+async function daemonRefusal(configManager: ConfigManager, key: string): Promise<string | null> {
+  const refused = (await configManager.settleDaemonWrites()).find((entry) => entry.key === key);
+  return refused ? (refused.error instanceof Error ? refused.error.message : String(refused.error)) : null;
+}
+
+/**
+ * Store one entered value: secrets through the secret store (config keeps a
+ * reference), plain values in config. Resolves once the value stands: a
+ * daemon setting only after the daemon took it, so "stored" is never printed
+ * for a value it refused.
+ */
 async function storeFieldValue(ctx: CommandContext, field: ChannelSetupFieldDescriptor, configKey: ConfigKey, value: string): Promise<void> {
   const configManager = ctx.platform.configManager;
   if (field.kind === 'secret') {
     await persistSecretBackedConfigValue(configManager, ctx.platform.secretsManager, configKey, value);
-    return;
-  }
-  if (field.kind === 'number') {
+  } else if (field.kind === 'number') {
     const parsed = Number(value);
     if (!Number.isFinite(parsed)) throw new Error(`"${value}" is not a number`);
     configManager.setDynamic(configKey, parsed);
-    return;
+  } else {
+    configManager.setDynamic(configKey, value);
   }
-  configManager.setDynamic(configKey, value);
+  const refused = await daemonRefusal(configManager, configKey);
+  if (refused) throw new Error(`the daemon refused ${configKey} (${refused})`);
 }
 
 /** Ask for each missing field in turn (required first), then finish. A skipped optional field is not a failure. */
@@ -183,7 +203,7 @@ function promptMissingFields(
   storedAny = false,
 ): void {
   if (index >= missing.length) {
-    finishPairing(ctx, schema, storedAny);
+    void finishPairing(ctx, schema, storedAny);
     return;
   }
   const field = missing[index]!;
@@ -289,7 +309,7 @@ export async function runChannelPairing(args: readonly string[], ctx: CommandCon
   const unset = credentialFields(schema).filter((f) => !fieldConfigured(f, configManager));
   const missing = [...unset.filter((f) => f.required), ...unset.filter((f) => !f.required)];
   if (missing.length === 0) {
-    finishPairing(ctx, schema, false);
+    await finishPairing(ctx, schema, false);
     return;
   }
   const required = missing.filter((f) => f.required).length;

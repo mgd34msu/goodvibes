@@ -75,6 +75,12 @@ export interface DaemonConfigClient {
    */
   set(key: string, value: unknown): Promise<void>;
   /**
+   * Write several daemon-owned keys as one update (`config.setMany`): the
+   * daemon admits every entry before it writes any, so a refusal leaves all of
+   * them as they were. Rejects, like `set`, when no daemon is reachable.
+   */
+  setMany(entries: readonly { readonly key: string; readonly value: unknown }[]): Promise<void>;
+  /**
    * Remove a daemon-owned key's explicit value so it reads as its default again
    * and follows later default changes. Absent on a client built before `config.reset`.
    */
@@ -150,6 +156,14 @@ export function createDaemonConfigClient(verbs: DaemonVerbCaller): DaemonConfigC
       }
       // The route takes a body envelope, not a flat pair.
       await verbs.invoke('config.set', { key, value });
+    },
+
+    setMany: async (entries) => {
+      const probe = verbs.probe();
+      if (!probe.available) {
+        throw new Error(`'${entries.map(entry => entry.key).join(', ')}' ${entries.length === 1 ? 'is a daemon-owned setting' : 'are daemon-owned settings'} and ${probe.reason}`);
+      }
+      await verbs.invoke('config.setMany', { entries: entries.map(({ key, value }) => ({ key, value })) });
     },
 
     reset: async (key) => {

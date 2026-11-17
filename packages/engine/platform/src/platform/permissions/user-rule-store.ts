@@ -46,6 +46,12 @@ export interface StoredUserPermissionRule {
   readonly project?: string | undefined;
 }
 
+/**
+ * Longest a watched rules file goes without a stat: a change another process
+ * made reaches this one within this bound even if the directory watch goes quiet.
+ */
+const USER_RULE_STALENESS_MS = 2_000;
+
 /** The identity a rule's project key is compared by: the resolved project root path. */
 export function projectIdentity(root: string): string {
   return resolve(root);
@@ -219,9 +225,14 @@ export class UserPermissionRuleStore {
   private refreshFromDisk(): void {
     if (this.diskSignature === null) return;
     this.#watchDisk();
-    // While the directory is watched, nothing to take in until it reports a change.
-    if (this.#diskWatcher && !this.#diskDirty) return;
+    // While a watch that has delivered events covers the directory, nothing to
+    // take in until it reports a change, or until the last stat is older than
+    // the staleness bound (a watch can go quiet: network and 9p mounts, missed events).
+    const now = Date.now();
+    if (this.#diskWatcher && this.#watchDelivers && !this.#diskDirty
+      && now - this.#lastDiskStatAt < USER_RULE_STALENESS_MS) return;
     this.#diskDirty = false;
+    this.#lastDiskStatAt = now;
     const signature = this.signatureOfFile();
     if (signature === this.diskSignature) return;
     this.diskSignature = signature;
@@ -244,9 +255,16 @@ export class UserPermissionRuleStore {
    * write (temporary file, then rename) is reported as one event naming the
    * temporary file, so an event filtered to the rules file's own name would
    * miss another process's change, a revoked rule included, for good.
+   *
+   * `fs.watch` can open and then deliver nothing (network and 9p mounts, a
+   * Windows drive under WSL). Until the watch has delivered one event (this
+   * process's own write produces one) every read stats the file; after that a
+   * read stats at most once per staleness bound when no event arrived.
    */
   #diskWatcher: FSWatcher | null | undefined;
   #diskDirty = true;
+  #watchDelivers = false;
+  #lastDiskStatAt = 0;
   #watchDisk(): void {
     if (this.#diskWatcher !== undefined) return;
     this.#diskWatcher = null;
@@ -254,6 +272,7 @@ export class UserPermissionRuleStore {
     try {
       const watcher = watch(dirname(this.filePath), { persistent: false }, () => {
         this.#diskDirty = true;
+        this.#watchDelivers = true;
       });
       watcher.on('error', () => {
         try { watcher.close(); } catch { /* already closed */ }

@@ -166,6 +166,13 @@ export interface ToolDefinition {
    * is remembered when he chooses; only yolo runs it unasked.
    */
   dangerous?: boolean | undefined;
+  /**
+   * Top-level argument names the host writes into a call after the model made
+   * it (left out of the schema the model sees). They are the host's own, so a
+   * call carrying them is never told they are unknown parameters. Never sent to
+   * the model.
+   */
+  hostArguments?: readonly string[] | undefined;
 }
 
 /** What happened to a call at the gate. */

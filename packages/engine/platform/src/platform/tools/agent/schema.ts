@@ -306,6 +306,7 @@ function withFieldRuleNotes(definition: ToolDefinition): ToolDefinition {
   const tasks = parameters.properties.tasks as { items: { properties: Record<string, Record<string, unknown>> } & Record<string, unknown> } & Record<string, unknown>;
   return {
     ...definition,
+    hostArguments: [...agentInputFields('host-stamped'), ...agentInputFields('host-only')],
     parameters: {
       ...parameters,
       properties: {

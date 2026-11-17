@@ -211,7 +211,10 @@ async function repairOwnedToolCall(
   assertRepairActive(signal);
   const repaired = repairs.length > 0;
   const unknownParameters: string[] = [];
-  try { collectUnknownParameters(fixed, params, '', toolName, unknownParameters); } catch { /* advisory only */ }
+  // Arguments the host stamps in after the model's call are not the model's mistake to report.
+  const hostArguments = new Set(schema.hostArguments ?? []);
+  const modelArguments = hostArguments.size === 0 ? fixed : Object.fromEntries(Object.entries(fixed).filter(([key]) => !hostArguments.has(key)));
+  try { collectUnknownParameters(modelArguments, params, '', toolName, unknownParameters); } catch { /* advisory only */ }
 
   if (repaired) {
     logger.debug('repairToolCall: repaired malformed tool call', {

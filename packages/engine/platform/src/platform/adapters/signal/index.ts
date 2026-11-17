@@ -123,5 +123,5 @@ export async function handleSignalSurfaceWebhook(req: Request, context: SurfaceA
       bindingId: outcome.binding.id,
     });
   }
-  return surfaceOutcomeResponse(outcome);
+  return surfaceOutcomeResponse(outcome, 'caller');
 }

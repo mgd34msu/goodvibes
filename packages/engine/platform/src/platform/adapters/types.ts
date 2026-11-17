@@ -29,14 +29,6 @@ export interface SurfaceIngressDecision extends Pick<ChannelPolicyDecision, 'all
    * done with it, and the provider is told it was received.
    */
   readonly consumed?: { readonly by: 'approval' | 'payment' | 'work-proposal'; readonly answer: string } | undefined;
-  /**
-   * For a refusal: true only when the same message delivered again could be
-   * admitted, so a provider that redelivers on a failure status should be
-   * given one. Policy refusals (an unaddressed group message, a sender not on
-   * the allowlist, a message carrying card details) do not change on
-   * redelivery and are acknowledged.
-   */
-  readonly retryWillChange?: boolean | undefined;
 }
 
 /** What ingress did with a message: admitted to the conversation, consumed as an answer, or refused. */

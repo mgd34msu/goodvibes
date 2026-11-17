@@ -108,7 +108,7 @@ async function dispatchDiscordInteraction(
       finished();
       return Response.json({
         type: DiscordInteractionResponseType.ChannelMessageWithSource,
-        data: { content: ingressAnswer(policy).text, flags: EPHEMERAL_MESSAGE_FLAG },
+        data: { content: ingressAnswer(policy, 'caller').text, flags: EPHEMERAL_MESSAGE_FLAG },
       });
     }
 
@@ -231,7 +231,7 @@ async function dispatchDiscordInteraction(
       if (!policy.allowed) {
         return Response.json({
           type: DiscordInteractionResponseType.ChannelMessageWithSource,
-          data: { content: ingressAnswer(policy).text, flags: EPHEMERAL_MESSAGE_FLAG },
+          data: { content: ingressAnswer(policy, 'caller').text, flags: EPHEMERAL_MESSAGE_FLAG },
         });
       }
       const message = await context.performInteractiveSurfaceAction(customId, 'discord', req, interaction.userId);
@@ -316,5 +316,5 @@ export async function handleDiscordGatewayDispatchPayload(
     },
   });
   if (outcome.kind === 'no-text') return new Response(null, { status: 204 });
-  return surfaceOutcomeResponse(outcome);
+  return surfaceOutcomeResponse(outcome, 'caller');
 }

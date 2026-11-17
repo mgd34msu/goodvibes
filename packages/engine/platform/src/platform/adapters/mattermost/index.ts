@@ -130,12 +130,12 @@ export async function handleMattermostSurfaceWebhook(req: Request, context: Surf
       bindingId: outcome.binding.id,
     });
   }
-  if (outcome.kind === 'control') return surfaceOutcomeResponse(outcome, { text: outcome.message });
+  if (outcome.kind === 'control') return surfaceOutcomeResponse(outcome, 'caller', { text: outcome.message });
   if (outcome.kind === 'started' && (req.headers.get('content-type') ?? '').includes('application/x-www-form-urlencoded')) {
     return Response.json({
       response_type: 'ephemeral',
       text: 'GoodVibes accepted the request and is processing it.',
     });
   }
-  return surfaceOutcomeResponse(outcome);
+  return surfaceOutcomeResponse(outcome, 'caller');
 }

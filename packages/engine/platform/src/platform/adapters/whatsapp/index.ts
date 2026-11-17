@@ -190,7 +190,7 @@ async function processWhatsAppMessage(value: Record<string, unknown>, message: R
     // Meta redelivers a payload answered with a failure status; the shared answer acknowledges a consumed
     // answer and a final refusal, so a blocked sender cannot make the allowed messages beside it repeat.
     if (!outcome.decision.consumed) logger.info('handleWhatsAppSurfaceWebhook: message not admitted by channel policy', { reason: outcome.reason, messageId });
-    return surfaceOutcomeResponse(outcome);
+    return surfaceOutcomeResponse(outcome, 'redelivering');
   }
   if (outcome.kind === 'no-text') {
     const media = readMediaKind(message);
@@ -211,5 +211,5 @@ async function processWhatsAppMessage(value: Record<string, unknown>, message: R
       bindingId: outcome.binding.id,
     });
   }
-  return surfaceOutcomeResponse(outcome);
+  return surfaceOutcomeResponse(outcome, 'redelivering');
 }

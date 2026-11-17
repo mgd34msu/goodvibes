@@ -106,7 +106,7 @@ export async function handleGenericWebhookSurface(req: Request, context: Generic
     controlCommand: typeof body.controlCommand === 'string' ? body.controlCommand : undefined,
     metadata: body,
   });
-  if (!policy.allowed) return ingressAnswerResponse(policy);
+  if (!policy.allowed) return ingressAnswerResponse(policy, 'caller');
   // A caller may continue a conversation that came through this webhook, not step into one from another surface.
   const requestedSessionId = typeof body.sessionId === 'string' ? body.sessionId : undefined;
   if (requestedSessionId) {
@@ -181,10 +181,10 @@ export async function handleGenericWebhookSurface(req: Request, context: Generic
   });
   switch (outcome.kind) {
     case 'continued':
-      return surfaceOutcomeResponse(outcome, { queued: true, ...callbackFields });
+      return surfaceOutcomeResponse(outcome, 'caller', { queued: true, ...callbackFields });
     case 'started':
-      return surfaceOutcomeResponse(outcome, { ...callbackFields, callbackDelivery });
+      return surfaceOutcomeResponse(outcome, 'caller', { ...callbackFields, callbackDelivery });
     default:
-      return surfaceOutcomeResponse(outcome);
+      return surfaceOutcomeResponse(outcome, 'caller');
   }
 }

@@ -311,11 +311,16 @@ to the command's channel instead of being dropped.
 
 What a provider is told about a message ingress did not start: an answer that
 was acted on (a permission ask, a purchase window or a work proposal took it) is
-acknowledged with `outcome: "consumed"`, and a message the policy refuses is
-acknowledged with `outcome: "ignored"` and the `policyReason`. Neither is
-answered with a failure status, so a provider that redelivers failures (Slack,
-Telegram webhooks, WhatsApp, the bridges) never delivers the same answer again
-as a new message. Slash commands and buttons show the same outcome as a line.
+acknowledged with `outcome: "consumed"`, so it is never delivered again as a new
+message. A message the policy refuses is answered by who reads the answer. A
+provider that redelivers failures and shows the answer to nobody (Slack events,
+Telegram, WhatsApp, Twilio) gets an acknowledgement with `outcome: "ignored"`
+and the `policyReason`, so it does not repeat the refusal or hold the messages
+beside it. A caller that reads the status (the generic webhook, Home Assistant,
+ntfy, and the iMessage, Signal, BlueBubbles, Matrix, Mattermost and Teams
+bridges) gets `403` with `ok: false`, `outcome: "refused"`, the `policyReason`
+and the next step, so a script or agent never reads a blocked request as
+accepted. Slash commands and buttons show the same outcome as a line.
 
 Each inbound message costs at most one decision-model request. Code decides
 which questions it needs: whether it gives card details (only when it uses card

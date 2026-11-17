@@ -89,7 +89,7 @@ export async function handleSlackSurfacePayload(
       // Slack shows a slash-command reply only when it arrives with 200.
       return Response.json({
         response_type: 'ephemeral',
-        text: ingressAnswer(policy).text,
+        text: ingressAnswer(policy, 'caller').text,
       });
     }
 
@@ -272,7 +272,7 @@ export async function handleSlackSurfacePayload(
     });
     if (outcome.kind === 'refused') {
       // Slack retries a failed event three times and stops delivering to an app whose deliveries mostly fail.
-      return ingressAnswerResponse(outcome.decision);
+      return ingressAnswerResponse(outcome.decision, 'redelivering');
     }
     if (outcome.kind === 'no-text') {
       // A message that is only a file: say so in a one-to-one conversation; in a channel it is chatter.
@@ -288,7 +288,7 @@ export async function handleSlackSurfacePayload(
         bindingId: outcome.binding.id,
       });
     }
-    return surfaceOutcomeResponse(outcome);
+    return surfaceOutcomeResponse(outcome, 'redelivering');
   }
 
   const actionPayload = event.payload;
@@ -318,7 +318,7 @@ export async function handleSlackSurfacePayload(
     if (!policy.allowed) {
       return Response.json({
         response_type: 'ephemeral',
-        text: ingressAnswer(policy).text,
+        text: ingressAnswer(policy, 'caller').text,
       });
     }
     const message = await context.performInteractiveSurfaceAction(actionId, 'slack', req, typeof (actionPayload.user as Record<string, unknown> | undefined)?.id === 'string'

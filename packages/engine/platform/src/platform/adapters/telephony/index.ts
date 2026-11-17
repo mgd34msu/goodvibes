@@ -168,7 +168,7 @@ export async function handleTelephonySurfaceWebhook(req: Request, context: Surfa
   });
   if (outcome.kind === 'refused') {
     if (!outcome.decision.consumed) logger.info('handleTelephonySurfaceWebhook: message not admitted by channel policy', { reason: outcome.reason });
-    return surfaceOutcomeResponse(outcome);
+    return surfaceOutcomeResponse(outcome, 'redelivering');
   }
   if (outcome.kind === 'no-text') {
     return Response.json({
@@ -179,5 +179,5 @@ export async function handleTelephonySurfaceWebhook(req: Request, context: Surfa
       bindingId: outcome.binding.id,
     });
   }
-  return surfaceOutcomeResponse(outcome);
+  return surfaceOutcomeResponse(outcome, 'redelivering');
 }

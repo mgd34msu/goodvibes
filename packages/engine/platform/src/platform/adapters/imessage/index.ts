@@ -74,5 +74,5 @@ export async function handleIMessageSurfaceWebhook(req: Request, context: Surfac
       bindingId: outcome.binding.id,
     });
   }
-  return surfaceOutcomeResponse(outcome);
+  return surfaceOutcomeResponse(outcome, 'caller');
 }

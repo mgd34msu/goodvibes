@@ -73,7 +73,7 @@ export async function handleHomeAssistantSurfaceWebhook(
     mentioned: declaredMention(body, true),
     metadata: body,
   });
-  if (!policy.allowed) return ingressAnswerResponse(policy);
+  if (!policy.allowed) return ingressAnswerResponse(policy, 'caller');
 
   // The conversation this request belongs to; the remote chat binds the same one.
   const conversationBinding = (): UpsertRouteBindingInput => ({

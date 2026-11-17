@@ -109,5 +109,5 @@ export async function handleBlueBubblesSurfaceWebhook(req: Request, context: Sur
       bindingId: outcome.binding.id,
     });
   }
-  return surfaceOutcomeResponse(outcome);
+  return surfaceOutcomeResponse(outcome, 'caller');
 }

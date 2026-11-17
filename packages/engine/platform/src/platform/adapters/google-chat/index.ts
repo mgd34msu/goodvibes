@@ -114,7 +114,7 @@ export async function handleGoogleChatSurfaceWebhook(req: Request, context: Surf
     case 'refused':
       // Google posts the 200 body as the reply; a 403 would only show "app not responding".
       // The pipeline lets a redelivery of a refusal run again (the policy may have changed) and keeps a consumed answer claimed.
-      return Response.json({ text: ingressAnswer(outcome.decision).text });
+      return Response.json({ text: ingressAnswer(outcome.decision, 'caller').text });
     case 'no-text': {
       const attachment = hasAttachments(message?.attachment) ? 'attachment' : undefined;
       const notified = attachment ? await noticeUnsupportedAttachment(context, outcome.binding, attachment, space?.type === 'DM' || space?.spaceType === 'DIRECT_MESSAGE') : false;
@@ -140,6 +140,6 @@ export async function handleGoogleChatSurfaceWebhook(req: Request, context: Surf
     case 'answered':
     case 'not-started': return outcome.response;
     // A redelivered event: no text, so Google posts nothing a second time.
-    case 'duplicate': return surfaceOutcomeResponse(outcome);
+    case 'duplicate': return surfaceOutcomeResponse(outcome, 'caller');
   }
 }

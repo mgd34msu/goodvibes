@@ -35,16 +35,30 @@ export function readString(value: unknown): string | undefined {
 }
 
 /**
- * What a provider is told about a message ingress did not admit, decided in
+ * Who reads the answer to a message ingress refused, decided per surface:
+ * - `redelivering`: a provider that sends the message again on a failure
+ *   status and does not show the answer to anyone (Telegram, WhatsApp, Slack
+ *   events, Twilio). A refusal will not change on redelivery, so it is
+ *   acknowledged with 2xx: a failure would only repeat it and hold the
+ *   messages beside it.
+ * - `caller`: a script, an AI agent, a bridge or a service that reads the
+ *   status (the generic webhook, Home Assistant, the iMessage, Signal,
+ *   BlueBubbles, Matrix, Mattermost and Teams bridges, ntfy). A refusal is
+ *   403 with `ok: false`, the policy reason and the next step, so nothing
+ *   reads a blocked request as accepted.
+ */
+export type IngressAudience = 'redelivering' | 'caller';
+
+/**
+ * What a surface is told about a message ingress did not admit, decided in
  * one place for every adapter:
  * - consumed (an answer that was acted on): 2xx, so the provider never
  *   redelivers it as a new chat message;
- * - refused and redelivery cannot change that: 2xx with `outcome: 'ignored'`;
- * - refused and redelivery could help: a failure status.
+ * - refused: by {@link IngressAudience}.
  * `text` is the line an interaction surface (a slash command, a button, a
  * chat app that posts the body) shows the person.
  */
-export function ingressAnswer(decision: SurfaceIngressDecision): { readonly status: number; readonly body: Record<string, unknown>; readonly text: string } {
+export function ingressAnswer(decision: SurfaceIngressDecision, audience: IngressAudience): { readonly status: number; readonly body: Record<string, unknown>; readonly text: string } {
   if (decision.consumed) {
     const { by, answer } = decision.consumed;
     return {
@@ -53,23 +67,28 @@ export function ingressAnswer(decision: SurfaceIngressDecision): { readonly stat
       text: `Your reply was received (${by}: ${answer}).`,
     };
   }
-  if (decision.retryWillChange === true) {
+  const text = `Not done: blocked by channel policy (${decision.reason}).`;
+  if (audience === 'caller') {
     return {
       status: 403,
-      body: { ok: false, error: `Blocked by channel policy: ${decision.reason}`, policyReason: decision.reason },
-      text: `Not done: blocked by channel policy (${decision.reason}).`,
+      body: {
+        ok: false, acknowledged: false, queued: false, outcome: 'refused',
+        error: `Blocked by channel policy: ${decision.reason}`, policyReason: decision.reason,
+        next: 'Nothing was started. The surface owner can admit this sender or conversation with the channel allowlist or policy actions; sending it again unchanged is refused the same way.',
+      },
+      text,
     };
   }
   return {
     status: 200,
     body: { ok: true, acknowledged: true, queued: false, outcome: 'ignored', reason: 'blocked-by-channel-policy', policyReason: decision.reason },
-    text: `Not done: blocked by channel policy (${decision.reason}).`,
+    text,
   };
 }
 
 /** {@link ingressAnswer} as the JSON response a webhook provider or bridge receives. */
-export function ingressAnswerResponse(decision: SurfaceIngressDecision): Response {
-  const answer = ingressAnswer(decision);
+export function ingressAnswerResponse(decision: SurfaceIngressDecision, audience: IngressAudience): Response {
+  const answer = ingressAnswer(decision, audience);
   return Response.json(answer.body, { status: answer.status });
 }
 

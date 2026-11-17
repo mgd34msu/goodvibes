@@ -275,7 +275,7 @@ export async function processTelegramUpdate(
   if (!policy.allowed) {
     // Telegram redelivers an update answered with a failure status; a consumed answer or a final refusal is acknowledged.
     if (!policy.consumed) logger.info('processTelegramUpdate: update not admitted by channel policy', { reason: policy.reason, chatId });
-    return ingressAnswerResponse(policy);
+    return ingressAnswerResponse(policy, 'redelivering');
   }
 
   // An edit is requested only so a purchase answer can be corrected, and the policy above has already
@@ -417,5 +417,5 @@ export async function processTelegramUpdate(
   if (outcome.kind === 'not-started' && ingressOutcome(outcome.response) !== 'failed') {
     return withSenderNotice(outcome.response, `Nothing was started: ${outcome.error}`);
   }
-  return surfaceOutcomeResponse(outcome);
+  return surfaceOutcomeResponse(outcome, 'redelivering');
 }

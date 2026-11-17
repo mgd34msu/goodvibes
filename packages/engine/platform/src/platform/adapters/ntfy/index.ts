@@ -138,7 +138,7 @@ async function authorizeNtfyPayload(
     mentioned: declaredMention(body, true),
     metadata: body,
   });
-  if (!policy.allowed) return ingressAnswerResponse(policy);
+  if (!policy.allowed) return ingressAnswerResponse(policy, 'caller');
   return null;
 }
 
@@ -172,7 +172,7 @@ async function answerNtfyControl(
     channelId: topic,
     answer: 'notice',
   });
-  return control ? surfaceOutcomeResponse({ kind: 'control', ...control }, { topic }) : null;
+  return control ? surfaceOutcomeResponse({ kind: 'control', ...control }, 'caller', { topic }) : null;
 }
 
 async function handleNtfyChatPayload(
@@ -311,7 +311,7 @@ async function handleNtfyAgentPayload(
     trackContract: true,
     committed,
   });
-  return surfaceOutcomeResponse(outcome, { topic });
+  return surfaceOutcomeResponse(outcome, 'caller', { topic });
 }
 
 async function findPreferredTuiSession(context: SurfaceAdapterContext) {

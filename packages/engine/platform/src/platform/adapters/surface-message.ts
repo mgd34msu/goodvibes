@@ -13,7 +13,7 @@ import type { AutomationRouteBinding } from '../automation/routes.js';
 import type { UpsertRouteBindingInput } from '../channels/route-manager.js';
 import type { SharedSessionSubmission } from '../control-plane/session-types.js';
 import type { SurfaceAdapterContext, SurfaceIngressDecision, TrySpawnAgentResult } from './types.js';
-import { ingressAnswerResponse } from './helpers.js';
+import { ingressAnswerResponse, type IngressAudience } from './helpers.js';
 import { duplicateDeliveryResponse, surfaceInboundDedup } from './inbound-dedup.js';
 
 type IngressInput = Parameters<SurfaceAdapterContext['authorizeSurfaceIngress']>[0];
@@ -265,19 +265,20 @@ async function runSurfaceMessageOnce(
 }
 
 /**
- * The answer most surfaces give for a message outcome. A refusal keeps the
- * shape every adapter has used; surfaces whose provider shows the answer or
- * redelivers on failure pass their own.
+ * The answer most surfaces give for a message outcome. A refusal is answered
+ * for the surface's {@link IngressAudience}: acknowledged to a provider that
+ * redelivers, refused with 403 to a caller that reads the answer.
  */
 export function surfaceOutcomeResponse(
   outcome: Exclude<SurfaceIngressOutcome, { kind: 'no-text' }>,
+  audience: IngressAudience,
   extra: Record<string, unknown> = {},
 ): Response {
   switch (outcome.kind) {
     case 'duplicate':
       return duplicateDeliveryResponse();
     case 'refused':
-      return ingressAnswerResponse(outcome.decision);
+      return ingressAnswerResponse(outcome.decision, audience);
     case 'control':
       return Response.json({
         ok: true, acknowledged: true, control: true, message: outcome.message, bindingId: outcome.bindingId,

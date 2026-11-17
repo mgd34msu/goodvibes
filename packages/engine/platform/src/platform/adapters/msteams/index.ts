@@ -227,5 +227,5 @@ export async function handleMSTeamsSurfaceWebhook(req: Request, context: Surface
       bindingId: outcome.binding.id,
     });
   }
-  return surfaceOutcomeResponse(outcome);
+  return surfaceOutcomeResponse(outcome, 'caller');
 }

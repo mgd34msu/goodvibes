@@ -474,9 +474,8 @@ export class SessionBrokerSnapshotStorage implements SessionBrokerStorage {
     return { messages: [], inputs: [] };
   }
 
-  /** Snapshot now, write in call order, so a later write never lands under an earlier one. */
-  /** Every write is synced before it resolves (one data sync per log written, one for the index when it changed), so `durable` asks for nothing more. */
-  async write(state: SessionBrokerStateView, changed: Set<string>, _durable: boolean): Promise<void> {
+  /** Snapshot now, write in call order, so a later write never lands under an earlier one; `durable` asks the store to sync the file before it resolves. */
+  async write(state: SessionBrokerStateView, changed: Set<string>, durable: boolean): Promise<void> {
     changed.clear();
     const snapshot = createSessionBrokerSnapshot(state, Number.POSITIVE_INFINITY);
     const unreadable = this.#unreadable;

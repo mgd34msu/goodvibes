@@ -10,6 +10,8 @@ import {
 import { CONTRACT_INPUT_EXCLUSIONS } from '../contract/input-snapshot.js';
 import { workingTreeIdentity } from '../contract/tree-identity.js';
 import { executePolicyCheck } from '../gate/execute-policy-check.js';
+import { logger } from '../utils/logger.js';
+import { summarizeError } from '../utils/error-display.js';
 import { rankCodeInjectionSnapshots } from '../state/code-injection-ranking.js';
 import type { SkippedCodeHit } from '../state/code-injection-live.js';
 import type { AuthorizedIndexBoundary } from '../state/code-index-authorized.js';
@@ -31,7 +33,9 @@ type IndexGuard = (boundary: AuthorizedIndexBoundary, path?: string) => Promise<
  * turn and every context holding that tree, so these bound one preparation,
  * sized for an ordinary repository. A file over the per-file size is left out;
  * exceeding a count or byte total makes the code source unavailable with the cap
- * named, and the run continues without code context.
+ * named, and the run continues without code context. A build (reading the tree
+ * and embedding its chunks) runs beside the run, never on a request's path: a
+ * turn that finds it still running goes without code context and says so.
  */
 const MAX_DISCOVERY_ENTRIES = 20_000;
 const MAX_FILES = 4_000;
@@ -43,6 +47,8 @@ const OPERATION_TIMEOUT_MS = 120_000;
 const CALL_TIMEOUT_MS = 15_000;
 class CodeContextTooLarge extends Error {}
 const CHUNK_BUDGET_MESSAGE = 'Authorized code index chunk budget exceeded';
+/** What a turn records when the index it would read is still being built. */
+const STILL_BUILDING = 'code index still building';
 
 // Retain one original text per mutable file for this run only. Immutable receipt
 // files are already compared to their captured input by read authority. These
@@ -170,6 +176,10 @@ export function createCapturedCodeContext(input: {
   let operation: AbortController | undefined;
   let disposed = false;
   let unavailable: string | undefined;
+  /** A preparation that reached a build (reading and embedding the tree, or waiting on another context's), running beside the run. */
+  let building: Promise<void> | undefined;
+  /** A prepare() call not yet known to be a build; a second call joins it instead of replacing its operation. */
+  let preparing: Promise<void> | undefined;
   const checkSignal = (): void => { if (disposed) throw new Error('captured code context is closed'); input.signal?.throwIfAborted(); operation?.signal.throwIfAborted(); };
   const checkProvider = (): void => {
     checkSignal();
@@ -349,8 +359,12 @@ export function createCapturedCodeContext(input: {
     const signal = AbortSignal.any([...(input.signal ? [input.signal] : []), owner.signal, AbortSignal.timeout(CALL_TIMEOUT_MS)]);
     return executePolicyCheck(() => work(signal), signal);
   };
-  const source: TurnCodeIndexSource = {
-    async prepare() {
+  /**
+   * Prepare this turn's generation. `buildStarted` is called when the work
+   * turns out to be a build (nothing to reuse yet), so the caller can stop
+   * waiting and let the build finish beside the run.
+   */
+  const prepareNow = async (buildStarted: () => void): Promise<void> => {
       input.signal?.throwIfAborted();
       if (disposed) throw new Error('captured code context is closed');
       // The run's captured generation is already indexed: every later turn reuses it.
@@ -381,6 +395,8 @@ export function createCapturedCodeContext(input: {
         let reused = shared && key !== undefined && shared.key === key && shared.provider === provider && !shared.lifetime.signal.aborted ? shared : undefined;
         if (!reused) {
           releaseIndex();
+          // Another context's build of this tree is still running: waiting on it is a build too.
+          if (key !== undefined && sharedIndexes.get(key) && !sharedIndexes.get(key)!.entry) buildStarted();
           if (key !== undefined) { reused = await acquireShared(key, provider, signal); shared = reused; }
         }
         if (reused) {
@@ -393,6 +409,7 @@ export function createCapturedCodeContext(input: {
         }
         // Built here, and shared under its tree with every context that asks while it is held.
         if (key !== undefined && !sharedIndexes.has(key)) { slot = createSlot(); sharedIndexes.set(key, slot); }
+        buildStarted();
         const { files, directories } = await discover(signal, true);
         if (!Number.isSafeInteger(++generationSequence)) throw new Error('Captured code identity exhausted');
         // Every file was just authorized and read; the generation is guarded
@@ -452,6 +469,32 @@ export function createCapturedCodeContext(input: {
         if (overBudget !== undefined && operation === owner) { unavailable = `captured code unavailable: too large (${overBudget})`; return; }
         throw error;
       }
+  };
+  const source: TurnCodeIndexSource = {
+    /**
+     * Returns once this turn's generation is ready, or as soon as the work turns
+     * out to be a build: the build then finishes beside the run and a later
+     * turn takes it, while this turn reads `stats()` as "code index still building".
+     */
+    async prepare() {
+      input.signal?.throwIfAborted();
+      if (disposed) throw new Error('captured code context is closed');
+      if (building) return;
+      if (preparing) return preparing;
+      let started!: () => void;
+      const reachedBuild = new Promise<'building'>((resolve) => { started = () => resolve('building'); });
+      const work = prepareNow(() => started());
+      const call = Promise.race([work.then(() => 'done' as const), reachedBuild]).then((outcome) => {
+        if (outcome === 'done') return;
+        const background: Promise<void> = work.then(() => undefined, (error: unknown) => {
+          // A failed background build leaves nothing held; the next turn prepares again and meets the failure itself.
+          logger.debug('Captured code index build stopped', { error: summarizeError(error) });
+        }).finally(() => { if (building === background) building = undefined; });
+        building = background;
+      });
+      const joined = call.finally(() => { if (preparing === joined) preparing = undefined; });
+      preparing = joined;
+      return joined;
     },
     async search(query, options) {
       checkSignal();
@@ -506,6 +549,7 @@ export function createCapturedCodeContext(input: {
     },
     stats() {
       if (cachedStats) return cachedStats;
+      if (building) return { available: false, indexedChunks: 0, semanticRetrievalAvailable: true, error: STILL_BUILDING };
       return { available: false, indexedChunks: 0, semanticRetrievalAvailable: unavailable !== 'no semantic embedding provider', ...(unavailable ? { error: unavailable } : {}) };
     },
     generation: () => current?.id,
@@ -519,6 +563,8 @@ export function createCapturedCodeContext(input: {
     },
     finishTurn() {
       assertReadingCurrent = undefined;
+      // A build running beside the run keeps its operation; the turn that finds it finished takes it.
+      if (building) return;
       if (immutable && current) return;
       // A mutable input may change before the next turn, so its generation is taken
       // again then. The index stays held: an unchanged tree is not read or embedded again.

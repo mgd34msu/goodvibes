@@ -595,6 +595,14 @@ async function runAgentTaskWithPolicy(context: AgentOrchestratorRunContext, reco
     let priorCapturedMemoryIds: string[] = [];
     let priorCapturedMemoryModes: string[] = [];
     const capturedCode = context.codeIndex?.prepare ? context.codeIndex : undefined;
+    // The captured code index starts building with the run, beside it: a turn
+    // that comes before it is ready goes without code context and says so.
+    if (capturedCode && (context.featureFlagManager?.isEnabled('agent-passive-code-injection') ?? false)
+      && (context.isCodeInjectionSettingEnabled?.() ?? true)) {
+      void capturedCode.prepare!().catch((error: unknown) => {
+        logger.debug('Captured code index could not start building with the run', { agentId: record.id, error: summarizeError(error) });
+      });
+    }
 
     const turnBudget = resolveRunTurnBudget(context, record);
     setAgentProgress(record, 'Turn 1 · Thinking…', 'operator');

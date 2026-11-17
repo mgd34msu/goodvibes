@@ -157,7 +157,8 @@ export function wireSessionPersistenceAndRecovery(
   openSessionHere(surface, liveSessionId);
   const followLiveSession = (): void => {
     const sessionId = runtime.sessionId;
-    if (sessionId === liveSessionId) return;
+    // Held already: one map lookup. Not held because another process had it (a forced resume): taken now if it left.
+    if (sessionId === liveSessionId) { openSessionHere(surface, liveSessionId); return; }
     try {
       moveLiveSessionArtifacts(surface, liveSessionId, sessionId);
     } catch (error) {

@@ -331,6 +331,8 @@ export function keepHeadlessSessionRecoverable(input: {
     subscribe: (moment, handler) => input.bus.on<TurnEvent>(moment, () => handler()),
     write: (moment) => {
       const sessionId = runtime.sessionId;
+      // The session lock's backstop: a hold that another process had (a forced resume) is taken once it left.
+      openSessionHere(surface, sessionId);
       const snapshot = { ...input.snapshot(), turn: crashSnapshotTurn(moment, input.conversation) };
       if (!writeRecoveryFile(snapshot, sessionId, input.title(), { surface })) return;
       if (pointed === sessionId) return;

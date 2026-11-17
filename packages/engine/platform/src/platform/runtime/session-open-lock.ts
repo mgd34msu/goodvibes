@@ -26,7 +26,7 @@
  */
 import { existsSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { askerLivenessPath, claimAskerRunning, holdAskerRunning, sessionAskerKey, settleAskerLock } from '../control-plane/owner-asker-liveness.js';
+import { askerLivenessPath, claimAskerRunning, holdAskerRunning, retakeAskerHold, sessionAskerKey, settleAskerLock } from '../control-plane/owner-asker-liveness.js';
 import { resolveSessionStorePath } from './session-persistence-scope.js';
 import { canonicalFilePath } from '../utils/canonical-path.js';
 import { ownerInboxStorePath } from '../control-plane/question-store.js';
@@ -76,11 +76,20 @@ export function isSessionOpenElsewhere(surface: SessionIdentitySurface, sessionI
 /** Lock path to its release, for every session this module holds open in this process. */
 const openHere = new Map<string, () => void>();
 
-/** Mark `sessionId` open in this process until {@link closeSessionHere}. Holding it twice is one hold. */
+/**
+ * Mark `sessionId` open in this process until {@link closeSessionHere}. Holding
+ * it twice is one hold. When the lock could not be taken because another
+ * process held it (a forced resume), each later call tries again, so the
+ * terminals call this at every turn as a backstop: once that process exits,
+ * this one holds the session and a third one is refused.
+ */
 export function openSessionHere(surface: SessionIdentitySurface, sessionId: string): void {
   if (!sessionId.trim()) return;
   const path = sessionOpenLockPath(surface, sessionId);
-  if (openHere.has(path)) return;
+  if (openHere.has(path)) {
+    void retakeAskerHold(path);
+    return;
+  }
   try {
     openHere.set(path, holdAskerRunning(path));
   } catch (error) {
@@ -100,14 +109,15 @@ export function closeSessionHere(surface: SessionIdentitySurface, sessionId: str
 
 /**
  * Hold `sessionId` open here only if no other process has it open: true once
- * this process holds it, false when another process does. Waits at most a
- * second (for another process's one-shot read); call
+ * this process holds the lock, false when another process does (also for a
+ * session already open here whose lock another process still holds). Waits at
+ * most a second (for another process's one-shot read); call
  * {@link isSessionOpenElsewhere} first to refuse without waiting.
  */
 export async function claimSessionHere(surface: SessionIdentitySurface, sessionId: string): Promise<boolean> {
   if (!sessionId.trim()) return false;
   const path = sessionOpenLockPath(surface, sessionId);
-  if (openHere.has(path)) return true;
+  if (openHere.has(path)) return retakeAskerHold(path);
   const release = await claimAskerRunning(path);
   if (!release) return false;
   if (openHere.has(path)) release();

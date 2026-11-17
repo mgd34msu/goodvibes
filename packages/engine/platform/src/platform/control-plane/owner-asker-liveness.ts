@@ -172,6 +172,19 @@ export async function claimAskerRunning(path: string): Promise<(() => void) | nu
   return null;
 }
 
+/**
+ * For a holding this process keeps at `path`: when its last attempt found
+ * another process holding the lock, try again (that process may have exited);
+ * resolves true once this process holds the lock. False when nothing here
+ * holds `path`, or another process still does (after at most a second).
+ */
+export async function retakeAskerHold(path: string): Promise<boolean> {
+  const holding = holdings.get(path);
+  if (!holding || holding.count === 0) return false;
+  if (holding.missed && holding.lock === null) attemptHold(path, holding);
+  return await holding.taken && holding.lock !== null;
+}
+
 function releaseOf(path: string, holding: Holding): () => void {
   holding.count += 1;
   const held = holding;

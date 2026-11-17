@@ -11,7 +11,7 @@ import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { HookDispatcher, HookPhase, HookCategory, HookEventPath } from '@goodvibes-jev/engine/platform/platform/hooks';
 import type { ConversationManager } from './conversation.ts';
 import type { SessionSurface } from '@/runtime/index.ts';
-import { writeCrashSnapshotAtTurnMoments } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { openSessionHere, writeCrashSnapshotAtTurnMoments } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import type { WebhookNotifier } from '@goodvibes-jev/engine/platform/platform/integrations';
 import { notifyCompletion } from '@goodvibes-jev/engine/platform/platform/utils';
 import { maybeNotifyLongTask, readNotifyAfterSeconds } from './long-task-notifier.ts';
@@ -237,6 +237,8 @@ export function wireTurnEventHandlers(options: WireTurnEventHandlersOptions): Wi
   // turn-end save deletes it, so a snapshot on disk always holds something the
   // session store does not.
   const writeCrashSnapshot = (moment: CrashSnapshotTurnMoment = 'TURN_COMPLETED'): void => {
+    // The session lock's backstop: a hold that another process had (a forced resume) is taken once it left.
+    openSessionHere(surface, runtime.sessionId);
     writeCrashSnapshotIfChanged({ conversation, sessionId: runtime.sessionId, surface, buildSessionContinuityHints, moment });
   };
   unsubs.push(writeCrashSnapshotAtTurnMoments({

@@ -794,7 +794,10 @@ async function fetchOne(
       });
       if (extracted.jsonParseError !== undefined) result.json_parse_error = extracted.jsonParseError;
       if (extracted.pdfError !== undefined) result.pdf_error = extracted.pdfError;
-      const sanitized = applySanitizer(extracted.content, effectiveSanitizeMode);
+      // Tags are handled only while the content is still markup (extract raw, or an
+      // HTML/XML body returned as written); extracted text is never tag-scanned.
+      const markup = extracted.content === rawBody && /html|xml/i.test(contentType);
+      const sanitized = applySanitizer(extracted.content, effectiveSanitizeMode, { markup });
       logger.debug('SANITIZE_MODE_APPLIED', {
         event: 'SANITIZE_MODE_APPLIED',
         url: sanitizeUrlForLog(urlInput.url),
@@ -802,7 +805,11 @@ async function fetchOne(
         modified: sanitized.modified,
       });
       result.content = sanitized.content;
-      if (sanitized.modified) result.sanitized = true;
+      if (sanitized.modified) {
+        result.sanitized = true;
+        result.sanitized_removed = { ...sanitized.removed };
+      }
+      if (sanitized.note !== undefined) result.sanitize_note = sanitized.note;
       result.tokens_used = Math.ceil(sanitized.content.length / 4);
     }
 

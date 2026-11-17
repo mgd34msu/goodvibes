@@ -20,6 +20,15 @@ export interface FetchUrlResult {
   tokens_used?: number | undefined;
   /** The sanitizer changed the returned content (it is not the extracted text verbatim). */
   sanitized?: boolean | undefined;
+  /** With `sanitized`: how many characters of each kind the sanitizer removed. */
+  sanitized_removed?: {
+    markup_chars: number;
+    control_chars: number;
+    invisible_chars: number;
+    non_ascii_chars: number;
+  } | undefined;
+  /** Set when the sanitizer removed more than a tenth of the text: how much, why, and how to keep it. */
+  sanitize_note?: string | undefined;
   sanitization_tier?: FetchSanitizeMode | 'skipped' | undefined;
   host_trust_tier?: string | undefined;
   /** `extract: 'json'` and the body is not JSON: why it did not parse (the body is returned as written). */

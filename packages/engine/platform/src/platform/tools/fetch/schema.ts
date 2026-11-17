@@ -156,7 +156,9 @@ export const FETCH_TOOL_SCHEMA = {
         + ' none: content returned verbatim (trusted hosts only);'
         + ' safe-text: strips script/style blocks, control characters and invisible Unicode (default);'
         + ' strict: strips all HTML and every non-ASCII character (untrusted hosts).'
-        + ' Both modes alter the content, so structured data can change; a result whose content was altered carries sanitized: true.',
+        + ' Both modes alter the content, so structured data can change; a result whose content was altered carries sanitized: true'
+        + ' and sanitized_removed (characters removed by kind), and sanitize_note when more than a tenth of the text went.'
+        + ' Tags are stripped only from content that is still HTML or XML (extract raw); extracted text keeps a literal < or >.',
     },
     blocked_hosts: {
       type: 'array',

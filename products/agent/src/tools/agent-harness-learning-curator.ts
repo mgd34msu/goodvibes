@@ -2,10 +2,10 @@ import { isClassicOperation, requireDecisionFeature, withConfiguredDecisionModel
 import { rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import type { CommandContext } from '../input/command-registry.ts';
 import { previewHarnessText } from './agent-harness-text.ts';
-import { buildLearningCandidateCounts, buildLearningCandidates, candidateSearchText } from './agent-harness-learning-curator-proposals.ts';
+import { buildLearningCandidates, candidateSearchText } from './agent-harness-learning-curator-proposals.ts';
 import { localRegistryRoute, MIN_PROMPT_MEMORY_CONFIDENCE, missingRequirementCount, routeValue } from './agent-harness-learning-curator-common.ts';
 import type { LearningCandidateCollection } from './agent-harness-learning-curator-source.ts';
-import type { AgentHarnessLearningCuratorArgs, LearningCandidate, LearningCandidateResolution, LearningConsolidationBatchPlan, LearningPromptPlan, LocalLearningCandidateDomain } from './agent-harness-learning-curator-types.ts';
+import type { AgentHarnessLearningCuratorArgs, LearningCandidate, LearningCandidateResolution, LearningConsolidationBatchPlan, LearningPromptPlan } from './agent-harness-learning-curator-types.ts';
 import { clampReadLimit } from './agent-harness-read-helpers.ts';
 export type { LearningCandidate, LearningCandidateResolution, LearningConsolidationDiff, LearningConsolidationFields, LearningConsolidationPlan } from './agent-harness-learning-curator-types.ts';
 
@@ -253,25 +253,20 @@ function learningPromptPlan(collection: LearningCandidateCollection, candidates:
   };
 }
 
-export async function learningCuratorCatalogStatus(context: CommandContext, options: CatalogRankingOptions = {}): Promise<Record<string, unknown>> {
-  return withConfiguredDecisionModelPolicy(() => ownedLearningCuratorCatalogStatus(context, options));
-}
+const CURATE_ROUTE = 'memory action:"curate"';
 
-async function ownedLearningCuratorCatalogStatus(context: CommandContext, options: CatalogRankingOptions): Promise<Record<string, unknown>> {
-  const counts = await buildLearningCandidateCounts(context, options); counts.assertCurrent();
+/** What the stored verdicts cover, and the one route that reads what they do not. */
+function curationState(collection: LearningCandidateCollection): Record<string, unknown> {
+  if (isClassicOperation()) return {};
   return {
-    ...(isClassicOperation() ? { operationProvenance: 'classic', semanticAssessment: 'not-evaluated',
-      interpretationNotice: 'Classic shows stored records and mechanical review flags. Automatic proposal, quality and duplicate analysis is unavailable.' } : {}),
-    modes: ['learning_curator', 'learning_candidate'],
-    candidates: counts.candidates,
-    needsReview: counts.needsReview,
-    needsSetup: counts.needsSetup,
-    needsConsolidation: counts.needsConsolidation,
-    lowConfidence: counts.lowConfidence,
-    proposedBehavior: counts.proposedBehavior,
-    personalityIssues: counts.personalityIssues,
-    readyToPromote: counts.readyToPromote,
-    readOnly: true,
+    curation: {
+      lastPassAt: collection.lastCurationPassAt === null ? null : new Date(collection.lastCurationPassAt).toISOString(),
+      unassessed: collection.unassessed,
+      route: CURATE_ROUTE,
+      note: collection.unassessed > 0
+        ? `${collection.unassessed} record(s), pair(s) or source(s) have not been read by a curation pass in their current form, so their proposals, duplicates and priorities are not shown yet. ${CURATE_ROUTE} reads only those.`
+        : 'Proposals, duplicate groups and priorities come from the last curation pass; nothing has changed since.',
+    },
   };
 }
 
@@ -319,6 +314,7 @@ async function ownedLearningCuratorSummary(context: CommandContext, args: AgentH
     returned: Math.min(filtered.length, limit),
     total: all.length,
     nextActions: nextActions(all),
+    ...curationState(collection),
     policy: 'Learning curator is read-only. Proposed memory and behavior changes use notes, completed work-plan items, completed research runs, saved sessions, VIBE.md personality health cards, duplicate consolidation, and existing owning capture routes; durable context requires provenance, rollback via stale/delete routes, and current recorded admission for writes or promotion.',
   };
 }

@@ -14,56 +14,57 @@ import { snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/g
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { CommandContext, CommandRegistry } from '../input/command-registry.ts';
-import { agentOrchestrationCatalogStatus, agentOrchestrationSummary, describeAgentOrchestrationAgent } from './agent-harness-agent-orchestration.ts';
+import { agentOrchestrationSummary, describeAgentOrchestrationAgent } from './agent-harness-agent-orchestration.ts';
 import { autonomyIntakeSummary } from './agent-harness-autonomy-intake.ts';
-import { autonomyQueueCatalogStatus, autonomyQueueSummary, describeAutonomyQueueItem } from './agent-harness-autonomy-queue.ts';
-import { channelReadinessCatalogStatus, describeHarnessChannel, describeHarnessChannelDeliveries, describeHarnessChannelSetupGuide, describeHarnessChannelTriage, listHarnessChannels } from './agent-harness-channel-metadata.ts';
+import { autonomyQueueSummary, describeAutonomyQueueItem } from './agent-harness-autonomy-queue.ts';
+import { describeHarnessChannel, describeHarnessChannelDeliveries, describeHarnessChannelSetupGuide, describeHarnessChannelTriage, listHarnessChannels } from './agent-harness-channel-metadata.ts';
 import { blockedHarnessCliCommandTokens, describeHarnessCliCommand, listHarnessCliCommands, totalHarnessCliCommands } from './agent-harness-cli-metadata.ts';
 import { describeHarnessCommand, searchHarnessCommands } from './agent-harness-command-catalog.ts';
-import { describeLearningCandidate, learningCuratorCatalogStatus, learningCuratorSummary } from './agent-harness-learning-curator.ts';
+import { describeLearningCandidate, learningCuratorSummary } from './agent-harness-learning-curator.ts';
+import { runLearningCurationPass } from './agent-harness-learning-curator-proposals.ts';
 import { runAutoPromoter, assertAutoPromoteResultCurrent, completedPromotionWrites } from './agent-harness-learning-auto-promote.ts';
 import { runSkillDraftProposer, assertSkillDraftRunResultCurrent } from '../agent/skill-draft-runner.ts';
 import { AgentSkillRegistry } from '../agent/skill-registry.ts';
-import { delegationPostureCatalogStatus, delegationPostureSummary, describeHarnessDelegationRoute } from './agent-harness-delegation-posture.ts';
+import { delegationPostureSummary, describeHarnessDelegationRoute } from './agent-harness-delegation-posture.ts';
 import { describeHarnessKeybinding, listHarnessKeybindings, listHarnessShortcuts, resetHarnessKeybinding, runHarnessKeybinding, setHarnessKeybinding, totalHarnessKeybindings, totalHarnessShortcuts } from './agent-harness-keybinding-metadata.ts';
-import { describeHarnessMediaProvider, mediaPostureCatalogStatus, mediaPostureSummary } from './agent-harness-media-posture.ts';
-import { describeHarnessNotificationTarget, listHarnessNotificationTargets, notificationTargetCatalogStatus } from './agent-harness-notification-metadata.ts';
+import { describeHarnessMediaProvider, mediaPostureSummary } from './agent-harness-media-posture.ts';
+import { describeHarnessNotificationTarget, listHarnessNotificationTargets } from './agent-harness-notification-metadata.ts';
 import { connectedHostStatusSummary } from './agent-harness-connected-host-status.ts';
-import { backgroundProcessCatalogStatus, backgroundProcessSummary, describeBackgroundProcess, runBackgroundProcessAction } from './agent-harness-background-processes.ts';
-import { describeDocumentOpsLane, documentOpsCatalogStatus, documentOpsSummary } from './agent-harness-document-ops.ts';
+import { backgroundProcessSummary, describeBackgroundProcess, runBackgroundProcessAction } from './agent-harness-background-processes.ts';
+import { describeDocumentOpsLane, documentOpsSummary } from './agent-harness-document-ops.ts';
 import { browserControlRouteSummary } from './agent-harness-browser-control.ts';
-import { describeExecutionHistoryItem, executionHistoryCatalogStatus, executionHistorySummary } from './agent-harness-execution-history.ts';
-import { describeHarnessExecutionRoute, executionPostureCatalogStatus, executionPostureSummary } from './agent-harness-execution-posture.ts';
-import { fileRecoveryCatalogStatus, fileRecoverySummary, runFileRecovery } from './agent-harness-file-recovery.ts';
-import { describeHarnessMcpServer, mcpServerCatalogStatus, mcpServerSummary } from './agent-harness-mcp-metadata.ts';
-import { describeHarnessModelRoute, modelRoutingCatalogStatus, modelRoutingSummary, runLocalModelServerSmoke } from './agent-harness-model-routing.ts';
+import { describeExecutionHistoryItem, executionHistorySummary } from './agent-harness-execution-history.ts';
+import { describeHarnessExecutionRoute, executionPostureSummary } from './agent-harness-execution-posture.ts';
+import { fileRecoverySummary, runFileRecovery } from './agent-harness-file-recovery.ts';
+import { describeHarnessMcpServer, mcpServerSummary } from './agent-harness-mcp-metadata.ts';
+import { describeHarnessModelRoute, modelRoutingSummary, runLocalModelServerSmoke } from './agent-harness-model-routing.ts';
 import { localModelCookbookSummary } from './agent-harness-local-model-cookbook.ts';
 import { describeHarnessModelTool, describeUnknownModelTool, searchHarnessModelTools } from './agent-harness-model-tool-catalog.ts';
-import { describeMemoryProvider, memoryPostureCatalogStatus, memoryPostureSummary } from './agent-harness-memory-posture.ts';
-import { memoryRefinementCatalogStatus, memoryRefinementSummary, runMemoryRefinement } from './agent-harness-memory-refinement.ts';
+import { describeMemoryProvider, memoryPostureSummary } from './agent-harness-memory-posture.ts';
+import { memoryRefinementSummary, runMemoryRefinement } from './agent-harness-memory-refinement.ts';
 import { describeHarnessOperatorMethod, operatorMethodCatalogStatus, operatorMethodSummary } from './agent-harness-operator-methods.ts';
-import { describePersonalOpsLane, personalOpsBriefingSummary, personalOpsCatalogStatus, personalOpsIntakeSummary, personalOpsQueueSummary, personalOpsSummary, runPersonalOpsRead } from './agent-harness-personal-ops.ts';
-import { describeHarnessPairingRoute, pairingPostureCatalogStatus, pairingPostureSummary } from './agent-harness-pairing-posture.ts';
+import { describePersonalOpsLane, personalOpsBriefingSummary, personalOpsIntakeSummary, personalOpsQueueSummary, personalOpsSummary, runPersonalOpsRead } from './agent-harness-personal-ops.ts';
+import { describeHarnessPairingRoute, pairingPostureSummary } from './agent-harness-pairing-posture.ts';
 import { explainAgentPolicyDecision } from './agent-policy-explanation.ts';
-import { promptContextCatalogStatus, promptContextSummary } from './agent-harness-prompt-context.ts';
-import { describeProjectContextFile, projectContextCatalogStatus, projectContextSummary } from './agent-harness-project-context.ts';
-import { describeHarnessProviderAccount, providerAccountCatalogStatus, providerAccountSummary } from './agent-harness-provider-account-metadata.ts';
+import { promptContextSummary } from './agent-harness-prompt-context.ts';
+import { describeProjectContextFile, projectContextSummary } from './agent-harness-project-context.ts';
+import { describeHarnessProviderAccount, providerAccountSummary } from './agent-harness-provider-account-metadata.ts';
 import { planAgentTaskRoute } from './agent-route-planner.ts';
-import { describeHarnessReleaseEvidenceArtifact, releaseEvidenceBundleStatus, releaseEvidenceSummary } from './agent-harness-release-evidence.ts';
-import { describeHarnessReleaseReadinessItem, releaseReadinessInventoryStatus, releaseReadinessSummary } from './agent-harness-release-readiness.ts';
-import { researchBriefingCatalogStatus, researchBriefingSummary } from './agent-harness-research-briefing.ts';
-import { describeResearchRun, researchRunsCatalogStatus, researchRunsSummary } from './agent-harness-research-runs.ts';
+import { describeHarnessReleaseEvidenceArtifact, releaseEvidenceSummary } from './agent-harness-release-evidence.ts';
+import { describeHarnessReleaseReadinessItem, releaseReadinessSummary } from './agent-harness-release-readiness.ts';
+import { researchBriefingSummary } from './agent-harness-research-briefing.ts';
+import { describeResearchRun, researchRunsSummary } from './agent-harness-research-runs.ts';
 import { researchWorkflowSummary } from './agent-harness-research-workflow.ts';
-import { describeResearchSource, researchQueueCatalogStatus, researchQueueSummary } from './agent-harness-research-queue.ts';
-import { describeHarnessSecurityFinding, describeHarnessSupportBundle, securityPostureCatalogStatus, securityPostureSummary, supportBundleCatalogStatus, supportBundleSummary } from './agent-harness-security-posture.ts';
-import { describeHarnessSession, sessionCatalogStatus, sessionSummary } from './agent-harness-session-metadata.ts';
+import { describeResearchSource, researchQueueSummary } from './agent-harness-research-queue.ts';
+import { describeHarnessSecurityFinding, describeHarnessSupportBundle, securityPostureSummary, supportBundleCatalogStatus, supportBundleSummary } from './agent-harness-security-posture.ts';
+import { describeHarnessSession, sessionSummary } from './agent-harness-session-metadata.ts';
 import { describeHarnessServiceEndpoint, servicePostureCatalogStatus, servicePostureSummary } from './agent-harness-service-posture.ts';
-import { clearSetupCheckpoint, describeHarnessSetupItem, markSetupCheckpoint, provisionConnectedHostOperatorToken, runSetupInstallSmoke, setupCheckpointSummary, setupPostureCatalogStatus, setupPostureSummary, setupRepairSummary } from './agent-harness-setup-posture.ts';
+import { clearSetupCheckpoint, describeHarnessSetupItem, markSetupCheckpoint, provisionConnectedHostOperatorToken, runSetupInstallSmoke, setupCheckpointSummary, setupPostureSummary, setupRepairSummary } from './agent-harness-setup-posture.ts';
 import { AGENT_HARNESS_MODES, AGENT_HARNESS_PARAMETER_PROPERTIES } from './agent-harness-tool-schema.ts';
 import { runCommand } from './agent-harness-command-runner.ts';
 import { runWorkspaceAction } from './agent-harness-workspace-action-runner.ts';
 import type { AgentHarnessToolArgs, AgentHarnessToolDeps } from './agent-harness-tool-types.ts';
-import { catalogEnvelope, catalogFilters, effectOutput, error, output, readLimit, readString, requireConfirmedAction, settingLookupArgs } from './agent-harness-tool-utils.ts';
+import { catalogEnvelope, catalogFilters, effectOutput, error, output, readString, requireConfirmedAction, settingLookupArgs } from './agent-harness-tool-utils.ts';
 import { CATALOG_QUERIES as CQ } from './agent-harness-catalog-filters.ts';
 import { describeHarnessMode, HARNESS_MODE_DESCRIPTORS, HARNESS_READ_MODES, installedModeDescriptors, listHarnessModes, type AgentHarnessMode } from './agent-harness-mode-catalog.ts';
 import { describeHarnessUiSurface, listHarnessUiSurfaces, openHarnessUiSurface, totalHarnessUiSurfaces } from './agent-harness-ui-surface-metadata.ts';
@@ -71,22 +72,9 @@ import { AGENT_WORKSPACE_CATEGORIES, allWorkspaceActions, buildWorkspaceEditorCo
 import { connectedHostSummary, describeConnectedHostCapability, settingsPolicySummary } from './agent-harness-metadata.ts';
 import { countHarnessSettingCatalog, formatHarnessError, resolveEffectiveHarnessSetting } from '../agent/harness-control.ts';
 import { harnessSettingsCatalog, isHarnessSettingsQuery } from './agent-harness-settings-catalog.ts';
-import { buildAssistantCockpitFromSummaries } from '../agent/assistant-cockpit.ts';
+import { assistantCockpitRouteMap } from '../agent/assistant-cockpit.ts';
 import { isAgentHarnessRemoteMode, remoteCatalogStatus, runRemoteMode } from './agent-harness-remote.ts';
 import { channelDraftSaveHandoff, channelDraftSendHandoff, channelDraftsSummary, channelRoutingAssignHandoff, channelRoutingRemoveHandoff, channelRoutingSummary, unifiedInboxSummary } from './agent-harness-comms.ts';
-
-/**
- * A summary section that could not be read is reported as unavailable with its
- * reason. A source that changed while the summary was assembled, and an abort,
- * are the call's own retry-able outcomes and reach the caller as such, held
- * included: a held source is one whose guard saw it change. A section whose
- * redaction refuses a value reports that itself, before it reaches here.
- */
-function unavailableSection<T>(err: unknown, section: T): T {
-  if (err instanceof Error && err.name === 'AbortError') throw err;
-  if (err instanceof ToolInputProjectionError && (err.problem === 'held' || err.problem === 'stale' || err.problem === 'cancelled' || err.problem === 'released')) throw err;
-  return section;
-}
 
 function isMode(value: unknown): value is AgentHarnessMode {
   return typeof value === 'string' && AGENT_HARNESS_MODES.includes(value as AgentHarnessMode);
@@ -159,6 +147,39 @@ function detailedHarnessModelAccessGuide(): Record<string, string> {
     daemon: 'Daemon aliases route to host action:"capabilities|status"; use agent_operator_method for exact admitted contract calls.',
   };
 }
+
+/** The route that reads each area's live status; the summary names them and reads none. */
+const HARNESS_STATUS_ROUTES: Readonly<Record<string, string>> = Object.freeze({
+  setup: 'setup action:"status"',
+  modelRouting: 'models action:"status"',
+  providerAccounts: 'models action:"providers"',
+  memory: 'memory action:"status"',
+  learningCurator: 'memory action:"curator"',
+  personalOps: 'personal_ops action:"briefing"',
+  channels: 'channels action:"status"',
+  notifications: 'agent_harness mode:"notifications"',
+  mcpServers: 'agent_harness mode:"mcp_servers"',
+  projectContext: 'context action:"files"',
+  promptContext: 'context action:"prompt"',
+  agentOrchestration: 'agent_harness mode:"agent_orchestration"',
+  execution: 'execution action:"status"',
+  backgroundProcesses: 'execution action:"processes"',
+  executionHistory: 'execution action:"history"',
+  fileRecovery: 'execution action:"recovery"',
+  autonomyQueue: 'autonomy action:"queue"',
+  research: 'research action:"briefing"',
+  researchRuns: 'research action:"runs"',
+  researchSources: 'research action:"sources"',
+  documentOps: 'agent_harness mode:"document_ops"',
+  pairing: 'device action:"status"',
+  media: 'device action:"voice"',
+  delegation: 'delegation action:"status"',
+  security: 'security action:"status"',
+  sessions: 'sessions action:"list"',
+  connectedHost: 'host action:"status"',
+  releaseEvidence: 'audit action:"evidence"',
+  releaseReadiness: 'audit action:"readiness"',
+});
 
 /**
  * One harness per tool registry. The registered `agent_harness` and every
@@ -256,8 +277,7 @@ function buildAgentHarnessTool(deps: AgentHarnessToolDeps): Tool {
       // own native restrictions while reading; join them at the publication
       // boundary instead of rereading every earlier catalog for every later
       // branch's model request.
-      const publicationGuards = dispatchMode === 'summary'
-        || dispatchMode === 'workspace_actions'
+      const publicationGuards = dispatchMode === 'workspace_actions'
         || dispatchMode === 'ui_surfaces'
         || dispatchMode === 'ui_surface'
         || dispatchMode === 'personal_ops'
@@ -368,78 +388,12 @@ function buildAgentHarnessTool(deps: AgentHarnessToolDeps): Tool {
           return error(resolved.usage);
         }
         if (dispatchMode === 'summary') {
-          const channelReadiness = channelReadinessCatalogStatus(deps.commandContext);
-          const notificationTargets = notificationTargetCatalogStatus(deps.commandContext);
-          const providerAccounts = await providerAccountCatalogStatus(deps.commandContext).catch((err) => unavailableSection(err, {
-            modes: ['provider_accounts', 'provider_account'],
-            status: 'unavailable',
-            error: formatHarnessError(err),
-          }));
-          const mcpServers = mcpServerCatalogStatus(deps.commandContext);
-          const setupPosture = await setupPostureCatalogStatus(deps.commandContext, catalogOptions).catch((err) => unavailableSection(err, {
-            modes: ['setup_posture', 'setup_item', 'setup_repair', 'setup_checkpoint', 'mark_setup_checkpoint', 'clear_setup_checkpoint', 'provision_connected_host_token', 'run_setup_smoke'],
-            status: 'unavailable',
-            error: formatHarnessError(err),
-          }));
-          const projectContext = projectContextCatalogStatus(deps.commandContext);
-          const promptContext = await promptContextCatalogStatus(deps.commandContext, signal);
-          const agentOrchestration = agentOrchestrationCatalogStatus(deps.commandContext, deps.toolRegistry);
-          const modelRouting = await modelRoutingCatalogStatus(deps.commandContext).catch((err) => unavailableSection(err, {
-            modes: ['model_routing', 'model_route'],
-            status: 'unavailable',
-            error: formatHarnessError(err),
-          }));
-          const executionPosture = await executionPostureCatalogStatus(deps.commandContext, deps.toolRegistry, catalogOptions);
-          const backgroundProcesses = backgroundProcessCatalogStatus(deps.commandContext);
-          const executionHistory = executionHistoryCatalogStatus(deps.commandContext);
-          const fileRecovery = fileRecoveryCatalogStatus(deps.commandContext);
-          const personalOps = personalOpsCatalogStatus(deps.commandContext);
-          const memoryPosture = await memoryPostureCatalogStatus(deps.commandContext, catalogOptions).catch((err) => unavailableSection(err, {
-            modes: ['memory_posture', 'memory_provider'],
-            status: 'unavailable',
-            error: formatHarnessError(err),
-          }));
-          const memoryRefinement = memoryRefinementCatalogStatus(deps.commandContext);
-          const autonomyQueue = autonomyQueueCatalogStatus(deps.commandContext);
-          const learningCurator = await learningCuratorCatalogStatus(deps.commandContext, catalogOptions);
-          const researchBriefing = await researchBriefingCatalogStatus(deps.commandContext, catalogOptions);
-          const researchRuns = await researchRunsCatalogStatus(deps.commandContext, catalogOptions);
-          const researchQueue = await researchQueueCatalogStatus(deps.commandContext, catalogOptions);
-          const documentOps = documentOpsCatalogStatus(deps.commandContext);
-          const pairingPosture = await pairingPostureCatalogStatus(deps.commandContext, catalogOptions);
-          const delegationPosture = delegationPostureCatalogStatus(deps.commandContext);
-          const securityPosture = securityPostureCatalogStatus(deps.commandContext);
-          const supportBundles = supportBundleCatalogStatus();
-          const mediaPosture = await mediaPostureCatalogStatus(deps.commandContext, catalogOptions);
-          const sessions = sessionCatalogStatus(deps.commandContext);
-          const releaseEvidence = await releaseEvidenceBundleStatus(catalogOptions, deps.releaseRoot).catch((err) => unavailableSection(err, {
-            status: 'unavailable', error: `Release evidence could not be read: ${formatHarnessError(err)}`,
-          }));
-          const releaseReadiness = await releaseReadinessInventoryStatus(catalogOptions, deps.releaseRoot).catch((err) => unavailableSection(err, {
-            status: 'unavailable', error: `Release readiness could not be read: ${formatHarnessError(err)}`,
-          }));
-          const operatorMethods = operatorMethodCatalogStatus();
-          const servicePosture = servicePostureCatalogStatus();
-          const remote = remoteCatalogStatus();
-          const connectedHost = connectedHostSummary(deps.commandContext, deps.toolRegistry, {
-            includeParameters: args.includeParameters === true,
-          });
-          for (const guard of publicationGuards ?? []) retainPublicationCurrent(guard);
+          // The map only: what is in memory or constant. Each area's live status
+          // is read by its own route in statusRoutes, when it is asked for.
           assertCatalogExecution();
           return output({
-            assistant: buildAssistantCockpitFromSummaries({
-              setupPosture,
-              projectContext,
-              agentOrchestration,
-              modelRouting,
-              executionPosture,
-              backgroundProcesses,
-              personalOps,
-              autonomyQueue,
-              researchRuns,
-              documentOps,
-              securityPosture,
-            }),
+            assistant: assistantCockpitRouteMap(),
+            statusRoutes: HARNESS_STATUS_ROUTES,
             harnessModes: installedModeDescriptors().length,
             cliCommands: totalHarnessCliCommands(),
             blockedCliCommandTokens: blockedHarnessCliCommandTokens(),
@@ -447,47 +401,18 @@ function buildAgentHarnessTool(deps: AgentHarnessToolDeps): Tool {
             shortcuts: totalHarnessShortcuts(deps.commandContext),
             keybindings: totalHarnessKeybindings(deps.commandContext),
             commands: deps.commandRegistry.list().length,
-            channelReadiness,
-            notificationTargets,
-            providerAccounts,
-            mcpServers,
-            setupPosture,
-            projectContext,
-            promptContext,
-            agentOrchestration,
-            modelRouting,
-            executionPosture,
-            backgroundProcesses,
-            executionHistory,
-            fileRecovery,
-            personalOps,
-            memoryPosture,
-            memoryRefinement,
-            autonomyQueue,
-            learningCurator,
-            researchBriefing,
-            researchRuns,
-            researchQueue,
-            documentOps,
-            pairingPosture,
-            delegationPosture,
-            securityPosture,
-            supportBundles,
-            mediaPosture,
-            sessions,
             settings: countHarnessSettingCatalog(deps.commandContext.platform.configManager, { includeHidden: true }),
             workspaceCategories: AGENT_WORKSPACE_CATEGORIES.length,
             workspaceActions: allWorkspaceActions().length,
             tools: deps.toolRegistry.getToolDefinitions().length,
-            releaseEvidence,
-            releaseReadiness,
-            operatorMethods,
-            servicePosture,
-            remote,
+            operatorMethods: operatorMethodCatalogStatus(),
+            servicePosture: servicePostureCatalogStatus(),
+            supportBundles: supportBundleCatalogStatus(),
+            remote: remoteCatalogStatus(),
             modeGuide: compactHarnessModeGuide(),
             ...(args.includeParameters === true ? { modelAccess: detailedHarnessModelAccessGuide() } : {}),
             settingsPolicy: settingsPolicySummary(),
-            connectedHost,
+            policy: 'This summary is the constant map and the counts held in memory; it reads no live status. Ask the route in statusRoutes for the area you need.',
           });
         }
         if (dispatchMode === 'route_decision') return output(await planAgentTaskRoute(deps.commandContext, args, deps.taskRouteSources, catalogOptions));
@@ -686,6 +611,17 @@ function buildAgentHarnessTool(deps: AgentHarnessToolDeps): Tool {
           return error(resolved.usage);
         }
         if (dispatchMode === 'learning_curator') return publishCatalog(output(await learningCuratorSummary(deps.commandContext, args, catalogOptions)));
+        if (dispatchMode === 'learning_curation_pass') {
+          const pass = await runLearningCurationPass(deps.commandContext, catalogOptions);
+          return output({
+            ...pass,
+            lastPassAt: new Date(pass.lastPassAt).toISOString(),
+            message: `Read ${pass.readings} new or changed item(s) and reused ${pass.reused} stored verdict(s); ${pass.proposals} proposal(s) and ${pass.duplicateGroups} duplicate group(s) are ready.`
+              + (pass.unsettled > 0 ? ` ${pass.unsettled} reading(s) were not settled and are read again by the next pass.` : ''),
+            next: 'memory action:"curator" shows the candidates; memory action:"candidate" candidateId:"..." inspects one.',
+            policy: 'The pass changes no memory, note, persona, skill or routine; it stores its verdicts with the content they were read from, so a later pass reads only what changed.',
+          });
+        }
         if (dispatchMode === 'learning_auto_promote') {
           const confirmationError = requireConfirmedAction(rawArgs, options, 'Learning promotion'); if (confirmationError) return error(confirmationError);
           const shellPaths = deps.commandContext.workspace?.shellPaths;

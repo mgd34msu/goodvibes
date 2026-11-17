@@ -1,4 +1,3 @@
-import fs from 'node:fs';
 import type { MemoryAddOptions } from '@goodvibes-jev/engine/platform/platform/state';
 import type { AgentPersonaCreateInput, AgentPersonaUpdateInput } from '../agent/persona-registry.ts';
 import type { AgentSkillCreateInput, AgentSkillUpdateInput } from '../agent/skill-registry.ts';
@@ -11,13 +10,12 @@ import { AgentResearchRunRegistry } from '../agent/research-run-registry.ts';
 import { summarizeMemoryItem, summarizeNoteItem, summarizePersonaItem, summarizeSkillItem, summarizeSkillBundleItem, summarizeRoutineItem } from '../input/agent-workspace-local-library-snapshot.ts';
 import type { AgentWorkspaceLocalLibraryItem } from '../input/agent-workspace-types.ts';
 import type { CommandContext } from '../input/command-registry.ts';
-import type { MemoryApi } from '@goodvibes-jev/engine/platform/platform/knowledge';
-import { captureWorkPlanTasks, ProjectWorkPlan, type ProjectWorkPlanTask } from '@goodvibes-jev/engine/platform/platform/knowledge';
+import type { MemoryApi, ProjectWorkPlanTask } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
-import { captureCatalogData, captureCatalogSnapshotGuard, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
-import { modelReadingServicePath, captureModelReadingSnapshotGuard } from './agent-harness-model-reading-source.ts';
+import { captureCatalogData, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { discoverVibeFiles } from '../agent/vibe-file.ts';
 import type { LocalLearningCandidateDomain, LearningCandidate } from './agent-harness-learning-curator-types.ts';
+import { LearningCurationStore } from './agent-harness-learning-curation-store.ts';
 import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 
 /** A work-plan task as the curator reads it: the row's fields under the record id the readings use. */
@@ -28,9 +26,14 @@ export interface LearningWorkItem {
   readonly owner?: string | undefined;
   readonly source?: string | undefined;
   readonly notes?: string | undefined;
-  readonly createdAt: number;
-  readonly updatedAt: number;
-  readonly completedAt?: number | undefined;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly completedAt?: string | undefined;
+}
+
+function nativeClock(value: unknown): string {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || Math.abs(value) > 8_640_000_000_000_000) throw new ToolInputProjectionError('invalid');
+  return new Date(value).toISOString();
 }
 
 function learningWorkItem(task: ProjectWorkPlanTask): LearningWorkItem {
@@ -41,9 +44,9 @@ function learningWorkItem(task: ProjectWorkPlanTask): LearningWorkItem {
     ...(task.owner ? { owner: task.owner } : {}),
     ...(task.source ? { source: task.source } : {}),
     ...(task.notes ? { notes: task.notes } : {}),
-    createdAt: task.createdAt,
-    updatedAt: task.updatedAt,
-    ...(task.completedAt !== undefined ? { completedAt: task.completedAt } : {}),
+    createdAt: nativeClock(task.createdAt),
+    updatedAt: nativeClock(task.updatedAt),
+    ...(task.completedAt !== undefined ? { completedAt: nativeClock(task.completedAt) } : {}),
   };
 }
 
@@ -61,7 +64,7 @@ export type LearningTransitionIntent =
 
 export interface LearningSourceTransition {
   readonly effects: { readonly assertCurrent: () => void; readonly onEffect: (published?: boolean) => void };
-  /** After the registry's own write: the source is read once and becomes the new baseline. */
+  /** After the registry's own write; the registry owns the record and its file format. */
   readonly commit: (record: unknown) => void;
   readonly abort: () => void;
 }
@@ -75,181 +78,72 @@ export interface LearningCuratorNativeContext {
   readonly workspace?: Pick<CommandContext['workspace'], 'shellPaths'> & { readonly workPlan?: Pick<NonNullable<CommandContext['workspace']['workPlan']>, 'snapshotNow'> };
   readonly clients?: { readonly agentKnowledgeApi?: { readonly memory?: Pick<MemoryApi, 'getAll'> } };
   readonly session?: {
-    readonly sessionManager?: Pick<NonNullable<CommandContext['session']['sessionManager']>, 'list' | 'load'>
-      & Partial<Pick<NonNullable<CommandContext['session']['sessionManager']>, 'fingerprint'>>;
+    readonly sessionManager?: Pick<NonNullable<CommandContext['session']['sessionManager']>, 'list' | 'load'>;
     readonly runtime?: Pick<CommandContext['session']['runtime'], 'sessionId'>;
   };
 }
 
+type SessionListEntry = ReturnType<NonNullable<NonNullable<LearningCuratorNativeContext['session']>['sessionManager']>['list']>[number];
+type SessionMeta = Omit<SessionListEntry, 'timestamp'> & { readonly timestamp?: string | undefined };
+type LoadedSession = NonNullable<ReturnType<NonNullable<NonNullable<LearningCuratorNativeContext['session']>['sessionManager']>['load']>>;
+export interface LearningSessionRecord {
+  readonly session: SessionMeta;
+  readonly loaded: (Omit<LoadedSession, 'meta'> & { readonly meta: SessionMeta }) | undefined;
+}
+
+function projectSessionMeta<T extends { readonly timestamp?: number }>(record: T): Omit<T, 'timestamp'> & { readonly timestamp?: string | undefined } {
+  if (record.timestamp === undefined) return record as Omit<T, 'timestamp'>;
+  return ({ ...record, timestamp: nativeClock(record.timestamp) }) as Omit<T, 'timestamp'> & { readonly timestamp?: string | undefined };
+}
+
+/** Memory clock columns as ISO text, so a reading sees dates rather than epoch numbers. */
+function projectMemoryRecord(record: unknown): unknown {
+  if (!record || typeof record !== 'object' || Array.isArray(record)) throw new ToolInputProjectionError('invalid');
+  const projected: Record<string, unknown> = Object.create(null);
+  for (const [key, value] of Object.entries(record)) {
+    projected[key] = ['createdAt', 'updatedAt', 'reviewedAt', 'validFrom', 'validUntil'].includes(key) && typeof value === 'number' ? nativeClock(value) : value;
+  }
+  return projected;
+}
+
+/**
+ * One read of every learning store for one call: memory, notes, personas,
+ * skills, routines, research runs, the work plan, the saved-session list and
+ * VIBE health. Session transcripts are not loaded here; `loadSession` reads
+ * one when a caller needs it. Nothing is read again to prove it did not
+ * change: the call's own check (signal and admission) is the only currentness
+ * test, and a listing a moment old is corrected by the next call.
+ */
 export function acquireLearningCuratorSource(context: LearningCuratorNativeContext, options: CatalogRankingOptions) {
-  const signal = options.signal, callerCurrent = options.assertCurrent, retainCurrent = options.retainCurrent;
-  const synchronous = (check: () => unknown) => assertSynchronousJudgmentGuard(check, () => new ToolInputProjectionError('held'));
-  let calling = false;
-  const assertCaller = () => {
-    if (calling) throw new ToolInputProjectionError('held');
-    signal?.throwIfAborted();
-    if (callerCurrent) {
-      calling = true;
-      try { synchronous(callerCurrent); } finally { calling = false; }
-    }
-    signal?.throwIfAborted();
-  };
-  assertCaller();
-  const paths = [
-    ['workspace', 'shellPaths'], ['workspace', 'workPlan'], ['clients', 'agentKnowledgeApi', 'memory'],
-    ['session', 'sessionManager'], ['session', 'runtime'],
-  ];
-  const identities = paths.map(keys => {
-    let parent: unknown = context;
-    for (const key of keys) {
-      parent = modelReadingServicePath(parent, [key]);
-    }
-    return { keys, value: parent };
-  });
-  const memory = context.clients?.agentKnowledgeApi?.memory;
-  const work = context.workspace?.workPlan;
-  const manager = context.session?.sessionManager;
-  const runtime = context.session?.runtime;
-  const sessionId = runtime?.sessionId;
-  const shellPaths = context.workspace?.shellPaths;
-  const notes = shellPaths ? AgentNoteRegistry.fromShellPaths(shellPaths) : undefined;
-  const personas = shellPaths ? AgentPersonaRegistry.fromShellPaths(shellPaths) : undefined;
-  const skills = shellPaths ? AgentSkillRegistry.fromShellPaths(shellPaths) : undefined;
-  const routines = shellPaths ? AgentRoutineRegistry.fromShellPaths(shellPaths) : undefined;
-  const research = shellPaths ? AgentResearchRunRegistry.fromShellPaths(shellPaths) : undefined;
-  const capturedAt = Date.now();
-  if (!Number.isSafeInteger(capturedAt) || Math.abs(capturedAt) > 8_640_000_000_000_000) throw new ToolInputProjectionError('invalid');
-  // This clock is generated by this native owner, never discovered by a field name.
-  const capturedAtForReading = new Date(capturedAt).toISOString();
-  const retained = new Set<() => void>();
-  // This guard never invokes the caller whose publication map retains it.
-  const assertNative = () => {
-    signal?.throwIfAborted();
-    for (const identity of identities) if (modelReadingServicePath(context, identity.keys) !== identity.value) throw new ToolInputProjectionError('stale');
-    if (runtime?.sessionId !== sessionId) throw new ToolInputProjectionError('stale');
-  };
-  const assertReadingBackends = () => { assertNative(); for (const guard of retained) guard(); assertNative(); };
-  assertNative();
-  // One read of the plan's rows; later reads compare the plan's revision (one indexed
-  // statement) and refuse with the work plan named when an edit committed since.
-  const nativeWorkItems = work instanceof ProjectWorkPlan ? captureWorkPlanTasks(work) : undefined;
-  const nativeLearningItems = nativeWorkItems?.tasks.map(learningWorkItem);
-  const readWorkItems = (): readonly LearningWorkItem[] => {
-    if (!nativeWorkItems || !nativeLearningItems) return (work?.snapshotNow().tasks ?? []).map(learningWorkItem);
-    nativeWorkItems.assertCurrent();
-    return nativeLearningItems;
-  };
-  // Parsing every saved session on each currentness check grows with the number of sessions.
-  // When no session file changed (same fingerprint, which a save always changes), the last
-  // full reading of them stands; publication points still read everything.
-  const readSessionList = () => captureCatalogData(manager?.list() ?? []);
-  const readSessionBodies = (list: ReturnType<typeof readSessionList>) =>
-    list.filter(session => session.name !== sessionId).map(session => ({ session, loaded: captureCatalogData(manager?.load(session.name)) }));
-  let sessionReading: { readonly fingerprint: string; readonly sessionList: ReturnType<typeof readSessionList>; readonly sessions: ReturnType<typeof readSessionBodies> } | undefined;
-  const read = (reuseSessions = false) => {
-    assertNative();
-    const memoryRecords = captureCatalogData(memory?.getAll() ?? []);
-    const noteSnapshot = captureCatalogData(notes?.snapshot());
-    const personaSnapshot = captureCatalogData(personas?.snapshot());
-    const skillSnapshot = captureCatalogData(skills?.snapshot());
-    const routineSnapshot = captureCatalogData(routines?.snapshot());
-    const researchSnapshot = captureCatalogData(research?.snapshot());
-    const registryFiles = [
-      { domain: 'note', path: noteSnapshot?.path }, { domain: 'persona', path: personaSnapshot?.path },
-      { domain: 'skill', path: skillSnapshot?.path }, { domain: 'routine', path: routineSnapshot?.path },
-      { domain: 'research', path: researchSnapshot?.path },
-    ].filter((file): file is { domain: string; path: string } => typeof file.path === 'string').map(file => {
-      const exists = fs.existsSync(file.path);
-      return { ...file, exists, bytes: exists ? fs.readFileSync(file.path, 'utf8') : undefined };
-    });
-    const workItems = captureCatalogData(readWorkItems());
-    const fingerprint = manager?.fingerprint?.();
-    let sessionList: ReturnType<typeof readSessionList>, sessions: ReturnType<typeof readSessionBodies>;
-    if (reuseSessions && fingerprint !== undefined && sessionReading?.fingerprint === fingerprint) {
-      ({ sessionList, sessions } = sessionReading);
-    } else {
-      sessionList = readSessionList();
-      sessions = readSessionBodies(sessionList);
-      sessionReading = fingerprint === undefined ? undefined : { fingerprint, sessionList, sessions };
-    }
-    const vibe = shellPaths ? captureCatalogData(discoverVibeFiles(shellPaths)) : undefined;
-    const vibeEvidence = vibe ? [...vibe.files, ...vibe.blocked].map(file => ({ ...file, body: fs.readFileSync(file.path, 'utf8') })) : [];
-    assertNative();
-    return captureCatalogData({ capturedAt, memoryRecords, noteSnapshot, personaSnapshot, skillSnapshot, routineSnapshot, researchSnapshot, registryFiles, workItems, sessionList, sessions, vibe, vibeEvidence });
-  };
-  assertCaller();
-  const source = read();
-  assertCaller();
-  // Keep the complete raw source for native currentness and exact self-write proofs.
-  // These columns belong to records acquired through the retained Memory API.
-  // Preserve every other slot, including nested producer evidence. `source` is
-  // already a captured plain copy, so its slots are read directly.
-  const projectMemoryRecord = (record: unknown): unknown => {
-    if (!record || typeof record !== 'object' || Array.isArray(record)) throw new ToolInputProjectionError('invalid');
-    const projected: Record<string, unknown> = Object.create(null);
-    for (const [key, original] of Object.entries(record)) {
-      let value: unknown = original;
-      if (['createdAt', 'updatedAt', 'reviewedAt', 'validFrom', 'validUntil'].includes(key) && typeof value === 'number') {
-        if (!Number.isSafeInteger(value) || Math.abs(value) > 8_640_000_000_000_000) throw new ToolInputProjectionError('invalid');
-        value = new Date(value).toISOString();
-      }
-      projected[key] = value;
-    }
-    return projected;
-  };
-  const memoryReadingRecords: unknown[] = source.memoryRecords.map(projectMemoryRecord);
-  const replaceSlots = <T extends object, R extends Record<string, unknown>>(record: T, replacements: R): Omit<T, keyof R> & R =>
-    ({ ...record, ...replacements }) as Omit<T, keyof R> & R;
-  const nativeClock = (value: unknown): string => {
-    if (typeof value !== 'number' || !Number.isSafeInteger(value) || Math.abs(value) > 8_640_000_000_000_000) throw new ToolInputProjectionError('invalid');
-    return new Date(value).toISOString();
-  };
-  const projectSessionMeta = <T extends { readonly timestamp?: number }>(record: T): Omit<T, 'timestamp'> & { readonly timestamp?: string | undefined } => {
-    if (record.timestamp === undefined) return record as Omit<T, 'timestamp'>;
-    return replaceSlots(record, { timestamp: nativeClock(record.timestamp) });
-  };
-  const projectCollection = <T, R>(records: readonly T[], project: (record: T) => R): readonly R[] => records.map(record => project(record));
-  // Only metadata acquired from this retained SessionManager owns these clock
-  // slots. Keep hidden collection/record evidence and every original byte locally.
-  const sessionList = projectCollection(source.sessionList, projectSessionMeta);
-  const sessions = projectCollection(source.sessions, record => replaceSlots(record, {
-    session: projectSessionMeta(record.session),
-    loaded: record.loaded ? replaceSlots(record.loaded, { meta: projectSessionMeta(record.loaded.meta) }) : record.loaded,
-  }));
-  const workItems = projectCollection(source.workItems, record => replaceSlots(record, {
-    createdAt: nativeClock(record.createdAt), updatedAt: nativeClock(record.updatedAt),
-    ...(Object.hasOwn(record, 'completedAt') ? { completedAt: record.completedAt === undefined ? undefined : nativeClock(record.completedAt) } : {}),
-  }));
-  const readingSource = captureCatalogData({ ...source, workItems, capturedAt: capturedAtForReading, memoryRecords: memoryReadingRecords, sessionList, sessions });
-  const assertReadingSnapshot = captureModelReadingSnapshotGuard(readingSource);
-  let expected = source;
-  let assertSnapshot = captureModelReadingSnapshotGuard(expected);
-  let active: object | undefined;
-  const checkEvidence = (full: boolean) => { assertReadingBackends(); assertSnapshot(read(!full)); assertReadingSnapshot(readingSource); assertNative(); };
-  const assertEvidence = () => checkEvidence(false);
+  const signal = options.signal, callerCurrent = options.assertCurrent;
   const assertCurrent = () => {
-    assertCaller(); assertEvidence(); assertCaller(); assertEvidence();
-  };
-  // Before anything is published every source is read again, session files included.
-  const assertCurrentFully = () => {
-    assertCaller(); checkEvidence(true); assertCaller(); checkEvidence(true);
+    signal?.throwIfAborted();
+    if (callerCurrent) assertSynchronousJudgmentGuard(callerCurrent, () => new ToolInputProjectionError('held'));
+    signal?.throwIfAborted();
   };
   assertCurrent();
-  const originalRecord = (state: typeof source, domain: LocalLearningCandidateDomain, id: string): unknown => {
-    const records = domain === 'memory' ? state.memoryRecords : domain === 'note' ? state.noteSnapshot?.notes
-      : domain === 'persona' ? state.personaSnapshot?.personas : domain === 'skill' ? state.skillSnapshot?.skills
-        : domain === 'skill_bundle' ? state.skillSnapshot?.bundles : state.routineSnapshot?.routines;
-    return records?.find(record => record.id === id);
-  };
-  const assertOriginalRecords = (domain: LocalLearningCandidateDomain, ids: readonly string[]) => {
+  const memory = context.clients?.agentKnowledgeApi?.memory;
+  const manager = context.session?.sessionManager;
+  const sessionId = context.session?.runtime?.sessionId;
+  const shellPaths = context.workspace?.shellPaths;
+  const capturedAt = new Date().toISOString();
+  const memoryRecords = captureCatalogData(memory?.getAll() ?? []);
+  const noteSnapshot = shellPaths ? captureCatalogData(AgentNoteRegistry.fromShellPaths(shellPaths).snapshot()) : undefined;
+  const personaSnapshot = shellPaths ? captureCatalogData(AgentPersonaRegistry.fromShellPaths(shellPaths).snapshot()) : undefined;
+  const skillSnapshot = shellPaths ? captureCatalogData(AgentSkillRegistry.fromShellPaths(shellPaths).snapshot()) : undefined;
+  const routineSnapshot = shellPaths ? captureCatalogData(AgentRoutineRegistry.fromShellPaths(shellPaths).snapshot()) : undefined;
+  const researchSnapshot = shellPaths ? captureCatalogData(AgentResearchRunRegistry.fromShellPaths(shellPaths).snapshot()) : undefined;
+  const workItems = captureCatalogData((context.workspace?.workPlan?.snapshotNow().tasks ?? []).map(learningWorkItem));
+  const sessions: readonly SessionMeta[] = captureCatalogData(manager?.list() ?? []).filter(session => session.name !== sessionId).map(projectSessionMeta);
+  const vibe = shellPaths ? captureCatalogData(discoverVibeFiles(shellPaths)) : undefined;
+  const source = Object.freeze({ capturedAt, workItems, researchSnapshot, sessions, vibe });
+  const loadSession = (session: SessionMeta): LearningSessionRecord => {
     assertCurrent();
-    for (const id of ids) {
-      const original = originalRecord(source, domain, id), current = originalRecord(expected, domain, id);
-      if (!original || !current) throw new ToolInputProjectionError('held');
-      captureCatalogSnapshotGuard(original)(current);
-    }
-    assertCurrent();
+    const loaded = manager ? captureCatalogData(manager.load(session.name)) : undefined;
+    return { session, loaded: loaded ? { ...loaded, meta: projectSessionMeta(loaded.meta) } : undefined };
   };
+  let active: object | undefined;
+  // One registry write at a time per acquired source; the registry is the owner of the record it writes.
   const prepareTransition = (_intent: LearningTransitionIntent): LearningSourceTransition => {
     assertCurrent();
     if (active) throw new ToolInputProjectionError('held');
@@ -257,28 +151,21 @@ export function acquireLearningCuratorSource(context: LearningCuratorNativeConte
     active = lease;
     let phase: 'unpublished' | 'published' | 'finished' = 'unpublished';
     const assertLease = () => {
-      assertCaller(); assertReadingBackends();
+      assertCurrent();
       if (active !== lease || phase === 'finished') throw new ToolInputProjectionError('held');
     };
     const effects = Object.freeze({
-      assertCurrent: () => { assertLease(); if (phase !== 'unpublished') throw new ToolInputProjectionError('held'); assertCurrentFully(); },
+      assertCurrent: () => { assertLease(); if (phase !== 'unpublished') throw new ToolInputProjectionError('held'); },
       onEffect: (published?: boolean) => {
         assertLease();
-        if (published !== true) { if (phase !== 'unpublished') throw new ToolInputProjectionError('held'); assertCurrentFully(); return; }
         if (phase !== 'unpublished') throw new ToolInputProjectionError('held');
-        phase = 'published';
+        if (published === true) phase = 'published';
       },
     });
     return Object.freeze({ effects,
-      // The registry is the one owner of its record and file format: the curator
-      // does not predict its bytes, it adopts what the registry wrote.
       commit: (_record: unknown) => {
-        assertLease();
-        if (phase !== 'published') throw new ToolInputProjectionError('held');
-        expected = read();
-        assertSnapshot = captureModelReadingSnapshotGuard(expected);
+        if (active !== lease || phase !== 'published') throw new ToolInputProjectionError('held');
         phase = 'finished'; active = undefined;
-        assertCaller();
       },
       abort: () => {
         if (phase === 'finished') return;
@@ -287,35 +174,26 @@ export function acquireLearningCuratorSource(context: LearningCuratorNativeConte
       },
     });
   };
-  if (retainCurrent) {
-    synchronous(() => retainCurrent(assertEvidence, 'agent.learning.curator.native-source')); assertCaller();
-  }
   const libraries: Readonly<Record<LocalLearningCandidateDomain, readonly LearningRecord[]>> = {
-    memory: source.memoryRecords.map((record, index) => ({ item: summarizeMemoryItem(record), record: readingSource.memoryRecords[index] })),
-    note: (source.noteSnapshot?.notes ?? []).map(record => ({ item: summarizeNoteItem(record), record })),
-    persona: (source.personaSnapshot?.personas ?? []).map(record => ({ item: summarizePersonaItem(record, source.personaSnapshot?.activePersonaId ?? null), record })),
-    skill: (source.skillSnapshot?.skills ?? []).map(record => ({ item: summarizeSkillItem(record), record })),
-    skill_bundle: (source.skillSnapshot?.bundles ?? []).map(record => ({ item: summarizeSkillBundleItem(record, source.skillSnapshot?.skills ?? []), record })),
-    routine: (source.routineSnapshot?.routines ?? []).map(record => ({ item: summarizeRoutineItem(record), record })),
+    memory: memoryRecords.map(record => ({ item: summarizeMemoryItem(record), record: projectMemoryRecord(record) })),
+    note: (noteSnapshot?.notes ?? []).map(record => ({ item: summarizeNoteItem(record), record })),
+    persona: (personaSnapshot?.personas ?? []).map(record => ({ item: summarizePersonaItem(record, personaSnapshot?.activePersonaId ?? null), record })),
+    skill: (skillSnapshot?.skills ?? []).map(record => ({ item: summarizeSkillItem(record), record })),
+    skill_bundle: (skillSnapshot?.bundles ?? []).map(record => ({ item: summarizeSkillBundleItem(record, skillSnapshot?.skills ?? []), record })),
+    routine: (routineSnapshot?.routines ?? []).map(record => ({ item: summarizeRoutineItem(record), record })),
   };
-  for (const records of Object.values(libraries)) {
-    const ids = records.map(record => record.item.id);
-    if (new Set(ids).size !== ids.length) throw new ToolInputProjectionError('held');
-  }
-  const retainReadingCurrent = (guard: () => void, key?: string) => {
-    assertCurrent();
-    retained.add(guard);
-    if (retainCurrent) synchronous(() => retainCurrent(guard, key));
-    assertCurrent();
-  };
-  const scoped = Object.freeze({ ...options, assertCurrent, retainCurrent: retainReadingCurrent, requirePreservedSource: true });
-  return { source: readingSource, libraries, assertCurrent, assertOriginalRecords, prepareTransition, options: scoped };
+  const curation = LearningCurationStore.forPaths(shellPaths);
+  const scoped = Object.freeze({ ...options, assertCurrent, requirePreservedSource: true });
+  return { source, libraries, curation, loadSession, assertCurrent, prepareTransition, options: scoped };
 }
 
 export type LearningCuratorSource = ReturnType<typeof acquireLearningCuratorSource>;
 export interface LearningCandidateCollection {
   readonly candidates: readonly LearningCandidate[];
   readonly promptRecords: readonly { readonly domain: LocalLearningCandidateDomain; readonly item: AgentWorkspaceLocalLibraryItem; readonly priority: LearningCandidate['priority']; readonly scores: LearningCandidate['scores'] }[];
+  /** Records no curation pass has read yet in their current form; `memory action:"curate"` reads them. */
+  readonly unassessed: number;
+  readonly lastCurationPassAt: number | null;
   readonly assertCurrent: () => void;
   readonly options: CatalogRankingOptions;
   readonly assertCandidateCurrent: (candidate: LearningCandidate) => void;

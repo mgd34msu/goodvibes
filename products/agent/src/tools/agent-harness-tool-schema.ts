@@ -17,7 +17,7 @@ export const AGENT_HARNESS_MODES = [
   'personal_ops_briefing', 'personal_ops', 'personal_ops_queue', 'personal_ops_intake', 'personal_ops_lane', 'run_personal_ops_read',
   'memory_posture', 'memory_provider', 'memory_refinement', 'run_memory_refinement',
   'autonomy_intake', 'autonomy_queue', 'autonomy_queue_item',
-  'learning_curator', 'learning_candidate', 'learning_auto_promote',
+  'learning_curator', 'learning_candidate', 'learning_curation_pass', 'learning_auto_promote',
   'research_briefing', 'research_workflow', 'research_runs', 'research_run',
   'research_queue', 'research_source',
   'document_ops', 'document_ops_lane',

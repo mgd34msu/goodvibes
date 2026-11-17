@@ -156,7 +156,7 @@ Press `/` inside the Agent workspace to search actions by name, category, comman
 
 ## Model access
 
-The main Agent model can use the Agent-controlled harness through Agent-owned tools. Use `agent_harness mode:"summary"` for a compact map, `mode:"modes"` to search every harness mode by task or id, and `mode:"mode"` to inspect one mode contract. Then drill into plural catalogs or single-item inspect modes.
+The main Agent model can use the Agent-controlled harness through Agent-owned tools. Use `agent_harness mode:"summary"` for a compact map (constant: counts, mode guide and the route that reads each area's live status), `mode:"modes"` to search every harness mode by task or id, and `mode:"mode"` to inspect one mode contract. Then drill into plural catalogs or single-item inspect modes.
 
 Default discovery is intentionally compact:
 
@@ -186,7 +186,7 @@ Common model routes:
 | Local background processes | `execution action:"processes\|process"` for inspection, `execution action:"process_capabilities"` for PTY/stdin/sudo posture, `terminal command:"..." background:true` to start, and `process action:"list\|poll\|log\|wait\|kill"` for lifecycle controls |
 | Documents, artifacts, compare | `agent_harness mode:"document_ops"`, `mode:"document_ops_lane"`, `agent_documents`, `agent_review_packet_presets`, `agent_review_packet_share`, `agent_artifacts`, `agent_model_compare` |
 | VIBE.md, project context, and local memory/notes/personas/skills/routines | `vibe action:"status\|show\|init\|import_persona"`, `/vibe`, `context action:"status\|files\|file\|prompt\|receipts\|receipt"`, `memory action:"status\|provider\|curator\|candidate\|list\|search\|get"` for local memory plus external provider next routes/checklists/receipt contracts, `agent_local_registry`, `agent_learning_consolidation`, or confirmed workspace actions |
-| Learning curator and prompt plan | `memory action:"curator" includeParameters:true`, `memory action:"candidate"`, `agent_learning_consolidation`; lower-level learning harness modes remain available for detail |
+| Learning curator and prompt plan | `memory action:"curate"` (reads new or changed records once), `memory action:"curator" includeParameters:true`, `memory action:"candidate"`, `agent_learning_consolidation`; lower-level learning harness modes remain available for detail |
 | Work plan | `agent_work_plan`, the Agent's todo list; `/work submit-file <JSON-path>` for original owner source |
 | Visible autonomous work | `agent_harness mode:"agent_orchestration"`, `mode:"agent_orchestration_agent"`, then `agent` with `mode:"spawn"`, `mode:"batch-spawn"`, `mode:"status"`, `mode:"message"`, `mode:"wait"`, or `mode:"cancel"` |
 | Channels, notifications, reminders, scheduled autonomy, media | `channels action:"status\|channel\|setup\|triage\|deliveries"`, `agent_channel_send`, `agent_notify`, `schedule action:"list\|create\|remind\|edit\|run\|pause\|resume\|delete"`, lower-level channel harness modes and `agent_reminder_schedule`/`agent_autonomy_schedule`/`agent_schedule_edit`, `agent_media_generate` |

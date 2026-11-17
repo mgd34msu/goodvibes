@@ -12,6 +12,7 @@ type AgentMemoryAction =
   | 'refinement'
   | 'run_refinement'
   | 'curator'
+  | 'curate'
   | 'candidate'
   | 'list'
   | 'search'
@@ -73,6 +74,7 @@ function normalizeMemoryAction(value: unknown): AgentMemoryAction | null {
   if (action === 'provider' || action === 'memory_provider' || action === 'embedding' || action === 'external' || action === 'external_provider') return 'provider';
   if (action === 'refinement' || action === 'refinement_tasks' || action === 'semantic_refinement' || action === 'self_improvement' || action === 'semantic_self_improvement' || action === 'learning_loop') return 'refinement';
   if (action === 'run_refinement' || action === 'refine' || action === 'run_semantic_refinement' || action === 'run_self_improvement' || action === 'self_improve') return 'run_refinement';
+  if (action === 'curate' || action === 'curation' || action === 'curation_pass' || action === 'run_curator' || action === 'refresh_curator') return 'curate';
   if (action === 'curator' || action === 'learning' || action === 'learning_curator' || action === 'queue' || action === 'review_queue' || action === 'plan') return 'curator';
   if (action === 'candidate' || action === 'learning_candidate' || action === 'card' || action === 'inspect_candidate') return 'candidate';
   if (action === 'list' || action === 'records' || action === 'memories') return 'list';
@@ -160,8 +162,8 @@ export function createAgentMemoryTool(deps: AgentMemoryToolDeps): Tool {
         properties: {
           action: {
             type: 'string',
-            enum: ['status', 'provider', 'refinement', 'run_refinement', 'curator', 'candidate', 'list', 'search', 'get', 'create', 'update', 'review', 'stale', 'delete'],
-            description: 'Read memory posture/providers/curator or operate records.',
+            enum: ['status', 'provider', 'refinement', 'run_refinement', 'curator', 'curate', 'candidate', 'list', 'search', 'get', 'create', 'update', 'review', 'stale', 'delete'],
+            description: 'Read memory posture/providers/curator, run the curation pass (curate: reads new or changed records once), or operate records.',
           },
           mode: { type: 'string', description: 'Alias for action.' },
           id: { type: 'string', description: 'Agent-local memory record id.' },
@@ -198,7 +200,7 @@ export function createAgentMemoryTool(deps: AgentMemoryToolDeps): Tool {
       const args = captureModelReadingInput(rawArgs);
       const forward = (translated: Record<string, unknown>) => forwardHarnessCatalogCall(harnessTool, rawArgs, translated, options);
       const unrecognised = unrecognisedAction(args);
-      if (unrecognised) return error(`Unknown memory action "${unrecognised}". Valid actions: status, provider, refinement, run_refinement, curator, candidate, list, search, get, create, update, review, stale, delete.`);
+      if (unrecognised) return error(`Unknown memory action "${unrecognised}". Valid actions: status, provider, refinement, run_refinement, curator, curate, candidate, list, search, get, create, update, review, stale, delete.`);
       const action = readAction(args);
 
       if (action === 'status') {
@@ -251,6 +253,7 @@ export function createAgentMemoryTool(deps: AgentMemoryToolDeps): Tool {
           includeParameters: args.includeParameters,
         }));
       }
+      if (action === 'curate') return forward({ mode: 'learning_curation_pass' });
       if (action === 'candidate') {
         return forward(compactArgs({
           mode: 'learning_candidate',

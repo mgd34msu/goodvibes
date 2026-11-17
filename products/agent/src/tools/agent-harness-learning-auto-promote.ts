@@ -10,7 +10,8 @@ import { AgentPersonaRegistry } from '../agent/persona-registry.ts';
 import { AgentRoutineRegistry } from '../agent/routine-registry.ts';
 import { AgentSkillRegistry } from '../agent/skill-registry.ts';
 import { runSkillDraftProposer, assertSkillDraftRunResultCurrent, type SkillDraftRunResult } from '../agent/skill-draft-runner.ts';
-import { buildLearningCandidates, assertLearningCandidateCollection } from './agent-harness-learning-curator-proposals.ts';
+import { buildLearningCandidates, assertLearningCandidateCollection, runLearningCurationPass } from './agent-harness-learning-curator-proposals.ts';
+import { isClassicOperation, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime';
 import type { LearningCandidate } from './agent-harness-learning-curator-types.ts';
 import type { CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { captureModelReadingSnapshotGuard, modelReadingServicePath } from './agent-harness-model-reading-source.ts';
@@ -308,6 +309,8 @@ async function runAutoPromoterOnce(
       throw new ToolInputProjectionError('stale');
   };
   assertOwnership(); assertCaller(); assertOwnership();
+  // The curation pass reads only what changed since the last one, so the promotions below act on current proposals.
+  await withConfiguredDecisionModelPolicy(async () => { if (!isClassicOperation()) await runLearningCurationPass(context, options); });
   const collection = await buildLearningCandidates(context, options);
   assertLearningCandidateCollection(collection, context, options);
   let skillResult: SkillDraftRunResult | undefined;

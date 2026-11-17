@@ -47,23 +47,6 @@ export interface AssistantCockpitMetrics {
   readonly unmeasured?: readonly AssistantCockpitLane['id'][];
 }
 
-function readRecord(value: unknown): Record<string, unknown> {
-  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
-}
-
-function readNumber(record: Record<string, unknown>, key: string): number {
-  const value = record[key];
-  return typeof value === 'number' && Number.isFinite(value) ? value : 0;
-}
-
-function readString(record: Record<string, unknown>, key: string): string {
-  return typeof record[key] === 'string' ? String(record[key]) : '';
-}
-
-function readNestedRecord(record: Record<string, unknown>, key: string): Record<string, unknown> {
-  return readRecord(record[key]);
-}
-
 const UNMEASURED_PREFIX = 'Not measured in this view; ';
 
 function lane(options: AssistantCockpitLane, unmeasured?: readonly AssistantCockpitLane['id'][]): AssistantCockpitLane {
@@ -180,44 +163,22 @@ export function buildAssistantCockpitFromMetrics(metrics: AssistantCockpitMetric
   };
 }
 
-export function buildAssistantCockpitFromSummaries(input: {
-  readonly setupPosture: unknown;
-  readonly projectContext?: unknown;
-  readonly agentOrchestration?: unknown;
-  readonly modelRouting: unknown;
-  readonly executionPosture: unknown;
-  readonly backgroundProcesses?: unknown;
-  readonly personalOps: unknown;
-  readonly autonomyQueue: unknown;
-  readonly researchRuns: unknown;
-  readonly documentOps: unknown;
-  readonly securityPosture: unknown;
-}): AssistantCockpit {
-  const setup = readRecord(input.setupPosture);
-  const model = readRecord(input.modelRouting);
-  const execution = readRecord(input.executionPosture);
-  const agentOrchestration = readRecord(input.agentOrchestration);
-  const backgroundProcesses = readRecord(input.backgroundProcesses);
-  const personal = readRecord(input.personalOps);
-  const autonomy = readRecord(input.autonomyQueue);
-  const research = readRecord(input.researchRuns);
-  const documents = readRecord(input.documentOps);
-  const security = readRecord(input.securityPosture);
-  const setupSmokeEvidence = readNestedRecord(setup, 'setupSmokeEvidence');
-  const setupSmokeHistory = readNestedRecord(setup, 'setupSmokeHistory');
-  return buildAssistantCockpitFromMetrics({
-    setupBlockers: readNumber(setup, 'autonomyBlockers') || readNumber(setup, 'blockedPlanItems'),
-    setupSmokeResult: readString(setupSmokeEvidence, 'result') || undefined,
-    setupSmokeTrend: readString(setupSmokeHistory, 'trend') || undefined,
-    modelStatus: readString(model, 'status'),
-    executionRoutes: readNumber(execution, 'routes'),
-    personalGaps: readNumber(personal, 'gap'),
-    runningWork: readNumber(autonomy, 'running') || readNumber(agentOrchestration, 'running') || readNumber(research, 'running') || readNumber(backgroundProcesses, 'running'),
-    researchRuns: readNumber(research, 'runs'),
-    documentLanes: readNumber(documents, 'lanes'),
-    documentGaps: readNumber(documents, 'gap'),
-    securityFindings: readNumber(security, 'findings'),
+export interface AssistantCockpitRoutes {
+  readonly lanes: readonly Pick<AssistantCockpitLane, 'id' | 'label' | 'routes'>[];
+  readonly boundaryPolicy: string;
+}
+
+/**
+ * The cockpit's lanes and the routes that read each one, with no state: the
+ * harness summary reads no live status, so it shows where to look, not what
+ * is there.
+ */
+export function assistantCockpitRouteMap(): AssistantCockpitRoutes {
+  const cockpit = buildAssistantCockpitFromMetrics({
+    setupBlockers: 0, modelStatus: 'ready', executionRoutes: 1, personalGaps: 0, runningWork: 0,
+    researchRuns: 0, documentLanes: 0, documentGaps: 0, securityFindings: 0,
   });
+  return { lanes: cockpit.lanes.map(({ id, label, routes }) => ({ id, label, routes })), boundaryPolicy: cockpit.boundaryPolicy };
 }
 
 export function buildAssistantCockpitFromWorkspaceSnapshot(snapshot: AgentWorkspaceRuntimeSnapshot): AssistantCockpit {

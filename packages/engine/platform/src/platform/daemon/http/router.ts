@@ -52,6 +52,7 @@ import type { IntegrationHelperService } from '../../runtime/integration/helpers
 import type { DomainDispatch, RuntimeStore } from '../../runtime/store/index.js';
 import type { RuntimeEventBus } from '../../runtime/events/index.js';
 import type { DaemonBatchManager } from '../../batch/index.js';
+import type { CloudflareTunnelConnector } from '../../cloudflare/tunnel-connector.js';
 import { emitCompanionMessageReceived } from '../../runtime/emitters/session.js';
 import { createAuthFailureAudit, type AuthFailureAudit } from '../auth-failure-audit.js';
 import { emitCompanionPairRequested, emitCompanionPairVerified } from '../../runtime/emitters/security.js';
@@ -156,6 +157,8 @@ interface DaemonHttpRouterContext {
   readonly runtimeStore: RuntimeStore | null;
   readonly runtimeDispatch: DomainDispatch | null;
   readonly batchManager?: DaemonBatchManager | null | undefined;
+  /** The daemon's Cloudflare Tunnel connector: provisioning starts it, status reports it, shutdown stops it. */
+  readonly cloudflareTunnel?: CloudflareTunnelConnector | null | undefined;
   /** Borrowed from the runtime graph; the graph owns admission shutdown and awaited drain. */
   readonly browserJudgment?: BrowserJudgmentCapability | undefined;
   readonly githubWebhookSecret: string | null;
@@ -318,6 +321,7 @@ export class DaemonHttpRouter {
   dispose(): void {
     this.telemetryApi?.dispose();
     this.context.batchManager?.dispose();
+    void this.context.cloudflareTunnel?.dispose();
   }
 
   /**
@@ -587,6 +591,7 @@ export class DaemonHttpRouter {
       configManager: context.configManager,
       secretsManager: context.secretsManager,
       authToken: context.authToken,
+      ...(context.cloudflareTunnel ? { tunnelConnector: context.cloudflareTunnel } : {}),
       parseJsonBody,
       parseOptionalJsonBody,
     };

@@ -142,7 +142,6 @@ function parseProvisionInput(body: Record<string, unknown>): CloudflareProvision
     ...(typeof body['kvNamespaceName'] === 'string' ? { kvNamespaceName: body['kvNamespaceName'] } : {}),
     ...(typeof body['kvNamespaceId'] === 'string' ? { kvNamespaceId: body['kvNamespaceId'] } : {}),
     ...(typeof body['durableObjectNamespaceName'] === 'string' ? { durableObjectNamespaceName: body['durableObjectNamespaceName'] } : {}),
-    ...(typeof body['durableObjectNamespaceId'] === 'string' ? { durableObjectNamespaceId: body['durableObjectNamespaceId'] } : {}),
     ...(typeof body['r2BucketName'] === 'string' ? { r2BucketName: body['r2BucketName'] } : {}),
     ...(typeof body['secretsStoreName'] === 'string' ? { secretsStoreName: body['secretsStoreName'] } : {}),
     ...(typeof body['secretsStoreId'] === 'string' ? { secretsStoreId: body['secretsStoreId'] } : {}),

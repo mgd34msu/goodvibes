@@ -53,6 +53,7 @@ import { DaemonSurfaceActionHelper } from './surface-actions.js';
 import { DaemonTransportEventsHelper } from './transport-events.js';
 import { DaemonHttpRouter } from './http/router.js';
 import { DaemonBatchManager } from '../batch/index.js';
+import { CloudflareTunnelConnector } from '../cloudflare/tunnel-connector.js';
 import { CompanionChatManager } from '../companion/companion-chat-manager.js';
 import type { CompanionLLMProvider, CompanionProviderChunk } from '../companion/companion-chat-manager.js';
 import { findModelDefinition, findModelDefinitionForProvider } from '../providers/registry-models.js';
@@ -733,6 +734,13 @@ export function createDaemonFacadeCollaborators(
     },
   });
   batchManager.start();
+  // The daemon runs cloudflared for the tunnel provisioning recorded, while the
+  // integration is on, and follows the tunnel settings; the router stops it.
+  const cloudflareTunnel = new CloudflareTunnelConnector({
+    configManager: runtime.configManager,
+    secretsManager: runtime.runtimeServices.secretsManager,
+  });
+  cloudflareTunnel.start();
   const httpRouter = new DaemonHttpRouter({
     listenerBinding: () => ({ ...options.transportBinding(), scheme: options.tlsState()?.tls ? 'https' : 'http' }),
     // The 401 names a refused credential the daemon knows: a device token over its
@@ -796,6 +804,7 @@ export function createDaemonFacadeCollaborators(
     runtimeStore: runtime.runtimeStore,
     runtimeDispatch: runtime.runtimeDispatch,
     batchManager,
+    cloudflareTunnel,
     githubWebhookSecret: runtime.githubWebhookSecret,
     authToken: options.authToken,
     buildSurfaceAdapterContext: () => surfaceActionHelper.buildSurfaceAdapterContext(),

@@ -39,7 +39,8 @@ export interface TunnelConnectorProcess {
 }
 
 export interface CloudflareTunnelConnectorOptions {
-  readonly configManager: Pick<ConfigManager, 'get'>;
+  /** `subscribe`, when present, lets {@link CloudflareTunnelConnector.start} follow the tunnel settings. */
+  readonly configManager: Pick<ConfigManager, 'get'> & Partial<Pick<ConfigManager, 'subscribe'>>;
   readonly secretsManager?: Pick<SecretsManager, 'get' | 'getGlobalHome'> | null | undefined;
   /** Path of the cloudflared binary; found on PATH when absent. */
   readonly binary?: string | undefined;
@@ -89,6 +90,9 @@ export class CloudflareTunnelConnector implements CloudflareTunnelConnectorHandl
   private failuresSinceConnected = 0;
   private stopping = false;
   private readonly waiters = new Set<() => void>();
+  /** Reconciles run one at a time, so a settings change and a provision cannot start two children. */
+  private reconciling: Promise<unknown> = Promise.resolve();
+  private unsubscribers: Array<() => void> = [];
 
   constructor(private readonly options: CloudflareTunnelConnectorOptions) {}
 
@@ -96,7 +100,44 @@ export class CloudflareTunnelConnector implements CloudflareTunnelConnectorHandl
     return this.current;
   }
 
-  async reconcile(options: { readonly force?: boolean } = {}): Promise<CloudflareTunnelConnectorStatus> {
+  /**
+   * The daemon's entry point: bring the connector in line with the settings
+   * now, and again whenever `cloudflare.enabled`, `cloudflare.tunnelId` or
+   * `cloudflare.tunnelTokenRef` changes. Idempotent.
+   */
+  start(): void {
+    if (this.unsubscribers.length === 0 && this.options.configManager.subscribe) {
+      const subscribe = this.options.configManager.subscribe.bind(this.options.configManager);
+      const follow = (): void => { this.reconcileInBackground(); };
+      this.unsubscribers = [
+        subscribe('cloudflare.enabled', follow),
+        subscribe('cloudflare.tunnelId', follow),
+        subscribe('cloudflare.tunnelTokenRef', follow),
+      ];
+    }
+    this.reconcileInBackground();
+  }
+
+  /** Stops following the settings and stops the connector; for daemon shutdown. */
+  async dispose(): Promise<void> {
+    for (const unsubscribe of this.unsubscribers) unsubscribe();
+    this.unsubscribers = [];
+    await this.stop();
+  }
+
+  private reconcileInBackground(): void {
+    void this.reconcile().catch((error: unknown) => {
+      logger.warn('cloudflare tunnel: the connector could not be brought in line with the settings', { error: summarizeError(error) });
+    });
+  }
+
+  reconcile(options: { readonly force?: boolean } = {}): Promise<CloudflareTunnelConnectorStatus> {
+    const run = this.reconciling.then(() => this.reconcileNow(options), () => this.reconcileNow(options));
+    this.reconciling = run.catch(() => undefined);
+    return run;
+  }
+
+  private async reconcileNow(options: { readonly force?: boolean }): Promise<CloudflareTunnelConnectorStatus> {
     const config = readCloudflareConfig(this.options.configManager);
     if (!config.tunnelId) {
       await this.stop();

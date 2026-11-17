@@ -911,7 +911,7 @@ export class CloudflareControlPlaneManager {
   private async startTunnelConnector(persist: boolean, steps: CloudflareProvisionStep[]): Promise<CloudflareTunnelConnectorStatus | undefined> {
     const connector = this.options.tunnelConnector;
     if (!connector) {
-      steps.push({ name: 'tunnel-connector', status: 'warning', message: 'This process does not run the tunnel connector. The daemon starts it when the integration is on; if /cloudflare status does not show it connected, restart the daemon.' });
+      steps.push({ name: 'tunnel-connector', status: 'warning', message: 'This process does not run the tunnel connector. The daemon runs it whenever cloudflare.enabled is on and a tunnel is recorded, and follows changes to those settings; /cloudflare status on the daemon says whether it is connected.' });
       return undefined;
     }
     if (!persist) {

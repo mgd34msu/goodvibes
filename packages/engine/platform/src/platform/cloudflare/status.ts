@@ -48,6 +48,9 @@ export function buildCloudflareControlPlaneStatus(input: BuildCloudflareStatusIn
   const connector = input.tunnelConnector;
   if (configured.tunnel && connector && connector.state !== 'connected') {
     warnings.push(`The Cloudflare Tunnel connector is ${connector.state}: ${connector.detail}${connector.next?.[0] ? ` Next: ${connector.next[0]}.` : ''}`);
+  } else if (configured.tunnel && !connector) {
+    // Only the daemon runs cloudflared; a reading made anywhere else cannot say the tunnel is served.
+    warnings.push('A Cloudflare Tunnel is provisioned, but this process does not run its connector, so it cannot tell whether the daemon hostname reaches the daemon. Ask the daemon (cloudflare.status, or /cloudflare status).');
   }
   const ready = input.config.enabled &&
     configured.accountId &&
@@ -58,7 +61,9 @@ export function buildCloudflareControlPlaneStatus(input: BuildCloudflareStatusIn
     configured.queueName &&
     configured.deadLetterQueueName &&
     configured.workerToken &&
-    (!configured.tunnel || !connector || connector.state === 'connected');
+    // A provisioned tunnel counts only while its connector is connected: without
+    // one, the Worker points at a hostname nothing serves.
+    (!configured.tunnel || connector?.state === 'connected');
   return {
     enabled: input.config.enabled,
     ready,

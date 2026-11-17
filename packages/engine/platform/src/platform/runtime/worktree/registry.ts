@@ -1,4 +1,4 @@
-import { acquireProcessLock, withProcessLock, withProcessLockSync, type HeldProcessLock } from '../../utils/process-lock.js';
+import { withProcessLockSync } from '../../utils/process-lock.js';
 import { existsSync, readFileSync, readdirSync, realpathSync, renameSync, statSync, unlinkSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { GitService } from '../../git/service.js';
@@ -540,7 +540,7 @@ export class WorktreeRegistry {
   public async reconcile(): Promise<WorktreeStatusRecord[]> {
     const beforeScan = readStore(getStorePath(this.workingDirectory), false);
     const listed = await this.git.worktreeList();
-    return withProcessLock(registerLockPath(getStorePath(this.workingDirectory)), () => {
+    return withRegistryWriteLock(getStorePath(this.workingDirectory), () => {
       const store = readStore(getStorePath(this.workingDirectory), true, true);
       const present = new Set(listed.map((entry) => normalizePath(entry.path, this.workingDirectory)));
       const records = this.joinListing(listed, store);
@@ -624,9 +624,12 @@ export class WorktreeRegistry {
    * marker was made before the marker existed and is removed, whatever it
    * holds, once no running owner holds it. Nothing marked kept, paused or
    * attached to a session or task is swept, and a directory that merely sits
-   * under `.goodvibes` is never touched. Each removal is re-decided under the register lock, which is
-   * released before the removal itself so a slow removal does not stall other
-   * register writers.
+   * under `.goodvibes` is never touched. Each removal is decided first (git and
+   * owner reads, outside any lock), then checked against the register under its
+   * lock, synchronously: a row whose state, session, task or update time moved
+   * since the decision is kept for the next sweep. The lock is never held across
+   * an await, so the register's other writers, which take it synchronously, are
+   * never refused because a sweep is running in the same process.
    *
    * `only` limits the pass to those paths (the contract end uses it).
    */
@@ -651,28 +654,30 @@ export class WorktreeRegistry {
       const keepReason = (reason: WorktreeKeepReason) => report.kept.push({ path: row.path, branch: row.branch, reason });
       const guarded = sweepProtection(row);
       if (guarded) { keepReason(guarded); continue; }
-      let evaluation = await decide();
+      const evaluation = await decide();
       if (evaluation.action === 'keep') { keepReason(evaluation.reason); continue; }
-      // The decision is made again with the lock held, against the register as it is now: another process may have
-      // acted, the owner may have moved on, or the worktree may have been marked kept. The lock is released before the
-      // removal itself, which can take long on a large tree and would otherwise make every other register writer
-      // wait out its limit. Git's own refusal to remove a tree with changes is the last check.
-      let lock: HeldProcessLock | undefined;
+      // The register as it is now, read under its lock with no await in between: another process or another
+      // contract here may have attached, paused, kept or set up this worktree since the listing the decision used.
+      // The removal itself runs after the lock is released, so a slow removal stalls no register writer. Git's own
+      // refusal to remove a tree with changes is the last check.
+      let changed: WorktreeKeepReason | null;
       try {
-        lock = await acquireProcessLock(registerLockPath(storePath));
-        const current = readStore(storePath).records[row.path];
-        const guardedNow = current ? sweepProtection({ ...row, state: current.state, sessionId: current.sessionId, taskId: current.taskId }) : null;
-        if (guardedNow) { keepReason(guardedNow); continue; }
-        evaluation = await decide();
-        if (evaluation.action === 'keep') { keepReason(evaluation.reason); continue; }
+        changed = withRegistryWriteLock<WorktreeKeepReason | null>(storePath, () => {
+          const current = readStore(storePath).records[row.path];
+          if (!current) return null;
+          const guardedNow = sweepProtection({ ...row, state: current.state, sessionId: current.sessionId, taskId: current.taskId });
+          if (guardedNow) return guardedNow;
+          return current.state !== row.state || current.sessionId !== row.sessionId || current.taskId !== row.taskId || current.updatedAt !== row.updatedAt
+            ? { why: 'protected', detail: 'its register entry changed while it was being assessed; the next sweep decides again' }
+            : null;
+        });
       } catch (error) {
         const message = summarizeError(error);
         report.failed.push({ path: row.path, error: message });
         logger.warn('worktree retention: a worktree was kept because its removal did not complete', { path: row.path, error: message });
         continue;
-      } finally {
-        lock?.release();
       }
+      if (changed) { keepReason(changed); continue; }
       try {
         if (evaluation.action === 'remove-unmarked') {
           // The owner's rule for worktrees from before the marker: removed with what they hold, so git's dirty-tree refusal is overridden.
@@ -692,7 +697,7 @@ export class WorktreeRegistry {
           // A captured-input view of a dirty checkout sits on a synthetic commit that is no deliverable; the person's files stay in their own checkout, so the branch is dropped with the directory.
           branchDeleted = (await runGit(this.workingDirectory, ['branch', '-D', branch])).ok;
         }
-        await this.forgetRemoved(storePath, row.path);
+        this.forgetRemoved(storePath, row.path);
         const note = evaluation.action === 'remove-unmarked'
           ? `${evaluation.reason.detail}${branchDeleted ? '; its branch was merged and is deleted' : ''}`
           : evaluation.action === 'prune-directory' && !branchDeleted
@@ -718,9 +723,9 @@ export class WorktreeRegistry {
   }
 
   /** Drop the register entry of a worktree whose directory is gone. Best effort: the next list() reaps it otherwise. */
-  private async forgetRemoved(storePath: string, path: string): Promise<void> {
+  private forgetRemoved(storePath: string, path: string): void {
     try {
-      await withProcessLock(registerLockPath(storePath), () => {
+      withRegistryWriteLock(storePath, () => {
         const store = readStore(storePath, true, true);
         delete store.records[path];
         writeStore(store, storePath);

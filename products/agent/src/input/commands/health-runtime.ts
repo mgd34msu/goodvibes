@@ -27,6 +27,7 @@ import {
   requireSessionMemoryStore,
 } from './runtime-services.ts';
 import { commandRefusal } from './confirmation.ts';
+import { readRefusal } from '@goodvibes-jev/engine/errors';
 
 async function loadProviderAccountSnapshot(ctx: CommandContext) {
   return await buildProviderAccountSnapshot({
@@ -479,7 +480,8 @@ export function registerHealthRuntimeCommands(registry: CommandRegistry): void {
           ].join('\n'),
         );
       } catch (error) {
-        ctx.print(`Health command failed: ${error instanceof Error ? error.message : String(error)}`);
+        if (readRefusal(error)) throw error;
+        throw commandRefusal(`Health command failed: ${error instanceof Error ? error.message : String(error)}`);
       }
     },
   });

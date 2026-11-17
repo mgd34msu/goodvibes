@@ -1,4 +1,4 @@
-import { isClassicOperation, requireDecisionFeature, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime/decision-policy';
+import { isClassicOperation, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime/decision-policy';
 import { rankHarnessCatalog, type CatalogRankingOptions } from './catalog-ranking.js';
 import { previewHarnessText } from './preview-text.js';
 import { buildLearningCandidates, candidateSearchText } from './learning-curator-proposals.js';
@@ -226,7 +226,7 @@ function learningPromptPlan(collection: LearningCandidateCollection, candidates:
     promptActiveCount: promptActiveRecords.length,
     suppressedCount,
     proposalCount: isClassicOperation() ? null : proposalCandidates.length,
-    consolidationCount: isClassicOperation() ? null : consolidationCandidates.length,
+    consolidationCount: consolidationCandidates.length,
     promptActiveRecords: promptActiveRecords.slice(0, includeParameters ? 12 : 5),
     reviewFirst: reviewFirstCandidates.slice(0, includeParameters ? 10 : 5).map((candidate) => promptPlanCandidate(candidate, includeParameters)),
     proposalQueue: proposalCandidates.slice(0, includeParameters ? 10 : 5).map((candidate) => promptPlanCandidate(candidate, includeParameters)),
@@ -234,7 +234,7 @@ function learningPromptPlan(collection: LearningCandidateCollection, candidates:
     suppressed,
     orderingRules: [
       `Prompt context is limited to memory at confidence ${MIN_PROMPT_MEMORY_CONFIDENCE} or higher that is not stale, contradicted or outside its validity window, active personas, and enabled setup-ready behavior.`,
-      isClassicOperation() ? 'Without a decision model, this lists native eligibility and review facts with unassessed scores/priority; stable label ordering is not a quality ranking.'
+      isClassicOperation() ? 'No decision model is in use: this lists native eligibility and review facts with unassessed scores/priority, and duplicates only where records are identical; stable label ordering is not a quality ranking.'
         : 'Current admitted curator readings grade usefulness, freshness, source quality, risk, confidence and priority. Sorting uses the settled priority grade.',
       'Low-confidence, stale, setup-blocked, blocked VIBE.md, and duplicate records stay suppressed until their confidence or enabled/active state is repaired.',
       'Proposals from notes, completed work, completed research, and saved sessions require explicit create or promotion routes before they can guide the assistant.',
@@ -291,12 +291,12 @@ async function ownedLearningCuratorSummary(context: LearningCuratorNativeContext
   const consolidationBatch = learningConsolidationBatchPlan(all, includeParameters);
   return {
     ...(isClassicOperation() ? { operationProvenance: 'classic', semanticAssessment: 'not-evaluated',
-      interpretationNotice: 'Without a decision model, this shows stored records and mechanical review flags. Automatic proposal, quality and duplicate analysis is unavailable.' } : {}),
+      interpretationNotice: 'No decision model is in use: this shows stored records, mechanical review flags and duplicate groups of records with identical content (compared by code). Proposals, priorities and duplicates in different words are not assessed.' } : {}),
     summary: {
       candidates: all.length,
       needsReview: all.filter((candidate) => candidate.status === 'needs-review').length,
       needsSetup: all.filter((candidate) => candidate.status === 'needs-setup').length,
-      needsConsolidation: isClassicOperation() ? null : all.filter((candidate) => candidate.status === 'needs-consolidation').length,
+      needsConsolidation: all.filter((candidate) => candidate.status === 'needs-consolidation').length,
       lowConfidence: all.filter((candidate) => candidate.status === 'low-confidence').length,
       proposedBehavior: isClassicOperation() ? null : all.filter((candidate) => candidate.status === 'proposal-ready').length,
       personalityIssues: all.filter((candidate) => candidate.domain === 'vibe').length,
@@ -333,9 +333,8 @@ async function ownedResolveLearningConsolidationCandidate(context: LearningCurat
       usage: 'candidateId or query is required. Use memory action:"curator" query:"consolidation" to inspect candidate ids.',
     };
   }
-  requireDecisionFeature('automatic learning duplicate selection and consolidation; inspect and edit individual records explicitly');
+  // Without a decision model the consolidation candidates are the identical-content groups code found.
   const collection = await buildLearningCandidates(context, options); collection.assertCurrent();
-  requireDecisionFeature('automatic learning duplicate selection and consolidation; inspect and edit individual records explicitly');
   const candidates = collection.candidates.filter((candidate) => candidate.consolidation !== undefined);
   const normalized = lookup.toLowerCase();
   const exact = candidates.find((candidate) => candidate.id === lookup)
@@ -364,7 +363,8 @@ async function ownedResolveLearningConsolidationCandidate(context: LearningCurat
   }
   return {
     status: 'missing_lookup',
-    usage: `Unknown duplicate-consolidation candidate ${lookup}. Use memory action:"curator" query:"consolidation" to inspect candidate ids.`,
+    usage: `Unknown duplicate-consolidation candidate ${lookup}. Use memory action:"curator" query:"consolidation" to inspect candidate ids.`
+      + (isClassicOperation() ? ' No decision model is in use, so only records with identical content are offered for consolidation.' : ''),
   };
 }
 

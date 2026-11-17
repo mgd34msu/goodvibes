@@ -616,7 +616,10 @@ function buildAgentHarnessTool(deps: AgentHarnessToolDeps): Tool {
           return output({
             ...pass,
             lastPassAt: new Date(pass.lastPassAt).toISOString(),
-            message: `Read ${pass.readings} new or changed item(s) and reused ${pass.reused} stored verdict(s); ${pass.proposals} proposal(s) and ${pass.duplicateGroups} duplicate group(s) are ready.`
+            message: (pass.withoutDecisionModel && pass.readings === 0
+              ? `No decision model is in use, so nothing was read: ${pass.duplicateGroups} duplicate group(s) of records with identical content were found by code; ${pass.unassessed} item(s) (proposals, priorities, duplicates in different words) stay unassessed until a pass with a decision model.`
+              : `Read ${pass.readings} new or changed item(s) and reused ${pass.reused} stored verdict(s); ${pass.proposals} proposal(s) and ${pass.duplicateGroups} duplicate group(s) are ready.`
+                + (pass.withoutDecisionModel ? ' The decision model stopped answering during the pass, so the rest was not read.' : ''))
               + (pass.unsettled > 0 ? ` ${pass.unsettled} reading(s) were not settled and are read again by the next pass.` : ''),
             next: 'memory action:"curator" shows the candidates; memory action:"candidate" candidateId:"..." inspects one.',
             policy: 'The pass changes no memory, note, persona, skill or routine; it stores its verdicts with the content they were read from, so a later pass reads only what changed.',

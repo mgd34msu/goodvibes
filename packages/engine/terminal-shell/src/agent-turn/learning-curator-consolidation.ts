@@ -1,6 +1,6 @@
 import type { AgentWorkspaceLocalLibraryItem } from './local-library-items.js';
 import type { LearningCandidateDraft, LearningConsolidationDiff, LearningConsolidationPlan, LocalLearningCandidateDomain } from './learning-curator-types.js';
-import { localRegistryRoute, routeValue } from './learning-curator-common.js';
+import { isReviewed, localRegistryRoute, routeValue } from './learning-curator-common.js';
 import type { LearningRecord } from './learning-curator-source.js';
 import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 
@@ -73,11 +73,15 @@ function consolidationProposalFields(plan: LearningConsolidationPlan): Readonly<
   };
 }
 
+/** What made a group: settled same-entity readings, or identical content compared by code (no decision model in use). */
+export type ConsolidationBasis = 'readings' | 'identical';
+
 function consolidationCandidate(
   domain: LocalLearningCandidateDomain,
   key: string,
   items: readonly AgentWorkspaceLocalLibraryItem[],
   survivor: AgentWorkspaceLocalLibraryItem,
+  basis: ConsolidationBasis,
 ): LearningCandidateDraft | null {
   if (items.length < 2) return null;
   const duplicates = items.filter((item) => item.id !== survivor.id);
@@ -107,7 +111,9 @@ function consolidationCandidate(
     domain,
     recordId: survivor.id,
     status: 'needs-consolidation',
-    reason: `${items.length} Agent-local ${domain} records have settled same-entity pair readings.`,
+    reason: basis === 'identical'
+      ? `${items.length} Agent-local ${domain} records have identical content, compared by code (no decision model is in use, so only exact copies are found).`
+      : `${items.length} Agent-local ${domain} records have settled same-entity pair readings.`,
     next: 'Keep the selected record unchanged and mark settled duplicates stale, retaining their complete originals.',
     reviewState: survivor.reviewState,
     ...(survivor.enabled === undefined ? {} : { enabled: survivor.enabled }),
@@ -208,9 +214,54 @@ export function liveGroupMembers(group: readonly LearningRecord[]): readonly Lea
   return group.filter(record => record.item.reviewState !== 'stale');
 }
 
-export function consolidationCandidateForGroup(domain: LocalLearningCandidateDomain, group: readonly LearningRecord[], survivorId: string): LearningCandidateDraft | null {
+export function consolidationCandidateForGroup(domain: LocalLearningCandidateDomain, group: readonly LearningRecord[], survivorId: string,
+  basis: ConsolidationBasis = 'readings'): LearningCandidateDraft | null {
   const survivor = group.find(record => record.item.id === survivorId);
   if (!survivor || survivor.item.reviewState === 'stale') return null;
   const key = JSON.stringify(group.map(record => record.item.id));
-  return consolidationCandidate(domain, key, group.map(record => record.item), survivor.item);
+  return consolidationCandidate(domain, key, group.map(record => record.item), survivor.item, basis);
+}
+
+/** The fields that are a record's content in each consolidation domain; identity, review and timestamps are not. */
+const CONTENT_FIELDS: Readonly<Partial<Record<LocalLearningCandidateDomain, readonly string[]>>> = {
+  memory: ['summary', 'detail', 'scope', 'cls', 'tags'],
+  persona: ['name', 'description', 'body', 'tags', 'triggers'],
+  skill: ['name', 'description', 'procedure', 'triggers', 'tags', 'requirements'],
+  routine: ['name', 'description', 'steps', 'triggers', 'tags', 'requirements'],
+};
+
+/** One content field, compared as written: text trimmed, tag and trigger lists as sets. */
+function contentValue(field: string, value: unknown): unknown {
+  if (typeof value === 'string') return value.trim();
+  if ((field === 'tags' || field === 'triggers') && Array.isArray(value)) {
+    return [...new Set(value.map(entry => typeof entry === 'string' ? entry.trim().toLowerCase() : JSON.stringify(entry)))].sort();
+  }
+  return value ?? null;
+}
+
+/**
+ * Whether two records of one domain carry identical content: a fact code
+ * decides without a decision model. Records that say the same thing in
+ * different words are not found this way; a decision model's pair reading
+ * finds those.
+ */
+export function identicalLearningRecords(domain: LocalLearningCandidateDomain, left: LearningRecord, right: LearningRecord): boolean {
+  const fields = CONTENT_FIELDS[domain];
+  if (!fields) return false;
+  const content = (record: LearningRecord): string => {
+    const source = record.record && typeof record.record === 'object' ? record.record as Record<string, unknown> : {};
+    return JSON.stringify(fields.map(field => contentValue(field, source[field])));
+  };
+  return content(left) === content(right);
+}
+
+/**
+ * The survivor code keeps among identical records: a reviewed one before an
+ * unreviewed one, then the first by id. The content is the same, so the
+ * choice loses nothing; the others are only marked stale.
+ */
+export function identicalGroupSurvivor(group: readonly LearningRecord[]): string | undefined {
+  const live = liveGroupMembers(group);
+  return [...live].sort((left, right) => Number(isReviewed(right.item)) - Number(isReviewed(left.item))
+    || left.item.id.localeCompare(right.item.id))[0]?.item.id;
 }

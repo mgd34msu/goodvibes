@@ -1,5 +1,4 @@
-import { DecisionModelsDisabledError } from '@goodvibes-jev/engine/errors';
-import { isClassicOperation, requireDecisionFeature, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime/decision-policy';
+import { activateClassicFallback, isClassicOperation, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime/decision-policy';
 import type { AgentNoteRecord } from './note-registry.js';
 import { type AgentResearchRunRecord } from './research-run-registry.js';
 import { previewHarnessText } from './preview-text.js';
@@ -12,7 +11,7 @@ import { logger, mapWithConcurrency } from '@goodvibes-jev/engine/platform/platf
 import { maxParallelToolCalls } from '@goodvibes-jev/engine/platform/platform/core';
 import type { LearningCandidate, LearningCandidateDraft, LearningProposalTarget, VibeCandidateKind, LocalLearningCandidateDomain } from './learning-curator-types.js';
 import { candidateBase, isMemoryPromptEligible, isReviewed, MIN_PROMPT_MEMORY_CONFIDENCE, learningPromotionReference, recordedPromotionReferences, localRegistryModelRoute, localRegistryRoute, missingRequirementCount } from './learning-curator-common.js';
-import { CONSOLIDATION_DOMAINS, consolidationCandidateForGroup, consolidationGroups, duplicatePairKey, liveGroupMembers, shortlistDuplicatePairs, survivorGroupKey } from './learning-curator-consolidation.js';
+import { CONSOLIDATION_DOMAINS, consolidationCandidateForGroup, consolidationGroups, duplicatePairKey, identicalGroupSurvivor, identicalLearningRecords, liveGroupMembers, shortlistDuplicatePairs, survivorGroupKey } from './learning-curator-consolidation.js';
 import { LearningCurationStore, learningContentHash, type StoredLearningGrade, type StoredLearningProposal } from './learning-curation-store.js';
 import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 function captureCandidate(): LearningCandidateDraft {
@@ -439,6 +438,9 @@ export function assertLearningCandidateCollection(collection: LearningCandidateC
  * decided in code; proposals, duplicate groups and priorities are the stored
  * readings for records whose content has not changed since. No model is asked
  * and no saved session is loaded except the few a stored proposal names.
+ * With no decision model in use stored readings are not used: duplicate groups
+ * are the records with identical content (compared by code), and what a pass
+ * with a decision model would read is counted as unassessed.
  */
 export async function buildLearningCandidates(context: LearningCuratorNativeContext, options: CatalogRankingOptions = {}): Promise<LearningCandidateCollection> {
   return withConfiguredDecisionModelPolicy(async () => {
@@ -479,7 +481,8 @@ function assembleLearningCandidates(source: LearningCuratorSource): AssembledCan
       const hash = contentHash(record.record);
       const local = mechanicalCandidates(domain, record);
       if (domain === 'note') {
-        if (isReviewed(record.item) && !classic) {
+        if (isReviewed(record.item) && classic) unassessed++;
+        else if (isReviewed(record.item)) {
           const proposal = source.curation.proposal(proposalKey.note(record.item.id), hash);
           if (!proposal) unassessed++;
           const behavior = noteBehaviorProposalCandidate(record, proposal);
@@ -496,8 +499,19 @@ function assembleLearningCandidates(source: LearningCuratorSource): AssembledCan
         : domain !== 'note' && record.item.enabled === true && missingRequirementCount(record.item) === 0;
       if (eligible) promptRecords.push({ domain, record, gradeKey: `prompt:${domain}:${record.item.id}`, gradeHash: hash });
     }
-    if (classic || !CONSOLIDATION_DOMAINS.includes(domain)) continue;
+    if (!CONSOLIDATION_DOMAINS.includes(domain)) continue;
     const pairs = shortlistDuplicatePairs(domain, records);
+    if (classic) {
+      // Code decides the one duplicate fact it can: identical content. Pairs that differ stay for a decision model.
+      const identical = (left: number, right: number) => identicalLearningRecords(domain, records[left]!, records[right]!);
+      unassessed += pairs.filter(([left, right]) => !identical(left, right)).length;
+      for (const group of consolidationGroups(records, pairs, identical)) {
+        const survivorId = identicalGroupSurvivor(group);
+        const candidate = survivorId === undefined ? null : consolidationCandidateForGroup(domain, group, survivorId, 'identical');
+        if (candidate) drafts.push(draft(candidate, group.map(record => record.record), learningContentHash(group.map(record => contentHash(record.record)))));
+      }
+      continue;
+    }
     const verdicts = new Map<string, boolean>();
     for (const [left, right] of pairs) {
       const a = records[left]!, b = records[right]!;
@@ -513,7 +527,12 @@ function assembleLearningCandidates(source: LearningCuratorSource): AssembledCan
       if (candidate) drafts.push(draft(candidate, group.map(record => record.record), learningContentHash(group.map(record => contentHash(record.record)))));
     }
   }
-  if (!classic) {
+  if (classic) {
+    // What a curation pass with a decision model would read for proposals: nothing of it is assessed here.
+    unassessed += source.source.workItems.filter(item => item.status === 'done').length
+      + (source.source.researchSnapshot?.completed.length ?? 0)
+      + source.source.sessions.filter(session => session.name).length;
+  } else {
     for (const item of source.source.workItems) {
       if (item.status !== 'done') continue;
       const hash = contentHash(item);
@@ -586,11 +605,9 @@ function issueCollection(source: LearningCuratorSource, assembled: AssembledCand
       if (!collection.candidates.includes(candidate)) throw new ToolInputProjectionError('held');
       assertLearningCandidateCollection(collection, context, options);
     },
-    prepareTransition: (intent: Parameters<LearningCuratorSource['prepareTransition']>[0]) => {
-      if (classic) throw new DecisionModelsDisabledError('automatic transitions from an unassessed learning inspection');
-      requireDecisionFeature('automatic learning proposal or consolidation transitions; use explicit native registry actions');
-      return source.prepareTransition(intent);
-    },
+    // A collection built without a decision model holds only what code decided (review flags, identical-content
+    // duplicates), so its transitions act on facts; the caller's own admission (the owner's confirmation) still applies.
+    prepareTransition: (intent: Parameters<LearningCuratorSource['prepareTransition']>[0]) => source.prepareTransition(intent),
     options: source.options,
   });
   collections.set(collection, { context, options });
@@ -608,6 +625,8 @@ export interface LearningCurationPassResult {
   readonly duplicateGroups: number;
   readonly unassessed: number;
   readonly lastPassAt: number;
+  /** No decision model is in use: nothing was read; duplicates are identical records found by code. */
+  readonly withoutDecisionModel?: true | undefined;
 }
 
 /**
@@ -623,11 +642,21 @@ export interface LearningCurationPassResult {
  * keeps up to `runtime.maxParallelToolCalls` (8 by default) in flight:
  * proposals and duplicate pairs together, then the survivors the settled
  * pairs produce, then the grades of the candidates the verdicts produce.
+ *
+ * With no decision model in use the pass reads nothing and stores nothing: it
+ * reports the identical-content duplicate groups code finds and how much is
+ * left unassessed. When a set model starts failing under Hybrid, the readings
+ * not yet made are counted as unsettled and the pass finishes; under Decision
+ * Model Only the failure stops the pass.
  */
 export async function runLearningCurationPass(context: LearningCuratorNativeContext, options: CatalogRankingOptions = {}): Promise<LearningCurationPassResult> {
   return withConfiguredDecisionModelPolicy(async () => {
-    requireDecisionFeature('the learning curation pass; inspect and edit the records explicitly with agent_local_registry');
     const source = acquireLearningCuratorSource(context, options);
+    if (isClassicOperation()) {
+      const assembled = assembleLearningCandidates(source);
+      return Object.freeze({ readings: 0, reused: 0, unsettled: 0, unassessed: assembled.unassessed, lastPassAt: Date.now(), proposals: 0,
+        duplicateGroups: assembled.drafts.filter(({ candidate }) => candidate.status === 'needs-consolidation').length, withoutDecisionModel: true as const });
+    }
     // One pass at a time per curation store: a second call (two in one tool
     // batch, or the auto-promoter's own pass) waits for the one running, then
     // reuses every verdict it stored instead of paying for the same readings.
@@ -672,17 +701,25 @@ async function runCurationPassOnce(context: LearningCuratorNativeContext, source
   const store = source.curation;
   const live = { proposals: new Set<string>(), pairs: new Set<string>(), survivors: new Set<string>(), grades: new Set<string>(), promotions: new Set<string>() };
   let readings = 0, reused = 0, unsettled = 0;
-  /** One reading; an unsettled one is counted and skipped, anything else (an abort, a lost admission) ends the pass. */
+  /**
+   * One reading; an unsettled one is counted and skipped, and so is every reading once the set model fails
+   * under Hybrid (the operation then runs without it). Anything else (an abort, a lost admission, a failure
+   * under Decision Model Only) ends the pass.
+   */
   const settle = async <T>(read: () => Promise<T>): Promise<T | undefined> => {
+    if (isClassicOperation()) { unsettled++; return undefined; }
     try { const value = await read(); readings++; source.assertCurrent(); return value; }
     catch (error) {
-      if (!(error instanceof ToolInputProjectionError) || error.problem !== 'held') throw error;
+      const unread = error instanceof ToolInputProjectionError && error.problem === 'held';
+      if (!unread && !activateClassicFallback(error)) throw error;
       source.assertCurrent(); unsettled++; return undefined;
     }
   };
   const proposal = async (key: string, hash: string, input: () => unknown): Promise<void> => {
     live.proposals.add(key);
     if (store.proposal(key, hash)) { reused++; return; }
+    // A transcript is not loaded for a reading that will not be made.
+    if (isClassicOperation()) { unsettled++; return; }
     const evidence = input();
     const target = await settle(() => readLearningProposalTarget(evidence, source.options));
     if (target === undefined) return;
@@ -751,6 +788,13 @@ async function runCurationPassOnce(context: LearningCuratorNativeContext, source
       }
     }
     await inParallel(survivorPhase);
+    if (isClassicOperation()) {
+      // The set model stopped answering during the pass (Hybrid): every stored verdict is kept and no pass is
+      // marked, so the next pass with a decision model reads what this one could not.
+      const after = assembleLearningCandidates(source);
+      return Object.freeze({ readings, reused, unsettled, unassessed: after.unassessed, lastPassAt: store.lastPassAt ?? Date.now(), proposals: 0,
+        duplicateGroups: after.drafts.filter(({ candidate }) => candidate.status === 'needs-consolidation').length, withoutDecisionModel: true as const });
+    }
     // Priorities last, over the candidates the stored verdicts now produce.
     const assembled = assembleLearningCandidates(source);
     const grades = [
@@ -772,12 +816,15 @@ async function runCurationPassOnce(context: LearningCuratorNativeContext, source
     // A promotion is kept while the record it came from still proposes it.
     for (const reference of assembled.proposed) live.promotions.add(reference);
     store.retainOnly(live);
-    const at = Date.now();
-    store.markPass(at);
+    // A pass the set model stopped answering during its grades is not marked complete; its stored verdicts stay.
+    const switched = isClassicOperation();
+    const at = switched ? store.lastPassAt ?? Date.now() : Date.now();
+    if (!switched) store.markPass(at);
     const after = assembleLearningCandidates(source);
     return Object.freeze({ readings, reused, unsettled, unassessed: after.unassessed, lastPassAt: at,
       proposals: after.drafts.filter(({ candidate }) => candidate.status === 'proposal-ready').length,
-      duplicateGroups: after.drafts.filter(({ candidate }) => candidate.status === 'needs-consolidation').length });
+      duplicateGroups: after.drafts.filter(({ candidate }) => candidate.status === 'needs-consolidation').length,
+      ...(switched ? { withoutDecisionModel: true as const } : {}) });
   } finally {
     // Verdicts read before a stop are kept, so the next pass does not pay for them again.
     store.save();

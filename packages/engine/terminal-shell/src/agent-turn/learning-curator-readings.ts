@@ -1,4 +1,4 @@
-import { isClassicOperation, requireDecisionFeature } from '@goodvibes-jev/engine/platform/platform/runtime';
+import { isClassicOperation } from '@goodvibes-jev/engine/platform/platform/runtime';
 import { learningProposalQuality } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import { captureJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { prepareJudgmentResult } from '@goodvibes-jev/engine/platform/platform/gate';
@@ -11,10 +11,15 @@ import type { LearningProposalTarget, LearningScores } from './learning-curator-
 
 export interface LearningGrade { readonly scores: LearningScores; readonly priority: number; readonly confidence: number }
 
+/**
+ * One curator reading. With no decision model in use nothing is sent and the
+ * reading is not settled (`held`): the curation pass counts it as unsettled and
+ * reads it again on its next pass with a decision model.
+ */
 async function reading<T>(source: unknown, options: CatalogRankingOptions, decision: NamedDecision,
   consume: (authority: ReturnType<typeof captureJudgmentPort>, captured: unknown) => Promise<T>): Promise<T> {
   options.signal?.throwIfAborted(); assertProjectionCurrent(options.assertCurrent);
-  requireDecisionFeature('automatic learning scoring, proposal inference or consolidation; inspect and edit the native records explicitly');
+  if (isClassicOperation()) throw new ToolInputProjectionError('held');
   return withModelReadingSource(source, options, async (captured, current) => {
     const site = decision.name;
     const assertCurrent = () => { current.assertCurrent?.(); };

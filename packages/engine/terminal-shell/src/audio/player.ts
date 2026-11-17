@@ -97,8 +97,12 @@ export class LocalStreamingAudioPlayer implements StreamingAudioPlayer {
     const cut = () => options.signal?.aborted === true || !this.live.has(proc);
     // Recorded from spawn so a sink that died between chunks is not waited on for a 'close' that already fired.
     let closed = false;
-    const exited = new Promise<number | null>((resolve) => {
-      proc.once('close', (code) => { closed = true; resolve(typeof code === 'number' ? code : null); });
+    // How the player ended: its exit code, or the signal that stopped it (a crash, or the audio server killing it).
+    const exited = new Promise<PlayerExit>((resolve) => {
+      proc.once('close', (code, signal) => {
+        closed = true;
+        resolve({ code: typeof code === 'number' ? code : null, signal: typeof signal === 'string' ? signal : null });
+      });
     });
     let playedOut = false;
 
@@ -121,9 +125,9 @@ export class LocalStreamingAudioPlayer implements StreamingAudioPlayer {
           if (cut()) return;
           // A closed pipe means the player went away; its exit code and last error line say why.
           abort();
-          const code = await exited;
+          const exit = await exited;
           if (cut()) return;
-          throw playerFailure(label, code, lastError(), error);
+          throw playerFailure(label, exit, lastError(), error);
         }
       }
 
@@ -134,9 +138,12 @@ export class LocalStreamingAudioPlayer implements StreamingAudioPlayer {
       // tail of the response is never truncated.
       if (cut()) return;
       try { proc.stdin.end(); } catch { /* ignore */ }
-      const code = await exited;
+      const exit = await exited;
       playedOut = true;
-      if (code !== null && code !== 0 && !cut()) throw playerFailure(label, code, lastError());
+      // A signal we did not send (cut() is false) is a failure too: the sound did not finish.
+      if (!cut() && ((exit.code !== null && exit.code !== 0) || (exit.code === null && exit.signal !== null))) {
+        throw playerFailure(label, exit, lastError());
+      }
     } finally {
       options.signal?.removeEventListener('abort', abort);
       // A failed stream (the chunk iterator threw) must not leave the sink reading stdin forever. A natural drain is left alone so the tail is not cut.
@@ -195,10 +202,19 @@ function trackLastErrorLine(proc: SpawnProcess): () => string {
   };
 }
 
-function playerFailure(label: string, code: number | null, lastLine: string, cause?: unknown): Error {
+interface PlayerExit {
+  readonly code: number | null;
+  readonly signal: string | null;
+}
+
+function playerFailure(label: string, exit: PlayerExit, lastLine: string, cause?: unknown): Error {
   const detail = lastLine ? `: ${lastLine}` : '';
+  const { code, signal } = exit;
   if (code !== null && code !== 0) {
     return new Error(`the audio player (${label}) exited with code ${code}${detail}`, cause === undefined ? undefined : { cause });
+  }
+  if (code === null && signal !== null) {
+    return new Error(`the audio player (${label}) was stopped by ${signal} before the sound finished${detail}`, cause === undefined ? undefined : { cause });
   }
   const reason = cause instanceof Error ? cause.message : String(cause ?? 'it stopped reading audio');
   return new Error(`the audio player (${label}) stopped before the sound finished (${reason})${detail}`, cause === undefined ? undefined : { cause });

@@ -69,9 +69,22 @@ export async function buildOAuthAuthorizationStart(
  * re-login).
  */
 export class OAuthTokenExchangeError extends Error {
-  constructor(message: string, readonly status: number) {
+  /** The `error` code of an RFC 6749 error answer (`invalid_grant`, ...), when the body carried one. */
+  readonly oauthError: string | undefined;
+  constructor(message: string, readonly status: number, oauthError?: string) {
     super(message);
     this.name = 'OAuthTokenExchangeError';
+    this.oauthError = oauthError;
+  }
+}
+
+/** The RFC 6749 `error` code in a token endpoint's error body, or undefined. */
+function oauthErrorCode(text: string): string | undefined {
+  try {
+    const parsed = JSON.parse(text) as { error?: unknown };
+    return typeof parsed.error === 'string' && parsed.error.length > 0 ? parsed.error : undefined;
+  } catch {
+    return undefined;
   }
 }
 
@@ -102,7 +115,7 @@ async function exchangeOAuthRequest(
   }
   if (!response.ok) {
     const text = await response.text().catch(() => '');
-    throw new OAuthTokenExchangeError(`OAuth token exchange failed (${response.status}): ${text}`, response.status);
+    throw new OAuthTokenExchangeError(`OAuth token exchange failed (${response.status}): ${text}`, response.status, oauthErrorCode(text));
   }
   const json = await response.json() as {
     access_token?: unknown | undefined;

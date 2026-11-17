@@ -141,6 +141,12 @@ function withoutRefreshState(record: ProviderSubscription): ProviderSubscription
   return rest;
 }
 
+/** Whether a failed token exchange is the authorization server refusing the grant itself. */
+function grantRefused(error: OAuthTokenExchangeError): boolean {
+  if (error.status !== 400 && error.status !== 401 && error.status !== 403) return false;
+  return error.oauthError === undefined || error.oauthError === 'invalid_grant';
+}
+
 function signedOutDuringRefresh(provider: string): Error {
   return new Error(`No stored OAuth subscription for ${provider}: it was signed out while its token was being refreshed.`);
 }
@@ -610,9 +616,12 @@ export class SubscriptionManager {
     try {
       tokenResponse = await refreshOAuthAccessToken(config, claimed.refreshToken!);
     } catch (error) {
-      // Only an answered 4xx is the authorization server refusing the grant;
-      // a transport failure, a 5xx or a malformed answer leaves it unknown.
-      const refused = error instanceof OAuthTokenExchangeError && error.status >= 400 && error.status < 500;
+      // Only the authorization server refusing the grant ends the session: a
+      // 400, 401 or 403 whose body says invalid_grant, or names no code. A busy
+      // or slow server (408, 425, 429), another client error, a transport
+      // failure, a 5xx or a malformed answer leaves it unknown: the claim is
+      // released and the next use tries again.
+      const refused = error instanceof OAuthTokenExchangeError && grantRefused(error);
       const newer = this.settleFailedRefresh(provider, claimed, refused);
       if (newer) {
         // The refusal answered a refresh token another process or a new sign-in

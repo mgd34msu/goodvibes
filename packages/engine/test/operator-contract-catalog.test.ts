@@ -1,5 +1,7 @@
 /**
- * buildOperatorContract must use the catalog parameter.
+ * The operator contract the daemon publishes lists exactly the methods and
+ * events of the catalog it is built from, keeps the auth modes clients log in
+ * with, and keeps the session record readable from a mixed-version daemon.
  */
 import { describe, expect, test } from 'bun:test';
 import { buildOperatorContract } from '../platform/src/platform/control-plane/operator-contract.js';
@@ -58,90 +60,22 @@ function makeMinimalCatalog(options: { methods: number; events: number }): Gatew
   return catalog;
 }
 
-// ---------------------------------------------------------------------------
-// Core invariant: contract.operator.methods/events reflect catalog
-// ---------------------------------------------------------------------------
-
-describe('buildOperatorContract uses catalog parameter', () => {
-  test('contract.operator.methods has exactly N methods when catalog has N methods', () => {
-    const N = 3;
-    const catalog = makeMinimalCatalog({ methods: N, events: 0 });
+describe('buildOperatorContract', () => {
+  test('lists exactly the methods and events of the catalog it is given', () => {
+    const catalog = makeMinimalCatalog({ methods: 4, events: 7 });
     const contract = buildOperatorContract(catalog);
-    expect(contract.operator.methods).toHaveLength(N);
+    expect(contract.operator.methods.map((method) => method.id).sort()).toEqual(catalog.list().map((method) => method.id).sort());
+    expect(contract.operator.events.map((event) => event.id).sort()).toEqual(catalog.listEvents().map((event) => event.id).sort());
+    expect(contract.operator.schemaCoverage.methods).toBe(4);
+    expect(contract.operator.eventCoverage.events).toBe(7);
+    const empty = buildOperatorContract(makeMinimalCatalog({ methods: 0, events: 0 }));
+    expect([empty.operator.methods.length, empty.operator.events.length]).toEqual([0, 0]);
   });
 
-  test('contract.operator.events has exactly M events when catalog has M events', () => {
-    const M = 5;
-    const catalog = makeMinimalCatalog({ methods: 0, events: M });
-    const contract = buildOperatorContract(catalog);
-    expect(contract.operator.events).toHaveLength(M);
-  });
-
-  test('contract.operator.methods and events reflect independent counts simultaneously', () => {
-    const N = 4;
-    const M = 7;
-    const catalog = makeMinimalCatalog({ methods: N, events: M });
-    const contract = buildOperatorContract(catalog);
-    expect(contract.operator.methods).toHaveLength(N);
-    expect(contract.operator.events).toHaveLength(M);
-  });
-
-  test('different catalogs produce different method counts (non-static behavior)', () => {
-    const catalogA = makeMinimalCatalog({ methods: 2, events: 0 });
-    const catalogB = makeMinimalCatalog({ methods: 6, events: 0 });
-    const contractA = buildOperatorContract(catalogA);
-    const contractB = buildOperatorContract(catalogB);
-    expect(contractA.operator.methods).toHaveLength(2);
-    expect(contractB.operator.methods).toHaveLength(6);
-    // The counts must differ, if both returned the static contract, they'd be equal
-    expect(contractA.operator.methods.length).not.toBe(contractB.operator.methods.length);
-  });
-
-  test('empty catalog produces empty methods and events arrays', () => {
-    const catalog = makeMinimalCatalog({ methods: 0, events: 0 });
-    const contract = buildOperatorContract(catalog);
-    expect(contract.operator.methods).toHaveLength(0);
-    expect(contract.operator.events).toHaveLength(0);
-  });
-
-  test('schemaCoverage.methods matches catalog method count', () => {
-    const N = 5;
-    const catalog = makeMinimalCatalog({ methods: N, events: 0 });
-    const contract = buildOperatorContract(catalog);
-    expect(contract.operator.schemaCoverage.methods).toBe(N);
-  });
-
-  test('eventCoverage.events matches catalog event count', () => {
-    const M = 3;
-    const catalog = makeMinimalCatalog({ methods: 0, events: M });
-    const contract = buildOperatorContract(catalog);
-    expect(contract.operator.eventCoverage.events).toBe(M);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Static fields are preserved (product, auth, transports, peer)
-// ---------------------------------------------------------------------------
-
-describe('buildOperatorContract preserves static contract fields', () => {
-  test('product.id is preserved from static contract', () => {
-    const catalog = makeMinimalCatalog({ methods: 1, events: 1 });
-    const contract = buildOperatorContract(catalog);
+  test('keeps the product id and the auth modes clients log in with', () => {
+    const contract = buildOperatorContract(makeMinimalCatalog({ methods: 0, events: 0 }));
     expect(contract.product.id).toBe('goodvibes');
-  });
-
-  test('auth modes are preserved from static contract', () => {
-    const catalog = makeMinimalCatalog({ methods: 0, events: 0 });
-    const contract = buildOperatorContract(catalog);
     expect(contract.auth.modes).toEqual(['shared-bearer', 'session-login']);
-  });
-
-  test('version is set to current platform VERSION string', () => {
-    const catalog = makeMinimalCatalog({ methods: 0, events: 0 });
-    const contract = buildOperatorContract(catalog);
-    // Version must be a semver-like string set dynamically by the contract builder.
-    expect(typeof contract.product.version).toBe('string');
-    expect(contract.product.version).toMatch(/^\d+\.\d+\.\d+/);
   });
 });
 

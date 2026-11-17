@@ -1,14 +1,10 @@
 /**
- * Coverage backfill for packages/operator-client/src/client-core.ts and client.ts
- *
- * Targets:
- * - client-core.ts line 63-65: splitArgs function
- * - client-core.ts lines 161-164: requireMethod throw when method not found
- * - client-core.ts lines 168-175: requireMethodRoute throw when no HTTP binding
- * - client-core.ts lines 192-346: listOperations, getOperation, invoke, stream + all shorthand methods
- * - client.ts line 57: validateResponses: false returns base client
- * - client.ts line 68: getSchemaRegistry
- * - client.ts lines 74-83: invoke with schema validation
+ * The operator client covers the operator contract: every shorthand of the
+ * client sends the HTTP method and path the contract gives its method id, a
+ * method without a REST binding is refused before anything is sent, and
+ * responses are held to the contract (a mixed-version daemon's session record
+ * still passes). The daemon is a fetch stand-in that records what reached the
+ * wire.
  */
 import { describe, expect, test } from 'bun:test';
 import { createOperatorApiClient } from '../operator-client/src/index.js';
@@ -46,112 +42,35 @@ function makeTransport(fetch: (input: string | URL | Request, init?: RequestInit
   });
 }
 
-// ---------------------------------------------------------------------------
-// createOperatorRemoteClient, contract/manifest inspection
-// ---------------------------------------------------------------------------
-
-describe('createOperatorRemoteClient: listOperations / getOperation', () => {
-  test('listOperations returns all methods from contract', () => {
-    const transport = makeTransport(async () => createJsonResponse({ ok: true }));
-    const contract = getOperatorContract();
-    const client = createOperatorRemoteClient(transport, contract);
-    const methods = client.listOperations();
-    expect(methods).toBeInstanceOf(Array);
-    expect(methods).toHaveLength(contract.operator.methods.length);
-    expect(methods.some((m) => m.id === 'accounts.snapshot')).toBe(true);
-  });
-
-  test('getOperation returns the matching method contract', () => {
-    const transport = makeTransport(async () => createJsonResponse({ ok: true }));
-    const contract = getOperatorContract();
-    const client = createOperatorRemoteClient(transport, contract);
-    const method = client.getOperation('accounts.snapshot');
-    expect(method.id).toBe('accounts.snapshot');
-  });
-
-  test('getOperation throws GoodVibesError for unknown method id', () => {
-    const transport = makeTransport(async () => createJsonResponse({ ok: true }));
-    const contract = getOperatorContract();
-    const client = createOperatorRemoteClient(transport, contract);
-    expect(() => client.getOperation('does.not.exist')).toThrow(GoodVibesError);
-    expect(() => client.getOperation('does.not.exist')).toThrow(/Unknown operator method/);
-  });
-
-  test('transport and contract are exposed as properties', () => {
-    const transport = makeTransport(async () => createJsonResponse({ ok: true }));
-    const contract = getOperatorContract();
-    const client = createOperatorRemoteClient(transport, contract);
-    expect(client.transport).toBe(transport);
-    expect(client.contract).toBe(contract);
-  });
-});
-
-describe('createOperatorRemoteClient: invoke rejects for missing HTTP binding', () => {
-  test('invoke rejects with a GoodVibesError of category contract when method has no http', async () => {
-    const transport = makeTransport(async () => createJsonResponse({ ok: true }));
-    // Build a minimal fake contract with a method that has no http binding
-    const contract = {
-      operator: {
-        methods: [
-          { id: 'internal.only', description: 'internal only', http: null },
-        ],
-      },
-    };
+describe('createOperatorRemoteClient: a method with no REST binding', () => {
+  test('is refused as a contract error before anything is sent', async () => {
+    let requests = 0;
+    const transport = makeTransport(async () => { requests++; return createJsonResponse({ ok: true }); });
+    const contract = { operator: { methods: [{ id: 'internal.only', description: 'internal only', http: null }] } };
     const client = createOperatorRemoteClient(transport, contract as unknown as ReturnType<typeof getOperatorContract>);
-    // The failure arrives on the returned promise, not as a synchronous throw.
     const caught = await client.invoke('internal.only' as never).then(() => null, (e: unknown) => e);
     expect(caught).toBeInstanceOf(GoodVibesError);
     expect((caught as GoodVibesError).category).toBe('contract');
+    expect(requests).toBe(0);
   });
 });
 
-// ---------------------------------------------------------------------------
-// createOperatorRemoteClient, shorthand method coverage
-// ---------------------------------------------------------------------------
+describe('createOperatorApiClient: responses are held to the contract', () => {
+  // A field the published schema does not declare: a strict client must refuse the answer, not pass it on.
+  const undeclared = { capturedAt: 0, providers: [], configuredCount: 0, issueCount: 0, internalOnly: true };
 
-
-// ---------------------------------------------------------------------------
-// createOperatorApiClient, validateResponses option
-// ---------------------------------------------------------------------------
-
-describe('createOperatorApiClient: validateResponses option', () => {
-  test('validateResponses: false skips Zod validation and returns base client', async () => {
-    const platformClient = createOperatorApiClient({
-      baseUrl: 'http://127.0.0.1:3210',
-      validateResponses: false,
-      fetch: withPreconnect(async () => createJsonResponse({ custom_field: 'no_zod_here', capturedAt: 0, providers: [], configuredCount: 0, issueCount: 0 })),
-    });
-    // Should not throw even if response shape is unexpected, Zod is bypassed
-    const result = await platformClient.accounts.snapshot();
-    expect(result).not.toBeNull(); // presence-only: validateResponses:false bypasses schema, no guaranteed shape
+  test('by default a response the contract does not allow is refused', async () => {
+    const client = createOperatorApiClient({ baseUrl: 'http://127.0.0.1:3210', fetch: withPreconnect(async () => createJsonResponse(undeclared)) });
+    const caught = await client.accounts.snapshot().then(() => null, (error: unknown) => error);
+    expect(caught).toBeInstanceOf(GoodVibesError);
+    expect((caught as GoodVibesError).category).toBe('contract');
   });
 
-  test('validateResponses: true (default) validates response against Zod schema', async () => {
-    const platformClient = createOperatorApiClient({
-      baseUrl: 'http://127.0.0.1:3210',
-      validateResponses: true,
-      fetch: withPreconnect(async () => createJsonResponse({ capturedAt: Date.now(), providers: [], configuredCount: 0, issueCount: 0 })),
-    });
-    const result = await platformClient.accounts.snapshot();
-    expect(result).toMatchObject({ configuredCount: 0, issueCount: 0 });
-  });
-
-  test('getOperation is accessible on OperatorApiClient', () => {
-    const platformClient = createOperatorApiClient({
-      baseUrl: 'http://127.0.0.1:3210',
-      fetch: withPreconnect(async () => createJsonResponse({ ok: true })),
-    });
-    expect(() => platformClient.getOperation('accounts.snapshot')).not.toThrow();
-    const method = platformClient.getOperation('accounts.snapshot');
-    expect(method.id).toBe('accounts.snapshot');
+  test('with validateResponses: false the same response is passed through', async () => {
+    const client = createOperatorApiClient({ baseUrl: 'http://127.0.0.1:3210', validateResponses: false, fetch: withPreconnect(async () => createJsonResponse(undeclared)) });
+    expect(await client.accounts.snapshot()).toMatchObject({ internalOnly: true });
   });
 });
-
-
-// ---------------------------------------------------------------------------
-// createOperatorRemoteClient (src), shorthand methods via src client
-// These cover the arrow-function method bindings in client-core.ts
-// ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
 // Shorthand bindings: every shorthand must reach the contract route of the

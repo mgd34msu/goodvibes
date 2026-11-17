@@ -15,6 +15,7 @@ import { readInvocationParams } from './invocation-params.js';
 import { requireNativeOwner } from './native-owner.js';
 import { logger } from '../../utils/logger.js';
 import { summarizeError } from '../../utils/error-display.js';
+import { readRefusal } from '@goodvibes-jev/engine/errors';
 const SCOPES = [WORK_LEDGER_READ_SCOPE, WORK_LEDGER_WRITE_SCOPE] as const;
 function authorize(invocation: GatewayMethodInvocation) {
   return requireNativeOwner(invocation, SCOPES, 'Native intake');
@@ -75,6 +76,11 @@ export function registerNativeConversationIntakeGatewayMethods(catalog: GatewayM
           logger.error('Native conversation storage refused the intake', { operation, code: error.code });
           throw new GatewayVerbError(stored.text, `NATIVE_INTAKE_STORAGE_${error.code.replaceAll('-', '_').toUpperCase()}`, stored.status);
         }
+        // A refusal that names its own state and next step (an unregistered or
+        // declined workspace) is decided before anything is recorded: answer it
+        // as itself, so the caller can say what to do instead of "unavailable".
+        const carried = readRefusal(error);
+        if (carried) throw new GatewayVerbError(`${carried.reason}: ${carried.state}.${carried.next.length > 0 ? ` ${carried.next.join(' ')}` : ''}`, carried.code, carried.status ?? 409);
         logger.error('Native conversation intake failed', { operation, error: summarizeError(error) });
         throw new GatewayVerbError(`Native conversation intake failed: ${summarizeError(error)}; retain the original input identity`, 'NATIVE_INTAKE_UNAVAILABLE', 503);
       }

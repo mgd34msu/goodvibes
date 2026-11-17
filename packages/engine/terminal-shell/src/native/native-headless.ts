@@ -10,6 +10,7 @@ import { captureNativeConversationInput } from './native-conversation-input.js';
 import { createNativeSubmissionIdentity, type NativeSubmissionHost, type NativeHostIdentityFormat } from './native-work-submission-host.js';
 import type { NativeHeadlessMode } from './native-headless-options.js';
 import { HEADLESS_SCHEMA_VERSION, type HeadlessUsage } from './headless-turn-events.js';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 export type NativeHeadlessHost = (NativeSubmissionHost & {
     readonly journalPath: string;
 }) | {
@@ -250,6 +251,15 @@ export async function executeNativeHeadless(options: NativeHeadlessOptions, poli
         if (options.signal.aborted) {
             state = await cancellation ?? state;
             return cancelled();
+        }
+        // The host admitted the turn and it failed here, in this process: the outcome is known (it failed),
+        // so say why and close its intake record rather than reporting an unknown host outcome.
+        if (inTurn && state?.turnPermit) {
+            try {
+                await state.finishTurn?.();
+            }
+            catch { /* the next save under this binding replaces the record */ }
+            return { exitCode: 1, response: '', error: `The turn failed in this process: ${summarizeError(error)}`, stopReason: 'unexpected_error', native: state };
         }
         const cause = nativeHeadlessFailureCause(error);
         if (!controls)

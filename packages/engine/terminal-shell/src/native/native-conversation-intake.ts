@@ -69,6 +69,21 @@ export function nativeIntakeFailureCause(error: unknown): NativeIntakeFailureCau
         return 'network';
     return 'unknown';
 }
+/**
+ * The host's own words when it answered a request with a definite refusal: a
+ * 4xx it decided before recording anything (an unregistered workspace, a
+ * missing scope, an invalid source). A timeout, a conflict with a stored
+ * record or a rate limit is not definite: the input may exist on the host.
+ */
+const INDEFINITE_CLIENT_STATUSES: ReadonlySet<number> = new Set([408, 409, 425, 429]);
+function definiteHostRefusal(error: unknown): string | undefined {
+    if (!(error instanceof Error))
+        return undefined;
+    const status = (error as { readonly status?: unknown }).status;
+    if (typeof status !== 'number' || status < 400 || status > 499 || INDEFINITE_CLIENT_STATUSES.has(status))
+        return undefined;
+    return error.message.trim() || `The host refused the input (${status}).`;
+}
 /** The one step that moves an earlier, unresolved input forward, decided from its recorded state. */
 export type NativeIntakeNextStep = 'retry' | 'resume' | 'inspect' | 'cancel';
 export interface NativeConversationIntakeState {
@@ -425,7 +440,25 @@ export class NativeConversationIntakeControls implements NativeConversationIntak
                 if (!current())
                     return;
                 phase = 'capture';
-                result = validate(await binding.client.capture(command, { signal: controller.signal }));
+                let captured: NativeConversationIntakeResult;
+                try {
+                    captured = await binding.client.capture(command, { signal: controller.signal });
+                }
+                catch (error) {
+                    const refused = definiteHostRefusal(error);
+                    if (refused === undefined || !current())
+                        throw error;
+                    // Refused before the host recorded anything: there is nothing to retry, resume or cancel,
+                    // so the record goes and the next input is not held behind this one.
+                    await settled();
+                    if (this.retained?.command.requestId === command.requestId)
+                        this.retained = undefined;
+                    // A 403 reads as an authentication failure by kind; only the principal codes say it is one.
+                    const principal = PRINCIPAL_CODES.has((error as { readonly code?: unknown }).code);
+                    return { status: 'unavailable', ...(principal ? { cause: 'principal' as const } : {}), request: request(),
+                        message: `The host refused this input, so nothing was captured or run. ${refused}` };
+                }
+                result = validate(captured);
                 if (!current())
                     return;
                 eligibleTurn = result.kind === 'turn';

@@ -101,8 +101,6 @@ const MANAGED_USAGE = `Usage: /managed ${MANAGED_USAGE_ARGS}`;
 export function registerManagedRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
     name: 'managed',
-    // A lock reason is free text, kept as typed.
-    rawRest: (args) => ((args[0] ?? '').toLowerCase() === 'lock' ? 3 : undefined),
     description: 'Export, inspect, and apply managed settings bundles',
     usage: MANAGED_USAGE_ARGS,
     confirm(args, ctx) {

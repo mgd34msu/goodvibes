@@ -283,8 +283,6 @@ export function registerSessionContentCommands(registry: CommandRegistry): void 
   // full writeup.
   registry.register({
     name: 'note',
-    // A note is kept exactly as typed.
-    rawRest: (args) => ((args[0] ?? '').toLowerCase() === 'add' ? 1 : undefined),
     description: 'Manage session notes (pinned across context compaction)',
     usage: '[list|add <text>|remove <id>]',
     argsHint: '[list|add|remove]',

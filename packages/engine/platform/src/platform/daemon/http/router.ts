@@ -497,11 +497,9 @@ export class DaemonHttpRouter {
         sessionId: url.searchParams.get('session') ?? undefined,
       }, { reachableOffHost: false });
       if (target) return new Response(null, { status: 302, headers: { Location: target } });
-      return jsonErrorResponse({
-        error: 'The web app is not served at a known address', code: 'WEB_APP_UNAVAILABLE',
-        state: 'neither the daemon nor a web server is set up to serve the web app',
-        next: ['Set controlPlane.webui.serve to true, or set web.publicBaseUrl to where the web app is served'],
-      }, { status: 404 });
+      // No web app is served anywhere this daemon knows of: the control plane's
+      // built-in page is the operator page this daemon has.
+      return this.context.controlPlaneGateway.renderWebUi();
     }
     if (url.pathname === '/api/control-plane/auth' && req.method === 'GET') {
       const apiResponse = await this.requests.dispatch(req);

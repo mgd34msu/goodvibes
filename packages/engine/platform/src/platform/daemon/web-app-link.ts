@@ -11,8 +11,10 @@
  *   neither:  `<origin>/`
  *
  * The origin is the daemon's own reachable address when it serves the web app
- * (`controlPlane.webui.serve`), otherwise the web app's address
- * (`web.publicBaseUrl`, or the web listener's binding).
+ * (`controlPlane.webui.serve`), otherwise the web app's address: a user-set
+ * `web.publicBaseUrl`, or the declared web endpoint (`web.host`/`web.port`)
+ * while `web.enabled` says a web app is served there. With none of the three
+ * there is no web app to link to, and no link is built.
  */
 import type { ConfigManager } from '../config/manager.js';
 import { resolvePairingWebOrigin } from '../pairing/web-origin.js';
@@ -35,11 +37,12 @@ function webAppPath(target: WebAppLinkTarget): string {
 }
 
 /**
- * The link, or undefined when there is no address to put in it. With
- * `reachableOffHost` (the default, for a message read on another device) a
- * loopback-only address counts as none: publishing a dead link is worse than
- * publishing none. Without it (a redirect answered by this daemon) a path on
- * this daemon is returned when the daemon serves the web app itself.
+ * The link, or undefined when there is no web app to link to or no address to
+ * put in it. With `reachableOffHost` (the default, for a message read on
+ * another device) a loopback-only address counts as none: publishing a dead
+ * link is worse than publishing none. Without it (a redirect answered by this
+ * daemon) a path on this daemon is returned when the daemon serves the web app
+ * itself.
  */
 export function webAppLink(
   config: Pick<ConfigManager, 'get'>,
@@ -53,7 +56,11 @@ export function webAppLink(
     const base = resolveReachableBaseUrl(config, 'off-host');
     return base ? `${base.replace(/\/+$/, '')}${path}` : undefined;
   }
-  const origin = resolvePairingWebOrigin(config).origin.replace(/\/+$/, '');
+  const resolved = resolvePairingWebOrigin(config);
+  // Not served by this daemon: a web app is known only at a user-set public
+  // URL, or at the declared web endpoint while web.enabled says one runs there.
+  if (!resolved.fromPublicBaseUrl && config.get('web.enabled') !== true) return undefined;
+  const origin = resolved.origin.replace(/\/+$/, '');
   if (offHost) {
     let host: string;
     try { host = new URL(origin).hostname; } catch { return undefined; }

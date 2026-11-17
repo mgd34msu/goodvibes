@@ -32,8 +32,6 @@ function usage(): string {
 export function registerVibeRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
     name: 'vibe',
-    // A reference may hold spaces and quotes; it is kept as typed.
-    rawRest: (args) => ((args[0] ?? '').toLowerCase() === 'show' ? 1 : undefined),
     effect: 'local-state',
     aliases: ['vibes'],
     description: 'Inspect, create, and import VIBE.md personality files',

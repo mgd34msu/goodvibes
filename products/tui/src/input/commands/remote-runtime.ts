@@ -64,8 +64,6 @@ function remoteDispatchSource(ctx: CommandContext) {
 export function registerRemoteRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
     name: 'remote',
-    // A pool label is free text, kept as typed.
-    rawRest: (args) => ((args[0] ?? '').toLowerCase() === 'pool' && (args[1] ?? '').toLowerCase() === 'create' ? 3 : undefined),
     aliases: [],
     description: 'Inspect, dispatch, and review self-hosted remote runners and artifacts',
     confirm(args, ctx) {

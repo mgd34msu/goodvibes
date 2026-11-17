@@ -37,8 +37,6 @@ const HEALTH_SUBCOMMANDS: ReadonlySet<string> = new Set(['report', 'review', 'op
 export function registerHealthRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
     name: 'health',
-    // A symptom is described in the words typed.
-    rawRest: (args) => ((args[0] ?? '').toLowerCase() === 'diagnose' ? 1 : undefined),
     aliases: ['doctor'],
     description: 'Health workspace for startup posture, service readiness, sandbox posture, and provider health',
     usage:

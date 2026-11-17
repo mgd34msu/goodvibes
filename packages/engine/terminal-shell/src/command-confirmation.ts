@@ -63,19 +63,6 @@ export function stripLeadingYesFlag(args: readonly string[], skip = 1): Confirma
   return { rest, yes };
 }
 
-/**
- * `--yes` on a free-text tail the command takes as typed (`rawRest`): a first
- * or last word `--yes` confirms and is not part of the text; any other
- * occurrence is text.
- */
-export function takeYesFromText(text: string): { readonly text: string; readonly yes: boolean } {
-  let rest = text.trim();
-  let yes = false;
-  if (/^--yes(?:\s|$)/.test(rest)) { yes = true; rest = rest.slice('--yes'.length).trimStart(); }
-  if (/(?:^|\s)--yes$/.test(rest)) { yes = true; rest = rest.slice(0, -'--yes'.length).trimEnd(); }
-  return { text: rest, yes };
-}
-
 /** Refuses a line that needs `--yes`: nothing was done, and the usage says how to confirm it. */
 export function requireYesFlag(_ctx: CommandConfirmationContext, action: string, usage: string): never {
   throw commandRefusal(`Refusing to ${action} without --yes.`, `Usage: ${usage}`, 'CONFIRMATION_REQUIRED');

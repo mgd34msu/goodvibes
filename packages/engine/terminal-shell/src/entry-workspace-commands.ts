@@ -46,8 +46,6 @@ export function createConfigWorkspaceCommand<Context extends EntryContext>(polic
     hidden: policy.hidden,
     // Any other word opens the settings workspace filtered by it, so only `set` takes arguments.
     subcommands: policy.set ? { set: '<key> <value>' } : undefined,
-    // `set`'s value is taken as typed: a string setting may hold quotes and spaces.
-    rawRest: policy.set ? (args) => (args[0] === 'set' ? 2 : undefined) : undefined,
     async handler(args, context) {
       if (args[0] === 'set' && policy.set) {
         await policy.set(args, context);

@@ -58,8 +58,6 @@ export function registerOperatorRuntimeCommands(registry: CommandRegistry): void
 
   registry.register({
     name: 'ops',
-    // A note is free text, kept as typed.
-    rawRest: (args) => ((args[0] ?? '').toLowerCase() === 'task' || (args[0] ?? '').toLowerCase() === 'agent' ? 3 : undefined),
     description: 'Operator Control Plane: view audit log, cancel/pause/resume/retry tasks and agents',
     usage: 'view | task <cancel|pause|resume|retry> <id> [note] | agent cancel <id> [note]',
     argsHint: '[view|task|agent]',

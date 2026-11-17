@@ -1,5 +1,5 @@
 import { routeNativeConversationInput } from '../../runtime/native-conversation-ingress.ts';
-import { renderContractStatus, runWorkstreamCommand, WORKSTREAM_SHARED_USAGE, workstreamRawRest } from '@goodvibes-jev/engine/terminal-shell';
+import { renderContractStatus, runWorkstreamCommand, WORKSTREAM_SHARED_USAGE } from '@goodvibes-jev/engine/terminal-shell';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 import { directOwnerWorkstreamInput, type CommandContext, type CommandRegistry } from '../command-registry.ts';
 
@@ -14,7 +14,6 @@ export { renderContractStatus };
 export function registerWorkstreamRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
     name: 'workstream',
-    rawRest: workstreamRawRest,
     description: 'Start, plan, inspect, stop, retry, re-budget or answer a workstream',
     usage: USAGE,
     argsHint: USAGE,

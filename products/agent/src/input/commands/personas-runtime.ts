@@ -161,8 +161,6 @@ function printError(_ctx: CommandContext, error: unknown): never {
 export function registerPersonasRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
     name: 'personas',
-    // A search or a stale reason is free text, kept as typed.
-    rawRest: (args) => ((args[0] ?? '').toLowerCase() === 'search' ? 1 : (args[0] ?? '').toLowerCase() === 'stale' ? 2 : undefined),
     effect: 'local-state',
     aliases: ['persona'],
     description: 'Manage Agent-local personas',

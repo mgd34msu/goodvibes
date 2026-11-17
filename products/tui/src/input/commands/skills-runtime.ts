@@ -7,8 +7,6 @@ import { parseScope } from './marketplace-runtime.ts';
 export function registerSkillsRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
     name: 'skills',
-    // A summary is free text, kept as typed.
-    rawRest: (args) => ((args[0] ?? '').toLowerCase() === 'publish-local' ? 3 : undefined),
     aliases: ['skill'],
     description: 'Inspect installed skill packs',
     usage: '[open|list|show <name>|origins|browse [query]|installed|catalog-review <id>|publish-local <id> <path> <summary...>|unpublish <id>|install-hint <catalog-id>|install <id> [project|user]|update <id> [project|user]|uninstall <id> [project|user]]',

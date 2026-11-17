@@ -35,8 +35,6 @@ import {
 export function registerDevicesRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
     name: 'devices',
-    // A device name is free text, kept as typed.
-    rawRest: (args) => ((args[0] ?? '').toLowerCase() === 'rename' ? 2 : (args[0] ?? '').toLowerCase() === 'migrate-shared' ? 1 : undefined),
     aliases: ['device'],
     description: 'Manage paired devices: their tokens, the phones paired as device nodes, always-allow grants and retained captures',
     usage: `[list|rename <id> <name>|revoke <id>|migrate-shared [name]|revoke-shared|${DEVICE_CAPABILITY_USAGE}]`,

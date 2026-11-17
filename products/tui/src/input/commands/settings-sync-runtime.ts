@@ -50,8 +50,6 @@ function readSettingsSyncBundle(sourcePath: string): SettingsSyncBundle {
 export function registerSettingsSyncRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
     name: 'settings-sync',
-    // A lock reason is free text, kept as typed.
-    rawRest: (args) => ((args[0] ?? '').toLowerCase() === 'lock' ? 3 : undefined),
     aliases: ['settingssync'],
     description: 'Open the settings sync modal (bare); review posture, export/import bundles, or resolve conflicts by subcommand',
     usage: '[panel|report|review|show <key>|staged|conflicts|resolve <key> <local|synced>|failures|rollback-history|export <path>|inspect <path>|pull <path>|push <path>|lock <key> <source> <reason...>|unlock <key>]: bare opens the modal',

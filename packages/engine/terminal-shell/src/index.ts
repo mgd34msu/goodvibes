@@ -341,7 +341,6 @@ export {
 } from './conversation-tree.js';
 export {
   WORKSTREAM_SHARED_USAGE,
-  workstreamRawRest,
   renderContractStatus,
   renderWorkstreamDraft,
   resolveWorkstreamContract,

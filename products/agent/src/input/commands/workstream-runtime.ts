@@ -1,4 +1,4 @@
-import { runWorkstreamCommand, WORKSTREAM_SHARED_USAGE, workstreamRawRest } from '@goodvibes-jev/engine/terminal-shell';
+import { runWorkstreamCommand, WORKSTREAM_SHARED_USAGE } from '@goodvibes-jev/engine/terminal-shell';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 import { readRefusal } from '@goodvibes-jev/engine/errors';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
@@ -13,7 +13,6 @@ import { commandRefusal } from './confirmation.ts';
 export function registerWorkstreamRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
     name: 'workstream',
-    rawRest: workstreamRawRest,
     effect: 'delegated-work',
     description: 'Plan, inspect, stop, retry, re-budget or answer a workstream',
     usage: WORKSTREAM_SHARED_USAGE,

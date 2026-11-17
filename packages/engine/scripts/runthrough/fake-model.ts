@@ -30,6 +30,8 @@ export interface RecordedRequest {
   readonly step: number;
   readonly messages: readonly ChatMessage[];
   readonly toolNames: readonly string[];
+  /** Tools whose full parameters this request carried (the rest went as one-line entries). */
+  readonly fullTools: readonly string[];
   readonly parallelToolCalls: unknown;
   readonly system: string;
   readonly replied: ScriptedReply;
@@ -122,7 +124,8 @@ export function startFakeModel(modelId = 'rt-1'): FakeModel {
       const script = marker === null ? undefined : scripts.get(marker);
       const reply = script?.(step, messages, toolNames) ?? { text: marker === null ? 'Noted.' : 'Done.' };
       const system = messages.filter((message) => message.role === 'system' || message.role === 'developer').map((message) => textOf(message.content)).join('\n');
-      requests.push({ at: Date.now(), marker, step, messages, toolNames, parallelToolCalls: body.parallel_tool_calls, system, replied: reply });
+      const fullTools = (body.tools ?? []).filter((tool) => Object.keys((tool.function?.parameters as { properties?: object } | undefined)?.properties ?? {}).length > 0).map((tool) => tool.function?.name ?? '');
+      requests.push({ at: Date.now(), marker, step, messages, toolNames, fullTools, parallelToolCalls: body.parallel_tool_calls, system, replied: reply });
       if (reply.delayMs) {
         const aborted = await new Promise<boolean>((resolve) => {
           const timer = setTimeout(() => resolve(false), reply.delayMs);

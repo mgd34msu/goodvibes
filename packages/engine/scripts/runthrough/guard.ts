@@ -1,16 +1,17 @@
 /**
  * Preload for every product process the run-through starts (passed through
  * BUN_OPTIONS, so child bun processes inherit it). Every connection must stay
- * on loopback, and on loopback only the ports this run opened
- * (RUNTHROUGH_PORTS, comma separated): the owner's own daemon listens on the
- * default ports of the same machine and must never be reached from an
- * isolated home.
+ * on loopback, and never to a port that was already listening on this machine
+ * when the run started (RUNTHROUGH_DENY_PORTS, the owner's own daemon among
+ * them) or to a GoodVibes default port: an isolated home must never reach the
+ * owner's services. Ports the run's own children open later (the daemon, the
+ * scripted model, a browser's debugging port) are reachable.
  */
 import net from 'node:net';
 import { createRequire, syncBuiltinESMExports } from 'node:module';
 import { installTestNetworkGuard } from '../../toolchain/src/test-runner/test-network-guard.ts';
 
-const allowed = new Set((process.env.RUNTHROUGH_PORTS ?? '').split(',').map((port) => port.trim()).filter(Boolean));
+const denied = new Set([...(process.env.RUNTHROUGH_DENY_PORTS ?? '').split(','), '3421', '3422', '3423', '4444'].map((port) => port.trim()).filter(Boolean));
 
 function refuse(what: string): never {
   const line = `[runthrough guard] refused ${what}`;
@@ -23,7 +24,7 @@ installTestNetworkGuard((diagnostic) => { process.stderr.write(`[runthrough guar
 function checkPort(port: unknown, what: string): void {
   if (port === undefined || port === null || port === '') return;
   const text = String(port);
-  if (!allowed.has(text)) refuse(`${what} to loopback port ${text} (not opened by this run)`);
+  if (denied.has(text)) refuse(`${what} to loopback port ${text} (a service that was running before this run)`);
 }
 
 function checkUrl(value: unknown, what: string): void {
@@ -66,7 +67,8 @@ const nodeRequire = createRequire(import.meta.url);
 const netModule = nodeRequire('node:net') as typeof net;
 const guardedConnect = netModule.Socket.prototype.connect;
 netModule.Socket.prototype.connect = function (this: net.Socket, ...args: unknown[]): net.Socket {
-  const first = args[0];
+  // Node normalizes some overloads to one array argument.
+  const first = Array.isArray(args[0]) ? (args[0] as unknown[])[0] : args[0];
   const options = typeof first === 'object' && first !== null && !Array.isArray(first) ? first as Record<string, unknown> : undefined;
   if (!(options && (typeof options.path === 'string'))) {
     if (!(typeof first === 'string' && !/^\d+$/.test(first))) checkPort(options ? options.port : first, 'TCP');

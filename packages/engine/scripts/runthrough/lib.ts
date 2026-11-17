@@ -9,7 +9,7 @@
  * run's root, and every product process loads guard.ts, which refuses any
  * connection that is not to a loopback port this run opened.
  */
-import { mkdirSync, writeFileSync, existsSync, readFileSync, appendFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync, existsSync, readFileSync, appendFileSync, symlinkSync, unlinkSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { Subprocess } from 'bun';
 
@@ -54,6 +54,19 @@ function deepMerge(target: Record<string, unknown>, source: Record<string, unkno
   return target;
 }
 
+/** A short symlink to `target` beside the scratch folder's temp root (/tmp/claude-<uid> when it exists). */
+function shortTempLink(target: string): string {
+  if (target.length < 48) return target;
+  const uid = typeof process.getuid === 'function' ? process.getuid() : 0;
+  const base = existsSync(`/tmp/claude-${uid}`) ? `/tmp/claude-${uid}` : '/tmp';
+  const link = join(base, `rt-${Math.random().toString(16).slice(2, 8)}`);
+  symlinkSync(target, link);
+  shortLinks.push(link);
+  return link;
+}
+const shortLinks: string[] = [];
+process.on('exit', () => { for (const link of shortLinks) { try { unlinkSync(link); } catch { /* already gone */ } } });
+
 export interface HomeOptions {
   readonly modelBaseURL: string;
   readonly permissionsMode?: string;
@@ -72,6 +85,10 @@ export function makeHome(base: string, name: string, options: HomeOptions): Home
   const workspace = join(root, 'workspace');
   const daemonHome = join(home, '.goodvibes', 'daemon');
   for (const dir of [home, workspace, daemonHome, join(root, 'tmp'), join(home, '.config'), join(home, '.cache'), join(home, '.local/share'), join(home, '.local/state')]) mkdirSync(dir, { recursive: true });
+  // Unix socket paths (a browser's singleton socket) are limited to about 100
+  // bytes, and the scratch folder alone is near that: the processes get a short
+  // link to this home's temp folder as TMPDIR.
+  const tmp = shortTempLink(join(root, 'tmp'));
   const ports = options.ports ?? { controlPlane: freePort(), http: freePort(), web: freePort() };
   const allowed = new Set<number>([ports.controlPlane, ports.http, ports.web, Number(new URL(options.modelBaseURL).port)]);
   const env: Record<string, string> = {
@@ -83,8 +100,8 @@ export function makeHome(base: string, name: string, options: HomeOptions): Home
     GOODVIBES_WORKING_DIR: workspace,
     XDG_CONFIG_HOME: join(home, '.config'), XDG_DATA_HOME: join(home, '.local/share'),
     XDG_CACHE_HOME: join(home, '.cache'), XDG_STATE_HOME: join(home, '.local/state'),
-    XDG_RUNTIME_DIR: join(root, 'tmp'),
-    TMPDIR: join(root, 'tmp'), TMP: join(root, 'tmp'), TEMP: join(root, 'tmp'),
+    XDG_RUNTIME_DIR: tmp,
+    TMPDIR: tmp, TMP: tmp, TEMP: tmp,
     RT_FAKE_API_KEY: 'rt-local-key',
     BUN_OPTIONS: `--preload ${GUARD}`,
   };
@@ -96,13 +113,10 @@ export function makeHome(base: string, name: string, options: HomeOptions): Home
   };
   const judgment = options.judgment === undefined || options.judgment === 'off'
     ? { policy: 'No Decision Model' }
-    : { policy: options.judgment.policy ?? 'Decision Model Only', endpoint: options.judgment.endpoint, keySource: 'none', keyName: '', model: 'rt-jev' };
+    // No policy: the default, which is what a person who set a decision model has.
+    : { ...(options.judgment.policy ? { policy: options.judgment.policy } : {}), endpoint: options.judgment.endpoint, keySource: 'none', model: 'rt-jev' };
   const common: Record<string, unknown> = {
-    controlPlane: { host: '127.0.0.1', port: ports.controlPlane },
-    httpListener: { host: '127.0.0.1', port: ports.http },
-    web: { host: '127.0.0.1', port: ports.web },
     provider: { model: `${PROVIDER_ID}:${MODEL_ID}` },
-    judgment,
     ...(options.permissionsMode ? { permissions: { mode: options.permissionsMode } } : {}),
   };
   if (options.extraSettings) deepMerge(common, options.extraSettings);
@@ -117,6 +131,14 @@ export function makeHome(base: string, name: string, options: HomeOptions): Home
     },
     allow(port) { allowed.add(port); },
   };
+  // Decision-model settings are the daemon's own (config-ownership.ts): its tier is the daemon home's settings file.
+  // So are the listener ports, which every app reads to find the daemon.
+  writeFileSync(join(daemonHome, 'settings.json'), `${JSON.stringify({
+    judgment,
+    controlPlane: { host: '127.0.0.1', port: ports.controlPlane },
+    httpListener: { host: '127.0.0.1', port: ports.http },
+    web: { host: '127.0.0.1', port: ports.web },
+  }, null, 2)}\n`);
   for (const surface of ['tui', 'agent', 'daemon-host'] as const) {
     value.settings(surface, common);
     mkdirSync(join(home, '.goodvibes', surface, 'providers'), { recursive: true });
@@ -125,8 +147,24 @@ export function makeHome(base: string, name: string, options: HomeOptions): Home
   return value;
 }
 
+/** Loopback ports listening before the run started (the owner's services): the guard refuses them. */
+function listeningPorts(): Set<number> {
+  const ports = new Set<number>();
+  for (const file of ['/proc/net/tcp', '/proc/net/tcp6']) {
+    let text = '';
+    try { text = readFileSync(file, 'utf8'); } catch { continue; }
+    for (const line of text.split('\n').slice(1)) {
+      const fields = line.trim().split(/\s+/);
+      if (fields[3] === '0A' && fields[1]) ports.add(parseInt(fields[1].split(':').at(-1) ?? '0', 16));
+    }
+  }
+  return ports;
+}
+const PREEXISTING_PORTS = listeningPorts();
+
 function envFor(home: Home, extra: Record<string, string> = {}): Record<string, string> {
-  return { ...home.env, RUNTHROUGH_PORTS: [...home.allowed].join(','), ...extra };
+  const deny = [...PREEXISTING_PORTS].filter((port) => !home.allowed.has(port));
+  return { ...home.env, RUNTHROUGH_DENY_PORTS: deny.join(','), ...extra };
 }
 
 export interface RunResult {
@@ -205,8 +243,24 @@ export interface Daemon {
   kill(): Promise<void>;
 }
 
-/** Start the daemon from the checkout in the foreground, bound to 127.0.0.1 on this home's port. */
+/**
+ * Start the daemon from the checkout in the foreground, bound to 127.0.0.1 on
+ * this home's port. A checkout someone is editing can fail to build for a
+ * moment; that (and only that) is retried for up to two minutes.
+ */
 export async function startDaemon(home: Home, extraArgs: readonly string[] = [], extraEnv: Record<string, string> = {}): Promise<Daemon> {
+  for (let attempt = 0; ; attempt++) {
+    try { return await startDaemonOnce(home, extraArgs, extraEnv); }
+    catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (attempt >= 8 || !/errors? building|Cannot find module|SyntaxError/.test(message)) throw error;
+      process.stdout.write(`[runthrough] the checkout does not build right now (${message.split('\n').find((line) => /building|Cannot find|SyntaxError/.test(line))?.slice(0, 160)}); retrying in 15 s\n`);
+      await Bun.sleep(15_000);
+    }
+  }
+}
+
+async function startDaemonOnce(home: Home, extraArgs: readonly string[], extraEnv: Record<string, string>): Promise<Daemon> {
   const child = Bun.spawn([process.execPath, '--no-env-file', DAEMON_ENTRY, 'serve', '--port', String(home.ports.controlPlane), '--hostname', '127.0.0.1', ...extraArgs], {
     cwd: home.workspace, env: envFor(home, extraEnv), stdin: 'ignore', stdout: 'pipe', stderr: 'pipe',
   });
@@ -247,9 +301,9 @@ export function operatorToken(home: Home): string {
   return token;
 }
 
-export async function api(daemon: Daemon, token: string, method: string, path: string, body?: unknown): Promise<{ status: number; body: unknown; text: string }> {
+export async function api(daemon: Daemon, token: string, method: string, path: string, body?: unknown, headers: Record<string, string> = {}): Promise<{ status: number; body: unknown; text: string }> {
   const response = await fetch(`${daemon.baseUrl}${path}`, {
-    method, headers: { authorization: `Bearer ${token}`, ...(body === undefined ? {} : { 'content-type': 'application/json' }) },
+    method, headers: { authorization: `Bearer ${token}`, ...(body === undefined ? {} : { 'content-type': 'application/json' }), ...headers },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
   const text = await response.text();
@@ -385,7 +439,7 @@ export interface NativeTurn {
  * through native intake, admit it, and start its hosted turn on the daemon
  * (`continuationSessionId` continues that hosted session).
  */
-export async function sendNativeHostedTurn(daemon: Daemon, token: string, text: string, continuationSessionId?: string): Promise<NativeTurn> {
+export async function sendNativeHostedTurn(daemon: Daemon, token: string, text: string, continuationSessionId?: string, asAgent = false): Promise<NativeTurn> {
   const requestId = crypto.randomUUID();
   const inputId = crypto.randomUUID();
   const capture = await api(daemon, token, 'POST', '/api/work-ledger/intake/capture', {
@@ -400,7 +454,8 @@ export async function sendNativeHostedTurn(daemon: Daemon, token: string, text: 
   }
   if (result.kind !== 'turn') throw new Error(`the host did not admit a conversation turn: ${JSON.stringify(result).slice(0, 400)}`);
   const target = { projectId: result.projectId, inputId, sourceRevision: result.sourceRef.sourceRevision };
-  const start = await api(daemon, token, 'POST', '/api/work-ledger/turn/start', target);
+  // The Agent starts its hosted turns as the GoodVibes Agent (its tools and prompt); the web UI as itself.
+  const start = await api(daemon, token, 'POST', asAgent ? '/api/work-ledger/turn/startAgent' : '/api/work-ledger/turn/start', target);
   return { projectId: result.projectId, inputId, requestId, sourceRevision: result.sourceRef.sourceRevision, start };
 }
 

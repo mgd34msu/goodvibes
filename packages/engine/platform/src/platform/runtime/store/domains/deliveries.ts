@@ -4,13 +4,6 @@
 
 import type { AutomationDeliveryAttempt } from '../../../automation/delivery.js';
 
-export type DeliveryLifecycleState =
-  | 'pending'
-  | 'sending'
-  | 'sent'
-  | 'failed'
-  | 'dead_lettered';
-
 export interface DeliveryDomainState {
   readonly revision: number;
   readonly lastUpdatedAt: number;
@@ -33,6 +26,7 @@ export interface RetiredAttemptCounts {
   readonly queued: number;
   readonly started: number;
   readonly succeeded: number;
+  readonly failed: number;
   readonly deadLettered: number;
 }
 

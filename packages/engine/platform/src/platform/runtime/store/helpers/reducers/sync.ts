@@ -583,11 +583,12 @@ export function patchControlPlaneDomain(domain: ControlPlaneDomainState, patch: 
 }
 
 function addRetiredAttempts(current: RetiredAttemptCounts | undefined, dropped: readonly AutomationDeliveryAttempt[]): RetiredAttemptCounts {
-  const base = current ?? { queued: 0, started: 0, succeeded: 0, deadLettered: 0 };
+  const base = current ?? { queued: 0, started: 0, succeeded: 0, failed: 0, deadLettered: 0 };
   return {
     queued: base.queued + dropped.length,
     started: base.started + dropped.filter((record) => record.startedAt !== undefined || record.status !== 'pending').length,
     succeeded: base.succeeded + dropped.filter((record) => record.status === 'sent').length,
+    failed: base.failed + dropped.filter((record) => record.status === 'failed').length,
     deadLettered: base.deadLettered + dropped.filter((record) => record.status === 'dead_lettered').length,
   };
 }
@@ -595,8 +596,9 @@ function addRetiredAttempts(current: RetiredAttemptCounts | undefined, dropped: 
 export function updateDeliveryDomainFromAttempt(domain: DeliveryDomainState, attempt: AutomationDeliveryAttempt, source: string): DeliveryDomainState {
   const deliveryAttempts = new Map(domain.deliveryAttempts);
   deliveryAttempts.set(attempt.id, attempt);
-  // Only attempts that reached their end are dropped; a failed one may still be retried.
-  const dropped = evictOldestEnded(deliveryAttempts, (record) => record.status === 'sent' || record.status === 'dead_lettered', (record) => record.endedAt ?? record.startedAt ?? 0);
+  // The delivery manager sets `endedAt` exactly when no further try will be
+  // made (sent, a non-retryable failure, retries spent), so that is the end.
+  const dropped = evictOldestEnded(deliveryAttempts, (record) => record.endedAt !== undefined, (record) => record.endedAt ?? 0);
   const retired = dropped.length > 0 ? addRetiredAttempts(domain.retiredAttempts, dropped) : domain.retiredAttempts;
   const attempts = [...deliveryAttempts.values()].sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0) || a.id.localeCompare(b.id));
   return {
@@ -609,7 +611,7 @@ export function updateDeliveryDomainFromAttempt(domain: DeliveryDomainState, att
     totalQueued: attempts.length + (retired?.queued ?? 0),
     totalStarted: attempts.filter((record) => record.startedAt !== undefined || record.status !== 'pending').length + (retired?.started ?? 0),
     totalSucceeded: attempts.filter((record) => record.status === 'sent').length + (retired?.succeeded ?? 0),
-    totalFailed: attempts.filter((record) => record.status === 'failed').length,
+    totalFailed: attempts.filter((record) => record.status === 'failed').length + (retired?.failed ?? 0),
     totalDeadLettered: attempts.filter((record) => record.status === 'dead_lettered').length + (retired?.deadLettered ?? 0),
     ...(retired ? { retiredAttempts: retired } : {}),
   };

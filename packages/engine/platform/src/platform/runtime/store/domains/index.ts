@@ -143,8 +143,8 @@ export type {
 export { createInitialControlPlaneState } from './control-plane.js';
 
 export type {
-  DeliveryLifecycleState,
   DeliveryDomainState,
+  RetiredAttemptCounts,
 } from './deliveries.js';
 export { createInitialDeliveryState } from './deliveries.js';
 

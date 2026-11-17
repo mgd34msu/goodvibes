@@ -65,7 +65,10 @@ async function run(cmd: string[], cwd?: string): Promise<void> {
  * with no entry is built only when its digest is given with --source-sha256,
  * so a retagged or tampered upstream archive is never compiled into a shipped binary.
  */
-const SOURCE_SHA256: Readonly<Record<string, string>> = {};
+const SOURCE_SHA256: Readonly<Record<string, string>> = {
+  // github.com/ggml-org/whisper.cpp/archive/refs/tags/v1.8.2.tar.gz, read from both the archive and codeload hosts.
+  '1.8.2': 'bcee25589bb8052d9e155369f6759a05729a2022d2a8085c1aa4345108523077',
+};
 
 const version = arg('version', '1.8.2');
 const outDir = resolve(arg('out', '.tmp/whisper-bundle'));

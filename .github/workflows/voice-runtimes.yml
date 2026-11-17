@@ -29,6 +29,10 @@ on:
         description: "Engine version (whisper.cpp source tag, no leading v)"
         required: false
         default: "1.8.2"
+      source_sha256:
+        description: "sha256 of the source archive, for a version the build script has no pin for (verify it against upstream first)"
+        required: false
+        default: ""
 
 concurrency:
   # Never let two publish runs race the same append-only tag.
@@ -58,13 +62,15 @@ jobs:
       - name: Build the reproducible bundle
         env:
           BUNDLE_VERSION: ${{ github.event.inputs.version }}
+          SOURCE_SHA256: ${{ github.event.inputs.source_sha256 }}
           REPO: ${{ github.repository }}
         run: |
           bun packages/engine/scripts/build-whisper-bundle.ts \
             --version "$BUNDLE_VERSION" \
             --out .tmp/voice-runtimes \
             --tag "$VOICE_RUNTIMES_TAG" \
-            --repo "$REPO"
+            --repo "$REPO" \
+            ${SOURCE_SHA256:+--source-sha256 "$SOURCE_SHA256"}
       - name: Ensure the append-only release tag exists
         env:
           GH_TOKEN: ${{ github.token }}

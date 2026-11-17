@@ -87,9 +87,7 @@ The model can inspect service posture with `host action:"services"`. That report
 | `httpListener` | 3422 | The daemon's inbound events endpoint |
 | `web` | 3423 | The browser companion route, the URL the connected browser cockpit opens |
 
-The connected browser cockpit/PWA is the visible UI surface `connected-browser-cockpit`; `computer action:"browser"` inspects readiness and `computer action:"open_browser" confirm:true explicitUserRequest:"..."` opens the configured URL through the existing confirmed surface route. `ui_surface surfaceId:"connected-browser-cockpit"` remains available for detailed compatibility inspection and reports Agent workspace category coverage, mobile/PWA control routes, the Agent onboarding marker, and browser/PWA first-run evidence.
-
-Certified platform/daemon browser/PWA category-route records can make the cockpit `browser-native-ready` only when every Agent workspace category has schema/version/publication/publisher/provenance/freshness-cursor/receipt metadata, exact inspect/open routes, and mobile/touch evidence. Certified browser/PWA first-run records add manifest, service-worker, install, and offline evidence with redacted URLs and summaries.
+The connected browser cockpit/PWA is the visible UI surface `connected-browser-cockpit`; `computer action:"browser"` inspects readiness and `computer action:"open_browser" confirm:true explicitUserRequest:"..."` opens the configured URL through the existing confirmed surface route. `ui_surface surfaceId:"connected-browser-cockpit"` remains available for detailed inspection and reports the web URL, whether the web endpoint is enabled, and whether Agent onboarding is complete. The web UI has its own views (chat, work, library, personal, phone and settings); it does not mirror the Agent workspace categories, so the cockpit claims no category coverage.
 
 Start/setup readiness can also satisfy the setup checklist from saved durable artifacts or live platform/daemon setup read models when the connected host publishes them, and reports the gap when no receipt exists. Service lifecycle and listener changes must use setup or confirmed daemon operator methods.
 

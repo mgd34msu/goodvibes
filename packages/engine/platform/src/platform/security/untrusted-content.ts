@@ -1030,6 +1030,22 @@ export function resetProcessUntrustedContentLedgerForTests(): void {
   processLedger = null;
 }
 
+/** Where page reads made by an admitted tool call wait until the call ends. */
+const deferredIngests = new AsyncLocalStorage<(record: () => void) => void>();
+
+/**
+ * Runs an admitted tool call's body with the reads it records through a port
+ * held back, each handed to `defer` to be recorded when the call has ended.
+ *
+ * The exposure revision is part of the call's own authority, so a read
+ * recorded mid-call (a browser snapshot recording the page it read) made that
+ * same call's authority stale and failed it. A call nested inside another
+ * joins the outer call's: its reads are recorded when the outer one ends.
+ */
+export function deferUntrustedIngests<T>(defer: (record: () => void) => void, run: () => T): T {
+  return deferredIngests.getStore() === undefined ? deferredIngests.run(defer, run) : run();
+}
+
 export interface UntrustedContentPortOptions {
   /** The surface every envelope and ingest from this port is labelled with. */
   readonly surface: UntrustedSurface;
@@ -1068,12 +1084,17 @@ export function createUntrustedContentPort(options: UntrustedContentPortOptions)
         ...(options.now ? { now: options.now } : {}),
       }),
     recordIngest: (input) => {
-      ledger.record({
+      const scope = currentUntrustedContentScope();
+      const ingest: UntrustedIngest = {
         surface,
         origin: input.origin,
         at: input.at,
+        ...(scope === undefined ? {} : { scope }),
         ...(input.content === undefined ? {} : { content: input.content }),
-      });
+      };
+      const defer = deferredIngests.getStore();
+      if (defer) defer(() => { ledger.record(ingest); });
+      else ledger.record(ingest);
     },
     evaluateOutwardEffect: (input) =>
       evaluateOutwardEffect({

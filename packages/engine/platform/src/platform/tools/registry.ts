@@ -18,7 +18,7 @@ import {
 } from './input-projection.js';
 import { captureNativeReferenceProjection } from './native-reference-projection.js';
 import { mcpResultIngest } from './mcp/result-ingest.js';
-import { getProcessUntrustedContentLedger, type UntrustedIngest } from '../security/untrusted-content.js';
+import { deferUntrustedIngests, getProcessUntrustedContentLedger, type UntrustedIngest } from '../security/untrusted-content.js';
 import { type JudgmentPort } from '@goodvibes-jev/judgment';
 import { captureOwnedJson, snapshotJudgmentInput } from '../gate/judgment-input.js';
 import { assertAutonomousConfigTransition, completeAutonomousConfigTransition, bindAutonomousNestedAdmission, readAutonomousSettingsPresentation, readAutonomousWorkspaceConstraint, readAutonomousEffectConstraint, readAutonomousNestedOwner, consumeAutonomousAdmission, type AutonomousNestedOwner, type AutonomousPermissionAdmission, type PermissionManager } from '../permissions/manager.js';
@@ -156,6 +156,8 @@ interface CurrentToolExecution {
    * captured under, so it is recorded when the parent has finished.
    */
   readonly pendingIngests: UntrustedIngest[];
+  /** Reads the body itself recorded through an untrusted-content port, held for the same reason. */
+  readonly deferredIngests: (() => void)[];
   active: boolean;
   checking: boolean;
 }
@@ -1168,7 +1170,7 @@ export class ToolRegistry {
         const nestedOwner = readAutonomousNestedOwner(assertAdmissionCurrent);
         if (!nestedOwner) throw new ToolInputProjectionError('held');
         const declaredEffects = record.projection.definition.sideEffects;
-        proof = { name: call.name, registry: this, nestedOwner, admissionGuard: assertAdmissionCurrent, args: call.args, active: true, checking: false, pendingIngests: [], assertEffect,
+        proof = { name: call.name, registry: this, nestedOwner, admissionGuard: assertAdmissionCurrent, args: call.args, active: true, checking: false, pendingIngests: [], deferredIngests: [], assertEffect,
           signal, readOnlyDefinition: Array.isArray(declaredEffects) && declaredEffects.length > 0 && declaredEffects.every(effect => effect === 'read_fs'),
           assertWorkspace: readAutonomousWorkspaceConstraint(assertAdmissionCurrent),
           settingsPresentation: readAutonomousSettingsPresentation(assertAdmissionCurrent),
@@ -1190,7 +1192,10 @@ export class ToolRegistry {
         assertProjectionCurrent(callerCurrent); assertAdmissionCurrent?.();
         this.assertExecuting(call, record); assertProjectionSignal(signal);
       };
-      const execute = () => applyIntrinsic(record.executor, record.tool, [call.args, executionOptions]);
+      const body = () => applyIntrinsic(record.executor, record.tool, [call.args, executionOptions]);
+      const deferred = proof?.deferredIngests;
+      // What the body reads is recorded when it ends, as below: recording it now would make this call's own authority stale.
+      const execute = deferred ? () => deferUntrustedIngests(recordIngest => { deferred.push(recordIngest); }, body) : body;
       const mode = currentExecutionMode() ?? registryPermissionOwners.get(this)?.getMode();
       const invoke = () => executingContext.run(proof ? { proof, options: executionOptions } : undefined, execute);
       const assertModeCurrent = proof ? () => {
@@ -1228,6 +1233,7 @@ export class ToolRegistry {
       const recordIngests = (): void => {
         if (outcome === undefined) return;
         const own = opts !== undefined && nestedCallOptions.has(opts) ? undefined : mcpResultIngest(call.name, call.args, outcome);
+        for (const recordIngest of proof?.deferredIngests ?? []) recordIngest();
         for (const ingest of [...(proof?.pendingIngests ?? []), ...(own ? [own] : [])]) getProcessUntrustedContentLedger().record(ingest);
       };
       try {

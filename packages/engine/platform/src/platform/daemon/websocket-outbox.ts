@@ -146,6 +146,11 @@ export class WebSocketOutbox {
   private enqueue(bytes: Buffer): void {
     this.directory ??= mkdtempSync(join(tmpdir(), `${OUTBOX_DIRECTORY_PREFIX}${process.pid}-`));
     let file = this.files.at(-1);
+    // Every record of the newest file was taken already (each is read before it
+    // is released): write from its start again instead of rolling to a new file
+    // and leaving this one on disk until the drain ends. Only a file that still
+    // holds records is ever rolled past, and release() removes it once emptied.
+    if (file !== undefined && file.pending === 0) file.written = 0;
     if (file === undefined || file.written >= SPILL_FILE_BYTES) {
       const path = join(this.directory, `outbox-${this.fileCount++}`);
       file = { fd: openSync(path, constants.O_CREAT | constants.O_EXCL | constants.O_RDWR | constants.O_NOFOLLOW, 0o600), path, written: 0, pending: 0 };
@@ -160,7 +165,11 @@ export class WebSocketOutbox {
     this.pendingBytes += bytes.length;
   }
 
-  /** A spill file whose records have all been taken, and that takes no new ones, is closed and removed. */
+  /**
+   * A spill file whose records have all been taken, and that takes no new ones,
+   * is closed and removed. The newest one stays open and is written from its
+   * start again by the next enqueue.
+   */
   private release(file: SpillFile): void {
     file.pending -= 1;
     if (file.pending > 0 || file === this.files.at(-1)) return;

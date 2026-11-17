@@ -1,6 +1,5 @@
 /** Derived cache freshness binds actual saved writer revisions, not another
  * serialization/hash of complete source text on every inspection. */
-import { captureStrictJudgmentJson } from '../../gate/judgment-result.js';
 import { sameKnowledgeRecord } from '../store-record-representation.js';
 import type { KnowledgeStore } from '../store.js';
 import type { KnowledgeExtractionRecord, KnowledgeSourceRecord } from '../types.js';
@@ -10,48 +9,39 @@ export interface SemanticSourceRevision {
   readonly version: 2; readonly sourceId: string; readonly sourceRevision: string;
   readonly extractionId: string; readonly extractionRevision: string;
 }
-const apply = Reflect.apply, weakGet = WeakMap.prototype.get, weakSet = WeakMap.prototype.set, freeze = Object.freeze;
-const NativeWeakRef = WeakRef, deref = WeakRef.prototype.deref;
-interface RevisionOwner { readonly store: WeakRef<KnowledgeStore>; readonly source: WeakRef<KnowledgeSourceRecord>; readonly extraction: WeakRef<KnowledgeExtractionRecord> }
-// A copied/retained tiny cache binding must not keep the complete source store
-// alive. The actual call arguments independently keep their owners alive.
-const revisions = new WeakMap<SemanticSourceRevision, RevisionOwner>();
+/** What one read of a source's saved enrichment state says: whether it was
+ * written against the current source and extraction revisions, and by which
+ * extractor. */
+export interface SemanticSourceFreshness { readonly current: boolean; readonly extractor: string | undefined }
+
 export function captureSemanticSourceRevision(store: KnowledgeStore, source: KnowledgeSourceRecord, extraction: KnowledgeExtractionRecord): SemanticSourceRevision {
   let result: SemanticSourceRevision | undefined;
   store.assertRecordSnapshotFrame(() => {
     if (store.getSource(source.id) !== source || store.getExtractionBySourceId(source.id) !== extraction || extraction.sourceId !== source.id) throw new Held('stale');
     const savedSource = store.getSourceSnapshot({ id: source.id }), savedExtraction = store.getRecordSnapshot('extraction', extraction.id);
     if (!savedSource.generation || !savedExtraction.generation || !sameKnowledgeRecord(source, savedSource.source) || !sameKnowledgeRecord(extraction, savedExtraction.record)) throw new Held('stale');
-    result = freeze({ version: 2, sourceId: source.id, sourceRevision: savedSource.generation, extractionId: extraction.id, extractionRevision: savedExtraction.generation });
+    result = Object.freeze({ version: 2, sourceId: source.id, sourceRevision: savedSource.generation, extractionId: extraction.id, extractionRevision: savedExtraction.generation });
     return undefined;
   });
-  apply(weakSet, revisions, [result!, freeze({ store: new NativeWeakRef(store), source: new NativeWeakRef(source), extraction: new NativeWeakRef(extraction) })]);
   return result!;
 }
 export function semanticSourceRevisionMetadata(binding: SemanticSourceRevision): Record<string, unknown> {
-  if (!apply(weakGet, revisions, [binding])) throw new Held('malformed');
   return { semanticSourceVersion: 2, semanticSourceBinding: binding };
 }
-/** Reconstructible caches require current native revisions. Old text digests
- * remain readable history, but never establish freshness or require hashing. */
-export function semanticSourceIsCurrent(store: KnowledgeStore, source: KnowledgeSourceRecord, extraction: KnowledgeExtractionRecord,
-  supplied?: SemanticSourceRevision): boolean {
+/** Reconstructible caches require current native revisions. Old text digests,
+ * a format this build does not know and an unreadable binding never establish
+ * freshness: the source reads as not current, so the next pass rewrites it. */
+export function semanticSourceFreshness(store: KnowledgeStore, source: KnowledgeSourceRecord, extraction: KnowledgeExtractionRecord): SemanticSourceFreshness {
   const binding = captureSemanticSourceRevision(store, source, extraction);
-  if (supplied) {
-    const original = apply(weakGet, revisions, [supplied]) as RevisionOwner | undefined;
-    if (!original || apply(deref, original.store, []) !== store || apply(deref, original.source, []) !== source || apply(deref, original.extraction, []) !== extraction) throw new Held('malformed');
-    if (JSON.stringify(supplied) !== JSON.stringify(binding)) throw new Held('stale');
-  }
-  const state = store.getSemanticEnrichmentStateSnapshot(source.id); if (!state) return false;
-  const metadata = captureStrictJudgmentJson(state.metadata), version = metadata.semanticSourceVersion;
-  if (version !== undefined && version !== 2) throw new Held('unsupported-format');
-  if (version === 2) {
-    const saved = metadata.semanticSourceBinding;
-    if (!saved || typeof saved !== 'object' || Array.isArray(saved) || Object.keys(saved).length !== 5) throw new Held('malformed');
-    const value = saved as Record<string, unknown>;
-    if (value['version'] !== 2 || ['sourceId', 'sourceRevision', 'extractionId', 'extractionRevision'].some(key => typeof value[key] !== 'string' || !value[key])) throw new Held('malformed');
-    return value['sourceId'] === binding.sourceId && value['sourceRevision'] === binding.sourceRevision
-      && value['extractionId'] === binding.extractionId && value['extractionRevision'] === binding.extractionRevision;
-  }
-  return false;
+  const state = store.getSemanticEnrichmentStateSnapshot(source.id);
+  if (!state) return { current: false, extractor: undefined };
+  const metadata = state.metadata;
+  const extractor = typeof metadata['extractor'] === 'string' ? metadata['extractor'] : undefined;
+  if (metadata['semanticSourceVersion'] !== 2) return { current: false, extractor };
+  const saved = metadata['semanticSourceBinding'];
+  if (!saved || typeof saved !== 'object' || Array.isArray(saved)) return { current: false, extractor };
+  const value = saved as Record<string, unknown>;
+  const current = value['version'] === 2 && value['sourceId'] === binding.sourceId && value['sourceRevision'] === binding.sourceRevision
+    && value['extractionId'] === binding.extractionId && value['extractionRevision'] === binding.extractionRevision;
+  return { current, extractor };
 }

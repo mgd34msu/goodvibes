@@ -23,7 +23,7 @@ import type {
 } from './types.js';
 import { readRecord, readString, readStringArray } from './utils.js';
 import { uniqueStrings } from './utils.js';
-import { semanticSourceIsCurrent } from './source-revisions.js';
+import { semanticSourceFreshness } from './source-revisions.js';
 import { isSelfImproveHold, runKnowledgeSemanticSelfImprovement } from './self-improvement.js';
 import {
   BackgroundSelfImproveScheduler,
@@ -751,9 +751,8 @@ function activeSelfImproveResult(input: KnowledgeSemanticSelfImproveInput): Know
 function sourceNeedsLlmUpgrade(store: KnowledgeStore, source: KnowledgeSourceRecord): boolean {
   const extraction = store.getExtractionBySourceId(source.id);
   if (!extraction) return false;
-  const existingSemantic = readRecord(store.getSemanticEnrichmentState(source.id)?.metadata);
-  return !semanticSourceIsCurrent(store, source, extraction)
-    || readString(existingSemantic.extractor) !== 'llm';
+  const freshness = semanticSourceFreshness(store, source, extraction);
+  return !freshness.current || freshness.extractor !== 'llm';
 }
 
 function emptySelfImproveResult(): KnowledgeSemanticSelfImproveResult {

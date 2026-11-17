@@ -7,7 +7,7 @@ import { prepareKnowledgeExtractionValueReading } from './extraction-value/reade
 import { guardKnowledgeEdgeInput } from '../store-edge-writes.js';
 import { captureKnowledgeSourceReferences, knowledgeSourceJudgmentUris, projectKnowledgeSourceReferences, prepareGeneratedKnowledgeNodeIdentity } from '../source-structural-references.js';
 import { retainGeneratedFactRecordReferences } from '../generated-fact-record-references.js';
-import { captureSemanticSourceRevision, semanticSourceIsCurrent, semanticSourceRevisionMetadata } from './source-revisions.js';
+import { captureSemanticSourceRevision, semanticSourceFreshness, semanticSourceRevisionMetadata } from './source-revisions.js';
 import { createSemanticNodeIdentityPlanner } from './node-identity-plan.js';
 import { prepareSemanticIssueIdentity } from './auxiliary-identities.js';
 import type { SemanticNodeSelector } from '../store-semantic-node-selector.js';
@@ -113,9 +113,7 @@ export async function enrichKnowledgeSource(
   const structural = projectKnowledgeSourceReferences(source, extraction, captureKnowledgeSourceReferences(context.store, source, extraction));
   const generationSource = { id: structural?.sourceId ?? source.id, title: source.title, sourceType: source.sourceType, tags: source.tags,
     uri: uris.canonicalUri ?? uris.sourceUri ?? uris.url, provenance: sourceRankingContent(source).claimedProvenance };
-  const sourceCurrent = semanticSourceIsCurrent(context.store, source, extraction);
-  const existingSemantic = readRecord(context.store.getSemanticEnrichmentState(source.id)?.metadata);
-  const currentExtractor = readString(existingSemantic.extractor);
+  const { current: sourceCurrent, extractor: currentExtractor } = semanticSourceFreshness(context.store, source, extraction);
   const shouldUpgradeDeterministic = Boolean(context.llm && sourceCurrent && currentExtractor !== 'llm');
   const scopeSelection = await prepareKnowledgeScopeSelection(context.store, { includeAllSpaces: true },
     { signal: options.signal, shouldStop: options.shouldStop, kinds: ['source'], sourceIds: [source.id] });

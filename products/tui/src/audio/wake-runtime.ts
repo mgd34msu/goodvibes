@@ -7,7 +7,7 @@ import { describeWakeBlockers, describeWakeLimitations, terminalWakeCapabilities
 import { describeTranscriptionFailure } from '../core/voice-stt-gateway.ts';
 export type { WakeProvisionSnapshot, WakeRuntimeTestSeams } from '@goodvibes-jev/engine/terminal-shell/audio/wake-runtime';
 /** TUI enablement remains read-only: provisioning is an explicit install/setup act. */
-export type WakeRuntimeDeps = Omit<TerminalWakeRuntimeDeps, 'ensureProvisioned' | 'enumerateInputDevices'>;
+export type WakeRuntimeDeps = Omit<TerminalWakeRuntimeDeps, 'ensureProvisioned'>;
 export type WakeRuntime = TerminalWakeRuntime;
 export const { wireWakeRuntime, startWakeRuntime } = createTerminalWakeRuntime({
   surface: 'tui',

@@ -25,6 +25,8 @@ import type { StreamingAudioPlayer } from './player.ts';
 import { createVoiceSttGateway } from '../core/voice-stt-gateway.ts';
 import { wireVoiceInputRuntime } from './voice-input-session.ts';
 import { startWakeRuntime, wireWakeRuntime } from './wake-runtime.ts';
+import { createInputDeviceEnumerator } from '@goodvibes-jev/engine/terminal-shell/audio/input-devices';
+import type { AudioInputDeviceEnumerator } from '@goodvibes-jev/engine/platform/platform/voice/capture';
 import { resolveWakeRuntimeSettings } from '@goodvibes-jev/engine/platform/platform/voice/wake/runtime';
 
 export interface VoiceCaptureWiringDeps {
@@ -43,6 +45,8 @@ export interface VoiceCaptureWiringDeps {
   readonly submitTurn: (text: string) => void;
   readonly notify: (message: string) => void;
   readonly render: () => void;
+  /** Injected in tests; defaults to listing this host's sources with pactl. */
+  readonly enumerateInputDevices?: AudioInputDeviceEnumerator | undefined;
   /** Injected in tests; defaults to a real streaming player for the activation sound. */
   readonly player?: StreamingAudioPlayer;
 }
@@ -78,7 +82,12 @@ export function wireVoiceCapture(deps: VoiceCaptureWiringDeps): VoiceCaptureWiri
     notify: deps.notify,
     render: deps.render,
   });
-  const { wake, unsubs } = wireTerminalWakeCapture(deps, ports, { wireWakeRuntime, startWakeRuntime, playActivationSound }, {});
+  const { wake, unsubs } = wireTerminalWakeCapture(
+    deps,
+    ports,
+    { wireWakeRuntime, startWakeRuntime, playActivationSound },
+    { enumerateInputDevices: deps.enumerateInputDevices ?? createInputDeviceEnumerator() },
+  );
   return {
     toggleVoiceInput: voiceInput.toggle,
     status: () => voiceInput.status() ?? wake.status(),

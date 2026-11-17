@@ -2787,6 +2787,11 @@
       "types": "./terminal-shell/dist/audio/wake-runtime.d.ts",
       "import": "./terminal-shell/dist/audio/wake-runtime.js"
     },
+    "./terminal-shell/audio/input-devices": {
+      "bun": "./terminal-shell/src/audio/input-devices.ts",
+      "types": "./terminal-shell/dist/audio/input-devices.d.ts",
+      "import": "./terminal-shell/dist/audio/input-devices.js"
+    },
     "./terminal-shell/audio/voice-capture-composition": {
       "bun": "./terminal-shell/src/audio/voice-capture-composition.ts",
       "types": "./terminal-shell/dist/audio/voice-capture-composition.d.ts",

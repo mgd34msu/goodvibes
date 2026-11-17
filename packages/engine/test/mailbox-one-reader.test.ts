@@ -151,10 +151,11 @@ async function machine(server: FakeMailboxOptions = {}) {
  * is moving. Bounded in steps, never in milliseconds.
  */
 async function pump(clock: FakeClock, done: () => boolean | Promise<boolean>, what: string): Promise<void> {
-  for (let step = 0; step < 4_000; step += 1) {
+  for (let step = 0; step < 40_000; step += 1) {
     if (await done()) return;
     await new Promise<void>((resolve) => { setImmediate(resolve); });
-    if (step % 50 === 49 && clock.pending > 0) await clock.advance(Math.max(1, clock.nextDueIn));
+    // Scheduled waits are moved only after the sockets have had their turns.
+    if (step % 200 === 199 && clock.pending > 0) await clock.advance(Math.max(1, clock.nextDueIn));
   }
   if (!await done()) throw new Error(`Gave up waiting for: ${what}`);
 }

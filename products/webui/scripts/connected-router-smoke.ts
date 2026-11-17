@@ -138,7 +138,7 @@ const answerWire = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(reque
   if (new URL(request.url).pathname !== '/v1/chat/completions') return new Response(null, { status: 404 });
   const value = await request.json() as WireAnswer; answers.push(value);
   assert.ok(['gpt-6.1-sol', 'fixture-coding'].includes(value.model));
-  const content = `Synthetic answer ${answers.length} from ${value.model}.` + (value.messages.some(message => typeof message.content === 'string' && message.content.startsWith('QUAL_CLASSIC_')) ? `\n\n${speechParagraph}` : '');
+  const content = `Synthetic answer ${answers.length} from ${value.model}.` + (value.messages.some(message => typeof message.content === 'string' && message.content.startsWith('QUAL_NO_MODEL_')) ? `\n\n${speechParagraph}` : '');
   const chunk = (delta: Record<string, string>, finish_reason: string | null) => ({ id: 'owned-synthetic-completion', object: 'chat.completion.chunk',
     created: 1, model: value.model, choices: [{ index: 0, delta, finish_reason }] });
   return new Response(`data: ${JSON.stringify(chunk({ role: 'assistant', content }, null))}\n\ndata: ${JSON.stringify(chunk({}, 'stop'))}\n\ndata: [DONE]\n\n`,
@@ -317,10 +317,10 @@ try {
       assert.equal(judgments.length, startJudgments + 2); assert.equal(answers.at(-1)?.model, 'gpt-6.1-sol');
       assert.equal(answers.at(-1)?.reasoning_effort, 'xhigh');
       await policy(page, 'Hybrid'); await policy(page, 'No Decision Model');
-      const beforeClassic = judgments.length;
+      const beforeNoModel = judgments.length;
       await page.goto(`${host.baseUrl}/?view=chat&session=${encodeURIComponent(sessionId)}`);
-      await send(page, `QUAL_CLASSIC_${viewport.name}: Continue the same authorized conversation.`, startAnswers + 5);
-      assert.equal(judgments.length, beforeClassic); assert.equal(answers.at(-1)?.model, 'gpt-6.1-sol');
+      await send(page, `QUAL_NO_MODEL_${viewport.name}: Continue the same authorized conversation.`, startAnswers + 5);
+      assert.equal(judgments.length, beforeNoModel); assert.equal(answers.at(-1)?.model, 'gpt-6.1-sol');
       assert.equal(host.services.configManager.get('judgment.policy'), 'No Decision Model');
       // Reload the original persisted reply under DefaultOn.
       await policy(page, 'Decision Model Only');
@@ -340,12 +340,12 @@ try {
       const stop = page.locator('.message.assistant').last().getByRole('button', { name: 'Stop reading aloud', exact: true });
       await expect(stop).toBeVisible();
       await expect.poll(() => synthesis.slice(beforeSynthesis).map(value => value.text).join(' '), { timeout: 25_000 }).toBe(saved.content.replace(/\s+/g, ' '));
-      assert.deepEqual(judgmentRequests, [], 'Read aloud must not ask for a judgment'); assert.equal(judgments.length, beforeClassic, 'Speech must not borrow Router classification');
+      assert.deepEqual(judgmentRequests, [], 'Read aloud must not ask for a judgment'); assert.equal(judgments.length, beforeNoModel, 'Speech must not borrow Router classification');
       await stop.click(); await expect(speak).toBeVisible(); page.off('request', observed);
       speechReceipts.push({ viewport: viewport.name, savedRevision: true, judgmentRequests: judgmentRequests.length,
         synthesisRequests: synthesis.length - beforeSynthesis, stopped: true });
       await page.screenshot({ path: join(output, `${viewport.name}-default-on-speech.png`), fullPage: true });
-      receipts.push({ viewport: viewport.name, proof: 'real config persistence, ordinary xhigh/max actual wire and zero categorization, same-chat Router/full history/category effort, General fallback, Classic no classifier' });
+      receipts.push({ viewport: viewport.name, proof: 'real config persistence, ordinary xhigh/max actual wire and zero categorization, same-chat Router/full history/category effort, General fallback, No Decision Model without a classifier' });
       // Keep each viewport independent without dropping history within its proof.
       assert.equal((await host.fetch(`/api/companion/chat/sessions/${sessionId}/close`, { method: 'POST', body: '{}' })).status, 200);
       assert.equal((await host.fetch(`/api/companion/chat/sessions/${sessionId}`, { method: 'DELETE' })).status, 200);

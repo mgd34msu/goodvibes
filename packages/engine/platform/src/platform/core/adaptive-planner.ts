@@ -51,7 +51,7 @@ export const VALID_STRATEGIES: ExecutionStrategy[] = ['auto', 'single', 'cohort'
  * `AdaptivePlanner.explainReasonCode()`.
  */
 export type StrategyReasonCode =
-  | 'CLASSIC_SINGLE'
+  | 'NO_DECISION_MODEL_SINGLE'
   // Selection reasons; legacy codes remain readable for older event/history consumers.
   | 'JUDGMENT_SELECTED'
   | 'JUDGMENT_UNSETTLED'
@@ -143,7 +143,7 @@ export interface PlannerDecision {
 // ---------------------------------------------------------------------------
 
 const REASON_EXPLANATIONS: Record<StrategyReasonCode, string> = {
-  CLASSIC_SINGLE: 'Without a decision model, this uses a single conversation worker unless the owner explicitly selects another strategy; no semantic ranking was taken.',
+  NO_DECISION_MODEL_SINGLE: 'Without a decision model, this uses a single conversation worker unless the owner explicitly selects another strategy; no semantic ranking was taken.',
   JUDGMENT_SELECTED: 'The recorded execution-strategy reading selected this available strategy.',
   JUDGMENT_UNSETTLED: 'The execution-strategy reading did not settle. No strategy was authorized.',
   PINNED_MODE: 'The owner explicitly pinned this strategy with /plan mode.',
@@ -219,7 +219,7 @@ export class AdaptivePlanner {
       const selected = this.overrideStrategy ?? (this.mode === 'auto' ? 'single' : this.mode);
       const decision: PlannerDecision = {
         selected, provenance: 'classic', candidates: [], overrideActive: this.overrideStrategy !== null,
-        reasonCode: this.overrideStrategy !== null ? 'OVERRIDE_IN_EFFECT' : this.mode !== 'auto' ? 'PINNED_MODE' : 'CLASSIC_SINGLE',
+        reasonCode: this.overrideStrategy !== null ? 'OVERRIDE_IN_EFFECT' : this.mode !== 'auto' ? 'PINNED_MODE' : 'NO_DECISION_MODEL_SINGLE',
         timestamp: Date.now(), inputs: captured,
       };
       this._appendHistory(decision);

@@ -25,7 +25,7 @@ export interface BrowserJudgmentServiceOptions {
 type Evidence = Pick<JudgmentResult<Questions>, 'decisionId' | 'model' | 'requestedModel' | 'usage' | 'latencyMs'>;
 
 function normalizedError(error: unknown, signal: AbortSignal): BrowserJudgmentError {
-  if (error instanceof DecisionModelsDisabledError) return new BrowserJudgmentError('JUDGMENT_CLASSIC');
+  if (error instanceof DecisionModelsDisabledError) return new BrowserJudgmentError('JUDGMENT_NO_DECISION_MODEL');
   if (signal.aborted && signal.reason instanceof BrowserJudgmentError) return signal.reason;
   if (error instanceof BrowserJudgmentError) return error;
   if (error instanceof JudgmentError) {

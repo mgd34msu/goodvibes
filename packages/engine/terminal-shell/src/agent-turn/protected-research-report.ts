@@ -131,7 +131,7 @@ function screeningStop(reason: SourceScreeningHold, what: string): never {
   switch (reason) {
     case 'cancelled': return stop('cancelled');
     case 'stale': return stop('stale', 'The screening setup changed while the report was being prepared.');
-    case 'proxy-configured': return stop('unavailable', 'A proxy variable is set for this process, so report text is not sent for hosted screening. Unset it, or choose the Classic decision policy.');
+    case 'proxy-configured': return stop('unavailable', 'A proxy variable is set for this process, so report text is not sent for hosted screening. Unset it, or set judgment.policy to No Decision Model.');
     case 'route-unavailable': case 'busy': return stop('unavailable', 'The report screening service did not answer.');
     default: return stop('invalid', `${what} could not be cleared by privacy screening. Remove credentials or private details from it and re-issue the call.`);
   }

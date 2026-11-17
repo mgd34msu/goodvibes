@@ -40,7 +40,7 @@ The `AdaptivePlanner` selects an execution strategy each turn based on risk, lat
 
 1. An active user override (`planner.override(...)`) is returned as the selected strategy, reason `OVERRIDE_IN_EFFECT`.
 2. A pinned mode other than `auto` (`planner.setMode(...)`) is returned, reason `PINNED_MODE`.
-3. In operation without a decision model (decision models off) the result is `single`, reason `CLASSIC_SINGLE`. No reading is taken.
+3. In operation without a decision model (decision models off) the result is `single`, reason `NO_DECISION_MODEL_SINGLE`. No reading is taken.
 4. Otherwise a Jev reading chooses from the actual task, its risk, latency budget and the available capabilities. A settled reading returns that strategy with reason `JUDGMENT_SELECTED`, plus the reading's `outcome` and `decisionId`. A `remote` or `background` choice whose capability is not available counts as unsettled.
 5. If the reading does not settle, `select` records a decision with `selected: 'auto'` and reason `JUDGMENT_UNSETTLED` in the audit log and then throws `PlannerJudgmentError` (`reason` is `unsettled` or `unavailable-strategy`). No strategy is guessed and no work starts; the owner decides, for example by pinning a mode or setting an override. Callers must handle this error.
 
@@ -61,7 +61,7 @@ try {
     backgroundEligible: false,
   });
   console.log(decision.selected);    // a strategy the reading settled on, or 'single' without a decision model
-  console.log(decision.reasonCode);  // 'JUDGMENT_SELECTED' or 'CLASSIC_SINGLE'
+  console.log(decision.reasonCode);  // 'JUDGMENT_SELECTED' or 'NO_DECISION_MODEL_SINGLE'
   console.log(decision.decisionId);  // set when a reading was taken
 } catch (error) {
   if (!(error instanceof PlannerJudgmentError)) throw error;

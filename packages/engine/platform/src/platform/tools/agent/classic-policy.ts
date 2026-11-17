@@ -6,7 +6,7 @@ import type { AgentInput } from './schema.js';
  * Existing source/tool/workspace restrictions remain on the worker input.
  */
 export function classicAgentInput(input: AgentInput): AgentInput {
-  return decisionModelPolicyState().operation === 'classic'
+  return decisionModelPolicyState().operation === 'no-decision-model'
     ? { ...input, outsideContract: true, reviewMode: 'none' }
     : input;
 }

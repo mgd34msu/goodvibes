@@ -1018,7 +1018,7 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
       let assertCompletionCurrent: (() => void) | undefined;
       if (!contractSession) {
         const decisionPolicy = decisionModelPolicyState();
-        if (decisionPolicy.operation === 'classic') response.decisionPolicy = decisionPolicy;
+        if (decisionPolicy.operation === 'no-decision-model') response.decisionPolicy = decisionPolicy;
         // The draft stands as it is when the check ran out of drafts or time; the person is told it is not verified.
         if (verified === false) completionGuard.acceptUnverified(checkInput(), { signal, assertCurrent: assertActiveTurn });
         assertCompletionCurrent = completionGuard.beginFinalization(response);

@@ -127,7 +127,7 @@ export function createAgentCredentialReader(homeDirectory: string, settings: Pic
 interface Acquisition { readonly owner: ProtectedSourceOwner; assertCurrent(): void; close(): Promise<void>; }
 
 /** The general sentence, for a refusal raised before any cause is known. */
-export const RESEARCH_SCREENING_UNCONFIGURED_DETAIL = `Research report screening needs ${AGENT_HOSTED_RESEARCH_SCREENING_KEY} turned on and the two screening provider keys (ABACUSAI_API_KEY, TYPESAFE_API_KEY), or the Classic decision policy.`;
+export const RESEARCH_SCREENING_UNCONFIGURED_DETAIL = `Research report screening needs ${AGENT_HOSTED_RESEARCH_SCREENING_KEY} turned on and the two screening provider keys (ABACUSAI_API_KEY, TYPESAFE_API_KEY), or judgment.policy No Decision Model.`;
 /** One fixed sentence per cause; none names a value. */
 const CONSENT_OFF = 'Turn on "Allow hosted report screening" in the Agent workspace (setting tools.hostedResearchScreening).';
 const CONSENT_QUARANTINED = 'The settings file holding tools.hostedResearchScreening could not be read; fix or re-save it, then re-issue the call.';
@@ -205,7 +205,7 @@ function acquire(config: ConfigOwner, secrets: CredentialOwner, hostSignal: Abor
       if (closed || isClosing()) unconfigured(SCREENING_CLOSED);
       if (config.getConfigurationIncarnation() !== incarnation) changed();
     };
-    if (decisionModelPolicyState().operation === 'classic') {
+    if (decisionModelPolicyState().operation === 'no-decision-model') {
       owner = createClassicProtectedSourceOwner(Object.freeze({ ownerId: `classic-agent-source-${randomUUID()}`,
         revision: randomUUID(), signal, assertCurrent: live }));
       return Object.freeze({ owner, assertCurrent: live, close });

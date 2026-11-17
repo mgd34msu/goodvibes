@@ -164,7 +164,7 @@ export function createProtectedSourceOwner(options: ProtectedSourceOwnerOptions)
     const assertCurrent = () => {
       operationCurrent(source, operation);
       const now = decisionModelPolicyState();
-      if (now.policy === policy.policy && now.operation === 'classic' && policy.operation === 'decision') {
+      if (now.policy === policy.policy && now.operation === 'no-decision-model' && policy.operation === 'decision') {
         policySelectedClassic = true; throw new DecisionModelsDisabledError('private source screening');
       }
       if (now.policy !== policy.policy || now.operation !== policy.operation || now.revision !== policy.revision) return invalid();

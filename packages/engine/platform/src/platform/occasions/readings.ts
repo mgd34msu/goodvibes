@@ -62,7 +62,7 @@ export class OccasionReadingWork {
     if (policy.policy !== this.policy) throw new OccasionReadingHeldError();
     assertSynchronousJudgmentGuard(() => this.options.assertCurrent?.(), () => new OccasionReadingHeldError());
     for (const check of this.checks) check();
-    if (policy.operation !== 'classic') this.owner?.assertCurrent();
+    if (policy.operation !== 'no-decision-model') this.owner?.assertCurrent();
   };
   /** Screened, owned copy of what goes to the model. Taken once; nothing is re-read later. */
   snapshot<T>(source: T): T {

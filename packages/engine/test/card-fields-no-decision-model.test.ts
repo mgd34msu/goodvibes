@@ -11,7 +11,7 @@ import { expect, test } from 'bun:test';
 import { installDecisionModelPolicyObserver } from '../errors/src/decision-policy.js';
 import { classifyCardFields, type FormControlDescriptor } from '../platform/src/platform/security/card-fields.js';
 
-installDecisionModelPolicyObserver(() => ({ policy: 'Hybrid', operation: 'classic', reason: 'not-set', revision: 1 }));
+installDecisionModelPolicyObserver(() => ({ policy: 'Hybrid', operation: 'no-decision-model', reason: 'not-set', revision: 1 }));
 
 function control(tag: string, type: string, name: string): FormControlDescriptor {
   return { tag, type, name, autocomplete: '', id: '', placeholder: '', ariaLabel: '', label: '' };

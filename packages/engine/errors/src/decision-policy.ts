@@ -28,7 +28,7 @@ export interface DecisionModelFailureState {
 }
 export interface DecisionModelPolicyState {
   readonly policy: DecisionModelPolicy;
-  readonly operation: 'decision' | 'classic';
+  readonly operation: 'decision' | 'no-decision-model';
   readonly reason: NoDecisionModelReason | null;
   readonly revision: number;
   /** Present while the set decision model is failing; cleared when it answers again. */
@@ -47,11 +47,11 @@ export function readDecisionModelPolicyHeader(headers: Pick<Headers, 'get'>): De
     if (state.policy === undefined || !Number.isSafeInteger(state.revision) || (state.revision as number) < 0) return undefined;
     const reason = state.reason;
     if (reason !== null && reason !== 'selected' && reason !== 'not-set' && reason !== 'unavailable') return undefined;
-    if (state.operation !== (reason === null ? 'decision' : 'classic')
+    if (state.operation !== (reason === null ? 'decision' : 'no-decision-model')
       || (policy === 'Decision Model Only' && reason !== null && reason !== 'not-set') || (policy === 'No Decision Model' && reason !== 'selected')
       || (policy === 'Hybrid' && reason === 'selected')) return undefined;
     const failure = readFailure(state.failure);
-    return Object.freeze({ policy, operation: reason === null ? 'decision' : 'classic', reason, revision: state.revision as number,
+    return Object.freeze({ policy, operation: reason === null ? 'decision' : 'no-decision-model', reason, revision: state.revision as number,
       ...(failure === undefined ? {} : { failure }) });
   } catch { return undefined; }
 }
@@ -93,7 +93,7 @@ export class DecisionModelsDisabledError extends Error {
 }
 
 export function assertDecisionModelsEnabled(feature: string): void {
-  if (decisionModelPolicyState().operation === 'classic') throw new DecisionModelsDisabledError(feature);
+  if (decisionModelPolicyState().operation === 'no-decision-model') throw new DecisionModelsDisabledError(feature);
 }
 
 /** Runtime-neutral pure-phase dispatch. The installed host owns operation
@@ -103,13 +103,13 @@ export function assertDecisionModelsEnabled(feature: string): void {
 export function runDecisionOrClassic<T>(decision: () => Promise<T>, classic: () => T | Promise<T>,
   fallbackAllowed: () => boolean = () => true): Promise<T> {
   return ownOperation(async () => {
-    if (decisionModelPolicyState().operation === 'classic') {
+    if (decisionModelPolicyState().operation === 'no-decision-model') {
       if (!fallbackAllowed()) throw new DecisionModelsDisabledError('fresh resolution of an existing semantic refusal');
       return classic();
     }
     try { return await decision(); }
     catch (error) {
-      const switchedBySibling = error instanceof DecisionModelsDisabledError && decisionModelPolicyState().operation === 'classic';
+      const switchedBySibling = error instanceof DecisionModelsDisabledError && decisionModelPolicyState().operation === 'no-decision-model';
       if (!fallbackAllowed() || !switchedBySibling && !tryClassicDecisionFallback(error)) throw error;
       return classic();
     }

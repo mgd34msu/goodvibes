@@ -102,7 +102,7 @@ function chatJson(route: Route, body: unknown, status = 200, policy: DecisionMod
     status,
     contentType: 'application/json',
     headers: { 'access-control-allow-origin': '*',
-      'x-goodvibes-decision-policy': JSON.stringify({ policy, operation: policy === 'No Decision Model' ? 'classic' : 'decision', reason: policy === 'No Decision Model' ? 'selected' : null, revision: 0 }) },
+      'x-goodvibes-decision-policy': JSON.stringify({ policy, operation: policy === 'No Decision Model' ? 'no-decision-model' : 'decision', reason: policy === 'No Decision Model' ? 'selected' : null, revision: 0 }) },
     body: JSON.stringify(body),
   });
 }

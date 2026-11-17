@@ -394,7 +394,7 @@ async function executeToolCallsInMode(
     let settledResult: ToolResult | undefined;
     let resultPolicy = decisionModelPolicyState();
     const appendResult = (result: ToolResult) => {
-      const recorded = { ...result, ...(resultPolicy.operation === 'classic' ? { decisionPolicy: resultPolicy } : {}) };
+      const recorded = { ...result, ...(resultPolicy.operation === 'no-decision-model' ? { decisionPolicy: resultPolicy } : {}) };
       settledResult = { ...recorded }; results.push(recorded);
     };
     // The provider could not read this call's arguments: answer it with that, never run it on empty ones.

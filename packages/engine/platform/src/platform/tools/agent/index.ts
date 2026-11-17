@@ -383,7 +383,7 @@ export function createAgentTool(config: AgentToolConfig): Tool {
     const session = config.resolveSessionId();
     const input = classicAgentInput({ ...modelAgentInput(args as unknown as AgentInput), sessionId: session });
     const completionRepair = readCompletionRepairContext();
-    if (isNativeConversationTurn() && decisionModelPolicyState().operation !== 'classic' && (input.mode === 'spawn' || input.mode === 'batch-spawn')) {
+    if (isNativeConversationTurn() && decisionModelPolicyState().operation !== 'no-decision-model' && (input.mode === 'spawn' || input.mode === 'batch-spawn')) {
       return { success: false, error: NATIVE_TURN_EXECUTION_REFUSAL };
     }
 
@@ -406,7 +406,7 @@ export function createAgentTool(config: AgentToolConfig): Tool {
     }
     const delegationKey = delegationPlanKey(delegationSession, input.authoritativeTask ?? '');
     const heldPlan = heldPlans.get(delegationKey);
-    if (heldPlan && decisionModelPolicyState().policy === 'Hybrid' && decisionModelPolicyState().operation === 'classic')
+    if (heldPlan && decisionModelPolicyState().policy === 'Hybrid' && decisionModelPolicyState().operation === 'no-decision-model')
       return publish({ success: false, error: 'The previous delegation plan remains held. Availability fallback cannot override its semantic refusal.' });
     const holdPlan = (assignments: readonly { readonly task: string }[], error: unknown, mode: 'spawn' | 'batch-spawn' = 'batch-spawn') => {
       const reason = summarizeError(error);

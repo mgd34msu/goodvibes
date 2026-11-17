@@ -559,7 +559,7 @@ export class AgentManager {
     // The session that started this agent: the spawner's, else its parent's, else (a contract unit) its contract owner's.
     const sessionId = input.sessionId ?? parentRecord?.sessionId ?? (binding ? this.contractSessionId(binding.contractId) : undefined);
     const record: AgentRecord = {
-      ...(decisionModelPolicyState().operation === 'classic' ? { decisionPolicy: decisionModelPolicyState() } : {}),
+      ...(decisionModelPolicyState().operation === 'no-decision-model' ? { decisionPolicy: decisionModelPolicyState() } : {}),
       id,
       task,
       template,

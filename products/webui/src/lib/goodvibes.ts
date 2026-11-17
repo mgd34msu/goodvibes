@@ -2008,14 +2008,14 @@ export async function runBrowserJudgment(
   signal: AbortSignal,
 ): Promise<OperatorMethodOutput<'judgment.battery.run'>> {
   const policy = await readBrowserDecisionPolicy(signal);
-  if (policy.operation === 'classic') throw new DecisionModelsDisabledError(input.battery);
+  if (policy.operation === 'no-decision-model') throw new DecisionModelsDisabledError(input.battery);
   const route = webuiRouteFor('judgment.battery.run');
   if (route?.method !== 'POST') throw new Error('Command judgment is unavailable.');
   try { return await requestJson(route.path, { method: route.method, body: input, signal }); }
   catch (error) {
     signal.throwIfAborted();
     const code = asRecord(asRecord(asRecord(error).body).error).code;
-    if (code === 'JUDGMENT_CLASSIC') throw new DecisionModelsDisabledError(input.battery);
+    if (code === 'JUDGMENT_NO_DECISION_MODEL') throw new DecisionModelsDisabledError(input.battery);
     throw error;
   }
 }

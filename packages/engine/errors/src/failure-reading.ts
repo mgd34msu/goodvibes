@@ -281,7 +281,7 @@ function remember(memo: Map<string, Promise<FailureConclusions>>, state: string,
  */
 export async function readFailure(evidence: FailureEvidence, site: string, options?: FailureReadOptions): Promise<FailureConclusions> {
   options?.signal?.throwIfAborted();
-  if (decisionModelPolicyState().operation === 'classic' || (evidence.status === undefined && codeFact(evidence.code) !== undefined)) {
+  if (decisionModelPolicyState().operation === 'no-decision-model' || (evidence.status === undefined && codeFact(evidence.code) !== undefined)) {
     return structuralFailureConclusions(evidence);
   }
   try { return await readDecisionFailure(evidence, site, options); }

@@ -1939,7 +1939,7 @@ export class PermissionManager {
   ): PermissionCheckResult {
     const policy = decisionModelPolicyState();
     return { ...extra, approved, persisted, sourceLayer, reasonCode, analysis,
-      ...(policy.operation === 'classic' ? { decisionPolicy: policy } : {}),
+      ...(policy.operation === 'no-decision-model' ? { decisionPolicy: policy } : {}),
       decision: toolDecisionOf({ approved, reasonCode, sourceLayer, userReason: extra.userReason, detail: extra.detail,
         decision: extra.decision, autonomousDecision: extra.autonomousDecision }) };
   }

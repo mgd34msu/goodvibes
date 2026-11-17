@@ -152,7 +152,7 @@ function observe(): DecisionModelPolicyState {
   const policy = scope?.policy ?? parseDecisionModelPolicy(configured());
   const reason = scope === undefined ? startingReason(policy) : scope.state.reason;
   const failure = episode.failure;
-  return Object.freeze({ policy, operation: reason === null ? 'decision' : 'classic', reason, revision: scope?.state.revision ?? 0,
+  return Object.freeze({ policy, operation: reason === null ? 'decision' : 'no-decision-model', reason, revision: scope?.state.revision ?? 0,
     ...(failure === undefined ? {} : { failure }) });
 }
 /** Make the platform's observer the process one again after something else replaced it. */
@@ -161,7 +161,7 @@ export function installPlatformDecisionPolicyObserver(): void {
 }
 installPlatformDecisionPolicyObserver();
 
-export function isClassicOperation(): boolean { return decisionModelPolicyState().operation === 'classic'; }
+export function isClassicOperation(): boolean { return decisionModelPolicyState().operation === 'no-decision-model'; }
 
 /** Pin one operation. Changing policy revokes it; fallback changes no host permission or completed action. */
 export function withDecisionModelPolicy<T>(read: () => unknown, operation: () => T,
@@ -174,7 +174,7 @@ export function withDecisionModelPolicy<T>(read: () => unknown, operation: () =>
     // another operation cannot retain this consumer's notice sink.
     return scopes.run({ ...parent, onChange(state) { parent.onChange?.(state); onChange(state); } }, () => {
       const state = observe();
-      if (state.operation === 'classic') onChange(state);
+      if (state.operation === 'no-decision-model') onChange(state);
       return operation();
     });
   }

@@ -11,23 +11,25 @@ Bun 1.3.14 and TypeScript (strict). `exactOptionalPropertyTypes` is on for `pack
 
 ## Running tests
 
-Never run plain `bun test`: it skips the runner's isolated home, temp directory and network block. `bun run test` runs every suite (installer, judgment, engine and every product) and does not typecheck; to check one change, run its file as below.
+Never run plain `bun test`: it skips the runner's isolated home, temp directory, network block, limits and admission scan. `bun run test` runs every default-suite file in the repository (engine, judgment, installer, products) from one pool of workers (cores minus one), one process per file, and does not typecheck or build.
 
 ```sh
-# one engine test (path relative to packages/engine, or to where you are)
+# one file (path relative to where you are, else to packages/engine)
 bun run test:one test/<name>.test.ts
-bun packages/engine/scripts/test.ts test/<name>.test.ts
+bun run test:one products/agent/src/test/<path>.test.ts
 
-# one product test (--cwd is relative to packages/engine)
-bun packages/engine/scripts/test.ts --cwd ../../products/agent ./src/test/<path>.test.ts
-bun packages/engine/scripts/test.ts --cwd ../../products/tui ./src/test/<path>.test.ts
+# the default-suite files under a folder; -t runs only matching test names
+bun packages/engine/scripts/test.ts products/tui/src/test
+bun packages/engine/scripts/test.ts test/<name>.test.ts -t '<test name>'
 
-# judgment and installer tests
+# judgment, installer, and the folders outside the default suite
 bun run test:judgment
 bun run test:installer
+bun run test:live   # files under test/live/ (the sandbox proofs)
+bun run test:e2e    # files under src/test/e2e/ (the built binaries)
 ```
 
-`--jobs=auto` runs files in parallel, each in its own process. When nothing matches, the runner names the directory it searched.
+The limits are fixed: 5 seconds per test, 10 seconds per file (30 under `test/live/` and `src/test/e2e/`), 600 file-seconds for the default suite. A file past its limit is killed and fails. Before anything runs, the runner parses every selected file and refuses the whole run, naming file and line, on `Bun.sleep`, a promise resolved by `setTimeout`, a snapshot, `mock.module`, `.skip`/`.todo`/`.skipIf`, or a timeout or retry argument. A file that runs no test, skips one, tries the network or leaves a process running fails. The run ends with the ten slowest files, the file-seconds per group, and a line of files run, passed, failed and refused.
 
 ## Typecheck
 
@@ -41,7 +43,7 @@ bun packages/engine/scripts/typecheck.ts --project engine-tests  # packages/engi
 bun packages/engine/scripts/typecheck.ts --project agent         # also tui, daemon, webui; refreshes stale engine declarations first
 ```
 
-The other names are `judgment`, `judgment-tests` and `type-tests`; an unknown name lists them. A scoped run trusts file times, so it can report nothing for a tree whose times were restored; it is not a substitute for the full run before a merge.
+The other names are `judgment`, `judgment-tests`, `type-tests` and `installer`; an unknown name lists them. A scoped run trusts file times, so it can report nothing for a tree whose times were restored; it is not a substitute for the full run before a merge.
 
 ## Gates: if you touch X, run Y
 

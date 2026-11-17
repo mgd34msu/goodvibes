@@ -152,7 +152,7 @@ bun run build
 | Command | Does |
 | --- | --- |
 | `bun run build` | Build judgment, engine and all four products from the monorepo root |
-| `bun run test` | Run the installer, judgment, engine and product test suites |
+| `bun run test` | Run every default-suite test file in the repository (engine, judgment, installer, products) from one pool |
 | `bun run validate` | Run the local integration gate: build/types, API/contracts, exports, packaging and runtime checks |
 | `bun run api:extract` / `bun run api:check` | Regenerate / verify the API Extractor reports under `etc/*.api.md` |
 | `bun run refresh:contracts` | Regenerate shared contract artifacts and product snapshots after a contract change |
@@ -160,41 +160,45 @@ bun run build
 
 ### Running tests
 
-Every suite runs through one runner, `packages/engine/scripts/test.ts`, which
-wraps `bun test`. For each run it creates a temporary directory under the
-system temp directory, exports it as `TMPDIR`, and removes it when the run
-ends. Tests run with provider credentials and `HOME` removed from the
-environment, and a run fails if a test attempts outbound network access. The
-default per-test timeout is 60 seconds; set `GOODVIBES_TEST_TIMEOUT_MS` or pass
-`--timeout=<ms>` to change it. Any other flag is passed to `bun test` unchanged.
+Every test file runs through one runner, `packages/engine/scripts/test.ts`.
+Each file runs in its own `bun test` process with its own home and temp
+directory, provider credentials removed from the environment and the network
+blocked, from one pool of workers (cores minus one; `--jobs <n>` sets it).
+
+The limits are fixed; no flag, variable or bunfig setting raises them: 5
+seconds per test, 10 seconds per file (30 under `test/live/` and
+`src/test/e2e/`), and 600 file-seconds for the default suite. A file past its
+limit is killed and reported as failed. Before any file starts, the runner
+parses every selected file and refuses the whole run, naming file and line, if
+one sleeps (`Bun.sleep`, a promise resolved by `setTimeout`, a timer from
+`timers/promises`), uses a snapshot, calls `mock.module`, skips a test (`.skip`,
+`.todo`, `.skipIf`, `xit`) or passes a timeout, retry or `setDefaultTimeout`. A
+file that runs no test, skips one at run time, tries the network or leaves a
+process running is a failure. The run ends with the ten slowest files, the
+file-seconds per group and a line of files run, passed, failed and refused.
 
 ```bash
-# The whole engine suite
-bun packages/engine/scripts/test.ts
+# Every default-suite file in the repository
+bun run test
 
-# One file, or several (paths are relative to packages/engine)
-bun packages/engine/scripts/test.ts test/lifecycle-machine.test.ts
+# One file, or the default-suite files under a folder (relative to the
+# current directory, else to packages/engine; --cwd sets another base)
+bun run test:one test/mailbox-one-reader.test.ts
+bun packages/engine/scripts/test.ts products/agent/src/test
 
-# One slice of the engine suite: partition INDEX of COUNT
-bun packages/engine/scripts/test.ts --partition=3/9
-
-# The live-sandbox tests, failing instead of skipping on a host without bubblewrap
-bun packages/engine/scripts/test.ts --live-sandbox
-
-# Another workspace: --cwd is relative to packages/engine
-bun packages/engine/scripts/test.ts --cwd ../../products/agent src/test
+# The files under test/live/ (the sandbox proofs; a host without bubblewrap
+# fails them) and under src/test/e2e/ (the built binaries), with their own totals
+bun packages/engine/scripts/test.ts --live
+bun packages/engine/scripts/test.ts --e2e
 ```
 
-`--partition` selects its own files and cannot be combined with `--cwd` or
-explicit files. `--live-sandbox` selects every engine test that reads
-`GOODVIBES_TEST_REQUIRE_EXEC_CONTAINMENT` (directly or through the containment
-proof helper), sets it, and accepts `--partition` to run a slice of them. Each product's `bun run test` script calls the same runner with
-its own `--cwd`. TUI and Agent tests create their working directories under
-`<product>/.test-tmp/run-*`, which is ignored by Git.
+`-t <pattern>` runs only the tests whose name matches. Each package's
+`bun run test` runs that package's files. TUI and Agent tests create their
+working directories under `<product>/.test-tmp/run-*`, which is ignored by Git.
 
-Plain `bun test <file>` also works for a quick run of one file. It skips the
-runner's environment and network isolation, and the tests that start daemon
-fixture processes refuse to run without the runner.
+Plain `bun test <file>` skips the runner's isolation, limits and admission
+scan, and the tests that start daemon fixture processes refuse to run without
+the runner.
 
 ### Continuous integration
 

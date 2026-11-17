@@ -250,7 +250,7 @@ Run these commands from `products/agent` after preparing the monorepo:
 | Command | Does |
 | --- | --- |
 | `bun run dev` | Run the Agent TUI from source |
-| `bun run test` | Run the full test suite (`src/test`) through the shared runner, `packages/engine/scripts/test.ts` |
+| `bun run test` | Run this product's tests except `src/test/e2e/` through the shared runner, `packages/engine/scripts/test.ts` (`bun run test:e2e` runs the end-to-end files) |
 | `bun run typecheck` | Type-check the source tree |
 | `bun run build` | Bundle the workspace package entrypoint into `dist/package/main.js` |
 | `bun run build:binary` | Compile the native Agent executable and stage its sqlite-vec library in `dist/lib` |

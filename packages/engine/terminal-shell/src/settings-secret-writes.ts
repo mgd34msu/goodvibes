@@ -68,16 +68,13 @@ export async function setSecretBackedSettingValue(args: {
   onError?: ((message: string) => void) | undefined;
 }): Promise<boolean> {
   const { key, value, configManager, secretsManager, setConfigValue } = args;
-  const assertPolicyAvailable = () => {
-    // Re-read authority from the captured owner, including after storage waits.
-    // A modal opened against another owner must not supply this metadata.
-    for (const setting of configManager.getHostSettingsSchema?.() ?? []) {
-      if (setting.type === 'boolean') configManager.getHostBooleanSetting(setting.key).getResolved();
-    }
-  };
   let step: SecretWriteStep = 'policy';
   try {
-    assertPolicyAvailable();
+    // One read of the captured owner's managed policy: unreadable policy stops
+    // the write before anything is stored or sent. After the storage wait the
+    // setter behind setConfigValue checks the lock again; that refusal is the
+    // authority, so nothing here repeats it.
+    configManager.readHostManagedSettingLocks?.();
     step = 'config';
     const update = buildSecretBackedConfigUpdate(key, value);
     if ((update.secretKey || update.clearSecretKey) && args.route?.applies(key)) {
@@ -108,10 +105,7 @@ export async function setSecretBackedSettingValue(args: {
       step = 'store';
       await secretsManager!.set(update.secretKey, update.secretValue, { scope, medium });
     }
-    step = 'policy';
-    assertPolicyAvailable();
     step = 'config';
-    configManager.validateDynamic?.(key, update.configValue);
     await setConfigValue(key, update.configValue);
     // A clear unpublishes the reference first and only then deletes the value:
     // the other order, failing at the config write, would leave a reference

@@ -8,7 +8,7 @@ import { postalConfigKey, readConfigSettingForDisplay } from '@goodvibes-jev/eng
 /** SettingsModal state for the /settings and /config fullscreen workspace. */
 
 import type { ModelPickerTarget } from './model-picker.ts';
-import type { ConfigManager, ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ConfigManager, ConfigKey, HostManagedSettingLocks } from '@goodvibes-jev/engine/platform/platform/config';
 import type { SubscriptionManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { isAgentHostSettingKey } from '../config/host-settings.ts';
 import { getAgentSettingsSchema, type AgentSettingKey } from '../config/settings-catalog.ts';
@@ -64,6 +64,10 @@ export {
 } from './settings-modal-types.ts';
 
 const MCP_TRUST_MODES: readonly McpEntry['trustMode'][] = ['constrained', 'ask-on-risk', 'allow-all', 'blocked'];
+
+/** One read of managed policy: every lock by key, or why policy could not be read. */
+type HostPolicyRead = { readonly locks: HostManagedSettingLocks } | { readonly error: string };
+const NO_HOST_LOCKS: HostManagedSettingLocks = new Map();
 
 // ---------------------------------------------------------------------------
 // SettingsModal
@@ -132,6 +136,8 @@ export class SettingsModal extends TerminalSettingsModalState<
   }
 
   private configManager: ConfigManager | null = null;
+  /** The managed-policy read of the synchronous user action in progress; see _policyRead. */
+  private actionPolicy: { readonly owner: ConfigManager; readonly read: HostPolicyRead } | undefined = undefined;
   private unsubscribeHostSetting: (() => void) | null = null;
   private requestHostSettingRender: (() => void) | null = null;
   private reportError: ((message: string) => void) | null = null;
@@ -908,7 +914,6 @@ export class SettingsModal extends TerminalSettingsModalState<
         entry.isDefault = entry.currentValue === entry.setting.default;
         if (entry.setting.key === 'permissions.mode')
           entry.sourceLabel = hasActiveExecutionMode(this.configManager) ? 'Active hosted session' : undefined;
-        this._refreshHostEntry(entry);
       }
     }
     this._reapplyHostValues();
@@ -950,11 +955,12 @@ export class SettingsModal extends TerminalSettingsModalState<
   /** Keep the registered host row's canonical source/lock metadata live too. */
   private _refreshHostEntry(entry: SettingEntry): void {
     if (!this.configManager || entry.setting.kind !== 'host') return;
+    const policy = this._policyRead(this.configManager);
     const handle = this.configManager.getHostBooleanSetting(entry.setting.key);
     entry.currentValue = handle.get();
     entry.isDefault = entry.currentValue === entry.setting.default;
-    try {
-      const resolved = handle.getResolved();
+    if ('locks' in policy) {
+      const resolved = handle.getResolved(policy.locks);
       Object.assign(entry, {
         effectiveSource: resolved.source,
         locked: resolved.managedLock !== null,
@@ -963,10 +969,10 @@ export class SettingsModal extends TerminalSettingsModalState<
         sourceLabel: undefined,
         lockReason: resolved.managedLock ? `${resolved.managedLock.source}: ${resolved.managedLock.reason}` : undefined,
       });
-    } catch (error) {
+    } else {
       Object.assign(entry, {
         effectiveSource: 'unavailable',
-        metadataUnavailable: summarizeError(error),
+        metadataUnavailable: policy.error,
         locked: undefined,
         conflict: undefined,
         sourceLabel: undefined,
@@ -975,13 +981,37 @@ export class SettingsModal extends TerminalSettingsModalState<
     }
   }
 
+  /**
+   * One read of the managed policy per synchronous user action: the
+   * edit-permission check, the host-setting subscription and every row
+   * refresh of that action share it instead of parsing the policy file again.
+   * It is dropped once the action's synchronous work is done, so a later
+   * answer from the host or a credential save reads policy afresh. The
+   * setter's own refusal stays the authority for a write.
+   */
+  private _policyRead(config: ConfigManager): HostPolicyRead {
+    if (this.actionPolicy?.owner === config) return this.actionPolicy.read;
+    let read: HostPolicyRead;
+    if (!(config.getHostSettingsSchema?.() ?? []).some((setting) => isAgentHostSettingKey(setting.key))) read = { locks: NO_HOST_LOCKS };
+    else {
+      try { read = { locks: config.readHostManagedSettingLocks() }; }
+      catch (error) { read = { error: summarizeError(error) }; }
+    }
+    const held = { owner: config, read };
+    this.actionPolicy = held;
+    queueMicrotask(() => {
+      if (this.actionPolicy === held) this.actionPolicy = undefined;
+    });
+    return read;
+  }
+
   private _setValue(key: AgentSettingKey, value: unknown): boolean {
     if (!this.configManager) return false;
     if (!this._canEditSettings()) return false;
     if (isAgentHostSettingKey(key)) {
       try {
         const handle = this.configManager.getHostBooleanSetting(key);
-        handle.getResolved(); // Unknown policy metadata must never be presented as editable.
+        // _canEditSettings read policy for this action; the setter refuses a locked setting itself.
         if (typeof value !== 'boolean') throw new Error(`${key} requires a literal boolean.`);
         handle.set(value);
         this.lastSettingEffectMessage = null;
@@ -1084,14 +1114,8 @@ export class SettingsModal extends TerminalSettingsModalState<
   private _hostPolicyMetadataError(): string | undefined {
     const config = this.configManager;
     if (!config) return undefined;
-    try {
-      for (const setting of config.getHostSettingsSchema?.() ?? []) {
-        if (isAgentHostSettingKey(setting.key)) config.getHostBooleanSetting(setting.key).getResolved();
-      }
-      return undefined;
-    } catch (error) {
-      return summarizeError(error);
-    }
+    const policy = this._policyRead(config);
+    return 'error' in policy ? policy.error : undefined;
   }
 
   private _canEditSettings(): boolean {

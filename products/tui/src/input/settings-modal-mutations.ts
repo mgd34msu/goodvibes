@@ -14,7 +14,7 @@ import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/conf
 import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { FeatureFlagManager } from '@/runtime/index.ts';
 import type { FlagEntry, SettingEntry } from './settings-modal-types.ts';
-import { deepEqual, refreshHostSettingEntry, refreshSettingsPolicyAvailability } from './settings-modal-data.ts';
+import { deepEqual, readSettingsPolicy, refreshHostSettingEntry, type SettingsPolicyRead } from './settings-modal-data.ts';
 
 // ---------------------------------------------------------------------------
 // ApplyValueResult, returned by applySettingValue so the caller can react
@@ -101,7 +101,8 @@ export function applySettingValue({
    */
   reset?: boolean | undefined;
 }): ApplyValueResult {
-  refreshSettingsPolicyAvailability(groups, configManager);
+  // The rows were refreshed from this action's one policy read; the setter's
+  // own refusal is the authority for a locked or unreadable-policy write.
   const unavailable = [...groups.values()].flat().find(entry => entry.setting.key === key && entry.metadataUnavailable);
   if (unavailable) {
     return { restartDomain: null, effectMessage: `Save failed: ${unavailable.metadataUnavailable}`, changed: false, failed: true };
@@ -177,7 +178,8 @@ export function applySettingValue({
     }
   } catch (e) {
     logger.error('SettingsModal: failed to set config value', { key, error: summarizeError(e) });
-    for (const entries of groups.values()) for (const entry of entries) refreshHostSettingEntry(entry, configManager);
+    const policy = readSettingsPolicy(configManager);
+    for (const entries of groups.values()) for (const entry of entries) refreshHostSettingEntry(entry, configManager, policy);
     return {
       restartDomain: null,
       effectMessage: `Save failed: ${summarizeError(e)}`,
@@ -209,30 +211,32 @@ export function applySettingValue({
 }
 
 /** Host UI writes use the validated boolean handle, never a generic consumer key cast. */
-export function applyHostSettingValue({ key, value, configManager, groups, onSettingApplied }: {
+export function applyHostSettingValue({ key, value, configManager, groups, onSettingApplied, policy }: {
   key: string;
   value: unknown;
   configManager: ConfigManager;
   groups: Map<string, SettingEntry[]>;
   onSettingApplied: SettingAppliedCallback | null;
+  /** This action's policy read; absent reads it once for the refresh. */
+  policy?: SettingsPolicyRead | undefined;
 }): ApplyValueResult {
   const refresh = () => {
+    const locks = policy === undefined ? readSettingsPolicy(configManager) : policy;
     for (const entries of groups.values()) for (const entry of entries) {
-      if (entry.setting.key === key) refreshHostSettingEntry(entry, configManager);
+      if (entry.setting.key === key) refreshHostSettingEntry(entry, configManager, locks);
     }
   };
   try {
     const handle = configManager.getHostBooleanSetting(key);
     if (typeof value !== 'boolean') throw new Error('Host settings require a literal boolean.');
-    // Check current metadata at action time as well as at modal open. A stale
-    // unlocked row must not permit a write through unavailable policy metadata.
-    const before = handle.getResolved();
-    if (before.managedLock) throw new Error(`Managed setting is locked: ${before.managedLock.source}: ${before.managedLock.reason}`);
+    // The setter refuses a locked setting and unreadable policy itself; that
+    // refusal is the authority, so no separate policy read precedes it.
+    const previousValue = handle.get();
     handle.set(value);
     const currentValue = handle.get();
     refresh();
-    const changed = before.value !== currentValue;
-    const result = changed ? onSettingApplied?.({ key, previousValue: before.value, value: currentValue }) : undefined;
+    const changed = previousValue !== currentValue;
+    const result = changed ? onSettingApplied?.({ key, previousValue, value: currentValue }) : undefined;
     return { restartDomain: null, effectMessage: result?.message ?? null, changed };
   } catch (error) {
     refresh();

@@ -55,9 +55,11 @@ import {
   buildMcpEntries,
   buildSubscriptionEntries,
   buildNetworkFilteredItems,
+  readSettingsPolicy,
   refreshEntryValues,
   refreshSettingsPolicyAvailability,
   searchSettingEntries,
+  type SettingsPolicyRead,
 } from './settings-modal-data.ts';
 import { getSettingLabel } from '../renderer/settings-modal-helpers.ts';
 import {
@@ -212,6 +214,8 @@ export class SettingsModal extends TerminalSettingsModalState<
 
   private configManager: ConfigManager | null = null;
   private unsubscribeHostSetting: (() => void) | null = null;
+  /** The managed-policy read of the user action in progress; see _refreshPolicyAvailability. */
+  private actionPolicy: SettingsPolicyRead | undefined = undefined;
   private secretsManager: SettingsSecretsManager | null = null;
   private daemonCredentials: SettingsDaemonCredentialWriter | null = null;
   private daemonConfig: DaemonOwnedConfigWriter | null = null;
@@ -275,7 +279,7 @@ export class SettingsModal extends TerminalSettingsModalState<
     this.active = true;
     const unsubscribes = configManager.getHostSettingsSchema().filter((setting) => setting.type === 'boolean').map((setting) =>
       configManager.getHostBooleanSetting(setting.key).subscribe(() => {
-        refreshSettingsPolicyAvailability(this.groups, configManager);
+        refreshSettingsPolicyAvailability(this.groups, configManager, this._policyRead(configManager));
         this.requestRender?.();
       }),
     );
@@ -646,15 +650,15 @@ export class SettingsModal extends TerminalSettingsModalState<
       },
       setSecretConfigValue: async (key: ConfigKey, value: unknown) => {
         if (!configManager) throw new Error('Settings owner unavailable.');
-        configManager.validateDynamic?.(key, value);
-        // A daemon-owned key is written by the daemon alone; this waits for its answer.
+        // The setter validates the value (and the daemon path validates before
+        // sending); a daemon-owned key is written by the daemon alone; this waits for its answer.
         const result = applySettingValue({
           key,
           value,
           configManager,
           groups,
           onSettingApplied: onApplied,
-          refreshGroups: () => refreshEntryValues(groups, configManager),
+          refreshGroups: () => refreshEntryValues(groups, configManager, this._policyRead(configManager)),
           daemonConfig,
         });
         if (result.effectMessage?.startsWith('Save failed:')) throw new Error(result.effectMessage);
@@ -817,8 +821,28 @@ export class SettingsModal extends TerminalSettingsModalState<
     return items;
   }
 
+  /**
+   * One read of the managed policy per user action. Every row refresh the
+   * action triggers (the write's own refresh, the host-setting subscription,
+   * a refresh after an applied effect) takes this read instead of parsing
+   * the policy file again; the setter's refusal stays the authority for the
+   * write itself. The read is dropped once the action's synchronous work is
+   * done, so a later daemon answer or credential save reads policy afresh.
+   */
   private _refreshPolicyAvailability(): void {
-    if (this.configManager) refreshSettingsPolicyAvailability(this.groups, this.configManager);
+    const configManager = this.configManager;
+    if (!configManager) return;
+    const policy = readSettingsPolicy(configManager);
+    this.actionPolicy = policy;
+    queueMicrotask(() => {
+      if (this.actionPolicy === policy) this.actionPolicy = undefined;
+    });
+    refreshSettingsPolicyAvailability(this.groups, configManager, policy);
+  }
+
+  /** The current action's policy read, or a fresh one outside an action. */
+  private _policyRead(configManager: ConfigManager): SettingsPolicyRead {
+    return this.actionPolicy !== undefined && configManager === this.configManager ? this.actionPolicy : readSettingsPolicy(configManager);
   }
 
   private _setHostValue(key: string, value: boolean): boolean {
@@ -829,6 +853,7 @@ export class SettingsModal extends TerminalSettingsModalState<
       configManager: this.configManager,
       groups: this.groups,
       onSettingApplied: this.onSettingApplied,
+      policy: this.actionPolicy,
     });
     this.lastSettingEffectMessage = result.effectMessage;
     return result.failed !== true;
@@ -847,7 +872,7 @@ export class SettingsModal extends TerminalSettingsModalState<
       groups: this.groups,
       onSettingApplied: callback,
       refreshGroups: () => {
-        if (this.configManager) refreshEntryValues(this.groups, this.configManager);
+        if (this.configManager) refreshEntryValues(this.groups, this.configManager, this._policyRead(this.configManager));
       },
       daemonConfig: this.daemonConfig,
       onAsyncError: (message) => {

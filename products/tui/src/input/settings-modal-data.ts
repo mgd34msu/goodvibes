@@ -9,7 +9,7 @@ import { isValidConfigKey } from '@goodvibes-jev/engine/platform/platform/config
  */
 
 import { type ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
-import type { ConfigManager, ConfigSetting } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ConfigManager, ConfigSetting, HostManagedSettingLocks } from '@goodvibes-jev/engine/platform/platform/config';
 import { readResolvedSettingLookups } from '@/runtime/index.ts';
 import type { FeatureFlagManager } from '@/runtime/index.ts';
 
@@ -97,14 +97,35 @@ export function deepEqual(a: unknown, b: unknown): boolean {
 
 const POLICY_METADATA_UNAVAILABLE = 'Managed policy metadata is unavailable. Editing is disabled until it can be read.';
 
+/**
+ * The managed locks of one policy read, or null when policy cannot be read.
+ * One read per user action: every row refresh in that action takes this
+ * instead of reading the policy file again.
+ */
+export type SettingsPolicyRead = HostManagedSettingLocks | null;
+
+const NO_HOST_LOCKS: HostManagedSettingLocks = new Map();
+
+export function readSettingsPolicy(configManager: ConfigManager): SettingsPolicyRead {
+  // Without a host boolean row nothing shows lock metadata, so nothing is read.
+  if (!configManager.getHostSettingsSchema().some((setting) => setting.type === 'boolean')) return NO_HOST_LOCKS;
+  try { return configManager.readHostManagedSettingLocks(); }
+  catch { return null; }
+}
+
 /** Refresh a host row exclusively through its validated public handle. */
-export function refreshHostSettingEntry(entry: SettingEntry, configManager: ConfigManager): void {
+export function refreshHostSettingEntry(
+  entry: SettingEntry,
+  configManager: ConfigManager,
+  policy?: SettingsPolicyRead,
+): void {
   if (entry.kind !== 'host') return;
+  const locks = policy === undefined ? readSettingsPolicy(configManager) : policy;
   const handle = configManager.getHostBooleanSetting(entry.setting.key);
   entry.currentValue = handle.get();
   entry.isDefault = entry.currentValue === entry.setting.default;
-  try {
-    const resolved = handle.getResolved();
+  if (locks) {
+    const resolved = handle.getResolved(locks);
     entry.currentValue = resolved.value;
     entry.isDefault = resolved.value === resolved.defaultValue;
     Object.assign(entry, {
@@ -115,7 +136,7 @@ export function refreshHostSettingEntry(entry: SettingEntry, configManager: Conf
       lockReason: resolved.managedLock ? `${resolved.managedLock.source}: ${resolved.managedLock.reason}` : undefined,
       metadataUnavailable: undefined,
     });
-  } catch {
+  } else {
     // The platform deliberately withholds lock metadata when policy cannot be read.
     // Do not turn that absence into an unlocked/default provenance claim.
     Object.assign(entry, {
@@ -130,22 +151,20 @@ export function refreshHostSettingEntry(entry: SettingEntry, configManager: Conf
 }
 
 /**
- * Best-effort UI preflight, not an atomic policy transaction or new authority.
- * Host metadata reads are pure; defer legacy builtin recovery until they work.
+ * Best-effort UI preflight, not an atomic policy transaction or new authority:
+ * the setter's own refusal decides a locked write. Host metadata reads are
+ * pure; defer legacy builtin recovery until they work.
  */
-export function refreshSettingsPolicyAvailability(groups: Map<string, SettingEntry[]>, configManager: ConfigManager): boolean {
-  const schema = configManager.getHostSettingsSchema().filter((setting) => setting.type === 'boolean');
-  if (schema.length === 0) return true;
-  let unavailable = false;
-  for (const setting of schema) {
-    try { configManager.getHostBooleanSetting(setting.key).getResolved(); }
-    catch { unavailable = true; }
-  }
+export function refreshSettingsPolicyAvailability(
+  groups: Map<string, SettingEntry[]>,
+  configManager: ConfigManager,
+  policy: SettingsPolicyRead = readSettingsPolicy(configManager),
+): boolean {
+  if (!configManager.getHostSettingsSchema().some((setting) => setting.type === 'boolean')) return true;
+  const unavailable = policy === null;
   const entries = [...groups.values()].flat();
   for (const entry of entries) {
-    if (entry.kind !== 'host') continue;
-    refreshHostSettingEntry(entry, configManager);
-    unavailable ||= entry.metadataUnavailable !== undefined;
+    if (entry.kind === 'host') refreshHostSettingEntry(entry, configManager, policy);
   }
   let lookup: ReturnType<typeof readResolvedSettingLookups> | undefined;
   for (const entry of entries) {
@@ -187,12 +206,13 @@ export function buildSettingGroups(
 
   // Host descriptors are a separate readonly schema, not builtin ConfigKeys.
   const hostSchema = configManager.getHostSettingsSchema();
+  const policy = readSettingsPolicy(configManager);
   const hostEntries = hostSchema.flatMap((setting): HostSettingEntry[] => {
     if (setting.type !== 'boolean') return [];
     const entry: HostSettingEntry = {
       kind: 'host', setting, currentValue: setting.default, isDefault: true,
     };
-    refreshHostSettingEntry(entry, configManager);
+    refreshHostSettingEntry(entry, configManager, policy);
     return [entry];
   });
   const hostMetadataUnavailable = hostEntries.some(entry => entry.metadataUnavailable !== undefined);
@@ -649,15 +669,13 @@ export function buildNetworkFilteredItems(
 export function refreshEntryValues(
   groups: Map<SettingsCategory, SettingEntry[]>,
   configManager: ConfigManager,
+  policy: SettingsPolicyRead = readSettingsPolicy(configManager),
 ): void {
-  refreshSettingsPolicyAvailability(groups, configManager);
+  // Host rows are refreshed here, from the same policy read.
+  refreshSettingsPolicyAvailability(groups, configManager, policy);
   for (const entries of groups.values()) {
     for (const entry of entries) {
-      if (entry.kind === 'host') {
-        refreshHostSettingEntry(entry, configManager);
-        continue;
-      }
-      refreshBuiltinSettingValue(entry, configManager);
+      if (entry.kind !== 'host') refreshBuiltinSettingValue(entry, configManager);
     }
   }
 }

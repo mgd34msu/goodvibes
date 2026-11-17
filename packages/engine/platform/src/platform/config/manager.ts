@@ -19,7 +19,7 @@ import type { HookDispatcher } from '../hooks/index.js';
 import type { HookEvent } from '../hooks/types.js';
 import { attachOwnedConfigHook } from './hook-attachment.js';
 import { getManagedSettingLock } from '../runtime/settings/control-plane.js';
-import { readHostManagedSettingLock, readStrictManagedSettingLock } from '../runtime/settings/host-setting-policy-read.js';
+import { readHostManagedSettingLock, readHostManagedSettingLocks, readStrictManagedSettingLock } from '../runtime/settings/host-setting-policy-read.js';
 import { requireSurfaceRoot, resolveSharedDirectory, resolveSurfaceDirectory, resolveSurfaceSharedFile } from '../runtime/surface-root.js';
 import { summarizeError } from '../utils/error-display.js';
 import { FeatureAnnouncementStore, featureAnnouncementsPath } from '../runtime/feature-announcements.js';
@@ -47,7 +47,7 @@ import { persistCategoryKeyRemoval, persistCategoryPatch, type CategoryIoDeps } 
 import { configKeyFacts } from './config-key-facts.js';
 import { refusal as buildRefusal, type Refusal } from '@goodvibes-jev/engine/errors';
 import type { ToolDecision } from '../types/tools.js';
-import { HostSettings, type HostBooleanSettingHandle, type HostSetting, type HostSettingValue, type HostSettingValues } from './host-settings.js';
+import { HostSettings, type HostBooleanSettingHandle, type HostManagedSettingLocks, type HostSetting, type HostSettingValue, type HostSettingValues } from './host-settings.js';
 import { HostSettingsReadError, hostSettingsFileExists, readHostSettingValues, readHostSettingsFile, recoverHostSettingsWriteFailure } from './manager-host-settings.js';
 import { ConfigRuntimeState, captureRuntimeValue } from './manager-runtime-state.js';
 import { announceIngestionNotice } from './settings-ingestion.js';
@@ -582,10 +582,10 @@ export class ConfigManager {
     const handle: HostBooleanSettingHandle = {
       key,
       get: () => this.get(registeredKey) as boolean,
-      getResolved: () => {
+      getResolved: (locks) => {
         const value = this.get(registeredKey) as boolean;
         return Object.freeze({ key, value, defaultValue: definition.default, source: value === definition.default ? 'default' : 'local',
-          managedLock: readHostManagedSettingLock(key, this.configDir) });
+          managedLock: locks ? locks.get(key) ?? null : readHostManagedSettingLock(key, this.configDir) });
       },
       set: (value, options) => this.setDynamic(registeredKey, value, options),
       setProjectValue: (value, options) => this.setProjectValue(registeredKey, value as never, options),
@@ -593,6 +593,15 @@ export class ConfigManager {
       reset: () => this.reset(registeredKey),
     };
     return Object.freeze(handle);
+  }
+
+  /**
+   * Every managed lock from one read of the policy file, for a caller that
+   * resolves several host settings at once (pass it to `getResolved`).
+   * Unreadable policy throws, as `getResolved` does.
+   */
+  readHostManagedSettingLocks(): HostManagedSettingLocks {
+    return readHostManagedSettingLocks(this.configDir);
   }
 
   /** Opaque pre-mutation lifetime signal, including category changes and reloads.

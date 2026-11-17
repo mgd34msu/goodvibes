@@ -45,12 +45,24 @@ export function migrateStore(raw: unknown): SettingsControlPlaneStore {
   };
 }
 
-/** Read lock metadata without quarantine, repair, persistence, or silent unlock. */
-export function readStrictManagedSettingLock(key: string, configDir: string): Readonly<Omit<ManagedSettingLock, 'key'>> | null {
+/** One managed lock as policy states it, without its key. */
+export type ManagedSettingLockView = Readonly<Omit<ManagedSettingLock, 'key'>>;
+
+/** Every managed lock of one policy read, by setting key. */
+export type ManagedSettingLocks = ReadonlyMap<string, ManagedSettingLockView>;
+
+const NO_LOCKS: ManagedSettingLocks = new Map();
+
+/**
+ * Every lock from one read and parse of the policy file, without quarantine,
+ * repair, persistence, or silent unlock. A screen resolving several settings
+ * reads once and looks each key up here.
+ */
+export function readStrictManagedSettingLocks(configDir: string): ManagedSettingLocks {
   let raw: string;
   try { raw = readFileSync(getSettingsControlPath(configDir), 'utf8'); }
   catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return NO_LOCKS;
     throw policyReadFailure();
   }
   try {
@@ -61,22 +73,34 @@ export function readStrictManagedSettingLock(key: string, configDir: string): Re
     // must be readable before metadata can claim either locked or unlocked.
     if (locks !== undefined && !Array.isArray(locks)) throw policyReadFailure();
     const store = migrateStore(parsed);
+    const byKey = new Map<string, ManagedSettingLockView>();
     for (const lock of store.managedLocks) {
       if (!lock || typeof lock !== 'object' || typeof lock.key !== 'string'
         || typeof lock.source !== 'string' || typeof lock.reason !== 'string'
         || typeof lock.updatedAt !== 'number' || !Number.isFinite(lock.updatedAt)) throw policyReadFailure();
+      // The first lock for a key is the one that applies, as a list search finds it.
+      if (!byKey.has(lock.key)) byKey.set(lock.key, Object.freeze({ source: lock.source, reason: lock.reason, updatedAt: lock.updatedAt }));
     }
-    const lock = store.managedLocks.find(entry => entry.key === key);
-    return lock ? Object.freeze({ source: lock.source, reason: lock.reason, updatedAt: lock.updatedAt }) : null;
+    return byKey;
   } catch { throw policyReadFailure(); }
+}
+
+/** One key's lock; reads the policy file. Several keys read once with {@link readStrictManagedSettingLocks}. */
+export function readStrictManagedSettingLock(key: string, configDir: string): ManagedSettingLockView | null {
+  return readStrictManagedSettingLocks(configDir).get(key) ?? null;
 }
 
 function policyReadFailure(): ConfigError {
   return new ConfigError('Setting metadata unavailable because managed policy could not be read.');
 }
 
-/** Compatibility alias for guarded host readers. */
-export function readHostManagedSettingLock(key: string, configDir: string): Readonly<Omit<ManagedSettingLock, 'key'>> | null {
-  try { return readStrictManagedSettingLock(key, configDir); }
+/** {@link readStrictManagedSettingLocks} with the host-metadata refusal. */
+export function readHostManagedSettingLocks(configDir: string): ManagedSettingLocks {
+  try { return readStrictManagedSettingLocks(configDir); }
   catch { throw new ConfigError('Host setting metadata unavailable because managed policy could not be read.'); }
+}
+
+/** One host key's lock; reads the policy file. */
+export function readHostManagedSettingLock(key: string, configDir: string): ManagedSettingLockView | null {
+  return readHostManagedSettingLocks(configDir).get(key) ?? null;
 }

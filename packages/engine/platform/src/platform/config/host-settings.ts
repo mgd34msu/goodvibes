@@ -5,6 +5,10 @@ import { readDotPath } from './shared-config-tier.js';
 import { deleteRawDotPath, writeRawDotPath } from './settings-io.js';
 import type { ConfigSetOptions, ConfigUnsubscribe } from './manager.js';
 import type { ManagedSettingLock } from '../runtime/settings/control-plane-store.js';
+import type { ManagedSettingLocks } from '../runtime/settings/host-setting-policy-read.js';
+
+/** Every managed lock from one policy read, by key: `ConfigManager.readHostManagedSettingLocks()`. */
+export type HostManagedSettingLocks = ManagedSettingLocks;
 
 /**
  * A surface-owned scalar leaf, under an existing config category or under a
@@ -58,8 +62,12 @@ export type HostSettingValue = HostSetting['default'];
 export interface HostBooleanSettingHandle {
   readonly key: string;
   readonly get: () => boolean;
-  /** Current value and policy metadata; unreadable policy throws without changing it. */
-  readonly getResolved: () => HostBooleanSettingResolved;
+  /**
+   * Current value and policy metadata; unreadable policy throws without changing it.
+   * Given the locks of one policy read, takes this key's lock from them instead
+   * of reading the policy file again.
+   */
+  readonly getResolved: (locks?: HostManagedSettingLocks) => HostBooleanSettingResolved;
   /** Set the existing explicit project leaf, otherwise the global leaf. */
   readonly set: (value: boolean, options?: ConfigSetOptions) => void;
   /** Set the project leaf, falling back to the global leaf without a project. */

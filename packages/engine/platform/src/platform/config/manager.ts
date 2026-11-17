@@ -42,7 +42,7 @@ import { daemonConfigPath, overlayDaemonTierFrom, readDaemonTierFile } from './d
 import { describeKeySource, type ConfigKeySource } from './manager-key-source.js';
 import { DEFAULT_CONFIG_SNAPSHOT, cloneDefaultConfig, ensureSharedConfig, requireAbsoluteOwnedPath, sanitizeConfigShape } from './manager-bootstrap.js';
 import { resolveWithProfileFallback, type ConfigProfileFallbackReader } from './profile-fallback.js';
-import { ingestManagerSettings, toConfigLoadFailure, UnknownSettingFormsQueue, type IngestionNoticeSink, type SettingsIngestionNotice } from './manager-ingestion.js';
+import { ingestManagerSettings, toConfigLoadFailure, type IngestionNoticeSink, type SettingsIngestionNotice } from './manager-ingestion.js';
 import { persistCategoryKeyRemoval, persistCategoryPatch, type CategoryIoDeps } from './manager-category-io.js';
 import { configKeyFacts } from './config-key-facts.js';
 import { refusal as buildRefusal, type Refusal } from '@goodvibes-jev/engine/errors';
@@ -387,7 +387,6 @@ export class ConfigManager {
   /** Settings the last load could not ingest. See ./settings-ingestion.ts. */
   private ingestionNotices: SettingsIngestionNotice[] = [];
   private readonly ingestionNoticeListeners = new Set<(notice: SettingsIngestionNotice) => void>();
-  private readonly unknownSettingForms = new UnknownSettingFormsQueue();
 
   private readonly nativeDataWriter: import('../runtime/native-reader-compatibility.js').NativeDataWriteOwner | undefined;
 
@@ -1957,8 +1956,6 @@ export class ConfigManager {
       catch (error) { drainOwned(error); } // A diagnostic observer cannot change settings admission.
     }
   }
-  /** Once a judgment port is installed: announces unknown keys that read as newer forms of known settings. */
-  announceUnknownSettingForms(): Promise<void> { return this.unknownSettingForms.start(this.ingestionSink()); }
   /** Where an ingestion notice is filed; see ./manager-ingestion.ts. */
   private ingestionSink(): IngestionNoticeSink {
     return {
@@ -1966,7 +1963,6 @@ export class ConfigManager {
       record: (entry) => { this.recordIngestionNotice(entry); },
       receipt: (id, text) => { this.migrationReceipt(id, text); },
       forgetReceipts: (selects) => { if (!this.readOnly) new FeatureAnnouncementStore(featureAnnouncementsPath(this)).forgetMatching(selects); },
-      unknown: (file, keys) => { this.unknownSettingForms.keep(file, keys, this.ingestionSink()); },
     };
   }
   private ingest(parsed: Record<string, unknown>, file: string): Record<string, unknown> {

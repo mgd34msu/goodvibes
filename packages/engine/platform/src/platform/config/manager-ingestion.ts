@@ -20,7 +20,6 @@ import {
   ingestSettingsFile,
   unreadableSettingsFileNotice,
   type SettingsIngestionNotice,
-  type UnknownSettingKey,
 } from './settings-ingestion.js';
 
 export type { SettingsIngestionNotice };
@@ -38,11 +37,6 @@ export interface IngestionNoticeSink {
   receipt(id: string, text: string): void;
   /** Withdraws announce-once receipts the predicate selects, so a setting fixed and then broken again is announced again. */
   forgetReceipts?(selects: (id: string) => boolean): void;
-  /**
-   * Unused: unknown keys are announced at load by {@link ingestManagerSettings}.
-   * @deprecated Kept only until ConfigManager stops passing it.
-   */
-  unknown?(file: string, keys: readonly UnknownSettingKey[]): void;
 }
 
 /**
@@ -97,16 +91,6 @@ function noticeTo(sink: IngestionNoticeSink, entry: SettingsIngestionNotice): vo
     // setting into a failed construction. It was already said on stderr and
     // in the activity log, which is where the guarantee actually lives.
   }
-}
-
-/**
- * Unknown keys are announced at load by {@link ingestManagerSettings}; nothing
- * waits for a judgment port any more.
- * @deprecated Kept only until ConfigManager stops constructing it.
- */
-export class UnknownSettingFormsQueue {
-  keep(_file: string, _keys: readonly UnknownSettingKey[], _sink: IngestionNoticeSink): void { /* announced at load */ }
-  start(_sink: IngestionNoticeSink): Promise<void> { return Promise.resolve(); }
 }
 
 /**

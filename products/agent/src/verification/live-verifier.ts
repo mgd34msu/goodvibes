@@ -10,7 +10,6 @@ import {
 } from '@goodvibes-jev/engine/terminal-shell/verification-primitives';
 export type { LiveVerificationStatus, LiveVerificationCheck } from '@goodvibes-jev/engine/terminal-shell/verification-primitives';
 
-import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -296,10 +295,14 @@ interface KnowledgeProbe {
   readonly title: string;
 }
 
-function createKnowledgeProbe(space: 'agent' | 'default'): KnowledgeProbe {
-  // One unbroken token per probe, so neither probe's words occur in the other
-  // or anywhere else in the operator's knowledge.
-  const marker = `gvprobe${space}${randomUUID().replace(/-/g, '')}`;
+/**
+ * The one probe each space keeps. One unbroken token per space, so neither
+ * probe's words occur in the other or anywhere else in the operator's
+ * knowledge; fixed, so every run reuses the source an earlier run seeded
+ * instead of adding another.
+ */
+function knowledgeProbe(space: 'agent' | 'default'): KnowledgeProbe {
+  const marker = `gvprobe${space}livecheck4f9c2e7a1b6d`;
   return { marker, title: `Live verification probe ${marker}` };
 }
 
@@ -354,9 +357,9 @@ async function seedKnowledgeProbe(baseUrl: string, routePrefix: string, token: s
   return { ok: false, summary: `${route} accepted the probe but returned no source id; isolation was not checked.`, detail: compact(body) };
 }
 
-/** Whether the Agent search route returned the probe, by its source id or its unique marker. */
-async function agentSearchReturns(baseUrl: string, token: string, probe: KnowledgeProbe, sourceId: string): Promise<ProbeStep<boolean>> {
-  const route = `${AGENT_KNOWLEDGE_ROUTE}/search`;
+/** The search result on `routePrefix` that is the probe (by its source id or its unique marker), or null when none is. */
+async function searchKnowledgeProbe(baseUrl: string, routePrefix: string, token: string, probe: KnowledgeProbe, sourceId?: string): Promise<ProbeStep<{ readonly sourceId: string } | null>> {
+  const route = `${routePrefix}/search`;
   const sent = await probeRequest(`${baseUrl}${route}`, token, { body: JSON.stringify({ query: probe.title, limit: 10 }), json: true });
   if (!sent.ok) return sent;
   const { status, body } = sent.value;
@@ -368,19 +371,39 @@ async function agentSearchReturns(baseUrl: string, token: string, probe: Knowled
     return { ok: false, summary: `${route} did not return parseable JSON.` };
   }
   if (!Array.isArray(results)) return { ok: false, summary: `${route} returned no results array.` };
-  return {
-    ok: true,
-    value: results.some((entry: unknown) => {
-      const record = entry as { id?: unknown; source?: { id?: unknown } } | null;
-      return record?.id === sourceId || record?.source?.id === sourceId || JSON.stringify(entry).includes(probe.marker);
-    }),
-  };
+  for (const entry of results as unknown[]) {
+    const record = entry as { id?: unknown; source?: { id?: unknown } } | null;
+    const matched = (sourceId !== undefined && (record?.id === sourceId || record?.source?.id === sourceId)) || JSON.stringify(entry).includes(probe.marker);
+    if (!matched) continue;
+    const found = typeof record?.source?.id === 'string' ? record.source.id : typeof record?.id === 'string' ? record.id : sourceId ?? probe.marker;
+    return { ok: true, value: { sourceId: found } };
+  }
+  return { ok: true, value: null };
+}
+
+/** Whether the Agent search route returned the probe. */
+async function agentSearchReturns(baseUrl: string, token: string, probe: KnowledgeProbe, sourceId: string): Promise<ProbeStep<boolean>> {
+  const found = await searchKnowledgeProbe(baseUrl, AGENT_KNOWLEDGE_ROUTE, token, probe, sourceId);
+  return found.ok ? { ok: true, value: found.value !== null } : found;
 }
 
 /**
- * Seeds one probe through the Agent ingest route and one through the default
- * route, then searches for each on the Agent route: the Agent probe must come
- * back and the default probe must not. This is the observation that tells a
+ * The space's probe source: the one an earlier run seeded when that space's
+ * own search returns it, else seeded now. Repeated runs add nothing to the
+ * host's knowledge.
+ */
+async function ensureKnowledgeProbe(baseUrl: string, routePrefix: string, token: string, probe: KnowledgeProbe): Promise<ProbeStep<string>> {
+  const existing = await searchKnowledgeProbe(baseUrl, routePrefix, token, probe);
+  if (!existing.ok) return { ...existing, summary: `Looking for the kept probe source: ${existing.summary} Isolation was not checked.` };
+  if (existing.value) return { ok: true, value: existing.value.sourceId };
+  return seedKnowledgeProbe(baseUrl, routePrefix, token, probe);
+}
+
+/**
+ * Keeps one probe in the Agent space and one in the default space (seeded
+ * through each ingest route the first time, reused after), then searches for
+ * each on the Agent route: the Agent probe must come back and the default
+ * probe must not. This is the observation that tells a
  * working split from crossed spaces; an empty store cannot pass it.
  */
 async function checkAgentKnowledgeIsolation(baseUrl: string, token: string | undefined): Promise<LiveVerificationCheck> {
@@ -390,11 +413,11 @@ async function checkAgentKnowledgeIsolation(baseUrl: string, token: string | und
   const fail = (step: { summary: string; detail?: string }): LiveVerificationCheck => ({
     id, title, status: 'fail', summary: step.summary, ...(step.detail ? { detail: step.detail } : {}),
   });
-  const agentProbe = createKnowledgeProbe('agent');
-  const defaultProbe = createKnowledgeProbe('default');
-  const agentSource = await seedKnowledgeProbe(baseUrl, AGENT_KNOWLEDGE_ROUTE, token, agentProbe);
+  const agentProbe = knowledgeProbe('agent');
+  const defaultProbe = knowledgeProbe('default');
+  const agentSource = await ensureKnowledgeProbe(baseUrl, AGENT_KNOWLEDGE_ROUTE, token, agentProbe);
   if (!agentSource.ok) return fail(agentSource);
-  const defaultSource = await seedKnowledgeProbe(baseUrl, DEFAULT_KNOWLEDGE_ROUTE, token, defaultProbe);
+  const defaultSource = await ensureKnowledgeProbe(baseUrl, DEFAULT_KNOWLEDGE_ROUTE, token, defaultProbe);
   if (!defaultSource.ok) return fail(defaultSource);
   const agentFound = await agentSearchReturns(baseUrl, token, agentProbe, agentSource.value);
   if (!agentFound.ok) return fail(agentFound);
@@ -417,7 +440,7 @@ async function checkAgentKnowledgeIsolation(baseUrl: string, token: string | und
     title,
     status: 'pass',
     summary: 'Agent search returned the Agent probe and did not return the default-route probe.',
-    detail: `Agent probe ${agentSource.value} found; default probe ${defaultSource.value} absent. Both probes stay in the host's knowledge, tagged live-verification.`,
+    detail: `Agent probe ${agentSource.value} found; default probe ${defaultSource.value} absent. Each space keeps one probe source, tagged live-verification, which later runs reuse instead of adding another.`,
   };
 }
 

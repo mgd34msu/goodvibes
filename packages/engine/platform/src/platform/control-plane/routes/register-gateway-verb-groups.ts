@@ -642,6 +642,7 @@ export function registerGatewayVerbGroups(catalog: GatewayMethodCatalog, deps: G
     setPublicBaseUrl: (url) => {
       deps.configManager.set('web.publicBaseUrl', url);
     },
+    getPublicBaseUrl: () => String(deps.configManager.get('web.publicBaseUrl') ?? ''),
   });
   // The escalation timers this service arms: one per outstanding blocked ask,
   // rearmed for each bounded reminder. Nothing outside the service could reach

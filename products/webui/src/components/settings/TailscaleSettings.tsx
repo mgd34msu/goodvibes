@@ -16,7 +16,12 @@
  * renders the daemon's own detail text, never a generic error. On success the
  * resulting https MagicDNS URL renders as a real link, and the daemon's
  * web.publicBaseUrl updates to it (publicBaseUrlUpdated echoes whether that write
- * landed).
+ * landed). A failed serve that printed a link to turn Serve on for the tailnet
+ * (enableUrl) shows that link.
+ *
+ * While a serve this daemon started is on (activeServe), "Stop serving" runs
+ * tailscale.serve.stop behind the same confirm; the daemon puts web.publicBaseUrl
+ * back and its publicBaseUrlDetail says what happened to it.
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { client as platformClient } from '../../lib/goodvibes';
@@ -53,6 +58,19 @@ export function TailscaleSettings() {
     onError: (error: unknown) => toast({ title: 'Tailscale serve failed', description: formatError(error), tone: 'danger' }),
   });
 
+  const serveStop = useMutation({
+    mutationFn: () => platformClient.operator.tailscale.serveStop(),
+    onSuccess: async (result) => {
+      toast(
+        result.receipt.ok
+          ? { title: 'Stopped serving over tailscale', description: result.publicBaseUrlDetail, tone: 'success' }
+          : { title: 'Tailscale serve was not stopped', description: result.receipt.detail, tone: 'danger' },
+      );
+      await queryClient.invalidateQueries({ queryKey: queryKeys.tailscale });
+    },
+    onError: (error: unknown) => toast({ title: 'Tailscale stop failed', description: formatError(error), tone: 'danger' }),
+  });
+
   async function handleServe(): Promise<void> {
     const ok = await confirm.ask({
       title: 'Serve this daemon over Tailscale?',
@@ -63,18 +81,34 @@ export function TailscaleSettings() {
     serveRun.mutate();
   }
 
+  async function handleStop(): Promise<void> {
+    const ok = await confirm.ask({
+      title: 'Stop serving this daemon over Tailscale?',
+      description: 'Its https tailnet address stops working, and links and pairing codes go back to the address used before.',
+      confirmLabel: 'Stop serving',
+    });
+    if (!ok) return;
+    serveStop.mutate();
+  }
+
   // Quiet by construction: pending, errored, or genuinely absent all render nothing,
   // no nag, no dead button. A daemon build without tailscale.get at all (an older
   // daemon) also lands here since detection.data stays undefined.
   const usable = detection.data?.available && detection.data.loggedIn && detection.data.httpsUrl;
-  if (!usable || !detection.data) return null;
+  // A serve this daemon started stays on in tailscaled until it is stopped, so
+  // the stop stays reachable while tailscale answers, logged in or not.
+  const activeServe = detection.data?.available ? detection.data.activeServe : undefined;
+  if ((!usable && !activeServe) || !detection.data) return null;
+  const busy = serveRun.isPending || serveStop.isPending;
 
   // Prefer the mutation's OWN just-returned receipt (instant, no refetch round-trip
   // needed) and fall back to the query's last-known receipt otherwise (e.g. on first
   // load, or after a page reload where a prior serve already ran). invalidateQueries
   // in the mutation's onSuccess still keeps the query itself in sync for any OTHER
   // consumer or a later remount.
-  const lastServe = serveRun.data?.receipt ?? detection.data.lastServe;
+  const mutationReceipts = [serveRun.data?.receipt, serveStop.data?.receipt]
+    .filter((receipt): receipt is NonNullable<typeof receipt> => receipt !== undefined);
+  const lastServe = mutationReceipts.sort((a, b) => b.at - a.at)[0] ?? detection.data.lastServe;
 
   return (
     <SettingsBlock
@@ -82,19 +116,32 @@ export function TailscaleSettings() {
       title="Tailscale"
       description={(
         <>
-          Connected as <strong>{detection.data.magicDnsName}</strong>. Serving over tailscale puts this
+          {detection.data.magicDnsName ? <>Connected as <strong>{detection.data.magicDnsName}</strong>. </> : `${detection.data.detail}. `}
+          Serving over tailscale puts this
           daemon at an https address, the kind browser features like the camera and push need, without
           the daemon making its own certificate.
         </>
       )}
       actions={(
-        <Button
-          variant="primary"
-          disabled={serveRun.isPending}
-          onClick={() => void handleServe()}
-        >
-          {serveRun.isPending ? 'Setting up…' : lastServe?.ok ? 'Serve over tailscale again' : 'Serve over tailscale'}
-        </Button>
+        <>
+          {usable && (
+            <Button
+              variant="primary"
+              disabled={busy}
+              onClick={() => void handleServe()}
+            >
+              {serveRun.isPending ? 'Setting up…' : activeServe ? 'Serve over tailscale again' : 'Serve over tailscale'}
+            </Button>
+          )}
+          {activeServe && (
+            <Button
+              disabled={busy}
+              onClick={() => void handleStop()}
+            >
+              {serveStop.isPending ? 'Stopping…' : 'Stop serving'}
+            </Button>
+          )}
+        </>
       )}
     >
       {confirm.element}
@@ -106,13 +153,19 @@ export function TailscaleSettings() {
         >
           <StatusDot tone={lastServe.ok ? 'ok' : 'bad'} />
           <span>
-            {lastServe.ok && lastServe.url ? (
+            {lastServe.ok && lastServe.url && lastServe.action !== 'stop' ? (
               <>
                 Serving at{' '}
                 <a href={lastServe.url} target="_blank" rel="noreferrer">{lastServe.url}</a>
               </>
             ) : (
               lastServe.detail
+            )}
+            {!lastServe.ok && lastServe.enableUrl && (
+              <>
+                {' '}
+                <a href={lastServe.enableUrl} target="_blank" rel="noreferrer">Turn on Serve for your tailnet</a>
+              </>
             )}
             {whenLabel(lastServe.at) ? ` · ${whenLabel(lastServe.at)}` : ''}
           </span>
@@ -121,6 +174,9 @@ export function TailscaleSettings() {
 
       {serveRun.isError && (
         <div className="banner warning" role="alert">{formatError(serveRun.error)}</div>
+      )}
+      {serveStop.isError && (
+        <div className="banner warning" role="alert">{formatError(serveStop.error)}</div>
       )}
     </SettingsBlock>
   );

@@ -7,7 +7,7 @@ import { createRuntimeProviderApi } from '@/runtime/index.ts';
 import { copyToClipboard } from '../utils/clipboard.ts';
 import { ensurePublicBaseUrl, pairingOriginUsesStableHost, refreshStableHostInputs } from '@goodvibes-jev/engine/platform/platform/pairing';
 import { availablePairingOffers, mintPairingHandoff, defaultPairingTokenName } from '@goodvibes-jev/engine/platform/platform/pairing';
-import { probePairingTailscale, runPairingTailscaleServe } from '../core/pairing-tailscale-gateway.ts';
+import { probePairingTailscale, runPairingTailscaleServe, stopPairingTailscaleServe } from '../core/pairing-tailscale-gateway.ts';
 // ── Providers & Connectivity + Security subset ────────────────────────────────
 import { createServicesModalSurface } from './modals/services-modal.ts';
 import { createSubscriptionModalSurface } from './modals/subscription-modal.ts';
@@ -168,6 +168,7 @@ export function registerBuiltinModals(
     copyToClipboard,
     probeTailscale: () => probePairingTailscale(tailscaleGatewayDeps),
     runTailscaleServe: () => runPairingTailscaleServe(tailscaleGatewayDeps),
+    stopTailscaleServe: () => stopPairingTailscaleServe(tailscaleGatewayDeps),
   }));
   manager.registerModalRedirect('qr-code', 'pairing-modal');
 

@@ -1,8 +1,9 @@
 // ---------------------------------------------------------------------------
 // pairing-tailscale-gateway.ts
 //
-// The two tailscale verbs the pairing surfaces drive, a read-only detection
-// (tailscale.get) and the one-action serve (tailscale.serve.run), over the
+// The tailscale verbs the pairing surfaces drive, a read-only detection
+// (tailscale.get), the one-action serve (tailscale.serve.run) and its stop
+// (tailscale.serve.stop), over the
 // same generic operator invoke path the fleet acts use (resolveOperatorRpc ->
 // platform.operator.invoke), reaching the SAME daemon the command layer does.
 //
@@ -16,6 +17,7 @@ import { resolveOperatorRpc } from '../input/commands/operator-rpc.ts';
 import type {
   PairingTailscaleServeReceipt,
   PairingTailscaleStatus,
+  PairingTailscaleStopResult,
 } from '../views/modals/pairing-modal.ts';
 
 export interface PairingTailscaleGatewayDeps {
@@ -53,4 +55,17 @@ export async function runPairingTailscaleServe(
     readonly receipt: PairingTailscaleServeReceipt;
   };
   return result.receipt;
+}
+
+/**
+ * Run tailscale.serve.stop: turn off the serve this daemon started and put
+ * web.publicBaseUrl back. Null when the daemon is unreachable; a failed stop
+ * returns a receipt with `ok:false` and the daemon's own detail.
+ */
+export async function stopPairingTailscaleServe(
+  deps: PairingTailscaleGatewayDeps,
+): Promise<PairingTailscaleStopResult | null> {
+  const rpc = resolveOperatorRpc(deps);
+  if (!rpc.available) return null;
+  return (await rpc.platformClient.operator.invoke('tailscale.serve.stop', {})) as PairingTailscaleStopResult;
 }

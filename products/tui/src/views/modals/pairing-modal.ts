@@ -68,14 +68,26 @@ export interface PairingTailscaleStatus {
   readonly httpsUrl?: string | undefined;
   readonly detail: string;
   readonly lastServe?: PairingTailscaleServeReceipt | undefined;
+  /** The serve this daemon started and has not stopped; tailscale keeps it on until tailscale.serve.stop. */
+  readonly activeServe?: PairingTailscaleServeReceipt | undefined;
 }
-/** tailscale.serve.run receipt, the one-action serve result rendered verbatim. */
+/** tailscale.serve.run / tailscale.serve.stop receipt, rendered verbatim. */
 export interface PairingTailscaleServeReceipt {
   readonly at: number;
+  readonly action?: 'serve' | 'stop' | undefined;
   readonly command: string;
   readonly ok: boolean;
   readonly url?: string | undefined;
+  /** A link tailscale printed for the user to act on, such as the page that turns Serve on for the tailnet. */
+  readonly enableUrl?: string | undefined;
   readonly detail: string;
+}
+/** tailscale.serve.stop result: the receipt and what happened to web.publicBaseUrl. */
+export interface PairingTailscaleStopResult {
+  readonly receipt: PairingTailscaleServeReceipt;
+  readonly publicBaseUrlRestored: boolean;
+  readonly publicBaseUrlDetail: string;
+  readonly receiptRecorded: boolean;
 }
 
 export interface PairingModalDeps {
@@ -98,6 +110,12 @@ export interface PairingModalDeps {
    * receipt render in place.
    */
   readonly runTailscaleServe?: () => Promise<PairingTailscaleServeReceipt | null>;
+  /**
+   * Run tailscale.serve.stop (behind the standard confirm): turns off the serve
+   * this daemon started and puts web.publicBaseUrl back. Offered only while a
+   * serve is active.
+   */
+  readonly stopTailscaleServe?: () => Promise<PairingTailscaleStopResult | null>;
 }
 
 // Fixed-width placeholder, deliberately NOT derived from the real secret's
@@ -120,8 +138,10 @@ class PairingModalSurface implements ConfigModalSurface {
   private tailscaleError: string | null = null;
   /** The receipt from a completed serve run, rendered verbatim under the affordance. */
   private serveReceipt: PairingTailscaleServeReceipt | null = null;
-  /** True while a serve run is in flight (the action is single-shot). */
+  /** True while a serve or stop run is in flight (each action is single-shot). */
   private serving = false;
+  /** The serve this daemon has on (from the probe, then each serve or stop result); null when none. */
+  private activeServe: PairingTailscaleServeReceipt | null = null;
 
   constructor(private readonly deps: PairingModalDeps) {}
 
@@ -139,6 +159,15 @@ class PairingModalSurface implements ConfigModalSurface {
       confirm: true,
       enabledFor: () => this.tailscale?.available === true && !this.serving,
     },
+    // A serve stays on in tailscaled until it is stopped; 'x' (confirmed) stops
+    // the one this daemon started and puts web.publicBaseUrl back.
+    {
+      key: 'x',
+      id: 'tailscaleStop',
+      label: 'stop serving over tailscale',
+      confirm: true,
+      enabledFor: () => Boolean(this.deps.stopTailscaleServe) && this.activeServe !== null && !this.serving,
+    },
   ];
 
   onOpen(requestRender: () => void): void {
@@ -148,7 +177,7 @@ class PairingModalSurface implements ConfigModalSurface {
     // a probe that failed says why in one dim row.
     if (this.deps.probeTailscale && this.tailscale === undefined) {
       this.deps.probeTailscale()
-        .then((status) => { this.tailscale = status ?? null; this.tailscaleError = null; this.requestRender(); })
+        .then((status) => { this.tailscale = status ?? null; this.activeServe = status?.activeServe ?? null; this.tailscaleError = null; this.requestRender(); })
         .catch((error: unknown) => { this.tailscale = null; this.tailscaleError = summarizeError(error); this.requestRender(); });
     }
   }
@@ -223,6 +252,7 @@ class PairingModalSurface implements ConfigModalSurface {
 
     const hints = [this.revealed ? 'v hide token' : 'v reveal token'];
     if (this.tailscale?.available && !this.serving) hints.push('t serve over tailscale');
+    if (this.deps.stopTailscaleServe && this.activeServe && !this.serving) hints.push('x stop serving');
     return {
       title: 'Device Pairing',
       tabs: [{ id: 'pairing', label: 'Pairing', rows, hints }],
@@ -239,18 +269,24 @@ class PairingModalSurface implements ConfigModalSurface {
     const ts = this.tailscale;
     if (this.tailscaleError !== null) rows.push(infoRow('ts-error', `Tailscale check failed: ${this.tailscaleError}`, { fg: MODAL_TONES.dim }));
     if (!ts || !ts.available) return; // absence stays quiet
-    const httpsUrl = this.serveReceipt?.url ?? ts.httpsUrl;
-    if (httpsUrl) {
-      rows.push(infoRow('ts-h', 'Encrypted access (Tailscale):', { fg: MODAL_TONES.dim }));
-      rows.push(infoRow('ts-url', `  ${httpsUrl}`, { fg: MODAL_TONES.good }));
+    // The detected https URL is only what a serve would yield; it is shown as
+    // encrypted access only while a serve is actually on.
+    const servedUrl = this.activeServe?.url;
+    if (servedUrl) {
+      rows.push(infoRow('ts-h', 'Encrypted access (Tailscale), press x to stop serving:', { fg: MODAL_TONES.dim }));
+      rows.push(infoRow('ts-url', `  ${servedUrl}`, { fg: MODAL_TONES.good }));
     } else {
-      rows.push(infoRow('ts-h', 'Tailscale detected: press t to serve this app over https (MagicDNS).', { fg: MODAL_TONES.reasoning }));
+      const target = ts.httpsUrl ? ` at ${ts.httpsUrl}` : ' (MagicDNS)';
+      rows.push(infoRow('ts-h', `Tailscale detected: press t to serve this app over https${target}.`, { fg: MODAL_TONES.reasoning }));
     }
     const receipt = this.serveReceipt ?? ts.lastServe;
     if (receipt) {
       rows.push(infoRow('ts-receipt', `  ${receipt.ok ? '✓' : '✗'} ${receipt.detail}`, receipt.ok ? { fg: MODAL_TONES.dim } : { fg: MODAL_TONES.warn }));
+      if (!receipt.ok && receipt.enableUrl) {
+        rows.push(infoRow('ts-enable', `  Turn on Serve for your tailnet: ${receipt.enableUrl}`, { fg: MODAL_TONES.reasoning }));
+      }
     } else if (this.serving) {
-      rows.push(infoRow('ts-serving', '  Serving over tailscale…', { fg: MODAL_TONES.dim }));
+      rows.push(infoRow('ts-serving', '  Working with tailscale…', { fg: MODAL_TONES.dim }));
     }
   }
 
@@ -258,6 +294,7 @@ class PairingModalSurface implements ConfigModalSurface {
     const info = this.ensureInfo();
     if (id === 'toggleReveal') { this.revealed = !this.revealed; this.requestRender(); return; }
     if (id === 'tailscaleServe') { this.runTailscaleServe(ctx); return; }
+    if (id === 'tailscaleStop') { this.stopTailscaleServe(ctx); return; }
     if (id === 'copyLink') {
       if (!this.deps.copyToClipboard || !info) { ctx.setStatus('No pairing link to copy; press v to reveal it instead.'); return; }
       const written = this.deps.copyToClipboard(info.deepLink);
@@ -298,6 +335,7 @@ class PairingModalSurface implements ConfigModalSurface {
       .then((receipt) => {
         this.serving = false;
         this.serveReceipt = receipt;
+        if (receipt?.ok && receipt.url) this.activeServe = receipt;
         if (receipt?.ok && receipt.url) ctx.setStatus(`Serving over tailscale: ${receipt.url}`);
         else if (receipt) ctx.setStatus(`Tailscale serve did not complete: ${receipt.detail}`);
         this.requestRender();
@@ -306,6 +344,39 @@ class PairingModalSurface implements ConfigModalSurface {
         this.serving = false;
         this.serveReceipt = { at: Date.now(), command: 'tailscale serve', ok: false, detail: summarizeError(err) };
         ctx.setStatus(`Tailscale serve failed: ${summarizeError(err)}`);
+        this.requestRender();
+      });
+  }
+
+  /**
+   * Stop the serve this daemon started (tailscale.serve.stop) after the standard
+   * confirm. The receipt renders in place and the status names what happened to
+   * web.publicBaseUrl.
+   */
+  private stopTailscaleServe(ctx: ConfigModalActionContext): void {
+    if (!this.deps.stopTailscaleServe || this.serving || !this.activeServe) return;
+    this.serving = true;
+    this.requestRender();
+    this.deps.stopTailscaleServe()
+      .then((result) => {
+        this.serving = false;
+        if (result) {
+          this.serveReceipt = result.receipt;
+          if (result.receipt.ok) {
+            this.activeServe = null;
+            ctx.setStatus(`Stopped serving over tailscale. ${result.publicBaseUrlDetail}`);
+          } else {
+            ctx.setStatus(`Tailscale serve was not stopped: ${result.receipt.detail}`);
+          }
+        } else {
+          ctx.setStatus('Tailscale serve was not stopped: the daemon is not reachable.');
+        }
+        this.requestRender();
+      })
+      .catch((err: unknown) => {
+        this.serving = false;
+        this.serveReceipt = { at: Date.now(), action: 'stop', command: 'tailscale serve --https=443 off', ok: false, detail: summarizeError(err) };
+        ctx.setStatus(`Tailscale stop failed: ${summarizeError(err)}`);
         this.requestRender();
       });
   }

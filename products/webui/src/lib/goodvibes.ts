@@ -1752,10 +1752,12 @@ export const client = {
     // receipt); a surface offers the action only when it reports a usable environment.
     // serve.run is the one state-changing tailscale command the daemon runs, only from
     // this explicit verb, with a receipt either way; on success web.publicBaseUrl
-    // becomes the same https URL. ws-only, generic-invoke.
+    // becomes the same https URL. serve.stop turns that serve off and puts
+    // web.publicBaseUrl back when it still names the tailnet URL. ws-only, generic-invoke.
     tailscale: {
       get: () => invokeGatewayMethod('tailscale.get', {}),
       serveRun: () => invokeGatewayMethod('tailscale.serve.run', {}),
+      serveStop: () => invokeGatewayMethod('tailscale.serve.stop', {}),
     },
   },
   chat: {

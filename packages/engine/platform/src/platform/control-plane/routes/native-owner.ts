@@ -10,7 +10,7 @@ import { missingScopes } from '@goodvibes-jev/engine/daemon-api/route-helpers';
 /** The one refusal code for a caller that is not a current paired owner. */
 export const PAIRED_OWNER_REQUIRED = 'PAIRED_OWNER_REQUIRED';
 
-const PAIR_STEP = 'On the daemon\'s own machine the apps use the operator token they already hold; from any other device, pair it with the daemon (web app: Settings, Devices and pairing; terminal: /devices migrate-shared), then retry.';
+const PAIR_STEP = 'On the daemon\'s own machine the apps use the operator token they already hold over a direct loopback connection (not through a proxy or tunnel, and not while a public address such as controlPlane.publicBaseUrl is configured); otherwise pair this device with the daemon (web app: Settings, Devices and pairing; terminal: /devices migrate-shared), then retry.';
 
 function holds(scopes: readonly string[] | undefined, needed: readonly string[]): boolean {
   return scopes !== undefined && missingScopes(scopes, needed).length === 0;

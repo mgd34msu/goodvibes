@@ -7,7 +7,6 @@ import type { UserAuthManager, SettingsSessionAuthority } from '../security/user
 import type { SettingsPairingAuthority } from '../pairing/pairing-token-store.js';
 import { PairingStoreFaultedError, SettingsAuthorityUnavailableError, runSynchronousSettingsOperation } from '../security/settings-authority.js';
 import { LOCAL_OWNER_CREDENTIAL, isPairingTokenShape, pairingPrincipalId, type NativeCredential } from '../pairing/pairing-token-store.js';
-import { isLoopbackHost } from '../utils/reachable-base-url.js';
 import {
   authenticateOperatorToken,
   credentialKindOf,
@@ -26,7 +25,7 @@ import type { RuntimeEventDomain } from '../runtime/events/index.js';
 import { isRuntimeEventDomain } from '../runtime/events/index.js';
 import type { DistributedRuntimeManager } from '../runtime/remote/index.js';
 import { extractForwardedClientIp } from '../runtime/network/index.js';
-import { clientAddressOf, resolveClientAddress } from './client-address.js';
+import { clientAddressOf, isLocalOrigin, resolveClientAddress } from './client-address.js';
 import { resolveGatewayPathTemplate } from './helpers.js';
 import { catalogGrantedScopes, narrowGatewayGrant, pairingTokenCaller, refuseGatewayInvocation } from './http/gateway-binding-gate.js';
 import { createAuthFailureAudit, type AuthFailureAudit } from './auth-failure-audit.js';
@@ -93,6 +92,8 @@ export interface ControlPlaneWebSocketData {
     | 'matrix'
     | 'daemon';
   readonly remoteAddress?: string | undefined;
+  /** The listener established the upgrade request as coming from the daemon's own machine (see client-address.ts). */
+  readonly localOrigin?: boolean | undefined;
   clientId?: string | undefined;
   authenticated: boolean;
   /** The daemon's authentication revision the socket's principal was read under; absent: re-read before each event. */
@@ -370,7 +371,7 @@ export class DaemonControlPlaneHelper {
     const bound = requestContextOf(req);
     if (bound && isPrincipalCurrent(bound.principal, this.authRevision())) return bound;
     const token = extractOperatorAuthToken(req);
-    const principal = token ? this.describeRequestPrincipal(token, isLoopbackHost(this.clientAddress(req))) : null;
+    const principal = token ? this.describeRequestPrincipal(token, isLocalOrigin(req)) : null;
     if (!principal) return null;
     const gateway = this.context.controlPlaneGateway;
     const context = createRequestContext(principal, req.signal,
@@ -554,8 +555,9 @@ export class DaemonControlPlaneHelper {
   /**
    * Authenticate a credential once into the principal a request or a socket
    * carries: who, with which credential, which scopes, and the authentication
-   * revision it was read under. `loopback`: the credential arrived from the
-   * daemon's own machine, which makes the operator token the `local` credential.
+   * revision it was read under. `loopback`: the listener established that the
+   * credential arrived straight from the daemon's own machine (not through a
+   * proxy or tunnel), which makes the operator token the `local` credential.
    */
   describeRequestPrincipal(token: string, loopback = false): RequestPrincipal | null {
     const authenticated = authenticateOperatorToken(token, this.authContext());
@@ -761,6 +763,7 @@ export class DaemonControlPlaneHelper {
         domains,
         clientKind,
         remoteAddress: this.clientAddress(req),
+        localOrigin: isLocalOrigin(req),
         authenticated: true,
         authRevision: principal.authRevision,
         expiresAt: principal.expiresAt,
@@ -807,7 +810,7 @@ export class DaemonControlPlaneHelper {
   private socketPrincipalCurrent(ws: { data: ControlPlaneWebSocketData }): boolean {
     const data = ws.data;
     if (data.authRevision !== undefined && isPrincipalCurrent({ authRevision: data.authRevision, ...(data.expiresAt === undefined ? {} : { expiresAt: data.expiresAt }) }, this.authRevision())) return true;
-    const fresh = this.describeRequestPrincipal(data.authToken, isLoopbackHost(data.remoteAddress));
+    const fresh = this.describeRequestPrincipal(data.authToken, data.localOrigin === true);
     if (!fresh || fresh.principalId !== data.principalId || fresh.principalKind !== data.principalKind) return false;
     const held = new Set(data.scopes);
     const wasAdmin = data.admin;
@@ -893,7 +896,7 @@ export class DaemonControlPlaneHelper {
 
     if (frame.type === 'auth') {
       const token = typeof frame.token === 'string' ? frame.token : ws.data.authToken;
-      const principal = this.describeRequestPrincipal(token, isLoopbackHost(ws.data.remoteAddress));
+      const principal = this.describeRequestPrincipal(token, ws.data.localOrigin === true);
       if (!principal) {
         this.authFailures.record(ws.data.remoteAddress ?? 'unknown', 'control-plane');
         this.sendFrame(ws, JSON.stringify({ type: 'auth', ok: false, error: 'Unauthorized' }));

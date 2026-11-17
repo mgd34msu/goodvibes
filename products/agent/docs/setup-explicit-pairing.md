@@ -2,8 +2,14 @@
 
 On the daemon's own machine the Agent needs no pairing: the operator token file
 it already reads is reported by the daemon as the `local` credential, which has
-native intake, submission and execution authority. Pairing is for an Agent on
-another machine (attribution and revocation per device).
+native intake, submission and execution authority. The daemon grants `local`
+only to a direct loopback connection: a request that arrives through a proxy or
+tunnel (it carries a forwarding header such as `X-Forwarded-For` or
+`CF-Connecting-IP`, or is addressed to a non-loopback name) is the operator
+token from another machine, and while `controlPlane.publicBaseUrl`,
+`web.publicBaseUrl` or `cloudflare.daemonHostname` is set no loopback request
+counts as `local`, so on a published daemon the Agent pairs here too. Pairing is
+for an Agent on another machine (attribution and revocation per device).
 
 `goodvibes-agent setup pair` previews migration of the selected host's existing
 legacy shared operator credential into a named per-device Agent credential.

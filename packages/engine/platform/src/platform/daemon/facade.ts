@@ -85,7 +85,7 @@ import { requirePortAvailable } from './port-check.js';
 import { resolveHostBinding } from './host-resolver.js';
 import { createHostModeRestartWatcher, RestartController } from './host-mode-watcher.js';
 import { configureJudgmentRequestLifetime } from './http/judgment-request-lifetime.js';
-import { bindClientAddress, resolveClientAddress } from './client-address.js';
+import { bindClientAddress, bindLocalOrigin, isDirectLoopbackRequest, resolveClientAddress } from './client-address.js';
 import { readControlPlaneStreamingMode, refuseUnservedListenerRequest } from './http/listener-admission.js';
 import type { ServiceCommandRunner } from './service-handover.js';
 import { inFlightWorkIds } from '../runtime/fleet/registry.js';
@@ -391,7 +391,7 @@ export class DaemonServer {
     // operator credential on it is the `local` credential, as the Agent's is
     // when it runs here.
     this.hostedSessions?.setRequestPath({
-      serve: (req) => { bindClientAddress(req, IN_PROCESS_CLIENT_ADDRESS); return this.handleRequest(req); },
+      serve: (req) => { bindClientAddress(req, IN_PROCESS_CLIENT_ADDRESS); bindLocalOrigin(req); return this.handleRequest(req); },
       operatorToken: () => this.authToken,
     });
     // Whether this daemon is keeping itself current, asked over the wire
@@ -887,6 +887,8 @@ export class DaemonServer {
           const peerAddress = server.requestIP?.(req)?.address;
           const clientAddress = resolveClientAddress(req, peerAddress, { trustProxy: self.trustProxyEnabled() });
           bindClientAddress(req, clientAddress);
+          // The operator token is the `local` credential only on a direct connection from this machine.
+          if (isDirectLoopbackRequest(req, peerAddress) && !self.publishedElsewhere()) bindLocalOrigin(req);
           // Who is served (controlPlane.enabled) and which live stream (controlPlane.streamMode), before any route.
           const unserved = refuseUnservedListenerRequest(req, {
             servesOtherMachines: self.configManager.get('controlPlane.enabled') === true,
@@ -1531,6 +1533,19 @@ export class DaemonServer {
   private surfaceDeliveryEnabled(surface: 'slack' | 'discord' | 'ntfy' | 'webhook' | 'homeassistant' | 'telegram' | 'google-chat' | 'signal' | 'whatsapp' | 'telephony' | 'imessage' | 'msteams' | 'bluebubbles' | 'mattermost' | 'matrix'): boolean {
     return isSurfaceFeatureGateEnabled(this.runtimeServices.featureFlags, surface)
       && isSurfaceDeliveryEnabled(this.configManager, surface);
+  }
+  /**
+   * A public address is configured for this daemon (a tunnel or reverse proxy
+   * publishes it). A same-machine proxy can rewrite Host and add no forwarding
+   * header, so then no loopback request is taken as the owner's own machine:
+   * the apps there pair like any other device. Three in-memory config reads,
+   * only for a direct loopback request.
+   */
+  private publishedElsewhere(): boolean {
+    const named = (value: unknown): boolean => typeof value === 'string' && value.trim().length > 0;
+    return named(this.configManager.get('controlPlane.publicBaseUrl'))
+      || named(this.configManager.get('web.publicBaseUrl'))
+      || named(this.configManager.get('cloudflare.daemonHostname'));
   }
   private trustProxyEnabled(): boolean {
     return this.tlsState?.trustProxy ?? Boolean(this.configManager.get('controlPlane.trustProxy'));

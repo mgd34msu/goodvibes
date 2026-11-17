@@ -7,6 +7,7 @@
  */
 
 import { extractForwardedClientIp } from '../runtime/network/index.js';
+import { isLoopbackHost } from '../utils/reachable-base-url.js';
 
 // ---------------------------------------------------------------------------
 // Cloudflare IP ranges (maintained constant; do NOT fetch at runtime by default).
@@ -168,4 +169,59 @@ export function bindClientAddress(req: Request, address: string): void {
 /** The address the listener bound to this request, or undefined for a request that did not come through one. */
 export function clientAddressOf(req: Request): string | undefined {
   return boundAddresses.get(req);
+}
+
+/**
+ * Headers a reverse proxy or tunnel adds to say whom it forwards for. A
+ * same-machine proxy (cloudflared, tailscale serve, Caddy, nginx) connects from
+ * loopback, so the socket peer alone cannot tell its callers from the
+ * daemon's own machine; an app talking to the daemon directly sends none.
+ */
+const FORWARDING_HEADERS = [
+  'forwarded', 'x-forwarded-for', 'x-forwarded-host', 'x-real-ip', 'cf-connecting-ip', 'true-client-ip', 'via',
+] as const;
+
+/** The host name the request was addressed to: its Host header, else its URL. */
+function requestHostName(req: Request): string | undefined {
+  const host = req.headers.get('host')?.trim();
+  if (!host) {
+    try { return new URL(req.url).hostname; } catch { return undefined; }
+  }
+  if (host.startsWith('[')) {
+    const end = host.indexOf(']');
+    return end > 0 ? host.slice(1, end) : undefined;
+  }
+  const colon = host.indexOf(':');
+  return colon >= 0 && host.indexOf(':', colon + 1) < 0 ? host.slice(0, colon) : host;
+}
+
+/**
+ * Whether a request reached the listener straight from this machine: the
+ * socket peer is loopback, no proxy or tunnel forwarding header is present, and
+ * it was addressed to a loopback name. A header read per name and no I/O.
+ * The listener still has to rule out a configured public address (a proxy
+ * that rewrites Host and adds no header looks the same) before it calls
+ * {@link bindLocalOrigin}.
+ */
+export function isDirectLoopbackRequest(req: Request, peerAddress: string | undefined): boolean {
+  if (!isLoopbackHost(peerAddress)) return false;
+  for (const name of FORWARDING_HEADERS) if (req.headers.has(name)) return false;
+  return isLoopbackHost(requestHostName(req));
+}
+
+const localOrigins = new WeakSet<Request>();
+
+/**
+ * Record that the listener established this request as coming from the
+ * daemon's own machine: the one fact that makes the operator token the
+ * `local` credential. Only a listener (or the daemon calling itself in
+ * process) sets it; a request it was not set on is never local.
+ */
+export function bindLocalOrigin(req: Request): void {
+  localOrigins.add(req);
+}
+
+/** True only when the listener bound this request as coming from the daemon's own machine. */
+export function isLocalOrigin(req: Request): boolean {
+  return localOrigins.has(req);
 }

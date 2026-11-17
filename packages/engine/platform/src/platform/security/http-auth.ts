@@ -31,8 +31,9 @@ export type AuthenticatedOperatorRequest =
 
 /**
  * The credential kind a request context reports for an authenticated operator
- * request. The operator token presented from the daemon's own machine
- * (`loopback`) is `local`: the credential the apps there already hold.
+ * request. The operator token presented straight from the daemon's own
+ * machine (`loopback`: the listener ruled out a proxy, a tunnel and a published
+ * address) is `local`: the credential the apps there already hold.
  */
 export function credentialKindOf(authenticated: AuthenticatedOperatorRequest, loopback = false): 'local' | 'shared-token' | 'device-token' | 'agent' | 'user-session' {
   if (authenticated.kind === 'pairing-token') return authenticated.client === 'agent' ? 'agent' : 'device-token';

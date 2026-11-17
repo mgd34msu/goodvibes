@@ -46,32 +46,68 @@ export {
 
 /**
  * The turn moments a terminal writes the conversation to its crash snapshot:
- * the prompt was accepted, and each batch of tool calls finished. The session
+ * the prompt was accepted, and a batch of tool calls finished. The session
  * save at turn end is the durable copy after that, so a crash mid-turn loses
- * at most the tool batch in flight, never the turn.
+ * at most the tool batches of the last few seconds, never the turn.
  */
 export type CrashSnapshotMoment = 'TURN_SUBMITTED' | 'TOOLS_DONE';
 
 /**
+ * Tool batches written to the crash snapshot at most once in this window; a
+ * batch inside it is written when the window ends. Each write serialises the
+ * whole conversation on the UI thread, so a turn of many quick batches paid it
+ * once per batch.
+ */
+export const CRASH_SNAPSHOT_TOOLS_INTERVAL_MS = 5_000;
+
+/**
  * Write the crash snapshot at each {@link CrashSnapshotMoment}, through the
  * product's own atomic recovery write (`write`). Shared by both terminal apps
- * so the two keep one rule. A failed write is logged and the next moment
- * writes again. Returns the unsubscribe.
+ * so the two keep one rule. An accepted prompt is written at once; tool
+ * batches are coalesced (at most one write per
+ * {@link CRASH_SNAPSHOT_TOOLS_INTERVAL_MS}, the last batch written when the
+ * window ends), and a pending batch write is dropped when the turn completes,
+ * because the turn-end save is the copy then. A failed write is logged and the
+ * next moment writes again. Returns the unsubscribe.
  */
 export function writeCrashSnapshotAtTurnMoments(input: {
-  readonly subscribe: (moment: CrashSnapshotMoment, handler: () => void) => () => void;
+  readonly subscribe: (moment: CrashSnapshotMoment | 'TURN_COMPLETED', handler: () => void) => () => void;
   /** Writes the snapshot; `moment` goes into it (see {@link crashSnapshotTurn}). */
   readonly write: (moment: CrashSnapshotMoment) => void;
 }): () => void {
-  const writeAt = (moment: CrashSnapshotMoment) => (): void => {
+  const writeNow = (moment: CrashSnapshotMoment): void => {
     try {
       input.write(moment);
     } catch (error) {
       logger.warn('[Recovery] Crash snapshot write failed; the next turn moment writes it again', { error: summarizeError(error) });
     }
   };
-  const unsubs = [input.subscribe('TURN_SUBMITTED', writeAt('TURN_SUBMITTED')), input.subscribe('TOOLS_DONE', writeAt('TOOLS_DONE'))];
-  return () => { for (const unsubscribe of unsubs) unsubscribe(); };
+  let lastToolsWrite = Number.NEGATIVE_INFINITY;
+  let pending: ReturnType<typeof setTimeout> | undefined;
+  const dropPending = (): void => {
+    if (pending !== undefined) clearTimeout(pending);
+    pending = undefined;
+  };
+  const writeTools = (): void => {
+    dropPending();
+    lastToolsWrite = Date.now();
+    writeNow('TOOLS_DONE');
+  };
+  const unsubs = [
+    input.subscribe('TURN_SUBMITTED', () => { dropPending(); writeNow('TURN_SUBMITTED'); }),
+    input.subscribe('TOOLS_DONE', () => {
+      const wait = lastToolsWrite + CRASH_SNAPSHOT_TOOLS_INTERVAL_MS - Date.now();
+      if (wait <= 0) { writeTools(); return; }
+      if (pending !== undefined) return;
+      pending = setTimeout(writeTools, wait);
+      (pending as { unref?: () => void }).unref?.();
+    }),
+    input.subscribe('TURN_COMPLETED', dropPending),
+  ];
+  return () => {
+    dropPending();
+    for (const unsubscribe of unsubs) unsubscribe();
+  };
 }
 
 /**

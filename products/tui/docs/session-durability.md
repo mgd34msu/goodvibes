@@ -20,7 +20,9 @@ The crash snapshot (`writeRecoveryFile`) is written, each time only when the con
 since its last write:
 
 - when a prompt is accepted (`TURN_SUBMITTED`), so the message survives a kill during the stream;
-- after each batch of tool calls (`TOOLS_DONE`), so a kill mid-turn keeps the tool work done so far;
+- after a batch of tool calls (`TOOLS_DONE`), so a kill mid-turn keeps the tool work done so far; batches
+  are written at most once every five seconds (a batch inside that window is written when it ends, and
+  dropped once the turn completes, since the turn-end save is the copy then);
 - when the save at the end of a turn fails, so that turn is not lost;
 - for a change made outside a turn (`/undo`, `/title`, a branch switch), at most once a minute
   (`src/runtime/recovery-autosave.ts`);

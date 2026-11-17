@@ -308,7 +308,8 @@ export interface HeadlessRecoverability {
  * last one, so `run --continue` after a killed run reaches it.
  *
  * Cost per turn: one atomic write (temp file and rename) of the whole
- * conversation when the prompt is accepted and one after each tool batch, each
+ * conversation when the prompt is accepted and after tool batches (at most one
+ * per five seconds, the last batch written when the window ends), each
  * the size of the session's messages as JSON lines; one pointer write per run;
  * one unlink after the run's session is saved.
  */

@@ -331,7 +331,7 @@ goodvibes auth rotate-password alice --password-stdin
 
 ### Crash recovery
 
-Every `run` writes its session's crash snapshot at the same moments the TUI does: when the prompt is accepted and after each batch of tool calls. That is one atomic write (temp file and rename) of the whole conversation each time, the size of the session's messages as JSON lines; the first one also records the session as the last one, so `--continue` reaches a run that was killed. When the run's session is saved at the end, the snapshot is removed. While the run has its session open it holds the session's lock, the same one an open terminal holds; the operating system releases it if the run is killed.
+Every `run` writes its session's crash snapshot at the same moments the TUI does: when the prompt is accepted and after batches of tool calls, at most once every five seconds. That is one atomic write (temp file and rename) of the whole conversation each time, the size of the session's messages as JSON lines; the first one also records the session as the last one, so `--continue` reaches a run that was killed. When the run's session is saved at the end, the snapshot is removed. While the run has its session open it holds the session's lock, the same one an open terminal holds; the operating system releases it if the run is killed.
 
 `run --continue`, `run --resume [id]` or `run --session <id>` on a session with a crash snapshot newer than its saved copy restores the snapshot before the first request, without asking (the flag is the ask). The new prompt then continues from the recovered conversation; the interrupted turn is not run again:
 

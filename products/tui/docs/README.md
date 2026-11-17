@@ -38,7 +38,7 @@ This directory contains the current product documentation for `goodvibes-tui`.
   Omnichannel surfaces, reply routing, remote peers, node-host contracts, and the daemon/control-plane HTTP + streaming surfaces.
 
 - [Session durability](session-durability.md)
-  The saved session written after every turn, and the crash snapshot written when a prompt is accepted and after each tool batch.
+  The saved session written after every turn, and the crash snapshot written when a prompt is accepted and after tool batches (at most once every five seconds).
 
 - [Share command](share-command.md)
   `/share` session export to HTML/JSON/Markdown with redaction, upload, clipboard, and open options.

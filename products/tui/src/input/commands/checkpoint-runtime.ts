@@ -94,6 +94,7 @@ export function registerCheckpointRuntimeCommands(registry: CommandRegistry): vo
     description: 'Create a manual workspace checkpoint (forensic retention)',
     usage: '[label]',
     argsHint: '[label]',
+    rawRest: 0,
     handler: async (args, ctx: CommandContext) => {
       const mgr = ctx.workspace.workspaceCheckpointManager;
       if (!mgr) {

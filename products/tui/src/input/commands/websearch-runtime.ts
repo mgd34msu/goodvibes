@@ -6,19 +6,19 @@ interface ParsedSearchArgs {
   readonly limit?: number;
 }
 
+/** The query as typed, with a `--limit <n>` (or `-n <n>`) read from its start or end. */
 function parseSearchArgs(args: string[]): ParsedSearchArgs {
-  const words: string[] = [];
+  let query = args.join(' ').trim();
   let limit: number | undefined;
-  for (let i = 0; i < args.length; i++) {
-    const token = args[i]!;
-    if ((token === '--limit' || token === '-n') && i + 1 < args.length) {
-      const parsed = Number.parseInt(args[++i]!, 10);
-      if (Number.isFinite(parsed) && parsed > 0) limit = parsed;
-    } else {
-      words.push(token);
-    }
-  }
-  return { query: words.join(' ').trim(), ...(limit !== undefined ? { limit } : {}) };
+  const take = (match: RegExpExecArray | null): void => {
+    if (!match) return;
+    const parsed = Number.parseInt(match[1]!, 10);
+    if (Number.isFinite(parsed) && parsed > 0) limit = parsed;
+    query = (query.slice(0, match.index) + query.slice(match.index + match[0].length)).trim();
+  };
+  take(/^(?:--limit|-n)(?:=|\s+)(\d+)(?:\s+|$)/.exec(query));
+  take(/(?:^|\s+)(?:--limit|-n)(?:=|\s+)(\d+)$/.exec(query));
+  return { query, ...(limit !== undefined ? { limit } : {}) };
 }
 
 /**
@@ -38,6 +38,8 @@ export function registerWebSearchRuntimeCommands(registry: CommandRegistry): voi
     description: 'Web search, ranked results with source labels (searching THIS transcript? use /find)',
     usage: '<query> [--limit <n>]',
     argsHint: '<query> [--limit <n>]',
+    // The query is sent as typed: quotes, apostrophes and spacing included.
+    rawRest: 0,
     async handler(args, ctx) {
       const service = ctx.platform.webSearchService;
       if (!service) {

@@ -5,12 +5,33 @@ import type { CommandRegistry } from '../command-registry.ts';
 import type { MediaGenerationResult, MediaProviderTask } from '@goodvibes-jev/engine/platform/platform/media';
 import { externalUrlLaunchers, redactSensitiveDataAsync, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { requireShellPaths } from '@goodvibes-jev/engine/terminal-shell/command-service-access';
+import { tokenizeSlashCommand } from '@goodvibes-jev/engine/terminal-shell/slash-command-parser';
 
 const USAGE = 'Usage: /imagine [--out <path>] <prompt>  |  /imagine [--out <path>] --collect <provider> <task-id> [key=value ...]';
 
 const EXTENSION_BY_MIME: Readonly<Record<string, string>> = {
   'image/png': '.png', 'image/jpeg': '.jpg', 'image/webp': '.webp', 'image/gif': '.gif', 'image/svg+xml': '.svg',
 };
+
+/**
+ * The typed line (taken whole, as typed) as words for `--out`/`--collect` and
+ * the prompt: a leading `--out <path>` (quoted when it has spaces) is read off
+ * the front, `--collect` words are fields, and anything else is the prompt,
+ * kept exactly as typed.
+ */
+export function readImagineLine(raw: string): { readonly out?: string; readonly rest: readonly string[] } | null {
+  let text = raw.trim();
+  let out: string | undefined;
+  const flag = /^--out(?:=|\s+)("([^"]*)"|'([^']*)'|(\S+))(?:\s+|$)/.exec(text);
+  if (/^--out(?:=|\s|$)/.test(text)) {
+    if (!flag) return null;
+    out = flag[2] ?? flag[3] ?? flag[4] ?? '';
+    if (!out || out.startsWith('--')) return null;
+    text = text.slice(flag[0].length);
+  }
+  const rest = text.startsWith('--collect') ? tokenizeSlashCommand(text) : text ? [text] : [];
+  return { ...(out === undefined ? {} : { out }), rest };
+}
 
 /** `--out <path>` or `--out=<path>` at the front of the line, and the rest. */
 export function readImagineOut(args: readonly string[]): { readonly out?: string; readonly rest: readonly string[] } | null {
@@ -83,6 +104,8 @@ export function registerImageRuntimeCommands(
     description: 'Generate an image from a prompt via a configured media provider',
     usage: '[--out <path>] <prompt> | [--out <path>] --collect <provider> <task-id> [key=value ...]',
     argsHint: '<prompt>',
+    // The prompt is sent as typed; readImagineLine reads --out and --collect off the front.
+    rawRest: 0,
     async handler(args, ctx) {
       const mediaProviders = ctx.platform.mediaProviders;
       const artifactStore = ctx.platform.artifactStore;
@@ -91,7 +114,7 @@ export function registerImageRuntimeCommands(
         return;
       }
 
-      const line = readImagineOut(args);
+      const line = readImagineLine(args.join(' '));
       if (!line) {
         ctx.print(`--out needs a file path. ${USAGE}`);
         return;

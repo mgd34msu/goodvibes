@@ -205,6 +205,8 @@ export function registerShellCoreCommands(registry: CommandRegistry): void {
 
   registry.register({
     name: 'keep',
+    // The pinned text is kept exactly as typed.
+    rawRest: 0,
     aliases: [],
     description: 'Pin text to session memory (survives compaction)',
     usage: '<text>',

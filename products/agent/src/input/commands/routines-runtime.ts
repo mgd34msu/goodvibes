@@ -504,6 +504,8 @@ export async function runRoutinesRuntimeCommand(args: readonly string[], ctx: Co
 export function registerRoutinesRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
     name: 'routines',
+    // A search or a stale reason is free text, kept as typed.
+    rawRest: (args) => ((args[0] ?? '').toLowerCase() === 'search' ? 1 : (args[0] ?? '').toLowerCase() === 'stale' ? 2 : undefined),
     effect: 'local-state',
     aliases: ['routine'],
     description: 'Manage Agent-local routines',

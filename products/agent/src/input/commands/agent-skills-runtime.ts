@@ -563,6 +563,18 @@ export async function runAgentSkillsRuntimeCommand(args: readonly string[], ctx:
 export function registerAgentSkillsRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
     name: 'skills',
+    // A search or a stale reason is free text, kept as typed.
+    rawRest: (args) => {
+      let at = 0;
+      while (['local', 'agent'].includes((args[at] ?? '').toLowerCase())) at += 1;
+      const sub = args[at]?.toLowerCase();
+      if (sub === undefined) return undefined;
+      if (sub === 'bundle' || sub === 'bundles') {
+        const verb = args[at + 1]?.toLowerCase();
+        return verb === 'search' ? at + 2 : verb === 'stale' ? at + 3 : undefined;
+      }
+      return sub === 'search' ? at + 1 : sub === 'stale' ? at + 2 : undefined;
+    },
     effect: 'local-state',
     aliases: ['skill', 'agent-skills', 'askills', 'local-skills'],
     description: 'Manage Agent-local skills',

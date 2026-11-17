@@ -2,7 +2,7 @@ import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/conf
 import type { NotificationDeadLetter, NotificationDeadLetterSource, WebhookNotifier } from '@goodvibes-jev/engine/platform/platform/integrations';
 import { classifyHostTrustTier, extractHostname } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { TerminalCommandRegistry } from './command-registry.js';
-import { commandRefusal, requireYesFlag, stripYesFlag } from './command-confirmation.js';
+import { commandRefusal, requireYesFlag, stripYesFlag, takeYesFromText } from './command-confirmation.js';
 interface NotifyContext {
   readonly platform: { readonly configManager: Pick<ConfigManager, 'getCategory' | 'mergeCategory'> };
   print(message: string): void;
@@ -50,6 +50,8 @@ export function createNotifyRuntimeCommands<Context extends NotifyContext>(
     registry.register({
       name: 'notify',
       effect: 'external-network',
+      // The message is free text, sent as typed; a first or last --yes confirms.
+      rawRest: (args) => (args[0]?.toLowerCase() === 'send' ? 1 : undefined),
       aliases: [],
       description: policy.description,
       usage: policy.usage,
@@ -175,11 +177,12 @@ export function createNotifyRuntimeCommands<Context extends NotifyContext>(
         }
 
         if (policy.allowSend && sub === 'send') {
-          const message = commandArgs.slice(1).join(' ').trim();
+          const typed = takeYesFromText(commandArgs.slice(1).join(' '));
+          const message = typed.text;
           if (!message) {
             throw commandRefusal(`Usage: /notify send <message>${suffix}`);
           }
-          if (!parsed.yes) {
+          if (!parsed.yes && !(policy.confirmMutations && typed.yes)) {
             requireYesFlag(ctx, 'send a notification to configured webhook targets', `/notify send <message>${suffix}`);
             return;
           }

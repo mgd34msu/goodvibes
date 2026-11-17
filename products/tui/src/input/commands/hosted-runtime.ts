@@ -246,6 +246,8 @@ export function registerHostedRuntimeCommands(registry: CommandRegistry): void {
     usage: '[new|list|attach|say|later|cancel|detach|kill <id>] [args]',
     argsHint: '[new|list|attach|say|later|cancel|detach|kill]',
     subcommands: { new: '[--survive|--kill] [prompt…]', list: '[--all]', attach: '<id|n>', say: '<text…>', later: '<text…>', cancel: '[callId]', kill: '[id|n]' },
+    // A prompt or message is free text, sent as typed.
+    rawRest: (args) => (['new', 'say', 'later'].includes((args[0] ?? '').toLowerCase()) ? 1 : undefined),
     confirm(args) {
       if ((args[0] ?? '').toLowerCase() !== 'kill') return undefined;
       const target = args[1] ? resolveIdArgument(args[1]) : getSharedHostedSessionFeed().getState().record?.id;
@@ -273,9 +275,15 @@ export function registerHostedRuntimeCommands(registry: CommandRegistry): void {
       try {
         switch (sub) {
           case 'new': {
-            const { policy, rest } = readDetachOverride(args.slice(1));
+            // Leading --survive/--kill words choose the detach policy; the prompt after them is as typed.
+            let tail = args.slice(1).join(' ').trimStart();
+            let policy: ReturnType<typeof readDetachOverride>['policy'];
+            for (let lead = /^--(survive|kill)(?:\s+|$)/.exec(tail); lead; lead = /^--(survive|kill)(?:\s+|$)/.exec(tail)) {
+              policy = readDetachOverride([`--${lead[1]}`]).policy;
+              tail = tail.slice(lead[0].length);
+            }
             const workspaceRoot = requireShellPaths(ctx).workingDirectory;
-            const prompt = rest.join(' ').trim();
+            const prompt = tail.trim();
             await attachSession(seams, async () => {
               const record = await seams.client.create({
                 workspaceRoot,

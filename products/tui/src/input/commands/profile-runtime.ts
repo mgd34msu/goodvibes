@@ -208,10 +208,16 @@ async function runWrite<TVerb extends ProfileWriteVerb, TBody extends ProfileInp
  * `note`, `forget` calls this solely when `--section` was given.
  */
 function parseSectionArgs(args: readonly string[]): { section: string; text: string } {
-  if (args[1] === '--section' && typeof args[2] === 'string' && args[2].length > 0) {
-    return { section: args[2], text: args.slice(3).join(' ').trim() };
-  }
-  return { section: 'Notes', text: args.slice(1).join(' ').trim() };
+  // The text arrives as typed (one raw word after the subcommand); a leading `--section <name>` is read off it.
+  const raw = args.slice(1).join(' ').trim();
+  const section = /^--section\s+(\S+)(?:\s+|$)/.exec(raw);
+  if (section) return { section: section[1]!, text: raw.slice(section[0].length).trim() };
+  return { section: 'Notes', text: raw };
+}
+
+/** Whether a `/profile` line names a prose section: `--section` first in its as-typed text. */
+function namesSection(args: readonly string[]): boolean {
+  return /^--section(?:\s|$)/.test(args.slice(1).join(' ').trim());
 }
 
 export function registerProfileRuntimeCommands(
@@ -223,6 +229,12 @@ export function registerProfileRuntimeCommands(
     description: 'What the platform knows about you: read it, correct it, trace where a fact came from, or forget one',
     usage: '[show|where <field>|set <field> <value>|note [--section <name>] <text>|forget <field>|forget --section <name> <text>|undo <field>|status]',
     argsHint: '[show|where|set|note|forget|undo|status]',
+    // Values, notes and line texts are kept as typed (a forget matches the exact text of a line).
+    rawRest: (args) => {
+      const sub = args[0];
+      if (sub === 'set') return 2;
+      return sub === 'note' || sub === 'forget' || sub === 'where' || sub === 'undo' ? 1 : undefined;
+    },
     async handler(args, ctx) {
       const sub = args[0] ?? 'show';
       if (!(SUBCOMMANDS as readonly string[]).includes(sub)) {
@@ -246,7 +258,7 @@ export function registerProfileRuntimeCommands(
       // about a person. The line is named by its exact text, never by position:
       // the owner edits this file himself, so an index taken from an earlier
       // read may address a different line by the time the delete lands (§9.2).
-      const forgetProse = sub === 'forget' && args[1] === '--section' ? parseSectionArgs(args) : null;
+      const forgetProse = sub === 'forget' && namesSection(args) ? parseSectionArgs(args) : null;
       if (forgetProse && forgetProse.text.length === 0) {
         ctx.print('Usage: /profile forget --section <name> <the exact text of the line>');
         return;

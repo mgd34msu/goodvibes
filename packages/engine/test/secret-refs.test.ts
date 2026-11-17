@@ -1,165 +1,127 @@
+/**
+ * A secret reference resolves only from the store it names, and only through
+ * the program, server and token variable the owner's own settings name. A
+ * reference is data that can arrive in a repository or an imported file, so
+ * nothing in it may choose a program to run or a server to hand a token to.
+ * A reference that fails to resolve, or is mistyped, yields no credential:
+ * neither the provider's output nor the reference text is used in its place.
+ *
+ * The password-manager programs are outside the product; the command runner
+ * records what the resolver asked to run and answers as the program would.
+ */
 import { describe, expect, test } from 'bun:test';
-import {
-  getSecretRefSource,
-  isSecretRefInput,
-  normalizeSecretRef,
-  resolveSecretInput,
-  resolveSecretRef,
-} from '../platform/src/platform/config/secret-refs.js';
+import { resolveSecretRef, type SecretCommandRunner, type SecretProviderHostConfig } from '../platform/src/platform/config/secret-refs.ts';
+import { resolveSecretInput } from '../platform/src/platform/config/secret-ref-refusal.ts';
 
-describe('GoodVibes SecretRef URI syntax', () => {
-  test('parses env and local GoodVibes secret refs', () => {
-    expect(normalizeSecretRef('goodvibes://secrets/env/OPENAI_API_KEY')).toEqual({
-      source: 'env',
-      id: 'OPENAI_API_KEY',
-    });
+interface Ran { readonly command: string; readonly args: readonly string[]; readonly env: Readonly<Record<string, string>> }
 
-    expect(normalizeSecretRef('goodvibes://secrets/goodvibes/OPENAI_API_KEY')).toEqual({
-      source: 'goodvibes',
-      id: 'OPENAI_API_KEY',
-    });
+function recordingRunner(stdout: string, exitCode = 0): { readonly runner: SecretCommandRunner; readonly ran: Ran[] } {
+  const ran: Ran[] = [];
+  const runner: SecretCommandRunner = async (command, args, options) => {
+    ran.push({ command, args: [...args], env: { ...(options?.env ?? {}) } });
+    return { exitCode, stdout, stderr: exitCode === 0 ? '' : 'provider unavailable' };
+  };
+  return { runner, ran };
+}
 
-    expect(getSecretRefSource('goodvibes://secrets/goodvibes/OPENAI_API_KEY')).toBe('goodvibes');
-  });
+const OWNER: SecretProviderHostConfig = {
+  onePassword: { cli: '/opt/owner/op' },
+  bitwarden: { cli: '/opt/owner/bw' },
+  bitwardenSecretsManager: { cli: '/opt/owner/bws', serverUrl: 'https://owner-vault.example' },
+};
 
-  test('parses file refs with home-relative and encoded absolute paths', () => {
-    expect(normalizeSecretRef('goodvibes://secrets/file/~/.credentials/key.json?selector=openai.api_key')).toEqual({
-      source: 'file',
-      path: '~/.credentials/key.json',
-      selector: 'openai.api_key',
-    });
-
-    expect(normalizeSecretRef('goodvibes://secrets/file/%2Fetc%2Fgoodvibes%2Fkey.json')).toEqual({
-      source: 'file',
-      path: '/etc/goodvibes/key.json',
-      selector: undefined,
-    });
-  });
-
-  test('parses exec refs with explicit URI args', () => {
-    expect(
-      normalizeSecretRef(
-        'goodvibes://secrets/exec/op?arg=read&arg=op%3A%2F%2FDevelopment%2FOpenAI%2Fapi_key&timeoutMs=5000',
-      ),
-    ).toMatchObject({
-      source: 'exec',
-      command: 'op',
-      args: ['read', 'op://Development/OpenAI/api_key'],
-      timeoutMs: 5000,
-    });
-  });
-
-  test('parses 1Password refs from query parameters and native refs', () => {
-    expect(
-      normalizeSecretRef('goodvibes://secrets/1password?vault=Development&item=OpenAI&field=api_key'),
-    ).toMatchObject({
-      source: '1password',
-      vault: 'Development',
-      item: 'OpenAI',
-      field: 'api_key',
-    });
-
-    expect(
-      normalizeSecretRef('goodvibes://secrets/op?ref=op%3A%2F%2FDevelopment%2FOpenAI%2Fapi_key'),
-    ).toMatchObject({
-      source: '1password',
-      ref: 'op://Development/OpenAI/api_key',
-    });
-  });
-
-  test('parses Bitwarden, Vaultwarden, and BWS refs', () => {
-    expect(
-      normalizeSecretRef(
-        'goodvibes://secrets/bitwarden/openai-prod/api_key?customField=ApiKey&server=https%3A%2F%2Fvault.example.com&validateServer=true&syncBeforeRead=false&timeoutMs=5000',
-      ),
-    ).toMatchObject({
-      source: 'bitwarden',
-      item: 'openai-prod',
-      field: 'api_key',
-      customField: 'ApiKey',
-      server: 'https://vault.example.com',
-      validateServer: true,
-      syncBeforeRead: false,
-      timeoutMs: 5000,
-    });
-
-    expect(normalizeSecretRef('goodvibes://secrets/vaultwarden?item=openai-prod&field=password')).toMatchObject({
-      source: 'vaultwarden',
-      item: 'openai-prod',
-      field: 'password',
-    });
-
-    expect(
-      normalizeSecretRef('goodvibes://secrets/bws/secret-123?field=value&profile=prod&serverUrl=https%3A%2F%2Fvault.example.com'),
-    ).toMatchObject({
-      source: 'bws',
-      id: 'secret-123',
-      field: 'value',
-      profile: 'prod',
-      serverUrl: 'https://vault.example.com',
-    });
-  });
-
-  test('rejects the removed generic secret URI scheme', () => {
-    expect(isSecretRefInput('secret://env/OPENAI_API_KEY')).toBe(false);
-    expect(normalizeSecretRef('secret://bitwarden?item=openai-prod&field=password')).toBeNull();
-    expect(normalizeSecretRef('goodvibes://config/env/OPENAI_API_KEY')).toBeNull();
-  });
-
-  test('resolves goodvibes URI refs without embedding secret values in the URI', async () => {
-    const previous = process.env['GV_SECRET_REF_TEST'];
-    process.env['GV_SECRET_REF_TEST'] = 'env-secret-value';
+describe('a reference resolves from the store it names', () => {
+  test('an env reference reads the environment; a local reference reads only the local store', async () => {
+    const previous = process.env['GV_SECRET_REF_FIXTURE'];
+    process.env['GV_SECRET_REF_FIXTURE'] = 'from-environment';
     try {
-      expect(await resolveSecretRef('goodvibes://secrets/env/GV_SECRET_REF_TEST')).toEqual({
-        source: 'env',
-        value: 'env-secret-value',
+      expect((await resolveSecretRef('goodvibes://secrets/env/GV_SECRET_REF_FIXTURE')).value).toBe('from-environment');
+      const local = await resolveSecretRef('goodvibes://secrets/goodvibes/GV_SECRET_REF_FIXTURE', {
+        resolveLocalSecret: async (key) => (key === 'GV_SECRET_REF_FIXTURE' ? 'from-local-store' : null),
       });
-
-      expect(
-        await resolveSecretRef('goodvibes://secrets/goodvibes/OPENAI_API_KEY', {
-          resolveLocalSecret: async (key) => key === 'OPENAI_API_KEY' ? 'local-secret-value' : null,
-        }),
-      ).toEqual({
-        source: 'goodvibes',
-        value: 'local-secret-value',
-      });
+      expect(local.value).toBe('from-local-store');
+      // With no local store there is no answer: the environment variable of the same name is not read instead.
+      await expect(resolveSecretRef('goodvibes://secrets/goodvibes/GV_SECRET_REF_FIXTURE')).rejects.toThrow();
+      expect(await resolveSecretInput('goodvibes://secrets/goodvibes/GV_SECRET_REF_FIXTURE')).toBeNull();
     } finally {
-      if (previous === undefined) delete process.env['GV_SECRET_REF_TEST'];
-      else process.env['GV_SECRET_REF_TEST'] = previous;
+      if (previous === undefined) delete process.env['GV_SECRET_REF_FIXTURE'];
+      else process.env['GV_SECRET_REF_FIXTURE'] = previous;
     }
   });
+});
 
-  test('reports secret provider stderr without exposing stdout on command failure', async () => {
-    let message = '';
+describe('a reference cannot choose the program, server or token variable', () => {
+  test('1Password: the owner\'s program runs, whatever program the reference names', async () => {
+    const { runner, ran } = recordingRunner('op-secret');
+    const value = await resolveSecretInput('goodvibes://secrets/1password?vault=V&item=I&field=F&cli=%2Ftmp%2Fplanted', { runCommand: runner, providers: OWNER });
+    expect(value).toBe('op-secret');
+    expect(ran.map((call) => call.command)).toEqual(['/opt/owner/op']);
+    expect(JSON.stringify(ran)).not.toContain('/tmp/planted');
+  });
+
+  test('Bitwarden: the owner\'s program runs and no data directory or session variable comes from the reference', async () => {
+    const previous = process.env['GV_PLANTED_SESSION'];
+    process.env['GV_PLANTED_SESSION'] = 'planted-session-token';
     try {
-      await resolveSecretRef(
-        { source: 'exec', command: 'secret-tool' },
-        {
-          runCommand: async () => ({
-            exitCode: 2,
-            stdout: 'secret-value',
-            stderr: 'provider unavailable',
-          }),
-        },
+      const { runner, ran } = recordingRunner('bw-secret');
+      const value = await resolveSecretInput(
+        'goodvibes://secrets/bitwarden/item-1/password?cli=%2Ftmp%2Fplanted&appDataDir=%2Ftmp%2Fplanted-data&sessionEnv=GV_PLANTED_SESSION&syncBeforeRead=false',
+        { runCommand: runner, providers: OWNER },
       );
-    } catch (error) {
-      message = error instanceof Error ? error.message : String(error);
+      expect(value).toBe('bw-secret');
+      expect(ran.length).toBeGreaterThan(0);
+      for (const call of ran) expect(call.command).toBe('/opt/owner/bw');
+      const sent = JSON.stringify(ran);
+      expect(sent).not.toContain('/tmp/planted');
+      expect(sent).not.toContain('planted-session-token');
+    } finally {
+      if (previous === undefined) delete process.env['GV_PLANTED_SESSION'];
+      else process.env['GV_PLANTED_SESSION'] = previous;
     }
-
-    expect(message).toBe('Secret provider exec command failed with exit 2: provider unavailable');
-    expect(message).not.toContain('secret-value');
   });
 
-  test('resolveSecretInput returns null when secret resolution fails', async () => {
-    await expect(resolveSecretInput(
-      { source: 'exec', command: 'secret-tool' },
-      {
-        runCommand: async () => ({
-          exitCode: 2,
-          stdout: 'secret-value',
-          stderr: 'provider unavailable',
-        }),
-      },
-    )).resolves.toBeNull();
+  test('Bitwarden Secrets Manager: the token goes only to the owner\'s server, through the owner\'s program', async () => {
+    const previous = process.env['GV_PLANTED_TOKEN'];
+    process.env['GV_PLANTED_TOKEN'] = 'planted-access-token';
+    try {
+      const { runner, ran } = recordingRunner(JSON.stringify({ value: 'bws-secret' }));
+      const value = await resolveSecretInput(
+        'goodvibes://secrets/bws/secret-123?serverUrl=https%3A%2F%2Fattacker.example&cli=%2Ftmp%2Fplanted&accessTokenEnv=GV_PLANTED_TOKEN&configFile=%2Ftmp%2Fplanted.conf',
+        { runCommand: runner, providers: OWNER },
+      );
+      expect(value).toBe('bws-secret');
+      expect(ran).toHaveLength(1);
+      expect(ran[0]!.command).toBe('/opt/owner/bws');
+      const serverAt = ran[0]!.args.indexOf('--server-url');
+      expect(ran[0]!.args[serverAt + 1]).toBe('https://owner-vault.example');
+      const sent = JSON.stringify(ran);
+      expect(sent).not.toContain('attacker.example');
+      expect(sent).not.toContain('/tmp/planted');
+      expect(sent).not.toContain('planted-access-token');
+    } finally {
+      if (previous === undefined) delete process.env['GV_PLANTED_TOKEN'];
+      else process.env['GV_PLANTED_TOKEN'] = previous;
+    }
+  });
+});
+
+describe('a failed or mistyped reference yields no credential', () => {
+  test('a provider that fails yields nothing, and its output never reaches the error', async () => {
+    const { runner } = recordingRunner('half-printed-secret', 2);
+    const failure = await resolveSecretRef({ source: 'exec', command: 'secret-tool' }, { runCommand: runner }).then(
+      () => undefined,
+      (error: unknown) => (error instanceof Error ? error.message : String(error)),
+    );
+    expect(failure).toBeDefined();
+    expect(failure).not.toContain('half-printed-secret');
+    expect(await resolveSecretInput({ source: 'exec', command: 'secret-tool' }, { runCommand: runner })).toBeNull();
+  });
+
+  test('a reference with a typo is refused, never sent on as the credential', async () => {
+    for (const typo of ['goodvibes://secrets/1pasword?vault=V&item=I&field=F', 'goodvibes://secret/env/OPENAI_API_KEY', 'bws://']) {
+      expect(await resolveSecretInput(typo)).toBeNull();
+    }
+    // A plain literal is still a literal.
+    expect(await resolveSecretInput('sk-literal-value')).toBe('sk-literal-value');
   });
 });

@@ -11,7 +11,8 @@ import { join } from 'node:path';
 import { logger } from '../../utils/logger.js';
 import { summarizeError } from '../../utils/error-display.js';
 import type { ConfigManager } from '../../config/manager.js';
-import type { PermissionPromptDecision } from '../../permissions/prompt.js';
+import type { PermissionPromptDecision, PermissionPromptRequest } from '../../permissions/prompt.js';
+import { callingAgentId } from '../../agents/calling-agent.js';
 import type { GatePresetName } from '../../gate/presets.js';
 import { PermissionManager, createPermissionConfigReader } from '../../permissions/manager.js';
 import { UserPermissionRuleStore } from '../../permissions/user-rule-store.js';
@@ -112,20 +113,29 @@ export interface BrokeredPermissionManagerOptions {
  */
 export function createBrokeredPermissionManager(options: BrokeredPermissionManagerOptions): PermissionManager {
   return new PermissionManager(
-    (request, execution) => options.requestApproval({
-      request,
-      ...(execution?.signal === undefined ? {} : { signal: execution.signal }),
-      ...(request.attribution?.kind === 'background-agent'
-        ? {
-            routeId: request.attribution.agentId,
-            metadata: {
-              source: 'background-agent',
-              agentId: request.attribution.agentId,
-              ...(request.attribution.template ? { agentTemplate: request.attribution.template } : {}),
-            },
-          }
-        : {}),
-    }),
+    (asked, execution) => {
+      // An ask raised inside an agent's tool call names that agent even when
+      // its gate passed no attribution (the autonomous admission path), so a
+      // surface, or an embedder sharing one daemon, knows whose work asks.
+      const callingAgent = asked.attribution === undefined ? callingAgentId() : undefined;
+      const request: PermissionPromptRequest = callingAgent === undefined
+        ? asked
+        : { ...asked, attribution: { kind: 'background-agent', agentId: callingAgent } };
+      return options.requestApproval({
+        request,
+        ...(execution?.signal === undefined ? {} : { signal: execution.signal }),
+        ...(request.attribution?.kind === 'background-agent'
+          ? {
+              routeId: request.attribution.agentId,
+              metadata: {
+                source: 'background-agent',
+                agentId: request.attribution.agentId,
+                ...(request.attribution.template ? { agentTemplate: request.attribution.template } : {}),
+              },
+            }
+          : {}),
+      });
+    },
     createPermissionConfigReader(options.configManager),
     options.policyRuntimeState,
     options.hookDispatcher,

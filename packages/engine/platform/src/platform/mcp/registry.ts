@@ -263,6 +263,22 @@ export class McpRegistry {
     await this._connectServer(serverConfig);
   }
 
+  /**
+   * removeServer, Disconnect a server added with connectServer and drop its
+   * config, so its tools leave the tool surface and a reload does not bring it
+   * back. Leaves the name alone, and answers false, when it now holds another
+   * config; otherwise answers whether a connection was closed.
+   */
+  async removeServer(serverConfig: McpServerConfig): Promise<boolean> {
+    if (!sameServerConfig(this.serverConfigs.get(serverConfig.name), serverConfig)) return false;
+    this.serverConfigs.delete(serverConfig.name); this.#revision++;
+    try {
+      return await this.disconnectServer(serverConfig.name, 'config-removed');
+    } finally {
+      this.forgetServer(serverConfig.name);
+    }
+  }
+
   async reload(roots: McpConfigRoots): Promise<McpReloadResult> {
     const effective = loadMcpEffectiveConfig(roots);
     return this.applyConfig(effective.servers.map((entry) => entry.server));

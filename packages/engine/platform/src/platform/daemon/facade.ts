@@ -564,6 +564,27 @@ export class DaemonServer {
   }
 
   /**
+   * Disconnect a server connected with {@link registerMcpServer} and drop its
+   * config, so its tools leave the tool surface. Exposed so an in-process
+   * embedder stops a server once no session that declared it is left. Leaves
+   * the name alone when it now holds another config.
+   */
+  async unregisterMcpServer(config: McpServerConfig): Promise<boolean> {
+    return this.runtimeServices.mcpRegistry.removeServer(config);
+  }
+
+  /**
+   * The conversation session and the contract an agent works for, from its
+   * record (a contract's unit agents carry the session that started the
+   * contract). Null for an unknown id. Exposed so an in-process embedder can
+   * name which of its sessions an agent's permission ask belongs to.
+   */
+  agentOwnership(agentId: string): { readonly sessionId: string | undefined; readonly contractId: string | undefined } | null {
+    const record = this.agentManager.getStatus(agentId);
+    return record ? { sessionId: record.sessionId, contractId: record.contractId } : null;
+  }
+
+  /**
    * Start the daemon. Refuses to start if not explicitly enabled.
    */
   async start(): Promise<void | NativeHandover> {

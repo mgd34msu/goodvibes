@@ -59,7 +59,8 @@ export interface EmbedSessionOptions {
    * MCP servers to connect into the daemon's tool surface (e.g. the servers an
    * ACP client declares in `session/new`). Each is connected through the
    * daemon's live MCP registry (tools namespaced `mcp:<name>:<tool>`), once per
-   * daemon however many sessions declare it. stdio transport only, the registry
+   * daemon however many sessions declare it, and disconnected when the last
+   * session that declared it stops. stdio transport only, the registry
    * spawns a process. A server that fails to connect is logged and skipped; it
    * never aborts session creation.
    */
@@ -152,6 +153,10 @@ interface Member {
   readonly requestPermission: PermissionRequestHandler | undefined;
   /** Agents this session's submissions started or reached. */
   readonly agentIds: Set<string>;
+  /** Shared sessions this session's submissions went to; a contract's unit agents carry the one that started it. */
+  readonly sessionIds: Set<string>;
+  /** Contracts this session's submissions started; their unit agents ask under their own ids. */
+  readonly contractIds: Set<string>;
   /** Runs still being followed; stopping the session ends each as cancelled. */
   readonly liveRuns: Set<RunWatch>;
 }
@@ -172,9 +177,14 @@ interface SharedDaemon {
 interface DeclaredMcpServer {
   readonly config: string;
   users: number;
-  /** Settles true once connected; null until a session connects it or after a failed attempt. */
+  /** Settles true once connected; null until a session connects it, after a failed attempt, or once it is being disconnected. */
   connection: Promise<boolean> | null;
+  /** The disconnect started when its last session stopped; a session that declares it again waits for it, then connects. */
+  removal: Promise<unknown> | null;
 }
+
+/** Where an agent's record says it belongs. */
+type AgentOwnershipSource = Pick<BootedDaemon['server'], 'agentOwnership'>;
 
 /** Live embedded daemons of this process, by home directory. */
 const embeddedDaemons = new Map<string, SharedDaemon[]>();
@@ -219,7 +229,10 @@ export async function createEmbeddedSession(options: EmbedSessionOptions): Promi
   const workspace = realOrResolved(options.workspace);
   const running = embeddedDaemons.get(home) ?? [];
   const daemon = running.find((candidate) => fits(candidate, options, workspace)) ?? startDaemon(home, workspace, options);
-  const member: Member = { workspace, requestPermission: options.requestPermission, agentIds: new Set(), liveRuns: new Set() };
+  const member: Member = {
+    workspace, requestPermission: options.requestPermission,
+    agentIds: new Set(), sessionIds: new Set(), contractIds: new Set(), liveRuns: new Set(),
+  };
   daemon.members.add(member);
 
   // Claim each declared MCP server before the first await, so a session
@@ -229,15 +242,37 @@ export async function createEmbeddedSession(options: EmbedSessionOptions): Promi
     const config = JSON.stringify(mcpServer);
     let entry = daemon.mcp.get(mcpServer.name);
     if (entry === undefined || entry.config !== config) {
-      entry = { config, users: 0, connection: null };
+      entry = { config, users: 0, connection: null, removal: null };
       daemon.mcp.set(mcpServer.name, entry);
     }
     entry.users += 1;
     declared.push({ server: mcpServer, entry });
   }
-  const releaseDeclared = (): void => {
-    // A connected server stays connected for the daemon's life; a later session may declare it again.
-    for (const { entry } of declared) entry.users = Math.max(0, entry.users - 1);
+  /**
+   * Give up this session's claim on its declared servers. A server no live
+   * session declares any more is disconnected, so its tools leave the other
+   * sessions' tool surface; `connected` is omitted when the daemon itself is
+   * stopping (or never booted) and takes every server down anyway.
+   */
+  const releaseDeclared = (connected?: Pick<BootedDaemon['server'], 'unregisterMcpServer'>): void => {
+    for (const { server: mcpServer, entry } of declared) {
+      entry.users = Math.max(0, entry.users - 1);
+      const connection = entry.connection;
+      if (entry.users > 0 || connected === undefined || connection === null || daemon.mcp.get(mcpServer.name) !== entry) continue;
+      entry.connection = null;
+      const removal: Promise<unknown> = connection
+        .then((ok) => (ok ? connected.unregisterMcpServer(mcpServer) : false))
+        .catch((error: unknown) => {
+          logger.warn('createEmbeddedSession: failed to disconnect a declared MCP server no session uses', {
+            server: mcpServer.name,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        })
+        .finally(() => {
+          if (entry.removal === removal) entry.removal = null;
+        });
+      entry.removal = removal;
+    }
   };
 
   let booted: BootedDaemon;
@@ -258,6 +293,8 @@ export async function createEmbeddedSession(options: EmbedSessionOptions): Promi
   // earlier session is connected once. A single server's failure is logged and
   // skipped (the next session that declares it tries again), it never aborts the session.
   for (const { server: mcpServer, entry } of declared) {
+    // A disconnect started by the last session that declared it finishes first.
+    while (entry.removal !== null && entry.connection === null) await entry.removal;
     entry.connection ??= server.registerMcpServer(mcpServer).then(() => true, (error: unknown) => {
       logger.warn('createEmbeddedSession: failed to connect declared MCP server', {
         server: mcpServer.name,
@@ -292,6 +329,7 @@ export async function createEmbeddedSession(options: EmbedSessionOptions): Promi
           ...(structured?.title !== undefined ? { title: structured.title } : {}),
           ...(structured?.metadata !== undefined ? { metadata: structured.metadata } : {}),
         });
+        member.sessionIds.add(submission.session.id);
         if (submission.mode !== 'spawn') {
           // Only a live agent that was handed this input is working on it; a
           // queued or refused input has nothing to follow yet.
@@ -320,6 +358,7 @@ export async function createEmbeddedSession(options: EmbedSessionOptions): Promi
           throw error;
         }
         member.agentIds.add(started.ownerAgentId);
+        member.contractIds.add(started.contract.id);
         const bound = await sessions.bindAgent(submission.session.id, started.ownerAgentId, submission.input.id);
         return { ...submission, session: bound ?? submission.session, activeAgentId: started.ownerAgentId,
           completion: watch.follow(started.ownerAgentId) };
@@ -339,8 +378,9 @@ export async function createEmbeddedSession(options: EmbedSessionOptions): Promi
       stopped ??= (async () => {
         for (const run of [...member.liveRuns]) run.end({ outcome: 'cancelled', reason: 'The embedded session stopped.' });
         for (const agentId of member.agentIds) server.cancelAgent(agentId);
-        releaseDeclared();
         daemon.members.delete(member);
+        // The last session stops the daemon, which takes every server down with it.
+        releaseDeclared(daemon.members.size > 0 ? server : undefined);
         await releaseIfUnused(daemon);
       })();
       return stopped;
@@ -363,7 +403,7 @@ function startDaemon(home: string, workspace: string, options: EmbedSessionOptio
       ...(options.token !== undefined ? { token: options.token } : {}),
       ...(options.boot ?? {}),
     }).then((booted) => {
-      bridgeApprovals(daemon, booted.approvals);
+      bridgeApprovals(daemon, booted.server, booted.approvals);
       return booted;
     }),
   };
@@ -389,17 +429,35 @@ async function releaseIfUnused(daemon: SharedDaemon): Promise<void> {
 }
 
 /**
- * The session a pending approval belongs to: the one whose submission started
- * the agent that asked, else the one session with a run in flight, else the
- * daemon's only session. `undefined` when none can be named.
+ * The session a pending approval belongs to: the one whose submissions went to
+ * the approval's shared session; else the one whose submission started the
+ * agent that asked, or started the contract that agent works on, or went to the
+ * shared session that agent works for; else the one session with a run in
+ * flight, else the daemon's only session. `undefined` when none can be named.
  */
-function memberForApproval(daemon: SharedDaemon, approval: SharedApprovalRecord): Member | undefined {
+function memberForApproval(daemon: SharedDaemon, server: AgentOwnershipSource, approval: SharedApprovalRecord): Member | undefined {
   const members = [...daemon.members];
+  const only = (holds: (member: Member) => boolean): Member | undefined => {
+    const matches = members.filter(holds);
+    return matches.length === 1 ? matches[0] : undefined;
+  };
+  const approvalSession = approval.sessionId;
+  if (approvalSession !== undefined) {
+    const bySession = only((member) => member.sessionIds.has(approvalSession));
+    if (bySession) return bySession;
+  }
   const attribution = approval.request.attribution;
   const agentId = attribution?.kind === 'background-agent' ? attribution.agentId : undefined;
   if (agentId !== undefined) {
-    const owner = members.find((member) => member.agentIds.has(agentId));
+    const owner = only((member) => member.agentIds.has(agentId));
     if (owner) return owner;
+    const ownership = server.agentOwnership(agentId);
+    const contractId = ownership?.contractId;
+    const sessionId = ownership?.sessionId;
+    const byContract = contractId === undefined ? undefined : only((member) => member.contractIds.has(contractId));
+    if (byContract) return byContract;
+    const byAgentSession = sessionId === undefined ? undefined : only((member) => member.sessionIds.has(sessionId));
+    if (byAgentSession) return byAgentSession;
   }
   const running = members.filter((member) => member.liveRuns.size > 0);
   if (running.length === 1) return running[0];
@@ -412,7 +470,7 @@ function memberForApproval(daemon: SharedDaemon, approval: SharedApprovalRecord)
  * approval routes. An ask no session can be named for is refused when every
  * session answers by callback (nobody else would), and left pending otherwise.
  */
-function bridgeApprovals(daemon: SharedDaemon, approvals: ApprovalBroker): void {
+function bridgeApprovals(daemon: SharedDaemon, server: AgentOwnershipSource, approvals: ApprovalBroker): void {
   const handled = new Set<string>();
   const deny = (approvalId: string, reason: string): Promise<unknown> =>
     approvals.resolveApproval(approvalId, { approved: false, reason, actor: 'embed', actorSurface: 'embed' })
@@ -424,7 +482,7 @@ function bridgeApprovals(daemon: SharedDaemon, approvals: ApprovalBroker): void 
       });
   approvals.subscribe((approval) => {
     if (approval.status !== 'pending' || handled.has(approval.id)) return;
-    const member = memberForApproval(daemon, approval);
+    const member = memberForApproval(daemon, server, approval);
     if (member === undefined) {
       const members = [...daemon.members];
       if (members.length === 0 || members.some((candidate) => candidate.requestPermission === undefined)) return;

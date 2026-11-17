@@ -408,11 +408,7 @@ async function resumeCommand(args: ParsedArgs, io: ContractCliIo, opened: Opened
   }
   for (const reaped of report.reaped) io.err(`Contract ${reaped.contractId} could not resume and was failed: ${reaped.reason}`);
   // A skipped contract is only held by the store: it has no run, never emits an event, and following it would hang or report an old outcome.
-  const heldReasons = new Map((report.heldForPolicy ?? []).map((entry) => [entry.contractId, entry.reason]));
-  for (const skippedId of report.skipped) {
-    const reason = heldReasons.get(skippedId) === 'decision-model-required' ? 'it needs a decision model, which is not configured' : 'it is held by this runner policy or is already live';
-    io.err(`Contract ${skippedId} was not resumed: ${reason}.`);
-  }
+  for (const skippedId of report.skipped) io.err(`Contract ${skippedId} was not resumed: it is held by this runner policy or is already live.`);
   const ids = [...new Set([...report.resumed.map((entry) => entry.contractId), ...report.queued])];
   if (ids.length === 0) {
     follower.stop();

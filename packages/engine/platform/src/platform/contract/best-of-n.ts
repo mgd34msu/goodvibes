@@ -1,4 +1,4 @@
-import { requireDecisionFeature } from '../runtime/decision-policy.js';
+import { decisionOrClassic } from '../runtime/decision-policy.js';
 /**
  * Best-of-N by candidate selection (docs/design/contract-runner.md section
  * 6.2). Replaces the provider-backed attempt judge that parsed a model's
@@ -18,14 +18,16 @@ import { requireDecisionFeature } from '../runtime/decision-policy.js';
  *   `judgeAttempts`, for the operator verb `fleet.attempts.judge`.
  *
  * Trimming candidates to the request budget and wording the reasons are code;
- * only the selection is judged.
+ * only the selection is judged. With no decision model in use the attempts are
+ * not ranked: the owner picks one (the attempts-undecided question names every
+ * passing attempt), and a native contract takes the first passing attempt.
  */
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
 import { estimateTokens, NONE, type Candidate, type JsonValue, type Selection, type Selector } from '@goodvibes-jev/judgment';
 import { attemptItemId } from '../orchestration/attempts.js';
 import { emptyWorkItemUsage, type AttemptCandidateDiff, type AttemptJudge, type AttemptJudgeInput, type AttemptJudgeVerdict } from '../orchestration/types.js';
 import { bestOfN } from './batteries/best-of-n.js';
-import { nativeContractPort, decideNativeContract, nativeDecisionState, type NativeContractServices } from './native-decisions.js';
+import { decidedWithoutModel, nativeContractPort, decideNativeContract, nativeDecisionState, type NativeContractServices } from './native-decisions.js';
 import type { Contract } from './types.js';
 import { emptyJudgmentUsage, meteredPort } from './check.js';
 import { DIFF_FILE_CAP_CHARS, EVIDENCE_TOKEN_BUDGET, headAndTail, splitUnifiedDiff } from './evidence.js';
@@ -173,22 +175,41 @@ export function selectionCandidates(
 
 // ── Reading and wording ───────────────────────────────────────────────────────
 
-/** Reads `contract.best-of-n`, counting the call into `usage`. */
+/** Selections made with no decision model in use: nothing was ranked. */
+const unranked = new WeakSet<object>();
+
+/** The selection when no decision model is in use: none chosen, so the attempts go to the owner unranked. */
+function unrankedSelection(): Selection {
+  const selection: Selection = {
+    chosen: undefined,
+    outcome: 'escalate',
+    pick: { kind: 'choice', choice: NONE, confidence: 0, probabilities: {}, outcome: 'escalate' },
+    fits: {},
+    decisionId: undefined,
+    recordAction: () => {},
+  };
+  unranked.add(selection);
+  return selection;
+}
+
+/** Reads `contract.best-of-n`, counting the call into `usage`; with no decision model in use nothing is ranked. */
 export function readBestOfN(
   context: JsonValue,
   candidates: readonly Candidate[],
   options: { readonly usage: JudgmentUsage; readonly native?: { contract: Contract; services: NativeContractServices | undefined } | undefined; readonly signal?: AbortSignal | undefined; readonly selector?: Selector | undefined },
 ): Promise<Selection> {
-  requireDecisionFeature('autonomous contract semantic checks, planning or continuation; use ordinary tools for explicit work');
-  const selector = options.selector ?? bestOfN;
-  const port = meteredPort(options.native === undefined ? judgmentPort(BEST_OF_N_SITE) : nativeContractPort(options.native.contract, options.native.services, judgmentPort(BEST_OF_N_SITE), options.signal), options.usage);
-  return selector.select(port, context, candidates, { site: BEST_OF_N_SITE, ...(options.signal === undefined ? {} : { signal: options.signal }) });
+  return decisionOrClassic(() => {
+    const selector = options.selector ?? bestOfN;
+    const port = meteredPort(options.native === undefined ? judgmentPort(BEST_OF_N_SITE) : nativeContractPort(options.native.contract, options.native.services, judgmentPort(BEST_OF_N_SITE), options.signal), options.usage);
+    return selector.select(port, context, candidates, { site: BEST_OF_N_SITE, ...(options.signal === undefined ? {} : { signal: options.signal }) });
+  }, unrankedSelection);
 }
 
 const two = (value: number): string => value.toFixed(2);
 
 /** The reasons, in code, from the readings: "chosen u1#a1 with confidence 0.91 (act); fits: u1#a0 no 0.40, u1#a1 yes 0.93". */
 export function describeSelection(selection: Pick<Selection, 'chosen' | 'outcome' | 'pick' | 'fits'>): string {
+  if (unranked.has(selection)) return 'not ranked: no decision model is in use, so the attempts were not compared; pick one';
   const fits = Object.entries(selection.fits).map(([id, reading]) => `${id} ${reading.verdict} ${two(reading.probability)}`).join(', ');
   const head = selection.chosen !== undefined
     ? `chosen ${selection.chosen} with confidence ${two(selection.pick.confidence)} (${selection.outcome})`
@@ -347,7 +368,6 @@ export async function acceptAttempt(run: ContractRun, unitId: string, attemptId:
  * contract), naming why each attempt failed.
  */
 export async function selectAttempts(run: ContractRun, engineGroupId: string, deps: AttemptSelectionDeps): Promise<void> {
-  requireDecisionFeature('autonomous contract semantic checks, planning or continuation; use ordinary tools for explicit work');
   const engine = run.engine;
   if (engine === null || run.terminal) return;
   const workstream = engine.listWorkstreams().find((candidate) => candidate.items.some((item) => item.attemptGroupId === engineGroupId));
@@ -422,9 +442,11 @@ export async function selectAttempts(run: ContractRun, engineGroupId: string, de
             candidates: nativeCandidates, current: record.candidateIds.map(id => ({ id, status: run.unit(id)?.status ?? 'missing', output: run.unit(id)?.answer ?? '' })) }) as unknown as import('@goodvibes-jev/judgment').EntryType,
           continuations: alternatives.map(id => ({ id: `select:${id}`, kind: 'revise-action' as const, description: `Prepare passing attempt ${id} as the exact alternative and freshly judge it before selection.` })),
           decisionIds, signal: run.abort.signal });
-        if (decision.decision.outcome === 'reject') { deps.failContract(run, 'other', 'Jev refused the native attempt selection'); return; }
+        if (decision.decision.outcome === 'reject') { deps.failContract(run, 'other', decidedWithoutModel(decision) ? `no passing attempt of unit ${unit.id} can be taken` : 'Jev refused the native attempt selection'); return; }
         if (decision.decision.outcome === 'act') {
-          decision.recordClaim(); await acceptAttempt(run, unit.id, selected, 'native semantic act on the exact passing candidate', decision.decision.judgmentDecisionIds); return;
+          decision.recordClaim();
+          await acceptAttempt(run, unit.id, selected, decidedWithoutModel(decision) ? 'a passing attempt, taken without comparing the attempts: no decision model is in use' : 'native semantic act on the exact passing candidate', decision.decision.judgmentDecisionIds);
+          return;
         }
         const next = alternatives.find(id => `select:${id}` === decision.continuationId);
         if (next === undefined) throw new Error('Native attempt continuation is no longer eligible');

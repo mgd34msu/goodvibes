@@ -1,4 +1,4 @@
-import { requireDecisionFeature } from '../runtime/decision-policy.js';
+import { decisionOrClassic } from '../runtime/decision-policy.js';
 /**
  * One check of a unit:
  * evidence in, Jev readings, an outcome out.
@@ -13,7 +13,9 @@ import { requireDecisionFeature } from '../runtime/decision-policy.js';
  * a failing gate or an unverified claim is a nudge whatever the readings say.
  * A pass is the only way a unit reaches `passed`, and it needs every judged
  * criterion and the goal read met at act, every quality item clean, gates
- * passed and claims verified.
+ * passed and claims verified. With no decision model in use, code decides the
+ * check from the gates and claims alone, and its readings say the work was not
+ * independently checked.
  *
  * Unmet criteria get a severity reading (`contract.unmet-severity`) after the
  * nudge goes out, so it never delays one. The reasons and passage locators a
@@ -291,15 +293,102 @@ function nudgedCriteria(findings: Findings, kinds: readonly NudgeKind[]): string
   });
 }
 
+/** What a criterion reading says when no decision model read the work. */
+export const UNCHECKED_RATIONALE = 'Not independently checked: no decision model is in use, so the work is accepted as produced; gates and claim verification still apply.';
+
 /**
  * Runs one check: asks Jev, maps readings to verdicts, and decides the result
  * with the regression and stall rules. The unit is not changed; the runner
- * applies the outcome with {@link applyUnitCheck}. A missing judgment port
- * throws JudgmentPortMissingError, which fails the contract as
- * `judgment-unavailable`; there is no other path.
+ * applies the outcome with {@link applyUnitCheck}. With no decision model in
+ * use the check is decided in code ({@link runUnitCheckWithoutModel}); under
+ * Decision Model Only a failing model fails the check as before.
  */
-export async function runUnitCheck(input: UnitCheckInput): Promise<UnitCheckOutcome> {
-  requireDecisionFeature('autonomous contract semantic checks, planning or continuation; use ordinary tools for explicit work');
+export function runUnitCheck(input: UnitCheckInput): Promise<UnitCheckOutcome> {
+  return decisionOrClassic(() => runUnitCheckWithModel(input), () => runUnitCheckWithoutModel(input));
+}
+
+/**
+ * A check with no decision model in use. The facts code holds decide it: a
+ * failing gate or an unverified claim nudges, a required check without current
+ * execution evidence asks for it (then the owner), and otherwise the unit
+ * passes. Its criteria and goal are accepted as produced at `confirm`, never at
+ * act, each reading saying it was not independently checked; nothing is
+ * requested. A mid-run check only records what code found.
+ */
+function runUnitCheckWithoutModel(input: UnitCheckInput): UnitCheckOutcome {
+  const { unit, settings } = input;
+  const usage = emptyJudgmentUsage();
+  if (input.signal?.aborted === true || unit.status === 'cancelled') return { discarded: true, usage };
+  const evidence = input.evidence.gates === undefined ? input.evidence : { ...input.evidence, gates: refreshGateResults(input.evidence.gates) };
+  const judged = unit.criteria.filter((criterion) => criterion.disposition === 'judged');
+  const checkId = `${unit.id}.k${unit.checks.length + 1}`;
+  const midRun = input.trigger === 'turn-end';
+  const failing = failedGates(evidence.gates);
+  const unverified = unverifiedGates(evidence.gates);
+  const claimsDidFail = claimsFailed(input);
+  const kinds = problemKinds({ unmet: false, unshown: unverified.length > 0, regression: false, quality: false, gate: failing.length > 0, claims: claimsDidFail });
+  let chosen: CheckResult = 'pass';
+  let nudgeKinds: readonly NudgeKind[] = [];
+  if (midRun) chosen = 'recorded';
+  else if (kinds.some((kind) => HARD_KINDS.has(kind))) { chosen = 'nudge'; nudgeKinds = kinds; }
+  else if (kinds.includes('unshown')) {
+    const underLimit = settings.evidenceNudgeLimit === 0 || consecutiveUnsettledChecks(unit) < settings.evidenceNudgeLimit;
+    chosen = underLimit ? 'nudge' : input.contract.nativeSource === undefined ? 'await-owner' : 'native-decision';
+    nudgeKinds = underLimit ? ['unshown'] : [];
+  }
+  // A mid-run check reads nothing about the criteria; a finished one accepts them as produced.
+  const verdicts = new Map<string, CriterionVerdict>(midRun ? [] : judged.map((criterion) => [criterion.id, 'met' as const]));
+  const baseCheck: UnitCheck = {
+    id: checkId,
+    at: input.now,
+    trigger: input.trigger,
+    ...(evidence.claims === undefined ? {} : { claims: { kind: evidence.claims.kind, summary: evidence.claims.summary } }),
+    ...(evidence.gates === undefined ? {} : { gates: evidence.gates }),
+    goal: { probabilityUnmet: 0.5, verdict: 'met', outcome: 'confirm' },
+    quality: {},
+    result: chosen,
+    // A mid-run check holds nothing back; the completion check acts on what code finds.
+    problems: midRun ? [] : kinds,
+    qualityProblems: [],
+    decisionIds: [],
+  };
+  let result: CheckResult = chosen;
+  let stall: StallReason | undefined;
+  if (result === 'nudge') {
+    stall = detectStall(unit, standingOf({ criteria: withReadings(unit, checkId, verdicts) }, baseCheck), [], settings) ?? undefined;
+    if (stall !== undefined) result = 'stall';
+  }
+  const check: UnitCheck = { ...baseCheck, result };
+  let nudge: CheckNudge | undefined;
+  if (nudgeKinds.length > 0) {
+    const findings: NudgeFindings = {
+      checkNumber: checkNumberOf(checkId), kinds: nudgeKinds, verdicts, regressions: [], goalVerdict: 'met',
+      qualityProblems: [], qualityUnshown: [], failedGates: failing,
+      ...(evidence.claims === undefined ? {} : { claims: { missingPaths: evidence.claims.missingPaths, noChanges: evidence.claims.missingPaths.length === 0 && claimsDidFail } }),
+    };
+    nudge = { text: buildNudge(unit, findings), kinds: nudgeKinds, criterionIds: [] };
+    if (unverified.length) nudge = { ...nudge, text: nudge.text + '\n\nRequired checks still need current execution evidence:\n'
+      + unverified.map(gate => `- ${gate.gate}: ${unverifiedGateAdvice(gate)}`).join('\n') };
+  }
+  const readings = new Map([...verdicts].map(([id, verdict]): [string, CriterionReading] => [id,
+    { checkId, at: input.now, probabilityUnmet: 0.5, verdict, outcome: 'confirm', decisionId: undefined, rationale: UNCHECKED_RATIONALE }]));
+  return {
+    discarded: false,
+    check,
+    readings,
+    verdicts,
+    goalVerdict: check.goal.verdict,
+    regressions: [],
+    unmetCriterionIds: [],
+    ...(nudge === undefined ? {} : { nudge }),
+    ...(stall === undefined ? {} : { stall }),
+    changedPaths: evidence.changedPaths,
+    usage,
+    recordAction: () => {},
+  };
+}
+
+async function runUnitCheckWithModel(input: UnitCheckInput): Promise<UnitCheckOutcome> {
   const { unit, settings } = input;
   // Gate results were identified when they ran; they are compared once, after the readings returned.
   let evidence = input.evidence;
@@ -586,7 +675,12 @@ export async function readUnmetSeverities(input: {
   /** Caller-owned accounting remains available even when this batch throws. */
   readonly usage?: JudgmentUsage | undefined;
 }): Promise<{ readonly severities: ReadonlyMap<string, SeverityReading>; readonly usage: JudgmentUsage }> {
-  requireDecisionFeature('autonomous contract semantic checks, planning or continuation; use ordinary tools for explicit work');
+  // With no decision model in use the severities stay unknown (unassessed); nothing is asked.
+  return decisionOrClassic(() => readUnmetSeveritiesWithModel(input),
+    () => ({ severities: new Map<string, SeverityReading>(), usage: input.usage ?? emptyJudgmentUsage() }));
+}
+
+async function readUnmetSeveritiesWithModel(input: Parameters<typeof readUnmetSeverities>[0]): Promise<{ readonly severities: ReadonlyMap<string, SeverityReading>; readonly usage: JudgmentUsage }> {
   const signal = input.signal;
   signal?.throwIfAborted();
   const usage = input.usage ?? emptyJudgmentUsage();

@@ -1,5 +1,5 @@
 import { isDeepStrictEqual as sameUnitCheckEvidence } from 'node:util';
-import { requireDecisionFeature } from '../runtime/decision-policy.js';
+import { decisionOrClassic, isClassicOperation } from '../runtime/decision-policy.js';
 import { selectBaselineExecutionRoot } from './tree-baseline.js';
 import { nativeContractActionSource, nativeContractPort } from './native-decisions.js';
 import { captureJudgmentPort, judgmentPort, type JudgmentPortCapture } from '@goodvibes-jev/engine/errors';
@@ -272,7 +272,6 @@ export function createUnitCheckLoop(deps: UnitCheckLoopDeps): UnitCheckLoop {
   }
 
   async function checkUnit(run: ContractRun, unit: ContractUnit, trigger: CheckTrigger, given?: string): Promise<void> {
-    requireDecisionFeature('autonomous contract semantic checks, planning or continuation; use ordinary tools for explicit work');
     const runtime = run.runtime(unit);
     const config = run.env.config();
     // A check asked for after the unit moved on (passed, ended, or taken by correction) has nothing to check.
@@ -314,12 +313,16 @@ export function createUnitCheckLoop(deps: UnitCheckLoopDeps): UnitCheckLoop {
       });
       if (check.superseded || signal.aborted) { retire(runtime, check); return; }
       if (!unitMustWrite(run.contract, unit)) unit.readEvidence = structuredClone(evidence.sourceReads ?? []);
-      const selection = await selectSourceCitationEvidence(unit, evidence, nativeContractPort(run.contract, run.env.native, judgmentPort('contract.check.source-citation-purpose'), signal), signal);
+      // With no decision model in use every cited read stays whole: nothing is narrowed and nothing is asked.
+      const selection = await decisionOrClassic(
+        () => selectSourceCitationEvidence(unit, evidence, nativeContractPort(run.contract, run.env.native, judgmentPort('contract.check.source-citation-purpose'), signal), signal),
+        () => ({ evidence, usage: emptyJudgmentUsage() }));
       if (check.superseded || signal.aborted) { retire(runtime, check); return; }
       addJudgmentUsage(run.contract.judgmentUsage, selection.usage);
       evidence = selection.evidence;
       const settings = checkSettings(config);
-      if (run.contract.nativeSource !== undefined) {
+      // A held native refusal binds a decision model's reading; with none in use there is nothing to hold.
+      if (run.contract.nativeSource !== undefined && !isClassicOperation()) {
         comparedEvidence = captureUnitCheckEvidence({ contract: run.contract, unit, trigger, evidence, settings });
         evidenceAuthority = captureJudgmentPort('contract.check.unit-judge', { signal: run.abort.signal });
       }

@@ -1,7 +1,6 @@
 import { captureAutonomousSource, retainAutonomousSource } from '../permissions/autonomous.js';
 import { RefusalError, refusal } from '@goodvibes-jev/engine/errors';
 import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
-import { requireDecisionFeature } from '../runtime/decision-policy.js';
 import { getContractActionSource, getContractActionSignal } from '../tools/agent/contract-binding.js';
 import { bindOwnedContractSource, assertOwnedContractSource } from './owned-source.js';
 import { pinContractInputAdmission } from './input-authority.js';
@@ -623,7 +622,6 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
     const unit = item.contractUnitId === undefined ? undefined : run?.unit(item.contractUnitId);
     const cancelled: ContractPreSpawn = { kind: 'settled', outcome: 'cancelled' };
     if (run === undefined || unit === undefined || run.terminal || signal.aborted) return Promise.resolve(cancelled);
-    requireDecisionFeature('autonomous contract worker execution');
     const runtime = run.runtime(unit);
     const decided = runtime.preSpawn;
     if (decided === null) {
@@ -860,7 +858,6 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
   }
 
   async function launchDurable(run: ContractRun): Promise<void> {
-    requireDecisionFeature('autonomous contract planning and acceptance');
     return withCurrentDurableExecution(run, () => {
       void run.work.run(() => run.contract.resumeFrom === undefined ? activate(run) : resume.continueResumed(run));
       return Promise.resolve();
@@ -888,7 +885,6 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
         if (!sameDurableRequest(existing, frozen)) throw new DurableContractAdmissionError('conflict');
         return durableResult(existing);
       }
-      requireDecisionFeature('autonomous contract planning and acceptance');
       // Never mint another binding if a surviving contract proves the receipt went missing. The
       // contract-id index names every bound key in small files; no checkpoint is read for it.
       for (const { key } of durableAdmissions.indexedKeys()) {
@@ -919,11 +915,9 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
       let owner: AgentRecord | undefined;
       let created: StartedContract | undefined;
       try {
-        requireDecisionFeature('autonomous contract planning and acceptance');
         const execution = await resolveContractGitPlacement(frozen.input.isolation ?? env.config().isolation,
           frozen.input.projectRoot, id, placementAbort.signal);
         if (disposed) throw new Error('Contract runner is disposed');
-        requireDecisionFeature('autonomous contract planning and acceptance');
         creation.assertCurrent();
         owner = spawnOwner(frozen.input, id);
         creation.assertCurrent();
@@ -981,7 +975,6 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
       captureStartInput(admission.input);
       const result = durableResult(admission);
       if (runs.has(admission.contractId) || result.state === 'terminal') return result;
-      requireDecisionFeature('autonomous contract planning and acceptance');
       // Old receipts remain inspectable/replayable, but their mutable checkpoint is
       // not evidence of the isolation/configuration originally selected at admission.
       if (admission.execution === undefined) throw new DurableContractAdmissionError('checkpoint');
@@ -994,7 +987,6 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
         contract = restored;
         assertDurableCheckpoint(contract, admission);
         if (contract.inputSnapshot !== undefined) contract.inputSnapshot = await restoreContractInputDevice(contract.inputSnapshot);
-        requireDecisionFeature('autonomous contract planning and acceptance');
         deps.store.hold(contract);
       }
       catch (error) { durableLeases.delete(admission.contractId); lease(); throw error; }
@@ -1031,7 +1023,6 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
     const current = (): void => {
       signal.throwIfAborted();
       if (disposed) throw new Error('Contract runner is disposed');
-      requireDecisionFeature('autonomous contract planning and acceptance');
       assertSynchronousJudgmentGuard(assertion, () => new Error('Contract start requires a synchronous current owner'));
       extraCurrent(); creation.assertCurrent();
       signal.throwIfAborted();
@@ -1053,7 +1044,6 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
 
   /** `reserved` hears the new contract's id before anything is prepared or published (the retry key is recorded there). */
   function start(input: StartContractInput, options: ContractStartOptions = {}, reserved?: (contractId: string) => void): Promise<StartedContract> {
-    requireDecisionFeature('autonomous contract planning and acceptance');
     if (disposed) throw new Error('Contract runner is disposed');
     const captured = captureStartInput(input);
     const id = newContractId(), creation = reserveCreation(id);
@@ -1114,7 +1104,6 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
   }
 
   function startFromPlan(input: StartFromPlanInput, options: ContractStartOptions = {}): Promise<StartedContract> {
-    requireDecisionFeature('autonomous contract planning and acceptance');
     if (disposed) throw new Error('Contract runner is disposed');
     const { draft, ...rest } = { ...input, ...captureStartInput(input) };
     const draftPlan = numberDraft(draft);
@@ -1132,7 +1121,6 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
   }
 
   function startForOwner(record: AgentRecord, options: ContractStartOptions = {}, requireSettlement = false): Promise<StartedContract> {
-    requireDecisionFeature('autonomous contract planning and acceptance');
     if (deps.nativeDecisions !== undefined) throw new Error('Native agent starts require source-bearing host admission');
     if (disposed) throw new Error('Contract runner is disposed');
     if (record.contractId !== undefined) throw new Error(`agent ${record.id} already belongs to contract ${record.contractId}`);
@@ -1373,7 +1361,6 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
     const { contract } = run;
     try {
       run.abort.signal.throwIfAborted();
-      requireDecisionFeature('autonomous contract planning and acceptance');
       await prepareInput(run);
       if (run.terminal) return;
       const shaped = await shapeContract(contract, plannerDeps(run), { signal: run.abort.signal });
@@ -1392,7 +1379,6 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
   async function replan(run: ContractRun): Promise<void> {
     try {
       run.abort.signal.throwIfAborted();
-      requireDecisionFeature('autonomous contract planning and acceptance');
       await prepareInput(run);
       if (run.terminal) return;
       const planned = await planContract(run.contract, plannerDeps(run), { proposedUnits: run.proposedUnits, signal: run.abort.signal });
@@ -1434,7 +1420,6 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
   /** After planning, or an owner reply that settled the shape or the plan: plan on, or start the accepted plan. */
   async function continuePlanning(run: ContractRun, outcome: ShapeOutcome | PlanningOutcome): Promise<void> {
     const { contract } = run;
-    if (outcome.kind === 'shaped' || outcome.kind === 'accepted') requireDecisionFeature('autonomous contract execution');
     if (outcome.kind === 'shaped') {
       settleSessionMode(run);
       const planned = await planContract(contract, plannerDeps(run), { proposedUnits: run.proposedUnits, signal: run.abort.signal });
@@ -1462,7 +1447,6 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
    * is also each unit's, so a session turn finds it set.
    */
   async function startSession(run: ContractRun): Promise<void> {
-    requireDecisionFeature('autonomous contract session acceptance');
     const { contract } = run;
     await takeSharedTreeForGroup(run, SESSION_TREE_HOLDER);
     if (run.terminal) return;

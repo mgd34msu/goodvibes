@@ -1,4 +1,4 @@
-import { requireDecisionFeature } from '../runtime/decision-policy.js';
+import { decisionOrClassic } from '../runtime/decision-policy.js';
 import { selectBaselineExecutionRoot } from './tree-baseline.js';
 import { bindContractInputAuthority } from './input-authority.js';
 import { bindContractActionSource, bindContractPlanConsumer } from '../tools/agent/contract-binding.js';
@@ -15,7 +15,8 @@ import { nativeContractActionSource } from './native-decisions.js';
  * - a session-mode contract (6.6) cannot delegate, so a planned fix or a fresh
  *   agent is not possible: the owner decides;
  * - otherwise `contract.stall-route` reads split, fresh or owner; a reading
- *   below act goes to the owner.
+ *   below act goes to the owner. With no decision model in use a planned fix
+ *   is the route, bounded by the same fix rounds.
  *
  * A planned fix (5.2) is ordinary contract structure: the planning model plans
  * one `fix` group, code and Jev check it, and it runs through the same engine
@@ -36,7 +37,7 @@ import { emptyJudgmentUsage, meteredPort, type DecidedCheck } from './check.js';
 import { readContractConfig } from './config.js';
 import { failedGates } from './gates.js';
 import { buildFixGroup, buildFixPlannerPrompt, buildFixPlannerRequest, buildFreshGroup, validateFixPlan, type FixBrief, type FixScope } from './fix-plan.js';
-import { nativeContractRoute, decideNativeContract, nativeContractPort, nativeDecisionState, nativeSpent, spendNative } from './native-decisions.js';
+import { decidedWithoutModel, nativeContractRoute, decideNativeContract, nativeContractPort, nativeDecisionState, nativeSpent, spendNative } from './native-decisions.js';
 import { assertNativeContractSource } from './native-source.js';
 import { renderContractAnswer } from './answer.js';
 import { contractWorkReceipts, workReceiptIdentity } from './work-receipts.js';
@@ -48,7 +49,7 @@ import { prepareFixPlannerInput, type FixPlannerInput } from './fix-planner-inpu
 import { readPlannerBounds } from './planner.js';
 import { describeStall, detectStall, standingOf, type StallReason } from './progress.js';
 import { failureFromError, isAbortError, type ContractRun } from './run-context.js';
-import { buildPublicationPauseQuestion, isPublicationPause, type Escalations, type PublicationPauseInput, type Rejudge } from './escalation.js';
+import { buildOwnerAcceptanceQuestion, buildPublicationPauseQuestion, isOwnerAcceptance, isPublicationPause, type Escalations, type OwnerAcceptanceInput, type PublicationPauseInput, type Rejudge } from './escalation.js';
 import type { StepContext } from './steps.js';
 import type { ContractDecision, ContractGroup, ContractUnit, Criterion, UnitCheck } from './types.js';
 import { addJudgmentUsage } from './usage.js';
@@ -67,6 +68,15 @@ export const SESSION_NO_DELEGATION_NOTE = 'You asked for this work to be done wi
 
 /** The last nudges and checks a stall reading sees. */
 /** Characters of the agent's last report a stall reading or a fix plan sees. */
+
+/** A stall route as correction acts on it; `note` says why when no decision model read it. */
+interface StallRouteRead {
+  readonly route: StallRoute;
+  readonly act: boolean;
+  readonly decisionId: string | undefined;
+  readonly note?: string;
+  recordAction(action: string): void;
+}
 
 /** What a failed group or deliverable check found, for correction. */
 export interface TargetFinding {
@@ -93,6 +103,12 @@ export interface Correction {
    * question uses, to clear the obstacle and reply "retry", or "cancel".
    */
   publicationPaused(run: ContractRun, input: PublicationPauseInput): void;
+  /**
+   * A finished result that no decision model could check: the owner is asked,
+   * as a code-answered question, to accept it ("accept") or stop ("cancel").
+   * Returns the open question's id.
+   */
+  ownerAcceptance(run: ContractRun, input: OwnerAcceptanceInput): string;
 }
 
 /** One line per check: each criterion's verdict at that check. */
@@ -158,12 +174,15 @@ export function createCorrection(context: StepContext, escalations: Pick<Escalat
       () => decideNativeContract(run.contract, context.native, input));
   }
 
-  async function readRoute(run: ContractRun, state: Record<string, unknown>): Promise<{ readonly route: StallRoute; readonly act: boolean; readonly decisionId: string | undefined; recordAction(action: string): void }> {
+  /** The stall route: the decision model's reading, or with none in use a planned fix (`note` says so). */
+  async function readRoute(run: ContractRun, state: Record<string, unknown>): Promise<StallRouteRead> {
     const usage = emptyJudgmentUsage();
     try {
-      const read = await readOwned(run, run.id, 'correction routing', () => stallRoute.run(meteredPort(nativeContractPort(run.contract, context.native, judgmentPort(STALL_ROUTE_SITE), run.abort.signal), usage), state as Parameters<typeof stallRoute.run>[1], { site: STALL_ROUTE_SITE, signal: run.abort.signal }));
-      const reading = read.readings.route;
-      return { route: reading.choice, act: reading.outcome === 'act', decisionId: read.result.decisionId, recordAction: (action) => read.recordAction(action) };
+      return await decisionOrClassic<StallRouteRead>(async () => {
+        const read = await readOwned(run, run.id, 'correction routing', () => stallRoute.run(meteredPort(nativeContractPort(run.contract, context.native, judgmentPort(STALL_ROUTE_SITE), run.abort.signal), usage), state as Parameters<typeof stallRoute.run>[1], { site: STALL_ROUTE_SITE, signal: run.abort.signal }));
+        const reading = read.readings.route;
+        return { route: reading.choice, act: reading.outcome === 'act', decisionId: read.result.decisionId, recordAction: (action: string) => read.recordAction(action) };
+      }, () => ({ route: 'split' as const, act: true, decisionId: undefined, note: 'no decision model is in use, so a planned fix is the route', recordAction: () => {} }));
     } finally {
       addJudgmentUsage(run.contract.judgmentUsage, usage);
     }
@@ -389,7 +408,7 @@ export function createCorrection(context: StepContext, escalations: Pick<Escalat
         const tree = buildFixGroup(brief, round, checked.group);
         startFixGroup(run, brief, round, tree.group, tree.units, decision.decision.judgmentDecisionIds, route); return;
       }
-      if (decision.decision.outcome === 'reject') { run.control.fail('planning', 'the decision model rejected the fix plan, and no other fix was eligible'); return; }
+      if (decision.decision.outcome === 'reject') { run.control.fail('planning', decidedWithoutModel(decision) ? `the fix plan did not pass its checks and no fix-planner attempt is left: ${checked.problems.map(entry => entry.message).join(' ')}` : 'the decision model rejected the fix plan, and no other fix was eligible'); return; }
       if (!canRepair || decision.continuationId !== 'repair-fix-plan') throw new Error('Native fix continuation is no longer eligible');
       decision.assertCurrent(); repair = { problems: checked.problems, previousPlan: checked.plan === undefined ? output! : renderContractPlan(checked.plan) }; needsPlan = true;
       await waitForTaskRecovery(0, run.abort.signal);
@@ -489,7 +508,7 @@ export function createCorrection(context: StepContext, escalations: Pick<Escalat
         allowAct: run.contract.sessionMode !== true && (config().maxFixRounds === 0 || unit.fixRounds + unit.freshAgents + cost <= config().maxFixRounds),
         state: () => ({ goal: unit.goal, brief: unit.brief, criteria: unit.criteria.map(c => ({ id: c.id, text: c.text, status: c.status })), route, spent: unit.fixRounds + unit.freshAgents, limit: config().maxFixRounds === 0 ? null : config().maxFixRounds, cost }) as unknown as import('@goodvibes-jev/judgment').EntryType,
         continuations: [], decisionIds, signal: run.abort.signal });
-      if (decision.decision.outcome !== 'act') { run.control.fail('other', 'the decision model would not start another worker on this unit, so the unmet criteria were not repaired'); return; }
+      if (decision.decision.outcome !== 'act') { run.control.fail('other', decidedWithoutModel(decision) ? 'no fresh worker can start on this unit: its fix rounds are used up or the work must stay in the session, so the unmet criteria were not repaired' : 'the decision model would not start another worker on this unit, so the unmet criteria were not repaired'); return; }
       decision.recordClaim();
     }
     unit.freshAgents += 1;
@@ -567,7 +586,7 @@ export function createCorrection(context: StepContext, escalations: Pick<Escalat
     if (run.terminal) return;
     const route: StallRoute = read.act ? read.route : 'owner';
     const decisionIds = [...check.check.decisionIds, ...(read.decisionId === undefined ? [] : [read.decisionId])];
-    stalled(run, 'unit', unit.id, route, unmet, read.act ? why : `${why}; the route read ${read.route} below act`, read.decisionId);
+    stalled(run, 'unit', unit.id, route, unmet, read.note !== undefined ? `${why}; ${read.note}` : read.act ? why : `${why}; the route read ${read.route} below act`, read.decisionId);
     read.recordAction(`route ${route}`);
     check.recordAction(`stalled: ${route}`);
     if (route === 'split') await splitUnit(run, unit);
@@ -584,7 +603,7 @@ export function createCorrection(context: StepContext, escalations: Pick<Escalat
         fixRounds: unit.fixRounds, freshAgents: unit.freshAgents, limit: config().maxFixRounds === 0 ? null : config().maxFixRounds, sessionMode: run.contract.sessionMode === true }) as unknown as import('@goodvibes-jev/judgment').EntryType,
       continuations: canFresh ? [{ id: 'fresh-worker', kind: 'revise-action', description: 'Prepare a fresh worker for the same requirements and obtain a new exact-action decision before starting it.' }] : [],
       decisionIds: check.check.decisionIds, signal: run.abort.signal });
-    if (decision.decision.outcome === 'reject') { run.control.fail('other', 'the decision model stopped correcting the work: the evidence or the remaining budget was not enough for another round'); return; }
+    if (decision.decision.outcome === 'reject') { run.control.fail('other', decidedWithoutModel(decision) ? 'no correction round is left for this unit: its fix rounds are used up or the work must stay in the session' : 'the decision model stopped correcting the work: the evidence or the remaining budget was not enough for another round'); return; }
     if (decision.decision.outcome === 'act') { decision.recordClaim(); await splitUnit(run, unit); return; }
     if (decision.continuationId !== 'fresh-worker' || !canFresh) throw new Error('Native correction continuation is no longer eligible');
     decision.assertCurrent(); await freshUnit(run, unit, 'registered native fresh-worker continuation', decision.decision.judgmentDecisionIds);
@@ -602,7 +621,7 @@ export function createCorrection(context: StepContext, escalations: Pick<Escalat
       const decision = await readDecision(run, { stage: 'stall', targetId: unit.id, action: 'Plan a bounded repair of this exact merge conflict without weakening criteria',
         allowAct: run.contract.sessionMode !== true && !exhausted(run, unit.fixRounds + unit.freshAgents),
         state: () => ({ conflict: { ...conflict, files: [...conflict.files] }, goal: unit.goal, spent: unit.fixRounds + unit.freshAgents, limit: config().maxFixRounds === 0 ? null : config().maxFixRounds }), continuations: [], signal: run.abort.signal });
-      if (decision.decision.outcome !== 'act') { run.control.fail('other', 'the decision model would not repair the conflicting merge of the units\' work'); return; }
+      if (decision.decision.outcome !== 'act') { run.control.fail('other', decidedWithoutModel(decision) ? 'the conflicting merge of the units\' work cannot be repaired: the fix rounds are used up or the work must stay in the session' : 'the decision model would not repair the conflicting merge of the units\' work'); return; }
       decision.recordClaim(); const runtime = run.runtime(unit); runtime.cwd = run.contract.worktreePath ?? run.contract.projectRoot;
       selectBaselineExecutionRoot(unit.baseline, runtime.cwd); stopForFix(run, unit); unit.fixRounds += 1;
       await planFix(run, unitBrief(run, unit, conflict), unit.fixRounds); return;
@@ -630,7 +649,7 @@ export function createCorrection(context: StepContext, escalations: Pick<Escalat
         allowAct: run.contract.sessionMode !== true && !exhausted(run, target.fixRounds),
         state: () => ({ scope, goal: target.goal, criteria: target.criteria.map(c => ({ id: c.id, text: c.text, status: c.status })), unmet: [...finding.unmet], unshown: [...finding.unshown], spent: target.fixRounds, limit: config().maxFixRounds === 0 ? null : config().maxFixRounds, sessionMode: run.contract.sessionMode === true }),
         continuations: [], decisionIds: finding.decisionIds, signal: run.abort.signal });
-      if (decision.decision.outcome !== 'act') { run.control.fail('other', 'the decision model would not start another correction of the unmet work'); return; }
+      if (decision.decision.outcome !== 'act') { run.control.fail('other', decidedWithoutModel(decision) ? 'no correction of the unmet work can start: the fix rounds are used up or the work must stay in the session' : 'the decision model would not start another correction of the unmet work'); return; }
       decision.recordClaim(); target.fixRounds += 1;
       if (scope === 'group') { const group = run.group(target.id); if (group !== undefined) run.moveGroup(group, 'fixing'); }
       else run.moveContract('fixing');
@@ -665,6 +684,7 @@ export function createCorrection(context: StepContext, escalations: Pick<Escalat
       });
       if (run.terminal) return;
       decisionId = read.decisionId;
+      if (read.note !== undefined) reason = `${reason}; ${read.note}`;
       // A group has no agent of its own: a fresh start is a new planned fix.
       route = !read.act || read.route === 'owner' ? 'owner' : 'split';
       read.recordAction(`route ${route}${read.route === 'fresh' ? ' (a fresh start for a group is a new planned fix)' : ''}`);
@@ -770,7 +790,25 @@ export function createCorrection(context: StepContext, escalations: Pick<Escalat
     deliverableFailed: (run, finding) => guarded(run, "the deliverable's failed check could not be routed", () => deliverableFailed(run, finding)),
     fixGroupPassed: (run, groupId) => guarded(run, `fix group ${groupId}'s target could not be checked again`, () => fixGroupPassed(run, groupId)),
     publicationPaused,
+    ownerAcceptance,
   };
+
+  function ownerAcceptance(run: ContractRun, input: OwnerAcceptanceInput): string {
+    const open = run.contract.escalations.find(item => item.resolvedAt === undefined && isOwnerAcceptance(item));
+    if (open !== undefined) return open.id;
+    const escalation = escalations.raise(run, {
+      scope: 'deliverable',
+      targetId: run.id,
+      reason: 'unsettled',
+      unmetCriterionIds: [],
+      decisionIds: [],
+      question: buildOwnerAcceptanceQuestion(run.contract, input),
+      retryOrCancel: true,
+    });
+    // The caller saves the question's binding and writes the checkpoint once.
+    run.contract.statusLine = `Contract ${run.id} finished; no decision model is in use, so its result waits for you to accept it (reply "accept" or "cancel").`;
+    return escalation.id;
+  }
 
   function publicationPaused(run: ContractRun, input: PublicationPauseInput): void {
     if (run.terminal || run.contract.escalations.some(isPublicationPause)) return;
@@ -790,7 +828,6 @@ export function createCorrection(context: StepContext, escalations: Pick<Escalat
 
 /** Fails an invalid correction step; temporary reading failures recover at their exact call sites. */
 export async function guarded(run: ContractRun, what: string, step: () => Promise<void>): Promise<void> {
-  requireDecisionFeature('autonomous contract semantic checks, planning or continuation; use ordinary tools for explicit work');
   try {
     await step();
   } catch (error) {

@@ -1,4 +1,4 @@
-import { requireDecisionFeature } from '../runtime/decision-policy.js';
+import { decisionOrClassic, isClassicOperation } from '../runtime/decision-policy.js';
 /**
  * Owner escalations: the question
  * put to the owner, built in code, and the owner's free-text reply, read with
@@ -15,6 +15,12 @@ import { requireDecisionFeature } from '../runtime/decision-policy.js';
  *
  * Any other reading, or one below act, asks the same question again with one
  * fixed line. Nothing the owner says can pass a criterion that reads unmet.
+ *
+ * With no decision model in use a reply is read by code: "approve", "stop" or
+ * "change: ..." (and their plain synonyms); anything else asks again and says
+ * which words are read. The work is never stopped for want of a model: the
+ * deliverable of such a contract is put to the owner as a code-answered
+ * "accept" or "cancel" question instead of being judged.
  */
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
 import type { Outcome } from '@goodvibes-jev/judgment';
@@ -78,6 +84,10 @@ const APPROVAL_CLAUSES: Readonly<Record<EscalationReason, string>> = {
 
 /** Said when a reply did not read as approve, change or stop at act. */
 export const ASK_AGAIN_LINE = 'I could not tell whether that approves, changes or stops the work.';
+/** Added under a question with no decision model in use: replies are read literally. */
+export const NO_MODEL_REPLY_LINE = 'No decision model is in use, so replies are read literally: reply "approve", "stop", or "change: " followed by what to change.';
+/** Said when a reply about file changes cannot be read without a decision model. */
+export const NO_MODEL_WRITING_LINE = 'No decision model is in use, so whether that allows changing files cannot be read: reply "approve" to allow file changes, or "stop".';
 /** Said when approval was given for work whose criteria are not met. */
 export const APPROVAL_REFUSED_LINE = 'Approval cannot pass work whose criteria are not met: say what to change about what is required, or stop the contract.';
 /** Said when an attempt was approved or asked for but none could be taken from the reply. */
@@ -90,7 +100,22 @@ export const AMENDMENT_FAILED_LINE = (problems: string): string => `That change 
 export const REPLY_NOT_APPLIED_LINE = (reason: string): string => `That could not be applied right now (${reason}); reply again to retry, or stop the contract.`;
 
 /** Lines the runner adds under a question it asks again; they are dropped before another is added. */
-const ADDED_LINE_PREFIXES = [ASK_AGAIN_LINE, APPROVAL_REFUSED_LINE, 'Say which attempt to take', 'The plan cannot run as it stands', 'That change could not be applied', 'That could not be applied right now'];
+const ADDED_LINE_PREFIXES = [ASK_AGAIN_LINE, APPROVAL_REFUSED_LINE, 'Say which attempt to take', 'The plan cannot run as it stands', 'That change could not be applied', 'That could not be applied right now', NO_MODEL_REPLY_LINE, NO_MODEL_WRITING_LINE];
+
+const APPROVE_WORDS = new Set(['approve', 'approved', 'yes', 'y', 'ok', 'okay', 'accept', 'accepted', 'go ahead', 'lgtm']);
+const STOP_WORDS = new Set(['stop', 'cancel', 'reject', 'rejected', 'no', 'n', 'abort']);
+const CHANGE_PREFIX = /^(?:change|amend)\s*:\s*(\S[\s\S]*)$/i;
+
+/** A reply as code reads it with no decision model: the plain word, or "change:" with what to change. */
+export function readOwnerReplyLiterally(text: string): { readonly choice: OwnerReplyReading; readonly instruction?: string } {
+  const trimmed = text.trim();
+  const change = CHANGE_PREFIX.exec(trimmed);
+  if (change !== null) return { choice: 'amend', instruction: change[1]!.trim() };
+  const word = trimmed.replace(/[.!]+$/, '').trim().toLowerCase();
+  if (APPROVE_WORDS.has(word)) return { choice: 'approve' };
+  if (STOP_WORDS.has(word)) return { choice: 'reject' };
+  return { choice: 'unclear' };
+}
 
 /**
  * The failure pause: what a native session contract asks when its turn keeps
@@ -214,8 +239,52 @@ export function buildPublicationPauseQuestion(contract: Contract, input: Publica
 }
 
 /** Whether an open escalation is a publication pause: a retry-or-cancel question about the deliverable. */
-export function isPublicationPause(escalation: Pick<Escalation, 'failurePause' | 'scope' | 'resolvedAt'>): boolean {
-  return escalation.failurePause === true && escalation.scope === 'deliverable' && escalation.resolvedAt === undefined;
+export function isPublicationPause(escalation: Pick<Escalation, 'failurePause' | 'scope' | 'resolvedAt' | 'reason'>): boolean {
+  return escalation.failurePause === true && escalation.scope === 'deliverable' && escalation.reason !== 'unsettled' && escalation.resolvedAt === undefined;
+}
+
+/** What the owner is shown when no decision model can check a finished result. */
+export interface OwnerAcceptanceInput {
+  /** The required checks that ran and passed against the result. */
+  readonly gates: readonly string[];
+  /** The branch holding the result in worktree mode. */
+  readonly branch?: string | undefined;
+  /** The head of the result's answer. */
+  readonly answer: string;
+}
+
+/** The answers the owner-acceptance question takes; code reads them. */
+export const ACCEPTANCE_ANSWERS = ['accept', 'cancel'] as const;
+export type AcceptanceAnswer = (typeof ACCEPTANCE_ANSWERS)[number];
+
+/** The answer a reply to the owner-acceptance question names, or undefined. */
+export function readAcceptanceAnswer(text: string): AcceptanceAnswer | undefined {
+  const word = text.trim().replace(/[.!]+$/, '').trim().toLowerCase();
+  if (word === 'accept' || word === 'approve' || word === 'yes') return 'accept';
+  if (word === 'cancel' || word === 'stop' || word === 'no') return 'cancel';
+  return undefined;
+}
+
+/**
+ * The owner-acceptance question, built in code: a finished result that no
+ * decision model could check is published only when the owner accepts it.
+ */
+export function buildOwnerAcceptanceQuestion(contract: Contract, input: OwnerAcceptanceInput): string {
+  const answer = input.answer.replace(/\s+/g, ' ').trim();
+  return [
+    `Contract ${contract.id} finished "${titleOf(contract.goal || contract.ask)}", but no decision model is in use, so the result was not independently checked against what you asked for.`,
+    input.gates.length === 0 ? 'No required checks are configured for this project.' : `Required checks that passed: ${input.gates.join(', ')}.`,
+    ...(answer.length === 0 ? [] : [`Its answer begins: ${answer.length <= 400 ? answer : `${answer.slice(0, 397)}...`}`]),
+    input.branch === undefined
+      ? 'Its changes are in the working tree.'
+      : `Its changes are on branch ${input.branch}; you can inspect them with: git diff HEAD...${input.branch}`,
+    'Reply "accept" to publish the result to the project, or "cancel" to stop the contract. Nothing is published until you accept.',
+  ].join('\n');
+}
+
+/** Whether an escalation is the owner-acceptance question of a result no decision model checked. */
+export function isOwnerAcceptance(escalation: Pick<Escalation, 'failurePause' | 'scope' | 'reason'>): boolean {
+  return escalation.failurePause === true && escalation.scope === 'deliverable' && escalation.reason === 'unsettled';
 }
 
 /**
@@ -384,7 +453,10 @@ export function createEscalations(context: StepContext, rejudge: Rejudge): Escal
     // A session's own request is fixed and answered by native decisions, not owner approval. A contract started
     // by unattended work keeps its source as the fixed root and asks its owner like any other.
     if (contract.nativeSource !== undefined && input.retryOrCancel !== true) throw new Error('Native session contracts do not ask for owner approval');
-    const question = input.question ?? buildEscalationQuestion(contract, input);
+    const built = input.question ?? buildEscalationQuestion(contract, input);
+    // A code-answered question names its own answers; any other says how a reply is read without a model.
+    const question = input.retryOrCancel !== true && input.reason !== 'attempts-undecided' && isClassicOperation() && !built.endsWith(NO_MODEL_REPLY_LINE)
+      ? `${built}\n${NO_MODEL_REPLY_LINE}` : built;
     const escalation: Escalation = {
       id: `${contract.id}.e${contract.escalations.length + 1}`,
       at: run.env.now(),
@@ -604,12 +676,14 @@ export function createEscalations(context: StepContext, rejudge: Rejudge): Escal
   /** The owner's reply changes what is required about writing: read with `forbids_writing` alone. */
   async function amendWriting(run: ContractRun, escalation: Escalation, text: string): Promise<Handled> {
     const usage = emptyJudgmentUsage();
-    let read: Awaited<ReturnType<typeof readForbidsWriting>>;
+    let read: Awaited<ReturnType<typeof readForbidsWriting>> | undefined;
     try {
-      read = await readForbidsWriting(meteredPort(judgmentPort(REQUEST_SHAPE_SITE), usage), text, { signal: run.abort.signal });
+      read = await decisionOrClassic<Awaited<ReturnType<typeof readForbidsWriting>> | undefined>(() => readForbidsWriting(meteredPort(judgmentPort(REQUEST_SHAPE_SITE), usage), text, { signal: run.abort.signal }), () => undefined);
     } finally {
       addJudgmentUsage(run.contract.judgmentUsage, usage);
     }
+    // No decision model can read what the change says about files: the owner is asked in plain words.
+    if (read === undefined) return { action: 'asked-again', next: askAgain(run, escalation, NO_MODEL_WRITING_LINE) };
     const { reading } = read;
     if (!saysYesAtAct(reading) && !saysNoAtAct(reading)) {
       read.recordAction('writing not settled by the reply: asked again');
@@ -662,10 +736,12 @@ export function createEscalations(context: StepContext, rejudge: Rejudge): Escal
     assertJudgmentInput({ reply: text, question: escalation.question, candidates });
     const usage = emptyJudgmentUsage();
     try {
-      const read = await ownerPick.select(meteredPort(judgmentPort(OWNER_PICK_SITE), usage), { reply: text, question: escalation.question }, candidates, { site: OWNER_PICK_SITE, signal: run.abort.signal });
-      const taken = read.outcome === 'act' ? read.chosen : undefined;
-      read.recordAction(taken === undefined ? 'no attempt taken: asked again' : `took ${taken}`);
-      return { id: taken, decisionId: read.decisionId };
+      return await decisionOrClassic(async () => {
+        const read = await ownerPick.select(meteredPort(judgmentPort(OWNER_PICK_SITE), usage), { reply: text, question: escalation.question }, candidates, { site: OWNER_PICK_SITE, signal: run.abort.signal });
+        const taken = read.outcome === 'act' ? read.chosen : undefined;
+        read.recordAction(taken === undefined ? 'no attempt taken: asked again' : `took ${taken}`);
+        return { id: taken, decisionId: read.decisionId };
+      }, () => ({ id: attemptNamedLiterally(text, selection.candidateIds), decisionId: undefined }));
     } finally {
       addJudgmentUsage(run.contract.judgmentUsage, usage);
     }
@@ -712,11 +788,8 @@ export function createEscalations(context: StepContext, rejudge: Rejudge): Escal
 
   async function reply(run: ContractRun, escalationId: string, text: string): Promise<OwnerReplyOutcome> {
     const escalation = run.contract.escalations.find((candidate) => candidate.id === escalationId);
-    // A failure pause is answered by code, not read, so it needs no decision model.
-    if (escalation?.failurePause !== true) {
-      requireDecisionFeature('autonomous contract semantic checks, planning or continuation; use ordinary tools for explicit work');
-      if (run.contract.nativeSource !== undefined) throw new OwnerReplyRefusedError('Native contracts do not read owner approval replies', 'unsupported');
-    }
+    // A failure pause is answered by code, not read; with no decision model any other reply is read literally.
+    if (escalation?.failurePause !== true && run.contract.nativeSource !== undefined) throw new OwnerReplyRefusedError('Native contracts do not read owner approval replies', 'unsupported');
     if (escalation === undefined || escalation.resolvedAt !== undefined) throw new OwnerReplyRefusedError(`contract ${run.id} has no open escalation ${escalationId}`, 'not-open');
     // Claimed before the first await: a second reply to the same question
     // (two quick messages, two surfaces) must not be read and acted on too.
@@ -735,6 +808,7 @@ export function createEscalations(context: StepContext, rejudge: Rejudge): Escal
 
   /** Retry runs the turn (or the publication) again; cancel stops the contract. Any other answer leaves the question open. */
   function replyToFailurePause(run: ContractRun, escalation: Escalation, text: string): OwnerReplyOutcome {
+    if (isOwnerAcceptance(escalation)) return replyToOwnerAcceptance(run, escalation, text);
     const publication = isPublicationPause(escalation);
     const unitFailure = isUnitFailurePause(run, escalation);
     if (!publication && !unitFailure && (run.contract.nativeSource === undefined || run.contract.sessionMode !== true)) throw new OwnerReplyRefusedError(`${escalation.id} is not a failure pause of a native session contract`, 'unsupported');
@@ -793,16 +867,60 @@ export function createEscalations(context: StepContext, rejudge: Rejudge): Escal
     return { escalationId: escalation.id, reading, outcome: 'act', action };
   }
 
+  /**
+   * The owner's answer to a result no decision model checked: "accept" records
+   * the acceptance and publishes it (the deliverable step finds the accepted,
+   * unchanged result); "cancel" stops the contract. Any other answer leaves the
+   * question open.
+   */
+  function replyToOwnerAcceptance(run: ContractRun, escalation: Escalation, text: string): OwnerReplyOutcome {
+    const answer = readAcceptanceAnswer(text);
+    if (answer === undefined) {
+      throw new OwnerReplyRefusedError(`"${titleOf(text)}" is not an answer to ${escalation.id}: it only accepts "accept" (publish the result that was not independently checked) or "cancel" (stop the contract); the question is still open`, 'not-an-answer');
+    }
+    const { contract } = run;
+    const reading: OwnerReplyReading = answer === 'accept' ? 'approve' : 'reject';
+    const action: OwnerReplyAction = answer === 'accept' ? 'approved' : 'stopped';
+    if (answer === 'accept' && contract.status === 'awaiting-owner') run.moveContract(contract.statusBeforeOwner ?? 'judging');
+    if (answer === 'accept') contract.statusBeforeOwner = undefined;
+    escalation.reply = { text, reading, outcome: 'act', decisionId: undefined };
+    escalation.resolvedAt = run.env.now();
+    run.decide('owner-replied', contract.id, answer === 'accept'
+      ? `${escalation.id}: accept, the owner accepted the result that no decision model checked; it is published`
+      : `${escalation.id}: cancel, the contract is stopped`);
+    run.emit({ type: 'CONTRACT_OWNER_REPLIED', contractId: run.id, escalationId: escalation.id, reading, outcome: 'act', action });
+    if (answer === 'cancel') {
+      contract.failureKind = 'owner-rejected';
+      run.control.cancel('stopped by the owner instead of accepting its result');
+      return { escalationId: escalation.id, reading, outcome: 'act', action };
+    }
+    context.ownerProgress(run);
+    context.checkpoint?.(run);
+    // The deliverable step publishes the accepted result, or checks it again when it changed meanwhile.
+    void rejudge.rejudgeDeliverable(run);
+    return { escalationId: escalation.id, reading, outcome: 'act', action };
+  }
+
   async function replyClaimed(run: ContractRun, escalation: Escalation, text: string): Promise<OwnerReplyOutcome> {
     const usage = emptyJudgmentUsage();
-    let read: Awaited<ReturnType<typeof ownerReply.read>>;
+    let read: ReplyRead;
     try {
-      read = await ownerReply.read(
-        meteredPort(judgmentPort(OWNER_REPLY_SITE), usage),
-        { reason: escalation.reason, question: escalation.question },
-        text,
-        { site: OWNER_REPLY_SITE, signal: run.abort.signal },
-      );
+      read = await decisionOrClassic(async (): Promise<ReplyRead> => {
+        const answered = await ownerReply.read(
+          meteredPort(judgmentPort(OWNER_REPLY_SITE), usage),
+          { reason: escalation.reason, question: escalation.question },
+          text,
+          { site: OWNER_REPLY_SITE, signal: run.abort.signal },
+        );
+        return { choice: answered.reading.choice as OwnerReplyReading, outcome: answered.reading.outcome, decisionId: answered.decisionId,
+          recordAction: (action) => answered.recordAction(action) };
+      }, (): ReplyRead => {
+        const literal = readOwnerReplyLiterally(text);
+        // An attempts question is answered by naming an attempt, which the pick reads literally too.
+        const choice = literal.choice === 'unclear' && escalation.reason === 'attempts-undecided' ? 'amend' : literal.choice;
+        return { choice, outcome: 'act', decisionId: undefined, literal: true,
+          ...(literal.instruction === undefined ? {} : { instruction: literal.instruction }), recordAction: () => {} };
+      });
     } catch (error) {
       // Nothing was decided and the question is still open: the owner can reply again.
       if (!run.terminal && !isAbortError(error, run.abort.signal)) {
@@ -822,8 +940,7 @@ export function createEscalations(context: StepContext, rejudge: Rejudge): Escal
     if (escalation.resolvedAt !== undefined) {
       throw new OwnerReplyRefusedError(`${escalation.id} was answered while the reply was being read; nothing was applied`, 'not-open');
     }
-    const { choice, outcome } = read.reading;
-    const reading = choice as OwnerReplyReading;
+    const { choice: reading, outcome } = read;
     escalation.reply = { text, reading, outcome, decisionId: read.decisionId };
     escalation.resolvedAt = run.env.now();
     const decisionIds = read.decisionId === undefined ? [] : [read.decisionId];
@@ -836,7 +953,7 @@ export function createEscalations(context: StepContext, rejudge: Rejudge): Escal
 
     let handled: Handled;
     if (outcome !== 'act' || reading === 'unclear') {
-      handled = { action: 'asked-again', next: askAgain(run, escalation, ASK_AGAIN_LINE) };
+      handled = { action: 'asked-again', next: askAgain(run, escalation, read.literal === true ? NO_MODEL_REPLY_LINE : ASK_AGAIN_LINE) };
       replied(handled.action);
     } else if (reading === 'reject') {
       handled = { action: 'stopped' };
@@ -845,7 +962,7 @@ export function createEscalations(context: StepContext, rejudge: Rejudge): Escal
       run.control.cancel('stopped by the owner');
     } else {
       try {
-        handled = reading === 'approve' ? await approve(run, escalation, read.decisionId) : await amend(run, escalation, text, read.decisionId);
+        handled = reading === 'approve' ? await approve(run, escalation, read.decisionId) : await amend(run, escalation, read.instruction ?? text, read.decisionId);
       } catch (error) {
         if (run.terminal || isAbortError(error, run.abort.signal)) throw error;
         // A step that cannot run (no route for the amendment planner, a Jev
@@ -871,7 +988,6 @@ export function createEscalations(context: StepContext, rejudge: Rejudge): Escal
   }
 
   async function operatorPick(run: ContractRun, unitId: string, attemptId: string): Promise<void> {
-    requireDecisionFeature('autonomous contract semantic checks, planning or continuation; use ordinary tools for explicit work');
     if (run.contract.nativeSource !== undefined) throw new Error('Native attempts require a fresh Jev decision');
     // The pick answers the question at once. A reply to it still being read
     // finds the question answered when its reading returns and applies nothing.
@@ -885,6 +1001,27 @@ export function createEscalations(context: StepContext, rejudge: Rejudge): Escal
   }
 
   return { raise, unitAwaitsOwner, attemptsUndecided, pauseForOwnerRetry, pauseFailedUnit, reply, operatorPick };
+}
+
+/** A reply as the runner acts on it: the decision model's reading, or code's literal reading with no model in use. */
+interface ReplyRead {
+  readonly choice: OwnerReplyReading;
+  readonly outcome: Outcome;
+  readonly decisionId: string | undefined;
+  /** Read by code because no decision model is in use. */
+  readonly literal?: true;
+  /** What to change, from a literal "change: ..." reply. */
+  readonly instruction?: string;
+  recordAction(action: string): void;
+}
+
+/** The attempt a reply names without a decision model: exactly one candidate id in it, or its position (1, 2, ...). */
+function attemptNamedLiterally(text: string, candidateIds: readonly string[]): string | undefined {
+  const named = candidateIds.filter((id) => text.includes(id));
+  if (named.length === 1) return named[0];
+  if (named.length > 1) return undefined;
+  const positions = [...text.matchAll(/\b(\d+)\b/g)].map((match) => Number(match[1]));
+  return positions.length === 1 && positions[0]! >= 1 && positions[0]! <= candidateIds.length ? candidateIds[positions[0]! - 1] : undefined;
 }
 
 /** Criteria of a target that read unmet, and those that read unshown, by id. */

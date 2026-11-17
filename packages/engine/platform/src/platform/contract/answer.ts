@@ -96,9 +96,15 @@ export function describeCommitOutcome(headHash: string | null, skippedIgnored: r
  * The status line for operator surfaces: `Contract {id} passed ({met} of
  * {judged} criteria met, {n} corrections{, n excluded}); {commit note}`.
  */
-export function describeContractOutcome(contract: Pick<Contract, 'id' | 'criteria' | 'units' | 'commit'>): string {
+export function describeContractOutcome(contract: Pick<Contract, 'id' | 'criteria' | 'units' | 'commit'> & Partial<Pick<Contract, 'checks'>>): string {
   const judged = contract.criteria.filter((criterion) => criterion.disposition === 'judged');
   const met = judged.filter((criterion) => criterion.status === 'met').length;
+  const last = contract.checks?.at(-1);
+  // A result no decision model read was accepted by the owner: its criteria were not checked.
+  if (last !== undefined && last.decisionIds.length === 0 && last.goal.outcome === 'confirm') {
+    const commit = contract.commit === undefined ? '' : `; ${contract.commit.note}`;
+    return `Contract ${contract.id} accepted by the owner (${judged.length} criteri${judged.length === 1 ? 'on' : 'a'} not independently checked: no decision model was in use)${commit}`;
+  }
   const nudges = contract.units.flatMap((unit) => [unit, ...(unit.attemptUnits ?? [])]).reduce((total, unit) => total + unit.nudges.length, 0);
   const excluded = contract.criteria.filter((criterion) => criterion.disposition === 'excluded').length;
   const parts = [

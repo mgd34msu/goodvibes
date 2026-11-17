@@ -1,12 +1,12 @@
 import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { isDeepStrictEqual } from 'node:util';
-import { requireDecisionFeature } from '../runtime/decision-policy.js';
+import { decisionOrClassic } from '../runtime/decision-policy.js';
 import { bindNativeCiSourceIssuer } from '../ci-watch/native-owner.js';
 import type { ExternalOperationSource } from '../permissions/external-request.js';
 /** Native semantic ownership. Registered continuations never run through an owner reply or a fake tool. */
 import { hashState, JudgmentError, type EntryType, type JudgmentPort, type JudgmentRetryProgress } from '@goodvibes-jev/judgment';
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
-import { captureJevDecisionContext, parseJevDecision, type JevDecision, type JevDecisionBinding, type JevVersionRef } from '@goodvibes-jev/judgment/decisions';
+import { captureJevDecisionContext, parseJevDecision, type JevContinuation, type JevDecision, type JevDecisionBinding, type JevDecisionContext, type JevVersionRef } from '@goodvibes-jev/judgment/decisions';
 import { decideAutonomous, type AutonomousDecision } from '../gate/autonomous-decision.js';
 import { autonomousSourceEvidence } from '../permissions/autonomous.js';
 import { snapshotJudgmentInput } from '../gate/judgment-input.js';
@@ -102,7 +102,6 @@ function readLifetime(contract: Contract, owner: NativeContractServices, signal?
 }
 /** Routing uses the same owner signal and before-attempt guard as every other native read. */
 export async function nativeContractRoute(selector: ContractRouteSelector, contract: Contract, services: NativeContractServices | undefined, request: Parameters<ContractRouteSelector>[0], signal?: AbortSignal) {
-  requireDecisionFeature('autonomous contract semantic checks, planning or continuation; use ordinary tools for explicit work');
   if (contract.nativeSource === undefined) return selector({ ...request, signal });
   autonomousSourceEvidence(nativeContractSourceForAdmission(contract));
   const scope = readLifetime(contract, ownedServices(services), signal);
@@ -206,7 +205,6 @@ export function nativeContractActionSource(contract: Contract, services: NativeC
 
 /** Decorates the single shared transport; owns no retry loop and cannot turn an outage into a decision. */
 export function nativeContractPort(contract: Contract, services: NativeContractServices | undefined, port: JudgmentPort, signal?: AbortSignal): JudgmentPort {
-  requireDecisionFeature('autonomous contract semantic checks, planning or continuation; use ordinary tools for explicit work');
   if (contract.nativeSource === undefined) return port;
   const owner = ownedServices(services);
   return {
@@ -304,9 +302,60 @@ class NativeOperationChangedError extends JudgmentError {
 /** Readings of one operation discarded for changed inputs before the contract is stopped as unable to settle. */
 const MAX_OPERATION_REREADS = 3;
 
+/** The prefix of a decision code made because no decision model was in use. */
+const CODE_DECISION_PREFIX = 'no-decision-model:';
+
+/** Whether code made this decision because no decision model was in use (callers word their result for it). */
+export function decidedWithoutModel(decision: Pick<NativeContractDecision, 'decision'>): boolean {
+  return decision.decision.decisionId.startsWith(CODE_DECISION_PREFIX);
+}
+
+/**
+ * Decides one native contract operation: the decision model reads it, or, with
+ * no decision model in use (none set, No Decision Model, or Hybrid with the set
+ * model unavailable), code takes the offered operation by its own checks.
+ * Under Decision Model Only a failing model still stops the operation.
+ */
+export function decideNativeContract(contract: Contract, services: NativeContractServices | undefined, input: NativeContractDecisionInput): Promise<NativeContractDecision> {
+  return decisionOrClassic(() => decideNativeContractWithModel(contract, services, input), () => decideNativeContractInCode(contract, services, input));
+}
+
+/**
+ * The operation code takes when no decision model is in use: the exact offered
+ * operation when the host's own checks allow it (`allowAct`), else the first
+ * registered continuation (each still bounded by its budget), else none. It is
+ * not recorded as a Jev decision; its summary and empty reading ids say that no
+ * decision model read it, so the result is not independently checked.
+ */
+function decideNativeContractInCode(contract: Contract, services: NativeContractServices | undefined, input: NativeContractDecisionInput): NativeContractDecision {
+  const owner = ownedServices(services);
+  const state = nativeDecisionState(contract);
+  const key = `${input.stage}:${input.targetId}`;
+  const expected = authorityIdentity(state.pending[key]?.decision.binding ?? authority(contract, owner));
+  assertAuthority(contract, owner, expected, input.signal);
+  // A deferral was the decision model's choice; code decides from the current state instead.
+  delete state.pending[key];
+  const actionRevision = crypto.randomUUID();
+  const binding: JevDecisionBinding = { sourceId: contract.nativeSource!.sourceId, inputRevision: contract.nativeSource!.inputRevision,
+    actionId: `${contract.id}:${key}`, actionRevision, ...expected };
+  const offered = input.continuations[0];
+  const next: JevContinuation | undefined = offered === undefined ? undefined : { id: offered.id, kind: offered.kind, revision: actionRevision };
+  const decisionId = `${CODE_DECISION_PREFIX}${actionRevision}`;
+  const record = { schemaVersion: 1 as const, decisionId, binding, judgmentDecisionIds: [], evidence: [],
+    summary: input.allowAct ? `No decision model is in use: ${input.action} (allowed by the host's own checks; not independently checked).`
+      : next !== undefined ? `No decision model is in use: the registered continuation ${next.id} is taken.`
+        : 'No decision model is in use, and the host\'s own checks allow neither this operation nor a continuation.' };
+  const decision: JevDecision = input.allowAct ? { ...record, outcome: 'act' } : next !== undefined ? { ...record, outcome: 'revise', next } : { ...record, outcome: 'reject' };
+  const context: JevDecisionContext = { decisionId, binding, judgmentDecisionIds: [], evidence: [], continuations: next === undefined ? [] : [next], resumeConditions: [] };
+  if (decision.outcome === 'reject') contract.nativeProgress = { schemaVersion: 1, state: 'refused', stage: input.stage, targetId: input.targetId };
+  else showNativeProgress(contract);
+  if (owner.checkpoint !== undefined) owner.checkpoint(contract); else owner.changed(contract);
+  return { decision, context, assertCurrent: () => assertAuthority(contract, owner, expected, input.signal), recordClaim: () => {},
+    ...(decision.outcome === 'revise' ? { continuationId: decision.next.id } : {}) };
+}
+
 /** Reconstructs current bindings after a real external change. No stored receipt is replayed on resume. */
-export async function decideNativeContract(contract: Contract, services: NativeContractServices | undefined, input: NativeContractDecisionInput): Promise<NativeContractDecision> {
-  requireDecisionFeature('autonomous contract semantic checks, planning or continuation; use ordinary tools for explicit work');
+async function decideNativeContractWithModel(contract: Contract, services: NativeContractServices | undefined, input: NativeContractDecisionInput): Promise<NativeContractDecision> {
   const owner = ownedServices(services);
   const state = nativeDecisionState(contract);
   const key = `${input.stage}:${input.targetId}`;

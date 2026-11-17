@@ -1,4 +1,4 @@
-import { requireDecisionFeature } from '../runtime/decision-policy.js';
+import { decisionOrClassic } from '../runtime/decision-policy.js';
 import { nativeContractSourceData } from './native-source.js';
 import { agentBriefFidelity } from '../agents/brief-fidelity.js';
 import { hasDerivedAcceptanceChecks } from './owned-source.js';
@@ -71,6 +71,8 @@ export interface PlanVerdict {
   readonly reports: readonly PlanCheckReport[];
   readonly decisionIds: readonly string[];
   readonly usage: PlanCheckUsage;
+  /** Set when no decision model is in use: only the code checks ran, so the plan is not independently checked. */
+  readonly unchecked?: true;
 }
 
 export interface PlanCheckOptions {
@@ -392,13 +394,21 @@ function concurrencyLimited(port: JudgmentPort, limit: number): JudgmentPort {
   };
 }
 
+const NO_USAGE: PlanCheckUsage = Object.freeze({ calls: 0, inputTokens: 0, outputTokens: 0 });
+
 /**
  * Runs every Jev plan check, at most PLAN_CHECK_CONCURRENCY requests at once,
  * and folds the readings into problems and dispositions. Call it only on a
- * plan whose code checks passed.
+ * plan whose code checks passed. With no decision model in use the planner's
+ * plan stands on its code checks: no problems, every criterion judged, and the
+ * verdict marked `unchecked`.
  */
-export async function runPlanChecks(plan: ContractPlan, ask: string, shape: RequestShape, options: PlanCheckOptions = {}): Promise<PlanVerdict> {
-  requireDecisionFeature('autonomous contract semantic checks, planning or continuation; use ordinary tools for explicit work');
+export function runPlanChecks(plan: ContractPlan, ask: string, shape: RequestShape, options: PlanCheckOptions = {}): Promise<PlanVerdict> {
+  return decisionOrClassic(() => runPlanChecksWithModel(plan, ask, shape, options),
+    (): PlanVerdict => ({ problems: [], dispositions: new Map<string, CriterionDispositionRuling>(), reports: [], decisionIds: [], usage: NO_USAGE, unchecked: true }));
+}
+
+async function runPlanChecksWithModel(plan: ContractPlan, ask: string, shape: RequestShape, options: PlanCheckOptions): Promise<PlanVerdict> {
   const owner = planCheckOwner(options, { plan, ask, shape });
   const port = concurrencyLimited(owner.port, PLAN_CHECK_CONCURRENCY);
   const derived = hasDerivedAcceptanceChecks(options.originalSource);
@@ -433,13 +443,20 @@ export async function runPlanChecks(plan: ContractPlan, ask: string, shape: Requ
 /**
  * Only the unit checks (role and scope), for a planned-fix group:
  * its criteria trace to criteria that already trace to the user, so
- * trace and coverage are not asked again.
+ * trace and coverage are not asked again. With no decision model in use the
+ * fix plan stands on its code checks (no problems).
  */
-export async function runUnitShapeChecks(
+export function runUnitShapeChecks(
   plan: ContractPlan,
   options: PlanCheckOptions = {},
 ): Promise<{ readonly problems: readonly PlanProblem[]; readonly decisionIds: readonly string[]; readonly usage: PlanCheckUsage }> {
-  requireDecisionFeature('autonomous contract semantic checks, planning or continuation; use ordinary tools for explicit work');
+  return decisionOrClassic(() => runUnitShapeChecksWithModel(plan, options), () => ({ problems: [], decisionIds: [], usage: NO_USAGE }));
+}
+
+async function runUnitShapeChecksWithModel(
+  plan: ContractPlan,
+  options: PlanCheckOptions,
+): Promise<{ readonly problems: readonly PlanProblem[]; readonly decisionIds: readonly string[]; readonly usage: PlanCheckUsage }> {
   const owner = planCheckOwner(options, { plan });
   const units = await checkUnits(owner.port, plan, options);
   owner.assertCurrent();
@@ -449,15 +466,24 @@ export async function runUnitShapeChecks(
 /**
  * Only the dispositions, for a plan the owner approved as it stands: the
  * owner settles the plan's problems, but which criteria are topology-only is
- * still read, since those are never judged.
+ * still read, since those are never judged. With no decision model in use
+ * nothing is read and every criterion stays judged.
  */
-export async function readCriterionDispositions(
+export function readCriterionDispositions(
   plan: ContractPlan,
   ask: string,
   shape: RequestShape,
   options: PlanCheckOptions = {},
 ): Promise<{ readonly dispositions: ReadonlyMap<string, CriterionDispositionRuling>; readonly decisionIds: readonly string[]; readonly usage: PlanCheckUsage }> {
-  requireDecisionFeature('autonomous contract semantic checks, planning or continuation; use ordinary tools for explicit work');
+  return decisionOrClassic(() => readCriterionDispositionsWithModel(plan, ask, shape, options), () => ({ dispositions: new Map<string, CriterionDispositionRuling>(), decisionIds: [], usage: NO_USAGE }));
+}
+
+async function readCriterionDispositionsWithModel(
+  plan: ContractPlan,
+  ask: string,
+  shape: RequestShape,
+  options: PlanCheckOptions,
+): Promise<{ readonly dispositions: ReadonlyMap<string, CriterionDispositionRuling>; readonly decisionIds: readonly string[]; readonly usage: PlanCheckUsage }> {
   const owner = planCheckOwner(options, { plan, ask, shape });
   const shapes = await readCriterionShapes(owner.port, plan, ask, shape, options);
   owner.assertCurrent();

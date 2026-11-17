@@ -29,7 +29,7 @@
  * checks the resumed units get are ordinary unit checks (check.ts).
  */
 import { assertContractInputObjects, assertContractInputView, assertContractExecutionView, restoreContractInputDevice } from './input-snapshot.js';
-import { isClassicOperation, requireDecisionFeature, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
+import { withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
 
 import { existsSync } from 'node:fs';
 import { selectBaselineExecutionRoot } from './tree-baseline.js';
@@ -60,8 +60,6 @@ export interface ResumeReport {
   readonly reaped: readonly { readonly contractId: string; readonly reason: string }[];
   /** Contracts already running here or held by the active policy; left as they are. */
   readonly skipped: readonly string[];
-  /** Saved work remains untouched; autonomous continuation needs decision models. */
-  readonly heldForPolicy?: readonly { readonly contractId: string; readonly reason: 'decision-model-required' }[];
 }
 
 /** Statuses whose work runs on the contract's engine and in its worktree. */
@@ -180,7 +178,6 @@ export function createContractResume(deps: ContractResumeDeps): ContractResume {
     const queued: string[] = [];
     const reaped: { contractId: string; reason: string }[] = [];
     const skipped: string[] = [];
-    const heldForPolicy: { contractId: string; reason: 'decision-model-required' }[] = [];
     const pending: ContractRun[] = [];
     for (const contractId of deps.store.listStoredIds()) {
       if (deps.isLive(contractId)) {
@@ -191,12 +188,6 @@ export function createContractResume(deps: ContractResumeDeps): ContractResume {
       if (deps.store.endedSummary(contractId) !== undefined) continue;
       const contract = deps.store.load(contractId);
       if (contract === null) continue;
-      if (isClassicOperation()) {
-        if (isTerminalContractStatus(contract.status)) { deps.store.noteEnded(contract); continue; }
-        deps.store.hold(contract);
-        skipped.push(contractId); heldForPolicy.push({ contractId, reason: 'decision-model-required' });
-        continue;
-      }
       if (isTerminalContractStatus(contract.status) && ((deps.nativeOnly === true) !== (contract.nativeSource !== undefined) || contract.durableAdmission !== undefined)) {
         deps.store.noteEnded(contract); continue;
       }
@@ -278,7 +269,7 @@ export function createContractResume(deps: ContractResumeDeps): ContractResume {
     // Legacy continuations settle here as before (the host drains recovery through this call); each ends its own contract on failure.
     await Promise.all(continuations);
     logger.info('contract runner: resumed contracts from disk', { resumed: resumed.length, queued: queued.length, reaped: reaped.length, skipped: skipped.length });
-    return { resumed, queued, reaped, skipped, ...(heldForPolicy.length ? { heldForPolicy } : {}) };
+    return { resumed, queued, reaped, skipped };
   }
 
   function prepareResume(run: ContractRun): void {
@@ -350,7 +341,6 @@ export function createContractResume(deps: ContractResumeDeps): ContractResume {
     try {
       // Inside the try: a refusal here must end the contract (and free its slot), not reject unseen.
       run.abort.signal.throwIfAborted();
-      requireDecisionFeature('autonomous contract continuation; inspect retained work or continue it through ordinary tools');
       contract.resumeFrom = undefined;
       if (contract.inputSnapshot !== undefined) await assertContractInputView(contract.inputSnapshot, run.abort.signal);
       await awaitNativeResumeConditions(contract, run.env.native, run.abort.signal);

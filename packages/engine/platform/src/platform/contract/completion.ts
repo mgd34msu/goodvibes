@@ -1,6 +1,6 @@
 import { currentFileObservationsAsync } from './current-file-observations.js';
 import { setAgentProgress } from '../agents/progress-audience.js';
-import { requireDecisionFeature } from '../runtime/decision-policy.js';
+import { decisionOrClassic } from '../runtime/decision-policy.js';
 import { nativeContractSourceData } from './native-source.js';
 import { reviewInventoryObservationAsync, compactReviewInventory } from './review-inventory.js';
 import { projectCheckEvidence } from './check-evidence-projection.js';
@@ -38,6 +38,13 @@ import { assertOwnedContractSource, hasDerivedAcceptanceChecks } from './owned-s
  *   audience only.
  *
  * Original-scope, content and publication compatibility have separate Jev checks.
+ *
+ * With no decision model in use (none set, No Decision Model, or Hybrid with
+ * the set model unavailable) the gates decide a group or the deliverable: a
+ * group whose gates hold passes on its units' work as produced, and a
+ * deliverable whose gates hold is put to the owner, who accepts it ("accept")
+ * before it is published or stops the contract ("cancel"). Every such check
+ * says it was not independently checked.
  */
 import { assertContractInputOwner, assertContractInputObjects, assertContractExecutionView, ContractInputOwnerChangedError } from './input-snapshot.js';
 import { applyCapturedInputDelta, ContractPublicationConflictError } from './input-apply.js';
@@ -66,7 +73,7 @@ import { GROUP_JUDGES } from './batteries/group-judge.js';
 import { FINAL_ANSWER_REVIEWS } from './batteries/final-answer-review.js';
 import { responseFinding } from '../core/batteries/response-finding.js';
 import { completionFinding, type CompletionFinding } from '../core/response-completion-findings.js';
-import { criterionVerdict, emptyJudgmentUsage, meteredPort } from './check.js';
+import { criterionVerdict, emptyJudgmentUsage, meteredPort, UNCHECKED_RATIONALE } from './check.js';
 import { readContractConfig } from './config.js';
 import type { Correction } from './correction.js';
 import { nativeContractPort } from './native-decisions.js';
@@ -134,6 +141,8 @@ interface TargetReading {
   readonly verdicts: ReadonlyMap<string, CriterionVerdict>;
   readonly passed: boolean;
   readonly output: string;
+  /** A deliverable no decision model could check waits for the owner to accept it; nothing goes to correction. */
+  readonly awaitingOwner?: true;
 }
 
 interface FinalAnswerReviewReceipt {
@@ -206,13 +215,16 @@ export function buildContractCommitMessage(contract: Contract): string {
   const firstLine = contract.goal.replace(/\s+/g, ' ').trim();
   const subject = firstLine.length <= 72 ? firstLine : `${firstLine.slice(0, 69)}...`;
   const judgedCriteria = judged(contract.criteria);
-  const gates = (contract.checks.at(-1)?.gates ?? []).filter((gate) => gate.passed && gate.skipped !== true).map((gate) => gate.gate);
+  const accepted = contract.checks.at(-1);
+  const gates = (accepted?.gates ?? []).filter((gate) => gate.passed && gate.skipped !== true).map((gate) => gate.gate);
   const excluded = contract.criteria.filter((criterion) => criterion.disposition !== 'judged');
+  // A result no decision model read was accepted by the owner, not checked against its criteria.
+  const unchecked = accepted !== undefined && accepted.decisionIds.length === 0 && accepted.goal.outcome === 'confirm';
   return [
     subject,
     '',
     `Contract ${contract.id}`,
-    'Criteria met:',
+    unchecked ? 'Criteria (accepted by the owner; not independently checked, no decision model was in use):' : 'Criteria met:',
     ...judgedCriteria.map((criterion) => `- [${criterion.id}] ${criterion.text}`),
     ...(gates.length > 0 ? [`Gates passed: ${gates.join(', ')}`] : []),
     'Units:',
@@ -244,6 +256,27 @@ interface AcceptanceRecord {
   readonly fixRounds: number;
 }
 
+/** The decision target the owner-acceptance question's binding is saved under. */
+const ownerAcceptanceTarget = (contractId: string): string => `${contractId}.owner-acceptance`;
+
+/** Which question asked the owner to accept which exact result, saved so an answer outlives the process. */
+interface OwnerAcceptanceRecord {
+  readonly version: 1;
+  readonly escalationId: string;
+  /** The result's gate source identity when the owner was asked. */
+  readonly source: string;
+  readonly fixRounds: number;
+}
+
+/** Whether the owner accepted exactly this result (same source, no fix round since) when no decision model could check it. */
+function ownerAccepted(contract: Pick<Contract, 'id' | 'decisions' | 'escalations' | 'fixRounds'>, source: string): boolean {
+  const saved = contract.decisions.findLast((decision) => decision.action === 'checked' && decision.targetId === ownerAcceptanceTarget(contract.id));
+  const record = saved === undefined ? undefined : decisionReceipt(saved) as Partial<OwnerAcceptanceRecord> | null | undefined;
+  if (record === undefined || record === null || record.version !== 1 || record.source !== source || record.fixRounds !== contract.fixRounds) return false;
+  const asked = contract.escalations.find((escalation) => escalation.id === record.escalationId);
+  return asked?.resolvedAt !== undefined && asked.reply?.reading === 'approve';
+}
+
 function readAcceptance(contract: Pick<Contract, 'id' | 'decisions'>): AcceptanceRecord | undefined {
   const saved = contract.decisions.findLast((decision) => decision.action === 'checked' && decision.targetId === acceptanceTarget(contract.id));
   if (saved === undefined) return undefined;
@@ -263,7 +296,7 @@ function abortableDelay(run: ContractRun, ms: number): Promise<void> {
   });
 }
 
-export function createCompletion(context: StepContext, correction: Pick<Correction, 'groupFailed' | 'deliverableFailed' | 'publicationPaused'>): Completion {
+export function createCompletion(context: StepContext, correction: Pick<Correction, 'groupFailed' | 'deliverableFailed' | 'publicationPaused' | 'ownerAcceptance'>): Completion {
   const config = () => readContractConfig(context.configManager);
   const pendingVerifications = new WeakMap<ContractRun, Map<string, Promise<void>>>();
   const publicationRepairs = new WeakMap<ContractRun, { evidence: JsonValue; decisionIds: readonly string[] }>();
@@ -324,11 +357,112 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
   }
 
   /**
+   * Reads one group or deliverable check: the decision model's judgment, or
+   * with none in use the code check (`readTargetWithoutModel`). Under Decision
+   * Model Only a failing model fails the check as before.
+   */
+  function readTarget(run: ContractRun, input: Parameters<typeof readTargetWithModel>[1]): Promise<TargetReading | null> {
+    return decisionOrClassic(() => readTargetWithModel(run, input), () => readTargetWithoutModel(run, input));
+  }
+
+  /**
+   * A group or deliverable check with no decision model in use. The gates run
+   * in the contract's tree as for a judged check, and a failing or unverified
+   * gate goes to correction. A group whose gates hold passes on its units' work
+   * as produced. A deliverable whose gates hold is published only once the
+   * owner accepted this exact result: until then the owner is asked, and the
+   * check waits (`awaitingOwner`). Criteria are recorded met at `confirm`,
+   * never at act, each saying it was not independently checked. No request is made.
+   */
+  async function readTargetWithoutModel(run: ContractRun, input: Parameters<typeof readTargetWithModel>[1]): Promise<TargetReading | null> {
+    const { contract } = run;
+    assertOwnedContractSource(contract);
+    const tree = contractTree(contract);
+    const scope = gateScope(contract);
+    const source = input.scope === 'deliverable' ? captureGateInput(tree, undefined, scope) : undefined;
+    if (input.scope === 'deliverable') acceptedSources.delete(run);
+    const gates = await runContractGates({ configManager: context.configManager, cwd: tree, runtimeBus: context.runtimeBus, sessionId: contract.sessionId, contractId: contract.id, targetId: input.targetId, scope, signal: run.abort.signal });
+    for (const unit of contract.units.filter(unit => input.unitIds.has(unit.id))) {
+      const preservation = verifyPrivateReceiptPreservation(contract, unit, tree);
+      if (preservation) gates.push(preservation);
+    }
+    if (run.terminal) return null;
+    assertOwnedContractSource(contract);
+    const currentSource = source === undefined ? undefined : captureGateInput(tree, source, scope).source;
+    if (source !== undefined && currentSource !== source.source)
+      throw new PublicationPending('The result source changed during acceptance; verify its current contents before publication.');
+    const currentGates = refreshGateResults(gates, context.configManager,
+      currentSource === undefined ? undefined : new Map([[gateSourceKey(tree, scope), currentSource]]));
+    const problems: NudgeKind[] = [
+      ...(unverifiedGates(currentGates).length > 0 ? ['unshown' as const] : []),
+      ...(failedGates(currentGates).length > 0 ? ['gate' as const] : []),
+    ];
+    const awaitingOwner = source !== undefined && problems.length === 0 && !ownerAccepted(contract, source.source);
+    const passed = problems.length === 0 && !awaitingOwner;
+    const checkId = `${input.targetId}.k${input.checks.length + 1}`;
+    const now = run.env.now();
+    const judgedCriteria = judged(input.criteria);
+    const verdicts = new Map<string, CriterionVerdict>(judgedCriteria.map((criterion) => [criterion.id, 'met']));
+    for (const criterion of judgedCriteria) {
+      criterion.readings.push({ checkId, at: now, probabilityUnmet: 0.5, verdict: 'met', outcome: 'confirm', decisionId: undefined, rationale: UNCHECKED_RATIONALE });
+      criterion.status = 'met';
+    }
+    const check: UnitCheck = {
+      id: checkId,
+      at: now,
+      trigger: input.trigger,
+      gates: currentGates,
+      goal: { probabilityUnmet: 0.5, verdict: 'met', outcome: 'confirm' },
+      quality: {},
+      result: passed ? 'pass' : awaitingOwner ? 'await-owner' : 'stall',
+      problems,
+      qualityProblems: [],
+      decisionIds: [],
+    };
+    input.checks.push(check);
+    if (passed && source !== undefined) {
+      acceptedSources.set(run, { checkId, tree, source });
+      const treeId = source.source.startsWith('tree:') ? source.source.slice('tree:'.length) : workingTreeIdentity(tree);
+      if (treeId !== null) {
+        const record: AcceptanceRecord = { version: 1, checkId, tree: treeId, fixRounds: contract.fixRounds };
+        decideRecorded(run, 'checked', acceptanceTarget(contract.id), `accepted result recorded (check ${checkId}, tree ${treeId.slice(0, 12)}): accepted by the owner, not independently checked`, receiptRecord(record));
+      }
+    }
+    const said = passed ? (source === undefined ? 'pass' : 'pass, accepted by the owner') : awaitingOwner ? 'the owner is asked to accept the result' : problems.join(', ');
+    run.decide('checked', input.targetId, `check ${checkId} (${input.trigger}): ${said}; not independently checked: no decision model is in use`);
+    run.emit({
+      type: 'CONTRACT_CHECKED',
+      contractId: contract.id,
+      scope: input.scope,
+      targetId: input.targetId,
+      checkId,
+      trigger: input.trigger,
+      result: check.result,
+      criteria: judgedCriteria.map((criterion) => ({ criterionId: criterion.id, verdict: 'met' as const, probabilityUnmet: 0.5, outcome: 'confirm' as const })),
+      goal: { verdict: 'met', outcome: 'confirm' },
+      quality: [],
+      gates: currentGates.map(gateEventSummary),
+      decisionIds: [],
+    });
+    if (awaitingOwner && source !== undefined) {
+      const escalationId = correction.ownerAcceptance(run, {
+        gates: currentGates.filter((gate) => gate.passed && gate.skipped !== true).map((gate) => gate.gate),
+        ...(contract.isolation === 'worktree' && contract.branch !== undefined ? { branch: contract.branch } : {}),
+        answer: input.output,
+      });
+      const record: OwnerAcceptanceRecord = { version: 1, escalationId, source: source.source, fixRounds: contract.fixRounds };
+      decideRecorded(run, 'checked', ownerAcceptanceTarget(contract.id), `the owner is asked to accept the result (${escalationId}): no decision model is in use to check it`, receiptRecord(record));
+      context.checkpoint?.(run);
+    }
+    return { check, verdicts, passed, output: input.output, ...(awaitingOwner ? { awaitingOwner: true as const } : {}) };
+  }
+
+  /**
    * Reads one group or deliverable check: the diff of `paths` since
    * `baseline`, gates in the contract's tree, and the judge. The criteria get
    * their readings and the check is recorded on `checks`.
    */
-  async function readTarget(run: ContractRun, input: {
+  async function readTargetWithModel(run: ContractRun, input: {
     readonly scope: 'group' | 'deliverable';
     readonly targetId: string;
     readonly goal: string;
@@ -971,7 +1105,6 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
   // ── Groups ────────────────────────────────────────────────────────────────────
 
   async function judgeGroup(run: ContractRun, groupId: string, trigger: CheckTrigger): Promise<void> {
-    requireDecisionFeature('autonomous contract semantic checks, planning or continuation; use ordinary tools for explicit work');
     const group = run.group(groupId);
     if (group === undefined || run.terminal) return;
     run.moveGroup(group, 'judging');
@@ -1018,7 +1151,6 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
   // ── The deliverable ───────────────────────────────────────────────────────────
 
   async function judgeDeliverable(run: ContractRun, trigger: CheckTrigger): Promise<void> {
-    requireDecisionFeature('autonomous contract semantic checks, planning or continuation; use ordinary tools for explicit work');
     const { contract } = run;
     if (run.terminal) return;
     assertNativeContractSource(contract);
@@ -1050,7 +1182,8 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
         })) },
         trigger,
       });
-      if (reading === null) return;
+      // No decision model checked it: the owner was asked to accept it, and the answer publishes it or stops the contract.
+      if (reading === null || reading.awaitingOwner === true) return;
       if (!reading.passed) {
         await correction.deliverableFailed(run, finding(reading));
         return;
@@ -1111,7 +1244,6 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
   }
 
   async function commitDeliverable(run: ContractRun, checkedAnswer?: string): Promise<void> {
-    requireDecisionFeature('autonomous contract semantic checks, planning or continuation; use ordinary tools for explicit work');
     const { contract } = run;
     if (run.terminal) return;
     assertOwnedContractSource(contract);
@@ -1185,35 +1317,42 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
       if (!(error instanceof ContractInputOwnerChangedError))
         return { status: 'failed', note: `not applied: ${summarizeError(error)}; the work stays on branch ${branch}` };
       try {
-        const admitted = await admitPublicationInput(contract, context.plannerDeps(run).readAccessFilter, run.abort.signal, async evidence => {
-          const site = 'contract.publication-owner', usage = emptyJudgmentUsage();
-          const owner = captureJudgmentPort(site, { signal: run.abort.signal, assertCurrent: () => assertOwnedContractSource(contract) });
-          try {
-            const checked = await publicationOwner.run(meteredPort(nativeContractPort(contract, context.native, owner.port, run.abort.signal), usage),
-              evidence as never, { site, signal: owner.signal, beforeAttempt: owner.assertCurrent });
-            owner.assertCurrent();
-            const accepted = Object.values(checked.readings).every(reading => reading.verdict === 'no' && reading.outcome === 'act');
-            const decisionIds = checked.result.decisionId ? [checked.result.decisionId] : [];
-            decideRecorded(run, 'checked', `${contract.id}.publication-owner`, `publication over newer owner changes: ${accepted ? 'compatible' : 'not yet compatible'}`,
-              receiptRecord({ policy: { name: publicationOwner.name, version: publicationOwner.version }, readings: checked.readings, passed: accepted }), decisionIds);
-            checked.recordAction(accepted ? 'Later owner changes preserve the original requested result; actual permissions, exact current owner/result identities and clean patch application still gate publication.'
-              : 'Retain accepted work and newer owner edits; resolve the specific integration/evidence gap instead of repeating the unchanged publication.');
-            if (!accepted) {
-              publicationRepairs.set(run, { evidence: { originalAssessment: evidence,
-                publicationChecks: JSON.parse(JSON.stringify(checked.readings)) as JsonValue,
-                remaining: Object.entries(checked.readings).filter(([, reading]) => reading.verdict !== 'no' || reading.outcome !== 'act')
-                  .map(([check, reading]) => ({ check, verdict: reading.verdict, outcome: reading.outcome,
-                    required: reading.outcome !== 'act'
-                      ? 'This check remains unsettled. Verify this specific compatibility question from the supplied observations or a targeted read. Do not assume a defect or repeat accepted work.'
-                      : check === 'incompatible'
-                      ? 'Resolve the actual incompatibility between the proposed publication, original requirements and pending answer claims.'
-                      : 'Obtain the missing current-owner file evidence needed to assess the proposed publication.' })) }, decisionIds });
-              return null;
-            }
-            publicationAssessments.set(run, { evidence, decisionIds });
-            return () => { assertAcceptedResultCurrent(run); owner.assertCurrent(); };
-          } finally { addJudgmentUsage(contract.judgmentUsage, usage); }
-        });
+        const admitted = await admitPublicationInput(contract, context.plannerDeps(run).readAccessFilter, run.abort.signal, evidence => decisionOrClassic(async () => {
+            const site = 'contract.publication-owner', usage = emptyJudgmentUsage();
+            const owner = captureJudgmentPort(site, { signal: run.abort.signal, assertCurrent: () => assertOwnedContractSource(contract) });
+            try {
+              const checked = await publicationOwner.run(meteredPort(nativeContractPort(contract, context.native, owner.port, run.abort.signal), usage),
+                evidence as never, { site, signal: owner.signal, beforeAttempt: owner.assertCurrent });
+              owner.assertCurrent();
+              const accepted = Object.values(checked.readings).every(reading => reading.verdict === 'no' && reading.outcome === 'act');
+              const decisionIds = checked.result.decisionId ? [checked.result.decisionId] : [];
+              decideRecorded(run, 'checked', `${contract.id}.publication-owner`, `publication over newer owner changes: ${accepted ? 'compatible' : 'not yet compatible'}`,
+                receiptRecord({ policy: { name: publicationOwner.name, version: publicationOwner.version }, readings: checked.readings, passed: accepted }), decisionIds);
+              checked.recordAction(accepted ? 'Later owner changes preserve the original requested result; actual permissions, exact current owner/result identities and clean patch application still gate publication.'
+                : 'Retain accepted work and newer owner edits; resolve the specific integration/evidence gap instead of repeating the unchanged publication.');
+              if (!accepted) {
+                publicationRepairs.set(run, { evidence: { originalAssessment: evidence,
+                  publicationChecks: JSON.parse(JSON.stringify(checked.readings)) as JsonValue,
+                  remaining: Object.entries(checked.readings).filter(([, reading]) => reading.verdict !== 'no' || reading.outcome !== 'act')
+                    .map(([check, reading]) => ({ check, verdict: reading.verdict, outcome: reading.outcome,
+                      required: reading.outcome !== 'act'
+                        ? 'This check remains unsettled. Verify this specific compatibility question from the supplied observations or a targeted read. Do not assume a defect or repeat accepted work.'
+                        : check === 'incompatible'
+                        ? 'Resolve the actual incompatibility between the proposed publication, original requirements and pending answer claims.'
+                        : 'Obtain the missing current-owner file evidence needed to assess the proposed publication.' })) }, decisionIds });
+                return null;
+              }
+              publicationAssessments.set(run, { evidence, decisionIds });
+              return () => { assertAcceptedResultCurrent(run); owner.assertCurrent(); };
+            } finally { addJudgmentUsage(contract.judgmentUsage, usage); }
+        }, () => {
+          // No decision model reads whether the newer owner changes and the accepted result fit together:
+          // the owner accepted the result, and the exact result delta must still apply cleanly over their changes.
+          decideRecorded(run, 'checked', `${contract.id}.publication-owner`, 'publication over newer owner changes: not independently checked, no decision model is in use; the exact accepted result must still apply cleanly',
+            receiptRecord({ passed: true, unchecked: 'no decision model is in use' }));
+          publicationAssessments.set(run, { evidence, decisionIds: [] });
+          return () => { assertAcceptedResultCurrent(run); };
+        }));
         if (!admitted) return { status: 'failed', note: `not applied: later owner changes need focused integration verification; the work stays on branch ${branch}` };
         publication = admitted;
       } catch (recoveryError) {
@@ -1295,7 +1434,6 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
   /** Publish worktree results or optionally commit files already in the owner tree.
    * Only an optional shared-tree Git commit failure may remain a warning. */
   async function commitContract(run: ContractRun): Promise<NonNullable<Contract['commit']>> {
-    requireDecisionFeature('autonomous contract semantic checks, planning or continuation; use ordinary tools for explicit work');
     const { contract } = run;
     if (!GitService.isGitRepo(contract.projectRoot)) return { status: 'skipped', note: 'commit skipped: not a git repository' };
     const settings = config();

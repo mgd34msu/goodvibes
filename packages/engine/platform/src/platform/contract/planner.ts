@@ -1,4 +1,4 @@
-import { requireDecisionFeature } from '../runtime/decision-policy.js';
+import { decisionOrClassic } from '../runtime/decision-policy.js';
 import { bindContractPlanConsumer } from '../tools/agent/contract-binding.js';
 import { waitForTaskRecovery } from '../core/response-completion.js';
 import { assertOwnedContractSource, checkOwnedSourcePlan, hasDerivedAcceptanceChecks } from './owned-source.js';
@@ -6,7 +6,7 @@ import { nativeContractTaskSource } from './native-source.js';
 import { captureReviewInventory, assignedReviewPaths, reviewInventoryForPlanner, type ReviewInventory } from './review-inventory.js';
 import { ContractInputReadDeniedError, withContractInputReadBatch, createContractInputAuthority, bindContractInputAuthority, assertContractInputAdmission, pinContractInputAdmission, authorizeContractInputPath, assertContractInputReadAccess, withContractInputAuthority, type ContractInputAuthority } from './input-authority.js';
 import { bindContractActionSource, getContractActionSource } from '../tools/agent/contract-binding.js';
-import { nativeContractActionSource } from './native-decisions.js';
+import { decidedWithoutModel, nativeContractActionSource } from './native-decisions.js';
 /**
  * Planning: read the request's
  * shape, run the planning model as a read-only sub-agent, check its plan in
@@ -412,15 +412,17 @@ function isAbort(error: unknown, signal: AbortSignal | undefined): boolean {
  * original request. Shaping does not ask the owner to authorize planning.
  */
 export async function shapeContract(contract: Contract, deps: ContractPlannerDeps, options: { readonly signal?: AbortSignal | undefined } = {}): Promise<ShapeOutcome> {
-  requireDecisionFeature('autonomous contract semantic checks, planning or continuation; use ordinary tools for explicit work');
   const context = new PlanningContext(contract, deps);
   context.move('shaping');
   let read: Awaited<ReturnType<typeof readRequestShape>>;
   const reusedShape = contract.nativeSource !== undefined && contract.shape !== undefined;
+  let unread = false;
   try {
     read = contract.nativeSource !== undefined && contract.shape !== undefined
       ? { shape: contract.shape, usage: { inputTokens: 0, outputTokens: 0 } }
-      : await readRequestShape(nativeContractPort(contract, deps.native, judgmentPort(REQUEST_SHAPE_SITE), options.signal), contract.ask, { ...options, nativeSource: contract.nativeSource });
+      : await decisionOrClassic(
+        () => readRequestShape(nativeContractPort(contract, deps.native, judgmentPort(REQUEST_SHAPE_SITE), options.signal), contract.ask, { ...options, nativeSource: contract.nativeSource }),
+        () => { unread = true; return { shape: unreadRequestShape(), usage: { inputTokens: 0, outputTokens: 0 } }; });
   } catch (error) {
     if (isAbort(error, options.signal)) return { kind: 'cancelled' };
     const reason = judgmentFailureReason(error);
@@ -432,8 +434,8 @@ export async function shapeContract(contract: Contract, deps: ContractPlannerDep
   if (shape.project_review?.verdict === 'yes' && (!contract.reviewInventory || contract.reviewInventory.errors.length > 0)) {
     contract.reviewInventory = await captureReviewInventory(contract.projectRoot, options.signal);
   }
-  context.addJudgmentUsage({ calls: reusedShape ? 0 : 1, ...usage });
-  context.decide('shaped', describeShape(shape), shape.decisionIds);
+  context.addJudgmentUsage({ calls: reusedShape || unread ? 0 : 1, ...usage });
+  context.decide('shaped', unread ? UNREAD_SHAPE_REASON : describeShape(shape), shape.decisionIds);
   deps.emit({
     type: 'CONTRACT_SHAPED',
     contractId: contract.id,
@@ -445,6 +447,28 @@ export async function shapeContract(contract: Contract, deps: ContractPlannerDep
   });
   return { kind: 'shaped', shape };
 }
+
+/** A shape question nobody read: below act, so code treats it as not said. */
+const unreadReading = (): RequestShape['forbids_writing'] => ({ verdict: 'uncertain', probability: 0.5, outcome: 'escalate' });
+
+/**
+ * The request shape when no decision model is in use. Nothing is read: the
+ * user is not taken to have asked for parallel agents, attempts or a project
+ * review; delegating is allowed as for any request; and whether files may
+ * change stays unsettled, which the planner resolves from the request itself.
+ */
+function unreadRequestShape(): RequestShape {
+  return {
+    project_review: unreadReading(),
+    forbids_delegation: { verdict: 'no', probability: 0, outcome: 'act' },
+    requests_parallel_agents: unreadReading(),
+    forbids_writing: unreadReading(),
+    asks_for_attempts: unreadReading(),
+    decisionIds: [],
+  };
+}
+
+const UNREAD_SHAPE_REASON = 'not read: no decision model is in use, so delegating is allowed as for any request, no parallel agents or attempts are assumed, and the planner settles whether files may change from the request itself';
 
 function describeShape(shape: RequestShape): string {
   const said = (name: string, reading: RequestShape['forbids_writing']): string => `${name} ${reading.verdict} (${reading.outcome})`;
@@ -568,7 +592,6 @@ async function checkPlanOwned(context: PlanningContext, output: string, repair: 
  * cannot produce a readable plan.
  */
 export async function planContract(contract: Contract, deps: ContractPlannerDeps, input: PlanContractInput = {}): Promise<PlanningOutcome> {
-  requireDecisionFeature('autonomous contract semantic checks, planning or continuation; use ordinary tools for explicit work');
   assertNativeContractSource(contract);
   if (contract.shape === undefined) throw new Error(`contract ${contract.id} has no request shape; shape it before planning`);
   const context = new PlanningContext(contract, deps);
@@ -701,7 +724,8 @@ export async function planContract(contract: Contract, deps: ContractPlannerDeps
       if (checked.problems.length === 0 && checked.plan !== undefined) {
         await assertView();
         const decisionIds = [...contract.shape.decisionIds, ...(checked.verdict?.decisionIds ?? [])];
-        acceptPlan(contract, checked.plan, checked.verdict?.dispositions ?? new Map(), context, decisionIds);
+        acceptPlan(contract, checked.plan, checked.verdict?.dispositions ?? new Map(), context, decisionIds,
+          checked.verdict?.unchecked === true ? PLAN_UNCHECKED_REASON : undefined);
         return { kind: 'accepted', plan: checked.plan, decisionIds };
       }
       // A run that failed to finish (an outage, a refused call) is retried with a backoff; only a plan the planner actually returned can repeat.
@@ -805,15 +829,18 @@ async function planNativeContract(context: PlanningContext, input: PlanContractI
         await admitted.assertView();
         decision.assertCurrent();
         decision.recordClaim();
-        acceptPlan(contract, checked.plan, checked.verdict?.dispositions ?? new Map(), context, decision.decision.judgmentDecisionIds, 'native Jev act on the exact checked plan');
+        acceptPlan(contract, checked.plan, checked.verdict?.dispositions ?? new Map(), context, decision.decision.judgmentDecisionIds,
+          decidedWithoutModel(decision) ? PLAN_UNCHECKED_REASON : 'native Jev act on the exact checked plan');
         return { kind: 'accepted', plan: checked.plan, decisionIds: decision.decision.judgmentDecisionIds };
       }
-      if (decision.decision.outcome === 'reject') return context.fail('planning', 'the decision model rejected the plan, and no repair was eligible');
+      if (decision.decision.outcome === 'reject') return context.fail('planning', decidedWithoutModel(decision)
+        ? `the plan did not pass its checks and no planner attempt is left: ${checked.problems.map(entry => entry.message).join(' ')}`
+        : 'the decision model rejected the plan, and no repair was eligible');
       if (decision.continuationId !== 'repair-plan' || !canRepair) throw new Error('Native planner continuation is no longer eligible');
       decision.assertCurrent();
       if (!failedRun) rejectedPlans.add(checked.text);
       previous = { problems: checked.problems, previousPlan: checked.text }; needsPlan = true;
-      context.decide('plan-repaired', 'Jev selected registered native plan repair', decision.decision.judgmentDecisionIds);
+      context.decide('plan-repaired', decidedWithoutModel(decision) ? 'the plan did not pass its checks: another planner attempt repairs it' : 'Jev selected registered native plan repair', decision.decision.judgmentDecisionIds);
       context.move('planning');
     }
   } catch (error) {
@@ -836,7 +863,6 @@ export async function acceptEscalatedPlan(
   deps: ContractPlannerDeps,
   options: { readonly signal?: AbortSignal | undefined } = {},
 ): Promise<EscalatedPlanOutcome> {
-  requireDecisionFeature('autonomous contract semantic checks, planning or continuation; use ordinary tools for explicit work');
   if (contract.nativeSource !== undefined) return { kind: 'unrunnable', problems: [{ code: 'native-source-changed', message: 'Native plans require a fresh semantic decision; owner approval is unavailable.' }] };
   if (escalation.reason !== 'plan-unresolved') throw new Error(`escalation ${escalation.id} is not about the plan`);
   if (contract.shape === undefined) throw new Error(`contract ${contract.id} has no request shape`);
@@ -866,6 +892,9 @@ export async function acceptEscalatedPlan(
 }
 
 // ── The contract tree ─────────────────────────────────────────────────────────
+
+/** How a plan was accepted when no decision model read it. */
+const PLAN_UNCHECKED_REASON = 'the code plan checks passed; the semantic plan checks did not run because no decision model is in use, so the plan is not independently checked';
 
 function plannedEvent(
   contractId: string,

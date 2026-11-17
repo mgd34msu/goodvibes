@@ -39,6 +39,7 @@ import { AttemptError } from '../../orchestration/attempts.js';
 import { paginateItems } from '@goodvibes-jev/engine/daemon-api';
 import { GatewayVerbError } from './gateway-verb-error.js';
 import { readInvocationParams, requireString } from './invocation-params.js';
+import { attachHandler } from './attach-handler.js';
 import { summarizeError } from '../../utils/error-display.js';
 import { randomUUID } from 'node:crypto';
 import type { ApprovalRaiseService } from './approvals-raise.js';
@@ -602,10 +603,7 @@ export function registerFleetGatewayMethods(
   attempts?: FleetAttemptsController,
   steerApprovals?: FleetSteerApprovals,
 ): void {
-  const attach = (id: string, handler: GatewayMethodHandler): void => {
-    const descriptor = catalog.get(id);
-    if (descriptor) catalog.register(descriptor, handler, { replace: true });
-  };
+  const attach = (id: string, handler: GatewayMethodHandler): void => { attachHandler(catalog, id, handler); };
   attach('fleet.snapshot', createFleetSnapshotHandler(registry));
   attach('fleet.list', createFleetListHandler(registry));
   attach('fleet.observed.steer', createFleetObservedSteerHandler(registry, steerApprovals));

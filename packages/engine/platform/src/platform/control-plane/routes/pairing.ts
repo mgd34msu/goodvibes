@@ -17,7 +17,7 @@ import type { GatewayMethodHandler, GatewayMethodInvocation } from '../method-ca
 import type { PairingTokenManager } from '../../pairing/pairing-token-store.js';
 import { PairingLimitReachedError, PairingMinterRevokedError, isPairingAttemptId, pairingTokenIdOfPrincipal } from '../../pairing/pairing-token-store.js';
 import { GatewayVerbError } from './gateway-verb-error.js';
-import { readInvocationParams } from './invocation-params.js';
+import { readInvocationParams, requireStringValue } from './invocation-params.js';
 
 /** The narrow slice of PairingTokenManager these verbs need. */
 export type PairingGatewayService = Pick<
@@ -29,13 +29,6 @@ function requirePrincipal(invocation: GatewayMethodInvocation): void {
   if (!invocation.context.principalId) {
     throw new GatewayVerbError('Pairing verbs require an authenticated principal', 'UNAUTHENTICATED', 401);
   }
-}
-
-function requireString(value: unknown, field: string): string {
-  if (typeof value !== 'string' || value.trim().length === 0) {
-    throw new GatewayVerbError(`Missing or invalid ${field}`, 'INVALID_ARGUMENT', 400, field);
-  }
-  return value;
 }
 
 function createListHandler(service: PairingGatewayService): GatewayMethodHandler {
@@ -65,7 +58,7 @@ function createMintHandler(service: PairingGatewayService): GatewayMethodHandler
   return async (invocation) => {
     requirePrincipal(invocation);
     const params = readInvocationParams(invocation);
-    const name = requireString(params.name, 'name');
+    const name = requireStringValue(params.name, 'name');
     try {
       return { token: service.mint({ name, mintedBy: pairingTokenIdOfPrincipal(invocation.context.principalId) }) };
     } catch (error) {
@@ -78,7 +71,7 @@ function createMigrateHandler(service: PairingGatewayService): GatewayMethodHand
   return async (invocation) => {
     requirePrincipal(invocation);
     const params = readInvocationParams(invocation);
-    const name = requireString(params.name, 'name');
+    const name = requireStringValue(params.name, 'name');
     const rawAttemptId = params.attemptId;
     let attemptId: string | undefined;
     if (rawAttemptId !== undefined) {
@@ -108,8 +101,8 @@ function createRenameHandler(service: PairingGatewayService): GatewayMethodHandl
   return async (invocation) => {
     requirePrincipal(invocation);
     const params = readInvocationParams(invocation);
-    const id = requireString(params.id, 'id');
-    const name = requireString(params.name, 'name');
+    const id = requireStringValue(params.id, 'id');
+    const name = requireStringValue(params.name, 'name');
     if (!service.rename(id, name)) {
       throw new GatewayVerbError('Unknown pairing token', 'PAIRING_TOKEN_NOT_FOUND', 404);
     }
@@ -124,7 +117,7 @@ function createRevokeHandler(service: PairingGatewayService, onRevoked?: Pairing
   return async (invocation) => {
     requirePrincipal(invocation);
     const params = readInvocationParams(invocation);
-    const id = requireString(params.id, 'id');
+    const id = requireStringValue(params.id, 'id');
     const outcome = service.revokeWithMinted(id);
     if (!outcome.revoked) {
       throw new GatewayVerbError('Unknown pairing token', 'PAIRING_TOKEN_NOT_FOUND', 404);

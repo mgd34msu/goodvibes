@@ -488,6 +488,13 @@ export function normalizeChannelRenderEventFromRuntime(
       }
       return events;
     }
+    case 'DRAFT_WITHDRAWN':
+      // The streamed text above was a draft the completion check sent back;
+      // the person reading it is told the answer is being redone.
+      return [renderEvent('status', 'progress', envelope, {
+        audience: 'owner',
+        text: 'That draft did not pass the completion check; a revised answer follows.',
+      })];
     case 'TOOL_EXECUTING':
       return [renderEvent('tool_start', 'progress', envelope, { toolName: payload.tool, text: payload.tool })];
     case 'TOOL_SUCCEEDED':

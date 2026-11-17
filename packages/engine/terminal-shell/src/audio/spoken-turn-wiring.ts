@@ -57,6 +57,7 @@ export function wireSpokenTurnRuntime(options: WireSpokenTurnRuntimeOptions, sou
         turns.on('TURN_SUBMITTED', (event) => { void controller.handleTurnEvent(event); }),
         turns.on('PREFLIGHT_FAIL', (event) => { void controller.handleTurnEvent(event); }),
         turns.on('STREAM_DELTA', (event) => { void controller.handleTurnEvent(event); }),
+        turns.on('DRAFT_WITHDRAWN', (event) => { void controller.handleTurnEvent(event); }),
         turns.on('STREAM_END', (event) => { void controller.handleTurnEvent(event); }),
         turns.on('TURN_COMPLETED', (event) => { void controller.handleTurnEvent(event); }),
         turns.on('TURN_ERROR', (event) => { void controller.handleTurnEvent(event); }),

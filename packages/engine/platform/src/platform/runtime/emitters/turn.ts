@@ -64,6 +64,11 @@ export function emitStreamDelta(
   bus.emit('turn', createEventEnvelope('STREAM_DELTA', { type: 'STREAM_DELTA', ...data }, ctx));
 }
 
+/** Emit DRAFT_WITHDRAWN when the completion check sends back a streamed draft. */
+export function emitDraftWithdrawn(bus: RuntimeEventBus, ctx: EmitterContext, data: { turnId: string; reason: string }): void {
+  bus.emit('turn', createEventEnvelope('DRAFT_WITHDRAWN', { type: 'DRAFT_WITHDRAWN', ...data }, ctx));
+}
+
 /** Emit STREAM_END when a provider stream iteration ends. */
 export function emitStreamEnd(
   bus: RuntimeEventBus,

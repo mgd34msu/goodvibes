@@ -32,6 +32,7 @@ import {
   emitPreflightFail,
   emitPreflightOk,
   emitStreamDelta,
+  emitDraftWithdrawn,
   emitStreamEnd,
   emitStreamRetry,
   emitStreamStart,
@@ -1025,7 +1026,13 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
         if (!streamBlockOpen) { context.conversation.startStreamingBlock(); streamBlockOpen = true; }
         context.conversation.updateStreamingBlock(streamedText);
       },
-      draftWithdrawn: () => { context.requestRender(); },
+      draftWithdrawn: (_draft, reason) => {
+        // Readers of the stream drop the draft they were shown; the next request streams its replacement.
+        if (streamEnabled && context.runtimeBus) {
+          emitDraftWithdrawn(context.runtimeBus, context.emitterContext(context.turnId), { turnId: context.turnId, reason });
+        }
+        context.requestRender();
+      },
       notVerified: (note) => {
         context.conversation.addNotice(`Not verified: ${note}, so the answer above is shown as it stands and its claims are unchecked.`, { level: 'warning', kind: 'operational' });
         context.requestRender();

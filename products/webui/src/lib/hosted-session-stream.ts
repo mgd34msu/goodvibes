@@ -62,9 +62,11 @@ export interface HostedActiveToolCall {
   readonly error?: string;
 }
 
-/** STREAM_DELTA's running text so far this turn (`payload.accumulated`), or
- * null when the frame is not a stream delta. */
+/** STREAM_DELTA's running text so far this turn (`payload.accumulated`), '' after
+ * DRAFT_WITHDRAWN (the completion check sent the streamed draft back and the
+ * replacement streams from empty), or null for any other frame. */
 export function streamDeltaAccumulated(frame: HostedStreamFrame): string | null {
+  if (frame.type === 'DRAFT_WITHDRAWN') return '';
   if (frame.type !== 'STREAM_DELTA') return null;
   const value = frame.payload.accumulated;
   return typeof value === 'string' ? value : '';

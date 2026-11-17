@@ -88,6 +88,11 @@ export function observeHeadlessTurn(bus: Pick<RuntimeEventBus, 'on'>, format: st
       state.events++;
       emit({ type: payload.type, content: payload.content, ...(options.omitAccumulated ? {} : { accumulated: payload.accumulated }) });
     }),
+    bus.on<Payload<TurnEvent, 'DRAFT_WITHDRAWN'>>('DRAFT_WITHDRAWN', ({ payload }) => {
+      state.events++;
+      // The STREAM_DELTA text of the current provider stream was a draft the completion check sent back.
+      emit({ type: payload.type, reason: forwardedText(payload.reason) });
+    }),
     bus.on<Payload<TurnEvent, 'LLM_RESPONSE_RECEIVED'>>('LLM_RESPONSE_RECEIVED', ({ payload, source }) => {
       state.events++;
       if (source === TOP_LEVEL_TURN_SOURCE) turns++;

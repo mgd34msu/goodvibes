@@ -219,6 +219,11 @@ export class HostedSessionFeed {
         this.updateStreamingRow(accumulated, event.at);
         return;
       }
+      case 'DRAFT_WITHDRAWN': {
+        // The completion check sent the streamed draft back; its replacement streams into a new row.
+        this.withdrawStreamingRow();
+        return;
+      }
       case 'TURN_COMPLETED': {
         const response = readString(event.payload, 'response');
         if (response) this.updateStreamingRow(response, event.at);
@@ -317,6 +322,14 @@ export class HostedSessionFeed {
     if (!existing) { this.streamingRowIndex = null; return; }
     rows[this.streamingRowIndex] = { ...existing, text, at };
     this.state = { ...this.state, rows };
+    this.emit();
+  }
+
+  private withdrawStreamingRow(): void {
+    if (this.streamingRowIndex === null) return;
+    const index = this.streamingRowIndex;
+    this.streamingRowIndex = null;
+    this.state = { ...this.state, rows: this.state.rows.filter((_, position) => position !== index) };
     this.emit();
   }
 

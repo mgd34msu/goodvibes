@@ -243,6 +243,14 @@ export function createHostedFrameRenderer(
         requestRender();
         return;
       }
+      case 'DRAFT_WITHDRAWN': {
+        // The completion check sent the streamed draft back; it is not the
+        // answer, so its text leaves the open block and the replacement streams in.
+        accumulated = '';
+        if (streaming) conversation.updateStreamingBlock('');
+        requestRender();
+        return;
+      }
       case 'TOOL_RECEIVED': {
         const callId = readString(payload, 'callId');
         const name = readString(payload, 'tool');

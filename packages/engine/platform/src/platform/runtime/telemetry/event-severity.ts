@@ -97,6 +97,7 @@ export const EVENT_SEVERITY: Readonly<Record<AnyRuntimeEvent['type'], TelemetryS
   DELIVERY_STARTED: 'debug',
   DELIVERY_SUCCEEDED: 'info',
   DELIVERY_WAITING: 'debug',
+  DRAFT_WITHDRAWN: 'info',
   FLEET_NODE_BLOCKED_ON_USER: 'warn',
   FLEET_NODE_FINISHED: 'info',
   FLEET_NODE_STARTED: 'debug',

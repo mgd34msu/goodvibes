@@ -62,6 +62,12 @@ export type TurnEvent =
    */
   | { type: 'STREAM_DELTA'; turnId: string; content: string; accumulated: string; provisional?: boolean; reasoning?: string; toolCalls?: PartialToolCall[] }
   /**
+   * The completion check sent back the draft streamed since the last
+   * STREAM_START: a reader removes that text (and stops speaking it); the next
+   * request streams the replacement from empty. `reason` is the check's reason.
+   */
+  | { type: 'DRAFT_WITHDRAWN'; turnId: string; reason: string }
+  /**
    * A provider stream iteration has ended.
    *
    * This is not the logical end of the turn when tools or multi-step provider

@@ -22,13 +22,14 @@
  * would see one this process ran itself.
  *
  * Scope is deliberately the exact event set the spoken-turn wiring subscribes
- * to (TURN_SUBMITTED, PREFLIGHT_FAIL, STREAM_DELTA, STREAM_END, TURN_COMPLETED,
+ * to (TURN_SUBMITTED, PREFLIGHT_FAIL, STREAM_DELTA, DRAFT_WITHDRAWN, STREAM_END, TURN_COMPLETED,
  * TURN_ERROR, TURN_CANCEL), the frame types this file has no mapping for are
  * ignored, the same "no guessing" stance hosted-frame-render.ts takes on its
  * own unmapped frames.
  */
 import type { RuntimeEventBus } from '@/runtime/index.ts';
 import {
+  emitDraftWithdrawn,
   emitPreflightFail,
   emitStreamDelta,
   emitStreamEnd,
@@ -113,6 +114,10 @@ export function bridgeHostedFrameOntoRuntimeBus(frame: HostedSessionFrame, optio
       const content = readString(payload, 'content') ?? '';
       const accumulated = readString(payload, 'accumulated') ?? content;
       emitStreamDelta(options.runtimeBus, ctx, { turnId, content, accumulated });
+      return;
+    }
+    case 'DRAFT_WITHDRAWN': {
+      emitDraftWithdrawn(options.runtimeBus, ctx, { turnId, reason: readString(payload, 'reason') ?? '' });
       return;
     }
     case 'STREAM_END': {

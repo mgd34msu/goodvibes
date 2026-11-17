@@ -221,6 +221,15 @@ export class SpokenTurnController {
         this.queueTexts(chunks);
         return;
       }
+      if (event.type === 'DRAFT_WITHDRAWN') {
+        // The draft was sent back: what is not yet audible is dropped and the
+        // replacement is chunked from its start. The turn keeps its playback.
+        this.chunker?.reset();
+        this.resetPipeline();
+        for (const controller of this.abortControllers) controller.abort();
+        this.abortControllers.clear();
+        return;
+      }
       if (event.type === 'TURN_COMPLETED') {
         this.finishTurn(event.turnId);
         return;

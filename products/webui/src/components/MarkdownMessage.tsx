@@ -38,15 +38,20 @@ function codeTextFromChildren(children: ReactNode): string {
 // one module-level object: a new map on every render would be a new component type, and
 // React would unmount and rebuild every code block on each keystroke or streamed token.
 const LineNumbersContext = createContext(false);
+// True inside a reply still being streamed: its code changes on every token, so an
+// untagged block is not run through language detection (every grammar, every token)
+// until the finished reply renders.
+const LiveContext = createContext(false);
 
 function CodeBlock({ children }: { children: ReactNode }) {
   const lineNumbers = useContext(LineNumbersContext);
+  const live = useContext(LiveContext);
   const [copied, setCopied] = useState(false);
   const toastCtx = useOptionalToast();
   const language = languageFromCodeChild(children);
   const code = codeTextFromChildren(children);
   const visibleCode = code.endsWith('\n') ? code.slice(0, -1) : code;
-  const highlighted = useMemo(() => highlightCode(visibleCode, language), [visibleCode, language]);
+  const highlighted = useMemo(() => highlightCode(visibleCode, language, { autoDetect: !live }), [visibleCode, language, live]);
   const highlightedLines = highlighted.html.split('\n');
   const displayLanguage = language || highlighted.language;
 
@@ -115,19 +120,23 @@ const COMPONENTS: Components = {
 interface MarkdownMessageProps {
   content: string;
   lineNumbers?: boolean;
+  /** The text is a reply still being streamed (see LiveContext). */
+  live?: boolean;
 }
 
 /** Re-renders only when its text or line-number setting changes; a parent's keystroke or token does not re-parse it. */
-export const MarkdownMessage = memo(function MarkdownMessage({ content, lineNumbers }: MarkdownMessageProps) {
+export const MarkdownMessage = memo(function MarkdownMessage({ content, lineNumbers, live = false }: MarkdownMessageProps) {
   const [preferences] = useWebUiPreferences();
   const showLineNumbers = lineNumbers ?? preferences.codeBlockLineNumbers;
 
   return (
     <div className="markdown-message">
       <LineNumbersContext.Provider value={showLineNumbers}>
-        <ReactMarkdown remarkPlugins={REMARK_PLUGINS} components={COMPONENTS}>
-          {content}
-        </ReactMarkdown>
+        <LiveContext.Provider value={live}>
+          <ReactMarkdown remarkPlugins={REMARK_PLUGINS} components={COMPONENTS}>
+            {content}
+          </ReactMarkdown>
+        </LiveContext.Provider>
       </LineNumbersContext.Provider>
     </div>
   );

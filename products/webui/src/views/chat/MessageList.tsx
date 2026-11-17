@@ -1,11 +1,12 @@
-import { RefObject, type ReactNode } from 'react';
+import { RefObject, useCallback, useSyncExternalStore, type ReactNode } from 'react';
 import { ArrowDown, Square, X } from 'lucide-react';
 import { MarkdownMessage } from '../../components/MarkdownMessage';
 import { Spark } from '../../components/shell/Spark';
 import { useReducedMotion } from '../../components/motion/useReducedMotion';
 import { MessageItem } from './MessageItem';
 import { lineageNodeKey, type LineageNode } from './lineage';
-import { bestId, canResendUserMessage } from './message-utils';
+import { bestId, canResendUserMessage, messageTone } from './message-utils';
+import type { LiveReplyStore } from './live-reply-store';
 import type { ChatMessage } from './types';
 import type { ActiveToolCall } from './useChatStream';
 import '../../styles/components/chat-stream.css';
@@ -13,7 +14,10 @@ import '../../styles/components/chat-stream.css';
 interface MessageListProps {
   /** Honest-lineage render nodes: active messages with any retained history attached. */
   nodes: LineageNode[];
-  liveText: string;
+  /** The reply being streamed; only the live bubble subscribes to it. */
+  liveReply: LiveReplyStore;
+  /** Whether the live reply has any text yet. */
+  hasLiveText: boolean;
   showJumpToBottom: boolean;
   isSendPending: boolean;
   /** Whether a turn is actively streaming (running | streaming | tooling). */
@@ -46,9 +50,27 @@ interface MessageListProps {
   lead?: ReactNode;
 }
 
+/** The streamed reply's text: re-renders on its own, at most once per frame, as the text grows. */
+function LiveReplyBubble({ store, showCaret, reducedMotion }: { store: LiveReplyStore; showCaret: boolean; reducedMotion: boolean }) {
+  const text = useSyncExternalStore(store.subscribe, store.get, store.get);
+  if (!text) return null;
+  return (
+    <div className="message-bubble">
+      <MarkdownMessage content={text} live />
+      {showCaret && (
+        <span
+          className={`stream-caret${reducedMotion ? ' stream-caret--reduced' : ''}`}
+          aria-hidden="true"
+        />
+      )}
+    </div>
+  );
+}
+
 export function MessageList({
   nodes,
-  liveText,
+  liveReply,
+  hasLiveText,
   showJumpToBottom,
   isSendPending,
   isStreaming = false,
@@ -74,6 +96,12 @@ export function MessageList({
   // no liveText yet. Requiring text here used to make a turn unstoppable
   // until it started talking.
   const showStreamControls = isStreaming;
+  // One callback for every user message, so the memo on MessageItem holds across
+  // keystrokes and tokens; replies get none (they are not edited).
+  const editMessage = useCallback(
+    (message: ChatMessage, newText: string) => onEditMessage?.(message.id ?? message.messageId ?? '', newText),
+    [onEditMessage],
+  );
 
   return (
     <div className="chat-thread">
@@ -95,25 +123,15 @@ export function MessageList({
               onCopyMessage={onCopyMessage}
               onResendMessage={onResendMessage}
               onRegenerateFrom={onRegenerateFrom}
-              onEditMessage={onEditMessage ? (_msg, newText) => onEditMessage(node.message.id ?? node.message.messageId ?? '', newText) : undefined}
+              onEditMessage={onEditMessage && messageTone(node.message) === 'user' ? editMessage : undefined}
             />
           ))}
-          {(liveText || isStreaming) && (
+          {(hasLiveText || isStreaming) && (
             <div aria-live="polite" aria-atomic="false">
               <article className="message assistant streaming">
                 <span className="message-mark" aria-hidden="true"><Spark size={18} /></span>
                 <div className="message-body">
-                  {liveText && (
-                    <div className="message-bubble">
-                      <MarkdownMessage content={liveText} />
-                      {showStreamControls && (
-                        <span
-                          className={`stream-caret${reducedMotion ? ' stream-caret--reduced' : ''}`}
-                          aria-hidden="true"
-                        />
-                      )}
-                    </div>
-                  )}
+                  <LiveReplyBubble store={liveReply} showCaret={showStreamControls} reducedMotion={reducedMotion} />
                   {showStreamControls && (
                     // One line naming what is happening right now; it shimmers (the
                     // only animated text in the product) and holds still with

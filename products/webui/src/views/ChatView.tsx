@@ -1,4 +1,4 @@
-import { ChangeEvent, Dispatch, FormEvent, KeyboardEvent, SetStateAction, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ChangeEvent, Dispatch, FormEvent, KeyboardEvent, SetStateAction, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 import { BookOpen, CalendarDays, LayoutGrid, Mail } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -32,6 +32,8 @@ import { parseSlashCommand, SLASH_COMMANDS } from './chat/slash-commands';
 import { useToast } from '../lib/toast';
 import { useWakeTranscriptSink } from '../lib/voice/useWake';
 import { useChatStream } from './chat/useChatStream';
+import { createLiveReplyStore } from './chat/live-reply-store';
+import { useStableCallback } from '../hooks/useStableCallback';
 import '../styles/components/chat-view.css';
 import {
   deriveChatTitle,
@@ -95,7 +97,11 @@ export function ChatView({
   const manuallyTitledSessionsRef = useRef<Set<string>>(new Set());
   const [draft, setDraft] = useState('');
   const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
-  const [liveText, setLiveText] = useState('');
+  // The streamed reply lives in a store, not in this view's state: a token
+  // re-renders only the live bubble. This view re-renders when it gains or loses text.
+  const [liveReply] = useState(createLiveReplyStore);
+  const setLiveText = liveReply.set;
+  const hasLiveText = useSyncExternalStore(liveReply.subscribe, () => liveReply.get() !== '', () => false);
   // turnState and turnError are ONE value (see TurnPhase in message-utils.ts):
   // the reset on a session switch sets both in a single setTurn call, so a
   // terminal state can never survive it. setTurnState/setTurnError are adapters
@@ -425,7 +431,16 @@ export function ChatView({
     window.requestAnimationFrame(() => {
       container.scrollTop = container.scrollHeight;
     });
-  }, [activeSessionId, liveText, renderedMessageItems.length, showJumpToBottom]);
+  }, [activeSessionId, renderedMessageItems.length, showJumpToBottom]);
+
+  // Follow the streamed reply as it grows (published at most once per frame).
+  useEffect(() => {
+    if (showJumpToBottom) return undefined;
+    return liveReply.subscribe(() => {
+      const container = scrollRef.current;
+      if (container) container.scrollTop = container.scrollHeight;
+    });
+  }, [liveReply, showJumpToBottom]);
 
   // Search jump-to-message: once the target session is active AND its messages
   // have loaded, locate the message in the DOM and scroll to it. Session switch
@@ -488,8 +503,8 @@ export function ChatView({
     const settled = settledFromList(renderedMessageItems, pendingUserMessageId);
     if (!settled) return;
     liveTextRef.current = '';
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- settles the turn from the list the stream could not report
     setLiveText('');
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- settles the turn from the list the stream could not report
     setPendingUserMessageId('');
     setTurnState(settled);
   }, [listSettlesTurn, listReadAt, pendingUserMessageId, renderedMessageItems, setTurnState, turnState]);
@@ -642,6 +657,13 @@ export function ChatView({
     sendRegenerateFrom(messageId, renderedMessageItems);
   }
 
+  // Stable identities for the message handlers, so each memoised message
+  // re-renders only when its own data changes.
+  const onCopyMessage = useStableCallback((message: ChatMessage) => { void copyMessage(message); });
+  const onResendMessage = useStableCallback(resendMessage);
+  const onRegenerateFrom = useStableCallback(regenerateFrom);
+  const onEditMessage = useStableCallback(editAndResend);
+
   function handleMessagesScroll() {
     const container = scrollRef.current;
     if (!container) return;
@@ -709,11 +731,11 @@ export function ChatView({
 
   // A new chat: no session yet and nothing sent. The greeting and the centered
   // composer show only here; the first send turns it into a conversation.
-  const isNewChat = !activeSessionId && lineageNodes.length === 0 && !liveText && !isStreaming && !send.isPending;
+  const isNewChat = !activeSessionId && lineageNodes.length === 0 && !hasLiveText && !isStreaming && !send.isPending;
   const workingLabel = workingStatusLabel(
     turnState,
     activeToolCalls.filter((call) => !call.cancelled),
-    Boolean(liveText),
+    hasLiveText,
     streamHealth,
   );
   // turnError already renders its exact words above the composer; the notice
@@ -776,7 +798,8 @@ export function ChatView({
       <MessageList
         nodes={lineageNodes}
         lead={greetingBlock}
-        liveText={liveText}
+        liveReply={liveReply}
+        hasLiveText={hasLiveText}
         showJumpToBottom={showJumpToBottom}
         isSendPending={send.isPending}
         isStreaming={isStreaming}
@@ -786,10 +809,10 @@ export function ChatView({
         hasHeldFiles={send.hasHeldFiles}
         onScroll={handleMessagesScroll}
         onJumpToBottom={scrollMessagesToBottom}
-        onCopyMessage={(message) => void copyMessage(message)}
-        onResendMessage={resendMessage}
-        onRegenerateFrom={regenerateFrom}
-        onEditMessage={editAndResend}
+        onCopyMessage={onCopyMessage}
+        onResendMessage={onResendMessage}
+        onRegenerateFrom={onRegenerateFrom}
+        onEditMessage={onEditMessage}
         onStop={stop}
         activeToolCalls={activeToolCalls}
         onCancelToolCall={(callId) => void cancelToolCall(callId)}

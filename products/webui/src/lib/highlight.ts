@@ -91,11 +91,13 @@ const AUTO_DETECT_MAX_CHARS = 20_000;
  *
  * - If `language` resolves to a registered hljs language, use it.
  * - An untagged or unknown tag is detected here against the registered grammars; nothing is sent anywhere.
+ *   `autoDetect: false` skips that (a block still being streamed, whose text changes every token).
  * - Otherwise escape and return as-is.
  */
 export function highlightCode(
   code: string,
   language: string,
+  options: { readonly autoDetect?: boolean } = {},
 ): { language: string; html: string } {
   const normalizedLanguage = normalizeLanguage(language);
   if (normalizedLanguage && hljs.getLanguage(normalizedLanguage)) {
@@ -105,7 +107,7 @@ export function highlightCode(
     });
     return { language: normalizedLanguage, html: result.value };
   }
-  if (code.trim() && code.length <= AUTO_DETECT_MAX_CHARS) {
+  if (options.autoDetect !== false && code.trim() && code.length <= AUTO_DETECT_MAX_CHARS) {
     const detected = hljs.highlightAuto(code, REGISTERED_LANGUAGES);
     if (detected.language && detected.language !== 'plaintext' && detected.relevance > 0) return { language: detected.language, html: detected.value };
   }

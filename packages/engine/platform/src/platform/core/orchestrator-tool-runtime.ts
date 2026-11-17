@@ -454,10 +454,14 @@ async function executeToolCallsInMode(
           decision: { state: 'refused', decidedBy: 'rule', reason: refusal, limit: `Pre:tool:${call.name} hook`,
             next: ['Do something else, or ask the owner to change the hook.'] },
         };
-        if (deps.runtimeBus) emitToolFailed(deps.runtimeBus, deps.emitterContext(turnId), {
-          callId: call.id, turnId, tool: call.name, error: redactDiagnosticText(refusal),
-          durationMs: Date.now() - hookStartedAt, result: redactedToolResultSummary(redactedErrorResult(deniedResult)),
-        });
+        if (deps.runtimeBus) {
+          // Observers see the call arrive before they see it refused.
+          emitToolReceived(deps.runtimeBus, deps.emitterContext(turnId), { callId: call.id, turnId, tool: call.name, args: call.arguments });
+          emitToolFailed(deps.runtimeBus, deps.emitterContext(turnId), {
+            callId: call.id, turnId, tool: call.name, error: redactDiagnosticText(refusal),
+            durationMs: Date.now() - hookStartedAt, result: redactedToolResultSummary(redactedErrorResult(deniedResult)),
+          });
+        }
         appendResult(deniedResult);
         continue;
       }

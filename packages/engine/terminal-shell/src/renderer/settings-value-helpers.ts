@@ -4,6 +4,10 @@ export interface SettingsValueEntry {
   readonly currentValue: unknown;
   readonly isDefault: boolean;
   readonly flag?: { readonly feature: { readonly name: string } } | undefined;
+  /** `unavailable` with no current value: the host owns the value and it is being read or could not be read. */
+  readonly effectiveSource?: string | undefined;
+  /** Why, for an unavailable row ("reading from the connected host", "host value unavailable: ..."). */
+  readonly sourceLabel?: string | undefined;
 }
 const CHOICE_LABELS: Readonly<Record<string, string>> = {
   'judgment.policy': 'Decision models', 'judgment.backend': 'Decision provider',
@@ -38,6 +42,8 @@ export function createSettingsValueHelpers<Entry extends SettingsValueEntry>(pol
       const adapter = (value as { adapter?: unknown }).adapter;
       return adapter === 'cloudflare-workers-ai' ? 'Cloudflare Workers AI' : adapter === 'laya' ? 'Laya' : 'System One';
     }
+    // A value the host owns and has not given is unknown, not unset.
+    if (value === undefined && entry.effectiveSource === 'unavailable') return `(${entry.sourceLabel ?? 'host value unavailable'})`;
     if (value === null || value === undefined) return '(unset)';
     if (typeof value === 'boolean') return value ? 'true' : 'false';
     if (typeof value === 'string' && policy.isSecretKey(entry.setting.key)) return maskSecretValue(value);

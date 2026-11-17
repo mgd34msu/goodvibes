@@ -126,11 +126,6 @@ jobs:
         uses: ./.github/actions/apt-install
         with:
           packages: ripgrep
-      # find-content-repeat-ripgrep measures content search with the host's rg.
-      - name: Install ripgrep
-        uses: ./.github/actions/apt-install
-        with:
-          packages: ripgrep
       - name: Setup Bun + deps (cached)
         uses: ./.github/actions/setup
       - name: Check the speed budgets

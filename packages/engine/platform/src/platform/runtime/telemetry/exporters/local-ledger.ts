@@ -20,13 +20,9 @@ import { summarizeError } from '../../../utils/error-display.js';
 import {
   type AtRestPolicy,
   DEFAULT_AT_REST_POLICY,
-  AtRestLineWriter,
   enforceFileRetention,
+  redactAtRestLine,
 } from '../../at-rest-persistence.js';
-
-/** The decision sites the ledger's credential span readings are logged under. */
-const SPAN_FILE_CREDENTIAL_SITE = 'runtime.telemetry.local-ledger.span-credential-span';
-const LEDGER_FILE_CREDENTIAL_SITE = 'runtime.telemetry.local-ledger.event-credential-span';
 
 /** Configuration for LocalLedgerExporter. */
 export interface LocalLedgerConfig {
@@ -123,9 +119,6 @@ export class LocalLedgerExporter implements SpanExporter {
   /** Run ids whose start has been handled; loaded from the snapshot file on first use. */
   private snapshottedRunIds: Set<string> | null = null;
   private entriesSinceRetention = 0;
-  /** Keep each file's lines in order while their credential spans are read. */
-  private readonly spanWriter = new AtRestLineWriter(SPAN_FILE_CREDENTIAL_SITE);
-  private readonly ledgerWriter = new AtRestLineWriter(LEDGER_FILE_CREDENTIAL_SITE);
 
   constructor(config: LocalLedgerConfig) {
     this.filePath = config.filePath;
@@ -187,12 +180,10 @@ export class LocalLedgerExporter implements SpanExporter {
     };
 
     // All I/O in a microtask to keep the call non-blocking. With redaction on,
-    // the batch waits for the readings of any credential-shaped span in it.
+    // the batch is masked in code (redactAtRestLine) before it is appended.
     await Promise.resolve().then(() => {
-      if (this.atRestPolicy.redact) this.spanWriter.write(payload, append);
-      else append(payload);
+      append(this.atRestPolicy.redact ? redactAtRestLine(payload) : payload);
     });
-    await this.spanWriter.flush();
   }
 
   /**
@@ -238,10 +229,7 @@ export class LocalLedgerExporter implements SpanExporter {
       });
       return;
     }
-    // A line with a credential-shaped span not yet read is written once the
-    // span is read, after every line ahead of it; flush() waits for those.
-    if (this.atRestPolicy.redact) this.ledgerWriter.write(serialized, append);
-    else append(serialized);
+    append(this.atRestPolicy.redact ? redactAtRestLine(serialized) : serialized);
     // Retention otherwise runs only when spans are exported, which a session
     // with span export off never does; the ledger and snapshot files would grow unchecked.
     this.entriesSinceRetention += 1;
@@ -275,8 +263,7 @@ export class LocalLedgerExporter implements SpanExporter {
         });
         continue;
       }
-      if (this.atRestPolicy.redact) this.ledgerWriter.write(serialized, (line) => { lines.push(line); });
-      else lines.push(serialized);
+      lines.push(this.atRestPolicy.redact ? redactAtRestLine(serialized) : serialized);
     }
     if (lines.length === 0) return;
     try {
@@ -422,8 +409,7 @@ export class LocalLedgerExporter implements SpanExporter {
         });
       }
     };
-    if (this.atRestPolicy.redact) this.ledgerWriter.write(serialized, append);
-    else append(serialized);
+    append(this.atRestPolicy.redact ? redactAtRestLine(serialized) : serialized);
   }
 
   private _readSnapshotRecords(): RunSnapshotRecord[] {
@@ -451,15 +437,11 @@ export class LocalLedgerExporter implements SpanExporter {
     return records;
   }
 
-  /** Resolves once every line waiting on a credential span reading is written. */
-  async flush(): Promise<void> {
-    await Promise.all([this.spanWriter.flush(), this.ledgerWriter.flush()]);
-  }
+  /** Every line is on disk when its write returns; kept so callers can await one point. */
+  async flush(): Promise<void> {}
 
-  /** Shutdown writes any line still waiting on a reading; there is nothing else to tear down. */
-  async shutdown(): Promise<void> {
-    await this.flush();
-  }
+  /** Nothing is held between writes, so there is nothing to tear down. */
+  async shutdown(): Promise<void> {}
 
   /**
    * Rotate the log file if it exceeds the configured maximum size.

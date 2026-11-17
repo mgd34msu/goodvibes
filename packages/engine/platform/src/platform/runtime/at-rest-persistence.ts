@@ -119,24 +119,6 @@ export function redactAtRestLine(line: string): string {
   return maskCredentialCandidates(text);
 }
 
-/**
- * Writes each line masked, at once, in call order. A failed append throws to
- * the caller, so the caller knows that line is not on disk.
- */
-export class AtRestLineWriter {
-  /** The site name is accepted from existing callers; nothing is read per site. */
-  constructor(_site?: string) {}
-
-  write(line: string, append: (redacted: string) => void): void {
-    append(redactAtRestLine(line));
-  }
-
-  /** Every line is on disk when write returns; kept so callers can await one point. */
-  flush(): Promise<void> {
-    return Promise.resolve();
-  }
-}
-
 export interface RetentionOutcome {
   readonly deletedFiles: readonly string[];
   readonly reclaimedBytes: number;

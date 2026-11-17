@@ -36,8 +36,23 @@ function stringEntries(value: unknown): Record<string, string> {
   return Object.fromEntries(Object.entries(value).filter((entry): entry is [string, string] => typeof entry[1] === 'string' && entry[1].length > 0));
 }
 
+let storeRevision = 0;
+
+/**
+ * Advances on every write this process makes to the record, so a client kept
+ * by a long-lived caller is rebuilt with the new bearer at once; a write from
+ * another process shows in the file's stat instead.
+ */
+export function connectedDaemonCredentialsRevision(): number {
+  return storeRevision;
+}
+
 function writeStore(homeDirectory: string, store: ConnectedDaemonCredentialStore): void {
-  writeFileAtomic(connectedDaemonCredentialsPath(homeDirectory), `${JSON.stringify(store, null, 2)}\n`, { mode: 0o600 });
+  try {
+    writeFileAtomic(connectedDaemonCredentialsPath(homeDirectory), `${JSON.stringify(store, null, 2)}\n`, { mode: 0o600 });
+  } finally {
+    storeRevision += 1;
+  }
 }
 
 function readStore(homeDirectory: string): ConnectedDaemonCredentialStore {

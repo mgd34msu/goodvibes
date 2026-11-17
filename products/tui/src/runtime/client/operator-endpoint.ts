@@ -40,7 +40,7 @@ import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/conf
 import { readConnectedDaemonOrigin, resolveDaemonEnabled } from '@goodvibes-jev/engine/platform/platform/config';
 import { resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/platform/platform/config/goodvibes-home';
 import { getOrCreateCompanionToken } from '@goodvibes-jev/engine/platform/platform/pairing';
-import { readConnectedDaemonToken, readDaemonSessionToken } from './connected-daemon-credentials.ts';
+import { connectedDaemonCredentialsPath, connectedDaemonCredentialsRevision, readConnectedDaemonToken, readDaemonSessionToken } from './connected-daemon-credentials.ts';
 import { operatorTokenPath } from '@goodvibes-jev/engine/platform/platform/pairing/companion-token';
 import type { DaemonVerbCaller } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 
@@ -327,8 +327,11 @@ function withGatewayRouteForWsOnlyVerbs(
 /**
  * The verb caller every client seam shares. The endpoint and its client are
  * resolved on first use and kept while nothing they depend on moved: the
- * settings revision, the token override and the token file (one `stat` per
- * verb). Before this, every verb re-read the token file and built a new client.
+ * settings revision, the token override, the token file and this terminal's
+ * own credential record (`/auth login daemon`, `/auth logout`, a connect with a
+ * new token: a revision for its writes here, a `stat` for one from another
+ * process). Two `stat` calls per verb; before this, every verb re-read the
+ * token file and built a new client.
  */
 export function createDaemonVerbCaller(deps: {
   readonly configManager: ConfigManager;
@@ -339,14 +342,17 @@ export function createDaemonVerbCaller(deps: {
     const configManager = deps.configManager as Partial<Pick<ConfigManager, 'getConfigurationIncarnation'>>;
     if (typeof configManager.getConfigurationIncarnation !== 'function') return null;
     let tokenFile = 'none';
+    let credentialRecord = 'none';
     try {
       const homeDirectory = typeof deps.homeDirectory === 'function' ? deps.homeDirectory() : deps.homeDirectory;
       const stat = statSync(operatorTokenPath(resolveDaemonStateDirectory(homeDirectory)), { throwIfNoEntry: false });
       if (stat) tokenFile = `${stat.mtimeMs}:${stat.size}:${stat.ino}`;
+      const record = statSync(connectedDaemonCredentialsPath(homeDirectory), { throwIfNoEntry: false });
+      if (record) credentialRecord = `${record.mtimeMs}:${record.size}:${record.ino}`;
     } catch {
       return null; // shell paths not wired yet: resolve fresh and let the resolver say why
     }
-    return `${configManager.getConfigurationIncarnation()}|${daemonTokenOverride() ?? ''}|${tokenFile}`;
+    return `${configManager.getConfigurationIncarnation()}|${daemonTokenOverride() ?? ''}|${tokenFile}|${connectedDaemonCredentialsRevision()}:${credentialRecord}`;
   };
   const resolve = (): OperatorRpc => {
     const key = currentKey();

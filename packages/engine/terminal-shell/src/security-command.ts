@@ -30,6 +30,7 @@ export function createSecurityCommand<Context extends { print(text: string): voi
 ): TerminalSlashCommand<Context> {
   return {
     name: 'security',
+    effect: 'read-only',
     aliases: [],
     description: 'Inspect security posture, attack paths, and review state',
     hidden: presentation.hidden,

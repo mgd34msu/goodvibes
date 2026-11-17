@@ -290,6 +290,7 @@ export function registerDelegationRuntimeCommands(registry: CommandRegistry): vo
 
   registry.register({
     name: 'delegate',
+    effect: 'delegated-work',
     aliases: ['build'],
     description: 'Explicitly delegate build/fix/review work to GoodVibes TUI through shared-session routes',
     hidden: true,

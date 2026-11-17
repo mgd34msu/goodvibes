@@ -46,6 +46,7 @@ function printSessionGraphMutationBlocked(context: CommandContext): void {
  */
 export const sessionCommand: SlashCommand = {
   name: 'session',
+  effect: 'session-lifecycle',
   aliases: ['sess'],
   description: 'Session continuity and read-only cross-session graph inspection.',
   usage: '<subcommand> [args]',

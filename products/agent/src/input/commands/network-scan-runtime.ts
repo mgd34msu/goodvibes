@@ -40,6 +40,7 @@ function statusText(storePath: string, decision: ReturnType<typeof loadLanScanCo
 export function registerNetworkScanRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
     name: 'network-scan',
+    effect: 'local-state',
     aliases: ['discover-lan'],
     description: 'Turn local-network scanning for model servers on or off, or check its status',
     usage: '[on|off|status]',

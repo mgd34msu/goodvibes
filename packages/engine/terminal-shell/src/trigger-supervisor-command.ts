@@ -14,7 +14,7 @@ export function registerRemoteTriggerSupervisorCommand<Context extends PaymentWi
   registry: { register(command: TerminalSlashCommand<Context>): void },
   policy: PaymentWindowCommandPolicy<Context>,
 ): void {
-  registry.register({ name: 'triggers', description: 'Inspect the selected daemon’s supervised triggers',
+  registry.register({ name: 'triggers', effect: 'read-only', description: 'Inspect the selected daemon’s supervised triggers',
     usage: '[status]', argsHint: 'status', async handler(args, context) {
       if (args.length > 1 || (args[0] ?? 'status') !== 'status') { throw commandRefusal('Usage: /triggers [status]'); }
       const abort = new AbortController();

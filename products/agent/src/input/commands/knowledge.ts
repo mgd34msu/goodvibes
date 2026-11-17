@@ -68,6 +68,7 @@ function parseConnectorInputFlag(args: string[]): unknown {
 
 export const knowledgeCommand: SlashCommand = {
   name: 'knowledge',
+  effect: 'mixed',
   aliases: ['know'],
   description:
     'Agent Knowledge: isolated Agent-owned status, ask/search, source/node/issue lists, item lookup, map, connectors, ingest, and review queue.',

@@ -411,6 +411,7 @@ export function createPaymentCardCommands<Context extends CardPromptContext>(pol
   function registerPaymentCardCommands(registry: Pick<import('./command-registry.js').TerminalCommandRegistry<Context>, 'register'>): void {
     registry.register({
       name: 'payments',
+      effect: 'connected-host-state',
       description: policy.description,
       usage: policy.usage,
       argsHint: policy.argsHint,

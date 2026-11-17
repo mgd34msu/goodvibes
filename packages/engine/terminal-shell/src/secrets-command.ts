@@ -53,6 +53,7 @@ export function createSecretsCommand<Context extends SecretsCommandContext>(
   ];
   return {
     name: 'secrets',
+    effect: 'mixed',
     description: policy.description,
     hidden: policy.hidden,
     usage,

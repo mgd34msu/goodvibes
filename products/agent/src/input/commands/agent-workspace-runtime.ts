@@ -18,6 +18,7 @@ export function registerAgentWorkspaceRuntimeCommands(registry: CommandRegistry)
 
   registry.register({
     name: 'work',
+    effect: 'ui-navigation',
     description: 'Inspect native work, recover ordinary input, or explicitly start, cancel or resume an existing attempt',
     usage:
       '[daemon-project-id] | start|status|cancel|resume <work-id> | submit-file <JSON-path> | submission-status | submission-retry | intake-status | intake-retry | intake-resume | intake-cancel',
@@ -70,6 +71,7 @@ export function registerAgentWorkspaceRuntimeCommands(registry: CommandRegistry)
   });
   registry.register({
     name: 'agent',
+    effect: 'ui-navigation',
     aliases: ['home', 'operator'],
     description: 'Open the GoodVibes Agent operator workspace',
     usage: '[category]',
@@ -80,6 +82,7 @@ export function registerAgentWorkspaceRuntimeCommands(registry: CommandRegistry)
   });
   registry.register({
     name: 'notes',
+    effect: 'ui-navigation',
     aliases: ['scratchpad'],
     description: 'Open Agent-local scratchpad notes in the operator workspace',
     usage: '',

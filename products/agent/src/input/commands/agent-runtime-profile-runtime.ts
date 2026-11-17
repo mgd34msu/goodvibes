@@ -138,6 +138,7 @@ function renderTemplatePreview(homeDirectory: string, templateId: string): strin
 export function registerAgentRuntimeProfileRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
     name: 'agent-profile',
+    effect: 'mixed',
     aliases: ['runtime-profile', 'agent-profiles'],
     description: 'Manage isolated Agent profiles and starter templates',
     hidden: true,

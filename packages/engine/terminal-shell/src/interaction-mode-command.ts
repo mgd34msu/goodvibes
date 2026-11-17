@@ -21,6 +21,7 @@ export function createInteractionModeCommand<Context extends InteractionModeCont
 }): TerminalSlashCommand<Context> {
   return {
     name: 'mode',
+    effect: 'local-state',
     aliases: ['hitl'],
     description: policy.description,
     usage: policy.usage,

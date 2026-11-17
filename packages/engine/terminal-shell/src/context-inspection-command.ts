@@ -19,6 +19,7 @@ export function createContextInspectionCommand<Context extends ContextInspection
 }): TerminalSlashCommand<Context> {
   return {
     name: 'context',
+    effect: 'mixed',
     aliases: ['ctx'],
     description: policy.description,
     hidden: policy.hidden,
@@ -53,6 +54,7 @@ export function createContextInspectionCommand<Context extends ContextInspection
 export function createErrorNavigationCommands<Context extends ContextInspectionContext>(hidden?: boolean) {
   const command = (direction: 'next' | 'prev'): TerminalSlashCommand<Context> => ({
     name: direction + '-error',
+    effect: 'ui-navigation',
     aliases: [direction === 'next' ? 'ne' : 'pe'],
     hidden,
     description: 'Jump to the ' + (direction === 'next' ? 'next' : 'previous') + ' error message in the conversation',

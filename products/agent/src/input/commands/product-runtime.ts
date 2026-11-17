@@ -22,6 +22,7 @@ const runTrustCommand = createTrustCommandFlow<CommandContext, Awaited<ReturnTyp
 export function registerProductRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
     name: 'trust',
+    effect: 'mixed',
     description: 'Review trust posture and export portable trust bundles',
     hidden: true,
     usage: '[review|bundle export <path> --yes|bundle inspect <path>]',

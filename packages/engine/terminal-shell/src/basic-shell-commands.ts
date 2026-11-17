@@ -14,6 +14,7 @@ export function createBasicShellCommands<Context extends BasicShellCommandContex
   return {
     paste: {
       name: 'paste',
+      effect: 'local-state',
       aliases: ['clip'],
       description: 'Insert clipboard text or image into the prompt',
       handler(_args, context) {
@@ -44,6 +45,7 @@ export function createShellNavigationCommands<
   return {
     commands: {
       name: 'commands',
+      effect: 'ui-navigation',
       aliases: ['cmds'],
       description: 'Browse all commands in a scrollable list',
       handler(_args, context) {
@@ -57,6 +59,7 @@ export function createShellNavigationCommands<
     },
     shortcuts: {
       name: 'shortcuts',
+      effect: 'ui-navigation',
       aliases: ['keys', 'keybinds'],
       description: 'Show keyboard shortcuts reference',
       hidden: policy.shortcutsHidden,
@@ -70,6 +73,7 @@ export function createShellNavigationCommands<
     },
     quit: {
       name: 'quit',
+      effect: 'session-lifecycle',
       aliases: policy.quitAliases,
       description: 'Exit the application',
       handler(_args, context) {

@@ -7,6 +7,7 @@ import { requireShellPaths } from './runtime-services.ts';
 export function registerCompatRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
     name: 'compat',
+    effect: 'read-only',
     aliases: ['compatibility'],
     description: 'Inspect connected-host compatibility and Agent Knowledge route readiness',
     hidden: true,

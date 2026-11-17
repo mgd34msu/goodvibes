@@ -13,6 +13,7 @@ import { commandRefusal } from './confirmation.ts';
 export function registerWorkstreamRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
     name: 'workstream',
+    effect: 'delegated-work',
     description: 'Plan, inspect, stop, retry, re-budget or answer a workstream',
     usage: WORKSTREAM_SHARED_USAGE,
     argsHint: WORKSTREAM_SHARED_USAGE,

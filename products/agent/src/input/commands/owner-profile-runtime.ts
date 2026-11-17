@@ -28,6 +28,7 @@ import { requireShellPaths } from './runtime-services.ts';
 export function registerOwnerProfileRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
     name: 'owner-profile',
+    effect: 'mixed',
     aliases: ['about-me'],
     description: 'Your profile: read it, see where a fact came from, correct one, or forget one',
     usage: '[read|get <fieldId>|person <name>|provenance <fieldId>|set <fieldId> <value> --yes|note --section <section> --text <line> --yes|undo <fieldId> --yes|forget <fieldId> --yes|status]',

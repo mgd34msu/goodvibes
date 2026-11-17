@@ -104,6 +104,7 @@ export function nativeSettingsCommandMutation(
 export function registerOperatorRuntimeCommands(registry: CommandRegistry): void {
   const settingsCommand: SlashCommand = {
     name: 'settings',
+    effect: 'mixed',
     aliases: ['cfg-ui'],
     description: 'Open, inspect, or update Agent settings',
     usage: '[category|key|list|get <key>|set <key> <value> --yes|reset <key> --yes]',

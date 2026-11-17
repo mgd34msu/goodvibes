@@ -129,6 +129,7 @@ export function createSelfUpdateCommand<Context extends { print(message: string)
 }): import('./command-registry.js').TerminalSlashCommand<Context> {
   return {
     name: 'update',
+    effect: 'mixed',
     aliases: ['upgrade'],
     description: policy.description,
     usage: policy.usage,

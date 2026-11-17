@@ -154,6 +154,7 @@ export function formatAgentOperatorBriefing(ctx: CommandContext): string {
 export function registerBriefRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
     name: 'brief',
+    effect: 'read-only',
     aliases: ['briefing'],
     description: 'Show a concise Agent operator briefing and next actions',
     usage: '',

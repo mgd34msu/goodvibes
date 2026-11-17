@@ -11,6 +11,7 @@ export function createWelcomeCommand<Context extends EntryContext>(policy: {
 }): TerminalSlashCommand<Context> {
   return {
     name: 'welcome',
+    effect: 'ui-navigation',
     aliases: ['guide'],
     description: policy.description,
     usage: '[open|print]',
@@ -37,6 +38,7 @@ export function createConfigWorkspaceCommand<Context extends EntryContext>(polic
 }): TerminalSlashCommand<Context> & CommandSubcommandHints {
   return {
     name: 'config',
+    effect: 'mixed',
     aliases: ['cfg'],
     description: policy.description,
     usage: policy.usage,

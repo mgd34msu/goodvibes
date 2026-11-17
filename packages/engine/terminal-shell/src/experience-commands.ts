@@ -21,6 +21,7 @@ export function createApprovalMatrixCommand<Context extends ExperienceContext>(p
 }): TerminalSlashCommand<Context> {
   return {
     name: 'approval',
+    effect: 'connected-host-state',
     aliases: ['approvals'],
     description: 'Review action-specific approval classes and the specialized security UX matrix',
     hidden: policy.hidden,
@@ -77,6 +78,7 @@ export function createVoiceExperienceCommand<Context extends ExperienceContext>(
 }): TerminalSlashCommand<Context> {
   return {
     name: 'voice',
+    effect: 'mixed',
     description: policy.description,
     usage: policy.usage,
     async handler(args, ctx) {

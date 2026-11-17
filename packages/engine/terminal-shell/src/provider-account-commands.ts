@@ -29,6 +29,9 @@ export function createProviderAccountCommands<
   function registerProviderAccountsRuntimeCommands(registry: Pick<TerminalCommandRegistry<Context>, 'register'>): void {
     registry.register({
       name: 'accounts',
+      // `panel` and `open` change what is on screen; every other verb reads.
+      effect: 'ui-navigation',
+      readVerbs: ['review', 'routes', 'repair', 'show', 'list', 'status'],
       aliases: ['account'],
       description: 'Review provider auth routes, subscription windows, and billing-path safety',
       hidden: policy.hidden,

@@ -120,6 +120,7 @@ export async function handleApprovalOperatorAction(args: readonly string[], ctx:
 export function registerOperatorActionRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
     name: 'automation',
+    effect: 'connected-host-state',
     aliases: ['auto'],
     description: 'Run confirmed connected-host automation actions from the Agent TUI',
     hidden: true,

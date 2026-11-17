@@ -38,6 +38,7 @@ export function handleStatusCommand(ctx: CommandContext): string {
 export function registerStatusRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
     name: 'status',
+    effect: 'read-only',
     description: 'Show the current model and its context window, with where the window came from',
     handler: (_args, ctx) => {
       handleStatusCommand(ctx);

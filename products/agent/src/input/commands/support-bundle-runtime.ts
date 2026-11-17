@@ -21,6 +21,7 @@ function bundleActionFor(subcommand: string): string | null {
 export function registerSupportBundleRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
     name: 'bundle',
+    effect: 'mixed',
     description: 'Export, inspect, or import redacted Agent support bundles from the TUI',
     hidden: true,
     usage: '[export [path] --yes|inspect <path>|import <path> --yes]',

@@ -377,6 +377,7 @@ const GOOGLE_VERBS: CommandVerbs = {
 export function registerGoogleRuntimeCommands(registry: CommandRegistry): void {
   registry.register(withCommandVerbs({
     name: 'google',
+    effect: 'external-network',
     aliases: ['gmail'],
     description: 'Connect Gmail and Google Calendar: one command, one consent link, proven by use',
     usage: 'connect | status | reauthorize | forget [--yes] | adopt [--yes] | setup [--path app-password|oauth|existing-client] | client-file <path> | client <id> <secret> | account <address> | calendar-address <url> | runbook | approve [<n>] [--yes|--drop]',

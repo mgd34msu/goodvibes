@@ -161,6 +161,7 @@ function printError(_ctx: CommandContext, error: unknown): never {
 export function registerPersonasRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
     name: 'personas',
+    effect: 'local-state',
     aliases: ['persona'],
     description: 'Manage Agent-local personas',
     hidden: true,

@@ -16,6 +16,7 @@ import { commandRefusal, requireYesFlag, stripYesFlag } from './confirmation.ts'
 export function registerDevicesRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
     name: 'devices',
+    effect: 'connected-host-state',
     aliases: ['device'],
     description: 'Paired phones: the device nodes, always-allow grants (revoke) and retained captures (delete)',
     usage: `[${DEVICE_CAPABILITY_USAGE}] (revoke-grant and delete-capture take --yes)`,

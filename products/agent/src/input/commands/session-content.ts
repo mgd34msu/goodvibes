@@ -48,6 +48,7 @@ export function registerSessionContentCommands(registry: CommandRegistry): void 
 
   registry.register({
     name: 'load',
+    effect: 'session-lifecycle',
     description: 'Load a saved session',
     usage: '<name>',
     argsHint: '<name>',
@@ -77,6 +78,7 @@ export function registerSessionContentCommands(registry: CommandRegistry): void 
 
   registry.register({
     name: 'undo',
+    effect: 'session-lifecycle',
     aliases: [],
     description: 'Undo the last conversation turn',
     usage: '',
@@ -101,6 +103,7 @@ export function registerSessionContentCommands(registry: CommandRegistry): void 
 
   registry.register({
     name: 'redo',
+    effect: 'session-lifecycle',
     description: 'Redo the last undone conversation turn',
     usage: '',
     argsHint: '',

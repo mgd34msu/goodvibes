@@ -31,6 +31,7 @@ export function createTtsRuntimeCommands<Context extends TtsContext>(policy: {
   function registerTtsRuntimeCommands(registry: Pick<TerminalCommandRegistry<Context>, 'register'>): void {
     registry.register({
       name: 'tts',
+      effect: 'external-network',
       description: policy.description,
       hidden: policy.hidden,
       usage: policy.alwaysSpeakControls ? '<prompt>|stop|on|off' : '<prompt>|stop',

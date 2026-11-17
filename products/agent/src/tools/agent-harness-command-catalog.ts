@@ -80,7 +80,7 @@ async function matchingCommands(commandRegistry: CommandRegistry, query: string,
 }
 
 function describeCommand(command: CatalogCommand, lookup?: CommandDetailLookup): Record<string, unknown> {
-  const policy = describeCommandPolicy(command.name);
+  const policy = describeCommandPolicy(command.name, command);
   const modelRoute = policy.preferredModelTool ?? `workspace action:"command" commandName:"${command.name}"`;
   return {
     name: command.name,
@@ -111,7 +111,7 @@ function describeCommand(command: CatalogCommand, lookup?: CommandDetailLookup):
 }
 
 function describeCommandCandidate(command: CatalogCommand): Record<string, unknown> {
-  const policy = describeCommandPolicy(command.name);
+  const policy = describeCommandPolicy(command.name, command);
   return {
     name: command.name,
     slash: `/${command.name}`,

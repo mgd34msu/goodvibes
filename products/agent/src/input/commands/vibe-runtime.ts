@@ -38,6 +38,7 @@ function usage(): string {
 export function registerVibeRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
     name: 'vibe',
+    effect: 'local-state',
     aliases: ['vibes'],
     description: 'Inspect, create, and import VIBE.md personality files',
     hidden: true,

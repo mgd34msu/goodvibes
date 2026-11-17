@@ -144,6 +144,8 @@ export function createPluginTrustCommand<Context extends ConfirmationHost>(
 ): TerminalSlashCommand<Context> {
   const command = {
     name: 'plugin',
+    effect: 'mixed' as const,
+    readVerbs: ['list'],
     aliases: [] as string[],
     description: 'List plugins and set what each one may do (its trust tier)',
     usage: `list | ${PLUGIN_TRUST_USAGE}`,

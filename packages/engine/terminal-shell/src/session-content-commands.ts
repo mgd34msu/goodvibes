@@ -44,6 +44,7 @@ export function createSessionContentCommands<Context extends ContentContext, Mes
 }) {
   const exportCommand: TerminalSlashCommand<Context> = {
     name: 'export',
+    effect: 'local-state',
     description: 'Export conversation to a Markdown file',
     usage: '[format] [path]' + (policy.confirmExport ? ' --yes' : ' [--yes]'),
     argsHint: '[markdown] [path]',
@@ -100,6 +101,7 @@ export function createSessionContentCommands<Context extends ContentContext, Mes
   };
   const titleCommand: TerminalSlashCommand<Context> = {
     name: 'title',
+    effect: 'session-lifecycle',
     description: 'Show or set the conversation title',
     usage: '[text]',
     argsHint: '[text]',
@@ -117,6 +119,7 @@ export function createSessionContentCommands<Context extends ContentContext, Mes
   };
   const retryCommand: TerminalSlashCommand<Context> = {
     name: 'retry',
+    effect: 'session-lifecycle',
     aliases: ['r'],
     description: policy.retryDescription,
     usage: '[modified text]',
@@ -159,6 +162,7 @@ export function createSessionSaveCommand<Context extends ContentContext>(policy:
 }): TerminalSlashCommand<Context> {
   return {
     name: 'save',
+    effect: 'session-lifecycle',
     description: policy.description,
     usage: '[name] [--replace]',
     argsHint: '[name]',
@@ -211,6 +215,7 @@ export function createSessionListCommand<
 }): TerminalSlashCommand<Context> {
   return {
     name: 'sessions',
+    effect: 'session-lifecycle',
     description: 'List saved sessions',
     usage: '[resume <id|name>]',
     argsHint: '[resume <id|name>]',

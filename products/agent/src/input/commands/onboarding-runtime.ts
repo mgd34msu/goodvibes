@@ -6,6 +6,7 @@ import { commandRefusal } from './confirmation.ts';
 export function registerOnboardingRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
     name: 'setup',
+    effect: 'ui-navigation',
     aliases: ['onboarding'],
     description: 'Open the Agent workspace',
     hidden: true,

@@ -32,6 +32,7 @@ function inspectAuthBundle(bundle: AuthReviewBundle): string {
 export function registerPlatformAccessRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
     name: 'auth',
+    effect: 'mixed',
     description: 'Review provider auth posture and export redacted auth review bundles',
     hidden: true,
     usage: '[review|show <provider>|repair <provider>|bundle export <path> --yes|bundle inspect <path>]',

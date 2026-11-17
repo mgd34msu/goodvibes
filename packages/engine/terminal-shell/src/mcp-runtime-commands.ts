@@ -216,6 +216,7 @@ export function createMcpRuntimeCommands<Context extends McpCommandContext>(
   function registerMcpRuntimeCommands(registry: Pick<TerminalCommandRegistry<Context>, 'register'>): void {
     registry.register({
       name: 'mcp',
+      effect: 'mixed',
       aliases: [],
       description: 'Manage MCP servers and their tools',
       ...(policy.hidden ? { hidden: true } : {}),

@@ -191,6 +191,7 @@ export function createLocalProviderCommands<Context extends LocalProviderCommand
     const confirmationSuffix = policy.confirmMutations ? ' --yes' : '';
     registry.register({
       name: 'provider',
+      effect: 'mixed',
       aliases: ['p'],
       description: 'Switch provider or manage custom providers (add/remove)',
       ...(policy.hidden ? { hidden: true } : {}),

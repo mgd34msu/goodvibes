@@ -94,6 +94,7 @@ const HEALTH_SUBCOMMANDS = new Set(['review', 'open', 'panel', 'setup', 'approva
 export function registerHealthRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
     name: 'health',
+    effect: 'read-only',
     aliases: ['doctor'],
     description: 'Health workspace for startup posture, connected host readiness, provider health, and Agent continuity',
     hidden: true,

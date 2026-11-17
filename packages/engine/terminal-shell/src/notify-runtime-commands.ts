@@ -49,6 +49,7 @@ export function createNotifyRuntimeCommands<Context extends NotifyContext>(
   function registerNotifyRuntimeCommands(registry: Pick<TerminalCommandRegistry<Context>, 'register'>): void {
     registry.register({
       name: 'notify',
+      effect: 'external-network',
       aliases: [],
       description: policy.description,
       usage: policy.usage,

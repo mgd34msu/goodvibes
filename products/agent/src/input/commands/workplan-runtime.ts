@@ -19,6 +19,7 @@ const clean = (text: string) => text.replace(/[\u0000-\u001f\u007f-\u009f\u202a-
 export function registerWorkPlanRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
     name: 'workplan',
+    effect: 'local-state',
     description: 'Manage local non-executing todos, or explicitly submit original source to native work',
     usage: USAGE.replace('/workplan ', ''),
     async handler(args, ctx) {

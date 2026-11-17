@@ -59,6 +59,8 @@ const dispatchRecall = createRecallDispatch<CommandContext>({
 
 export const recallCommand: SlashCommand = {
   name: 'recall',
+  effect: 'local-state',
+  readVerbs: ['search', 'get', 'list', 'files'],
   aliases: ['rc'],
   description: 'Project memory: add decisions, constraints, incidents, and patterns with provenance.',
   usage: '<subcommand> [args]',

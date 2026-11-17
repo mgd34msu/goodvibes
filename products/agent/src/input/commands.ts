@@ -57,6 +57,8 @@ import { declareCommandVerbs, SHARED_COMMAND_VERBS } from './commands/command-ve
 function registerAgentMemoryCommand(registry: CommandRegistry): void {
   registry.register({
     name: 'memory',
+    effect: 'local-state',
+    readVerbs: ['list', 'search', 'queue'],
     aliases: ['mem'],
     description: 'Agent-local memory: add, search, review, stale, and delete durable memory records',
     usage: '<list|add|search|queue|review|stale|remove> [args]',

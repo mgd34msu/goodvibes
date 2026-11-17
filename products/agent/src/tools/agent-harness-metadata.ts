@@ -1,5 +1,7 @@
 import { agentHarnessModes, hostActions, settingsActions } from './agent-harness-route-format.ts';
 import { EFFECT_ADMISSION_SENTENCE } from './agent-harness-effect-admission.ts';
+import type { TerminalCommandEffect } from '@goodvibes-jev/engine/terminal-shell/command-registry';
+import type { SlashCommand } from '../input/command-registry.ts';
 export { describeCliCommandPolicy } from './agent-harness-cli-command-policy.ts';
 // Re-exported so this module stays the one import site for harness metadata,
 // exactly as describeCliCommandPolicy above already is.
@@ -13,19 +15,21 @@ export {
 export type { ConnectedHostCapabilityResolution } from './agent-harness-connected-host-capabilities.ts';
 
 export interface CommandExecutionPolicy {
-  readonly effect: 'read-only' | 'local-state' | 'connected-host-state' | 'external-network' | 'ui-navigation' | 'session-lifecycle' | 'delegated-work' | 'mixed' | 'unknown';
+  /** Declared on the command's definition (`effect`, next to `usage`); `undeclared` when the command states none, which the model runner refuses. */
+  readonly effect: TerminalCommandEffect | 'undeclared';
+  readonly readVerbs?: readonly string[];
   readonly confirmation: string;
   readonly requiresConfirmation?: boolean;
   readonly preferredModelTool?: string;
   readonly boundary: string;
 }
 
-export function describeCommandPolicy(commandName: string): CommandExecutionPolicy {
+/** Model-facing notes for a command: how to reach it and what it touches. They grant nothing; the effect is the command's own. */
+function commandModelNotes(commandName: string): Omit<CommandExecutionPolicy, 'effect' | 'readVerbs'> {
   const root = commandName.replace(/^\//, '').trim().toLowerCase();
   const confirmation = 'Model command effects require current recorded engine admission. Caller confirmation and request fields grant no authority; owner-specific scope and effect checks remain mandatory.';
   if (root === 'triggers') {
     return {
-      effect: 'read-only',
       confirmation: 'Status is read-only.',
       preferredModelTool: `${agentHarnessModes('run_command')} commandName:"triggers"`,
       boundary: '/triggers status inspects the actual surface supervisor without promoting ownership.',
@@ -33,7 +37,6 @@ export function describeCommandPolicy(commandName: string): CommandExecutionPoli
   }
   if (root === 'work-import') {
     return {
-      effect: 'mixed',
       requiresConfirmation: false,
       confirmation: 'Read operations use existing host read permissions. Explicit submission and recovery use current import authority and a fresh host-owned Jev decision; caller confirmation flags grant no authority.',
       preferredModelTool: `${agentHarnessModes('run_command')} commandName:"work-import"`,
@@ -42,7 +45,6 @@ export function describeCommandPolicy(commandName: string): CommandExecutionPoli
   }
   if (root === 'work') {
     return {
-      effect: 'ui-navigation',
       confirmation,
       preferredModelTool: `${agentHarnessModes('run_command')} commandName:"work"`,
       boundary: '/work [daemon-project-id] opens the native read-only work ledger in the visible Agent workspace. Project discovery, snapshots, history, and live updates use the selected authenticated host and its existing read permissions. Explicit project selection is view-local; this command does not create or mutate work, change credentials, grant trust, or broaden scopes. Host, credential, workspace changes and access revocation invalidate the view.',
@@ -50,7 +52,6 @@ export function describeCommandPolicy(commandName: string): CommandExecutionPoli
   }
   if (root === 'agent' || root === 'agent-workspace' || root === 'workspace') {
     return {
-      effect: 'ui-navigation',
       confirmation,
       preferredModelTool: agentHarnessModes('workspace', 'workspace_categories', 'workspace_actions', 'workspace_action', 'run_workspace_action'),
       boundary: 'Agent workspace navigation is visible shell routing. Use workspace action modes for concrete model-readable operation.',
@@ -58,7 +59,6 @@ export function describeCommandPolicy(commandName: string): CommandExecutionPoli
   }
   if (root === 'setup' || root === 'welcome') {
     return {
-      effect: 'ui-navigation',
       confirmation,
       preferredModelTool: agentHarnessModes('workspace_actions', 'workspace_action', 'open_ui_surface'),
       boundary: 'Setup opens the visible Agent workspace. Model-side changes should use settings or workspace actions.',
@@ -66,7 +66,6 @@ export function describeCommandPolicy(commandName: string): CommandExecutionPoli
   }
   if (root === 'commands' || root === 'help' || root === 'shortcuts') {
     return {
-      effect: 'ui-navigation',
       confirmation,
       preferredModelTool: root === 'shortcuts' ? agentHarnessModes('shortcuts', 'keybindings', 'keybinding') : agentHarnessModes('commands', 'command'),
       boundary: 'Discovery commands open visible help surfaces. The model should inspect the matching harness catalog directly before invoking commands.',
@@ -74,7 +73,6 @@ export function describeCommandPolicy(commandName: string): CommandExecutionPoli
   }
   if (root === 'keybindings') {
     return {
-      effect: 'read-only',
       confirmation,
       preferredModelTool: agentHarnessModes('shortcuts', 'keybindings', 'keybinding', 'run_keybinding', 'set_keybinding', 'reset_keybinding'),
       boundary: 'Keybinding inspection is read-only. Keybinding execution or edits require explicit confirmation through agent_harness keybinding modes.',
@@ -82,7 +80,6 @@ export function describeCommandPolicy(commandName: string): CommandExecutionPoli
   }
   if (root === 'payments') {
     return {
-      effect: 'connected-host-state',
       confirmation,
       preferredModelTool: settingsActions('list', 'get', 'set'),
       boundary: 'Budgets, windows, CVV handling and the two addresses are ordinary daemon-owned settings and can be read or written through the settings adapter. The card itself cannot: number, expiry, verification code and cardholder name are typed only by the person at a local terminal, through a masked prompt that echoes nothing, and are stored write-only in the daemon secret store. Nothing here returns them and nothing here sets them, and no card prompt is ever offered over Telegram, ntfy, Discord, Slack, WhatsApp, Signal or a webhook, approving or cancelling a purchase over those channels still works.',
@@ -90,7 +87,6 @@ export function describeCommandPolicy(commandName: string): CommandExecutionPoli
   }
   if (root === 'settings' || root === 'config') {
     return {
-      effect: 'mixed',
       confirmation,
       preferredModelTool: settingsActions('list', 'get', 'set', 'reset', 'import'),
       boundary: 'Settings can be changed through the first-class settings adapter, including daemon-owned ones, a write routes to the runtime that owns the key and reports the store it landed in. A change is applied only for what the owner asked in this turn, and confirm or explicitUserRequest arguments are not authority; payment card details, credential destinations and a credential reference to another key\'s secret are refused with the key and the reason; payment limits and every other setting are written when asked.',
@@ -98,7 +94,6 @@ export function describeCommandPolicy(commandName: string): CommandExecutionPoli
   }
   if (root === 'model' || root === 'effort') {
     return {
-      effect: 'mixed',
       confirmation,
       preferredModelTool: `${settingsActions('get', 'set')} or ${agentHarnessModes('open_ui_surface')}`,
       boundary: 'Model and reasoning-effort changes affect the current Agent chat route. Prefer settings for concrete values and UI surface routing for visible pickers.',
@@ -106,7 +101,6 @@ export function describeCommandPolicy(commandName: string): CommandExecutionPoli
   }
   if (root === 'provider' || root === 'providers') {
     return {
-      effect: 'mixed',
       confirmation,
       preferredModelTool: `${settingsActions('get', 'set')} or ${agentHarnessModes('open_ui_surface')}`,
       boundary: 'Provider selection and custom provider files belong to Agent provider configuration. Adding, removing, or switching providers requires explicit user intent.',
@@ -114,7 +108,6 @@ export function describeCommandPolicy(commandName: string): CommandExecutionPoli
   }
   if (root === 'network-scan' || root === 'discover-lan') {
     return {
-      effect: 'local-state',
       confirmation,
       preferredModelTool: settingsActions('get', 'set'),
       boundary: 'Turns the local-network model-server scan on or off and persists that decision to a local consent file; it never probes the network itself. Enabling it requires the user\'s explicit request, do not turn it on unprompted.',
@@ -122,7 +115,6 @@ export function describeCommandPolicy(commandName: string): CommandExecutionPoli
   }
   if (root === 'refresh-models') {
     return {
-      effect: 'external-network',
       confirmation,
       preferredModelTool: `${settingsActions('list', 'get')} or ${agentHarnessModes('tools')}`,
       boundary: 'Model catalog refresh may call provider discovery routes and update local provider metadata. Do not run it without explicit user request.',
@@ -130,7 +122,6 @@ export function describeCommandPolicy(commandName: string): CommandExecutionPoli
   }
   if (root === 'pin' || root === 'unpin') {
     return {
-      effect: 'local-state',
       confirmation,
       preferredModelTool: agentHarnessModes('run_command'),
       boundary: 'Pinned model changes mutate local Agent provider preferences only and require an explicit model id.',
@@ -138,7 +129,6 @@ export function describeCommandPolicy(commandName: string): CommandExecutionPoli
   }
   if (root === 'mode') {
     return {
-      effect: 'local-state',
       confirmation,
       preferredModelTool: settingsActions('get', 'set'),
       boundary: 'Interaction-mode changes affect the current Agent operator notification posture and should be explicit.',
@@ -146,7 +136,6 @@ export function describeCommandPolicy(commandName: string): CommandExecutionPoli
   }
   if (root === 'vibe' || root === 'vibes') {
     return {
-      effect: 'local-state',
       confirmation,
       preferredModelTool: 'vibe or agent_local_registry',
       boundary: 'VIBE.md status/show are read-only; init writes a local personality file and import-persona writes an Agent-local persona after explicit confirmation.',
@@ -154,7 +143,6 @@ export function describeCommandPolicy(commandName: string): CommandExecutionPoli
   }
   if (root === 'brief') {
     return {
-      effect: 'read-only',
       confirmation,
       preferredModelTool: 'agent_operator_briefing',
       boundary: 'Briefing reads current Agent operator posture and next actions without mutating connected-host state.',
@@ -162,7 +150,6 @@ export function describeCommandPolicy(commandName: string): CommandExecutionPoli
   }
   if (root === 'context') {
     return {
-      effect: 'mixed',
       confirmation,
       preferredModelTool: agentHarnessModes('open_ui_surface', 'run_command'),
       boundary: '/context (the usage breakdown) and /context window (the current model\'s window) only read. /context window <size> writes a context window override for the current model and /context window clear removes it and any learned limit; both change the model registry\'s persisted override file in the local config directory and need explicit user intent.',
@@ -170,7 +157,6 @@ export function describeCommandPolicy(commandName: string): CommandExecutionPoli
   }
   if (root === 'health' || root === 'compat' || root === 'status' || root === 'accounts' || root === 'security') {
     return {
-      effect: 'read-only',
       confirmation,
       preferredModelTool: root === 'compat'
         ? hostActions('services', 'service', 'status')
@@ -180,7 +166,6 @@ export function describeCommandPolicy(commandName: string): CommandExecutionPoli
   }
   if (root === 'update' || root === 'upgrade') {
     return {
-      effect: 'mixed',
       confirmation,
       preferredModelTool: agentHarnessModes('run_command'),
       boundary: 'Check is a read-only release lookup; apply downloads, checksum-verifies, and atomically swaps the installed binary (and vector addon) keeping the previous version beside it, and rollback exchanges the kept previous version back in. Apply and rollback change the installed program and require explicit user intent.',
@@ -188,7 +173,6 @@ export function describeCommandPolicy(commandName: string): CommandExecutionPoli
   }
   if (root === 'trust' || root === 'auth' || root === 'bundle') {
     return {
-      effect: 'mixed',
       confirmation,
       preferredModelTool: agentHarnessModes('run_command'),
       boundary: 'Review subcommands are read-only; bundle export/import or auth/trust bundle export writes local files and requires explicit confirmation.',
@@ -196,7 +180,6 @@ export function describeCommandPolicy(commandName: string): CommandExecutionPoli
   }
   if (root === 'mcp' || root === 'voice' || root === 'subscription' || root === 'secrets' || root === 'secret') {
     return {
-      effect: 'mixed',
       confirmation,
       preferredModelTool: root === 'secrets' || root === 'secret'
         ? settingsActions('list', 'get', 'set', 'reset')
@@ -216,7 +199,6 @@ export function describeCommandPolicy(commandName: string): CommandExecutionPoli
     || root === 'routines'
   ) {
     return {
-      effect: 'local-state',
       confirmation,
       preferredModelTool: 'agent_local_registry',
       boundary: 'Agent-local library records only unless the invoked command explicitly promotes to a connected schedule or Agent Knowledge source.',
@@ -229,7 +211,6 @@ export function describeCommandPolicy(commandName: string): CommandExecutionPoli
       // tool, not this command: the tool carries the authority naming where a
       // fact came from, his verbatim words, and the one-line disclosure that
       // goes back in the reply, none of which a shell string can express.
-      effect: 'mixed',
       confirmation,
       preferredModelTool: 'profile',
       boundary: 'The owner profile is one Markdown file at daemon scope that only the daemon writes. Reads are safe; every write carries an authority and is refused unless the fact came from him directly. Record facts through the `profile` tool during a conversation rather than invoking this command.',
@@ -237,7 +218,6 @@ export function describeCommandPolicy(commandName: string): CommandExecutionPoli
   }
   if (root === 'notes') {
     return {
-      effect: 'ui-navigation',
       confirmation,
       preferredModelTool: `${agentHarnessModes('workspace_actions', 'workspace_action', 'run_workspace_action')} or agent_local_registry`,
       boundary: 'Notes workspace routing is visible navigation; note record mutations should use Agent-local registry or workspace action modes.',
@@ -245,7 +225,6 @@ export function describeCommandPolicy(commandName: string): CommandExecutionPoli
   }
   if (root === 'knowledge') {
     return {
-      effect: 'mixed',
       confirmation,
       preferredModelTool: 'agent_knowledge or agent_knowledge_ingest',
       boundary: 'Agent Knowledge only. Do not use default knowledge or non-Agent knowledge spaces.',
@@ -253,7 +232,6 @@ export function describeCommandPolicy(commandName: string): CommandExecutionPoli
   }
   if (root === 'approval' || root === 'approvals' || root === 'automation') {
     return {
-      effect: 'connected-host-state',
       confirmation,
       preferredModelTool: 'agent_operator_action',
       boundary: 'Only explicit allowlisted approval and automation operator actions should be performed from the model.',
@@ -261,7 +239,6 @@ export function describeCommandPolicy(commandName: string): CommandExecutionPoli
   }
   if (root === 'ci' || root === 'principals' || root === 'principal' || root === 'channel-profiles' || root === 'channel-profile') {
     return {
-      effect: 'connected-host-state',
       confirmation,
       // agent_operator_method, NOT agent_operator_action: the action tool's
       // allowlist covers only approvals.* and automation.* and cannot invoke
@@ -273,7 +250,6 @@ export function describeCommandPolicy(commandName: string): CommandExecutionPoli
   }
   if (root === 'schedule' || root === 'remind' || root === 'reminder') {
     return {
-      effect: 'connected-host-state',
       confirmation,
       preferredModelTool: 'schedule',
       boundary: 'Connected schedules require an explicit user request and do not create hidden Agent jobs or local schedulers.',
@@ -281,7 +257,6 @@ export function describeCommandPolicy(commandName: string): CommandExecutionPoli
   }
   if (root === 'google' || root === 'gmail') {
     return {
-      effect: 'external-network',
       confirmation,
       preferredModelTool: 'google',
       boundary: 'Connects the Google account that backs mail and calendar. /google connect runs the connection flow; /google adopt takes up credentials from files you point it at. Once connected, the google tool is the model route, no MCP server is involved. forget, adopt, account, calendar-address, client, client-file and approve store, adopt, remove or unlock credentials, so only the owner typing them counts; a model invocation is refused.',
@@ -289,7 +264,6 @@ export function describeCommandPolicy(commandName: string): CommandExecutionPoli
   }
   if (root === 'email') {
     return {
-      effect: 'external-network',
       confirmation,
       preferredModelTool: `${agentHarnessModes('run_command')} (use /email set to configure, /email config to view settings)`,
       boundary: 'Email IMAP reads are read-only (EXAMINE); sends require explicit --yes confirmation and route only to the configured account. Use /email set email.<key> <value> to configure email settings; use /email config to view current settings. /email set is the reviewed path for email.* keys: it validates each field and stores the password as a secret reference. The generic settings action routes an email.* write to the daemon that owns the key, under the same recorded admission; prefer /email set. Setting the mail servers, ports, security, username or password changes where the stored password is presented, so only the owner typing /email set counts; a model invocation is refused.',
@@ -297,7 +271,6 @@ export function describeCommandPolicy(commandName: string): CommandExecutionPoli
   }
   if (root === 'calendar' || root === 'cal') {
     return {
-      effect: 'mixed',
       confirmation,
       preferredModelTool: agentHarnessModes('run_command'),
       boundary: '/calendar list, upcoming, subscriptions and accounts read and need no admission. add, delete, import and export change local ICS events (--yes required) under the local-write admission; subscribe and refresh fetch a feed under the outward one. unsubscribe (deletes a stored feed address), connect and disconnect (sign a calendar account in or out) are the owner\'s to type: a model invocation is refused before it runs. Calendar configuration is set via /calendar subcommands.',
@@ -305,7 +278,6 @@ export function describeCommandPolicy(commandName: string): CommandExecutionPoli
   }
   if (root === 'channels' || root === 'channel' || root === 'notify') {
     return {
-      effect: 'external-network',
       confirmation,
       preferredModelTool: root === 'notify' ? 'agent_notify' : 'agent_channel_send',
       boundary: 'External delivery requires an explicit target and direct user authorization.',
@@ -313,7 +285,6 @@ export function describeCommandPolicy(commandName: string): CommandExecutionPoli
   }
   if (root === 'media') {
     return {
-      effect: 'external-network',
       confirmation,
       preferredModelTool: 'agent_media_generate',
       boundary: 'Media generation uses configured Agent media providers and writes normal artifacts only.',
@@ -321,7 +292,6 @@ export function describeCommandPolicy(commandName: string): CommandExecutionPoli
   }
   if (root === 'image') {
     return {
-      effect: 'external-network',
       confirmation,
       preferredModelTool: agentHarnessModes('open_ui_surface'),
       boundary: 'Image attachment reads a local image and submits a model turn with image content. Use only for explicit user-supplied files.',
@@ -329,7 +299,6 @@ export function describeCommandPolicy(commandName: string): CommandExecutionPoli
   }
   if (root === 'tts') {
     return {
-      effect: 'external-network',
       confirmation,
       preferredModelTool: `${settingsActions('get', 'set')} or ${agentHarnessModes('open_ui_surface')}`,
       boundary: 'Live TTS submits a normal prompt and may call model and speech providers; stopping playback is local runtime control.',
@@ -337,7 +306,6 @@ export function describeCommandPolicy(commandName: string): CommandExecutionPoli
   }
   if (root === 'workplan' || root === 'plan' || root === 'task' || root === 'tasks') {
     return {
-      effect: 'local-state',
       confirmation,
       preferredModelTool: 'agent_work_plan',
       boundary: 'Work planning stays in the current Agent/project planning surfaces unless the command explicitly calls connected-host operator routes.',
@@ -345,7 +313,6 @@ export function describeCommandPolicy(commandName: string): CommandExecutionPoli
   }
   if (root === 'delegate') {
     return {
-      effect: 'delegated-work',
       confirmation,
       preferredModelTool: agentHarnessModes('workspace_actions', 'workspace_action', 'run_workspace_action'),
       boundary: 'Delegation is explicit user-directed work only; no hidden background review or separate Agent job should be created implicitly.',
@@ -368,7 +335,6 @@ export function describeCommandPolicy(commandName: string): CommandExecutionPoli
     || root === 'retry'
   ) {
     return {
-      effect: 'session-lifecycle',
       confirmation,
       preferredModelTool: agentHarnessModes('commands', 'command', 'run_command'),
       boundary: 'Session and conversation commands operate on the visible harness session lifecycle.',
@@ -376,7 +342,6 @@ export function describeCommandPolicy(commandName: string): CommandExecutionPoli
   }
   if (root === 'export') {
     return {
-      effect: 'local-state',
       confirmation,
       preferredModelTool: `${agentHarnessModes('workspace_actions', 'workspace_action', 'run_workspace_action')} or ${agentHarnessModes('run_command')}`,
       boundary: 'Conversation export writes a local workspace file and requires an explicit output intent.',
@@ -384,7 +349,6 @@ export function describeCommandPolicy(commandName: string): CommandExecutionPoli
   }
   if (root === 'activity') {
     return {
-      effect: 'ui-navigation',
       confirmation,
       preferredModelTool: agentHarnessModes('run_command'),
       boundary: 'Opens the Activity view (running work, what needs you, what is coming up, recent activity); it only changes what is on screen.',
@@ -392,7 +356,6 @@ export function describeCommandPolicy(commandName: string): CommandExecutionPoli
   }
   if (root === 'notifications') {
     return {
-      effect: 'ui-navigation',
       confirmation,
       preferredModelTool: agentHarnessModes('run_command'),
       boundary: 'Opens the notification history (every system notice in full, newest first); it only changes what is on screen.',
@@ -400,7 +363,6 @@ export function describeCommandPolicy(commandName: string): CommandExecutionPoli
   }
   if (root === 'bookmarks' || root === 'expand' || root === 'collapse' || root === 'next-error' || root === 'prev-error') {
     return {
-      effect: 'ui-navigation',
       confirmation,
       preferredModelTool: root === 'bookmarks' ? `${agentHarnessModes('open_ui_surface')} or ${agentHarnessModes('run_command')}` : agentHarnessModes('run_command'),
       boundary: 'Conversation display navigation mutates only the visible transcript view or scroll position.',
@@ -408,7 +370,6 @@ export function describeCommandPolicy(commandName: string): CommandExecutionPoli
   }
   if (root === 'paste') {
     return {
-      effect: 'local-state',
       confirmation,
       preferredModelTool: agentHarnessModes('run_keybinding'),
       boundary: 'Paste reads the local clipboard and mutates the visible prompt or image attachment state.',
@@ -416,7 +377,6 @@ export function describeCommandPolicy(commandName: string): CommandExecutionPoli
   }
   if (root === 'profile' || root === 'agent-profile') {
     return {
-      effect: 'mixed',
       confirmation,
       preferredModelTool: agentHarnessModes('workspace_actions', 'workspace_action', 'run_workspace_action'),
       boundary: 'Agent profile commands manage isolated Agent runtime profiles and starter templates. Mutations require explicit confirmation.',
@@ -424,17 +384,25 @@ export function describeCommandPolicy(commandName: string): CommandExecutionPoli
   }
   if (root === 'qrcode') {
     return {
-      effect: 'connected-host-state',
       confirmation,
       preferredModelTool: agentHarnessModes('run_command'),
       boundary: 'Each run mints a named device token that gives a new device access to the connected host, so only the owner typing the command counts; a model invocation is refused before anything is minted. The Agent does not manage connected-host listener lifecycle.',
     };
   }
   return {
-    effect: 'unknown',
     confirmation,
     boundary: 'Inspect the command description, usage, and workspace action metadata before invoking through run_command.',
   };
+}
+
+/**
+ * The admission policy of a command, from what its definition declares: the
+ * command's `effect` and `readVerbs`, or its per-verb declaration
+ * (command-verbs.ts). The notes above only describe routes.
+ */
+export function describeCommandPolicy(commandName: string, command?: Pick<SlashCommand, 'effect' | 'readVerbs'>): CommandExecutionPolicy {
+  return { ...commandModelNotes(commandName), effect: command?.effect ?? 'undeclared',
+    ...(command?.readVerbs ? { readVerbs: command.readVerbs } : {}) };
 }
 
 export function settingsPolicySummary(): Record<string, unknown> {

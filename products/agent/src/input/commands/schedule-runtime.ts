@@ -176,6 +176,7 @@ async function editSchedule(args: readonly string[], ctx: CommandContext): Promi
 export function registerScheduleRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
     name: 'schedule',
+    effect: 'connected-host-state',
     // Its words are fields (kind, value, prompt), so an unclosed quote is refused, not shifted.
     strictArgs: true,
     aliases: ['sched'],

@@ -383,6 +383,7 @@ async function printReadOnlyChannelRead(
 export function registerChannelsRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
     name: 'channels',
+    effect: 'external-network',
     aliases: ['channel'],
     description: 'Inspect Agent channel readiness or send an explicitly confirmed delivery message',
     hidden: true,

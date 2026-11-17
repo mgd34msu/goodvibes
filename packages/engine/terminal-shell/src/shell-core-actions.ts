@@ -54,6 +54,7 @@ export function createShellCoreActions<Context extends ShellCoreContext>(
   return {
     model: {
       name: 'model',
+      effect: 'mixed',
       aliases: ['m'],
       description: 'Select or display the current LLM model',
       usage: '[model-id]',
@@ -112,6 +113,7 @@ export function createShellCoreActions<Context extends ShellCoreContext>(
     } satisfies TerminalSlashCommand<Context>,
     effort: {
       name: 'effort',
+      effect: 'mixed',
       hidden: policy.hidden,
       aliases: ['e'],
       description: 'Show or set reasoning effort level',
@@ -201,6 +203,7 @@ export function createShellCoreActions<Context extends ShellCoreContext>(
     } satisfies TerminalSlashCommand<Context>,
     clear: {
       name: 'clear',
+      effect: 'session-lifecycle',
       aliases: ['cls'],
       description: 'Start a fresh conversation (the current one is saved as its own session)',
       handler(_args: string[], ctx: Context) {
@@ -223,6 +226,7 @@ export function createShellCoreActions<Context extends ShellCoreContext>(
     } satisfies TerminalSlashCommand<Context>,
     keybindings: {
       name: 'keybindings',
+      effect: 'read-only',
       hidden: policy.hidden,
       aliases: ['kb'],
       description: 'List current keyboard bindings and their config file path',

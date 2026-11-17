@@ -20,7 +20,7 @@ function entryLines(entry: LegacyImportEntry | null, project: string): string[] 
 }
 /** Keyboard and model callers share deterministic authorization and host-owned Jev admission. */
 export function registerLegacyImportCommands<T extends Context>(registry: Registry<T>, open: (context: T, projectId: string) => Promise<LegacyImportOperatorSession>): void {
-  registry.register({ name: 'work-import', description: 'Import legacy planning records into the native work ledger, with safe retry of a lost request', usage, argsHint: usage,
+  registry.register({ name: 'work-import', effect: 'mixed', description: 'Import legacy planning records into the native work ledger, with safe retry of a lost request', usage, argsHint: usage,
     async handler(args, context) {
       const action = args[0];
       const initial = action === 'preview' || action === 'status' || action === 'submit';

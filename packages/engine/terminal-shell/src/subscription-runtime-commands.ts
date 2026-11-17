@@ -139,6 +139,7 @@ export function createSubscriptionRuntimeCommands<Context extends SubscriptionCo
   function registerSubscriptionRuntimeCommands(registry: Pick<TerminalCommandRegistry<Context>, 'register'>): void {
     registry.register({
       name: 'subscription',
+      effect: 'mixed',
       aliases: ['subs'],
       description: 'Manage provider subscription sessions and, when supported, let them override ambient API keys for matching providers',
       usage:

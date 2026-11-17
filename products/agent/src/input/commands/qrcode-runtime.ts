@@ -17,6 +17,7 @@ const QRCODE_VERBS: CommandVerbs = { defaultVerb: '', verbs: {}, otherwise: PAIR
 export function registerQrcodeRuntimeCommands(registry: CommandRegistry): void {
   registry.register(withCommandVerbs({
     name: 'qrcode',
+    effect: 'connected-host-state',
     aliases: ['qr', 'pair'],
     description: 'Pair a device with the connected host: mints a named device token and shows its link and QR',
     hidden: true,

@@ -504,6 +504,7 @@ export async function runRoutinesRuntimeCommand(args: readonly string[], ctx: Co
 export function registerRoutinesRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
     name: 'routines',
+    effect: 'local-state',
     aliases: ['routine'],
     description: 'Manage Agent-local routines',
     hidden: true,

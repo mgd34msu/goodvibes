@@ -179,6 +179,7 @@ export function registerShellCoreCommands(registry: CommandRegistry): void {
 
   registry.register({
     name: 'help',
+    effect: 'ui-navigation',
     aliases: ['h', '?'],
     description: 'Show available commands and keyboard shortcuts',
     argsHint: '[command]',
@@ -196,6 +197,7 @@ export function registerShellCoreCommands(registry: CommandRegistry): void {
 
   registry.register({
     name: 'compact',
+    effect: 'session-lifecycle',
     aliases: [],
     description: 'Summarize conversation to free context window',
     async handler(_args, ctx) {

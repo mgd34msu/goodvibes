@@ -1,6 +1,6 @@
 import type { CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
-import { formatRefusal, readRefusal, type Refusal } from '@goodvibes-jev/engine/errors';
+import { formatRefusal, readRefusal, refusal, RefusalError, type Refusal } from '@goodvibes-jev/engine/errors';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import type { CommandContext } from '../input/command-registry.ts';
 import { nativeSettingsCommandMutation } from '../input/commands/operator-runtime.ts';
@@ -49,11 +49,19 @@ export async function runCommand(deps: AgentHarnessToolDeps, args: Record<string
 
   const assertCommandEffect = (name: string, commandArgs: readonly string[]) => {
     options.signal?.throwIfAborted(); options.assertCurrent?.();
-    // A command that declares its verbs (command-verbs.ts) says which admission
-    // each needs; a command without a declaration is read from the command policy table.
-    const verb = commandVerbPolicy(registry.get(name), commandArgs);
-    const policy = describeCommandPolicy(name);
-    const read = verb ? verb.effect === 'read' : policy.effect === 'read-only';
+    // The command's definition says which admission a run needs: its per-verb
+    // declaration (command-verbs.ts), else its `effect` and `readVerbs`.
+    const command = registry.get(name);
+    const verb = commandVerbPolicy(command, commandArgs);
+    const policy = describeCommandPolicy(name, command);
+    if (!verb && policy.effect === 'undeclared') throw new RefusalError(refusal({
+      code: 'COMMAND_EFFECT_UNDECLARED', state: 'not run; nothing was changed',
+      reason: `/${name} does not declare what it does, so the model cannot be admitted to run it`,
+      next: [`Ask the owner to type /${name}`, `Declare \`effect\` on the /${name} command definition`], status: 403,
+    }));
+    const firstVerb = (commandArgs[0] ?? '').trim().toLowerCase();
+    const read = verb ? verb.effect === 'read'
+      : policy.effect === 'read-only' || (policy.readVerbs?.includes(firstVerb) ?? false);
     const effect = verb ? (verb.effect === 'local-write' ? 'write' : 'send')
       : ['local-state', 'ui-navigation', 'session-lifecycle'].includes(policy.effect) ? 'write' : 'send';
     if (!read && !harnessCatalogInvocationAuthority(args, executionOptions, effect)) throw new ToolInputProjectionError('held');

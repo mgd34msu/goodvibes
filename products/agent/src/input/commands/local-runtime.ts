@@ -107,6 +107,7 @@ const secretsCommand = createSecretsCommand<CommandContext>(requireSecretsManage
 export function registerLocalRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
     name: 'expand',
+    effect: 'ui-navigation',
     description: 'Expand blocks by type',
     hidden: true,
     usage: '[all|thinking|tool|code]',
@@ -117,6 +118,7 @@ export function registerLocalRuntimeCommands(registry: CommandRegistry): void {
   });
   registry.register({
     name: 'collapse',
+    effect: 'ui-navigation',
     description: 'Collapse blocks by type',
     hidden: true,
     usage: '[all|thinking|tool|code]',
@@ -128,6 +130,7 @@ export function registerLocalRuntimeCommands(registry: CommandRegistry): void {
 
   registry.register({
     name: 'activity',
+    effect: 'ui-navigation',
     description: 'Show running work, what needs you, what is coming up, and recent activity',
     handler(_args, ctx) {
       if (ctx.openActivityModal) {
@@ -140,6 +143,7 @@ export function registerLocalRuntimeCommands(registry: CommandRegistry): void {
 
   registry.register({
     name: 'notifications',
+    effect: 'ui-navigation',
     description: 'Show every notice and notification in full, newest first',
     handler(_args, ctx) {
       if (ctx.openNotifications) {
@@ -152,6 +156,7 @@ export function registerLocalRuntimeCommands(registry: CommandRegistry): void {
 
   registry.register({
     name: 'bookmarks',
+    effect: 'ui-navigation',
     aliases: ['bm'],
     description: 'List bookmarked blocks',
     hidden: true,
@@ -166,6 +171,7 @@ export function registerLocalRuntimeCommands(registry: CommandRegistry): void {
 
   registry.register({
     name: 'media',
+    effect: 'external-network',
     description: 'Inspect media providers or generate media through configured providers',
     hidden: true,
     usage: 'providers | generate [--provider <id>] [--model <id>] [--mime <mime>] <prompt> --yes',

@@ -23,8 +23,18 @@ export interface TerminalSlashCommand<Context> {
    * the typed line untouched, as one argument.
    */
   rawRest?: SlashCommandRawRest | undefined;
+  /**
+   * What running the command does, declared where the command is written: a
+   * caller that is not the owner typing it (the Agent's model command runner)
+   * reads it to decide which admission the run needs. `mixed` means its verbs
+   * differ; `readVerbs` then names the first-argument verbs that only read.
+   */
+  effect?: TerminalCommandEffect | undefined;
+  readVerbs?: readonly string[] | undefined;
   handler: (args: string[], context: Context) => void | Promise<void>;
 }
+export type TerminalCommandEffect = 'read-only' | 'local-state' | 'connected-host-state' | 'external-network'
+  | 'ui-navigation' | 'session-lifecycle' | 'delegated-work' | 'mixed';
 /**
  * Which typed arguments of a command are secrets. Positions count from the
  * first argument after the command name. `subcommands` keys on the first

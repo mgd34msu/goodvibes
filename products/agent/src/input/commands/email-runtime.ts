@@ -399,6 +399,7 @@ const EMAIL_VERBS: CommandVerbs = {
 export function registerEmailRuntimeCommands(registry: CommandRegistry): void {
   registry.register(withCommandVerbs({
     name: 'email',
+    effect: 'external-network',
     aliases: [],
     description: 'Direct IMAP/SMTP email: configure, check inbox, or send a confirmed message',
     usage: 'status | config | set <key> <value> [--yes] | check [n] | send <to> <subject...> [-- <body...>] --yes',

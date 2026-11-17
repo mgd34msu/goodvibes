@@ -87,6 +87,7 @@ export function createLocalCommandActions<Context extends LocalCommandContext>(
     toggleBlocks,
     image: {
       name: 'image',
+      effect: 'external-network',
       hidden: policy.hidden,
       aliases: ['img'],
       description: 'Attach an image file to the next message',
@@ -152,6 +153,7 @@ export function createLocalCommandActions<Context extends LocalCommandContext>(
     } satisfies TerminalSlashCommand<Context>,
     'refresh-models': {
       name: 'refresh-models',
+      effect: 'external-network',
       hidden: policy.hidden,
       description: 'Refresh model catalog, benchmarks, and token limits',
       async handler(_args: string[], ctx: Context) {
@@ -216,6 +218,7 @@ export function createLocalCommandActions<Context extends LocalCommandContext>(
     } satisfies TerminalSlashCommand<Context>,
     pin: {
       name: 'pin',
+      effect: 'local-state',
       hidden: policy.hidden,
       description: 'Pin a model to the favorites list',
       usage: '<model-id>',
@@ -249,6 +252,7 @@ export function createLocalCommandActions<Context extends LocalCommandContext>(
     } satisfies TerminalSlashCommand<Context>,
     unpin: {
       name: 'unpin',
+      effect: 'local-state',
       hidden: policy.hidden,
       description: 'Unpin a model from the favorites list',
       usage: '<model-id>',

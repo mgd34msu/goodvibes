@@ -42,6 +42,7 @@ async function runBridgedCliCommand(
 export function registerConnectedHostAdminCommands(registry: CommandRegistry): void {
   registry.register({
     name: 'ci',
+    effect: 'connected-host-state',
     description: 'Check a repo/PR CI status with per-job conclusions and manage standing CI watches on the connected host',
     hidden: true,
     usage: 'status <repo> [--ref <ref>] [--pr <number>] | watches list | watches create <repo> --delivery-channel <channel> [--trigger-fix-session] --yes | watches run <watch-id> | watches delete <watch-id> --yes',
@@ -52,6 +53,7 @@ export function registerConnectedHostAdminCommands(registry: CommandRegistry): v
   });
   registry.register({
     name: 'principals',
+    effect: 'connected-host-state',
     aliases: ['principal'],
     description: 'Manage the connected host cross-channel principal identity registry',
     hidden: true,
@@ -63,6 +65,7 @@ export function registerConnectedHostAdminCommands(registry: CommandRegistry): v
   });
   registry.register({
     name: 'channel-profiles',
+    effect: 'connected-host-state',
     aliases: ['channel-profile'],
     description: 'Manage per-channel session profile bindings (model, provider, permission mode) on the connected host',
     hidden: true,

@@ -570,6 +570,7 @@ export async function runAgentSkillsRuntimeCommand(args: readonly string[], ctx:
 export function registerAgentSkillsRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
     name: 'skills',
+    effect: 'local-state',
     aliases: ['skill', 'agent-skills', 'askills', 'local-skills'],
     description: 'Manage Agent-local skills',
     hidden: true,

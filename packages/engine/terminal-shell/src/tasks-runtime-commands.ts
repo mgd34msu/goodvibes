@@ -43,6 +43,7 @@ export function createTasksRuntimeCommands<Context extends TaskCommandContext>(p
   function registerTasksRuntimeCommands(registry: Pick<TerminalCommandRegistry<Context>, 'register'>): void {
     registry.register({
       name: 'tasks',
+      effect: 'local-state',
       aliases: ['task'],
       description: policy.description,
       hidden: policy.hidden,

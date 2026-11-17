@@ -191,10 +191,10 @@ export function deliveryModeFromTargets(
 export function toDeliveryTargetInput(target: RoutineScheduleDeliveryTargetSpec): ScheduleDeliveryTargetInput {
   return {
     kind: target.kind,
-    surfaceKind: target.surfaceKind as ScheduleDeliveryTargetInput['surfaceKind'],
-    address: target.address,
-    routeId: target.routeId,
-    label: target.label,
+    ...(target.surfaceKind !== undefined ? { surfaceKind: target.surfaceKind } : {}),
+    ...(target.address !== undefined ? { address: target.address } : {}),
+    ...(target.routeId !== undefined ? { routeId: target.routeId } : {}),
+    ...(target.label !== undefined ? { label: target.label } : {}),
   };
 }
 
@@ -228,8 +228,8 @@ export function deliveryTargetFlag(target: {
 
 /** Splits a `provider/model` value into its parts, inferring the provider when only a model is given. */
 export function normalizeProviderModel(provider: string | undefined, model: string | undefined): {
-  readonly provider?: string | undefined;
-  readonly model?: string | undefined;
+  readonly provider?: string;
+  readonly model?: string;
 } {
   if (!model) return provider ? { provider } : {};
   // A bare model id carries no provider; only a `provider:model` value names one.

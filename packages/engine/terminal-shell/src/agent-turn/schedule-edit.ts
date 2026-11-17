@@ -25,6 +25,7 @@ import {
 
 type SchedulePatchInput = OperatorMethodInput<'automation.jobs.update'>;
 type SchedulePatchOutput = OperatorMethodOutput<'automation.jobs.update'>;
+type SchedulePatchDefinition = NonNullable<SchedulePatchInput['schedule']>;
 
 export const SCHEDULE_EDIT_METHOD = 'automation.jobs.update';
 /** The contract's binding for the edit, `PATCH /api/automation/jobs/{jobId}`. */
@@ -120,14 +121,33 @@ function parseOptionalNumber(raw: string, flag: string): number | string {
   return value;
 }
 
-function scheduleDefinition(schedule: RoutineScheduleSpec, timezone?: string, staggerMs?: number): AutomationScheduleDefinition {
-  if (schedule.kind === 'cron') return normalizeCronSchedule(schedule.value, timezone, staggerMs);
+function scheduleDefinition(schedule: RoutineScheduleSpec, timezone?: string, staggerMs?: number): SchedulePatchDefinition {
+  if (schedule.kind === 'cron') return toSchedulePatchDefinition(normalizeCronSchedule(schedule.value, timezone, staggerMs));
   if (timezone) throw new Error('--timezone is only valid with --cron.');
   if (staggerMs !== undefined) throw new Error('--stagger-ms is only valid with --cron.');
-  if (schedule.kind === 'every') return normalizeEverySchedule(schedule.value);
+  if (schedule.kind === 'every') return toSchedulePatchDefinition(normalizeEverySchedule(schedule.value));
   const at = Date.parse(schedule.value);
   if (!Number.isFinite(at)) throw new Error(`Invalid --at timestamp: ${schedule.value}`);
-  return normalizeAtSchedule(at);
+  return toSchedulePatchDefinition(normalizeAtSchedule(at));
+}
+
+/** The normalized schedule as the edit request carries it: an unset optional field is left out, not sent empty. */
+function toSchedulePatchDefinition(schedule: AutomationScheduleDefinition): SchedulePatchDefinition {
+  if (schedule.kind === 'at') return { kind: 'at', at: schedule.at };
+  if (schedule.kind === 'every') {
+    return {
+      kind: 'every',
+      intervalMs: schedule.intervalMs,
+      ...(schedule.anchorAt !== undefined ? { anchorAt: schedule.anchorAt } : {}),
+    };
+  }
+  return {
+    kind: 'cron',
+    expression: schedule.expression,
+    ...(schedule.timezone !== undefined ? { timezone: schedule.timezone } : {}),
+    ...(schedule.staggerMs !== undefined ? { staggerMs: schedule.staggerMs } : {}),
+    ...(schedule.staggerPhase !== undefined ? { staggerPhase: schedule.staggerPhase } : {}),
+  };
 }
 
 function pushRequiredPairErrors(parsed: {

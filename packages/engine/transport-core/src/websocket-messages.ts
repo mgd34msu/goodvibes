@@ -71,11 +71,19 @@ export async function sendWebSocketMessage(
       assertOpen(socket);
     }
     // Bun returns 0 when it dropped the message; undefined or a positive/-1 count means it was accepted.
-    if (socket.send(frame) === 0) throw new Error('WebSocket dropped an outgoing message');
+    if (socket.send(frame) === 0) throw notSent('WEBSOCKET_SEND_DROPPED', 'WebSocket dropped an outgoing message');
   }
+}
+
+/** A message that did not leave: the category says a reconnect and resend can clear it, so no caller has to read the wording. */
+function notSent(code: string, message: string): GoodVibesError {
+  return new GoodVibesError(message, {
+    category: 'network', source: 'transport', code, recoverable: true,
+    state: 'not sent', next: ['Reconnect, then send the message again'],
+  });
 }
 
 const WEBSOCKET_OPEN = 1;
 function assertOpen(socket: { readonly readyState?: number }): void {
-  if (socket.readyState !== undefined && socket.readyState !== WEBSOCKET_OPEN) throw new Error('WebSocket closed before the message was sent');
+  if (socket.readyState !== undefined && socket.readyState !== WEBSOCKET_OPEN) throw notSent('WEBSOCKET_CLOSED', 'WebSocket closed before the message was sent');
 }

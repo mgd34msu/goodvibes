@@ -22,6 +22,7 @@ import {
   turnStatusLine,
 } from "./native-request-status";
 import { Button } from "../../components/ui/Button";
+import { useConfirm } from "../../components/ui/ConfirmDialog";
 import { Field, Input, Textarea } from "../../components/ui/Field";
 import { Select } from "../../components/ui/Select";
 import { Facts, DetailSection, Disclosure } from "../../components/data-view/DataView";
@@ -91,6 +92,12 @@ function ScopedNativeIntakeForm({
   const [executionError, setExecutionError] = useState<string>();
   const [ready, setReady] = useState(false);
   const [settleTried, setSettleTried] = useState<string>();
+  // Saved in this browser under an earlier pairing with this daemon and project: the daemon
+  // answers only the current pairing, so these are listed read-only and can be discarded.
+  const [otherOwners, setOtherOwners] = useState<NativeIntakeBrowserRecord[]>([]);
+  // Saved records this build cannot read; they cannot be shown or sent, only discarded.
+  const [unreadableCount, setUnreadableCount] = useState(0);
+  const confirm = useConfirm();
   const session = useRef<NativeIntakeSession | undefined>(undefined);
   const operation = useRef<AbortController | undefined>(undefined);
   const generation = useRef(0);
@@ -140,6 +147,15 @@ function ScopedNativeIntakeForm({
         if (!current()) return;
         setRecords(saved);
         setReady(true);
+        // Read beside the status below, never in its way: a failure here only leaves them unlisted.
+        void Promise.all([connected.listOtherOwners(), connected.unreadable()]).then(
+          ([others, unreadable]) => {
+            if (!current()) return;
+            setOtherOwners(others);
+            setUnreadableCount(unreadable);
+          },
+          () => undefined
+        );
         // Reopening reads the latest message's status; the page carries it on from there.
         if (saved.length > 0) {
           const latest = [...saved].sort((a, b) => b.createdAt - a.createdAt)[0];
@@ -350,6 +366,45 @@ function ScopedNativeIntakeForm({
       }
     }
     return freed;
+  };
+  const discardOtherOwner = async (record: NativeIntakeBrowserRecord) => {
+    const ok = await confirm.ask({
+      title: "Discard this saved message?",
+      target: record.command.text.slice(0, 200),
+      description:
+        "It was saved in this browser under an earlier pairing. It is removed from this browser only; nothing is sent to the daemon, and it cannot be brought back.",
+      confirmLabel: "Discard",
+      tone: "danger",
+    });
+    if (!ok) return;
+    void run("Discarding", async (connected, _signal, current) => {
+      try {
+        await connected.discardOtherOwner(record);
+      } catch (cause) {
+        throw new KnownOutcome(`The saved message was not discarded: ${formatError(cause)}`);
+      }
+      if (current())
+        setOtherOwners((items) => items.filter((item) => item.command.inputId !== record.command.inputId));
+    });
+  };
+  const discardUnreadable = async () => {
+    const ok = await confirm.ask({
+      title: "Discard the unreadable saved messages?",
+      description:
+        "This version of the app cannot read them, so they cannot be shown or sent. They are removed from this browser only.",
+      confirmLabel: "Discard",
+      tone: "danger",
+    });
+    if (!ok) return;
+    void run("Discarding", async (connected, _signal, current) => {
+      try {
+        await connected.discardUnreadable();
+      } catch (cause) {
+        throw new KnownOutcome(`The unreadable saved messages were not discarded: ${formatError(cause)}`);
+      }
+      const left = await connected.unreadable();
+      if (current()) setUnreadableCount(left);
+    });
   };
   const invalid =
     !text.trim() ||
@@ -735,6 +790,49 @@ function ScopedNativeIntakeForm({
           </ul>
         </DetailSection>
       )}
+      {otherOwners.length > 0 && (
+        <DetailSection title="Saved under an earlier pairing">
+          <p className="dv-muted">
+            Saved in this browser before it was paired with this daemon again. The daemon answers
+            only for this pairing, so their status cannot be read here.
+          </p>
+          <ul className="native-intake__saved">
+            {otherOwners.map((record) => {
+              const id = record.command.inputId;
+              return (
+                <li key={id}>
+                  <span>
+                    {record.command.text.slice(0, 80)}
+                    {record.command.text.length > 80 ? "…" : ""}
+                  </span>
+                  <span className="dv-muted">Saved {new Date(record.createdAt).toLocaleString()}.</span>
+                  <Button
+                    size="sm"
+                    disabled={Boolean(busy)}
+                    onClick={() => void discardOtherOwner(record)}
+                    aria-label={`Discard saved message ${id}`}
+                  >
+                    Discard
+                  </Button>
+                </li>
+              );
+            })}
+          </ul>
+        </DetailSection>
+      )}
+      {unreadableCount > 0 && (
+        <DetailSection title="Unreadable saved messages">
+          <p className="dv-muted">
+            {unreadableCount === 1
+              ? "One saved message in this browser cannot be read by this version of the app, so it cannot be shown or sent."
+              : `${unreadableCount} saved messages in this browser cannot be read by this version of the app, so they cannot be shown or sent.`}
+          </p>
+          <Button size="sm" disabled={Boolean(busy)} onClick={() => void discardUnreadable()}>
+            Discard them
+          </Button>
+        </DetailSection>
+      )}
+      {confirm.element}
       {selected && (
         <section className="native-intake__request" aria-label="Selected message">
           <pre className="native-intake__source">{selected.command.text}</pre>

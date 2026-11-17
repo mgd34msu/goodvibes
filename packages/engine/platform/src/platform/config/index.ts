@@ -365,7 +365,7 @@ export { createRuntimeSecretsManager } from '../runtime/secrets-composition.js';
 export type { DaemonSecretsCompositionInput } from '../runtime/secrets-composition.js';
 export { ServiceRegistry, captureServiceReadSource, describePendingProjectService, pendingProjectServiceLines } from './service-registry.js';
 export type * from './service-registry.js';
-export { SubscriptionManager, captureSubscriptionReadSource, sharedSubscriptionsPath, subscriptionState, subscriptionAuthFreshness, SUBSCRIPTION_EXPIRING_SOON_MS } from './subscriptions.js';
+export { SubscriptionManager, SubscriptionSessionEndedError, captureSubscriptionReadSource, sharedSubscriptionsPath, subscriptionState, subscriptionAuthFreshness, SUBSCRIPTION_EXPIRING_SOON_MS } from './subscriptions.js';
 export type {
   PreparedSubscriptionImport,
   PreparedSubscriptionImportTransition,

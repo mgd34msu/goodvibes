@@ -1,4 +1,4 @@
-import type { EventLike } from '@goodvibes-jev/engine/transport-core';
+import type { EventLike, StreamTextAssembler } from '@goodvibes-jev/engine/transport-core';
 import type { SerializedEventEnvelope } from './domain-events.js';
 
 /**
@@ -11,8 +11,10 @@ import type { SerializedEventEnvelope } from './domain-events.js';
  * so a field a newer daemon adds does not silence an older client. `timestamp`
  * is read as `ts` for older emitters. Returns null for a frame that is not an
  * envelope. The payload's own shape is checked by whoever consumes the domain.
+ * With `streamText` (one per connection), a `STREAM_DELTA` that arrived as its
+ * increment is handed out with `accumulated` filled in.
  */
-export function readEventEnvelope<TEvent extends EventLike = EventLike>(value: unknown): SerializedEventEnvelope<TEvent> | null {
+export function readEventEnvelope<TEvent extends EventLike = EventLike>(value: unknown, streamText?: StreamTextAssembler): SerializedEventEnvelope<TEvent> | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const record = value as Record<string, unknown>;
   const payload = record['payload'];
@@ -30,6 +32,6 @@ export function readEventEnvelope<TEvent extends EventLike = EventLike>(value: u
     ...(typeof traceId === 'string' ? { traceId } : {}),
     ...(typeof sessionId === 'string' ? { sessionId } : {}),
     ...(typeof source === 'string' ? { source } : {}),
-    payload: payload as TEvent,
+    payload: (streamText ? streamText.complete(payload) : payload) as TEvent,
   };
 }

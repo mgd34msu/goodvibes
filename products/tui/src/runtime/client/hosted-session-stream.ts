@@ -26,6 +26,7 @@
  */
 import { openServerSentEventStream } from '@/runtime/index.ts';
 import { buildUrl } from '@goodvibes-jev/engine/transport-http';
+import { createStreamTextAssembler } from '@goodvibes-jev/engine/transport-core';
 import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { HostedSessionUpdatePayload } from '@goodvibes-jev/engine/platform/platform/hosted-sessions';
 
@@ -153,6 +154,9 @@ export async function watchHostedSession(
       logger.debug('[hosted-sessions] a stream subscriber threw', { error: summarizeError(error) });
     }
   };
+  // Stream deltas arrive as increments between resync points; every turn frame
+  // passes this, whichever session it belongs to, so the text it hands out is whole.
+  const streamText = createStreamTextAssembler();
   try {
     const close = await openServerSentEventStream(
       fetchImpl,
@@ -161,7 +165,9 @@ export async function watchHostedSession(
         onEvent: (eventName, payload) => {
           if (eventName === 'turn' || eventName === 'tools') {
             const event = readHostedStreamEnvelope(eventName, payload);
-            if (event) deliver(event);
+            if (!event) return;
+            const whole = streamText.complete(event.payload);
+            deliver(whole === event.payload ? event : { ...event, payload: whole });
             return;
           }
           if (eventName !== HOSTED_SESSION_LIFECYCLE_WIRE_EVENT) return;

@@ -134,6 +134,31 @@ interface WebSocketControlPlaneClient {
   readonly traceId: string;
   readonly domains: Set<RuntimeEventDomain>;
   readonly unsubscribers: Map<RuntimeEventDomain, () => void>;
+  /** Turns whose full text this socket has received; their next deltas carry only the increment. */
+  readonly streamBases: Set<string>;
+}
+
+/** How a retained runtime event goes out live: a stream delta's increment form, or the turn it ends. */
+interface StreamDeltaWire {
+  readonly turnId: string;
+  /** The payload without `accumulated`; absent when this delta is a resync point. */
+  readonly increment?: Record<string, unknown> | undefined;
+  readonly ends?: true | undefined;
+}
+
+const STREAM_TURN_END_EVENTS: ReadonlySet<string> = new Set(['TURN_COMPLETED', 'TURN_ERROR', 'TURN_CANCEL', 'PREFLIGHT_FAIL']);
+/** A delta carries the full text again once the text grew this much past the last full frame (and at least doubled). */
+const STREAM_RESYNC_MIN_GROWTH = 4096;
+/** Turns tracked at once, by the gateway and per connection. */
+const STREAM_TURNS_TRACKED = 256;
+
+function trackBounded<T>(map: Map<string, T>, key: string, value: T): void {
+  map.delete(key);
+  map.set(key, value);
+  if (map.size > STREAM_TURNS_TRACKED) {
+    const oldest = map.keys().next().value;
+    if (oldest !== undefined) map.delete(oldest);
+  }
 }
 
 export class ControlPlaneGateway {
@@ -153,6 +178,10 @@ export class ControlPlaneGateway {
   private readonly _recentEventsCapacity = 500;
   /** One replay entry/id per bus emission, shared by its host and live readers. */
   private readonly runtimeEventRecords = new WeakMap<RuntimeEventEnvelope<AnyRuntimeEvent['type'], AnyRuntimeEvent>, ScopedControlPlaneRecentEvent>();
+  /** Live wire form of each retained stream delta / turn end, decided once per emission. */
+  private readonly streamDeltaWires = new WeakMap<ScopedControlPlaneRecentEvent, StreamDeltaWire>();
+  /** Per streaming turn: the text length so far and the length at its last full frame. */
+  private readonly streamTurns = new Map<string, { readonly length: number; readonly fullLength: number }>();
   /** Materialized newest-first view of the recent event ring buffer. */
   private get recentEvents(): ScopedControlPlaneRecentEvent[] {
     const out: ScopedControlPlaneRecentEvent[] = [];
@@ -485,6 +514,7 @@ export class ControlPlaneGateway {
       traceId,
       domains: wsDomains,
       unsubscribers: new Map(),
+      streamBases: new Set(),
     });
     this.dispatch?.syncControlPlaneState({
       enabled: true,
@@ -602,7 +632,7 @@ export class ControlPlaneGateway {
       const unsubscribe = this.runtimeBus.onDomain(domain, (envelope) => {
         this.touchWebSocketClient(clientId, { lastEventType: envelope.type });
         const record = this.rememberRuntimeEvent(domain, envelope);
-        liveClient.send(domain, record.payload, record.id);
+        liveClient.send(domain, this.liveRuntimePayload(record, wsClient.streamBases), record.id);
       });
       wsClient.unsubscribers.set(domain, unsubscribe);
       wsClient.domains.add(domain);
@@ -769,6 +799,8 @@ export class ControlPlaneGateway {
         // waiting on a stream that only looks healthy.
         let dropped = 0;
         let lastDeliveredId: string | undefined;
+        // Turns whose full text this stream has received; emptied when a frame is dropped.
+        const streamBases = new Set<string>();
         const write = (event: string, payload: unknown, id?: string): void => {
           controller.enqueue(sseFrame(event, payload, id));
         };
@@ -783,6 +815,7 @@ export class ControlPlaneGateway {
           if ((controller.desiredSize ?? 1) <= 0) {
             if (dropped === 0) logger.warn('Control-plane stream consumer is behind; dropping events', { clientId, event });
             dropped += 1;
+            streamBases.clear();
             return;
           }
           if (dropped > 0) {
@@ -806,7 +839,7 @@ export class ControlPlaneGateway {
           };
           this.clients.set(clientId, updated);
           const record = this.rememberRuntimeEvent(domain, envelope);
-          send(domain, record.payload, record.id);
+          send(domain, this.liveRuntimePayload(record, streamBases), record.id);
         }));
         // Opt-in narrowing (null=deliver-all, never the DEFAULT_DOMAINS fallback); reused below for replay.
         const sseLiveDomains = (options.domains?.length ?? 0) > 0 ? new Set(selectedDomains) : null;
@@ -1003,7 +1036,66 @@ export class ControlPlaneGateway {
     if (previous) return previous;
     const record = this.rememberEvent(domain, serializeEnvelope(envelope));
     this.runtimeEventRecords.set(envelope, record);
+    if (domain === 'turn') this.decideStreamDeltaWire(record, envelope.payload);
     return record;
+  }
+
+  /**
+   * Once per emission: whether a `STREAM_DELTA` may go out live as its
+   * increment (`content` only). It may when its text extends the turn's
+   * previous delta by exactly `content` and has not grown past the resync
+   * point; otherwise it is a resync point and carries `accumulated`. The
+   * replay ring always keeps the full payload, so a reconnecting reader is
+   * whole from its first replayed delta.
+   */
+  private decideStreamDeltaWire(record: ScopedControlPlaneRecentEvent, payload: AnyRuntimeEvent): void {
+    if (!('turnId' in payload) || typeof payload.turnId !== 'string') return;
+    const turnId = payload.turnId;
+    if (STREAM_TURN_END_EVENTS.has(payload.type)) {
+      this.streamTurns.delete(turnId);
+      this.streamDeltaWires.set(record, { turnId, ends: true });
+      return;
+    }
+    if (payload.type !== 'STREAM_DELTA') return;
+    const { content, accumulated } = payload;
+    const previous = this.streamTurns.get(turnId);
+    const appends = previous !== undefined
+      && accumulated.length === previous.length + content.length
+      && accumulated.endsWith(content)
+      && accumulated.length < Math.max(previous.fullLength * 2, previous.fullLength + STREAM_RESYNC_MIN_GROWTH);
+    if (!appends || previous === undefined) {
+      trackBounded(this.streamTurns, turnId, { length: accumulated.length, fullLength: accumulated.length });
+      this.streamDeltaWires.set(record, { turnId });
+      return;
+    }
+    trackBounded(this.streamTurns, turnId, { length: accumulated.length, fullLength: previous.fullLength });
+    const { accumulated: _full, ...increment } = payload;
+    this.streamDeltaWires.set(record, {
+      turnId,
+      increment: { ...(record.payload as Record<string, unknown>), payload: increment },
+    });
+  }
+
+  /**
+   * What one connection is sent for a retained runtime event: a stream
+   * delta's increment once the connection holds that turn's full text, the
+   * full payload otherwise. `bases` is the connection's own set of turns whose
+   * full text it has received.
+   */
+  private liveRuntimePayload(record: ScopedControlPlaneRecentEvent, bases: Set<string>): unknown {
+    const wire = this.streamDeltaWires.get(record);
+    if (!wire) return record.payload;
+    if (wire.ends) {
+      bases.delete(wire.turnId);
+      return record.payload;
+    }
+    if (wire.increment && bases.has(wire.turnId)) return wire.increment;
+    bases.add(wire.turnId);
+    if (bases.size > STREAM_TURNS_TRACKED) {
+      const oldest = bases.values().next().value;
+      if (oldest !== undefined) bases.delete(oldest);
+    }
+    return record.payload;
   }
 
   private rememberEvent(

@@ -29,6 +29,7 @@ import { isGatePresetName, type GatePresetName } from '@goodvibes-jev/engine/pla
  */
 
 import { buildUrl } from '@goodvibes-jev/engine/transport-http';
+import { createStreamTextAssembler } from '@goodvibes-jev/engine/transport-core';
 import { nativeHostedTurnSnapshotSchema, type NativeHostedTurnSnapshot } from '@goodvibes-jev/engine/platform/platform/hosted-sessions/native-turn-client';
 import { createOperatorApiClient } from '@goodvibes-jev/engine/operator-client';
 import { transport } from '@goodvibes-jev/engine/platform/platform/runtime';
@@ -328,6 +329,9 @@ export function createRemoteConversationRouter(
     const streamUrl = hostedSessionEventStreamUrl(baseUrl, sessionId);
     const positionKey = turn.nativeKey;
     const terminalTypes = new Set(TERMINAL_TURN_EVENT_TYPES);
+    // Stream deltas arrive as increments between resync points. Every frame
+    // passes this before any filtering, so the text it hands out is whole.
+    const streamText = createStreamTextAssembler();
     const close = await transport.openServerSentEventStream(options.fetchImpl ?? globalThis.fetch, streamUrl, {
       // The platform parses id: before dispatching its event. After terminal release
       // or replacement, buffered frames no longer advance this watch's cursor.
@@ -341,8 +345,10 @@ export function createRemoteConversationRouter(
           return;
         }
         if (!ownsWatch() || !payload || typeof payload !== 'object') return;
-        const frame = payload as HostedSessionFrame;
-        if (typeof frame.type !== 'string') return;
+        const received = payload as HostedSessionFrame;
+        if (typeof received.type !== 'string') return;
+        const whole = streamText.complete(received.payload);
+        const frame: HostedSessionFrame = whole === received.payload ? received : { ...received, payload: whole };
         if (frame.sessionId !== undefined && frame.sessionId !== sessionId) return;
         const frameTurnId = frame.payload?.['turnId'];
         // A session stream may replay prior work or carry somebody else's

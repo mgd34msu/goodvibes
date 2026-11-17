@@ -21,6 +21,7 @@
 
 import { useSyncExternalStore } from 'react';
 import type { RuntimeEventDomain } from '@goodvibes-jev/engine/contracts';
+import { createStreamTextAssembler, type StreamTextAssembler } from '@goodvibes-jev/engine/transport-core/event-envelope';
 import { client as platformClient, DEFAULT_SSE_RECONNECT } from './goodvibes';
 import { getClientLifetime, subscribeClientLifetime, type ClientLifetime } from './client-lifetime';
 import { getActiveRoute, subscribeActiveRoute, type ConnectionRoute } from './relay-connection';
@@ -143,6 +144,18 @@ function shutLane(lane: LaneRecord): void {
   lane.openDomains = null;
 }
 
+/**
+ * A `turn` frame with its stream delta made whole: between resync points the
+ * daemon sends a delta's new `content` only, and the lane's assembler fills in
+ * `accumulated`, so every subscriber reads the turn's text so far.
+ */
+function completeTurnFrame(streamText: StreamTextAssembler, frame: unknown): unknown {
+  if (!frame || typeof frame !== 'object') return frame;
+  const envelope = frame as Record<string, unknown>;
+  const payload = streamText.complete(envelope.payload);
+  return payload === envelope.payload ? frame : { ...envelope, payload };
+}
+
 function openLane(lane: LaneRecord, domains: string): void {
   shutLane(lane);
   const controller = new AbortController();
@@ -154,6 +167,7 @@ function openLane(lane: LaneRecord, domains: string): void {
   setState(lane, CONNECTING);
   const current = () => lane.controller === controller && !controller.signal.aborted;
   const text = MESSAGES[lane.name];
+  const streamText = createStreamTextAssembler();
 
   platformClient.streams
     .open(
@@ -182,9 +196,11 @@ function openLane(lane: LaneRecord, domains: string): void {
             setState(lane, ended(lane, true, typeof next === 'string' && next ? `${text.revoked} ${next}` : undefined));
             return;
           }
+          // Every turn frame passes the assembler, handled or not, so a subscriber that arrives mid-turn reads whole text.
+          const frame = name === 'turn' ? completeTurnFrame(streamText, payload) : payload;
           const handlers = lane.byEvent.get(name);
           if (!handlers) return;
-          for (const subscriber of handlers) subscriber.spec.onEvent(name, payload);
+          for (const subscriber of handlers) subscriber.spec.onEvent(name, frame);
         },
         // The transport's error text can be a raw response body; only fixed copy is shown.
         onError: () => {

@@ -1,4 +1,4 @@
-import type { FetchLike } from '@goodvibes-jev/engine/transport-core';
+import { createStreamTextAssembler, type FetchLike, type StreamTextAssembler } from '@goodvibes-jev/engine/transport-core';
 import { buildUrl } from '@goodvibes-jev/engine/transport-http';
 import { ConfigurationError, ContractError } from '@goodvibes-jev/engine/errors';
 import type {
@@ -296,8 +296,8 @@ function createFeed(
  * The shared envelope reader, plus what this feed dispatches on: the payload's
  * own `type`. It always stamps a time on what it hands out.
  */
-function readScopedEnvelope(value: unknown): ScopedRuntimeEventEnvelope | null {
-  const envelope = readEventEnvelope(value);
+function readScopedEnvelope(value: unknown, streamText: StreamTextAssembler): ScopedRuntimeEventEnvelope | null {
+  const envelope = readEventEnvelope(value, streamText);
   if (!envelope || typeof (envelope.payload as { readonly type?: unknown } | null)?.type !== 'string') return null;
   return { ...envelope, ts: envelope.ts ?? Date.now() };
 }
@@ -333,6 +333,8 @@ function createScopedRealtime<TDomain extends string>(
       // One gate for this realtime client: a terminal frame addressed to a turn
       // this client is not rendering never reaches a listener.
       const turnGate = createTurnLifecycleGate();
+      // Stream deltas arrive as increments between resync points; this hands them out whole.
+      const streamText = createStreamTextAssembler();
 
       const ensureDomain = (domain: TDomain) => {
         const existing = activeByDomain.get(domain);
@@ -376,7 +378,7 @@ function createScopedRealtime<TDomain extends string>(
             },
             onEvent: (eventName, payload) => {
               if (!isCurrent() || eventName !== domain) return;
-              const envelope = readScopedEnvelope(payload);
+              const envelope = readScopedEnvelope(payload, streamText);
               if (!envelope) return;
               const frame = readTurnLifecycleFrame(envelope.sessionId, envelope.payload);
               if (frame && !turnGate.accepts(frame)) return;

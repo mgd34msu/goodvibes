@@ -1,4 +1,4 @@
-import { WebSocketMessageAssembler, sendWebSocketMessage } from '@goodvibes-jev/engine/transport-core';
+import { WebSocketMessageAssembler, createStreamTextAssembler, sendWebSocketMessage } from '@goodvibes-jev/engine/transport-core';
 import {
   RUNTIME_EVENT_DOMAINS,
   type RuntimeEventDomain,
@@ -435,6 +435,8 @@ export function createWebSocketConnector<TEvent extends RuntimeEventRecord = Run
     };
 
     const assembler = new WebSocketMessageAssembler();
+    // Stream deltas arrive as increments between resync points; this hands them out whole.
+    const streamText = createStreamTextAssembler();
     let connectionAbort = new AbortController();
     let flushing = false;
     let authenticated = false;
@@ -674,7 +676,7 @@ export function createWebSocketConnector<TEvent extends RuntimeEventRecord = Run
         if (frame.type === 'event' && typeof frame.event === 'string' && carried.has(frame.event as RuntimeEventDomain)
           && frame.payload && typeof frame.payload === 'object') {
           // The shared envelope reader (envelope.ts): unknown keys are ignored.
-          const wsPayload: SerializedRuntimeEnvelope<TEvent> | null = readEventEnvelope<TEvent>(frame.payload);
+          const wsPayload: SerializedRuntimeEnvelope<TEvent> | null = readEventEnvelope<TEvent>(frame.payload, streamText);
           if (!wsPayload) {
             throw new WebSocketTransportError('A WebSocket runtime event frame is not an event envelope: it needs a type and a payload.', {
               code: 'WS_EVENT_ERROR',

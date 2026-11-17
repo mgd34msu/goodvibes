@@ -36,6 +36,7 @@ import {
 } from '@goodvibes-jev/engine/transport-http';
 import {
   type FetchLike,
+  createStreamTextAssembler,
   injectTraceparentAsync,
   invokeTransportObserver,
   transportErrorFromUnknown,
@@ -128,6 +129,8 @@ export function createEventSourceConnector<TEvent extends RuntimeEventRecord = R
     const url = buildEventSourceUrl(baseUrl, domains);
     const carried = new Set<string>(domains);
     let closed = false;
+    // Stream deltas arrive as increments between resync points; this hands them out whole.
+    const streamText = createStreamTextAssembler();
     // Numbers the raw streams this connection opens; frames from a replaced one are ignored.
     let streamNumber = 0;
     let closeStream: (() => void) | null = null;
@@ -179,7 +182,7 @@ export function createEventSourceConnector<TEvent extends RuntimeEventRecord = R
           // The shared envelope reader (envelope.ts). Unlike the WS path this must NOT
           // throw (the SSE flush loop has no try/catch around onEvent), so a frame that
           // is not an envelope is reported and dropped.
-          const envelope = readEventEnvelope<TEvent>(payload);
+          const envelope = readEventEnvelope<TEvent>(payload, streamText);
           if (!envelope) {
             report(new GoodVibesError('An SSE runtime event frame is not an event envelope: it needs a type and a payload.', {
               category: 'protocol',

@@ -27,7 +27,8 @@ export type HostedSessionProviderRegistry = HostedWorkspaceFloor['services']['pr
  * The host's own request path, for a surface whose tools call the daemon's
  * operator routes: a request served here takes the same authentication,
  * access gate and handlers as one that arrived over the network, without a
- * socket. The surface's tools present their own credential on it.
+ * socket. It is served as a request from the daemon's own machine, which it
+ * is. The surface's tools present their own credential on it.
  */
 export interface HostedDaemonRequestPath {
   /** Serves one request through the daemon's own request path. */

@@ -2,7 +2,7 @@ import { captureStrictJudgmentJson } from '@goodvibes-jev/engine/platform/platfo
 import { isServiceMethodId, serviceExpectedOutcome, serviceLifecycleDecision, serviceOutcomeCertified, serviceReceiptEvidence } from './service-lifecycle.js';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { assertCurrentToolInvocation, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
-import { logger, redactStructuredDataAsync } from '@goodvibes-jev/engine/platform/platform/utils';
+import { logger, redactStructuredDataAsync, type StructuredRedactionOptions } from '@goodvibes-jev/engine/platform/platform/utils';
 import { isDeepStrictEqual } from 'node:util';
 import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 import type { ConnectedHostConfigReader as AgentConnectedHostConfigReader } from './connected-host-client.js';
@@ -16,6 +16,8 @@ import { createOperatorInputProjector, operatorExecutionConnection, operatorExec
 import { confirmParameter, requestParameter } from './effect-admission.js';
 
 type JsonRecord = Record<string, unknown>;
+/** The response fields a result declares, as the redaction reads them. */
+type DeclaredFields = NonNullable<StructuredRedactionOptions['declaredFields']>;
 
 interface OperatorContractMethod {
   readonly id: string;
@@ -182,7 +184,7 @@ function summarizePreview(route: PreparedOperatorRoute): JsonRecord {
   return preview;
 }
 
-async function stringifyOutput(value: unknown, options: Parameters<typeof redactStructuredDataAsync>[1] = {}): Promise<string> {
+async function stringifyOutput(value: unknown, options: StructuredRedactionOptions = {}): Promise<string> {
   const protectedOutput = await redactStructuredDataAsync(value, options);
   if (!isRecord(protectedOutput)) throw new Error('Connected operator output could not be projected safely.');
   const text = JSON.stringify(protectedOutput, null, 2);
@@ -191,8 +193,8 @@ async function stringifyOutput(value: unknown, options: Parameters<typeof redact
 
 /** The admitted native method declares its response structure. Unknown extension
  * fields stay withheld; declared strings still undergo all egress checks. */
-function operatorResultFields(method: OperatorContractMethod): NonNullable<Parameters<typeof redactStructuredDataAsync>[1]>['declaredFields'] {
-  type Declaration = NonNullable<NonNullable<Parameters<typeof redactStructuredDataAsync>[1]>['declaredFields']>[number];
+function operatorResultFields(method: OperatorContractMethod): DeclaredFields {
+  type Declaration = DeclaredFields[number];
   const fields = new Map<string, Declaration>();
   const add = (path: readonly string[], kind: Declaration['kind'] = 'content') => {
     const key = JSON.stringify(path);

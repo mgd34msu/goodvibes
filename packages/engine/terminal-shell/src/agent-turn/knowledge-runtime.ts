@@ -9,9 +9,9 @@
  * moved. The host and credential come from the Agent's one resolution
  * (`resolveConnectedHost`): the configured host over the network in the
  * Agent's own process, and in a turn the daemon hosts for the Agent the daemon
- * itself, through its own request path with the Agent's own credential for it
- * (in-process-host.ts), so the call is authenticated, gated and handled exactly
- * as the paired Agent's call over the wire. Every request has a deadline joined to the caller's
+ * itself, through its own request path with the credential the Agent presents
+ * to a daemon on its own machine (in-process-host.ts), so the call is
+ * authenticated, gated and handled exactly as the Agent's own call. Every request has a deadline joined to the caller's
  * signal, follows no redirect, and is never retried. A refusal carries the
  * host's own words and the status, `<host message> (HTTP <status>)`, plus the
  * next step.

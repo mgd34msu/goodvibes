@@ -19,7 +19,7 @@ const captures = new WeakMap<object, { readonly shellPaths: ShellPathService; re
 /**
  * Resolve selected sources before any repair or model admission. The host is
  * the Agent's connected host; in a turn the daemon hosts for the Agent it is
- * that daemon, reached in process (`inProcess`) with the Agent's own credential.
+ * that daemon, reached in process (`inProcess`) with the credentials the Agent presents to it.
  */
 export function createScheduleInputProjector(shellPaths: ShellPathService, configManager: AgentConnectedHostConfigReader,
   inProcess?: AgentInProcessHost): ToolInputProjector {

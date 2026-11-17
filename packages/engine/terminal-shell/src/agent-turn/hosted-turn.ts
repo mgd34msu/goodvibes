@@ -114,8 +114,8 @@ export interface AgentTurnToolDeps {
   readonly settings: ConnectedHostConfigReader;
   /**
    * The daemon hosting this turn, which is then the operator tools' connected
-   * host, reached in process with the Agent's own credential for it
-   * (in-process-host.ts). Absent in the Agent's own process.
+   * host, reached in process with the credentials the Agent presents to a
+   * daemon on its own machine (in-process-host.ts). Absent in the Agent's own process.
    */
   readonly inProcessHost?: AgentInProcessHost | undefined;
   /**
@@ -226,9 +226,9 @@ function hostedAgentSection(): string {
   return [
     '## This Agent turn is hosted by the daemon',
     'You are the GoodVibes Agent, answering in a session the daemon hosts rather than in the Agent\'s own process. Your policy, persona, skills, routines and memory below are the Agent\'s, and the Agent tools `profile`, `occasions`, `agent_artifacts`, `agent_documents`, `agent_research_runs`, `agent_research_sources`, `agent_review_packet_presets`, `agent_review_packet_share`, `agent_media_generate`, `agent_notify`, `agent_local_registry`, `agent_learning_consolidation`, `agent_channel_send`, `browser` (the daemon\'s browser), `google` (the daemon\'s Google account and calendar) and, in the daemon\'s own project, `agent_work_plan` are here, so recording what you learn works as the policy says.',
-    'The Agent Knowledge, research report and model comparison tools `agent_knowledge`, `agent_knowledge_ingest`, `agent_research_report` and `agent_model_compare` are here too: Agent Knowledge is this daemon\'s own, reached in process with the Agent\'s own credential, reports and comparisons are saved to the same artifact store, and a comparison\'s apply mode sets the Agent\'s own model setting.',
-    'The connected-host operator tools `agent_operator_action`, `agent_operator_briefing` and `agent_operator_method` are here too: their host is this daemon, reached in process with the Agent\'s own credential, so each call is judged as the Agent\'s.',
-    'The schedule tools `schedule`, `agent_autonomy_schedule`, `agent_reminder_schedule` and `agent_schedule_edit` are here too: they list, create, edit, run, pause, resume and delete this daemon\'s own schedules through `agent_operator_method` and `agent_operator_action`, so each change is judged as the Agent\'s.',
+    'The Agent Knowledge, research report and model comparison tools `agent_knowledge`, `agent_knowledge_ingest`, `agent_research_report` and `agent_model_compare` are here too: Agent Knowledge is this daemon\'s own, reached in process as the Agent reaches it, reports and comparisons are saved to the same artifact store, and a comparison\'s apply mode sets the Agent\'s own model setting.',
+    'The connected-host operator tools `agent_operator_action`, `agent_operator_briefing` and `agent_operator_method` are here too: their host is this daemon, reached in process with the credentials the GoodVibes Agent presents on this machine, so each call is admitted and judged exactly as in the Agent\'s own process: a call made on the owner\'s behalf (a schedule change, a channel draft, a profile or occasion write) is judged as the Agent\'s, and a purchase start or cancel carries the owner\'s request.',
+    'The schedule tools `schedule`, `agent_autonomy_schedule`, `agent_reminder_schedule` and `agent_schedule_edit` are here too: they list, create, edit, run, pause, resume and delete this daemon\'s own schedules through `agent_operator_method` and `agent_operator_action`, so each change is admitted and judged as in the Agent\'s own process.',
     '`accounts` is here too: the Agent\'s register of the accounts it created, and a signup alias opens this daemon\'s own watch for the verification mail.',
     `These work through the Agent's own command registry and session and are not here: ${names(AGENT_SHELL_TOOL_NAMES)}. Use the platform tool that covers the same facts, or say the request runs when the owner continues in the GoodVibes Agent itself.`,
     ...(AGENT_NOT_YET_HOSTED_TOOL_NAMES.length > 0
@@ -256,7 +256,7 @@ export interface AgentHostedTurnDeps {
   readonly channelDeliveryRouter: AgentTurnToolDeps['channelDeliveryRouter'];
   /** The daemon's project work plan, kept for its own project only. */
   readonly workPlan: AgentWorkPlanStore;
-  /** The daemon's settings: its control-plane address keys the Agent's credential for it; the owner's mail address. */
+  /** The daemon's settings: its control-plane address keys the Agent's pairing and delegated credential for it; the owner's mail address. */
   readonly settings: ConnectedHostConfigReader;
   /** The daemon's `browser.*` service, which `browser` drives; absent when the daemon composed no browser. */
   readonly browser?: BrowserToolBackend | undefined;
@@ -302,8 +302,6 @@ export function createAgentHostedTurn(deps: AgentHostedTurnDeps): HostedSurfaceT
       baseUrl: connectedHostBaseUrl(deps.settings.get('controlPlane.host'), deps.settings.get('controlPlane.port')),
       homeDirectory: deps.homeDirectory,
     });
-    // Resolving once starts making the Agent's credential for this daemon, so it is there for the first call.
-    host.connection();
     inProcess = { requests, host };
     return host;
   };

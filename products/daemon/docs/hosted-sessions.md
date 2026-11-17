@@ -80,15 +80,20 @@ tools beside the platform tools (using the daemon's own channel delivery, media 
 memory store, the browser its `browser.*` methods drive, and the Google account and `calendar.events.*`
 methods it holds), and `agent_work_plan` when the session is in the daemon's own project. Its `schedule`,
 `agent_autonomy_schedule`, `agent_reminder_schedule` and `agent_schedule_edit` tools list, create, edit, run,
-pause, resume and delete the daemon's own schedules through the daemon's own request path under the Agent's
-credential, so each change is judged as the Agent's. Its `agent_knowledge` and `agent_knowledge_ingest` tools read
+pause, resume and delete the daemon's own schedules through the daemon's own request path, admitted and
+judged as in the Agent's own process. Its `agent_knowledge` and `agent_knowledge_ingest` tools read
 and add to the Agent's own knowledge store (`/api/goodvibes-agent/knowledge/*`) the same way, its
 `agent_research_report` tool saves sourced reports under the Agent's own screening consent
 (`tools.hostedResearchScreening` in the Agent's settings, or Classic) with the screening keys
 (`ABACUSAI_API_KEY`, `TYPESAFE_API_KEY`) read from the environment or the Agent's own credential stores, and its `agent_model_compare` tool
 blind-compares this session's models and, on apply, sets the Agent's own `provider.model`. Its `agent_operator_briefing`,
 `agent_operator_action` and `agent_operator_method` tools read and act on this daemon through the same
-request path under the Agent's credential, and its `accounts` tool keeps the Agent's register of the accounts
+request path, which serves them as requests from this machine. They present the credentials the Agent presents
+to a daemon on its own machine: its pairing with this daemon when it has one, otherwise the daemon's operator
+credential (credential kind `local`), and for a call the Agent makes on the owner's behalf (a schedule change,
+a channel draft, a profile or occasion write) the Agent's delegated credential (credential kind `agent`), so
+the daemon judges that call as the Agent's. A purchase start or cancel therefore carries the owner's request
+as it does from the Agent itself. Its `accounts` tool keeps the Agent's register of the accounts
 it created, where a signup alias opens this daemon's own watch for the verification mail. Its platform tools carry the
 Agent's read-mode table, so a mode reads or changes exactly as it does in the Agent, and a
 `profile` or `occasions` call is admitted with the scopes the paired Agent's credential holds. The Agent tools that work through the Agent's own

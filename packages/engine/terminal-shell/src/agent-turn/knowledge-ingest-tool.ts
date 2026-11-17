@@ -413,7 +413,7 @@ export function createAgentKnowledgeIngestInputProjector(shellPaths: ShellPathSe
 
 /**
  * `inProcess` is the daemon hosting this turn, which is then the host (reached
- * in process, with the Agent's own credential for it); absent, the Agent's
+ * in process, with the credential the Agent presents to it); absent, the Agent's
  * configured connected host.
  */
 export function createAgentKnowledgeIngestTool(

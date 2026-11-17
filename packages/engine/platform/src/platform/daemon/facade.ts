@@ -117,6 +117,8 @@ interface StartupDrain { readonly pending: Set<Promise<void>>; readonly failures
 // Per-facade ownership without widening the public declaration surface. A
 // fail-fast join cannot retire sibling acquisitions or the first rollback stop.
 const startupDrains = new WeakMap<object, StartupDrain>();
+/** The client address of a request this daemon makes to itself in process: its own machine. */
+const IN_PROCESS_CLIENT_ADDRESS = '127.0.0.1';
 function ownStartup(owner: object, label: StartupOwner, action: () => Promise<void>): Promise<void> {
   let drain = startupDrains.get(owner);
   if (!drain) { drain = { pending: new Set(), failures: new Map() }; startupDrains.set(owner, drain); }
@@ -381,7 +383,13 @@ export class DaemonServer {
     this.hostedSessions?.setOwnerAlerter(createDaemonOwnerAlerter(this.routeBindings, this.surfaceDeliveryHelper));
     // A hosted Agent turn's operator tools call this daemon's own routes in
     // process: the same authentication, gate and handlers as over the wire.
-    this.hostedSessions?.setRequestPath({ serve: (req) => this.handleRequest(req), operatorToken: () => this.authToken });
+    // Such a request comes from this machine, so it is served as one, and the
+    // operator credential on it is the `local` credential, as the Agent's is
+    // when it runs here.
+    this.hostedSessions?.setRequestPath({
+      serve: (req) => { bindClientAddress(req, IN_PROCESS_CLIENT_ADDRESS); return this.handleRequest(req); },
+      operatorToken: () => this.authToken,
+    });
     // Whether this daemon is keeping itself current, asked over the wire
     // rather than read out of a log on the host, see routes/update.ts.
     registerUpdateGatewayMethods(this.runtimeServices.gatewayMethods, this.lifecycle);

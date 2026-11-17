@@ -6,7 +6,6 @@ import { connectedHostOperatorTokenPath } from './connected-host-auth.js';
 import { agentHostPairingStorePath } from './connected-host-pairing-store.js';
 import { resolveConnectedHost, type ConnectedHostConfigReader as AgentConnectedHostConfigReader, type ConnectedHostSource, type ConnectedHostUnavailable } from './connected-host-client.js';
 import type { AgentInProcessHost } from './in-process-host.js';
-import { agentDelegationStorePath } from './agent-delegation-credential.js';
 
 /** File identity, size and change time; `absent` when there is no file, `symlink` for a link. One `lstat`. */
 function credentialStamp(path: string): string {
@@ -22,8 +21,7 @@ function credentialStamp(path: string): string {
 function credentialFile(source: ConnectedHostSource | undefined, homeDirectory: string): string | undefined {
   if (source === 'pairing') return agentHostPairingStorePath(homeDirectory);
   if (source === 'operator-file') return connectedHostOperatorTokenPath(homeDirectory);
-  // The daemon hosting this turn: the Agent's credential for it is kept in the delegation store.
-  if (source === 'in-process') return agentDelegationStorePath(homeDirectory);
+  // The environment, and the operator credential of the daemon hosting this turn (read live from it), have no file.
   return undefined;
 }
 

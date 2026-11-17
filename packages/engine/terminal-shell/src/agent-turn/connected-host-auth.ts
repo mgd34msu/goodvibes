@@ -54,6 +54,10 @@ function readPairing(homeDirectory: string, hostUrl: string): AgentHostPairing {
   else pairingReads.set(key, { stamp, value });
   return value;
 }
+/** The Agent's pairing with one host, as the credential precedence below reads it: one stat while the store is unchanged. */
+export function readConnectedHostPairing(homeDirectory: string, hostUrl: string): AgentHostPairing {
+  return readPairing(homeDirectory, hostUrl);
+}
 const tokenFileReads = new Map<string, { readonly stamp: string; readonly token: string | null; readonly error?: string }>();
 
 export function readConnectedHostOperatorToken(homeDirectory: string, hostUrl: string | undefined,

@@ -41,7 +41,7 @@ import { agentHostPairingStorePath } from './connected-host-pairing-store.js';
 import { assertSafeOperatorPathValue, findOperatorContractMethod, findOperatorHttpBinding, READ_ONLY_HTTP_METHODS } from './operator-contract-routes.js';
 import type { AgentInProcessHost } from './in-process-host.js';
 
-/** Where the credential came from; `in-process` is the daemon hosting this Agent turn itself (in-process-host.ts). */
+/** Where the credential came from; `in-process` is the operator credential of the daemon hosting this Agent turn, presented in process (in-process-host.ts). */
 export type ConnectedHostSource = ConnectedHostCredentialSource | 'in-process';
 
 /** How long a read may wait for the host before the call ends as a timeout. */
@@ -90,8 +90,7 @@ export interface ConnectedHostConnection {
   readonly expectedPrincipalId?: string;
   /**
    * How a request reaches the host. Absent: the network. For the daemon
-   * hosting this turn itself, its own request path, which presents the
-   * Agent's own credential for that daemon (in-process-host.ts).
+   * hosting this turn itself, its own request path (in-process-host.ts).
    */
   readonly fetch?: typeof fetch | undefined;
 }

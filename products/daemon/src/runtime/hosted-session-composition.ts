@@ -240,8 +240,8 @@ export function createHostedSessionOptions(services: RuntimeServices): DaemonHos
         mediaProviders: services.mediaProviders,
         channelDeliveryRouter: services.channelDeliveryRouter,
         workPlan: services.workPlan,
-        // Its control-plane address keys the Agent's own credential for this daemon, which the
-        // operator tools present when they call this daemon in process.
+        // Its control-plane address keys the Agent's pairing and delegated credential for this
+        // daemon, which the operator tools present when they call this daemon in process.
         settings: services.configManager,
         // The daemon's own browser and Google account: `browser` drives the
         // engine the `browser.*` verbs serve; `google` reads the daemon's

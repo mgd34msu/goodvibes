@@ -91,7 +91,8 @@ export class ShellPassthrough {
     const timer = timeoutMs === undefined ? undefined : setTimeout(() => stop('timeout'), timeoutMs);
     const out = new CappedText(SHELL_OUTPUT_LIMIT_CHARS);
     const err = new CappedText(SHELL_OUTPUT_LIMIT_CHARS);
-    const readers: Array<ReadableStreamDefaultReader<Uint8Array>> = [];
+    // Kept only to cancel at the end; the stream's own reader type (Node's web-stream one under Bun.spawn) has that.
+    const readers: Array<Pick<ReadableStreamDefaultReader<Uint8Array>, 'cancel'>> = [];
     const drain = async (stream: ReadableStream<Uint8Array>, sink: CappedText): Promise<void> => {
       const reader = stream.getReader();
       readers.push(reader);

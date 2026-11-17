@@ -1,4 +1,3 @@
-import { redactionCredential, residualCredential } from '@goodvibes-jev/engine/platform/platform/utils';
 import modelIdentity from '../fixtures/e2e-judgments/model-identity.json';
 import modelTier from '../fixtures/e2e-judgments/model-tier.json';
 import unavailableModelRoutes from '../fixtures/e2e-judgments/unavailable-model-routes.json';
@@ -21,7 +20,7 @@ function completionShape(value: unknown): string {
 const stable = (value: unknown): string => JSON.stringify(value, (_key, entry) => entry && typeof entry === 'object' && !Array.isArray(entry)
   ? Object.fromEntries(Object.entries(entry).sort(([a], [b]) => a.localeCompare(b))) : entry);
 
-type PrivacyKind = 'privacy-field' | 'privacy-source' | 'privacy-residual';
+type PrivacyKind = 'privacy-field';
 // Explicit authored roles for these native diagnostic fields. Unknown names
 // still fail; names that do not establish a value role remain uncertain.
 const privacyFieldRoles = {
@@ -106,77 +105,7 @@ const privacyFieldRoles = {
   "shippingAddress": "owner_profile",
   "billing_address": "owner_profile"
 } as const;
-const ordinaryDiagnosticTexts = [
-  'Unable to connect. Is the computer able to access the url?',
-  'the judgment request was rejected',
-] as const;
-const ordinaryMissingFileSuffixes = [
-  "/.goodvibes/daemon/provider-models/aihubmix.json",
-  "/.goodvibes/daemon/provider-models/anthropic.json",
-  "/.goodvibes/daemon/provider-models/cerebras.json",
-  "/.goodvibes/daemon/provider-models/cloudflare-ai-gateway.json",
-  "/.goodvibes/daemon/provider-models/copilot-proxy.json",
-  "/.goodvibes/daemon/provider-models/deepseek.json",
-  "/.goodvibes/daemon/provider-models/fireworks.json",
-  "/.goodvibes/daemon/provider-models/gemini.json",
-  "/.goodvibes/daemon/provider-models/groq.json",
-  "/.goodvibes/daemon/provider-models/huggingface.json",
-  "/.goodvibes/daemon/provider-models/litellm.json",
-  "/.goodvibes/daemon/provider-models/llm7.json",
-  "/.goodvibes/daemon/provider-models/microsoft-foundry.json",
-  "/.goodvibes/daemon/provider-models/minimax.json",
-  "/.goodvibes/daemon/provider-models/mistral.json",
-  "/.goodvibes/daemon/provider-models/moonshot.json",
-  "/.goodvibes/daemon/provider-models/nvidia.json",
-  "/.goodvibes/daemon/provider-models/ollama-cloud.json",
-  "/.goodvibes/daemon/provider-models/openrouter.json",
-  "/.goodvibes/daemon/provider-models/qianfan.json",
-  "/.goodvibes/daemon/provider-models/qwen.json",
-  "/.goodvibes/daemon/provider-models/sglang.json",
-  "/.goodvibes/daemon/provider-models/stepfun.json",
-  "/.goodvibes/daemon/provider-models/together.json",
-  "/.goodvibes/daemon/provider-models/venice.json",
-  "/.goodvibes/daemon/provider-models/vercel-ai-gateway.json",
-  "/.goodvibes/daemon/provider-models/volcengine.json",
-  "/.goodvibes/daemon/provider-models/xai.json",
-  "/.goodvibes/daemon/provider-models/xiaomi.json",
-  "/.goodvibes/daemon/provider-models/zai.json",
-  "/.goodvibes/tui/model-tiers.json",
-  "/.goodvibes/tui/provider-models/aihubmix.json",
-  "/.goodvibes/tui/provider-models/anthropic.json",
-  "/.goodvibes/tui/provider-models/cerebras.json",
-  "/.goodvibes/tui/provider-models/cloudflare-ai-gateway.json",
-  "/.goodvibes/tui/provider-models/copilot-proxy.json",
-  "/.goodvibes/tui/provider-models/deepseek.json",
-  "/.goodvibes/tui/provider-models/fireworks.json",
-  "/.goodvibes/tui/provider-models/gemini.json",
-  "/.goodvibes/tui/provider-models/groq.json",
-  "/.goodvibes/tui/provider-models/huggingface.json",
-  "/.goodvibes/tui/provider-models/inceptionlabs.json",
-  "/.goodvibes/tui/provider-models/litellm.json",
-  "/.goodvibes/tui/provider-models/llm7.json",
-  "/.goodvibes/tui/provider-models/microsoft-foundry.json",
-  "/.goodvibes/tui/provider-models/minimax.json",
-  "/.goodvibes/tui/provider-models/mistral.json",
-  "/.goodvibes/tui/provider-models/moonshot.json",
-  "/.goodvibes/tui/provider-models/nvidia.json",
-  "/.goodvibes/tui/provider-models/ollama-cloud.json",
-  "/.goodvibes/tui/provider-models/openrouter.json",
-  "/.goodvibes/tui/provider-models/qianfan.json",
-  "/.goodvibes/tui/provider-models/qwen.json",
-  "/.goodvibes/tui/provider-models/sglang.json",
-  "/.goodvibes/tui/provider-models/stepfun.json",
-  "/.goodvibes/tui/provider-models/together.json",
-  "/.goodvibes/tui/provider-models/venice.json",
-  "/.goodvibes/tui/provider-models/vercel-ai-gateway.json",
-  "/.goodvibes/tui/provider-models/volcengine.json",
-  "/.goodvibes/tui/provider-models/xai.json",
-  "/.goodvibes/tui/provider-models/xiaomi.json",
-  "/.goodvibes/tui/provider-models/zai.json",
-  "/.goodvibes/tui/synthetic-identities.json"
-] as const;
-
-function privacyAnswers(body: unknown, ordinaryMissingFiles: readonly string[]): { kind: PrivacyKind; answers: unknown } | undefined {
+function privacyAnswers(body: unknown): { kind: PrivacyKind; answers: unknown } | undefined {
   const serialized = stable(body);
   const matches = (state: unknown, questions: unknown) => serialized === stable({ state, questions, model: modelTier.model });
   for (const [field, role] of Object.entries(privacyFieldRoles)) {
@@ -189,30 +118,12 @@ function privacyAnswers(body: unknown, ordinaryMissingFiles: readonly string[]):
     probabilities[role] = 1;
     return { kind: 'privacy-field', answers: { kind: { type: 'choice', choice: role, confidence: 1, probabilities } } };
   }
-  for (const text of ordinaryDiagnosticTexts) {
-    if (matches({ phase: 'source', parts: [{ kind: 'text', text }], target: 'whole-line' }, {
-      lineHasCredential: redactionCredential.items.lineHasCredential.question,
-      spanIsCredential: redactionCredential.items.spanIsCredential.question,
-    })) return { kind: 'privacy-source', answers: {
-      lineHasCredential: { type: 'noul', noul: 0 }, spanIsCredential: { type: 'noul', noul: 0 },
-    } };
-  }
-  const residuals: unknown[] = [
-    { parts: [{ kind: 'text', text: "'fleet.snapshot' failed: " }, { kind: 'withheld', reference: 'span-1' }, { kind: 'text', text: '' }] },
-    ...ordinaryMissingFiles.map(path => ({ parts: [{ kind: 'text', text: 'ENOENT: ' },
-      { kind: 'withheld', reference: 'span-1' }, { kind: 'text', text: `, open '${path}'` }] })),
-  ];
-  for (const state of residuals) {
-    if (matches(state, { credentialRemains: residualCredential.items.credentialRemains.question })) {
-      return { kind: 'privacy-residual', answers: { credentialRemains: { type: 'noul', noul: 0 } } };
-    }
-  }
   return undefined;
 }
 
 /** Exact captured synthetic requests, never an approval/classification shortcut. */
-export function e2eJudgmentAnswers(body: unknown, ordinaryMissingFiles: readonly string[] = []): { kind: 'tier' | 'identity' | 'planning-goal' | PrivacyKind; answers: unknown } | undefined {
-  const privacy = privacyAnswers(body, ordinaryMissingFiles);
+export function e2eJudgmentAnswers(body: unknown): { kind: 'tier' | 'identity' | 'planning-goal' | PrivacyKind; answers: unknown } | undefined {
+  const privacy = privacyAnswers(body);
   if (privacy) return privacy;
   const serialized = stable(body);
   if (planningGoals.some(request => serialized === stable(request))) return { kind: 'planning-goal', answers: {
@@ -228,11 +139,7 @@ export function e2eJudgmentAnswers(body: unknown, ordinaryMissingFiles: readonly
   return undefined;
 }
 
-export function startE2EJudgments(options: { readonly ordinaryHomes?: readonly string[] } = {}) {
-  // These exact roots are supplied by the owning temporary-home fixture.
-  // No arbitrary path shape or text is treated as safe.
-  const ordinaryMissingFiles = Object.freeze((options.ordinaryHomes ?? []).flatMap(home =>
-    ordinaryMissingFileSuffixes.map(suffix => `${home}${suffix}`)));
+export function startE2EJudgments() {
   const accepted: string[] = [];
   const rejected: unknown[] = [];
   const unexpected: unknown[] = [];
@@ -254,7 +161,7 @@ export function startE2EJudgments(options: { readonly ordinaryHomes?: readonly s
       ? { kind: 'completion-applicability', answers: { completion_required: { type: 'noul' as const, noul: 0.99 } } }
       : expectedCompletions.has(completionShape(body))
       ? { kind: 'completion', answers: completionAnswers }
-      : e2eJudgmentAnswers(body, ordinaryMissingFiles);
+      : e2eJudgmentAnswers(body);
     if (!reading) {
       rejected.push(body);
       if (!expectedNegative.has(stable(body)) && !expectedNoticeNegative.has(noticeShape(body))) unexpected.push(body);

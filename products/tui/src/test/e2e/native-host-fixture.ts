@@ -13,7 +13,7 @@ import { startE2EJudgments } from './judgment-fixture.ts';
 import { closeE2EFixture, type E2EHome } from './harness.ts';
 
 export async function startE2ENativeHost(home: E2EHome) {
-  const judgments = startE2EJudgments({ ordinaryHomes: [home.home, join(home.root, 'native-host', 'home')] });
+  const judgments = startE2EJudgments();
   const previousKey = process.env.TYPESAFE_API_KEY;
   process.env.TYPESAFE_API_KEY = 'local-e2e-judgment-fixture-not-a-secret';
   const restore = async () => {
@@ -55,10 +55,12 @@ export async function startE2ENativeHost(home: E2EHome) {
       token: paired.token, tokenId: paired.id, name: paired.name, createdAt: paired.createdAt,
     })).status !== 'paired') throw new Error('E2E paired authority was not stored');
     const config = new TuiConfigManager({ configDir: join(home.home, '.goodvibes/tui'), homeDir: home.home, workingDir: home.workspace, surfaceRoot: 'tui' });
-    config.set('controlPlane.publicBaseUrl', daemon.baseUrl);
-    config.set('daemon.enabled', true);
-    config.set('hostedSessions.routeConversationTurns', false);
-    config.set('judgment.endpoint', judgments.baseURL);
+    // No daemon runs for this home yet; its settings are written for the daemon to read, as the routed write does then.
+    const offline = { daemonNotRunning: true } as const;
+    config.set('controlPlane.publicBaseUrl', daemon.baseUrl, offline);
+    config.set('daemon.enabled', true, offline);
+    config.set('hostedSessions.routeConversationTurns', false, offline);
+    config.set('judgment.endpoint', judgments.baseURL, offline);
     return { daemon, judgments, env: { TYPESAFE_API_KEY: 'local-e2e-judgment-fixture-not-a-secret', TYPESAFE_BASE_URL: judgments.baseURL },
       async stop() { await closeE2EFixture(null, () => daemon.stop(), () => judgments.assertNoUnexpected(), restore); },
     };

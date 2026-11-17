@@ -22,4 +22,9 @@ export class KnowledgeAnswerGapHeldError extends Error {
   override readonly name = 'KnowledgeAnswerGapHeldError';
   constructor(readonly reason: AnswerGapHoldReason) { super(`Knowledge answer gap held (${reason}); no gap write was authorized.`); }
 }
-export const ANSWER_GAP_LIMITS = Object.freeze({ candidates: Number.POSITIVE_INFINITY, characters: Number.POSITIVE_INFINITY, bytes: Number.POSITIVE_INFINITY, timeoutMs: 2_147_483_647, defaultTimeoutMs: 0 });
+/**
+ * Recording a missing answer: an earlier gap with the same normalised question
+ * and the same subjects is the same gap (no request); otherwise at most
+ * `equivalenceRequests` earlier gap sharing a subject is read for equivalence.
+ */
+export const ANSWER_GAP_LIMITS = Object.freeze({ equivalenceRequests: 1 });

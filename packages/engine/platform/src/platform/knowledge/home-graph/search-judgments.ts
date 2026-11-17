@@ -9,7 +9,7 @@ import type { KnowledgeNodeRecord, KnowledgeSourceRecord } from '../types.js';
 import { factHasUsableSource, factSourceIds, initialEvidenceCandidate, initialNodeReferenceContext, listAnswerNodes,
   type AnswerRecordReader } from '../semantic/answer-evidence.js';
 import { renderNodeEvidence } from '../semantic/answer-fact-selection.js';
-import { prepareAnswerSourceExcerptBatches } from '../semantic/answer-excerpts/prepare.js';
+import { readAnswerSourceExcerpts } from '../semantic/answer-excerpts/prepare.js';
 import { KnowledgeAnswerExcerptHeldError } from '../semantic/answer-excerpts/types.js';
 import { prepareAnswerLinkedObjects } from '../semantic/answer-object-alignment/prepare.js';
 import { KnowledgeAnswerObjectAlignmentHeldError } from '../semantic/answer-object-alignment/types.js';
@@ -17,7 +17,6 @@ import { withAnswerVerificationBudget } from '../semantic/answer-verification/bu
 import { KnowledgeAnswerQualityHeldError as Held } from '../semantic/answer-verification/types.js';
 import { prepareAnswerEvidenceRelevance } from '../semantic/evidence-ranking/reader.js';
 import { KnowledgeEvidenceRelevanceHeldError, type AnswerEvidenceCandidate } from '../semantic/evidence-ranking/types.js';
-import { createSemanticWriteGuard } from '../semantic/primary-source-plan.js';
 import { readStringArray, sourceSemanticText } from '../semantic/utils.js';
 import { subjectIdentity } from './answer-scope.js';
 import { buildSourceLinkIndex } from './source-links.js';
@@ -93,7 +92,7 @@ export async function readHomeGraphSearchSelection(input: {
       const answerNodes = listAnswerNodes(scope).filter((node) => !node.kind.startsWith('ha_')
         && (node.metadata.semanticKind !== 'fact' || factHasUsableSource(node, usableSourceIds)));
       const linkedObjects = input.linkedObjects ?? (await prepareAnswerLinkedObjects(input.store, input.spaceId, { query },
-        HOME_GRAPH_KNOWLEDGE_EXTENSION.objectProfiles ?? [], signal).read([], [])).linkedObjects;
+        HOME_GRAPH_KNOWLEDGE_EXTENSION.objectProfiles ?? [], signal, { nodes: state.nodes, sources: state.sources, edges: state.edges }).read([], [])).linkedObjects;
       signal.throwIfAborted();
       const shortlist = shortlistHomeGraphCandidates(state, query, linkedObjects, answerNodes, HOME_GRAPH_ASK_SHORTLIST);
       const subjects = linkedObjects.map((node) => ({ title: node.title, kind: node.kind, summary: node.summary,
@@ -136,13 +135,10 @@ export async function readHomeGraphSearchSelection(input: {
         if (value) summaries.set(item.id, value.trim());
       }
       const selectedSources = selected.flatMap((item) => item.source ? [item.source] : []);
-      // The excerpt reader checks only the documents it reads.
-      const excerptGuard = createSemanticWriteGuard(input.store, signal);
-      const excerpts = prepareAnswerSourceExcerptBatches(input.store, query,
-        selectedSources.map((source) => ({ source, context: JSON.stringify({ subjects }) })), excerptGuard, signal);
-      excerpts.start();
-      const spans = await excerpts.read(new Set(selectedSources.map((source) => source.id)));
-      const selectedText = new Map([...spans].map(([id, selection]) => [id, selection.map((span) => span.text).join('\n\n')]));
+      // One excerpt request per accepted source; a source whose reading does not settle keeps its best-matching passages.
+      const spans = await readAnswerSourceExcerpts(query, selectedSources.map((source) => ({ source,
+        extraction: state.extractionBySourceId.get(source.id) ?? null, context: JSON.stringify({ subjects }), hints: terms })), signal);
+      const selectedText = new Map([...spans].map(([id, selection]) => [id, selection.spans.map((span) => span.text).join('\n\n')]));
       const results = selected.map((item) => ({ ...item, summary: item.source ? summaries.get(item.id) : item.node?.summary,
         // A settled empty excerpt is explicit; the renderer must not revive an unselected summary.
         excerpt: item.source ? selectedText.get(item.id) ?? '' : renderNodeEvidence(item.node!),

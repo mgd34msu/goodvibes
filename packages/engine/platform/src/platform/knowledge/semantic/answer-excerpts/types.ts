@@ -1,34 +1,16 @@
-/** Only request-local references cross the judgment boundary. */
+/** One field of a source as it is stored: where it came from and its exact text. */
 export interface AnswerExcerptDocument {
-  readonly reference: string;
+  readonly field: string;
   readonly kind: 'source-summary' | 'source-description' | 'extraction';
   readonly text: string;
 }
-export interface AnswerExcerptInput {
-  readonly reference: string;
-  readonly query: string;
-  readonly source: { readonly title: string; readonly sourceType: string; readonly uri: string };
-  /** Complete projected claims/subject context, never database keys or authority. */
-  readonly context: string;
-  readonly documents: readonly AnswerExcerptDocument[];
-}
+/** A paragraph-sized span of one field, with half-open UTF-16 offsets for String.slice. */
 export interface AnswerExcerptSpan {
-  readonly reference: string;
-  readonly document: string;
-  /** Half-open UTF-16 offsets into the exact original document string. */
+  readonly field: string;
+  readonly kind: AnswerExcerptDocument['kind'];
   readonly start: number;
   readonly end: number;
   readonly text: string;
-}
-/** A structural bundle can retain labels or exceptions stored in another exact field. */
-export interface AnswerExcerptCandidate {
-  readonly reference: string;
-  readonly text: string;
-  readonly spans: readonly AnswerExcerptSpan[];
-}
-export interface AnswerExcerptSelection {
-  readonly reference: string;
-  readonly spans: readonly AnswerExcerptSpan[];
 }
 export type AnswerExcerptHoldReason = 'unconfigured' | 'unavailable' | 'unsettled' | 'malformed' | 'aborted' | 'budget' | 'stale';
 export class KnowledgeAnswerExcerptHeldError extends Error {
@@ -37,5 +19,10 @@ export class KnowledgeAnswerExcerptHeldError extends Error {
     super(`Knowledge answer excerpts held (${reason}); no partial selection was authorized.`);
   }
 }
-export const ANSWER_EXCERPT_LIMITS = Object.freeze({ inputs: Number.POSITIVE_INFINITY, documents: Number.POSITIVE_INFINITY, characters: Number.POSITIVE_INFINITY,
-  candidates: Number.POSITIVE_INFINITY, requests: Number.POSITIVE_INFINITY, bytes: Number.POSITIVE_INFINITY, concurrency: 4, defaultTimeoutMs: 0, timeoutMs: 2_147_483_647 });
+/**
+ * What one source's excerpt reading may send: at most `passages` spans of at
+ * most `passageChars` characters, chosen by the words they share with the
+ * question, within `requestBytes` of passage text. `fallbackPassages` are kept
+ * when the reading does not settle.
+ */
+export const ANSWER_EXCERPT_LIMITS = Object.freeze({ passages: 8, passageChars: 1_600, requestBytes: 12 * 1024, fallbackPassages: 2 });

@@ -4,7 +4,7 @@ import { toJson, type JsonValue, type JudgmentPort } from '@goodvibes-jev/judgme
 import { assertJudgmentInput } from '../../../gate/judgment-input.js';
 import { snapshotNodeInput } from '../../activation/projection.js';
 import { freezeSupport } from '../verification/projection.js';
-import { answerIntegrationIntent, answerObjectAlignment } from './battery.js';
+import { answerIntegrationIntent, answerObjectAlignment, answerObjectState } from './battery.js';
 import { ANSWER_OBJECT_LIMITS as LIMITS, KnowledgeAnswerObjectAlignmentHeldError as Held,
   type AnswerObjectAlignmentInput, type AnswerObjectAlignmentPlan, type AnswerObjectReading, type AnswerObjectBoolean } from './types.js';
 export * from './types.js';
@@ -33,7 +33,6 @@ export function snapshotAnswerObjectInput(input: AnswerObjectAlignmentInput): An
         || (association.relation !== undefined && typeof association.relation !== 'string')) throw new Held('malformed');
     }
   }
-  if (JSON.stringify(snapshot).length > LIMITS.characters) throw new Held('budget');
   return snapshot;
 }
 function jsonState(value: object): Record<string, JsonValue> {
@@ -56,8 +55,9 @@ function validatedPort(port: JudgmentPort): JudgmentPort {
     return result;
   } };
 }
-function settled(reading: { readonly probability: number; readonly verdict: string; readonly outcome: string }): AnswerObjectBoolean {
-  if (reading.outcome !== 'act' || (reading.verdict !== 'yes' && reading.verdict !== 'no')) throw new Held('uncertain');
+/** A settled yes/no, or undefined: an unsettled reading leaves its candidate out and is counted. */
+function settled(reading: { readonly probability: number; readonly verdict: string; readonly outcome: string }): AnswerObjectBoolean | undefined {
+  if (reading.outcome !== 'act' || (reading.verdict !== 'yes' && reading.verdict !== 'no')) return undefined;
   return { probability: reading.probability, verdict: reading.verdict, outcome: 'act' };
 }
 /** Read-only preparation. Access, identity/provenance and write guards remain the caller's responsibility. */
@@ -69,7 +69,7 @@ export async function readAnswerObjectAlignment(input: AnswerObjectAlignmentInpu
   if (options.signal?.aborted) throw new Held('aborted');
   const snapshot = snapshotAnswerObjectInput(input);
   options.assertCurrent?.();
-  if (!snapshot.candidates.length) return freezeSupport({ accepted: [], rejected: [] });
+  if (!snapshot.candidates.length) return freezeSupport({ accepted: [], rejected: [], unsettled: 0 });
   const timeoutMs = options.timeoutMs;
   if (timeoutMs !== undefined && (!Number.isFinite(timeoutMs) || timeoutMs < 0 || timeoutMs > LIMITS.timeoutMs)) throw new Held('budget');
   const controller = new AbortController();
@@ -84,47 +84,58 @@ export async function readAnswerObjectAlignment(input: AnswerObjectAlignmentInpu
     if (options.signal?.aborted) throw new Held('aborted');
     options.assertCurrent?.();
   };
-  const run = async () => {
+  const run = async (): Promise<AnswerObjectAlignmentPlan> => {
     check();
-    const intentPort = judgmentPort('engine.knowledge.answer-integration-intent');
-    const objectPort = judgmentPort('engine.knowledge.answer-object-alignment');
-    const intentModel = intentPort.model, objectModel = objectPort.model;
-    const checkConfiguration = () => {
-      if (judgmentPort('engine.knowledge.answer-integration-intent') !== intentPort || intentPort.model !== intentModel
-        || judgmentPort('engine.knowledge.answer-object-alignment') !== objectPort || objectPort.model !== objectModel) throw new Held('stale');
-    };
-    const intent = await answerIntegrationIntent.run(validatedPort(intentPort), jsonState(snapshot),
-      { signal: controller.signal, site: 'engine.knowledge.answer-integration-intent' });
-    check(); checkConfiguration();
-    const integrationIntent = settled(intent.readings.integrationIntent);
-    intent.recordAction(`settled integration intent ${integrationIntent.verdict}; no subject or write authority`);
-    const readings: AnswerObjectReading[] = []; let next = 0;
-    let model: string | undefined, requestedModel: string | undefined;
+    const intentPort = validatedPort(judgmentPort('engine.knowledge.answer-integration-intent'));
+    const objectPort = validatedPort(judgmentPort('engine.knowledge.answer-object-alignment'));
+    let unsettled = 0;
+    // An unsettled or failed intent reading selects no integration object; physical objects still answer.
+    let integrationIntent: AnswerObjectBoolean | undefined;
+    try {
+      const intent = await answerIntegrationIntent.run(intentPort, jsonState(snapshot),
+        { signal: controller.signal, site: 'engine.knowledge.answer-integration-intent' });
+      integrationIntent = settled(intent.readings.integrationIntent);
+      intent.recordAction(`integration intent ${integrationIntent?.verdict ?? 'unsettled'}; no subject or write authority`);
+    } catch (error) {
+      if (controller.signal.aborted) throw error;
+    }
+    check();
+    if (!integrationIntent) unsettled += 1;
+    const readings: (AnswerObjectReading | undefined)[] = []; let next = 0;
     await Promise.all(Array.from({ length: Math.min(LIMITS.concurrency, snapshot.candidates.length) }, async () => {
       while (next < snapshot.candidates.length) {
         check(); const index = next++; const candidate = snapshot.candidates[index]!;
+        let read: Awaited<ReturnType<typeof answerObjectAlignment.run>>;
         try {
-          const read = await answerObjectAlignment.run(validatedPort(objectPort), jsonState({ query: snapshot.query, candidate, candidates: snapshot.candidates }),
+          read = await answerObjectAlignment.run(objectPort, jsonState(answerObjectState(snapshot.query, candidate, snapshot.candidates)),
             { signal: controller.signal, site: 'engine.knowledge.answer-object-alignment' });
-          check(); checkConfiguration();
-          if ((model !== undefined && read.result.model !== model) || (requestedModel !== undefined && read.result.requestedModel !== requestedModel)) throw new Held('stale');
-          model = read.result.model; requestedModel = read.result.requestedModel;
-          const concreteObject = settled(read.readings.concreteObject), integrationObject = settled(read.readings.integrationObject), aligned = settled(read.readings.aligned);
-          const selected = concreteObject.verdict === 'yes' && aligned.verdict === 'yes'
-            && (integrationObject.verdict === 'no' || integrationIntent.verdict === 'yes');
-          readings[index] = { reference: candidate.reference, concreteObject, integrationObject, aligned, selected,
-            ...(read.result.decisionId ? { decisionId: read.result.decisionId } : {}) };
-          read.recordAction(`prepared linked-object ${selected ? 'selection' : 'rejection'}; original associations retained locally; no authorization`);
-        } catch (error) { const failure = error instanceof Held ? error : new Held('unavailable'); stop(failure); throw failure; }
+        } catch (error) {
+          if (controller.signal.aborted || error instanceof JudgmentPortMissingError) throw error;
+          // One failed request leaves its candidate out; the others still answer.
+          unsettled += 1; continue;
+        }
+        check();
+        const concreteObject = settled(read.readings.concreteObject), integrationObject = settled(read.readings.integrationObject), aligned = settled(read.readings.aligned);
+        if (!concreteObject || !integrationObject || !aligned) {
+          unsettled += 1;
+          read.recordAction('linked-object reading unsettled; candidate left out; no authorization');
+          continue;
+        }
+        const selected = concreteObject.verdict === 'yes' && aligned.verdict === 'yes'
+          && (integrationObject.verdict === 'no' || integrationIntent?.verdict === 'yes');
+        readings[index] = { reference: candidate.reference, concreteObject, integrationObject, aligned, selected,
+          ...(read.result.decisionId ? { decisionId: read.result.decisionId } : {}) };
+        read.recordAction(`prepared linked-object ${selected ? 'selection' : 'rejection'}; original associations retained locally; no authorization`);
       }
     }));
-    check(); checkConfiguration();
-    const accepted = readings.filter((reading) => reading.selected);
-    if (accepted.length > LIMITS.selected) throw new Held('budget');
+    check();
+    const settledReadings = readings.filter((reading): reading is AnswerObjectReading => reading !== undefined);
+    const accepted = settledReadings.filter((reading) => reading.selected);
     // Keep actual alignment probabilities. No old point scale or fixed kind ladder.
     const order = new Map(snapshot.candidates.map((candidate, index) => [candidate.reference, index]));
     accepted.sort((a, b) => b.aligned.probability - a.aligned.probability || order.get(a.reference)! - order.get(b.reference)!);
-    return freezeSupport({ integrationIntent, model, requestedModel, accepted, rejected: readings.filter((reading) => !reading.selected) });
+    return freezeSupport({ ...(integrationIntent ? { integrationIntent } : {}), accepted,
+      rejected: settledReadings.filter((reading) => !reading.selected), unsettled });
   };
   try { return await Promise.race([run(), stopped]); }
   catch (error) { controller.abort(); throw error instanceof Held ? error : new Held(error instanceof JudgmentPortMissingError ? 'unconfigured' : 'unavailable'); }

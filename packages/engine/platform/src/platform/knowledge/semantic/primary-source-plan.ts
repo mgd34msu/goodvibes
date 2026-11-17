@@ -1,92 +1,92 @@
 import { KnowledgeRecordAdmissionHeldError } from '../store-record-snapshot.js';
 import { projectSemanticPrimaryClaim } from './primary-claim-projection.js';
 import { assertJudgmentInput, JudgmentInputError } from '../../gate/judgment-input.js';
-import { retainStrictJudgmentJson, type RetainedStrictJudgmentJson } from '../../gate/judgment-result.js';
+import type { PersistedKnowledgeRecordSelector } from '../../state/sqlite-store.js';
 import { sourceRankingContent } from './answer-source-ranking.js';
 import { getKnowledgeSpaceId } from '../spaces.js';
 import { createKnowledgePageSourceReader, KnowledgeSourceQualityHeldError } from '../source-quality.js';
 import type { KnowledgeStore } from '../store.js';
 import type { KnowledgeExtractionRecord, KnowledgeNodeRecord, KnowledgeSourceRecord } from '../types.js';
 
-const originalJson = JSON;
-const originalStringify = JSON.stringify;
-const ownDescriptor = Object.getOwnPropertyDescriptor;
-const hasOwn = Object.hasOwn;
-const prototype = Object.getPrototypeOf;
-const originalObjectPrototype = Object.prototype;
-const originalArrayPrototype = Array.prototype;
-function originalRecordSerializer(): boolean {
-  const descriptor = ownDescriptor(JSON, 'stringify');
-  return JSON === originalJson && descriptor?.value === originalStringify && !descriptor.get && !descriptor.set
-    && Object.prototype === originalObjectPrototype && Array.prototype === originalArrayPrototype
-    && prototype(originalObjectPrototype) === null && prototype(originalArrayPrototype) === originalObjectPrototype
-    && !hasOwn(originalObjectPrototype, 'toJSON') && !hasOwn(originalArrayPrototype, 'toJSON');
-}
-
 /** A cooperative lifecycle stop never authorizes a fallback or late write. */
 export function assertSemanticWriteAllowed(signal?: AbortSignal, shouldStop?: () => boolean): void {
   if (signal?.aborted || shouldStop?.()) throw new KnowledgeSourceQualityHeldError('aborted');
 }
 
-/** Optimistic read-set for one persistence pass, including absent/excluded records. */
+/**
+ * The rows one persistence pass read, checked before its write. A source, node
+ * or extraction row is held by its store generation, so a check is one indexed
+ * read of the generations of exactly those rows; an edge window by its window
+ * generation. `watch` keeps a value comparison for small values the caller
+ * owns (a flag, an id list); never hand it a whole collection.
+ */
 export function createSemanticWriteGuard(store: KnowledgeStore, signal?: AbortSignal, shouldStop?: () => boolean) {
-  const checks = new Map<string, () => void>();
+  const values = new Map<string, () => void>();
+  const rows = new Map<string, { readonly selector: PersistedKnowledgeRecordSelector; readonly generation: string | null }>();
+  const edgeWindows = new Map<string, { readonly endpoints: readonly string[]; readonly generation: string }>();
+  const stale = () => new KnowledgeSourceQualityHeldError('stale');
   function watch<T>(key: string, read: () => T, expected: T = read()): T {
     const version = JSON.stringify(expected);
     const check = () => {
-      if (JSON.stringify(read()) !== version) throw new KnowledgeSourceQualityHeldError('stale');
+      if (JSON.stringify(read()) !== version) throw stale();
     };
     // A second observation may not silently replace the original version.
-    checks.get(key)?.();
-    if (!checks.has(key)) checks.set(key, check);
+    values.get(key)?.();
+    if (!values.has(key)) values.set(key, check);
     check();
     return expected;
   }
-  function watchRecord<T extends KnowledgeSourceRecord | KnowledgeNodeRecord | KnowledgeExtractionRecord | null>(
-    key: string, read: () => T, expected: T, captureRecord?: (value: T) => T,
+  /** Hold one row by generation. A caller's copy must equal the stored row once, here. */
+  function row<T extends KnowledgeSourceRecord | KnowledgeNodeRecord | KnowledgeExtractionRecord | null>(
+    key: string, selector: PersistedKnowledgeRecordSelector, read: () => T, expected: T | undefined,
   ): T {
-    const snapshot = captureRecord ? captureRecord(expected) : expected;
-    const version = JSON.stringify(snapshot);
-    let original: { readonly value: T; readonly slots: RetainedStrictJudgmentJson<T> } | undefined;
-    let first = true;
-    const check = () => {
-      const firstRead = first;
-      first = false;
-      const current = read();
-      if (original && current === original.value && originalRecordSerializer()) {
-        try { original.slots.assertCurrent(); return; } catch { /* Compare the original complete value below. */ }
-      }
-      if (JSON.stringify(captureRecord ? captureRecord(current) : current) !== version) throw new KnowledgeSourceQualityHeldError('stale');
-      if (firstRead) {
-        // Adopt only the actual first getter result after full original equality.
-        // A later equal replacement never becomes a new retained baseline.
-        if (originalRecordSerializer()) {
-          try {
-            const slots = retainStrictJudgmentJson(current);
-            if (originalRecordSerializer() && originalStringify(slots.snapshot) === version) {
-              slots.assertCurrent(); original = { value: current, slots };
-            }
-          } catch { /* Unsupported original shapes keep the full comparison. */ }
-        }
-      }
-    };
-    checks.get(key)?.();
-    if (!checks.has(key)) checks.set(key, check);
-    check();
-    return snapshot;
+    const current = read();
+    if (expected !== undefined && JSON.stringify(expected) !== JSON.stringify(current)) throw stale();
+    const generation = store.getRecordGenerations([selector])[0] ?? null;
+    const held = rows.get(key);
+    if (held && held.generation !== generation) throw stale();
+    if (!held) rows.set(key, { selector, generation });
+    return expected ?? current;
+  }
+  function extraction(sourceId: string, expected?: KnowledgeExtractionRecord | null): KnowledgeExtractionRecord | null {
+    const current = store.getExtractionBySourceId(sourceId);
+    if (!current) {
+      // Absence is held as absence: a later extraction for the source is a change.
+      watch(`extraction-absent:${sourceId}`, () => store.getExtractionBySourceId(sourceId) === null, true);
+      if (expected) throw stale();
+      return null;
+    }
+    return row(`extraction:${sourceId}`, { kind: 'extraction', id: current.id }, () => store.getExtractionBySourceId(sourceId), expected);
+  }
+  /** Every edge with an end at one of `endpoints` (`source:<id>`, `node:<id>`), by one window generation. */
+  function edges(key: string, endpoints: readonly string[]): void {
+    const unique = [...new Set(endpoints)];
+    if (unique.length === 0) return;
+    const generation = store.getEdgeWindowGeneration(unique, unique, true);
+    const held = edgeWindows.get(key);
+    if (held && held.generation !== generation) throw stale();
+    if (!held) edgeWindows.set(key, { endpoints: unique, generation });
   }
   return {
     watch,
-    watchRecord,
-    source(id: string, expected = store.getSource(id)) { return watchRecord(`source:${id}`, () => store.getSource(id), expected); },
-    node(id: string, expected = store.getNode(id)) { return watchRecord(`node:${id}`, () => store.getNode(id), expected); },
-    extraction(id: string, expected = store.getExtractionBySourceId(id)) { return watchRecord(`extraction:${id}`, () => store.getExtractionBySourceId(id), expected); },
+    edges,
+    source(id: string, expected?: KnowledgeSourceRecord | null) { return row(`source:${id}`, { kind: 'source', id }, () => store.getSource(id), expected); },
+    node(id: string, expected?: KnowledgeNodeRecord | null) { return row(`node:${id}`, { kind: 'node', id }, () => store.getNode(id), expected); },
+    extraction,
     assertCurrent() {
       try { store.assertRecordSnapshotFrame(() => {
         assertSemanticWriteAllowed(signal, shouldStop);
-        for (const check of checks.values()) check();
+        const held = [...rows.values()];
+        if (held.length) {
+          const now = store.getRecordGenerations(held.map((entry) => entry.selector));
+          for (let index = 0; index < held.length; index += 1) if (now[index] !== held[index]!.generation) throw stale();
+        }
+        for (const window of edgeWindows.values()) {
+          if (store.getEdgeWindowGeneration(window.endpoints, window.endpoints, true) !== window.generation) throw stale();
+        }
+        for (const check of values.values()) check();
       }); } catch (error) {
-        if (error instanceof KnowledgeRecordAdmissionHeldError) throw new KnowledgeSourceQualityHeldError('stale');
+        if (error instanceof KnowledgeRecordAdmissionHeldError) throw stale();
         throw error;
       }
     },

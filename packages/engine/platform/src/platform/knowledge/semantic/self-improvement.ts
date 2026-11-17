@@ -138,8 +138,32 @@ export async function runKnowledgeSemanticSelfImprovement(
   const candidates = await collectCandidateGaps(context.store, spaceId, sourceIdFilter, gapIdFilter,
     { signal: input.signal, shouldStop: context.shouldStop });
   candidates.assertCurrent();
-  const plan = createSelfImproveRunPlan(candidates.gaps, input);
+  // Decided from what is stored, before any reading and before the limit is
+  // applied: a gap waiting out its retry window (forced or not) or one whose
+  // task is final costs no model request and no task write, and does not take
+  // a slot from a gap that can be worked.
+  const workable: KnowledgeNodeRecord[] = [];
+  let waiting = 0, finishedSuppressions = 0;
+  let nextWaitingAttemptAt: number | undefined;
+  for (const gap of candidates.gaps) {
+    const stored = storedGapState(context.store, spaceId, gap);
+    if (stored.kind === 'ready') { workable.push(gap); continue; }
+    if (stored.kind === 'waiting') nextWaitingAttemptAt = Math.min(nextWaitingAttemptAt ?? Infinity, stored.nextAttemptAt);
+    if (stored.kind === 'suppressed') {
+      // A suppress decision writes its task first; a run stopped between the two
+      // writes left the gap active under a final task, so finish the gap.
+      await suppressGap(context.store, gap, stored.task.trace.findLast((entry) => entry.state === 'suppressed')?.message ?? 'Gap was classified as not applicable.', spaceId);
+      finishedSuppressions += 1;
+      continue;
+    }
+    waiting += 1;
+  }
+  const plan = createSelfImproveRunPlan(workable, input);
   const state = createSelfImproveRunState(plan);
+  state.skippedGaps += waiting;
+  state.suppressedGaps += finishedSuppressions;
+  // When the next attempt of a gap that is waiting out its retry window is due.
+  if (nextWaitingAttemptAt !== undefined) state.nextRepairAttemptAt = nextWaitingAttemptAt;
 
   for (const plannedGap of plan.gaps) {
     // A preceding repair can close or update another planned gap.
@@ -155,25 +179,8 @@ export async function runKnowledgeSemanticSelfImprovement(
       markRunBudgetExhausted(state);
       break;
     }
-    if (input.force !== true) {
-      // Decided from what is stored, before any reading: a gap waiting out its retry
-      // window, or one whose task is final, costs no model request and no task write.
-      const nextAttemptAt = gap.metadata.nextRepairAttemptAt;
-      if (readString(gap.metadata.repairStatus) !== 'repaired' && typeof nextAttemptAt === 'number' && nextAttemptAt > Date.now()) {
-        state.skippedGaps += 1;
-        continue;
-      }
-      const stored = storedRefinementTaskForGap(context.store, spaceId, gap.id);
-      if (stored && isTerminalRefinementState(stored.state)) {
-        // A suppress decision writes its task first; a run stopped between the two
-        // writes left the gap active under a final task, so finish the gap.
-        if (stored.state === 'suppressed') {
-          await suppressGap(context.store, gap, stored.trace.findLast((entry) => entry.state === 'suppressed')?.message ?? 'Gap was classified as not applicable.', spaceId);
-          state.suppressedGaps += 1;
-        } else state.skippedGaps += 1;
-        continue;
-      }
-    }
+    // A preceding repair in this run can have started this gap's retry window.
+    if (storedGapState(context.store, spaceId, gap).kind !== 'ready') { state.skippedGaps += 1; continue; }
     state.processedGaps += 1;
     try {
       // The run's remaining time bounds every judgment reading, so a hung model
@@ -186,8 +193,19 @@ export async function runKnowledgeSemanticSelfImprovement(
       // discover that its previous repaired-fact decision cannot be revalidated.
       const classification = await classifyGap(gapContext, input.force === true, objectProfiles, context.store, readingBudget);
       classification.assertCurrent?.();
-      const task = await upsertRefinementTaskForGap(context.store, spaceId, gapContext, plan.trigger, 'detected', 'Gap was detected for semantic refinement.', {}, classification.assertCurrent);
+      let task = await upsertRefinementTaskForGap(context.store, spaceId, gapContext, plan.trigger, 'detected', 'Gap was detected for semantic refinement.', {}, classification.assertCurrent);
       state.taskIds.push(task.id);
+      const repaired = classification.action === 'skip' && (classification.status === 'repaired' || classification.status === 'already_repaired');
+      if (task.state === 'closed') {
+        if (repaired) {
+          // Repaired before repaired gaps were retired: retire it now.
+          state.closedGaps += 1;
+          await markGapRepairAttempt(context.store, gap, spaceId, { status: 'repaired', reason: classification.reason, assertCurrent: classification.assertCurrent });
+          continue;
+        }
+        // The gap was repaired once and is open again: its task starts a new attempt.
+        task = await updateRefinementTask(context.store, task, 'detected', 'Gap was observed again after its repair; a new repair attempt starts.', {}, classification.assertCurrent);
+      }
       const shouldStop = () => input.signal?.aborted === true || context.shouldStop?.() === true || lifecycleStopped(task.id);
       if (isTerminalRefinementState(task.state)) {
         // A suppress decision writes its task first. A run that stopped between
@@ -197,11 +215,8 @@ export async function runKnowledgeSemanticSelfImprovement(
           state.suppressedGaps += 1;
           continue;
         }
+        // A cancelled task is the owner's decision about this gap; it is skipped, not reported again.
         state.skippedGaps += 1;
-        // The task id belongs to the gap, so a final task cannot be reopened.
-        if (classification.action === 'repair') {
-          state.errors.push({ gapId: gap.id, error: `Gap needs repair again, but its refinement task ${task.id} is ${task.state} and final; it was not repaired.` });
-        }
         continue;
       }
       if (shouldStop()) { state.skippedGaps += 1; continue; }
@@ -212,9 +227,11 @@ export async function runKnowledgeSemanticSelfImprovement(
         continue;
       }
       if (classification.action === 'skip') {
-        if (classification.status === 'repaired' || classification.status === 'already_repaired') {
+        if (repaired) {
           state.closedGaps += 1;
           await updateRefinementTask(context.store, task, 'closed', classification.reason ?? 'Gap is already repaired.', {}, classification.assertCurrent);
+          // Retire the repaired gap so it leaves the candidate set.
+          await markGapRepairAttempt(context.store, gap, spaceId, { status: 'repaired', reason: classification.reason, assertCurrent: classification.assertCurrent });
           continue;
         }
         state.blockedGaps += 1;
@@ -274,6 +291,21 @@ export async function runKnowledgeSemanticSelfImprovement(
   }
 
   return buildSelfImproveResult(plan, state, createdGaps);
+}
+
+type StoredGapState =
+  | { readonly kind: 'ready' }
+  | { readonly kind: 'waiting'; readonly nextAttemptAt: number }
+  | { readonly kind: 'final'; readonly task: KnowledgeRefinementTaskRecord }
+  | { readonly kind: 'suppressed'; readonly task: KnowledgeRefinementTaskRecord };
+
+/** What the stored gap and its task already say: inside its retry window, final, or ready to work. */
+function storedGapState(store: KnowledgeStore, spaceId: string, gap: KnowledgeNodeRecord): StoredGapState {
+  const nextAttemptAt = gap.metadata.nextRepairAttemptAt;
+  if (readString(gap.metadata.repairStatus) !== 'repaired' && typeof nextAttemptAt === 'number' && nextAttemptAt > Date.now()) return { kind: 'waiting', nextAttemptAt };
+  const task = storedRefinementTaskForGap(store, spaceId, gap.id);
+  if (task && isTerminalRefinementState(task.state)) return task.state === 'suppressed' ? { kind: 'suppressed', task } : { kind: 'final', task };
+  return { kind: 'ready' };
 }
 
 /**

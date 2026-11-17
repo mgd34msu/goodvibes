@@ -14,8 +14,9 @@ function jsonState(value: object): Record<string, JsonValue> {
   if (!state || typeof state !== 'object' || Array.isArray(state)) throw new Held('malformed');
   return freezeSupport(state);
 }
-function booleanReading(reading: YesNoReading): AnswerQualityBoolean {
-  if (reading.outcome !== 'act' || reading.verdict === 'uncertain') throw new Held('uncertain');
+/** A settled yes/no, or undefined when the reading did not settle (which never withholds the answer by itself). */
+function booleanReading(reading: YesNoReading): AnswerQualityBoolean | undefined {
+  if (reading.outcome !== 'act' || reading.verdict === 'uncertain') return undefined;
   return { verdict: reading.verdict, probability: reading.probability, outcome: 'act' };
 }
 function snapshotInput(input: AnswerVerificationInput): AnswerVerificationInput {
@@ -95,34 +96,47 @@ export async function verifyKnowledgeAnswer(input: AnswerVerificationInput,
     check();
     const enough = booleanReading(evidenceRun.readings.enough);
     const decisions = [evidenceRun.result.decisionId, ...readings.map(({ run }) => run.result.decisionId)].filter((id): id is string => id !== undefined);
-    const read = readings.map(({ candidate, run }) => {
-      if (run.readings.fidelity.outcome !== 'act') throw new Held('uncertain');
+    // Only the fidelity reading of the answer itself can withhold it. A candidate
+    // whose fidelity does not settle is not shown; an unsettled sufficiency or
+    // completeness reading only keeps the answer from being called verified.
+    let unsettled = enough ? 0 : 1;
+    const read = readings.flatMap(({ candidate, run }) => {
       const complete = booleanReading(run.readings.complete);
-      run.recordAction(`candidate ${candidate.id}: ${run.readings.fidelity.choice}; complete=${complete.verdict}; no write yet`);
-      return { candidate, fidelity: run.readings.fidelity, complete };
+      if (!complete) unsettled += 1;
+      if (run.readings.fidelity.outcome !== 'act') {
+        unsettled += 1;
+        run.recordAction(`candidate ${candidate.id}: fidelity unsettled; not shown`);
+        return [];
+      }
+      run.recordAction(`candidate ${candidate.id}: ${run.readings.fidelity.choice}; complete=${complete?.verdict ?? 'unsettled'}; no write yet`);
+      return [{ candidate, fidelity: run.readings.fidelity, complete }];
     });
-    evidenceRun.recordAction(`evidence sufficiency=${enough.verdict}; no repair write yet`);
+    evidenceRun.recordAction(`evidence sufficiency=${enough?.verdict ?? 'unsettled'}; no repair write yet`);
     const supported = read.filter(({ fidelity }) => fidelity.choice === 'supported');
-    const complete = supported.filter((candidate) => candidate.complete.verdict === 'yes');
+    const complete = supported.filter((candidate) => candidate.complete?.verdict === 'yes');
     const eligible = complete.length ? complete : supported;
-    if (!eligible.length) return freezeSupport({ confidence: 0, quality: { status: 'unsupported', evidenceSufficient: enough, decisionIds: decisions } });
-    let selected = eligible[0]!;
+    if (!eligible.length) return freezeSupport({ confidence: 0, quality: { status: 'unsupported',
+      ...(enough ? { evidenceSufficient: enough } : {}), decisionIds: decisions, ...(unsettled ? { unsettled } : {}) } });
+    let selected = [...eligible].sort((left, right) => right.fidelity.confidence - left.fidelity.confidence)[0]!;
     if (eligible.length > 1) {
       check();
       const preference = await answerCandidatePreference.run(port, jsonState({ query: snapshot.query,
         candidates: Object.fromEntries(eligible.map(({ candidate }) => [candidate.id, candidate.text])),
       }), settings);
       check();
-      if (preference.readings.preferred.outcome !== 'act') throw new Held('uncertain');
-      selected = eligible.find(({ candidate }) => candidate.id === preference.readings.preferred.choice)!;
-      if (!selected) throw new Held('malformed');
+      // An unsettled preference keeps the candidate whose fidelity reading is strongest.
+      const preferred = preference.readings.preferred.outcome === 'act'
+        ? eligible.find(({ candidate }) => candidate.id === preference.readings.preferred.choice) : undefined;
+      if (preferred) selected = preferred;
+      else unsettled += 1;
       if (preference.result.decisionId) decisions.push(preference.result.decisionId);
       preference.recordAction(`selected verified candidate ${selected.candidate.id}; no write yet`);
     }
     return freezeSupport({ candidate: selected.candidate, confidence: Math.round(selected.fidelity.confidence * 100), quality: {
-      status: selected.complete.verdict === 'yes' && enough.verdict === 'yes' ? 'verified' : 'partial',
+      status: selected.complete?.verdict === 'yes' && enough?.verdict === 'yes' ? 'verified' : 'partial',
       fidelity: { verdict: selected.fidelity.choice, probability: selected.fidelity.confidence, outcome: selected.fidelity.outcome },
-      evidenceSufficient: enough, answerComplete: selected.complete, decisionIds: decisions,
+      ...(enough ? { evidenceSufficient: enough } : {}), ...(selected.complete ? { answerComplete: selected.complete } : {}),
+      decisionIds: decisions, ...(unsettled ? { unsettled } : {}),
     } });
   };
   try { return await Promise.race([run(), cancelled]); }

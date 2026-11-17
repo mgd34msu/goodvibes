@@ -18,17 +18,21 @@ function isNoRepairerBlock(task: KnowledgeRefinementTaskRecord): boolean {
   return task.metadata.blockedKind === NO_REPAIRER_BLOCK || task.blockedReason === NO_REPAIRER_REASON;
 }
 
+/**
+ * Settles tasks left active past the active window. The listing picks the
+ * candidates; each is decided once, from the task as stored when its write is
+ * made, because a repair that wrote the task since the listing still owns it.
+ */
 export async function recoverStaleActiveTasks(store: KnowledgeStore, spaceId: string,
   inFlight: (task: KnowledgeRefinementTaskRecord) => boolean = () => false, now: number = Date.now()): Promise<void> {
-  const staleTasks = store.listRefinementTasks(10_000, { spaceId })
-    .filter((task) => ACTIVE_REFINEMENT_STATES.has(task.state))
-    .filter((task) => now - task.updatedAt >= STALE_ACTIVE_TASK_MS)
-    .filter((task) => !inFlight(task));
+  const stale = (task: KnowledgeRefinementTaskRecord | null): task is KnowledgeRefinementTaskRecord => task !== null
+    && ACTIVE_REFINEMENT_STATES.has(task.state) && now - task.updatedAt >= STALE_ACTIVE_TASK_MS && !inFlight(task);
+  const ids = store.listRefinementTasks(10_000, { spaceId }).filter(stale).map((task) => task.id);
+  if (ids.length === 0) return;
   await store.batch(async () => {
-    for (const listed of staleTasks) {
-      // The list is a snapshot: an owner that wrote the task since is not stale.
-      const task = store.getRefinementTask(listed.id);
-      if (!task || !ACTIVE_REFINEMENT_STATES.has(task.state) || now - task.updatedAt < STALE_ACTIVE_TASK_MS || inFlight(task)) continue;
+    for (const id of ids) {
+      const task = store.getRefinementTask(id);
+      if (!stale(task)) continue;
       await upsertRecoveredTask(
         store,
         task,
@@ -40,14 +44,16 @@ export async function recoverStaleActiveTasks(store: KnowledgeStore, spaceId: st
   });
 }
 
+/** Reopens work that was blocked only because no repairer was configured; decided per task as stored at its write. */
 export async function recoverNoRepairerTasks(store: KnowledgeStore, spaceId: string): Promise<void> {
-  const tasks = store.listRefinementTasks(10_000, { spaceId })
-    .filter((task) => task.state === 'blocked')
-    .filter(isNoRepairerBlock);
-  for (const listed of tasks) {
-    await store.batch(async () => {
-      const task = store.getRefinementTask(listed.id);
-      if (!task || task.state !== 'blocked' || !isNoRepairerBlock(task)) return;
+  const blocked = (task: KnowledgeRefinementTaskRecord | null): task is KnowledgeRefinementTaskRecord => task !== null
+    && task.state === 'blocked' && isNoRepairerBlock(task);
+  const ids = store.listRefinementTasks(10_000, { spaceId }).filter(blocked).map((task) => task.id);
+  if (ids.length === 0) return;
+  await store.batch(async () => {
+    for (const id of ids) {
+      const task = store.getRefinementTask(id);
+      if (!blocked(task)) continue;
       if (task.gapId) {
         const gap = store.getNode(task.gapId);
         if (gap && getKnowledgeSpaceId(gap) === spaceId && readString(gap.metadata.repairStatus) === NO_REPAIRER_BLOCK) {
@@ -79,8 +85,8 @@ export async function recoverNoRepairerTasks(store: KnowledgeStore, spaceId: str
         { recoveredFrom: NO_REPAIRER_BLOCK },
         { repairStatus: 'open', recoveredFrom: NO_REPAIRER_BLOCK, recoveredAt: Date.now(), blockedKind: null },
       );
-    });
-  }
+    }
+  });
 }
 
 async function upsertRecoveredTask(

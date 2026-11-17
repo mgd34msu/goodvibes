@@ -1,19 +1,18 @@
 import { randomUUID } from 'node:crypto';
 import { toJson, type JsonValue } from '@goodvibes-jev/judgment';
 import { assertJudgmentInput } from '../../../gate/judgment-input.js';
-import { gapRecordField as field, snapshotGapRecord as snapshotNodeInput } from './snapshot.js';
+import { knowledgeTerms } from '../../passages.js';
 import { isActiveKnowledgeEdge } from '../../projection-utils.js';
+import { knowledgeSourceJudgmentUris } from '../../source-structural-references.js';
 import { DEFAULT_KNOWLEDGE_SPACE_ID, getKnowledgeSpaceId, isHomeAssistantKnowledgeSpace, normalizeKnowledgeSpaceId } from '../../spaces.js';
 import type { KnowledgeStore } from '../../store.js';
-import { KnowledgeRecordAdmissionHeldError } from '../../store-record-snapshot.js';
 import type { KnowledgeNodeRecord, KnowledgeSourceRecord } from '../../types.js';
-import { captureKnowledgeSourceReferences, projectKnowledgeSourceReferences } from '../../source-structural-references.js';
 import { sourceRankingContent } from '../answer-source-ranking.js';
 import { createSemanticWriteGuard } from '../primary-source-plan.js';
-import { exactReferences as references, exactReference as reference, exactIds, originalText } from './references.js';
-import { freezeSupport } from '../verification/projection.js';
-import { prepareAnswerGapReadings, snapshotAnswerGapInput } from './reader.js';
-import { ANSWER_GAP_LIMITS as LIMITS, KnowledgeAnswerGapHeldError as Held, type AnswerGapCandidate, type AnswerGapMeaning } from './types.js';
+import { readString, readStringArray } from '../utils.js';
+import { originalText } from './references.js';
+import { readAnswerGapAdmission, readAnswerGapEquivalence } from './reader.js';
+import { KnowledgeAnswerGapHeldError as Held, type AnswerGapCandidate, type AnswerGapMeaning } from './types.js';
 import { persistPreparedAnswerGap } from './write.js';
 
 export interface AnswerGapContext {
@@ -23,188 +22,144 @@ export interface AnswerGapContext {
   readonly noMatch?: boolean | undefined;
   readonly assertCurrent?: (() => void) | undefined;
 }
+
 function jsonRecord(value: object): Readonly<Record<string, JsonValue>> {
   assertJudgmentInput(value);
   const json = toJson(value);
   if (!json || typeof json !== 'object' || Array.isArray(json)) throw new Held('malformed');
-  return freezeSupport(json);
+  return json;
 }
 function subjectContent(node: KnowledgeNodeRecord): Readonly<Record<string, JsonValue>> {
-  const identity = Object.fromEntries(['manufacturer', 'brand', 'vendor', 'model', 'modelNumber', 'variant', 'entityKind', 'homeAssistant',
-    'subject', 'value', 'evidence', 'text', 'markdown', 'searchText', 'attributes', 'labels'].filter((key) => node.metadata[key] !== undefined)
-    .map((key) => [key, node.metadata[key]]));
+  const identity = Object.fromEntries(['manufacturer', 'brand', 'vendor', 'model', 'modelNumber', 'variant', 'entityKind', 'homeAssistant', 'subject']
+    .filter((key) => node.metadata[key] !== undefined).map((key) => [key, node.metadata[key]]));
   return jsonRecord({ kind: node.kind, title: node.title, summary: node.summary, aliases: node.aliases, identity });
+}
+function sourceContent(source: KnowledgeSourceRecord): Readonly<Record<string, JsonValue>> {
+  const uris = knowledgeSourceJudgmentUris(source);
+  return jsonRecord({ ...sourceRankingContent(source), uri: uris.url ?? uris.sourceUri ?? uris.canonicalUri ?? '' });
 }
 function answerGap(node: KnowledgeNodeRecord): boolean { return node.kind === 'knowledge_gap' && node.metadata.gapKind === 'answer'; }
 
-/** Capture the full structural universe before any answer/evidence request. IDs,
- * dates and lifecycle authority stay local; complete question/identity text does not.
+/** The same question in code: normalised text plus the exact subject ids. */
+export function answerGapKey(question: string, subjectIds: readonly string[]): string {
+  const text = question.normalize('NFKC').toLowerCase().replace(/[\p{P}\p{S}]+/gu, ' ').replace(/\s+/g, ' ').trim();
+  return `${text}\u0000${[...new Set(subjectIds)].sort().join('\u0000')}`;
+}
+
+/**
+ * Records a question the knowledge base could not answer as a missing-answer
+ * gap, after the answer was decided. Nothing of the space is read up front.
+ * An earlier gap with the same normalised question and subjects is the same
+ * gap (no request); otherwise the one earlier gap that shares a subject and
+ * most words is read for equivalence (at most one request). The write checks
+ * the generations of the rows it records against (the earlier gap, the linked
+ * objects, the sources), so an unrelated write elsewhere never stops it.
  */
 export function prepareAnswerGapUniverse(store: KnowledgeStore, requestedSpace: string, query: string, options: {
   readonly signal?: AbortSignal | undefined; readonly timeoutMs?: number | undefined;
 } = {}) {
   const signal = options.signal;
   const space = normalizeKnowledgeSpaceId(requestedSpace);
-  const guard = createSemanticWriteGuard(store, signal);
-  const timeoutMs = options.timeoutMs ?? LIMITS.defaultTimeoutMs;
-  const deadlineAt = timeoutMs > 0 ? Date.now() + timeoutMs : Infinity;
-  const assertCurrent = () => {
-    if (signal?.aborted) throw new Held('aborted');
-    if (Date.now() >= deadlineAt) throw new Held('budget');
-    try { guard.assertCurrent(); } catch { throw new Held('stale'); }
-  };
-  const inScope = (record: { readonly metadata: Record<string, unknown> }) => {
-    const metadata = field(record, 'metadata');
-    let recordSpace = DEFAULT_KNOWLEDGE_SPACE_ID;
-    for (const key of ['knowledgeSpaceId', 'spaceId', 'namespace']) {
-      const value = field(metadata, key);
-      if (typeof value === 'string' && value.trim()) { recordSpace = normalizeKnowledgeSpaceId(value); break; }
-    }
-    return recordSpace === space || (space === 'homeassistant' && isHomeAssistantKnowledgeSpace(recordSpace));
-  };
-  const readNodes = () => store.listNodes(Number.MAX_SAFE_INTEGER).filter(inScope).map((node) => snapshotNodeInput(node));
-  const readSources = () => store.listSources(Number.MAX_SAFE_INTEGER).filter(inScope).map((source) => snapshotNodeInput(source));
-  const nodes = readNodes(), sources = readSources();
-  guard.watch('gap-node-universe', readNodes, nodes);
-  guard.watch('gap-source-universe', readSources, sources);
-  guard.watch('gap-extraction-universe', () => store.listExtractions(Number.MAX_SAFE_INTEGER).filter(inScope).map((row) => snapshotNodeInput(row)));
-  const sourceProofs = new Map(sources.map((source) => {
-    const current = store.getSource(source.id), extraction = store.getExtractionBySourceId(source.id);
-    return [source.id, { proof: captureKnowledgeSourceReferences(store, current, extraction), extraction: snapshotNodeInput(extraction) }] as const;
-  }));
-  const sourceContent = (source: KnowledgeSourceRecord) => {
-    const captured = sourceProofs.get(source.id);
-    const structural = projectKnowledgeSourceReferences(source, captured?.extraction, captured?.proof);
-    return { ...sourceRankingContent(source), uri: source.url ?? (structural?.omitSourceUri ? undefined : source.sourceUri)
-      ?? (structural?.omitCanonicalUri ? undefined : source.canonicalUri) ?? '' };
-  };
-  const gaps = nodes.filter(answerGap), gapIds = new Set(gaps.map((node) => node.id));
-  const nodeIds = new Set(nodes.map((node) => node.id)), sourceIds = new Set(sources.map((source) => source.id));
-  const includes = (ids: ReadonlySet<string>, value: unknown) => typeof value === 'string' && ids.has(value);
-  const pertinent = (edge: ReturnType<KnowledgeStore['listEdges']>[number]) => inScope(edge)
-    || (field(edge, 'fromKind') === 'node' && includes(nodeIds, field(edge, 'fromId'))) || (field(edge, 'toKind') === 'node' && includes(nodeIds, field(edge, 'toId')))
-    || (field(edge, 'fromKind') === 'source' && includes(sourceIds, field(edge, 'fromId'))) || (field(edge, 'toKind') === 'source' && includes(sourceIds, field(edge, 'toId')));
-  const readEdges = () => store.listEdges().filter(pertinent).map((edge) => snapshotNodeInput(edge));
-  const edges = readEdges();
-  guard.watch('gap-edge-universe', readEdges, edges);
-  const readIssues = () => store.listIssues(Number.MAX_SAFE_INTEGER)
-    .filter((issue) => inScope(issue) || includes(gapIds, field(issue, 'nodeId'))).map((issue) => snapshotNodeInput(issue));
-  const issues = readIssues();
-  guard.watch('gap-issue-universe', readIssues, issues);
-  const readTasks = () => store.listRefinementTasks(Number.MAX_SAFE_INTEGER)
-    .filter((task) => field(task, 'spaceId') === space || includes(gapIds, field(task, 'gapId'))).map((task) => snapshotNodeInput(task));
-  const tasks = readTasks();
-  guard.watch('gap-lifecycle-universe', readTasks, tasks);
-  const fingerprint = randomUUID();
-  const nodeId = `sem-answer-gap-${fingerprint}`, issueId = `sem-answer-gap-issue-${fingerprint}`;
-  guard.node(nodeId); guard.watch('absent-gap-issue', () => store.getIssue(issueId));
-  guard.watch('absent-gap-slug', () => store.getNodeByKindAndSlug('knowledge_gap', `answer-gap-${fingerprint}`));
-  const subjectReferences = new Map(nodes.map((node, index) => [node.id, `subject-${index + 1}`]));
-  const sourceReferences = new Map(sources.map((source, index) => [source.id, `source-${index + 1}`]));
-  const subjectsFor = (gap: KnowledgeNodeRecord) => exactIds([
-    ...references(gap.subjectIds), ...references(gap.linkedObjectIds), reference(gap.metadata.subjectId),
-    ...references(gap.metadata.subjectIds), ...references(gap.metadata.linkedObjectIds),
-    ...issues.filter((issue) => issue.nodeId === gap.id && issue.code === 'knowledge.answer_gap').flatMap((issue) =>
-      exactIds([reference(issue.metadata.subjectId), ...references(issue.metadata.subjectIds), ...references(issue.metadata.linkedObjectIds)])),
-    ...edges.filter((edge) => isActiveKnowledgeEdge(edge) && getKnowledgeSpaceId(edge) === getKnowledgeSpaceId(gap)
-      && edge.fromKind === 'node' && edge.toKind === 'node' && edge.toId === gap.id && edge.relation === 'has_gap').map((edge) => edge.fromId),
-  ]);
-  const sourcesFor = (gap: KnowledgeNodeRecord) => exactIds([gap.sourceId, reference(gap.metadata.sourceId), ...references(gap.metadata.sourceIds),
-    ...edges.filter((edge) => isActiveKnowledgeEdge(edge) && getKnowledgeSpaceId(edge) === getKnowledgeSpaceId(gap)
-      && edge.fromKind === 'source' && edge.toKind === 'node' && edge.toId === gap.id && edge.relation === 'has_gap').map((edge) => edge.fromId)]);
-  const meaning = (question: string, subject: unknown, ids: readonly string[], provenance: readonly string[], exactSpace: string): AnswerGapMeaning => {
-    // Unknown/foreign references retain privacy preflight; they cannot acquire a
-    // local opaque alias or disappear from the subject's meaning.
-    const subjectRows = ids.map((id) => nodes.find((node) => node.id === id && getKnowledgeSpaceId(node) === exactSpace));
-    const sourceRows = provenance.map((id) => sources.find((source) => source.id === id && getKnowledgeSpaceId(source) === exactSpace));
-    assertJudgmentInput({ query: question, subject,
-      subjects: subjectRows.map((node, index) => node ? subjectContent(node) : { unresolvedReference: ids[index] }),
-      sources: sourceRows.map((source, index) => source ? sourceContent(source) : { unresolvedReference: provenance[index] }) });
-    if ((subject !== undefined && typeof subject !== 'string') || subjectRows.some((node) => !node) || sourceRows.some((source) => !source)) throw new Held('malformed');
-    return { query: question, ...(typeof subject === 'string' ? { subject } : {}),
-      subjects: subjectRows.map((node) => ({ reference: subjectReferences.get(node!.id)!, content: subjectContent(node!) })),
-      sources: sourceRows.map((source) => ({ reference: sourceReferences.get(source!.id)!, content: jsonRecord(sourceContent(source!)) })) };
-  };
-  if (!Number.isFinite(timeoutMs) || timeoutMs < 0 || timeoutMs > LIMITS.timeoutMs) throw new Held('budget');
-  assertCurrent();
+  const assertCurrent = () => { if (signal?.aborted) throw new Held('aborted'); };
   return {
     assertCurrent,
     prepare(context: AnswerGapContext) {
-      assertCurrent();
       const callerCurrent = context.assertCurrent;
-      const noMatch = context.noMatch === true;
-      const exactSpace = normalizeKnowledgeSpaceId(context.spaceId);
-      const linkedObjects = snapshotNodeInput(context.linkedObjects ?? []), selectedSources = snapshotNodeInput(context.sources ?? []);
-      for (const node of linkedObjects) {
-        guard.watch(`gap-context-node:${node.id}`, () => snapshotNodeInput(store.getNode(node.id)), node);
-      }
-      for (const source of selectedSources) {
-        guard.watch(`gap-context-source:${source.id}`, () => snapshotNodeInput(store.getSource(source.id)), source);
-        guard.extraction(source.id);
-      }
-      const noAdmission = noMatch && !linkedObjects.length && exactSpace === DEFAULT_KNOWLEDGE_SPACE_ID;
-      let reader: ReturnType<typeof prepareAnswerGapReadings> | undefined;
-      const assertContextCurrent = () => {
-        try {
-          store.assertRecordSnapshotFrame(() => {
-            assertCurrent();
-            callerCurrent?.();
-            assertCurrent();
-          });
-        } catch (error) {
-          if (error instanceof KnowledgeRecordAdmissionHeldError && error.reason === 'stale') throw new Held('stale');
-          throw error;
-        }
-      };
-      const check = () => { if (reader) reader.assertCurrent(); else assertContextCurrent(); };
+      const check = () => { assertCurrent(); callerCurrent?.(); };
       let resultPromise: ReturnType<typeof resolve> | undefined;
       async function resolve() {
         check();
+        const noMatch = context.noMatch === true;
+        const exactSpace = normalizeKnowledgeSpaceId(context.spaceId);
+        const linkedObjects = [...(context.linkedObjects ?? [])], selectedSources = [...(context.sources ?? [])];
         if (exactSpace !== space && !(space === 'homeassistant' && isHomeAssistantKnowledgeSpace(exactSpace))
           || linkedObjects.some((node) => getKnowledgeSpaceId(node) !== exactSpace || node.status !== 'active')
           || selectedSources.some((source) => getKnowledgeSpaceId(source) !== exactSpace)) throw new Held('malformed');
-        if (noAdmission) return Object.freeze({ assertCurrent: check, async persist(_reason: string): Promise<KnowledgeNodeRecord | null> { check(); return null; } });
-        const localGaps = gaps.filter((gap) => getKnowledgeSpaceId(gap) === exactSpace);
-        const candidates: AnswerGapCandidate[] = localGaps.map((gap, index) => ({ reference: `gap-${index + 1}`, title: gap.title,
-          summary: gap.summary, reason: gap.metadata.reason as string | undefined, ...meaning(gap.metadata.query === undefined ? gap.title : gap.metadata.query as string,
-            gap.metadata.subject, subjectsFor(gap), sourcesFor(gap), getKnowledgeSpaceId(gap)),
-          issues: issues.filter((issue) => issue.nodeId === gap.id && issue.code === 'knowledge.answer_gap').map((issue, issueIndex) => ({
-            reference: `issue-${issueIndex + 1}`, message: issue.message, reason: issue.metadata.reason as string | undefined,
-            ...meaning(issue.metadata.query === undefined ? gap.title : issue.metadata.query as string, issue.metadata.subject,
-              exactIds([reference(issue.metadata.subjectId), ...references(issue.metadata.subjectIds), ...references(issue.metadata.linkedObjectIds)]),
-              exactIds([issue.sourceId, reference(issue.metadata.sourceId), ...references(issue.metadata.sourceIds)]), exactSpace),
-          })),
-        }));
-        const question = meaning(query, undefined, linkedObjects.map((node) => node.id), selectedSources.map((source) => source.id), exactSpace);
-        // Complete selected universe preflight before candidate/byte bounds and ports.
-        snapshotAnswerGapInput({ question, candidates, needsSubject: false });
-        const currentSubjects = new Set(linkedObjects.map((node) => node.id));
-        const eligible = candidates.filter((_, index) => {
-          const gap = localGaps[index]!, previousSubjects = subjectsFor(gap);
-          return getKnowledgeSpaceId(gap) === exactSpace && (!currentSubjects.size || !previousSubjects.length
-            || (previousSubjects.length === currentSubjects.size && previousSubjects.every((id) => currentSubjects.has(id))));
+        const nothing = Object.freeze({ assertCurrent: check, async persist(_reason: string): Promise<KnowledgeNodeRecord | null> { check(); return null; } });
+        if (noMatch && !linkedObjects.length && exactSpace === DEFAULT_KNOWLEDGE_SPACE_ID) return nothing;
+
+        const references = new Map<string, string>();
+        let subjects = 0, sources = 0;
+        const subjectReference = (id: string) => references.get(`node:${id}`) ?? (references.set(`node:${id}`, `subject-${++subjects}`), `subject-${subjects}`);
+        const sourceReference = (id: string) => references.get(`source:${id}`) ?? (references.set(`source:${id}`, `source-${++sources}`), `source-${sources}`);
+        const meaning = (question: string, subject: unknown, subjectRows: readonly KnowledgeNodeRecord[], sourceRows: readonly KnowledgeSourceRecord[]): AnswerGapMeaning => ({
+          query: question, ...(typeof subject === 'string' ? { subject } : {}),
+          subjects: subjectRows.map((node) => ({ reference: subjectReference(node.id), content: subjectContent(node) })),
+          sources: sourceRows.map((source) => ({ reference: sourceReference(source.id), content: sourceContent(source) })),
         });
-        reader = prepareAnswerGapReadings({ question, candidates: eligible,
-          needsSubject: noMatch && !linkedObjects.length && exactSpace === 'homeassistant' },
-        { signal, deadlineAt, assertCurrent: assertContextCurrent });
-        const result = await reader.read();
-        check();
-        const selected = result?.reference ? localGaps[candidates.findIndex((candidate) => candidate.reference === result.reference)] : undefined;
-        const selectedIssues = selected ? issues.filter((issue) => issue.nodeId === selected.id && issue.code === 'knowledge.answer_gap') : [];
-        if (selectedIssues.length > 1) throw new Held('uncertain');
-        // Preserve exact IDs and the existing lifecycle fingerprint. The new
-        // UUID is only allocation, never a semantic equivalence decision.
-        const target = freezeSupport({ nodeId: selected?.id ?? nodeId, issueId: selectedIssues[0]?.id ?? issueId,
-          fingerprint: originalText(selected?.metadata.subjectFingerprint) ?? originalText(selectedIssues[0]?.metadata.subjectFingerprint) ?? fingerprint });
-        guard.node(target.nodeId); guard.watch(`gap-selected-issue:${target.issueId}`, () => store.getIssue(target.issueId));
+        const subjectIdsOf = (gap: KnowledgeNodeRecord) => [...new Set([
+          ...(gap.subjectIds ?? []), ...(gap.linkedObjectIds ?? []), readString(gap.metadata.subjectId),
+          ...readStringArray(gap.metadata.subjectIds), ...readStringArray(gap.metadata.linkedObjectIds),
+          ...store.edgesFor('node', gap.id).filter((edge) => isActiveKnowledgeEdge(edge) && edge.fromKind === 'node'
+            && edge.toKind === 'node' && edge.toId === gap.id && edge.relation === 'has_gap').map((edge) => edge.fromId),
+        ].filter((id): id is string => typeof id === 'string' && id.length > 0))];
+        const gapQuestion = (gap: KnowledgeNodeRecord) => originalText(gap.metadata.query) ?? gap.title;
+
+        const currentSubjects = linkedObjects.map((node) => node.id);
+        const key = answerGapKey(query, currentSubjects);
+        // A gap retired after its repair is history: the same question unanswered
+        // again is a new gap, with a task of its own.
+        const gaps = store.listNodesInSpace(exactSpace).filter((node) => answerGap(node) && getKnowledgeSpaceId(node) === exactSpace
+          && !(node.status !== 'active' && readString(node.metadata.repairStatus) === 'repaired'))
+          .map((gap) => ({ gap, subjectIds: subjectIdsOf(gap) }));
+        let selected = gaps.find((entry) => answerGapKey(gapQuestion(entry.gap), entry.subjectIds) === key)?.gap;
+        const decisionIds: string[] = [];
+        const question = meaning(query, undefined, linkedObjects, selectedSources);
+        if (!selected && noMatch && !linkedObjects.length && exactSpace === 'homeassistant') {
+          const admission = await readAnswerGapAdmission(question, signal);
+          check();
+          if (admission.decisionId) decisionIds.push(admission.decisionId);
+          if (!admission.yes) return nothing;
+        }
+        if (!selected) {
+          // The one earlier gap about the same subjects (or, with none, another
+          // subjectless gap) sharing the most words is the only one read.
+          const current = new Set(currentSubjects);
+          const terms = knowledgeTerms([query]);
+          const overlap = (text: string) => { const words = new Set(knowledgeTerms([text])); return terms.filter((term) => words.has(term)).length; };
+          const nearest = gaps
+            .filter((entry) => current.size ? entry.subjectIds.some((id) => current.has(id)) : entry.subjectIds.length === 0)
+            .map((entry) => ({ ...entry, score: overlap(gapQuestion(entry.gap)) }))
+            .filter((entry) => entry.score > 0)
+            .sort((left, right) => right.score - left.score || left.gap.id.localeCompare(right.gap.id))[0];
+          if (nearest) {
+            const rowsOf = (ids: readonly string[]) => ids.map((id) => store.getNode(id))
+              .filter((node): node is KnowledgeNodeRecord => Boolean(node && getKnowledgeSpaceId(node) === exactSpace));
+            const sourceRows = [...new Set([nearest.gap.sourceId, readString(nearest.gap.metadata.sourceId), ...readStringArray(nearest.gap.metadata.sourceIds)])]
+              .flatMap((id) => { const source = id ? store.getSource(id) : null; return source && getKnowledgeSpaceId(source) === exactSpace ? [source] : []; });
+            const candidate: AnswerGapCandidate = { reference: 'gap-1', title: nearest.gap.title, summary: nearest.gap.summary,
+              reason: originalText(nearest.gap.metadata.reason), ...meaning(gapQuestion(nearest.gap), nearest.gap.metadata.subject, rowsOf(nearest.subjectIds), sourceRows) };
+            const equivalence = await readAnswerGapEquivalence(question, candidate, signal);
+            check();
+            if (equivalence.decisionId) decisionIds.push(equivalence.decisionId);
+            if (equivalence.yes) selected = nearest.gap;
+          }
+        }
+        const issues = selected ? store.listIssuesInSpace(exactSpace).filter((issue) => issue.nodeId === selected!.id) : [];
+        const selectedIssue = issues.filter((issue) => issue.code === 'knowledge.answer_gap').sort((left, right) => left.id.localeCompare(right.id))[0];
+        const tasks = selected ? store.listRefinementTasks(Number.MAX_SAFE_INTEGER, { gapId: selected.id }) : [];
+        const fingerprint = originalText(selected?.metadata.subjectFingerprint) ?? originalText(selectedIssue?.metadata.subjectFingerprint) ?? randomUUID();
+        // Preserve exact IDs and the existing lifecycle fingerprint; a new UUID is only allocation.
+        const target = Object.freeze({ nodeId: selected?.id ?? `sem-answer-gap-${fingerprint}`,
+          issueId: selectedIssue?.id ?? `sem-answer-gap-issue-${fingerprint}`, fingerprint });
+        // The rows this record is written against, compared by generation at the write.
+        const guard = createSemanticWriteGuard(store, signal);
+        const capture = () => {
+          if (selected) guard.node(selected.id, selected);
+          for (const node of linkedObjects) guard.node(node.id, node);
+          for (const source of selectedSources) guard.source(source.id, source);
+        };
+        const writeCurrent = () => {
+          check();
+          try { guard.assertCurrent(); } catch { throw new Held(signal?.aborted ? 'aborted' : 'stale'); }
+        };
         return Object.freeze({ assertCurrent: check,
           async persist(reason: string): Promise<KnowledgeNodeRecord | null> {
             check(); assertJudgmentInput({ reason });
-            if (!result?.admitted) return null;
+            try { capture(); } catch { throw new Held(signal?.aborted ? 'aborted' : 'stale'); }
             return persistPreparedAnswerGap(store, { spaceId: exactSpace, query, reason, target, existing: selected,
-              issue: selectedIssues[0], issues: selected ? issues.filter((issue) => issue.nodeId === selected.id) : [],
-              tasks: selected ? tasks.filter((task) => task.gapId === selected.id) : [],
-              sources: selectedSources, linkedObjects, reading: result }, check, signal);
+              issue: selectedIssue, issues, tasks, sources: selectedSources, linkedObjects,
+              reading: { version: 2, decisionIds } }, writeCurrent, signal);
           },
         });
       }

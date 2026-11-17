@@ -9,6 +9,7 @@ import { MAX_TIMER_MS } from './self-improvement-budget.js';
 import { getKnowledgeSpaceId, isHomeAssistantKnowledgeSpace, normalizeKnowledgeSpaceId } from '../spaces.js';
 import { answerKnowledgeQuery } from './answer.js';
 import { refreshAnswerCandidateWindowAfterRepair } from './answer-candidate-window.js';
+import { isRepairedAnswerGap } from './answer-gaps.js';
 import { enrichKnowledgeSource, type EnrichKnowledgeSourceOptions } from './enrichment.js';
 import type {
   KnowledgeSemanticAnswerInput,
@@ -220,10 +221,11 @@ export class KnowledgeSemanticService {
     });
     signal?.throwIfAborted();
     const backgroundRepairLimit = Math.max(1, this.options.backgroundRepairLimit ?? 8);
+    // Unforced: gaps inside their retry window or with a final task are left out
+    // before the limit applies, so the slots go to gaps that can be worked.
     this.queueBackgroundSelfImprove({
       knowledgeSpaceId: input.knowledgeSpaceId,
       sourceIds: input.sourceIds,
-      force: true,
       reason: 'reindex',
       signal,
       limit: Math.min(Math.max(1, input.limit ?? backgroundRepairLimit), backgroundRepairLimit),
@@ -233,103 +235,85 @@ export class KnowledgeSemanticService {
     return { scanned: sources.length, enriched, skipped, failed, errors, selfImprovement };
   }
 
+  /**
+   * Answers, then repairs what the answer could not establish. A subject-scoped
+   * ask runs one foreground repair bounded by the caller's timeout (else
+   * {@link DEFAULT_FOREGROUND_ANSWER_REPAIR_MS}) and recomputes the answer only
+   * when the repair changed evidence (a linked source or a promoted fact), or
+   * when it waited for another caller's repair of the same gap that was
+   * actually running and that repair retired the gap. Every other case returns
+   * the first answer with `refinement.status: 'active'` while the repair
+   * continues in the background.
+   */
   async answer(input: KnowledgeSemanticAnswerInput): Promise<KnowledgeSemanticAnswerResult> {
     requireDecisionFeature('verified semantic knowledge answers; use local knowledge search during Classic');
     await this.store.init();
-    let answer = await answerKnowledgeQuery({
+    const answerOnce = (current: KnowledgeSemanticAnswerInput) => answerKnowledgeQuery({
       store: this.store,
       llm: this.options.llm,
       objectProfiles: this.options.objectProfiles,
-    }, input);
+    }, current);
+    let answer = await answerOnce(input);
     assertAnswerVerificationActive(input.signal);
-    if (input.autoRepairGaps === false) return answer;
-    if (this.options.gapRepairer && answer.answer.gaps.length > 0) {
-      const repairSpaceId = answerRepairSpaceId(answer);
-      const originalGapIds = answer.answer.gaps
-        .filter((gap) => readString(readRecord(gap.metadata).gapKind) === 'answer')
-        .map((gap) => gap.id);
-      const foregroundBudgetMs = foregroundAnswerRepairBudget(input, answer);
-      const foregroundTaskIds: string[] = [];
-      const foregroundStartedAt = Date.now();
-      let foregroundRepair = emptySelfImproveResult();
-      if (foregroundBudgetMs > 0) {
-        foregroundRepair = await this.repairAnswerGaps({
-          answer, signal: input.signal,
-          maxRunMs: foregroundBudgetMs,
-          limit: answer.answer.gaps.length,
-        });
-        assertAnswerVerificationActive(input.signal);
-        foregroundTaskIds.push(...foregroundRepair.taskIds);
-        if (foregroundRepair.closedGaps > 0 || foregroundRepair.linkedRepairs > 0 || (foregroundRepair.promotedFactCount ?? 0) > 0) {
-          input = await refreshAnswerCandidateWindowAfterRepair(input);
-          answer = withRefinementTaskIds(
-            await answerKnowledgeQuery({
-              store: this.store,
-              llm: this.options.llm,
-              objectProfiles: this.options.objectProfiles,
-            }, input),
-            foregroundTaskIds,
-          );
-          if (answerHasUsableEvidence(answer)) {
-            return withAnswerRefinement(answer, answerRefinementFromRepair(this.completedRepairEvidence(foregroundRepair, repairSpaceId, originalGapIds, answer), 'repaired', {
-              waitedMs: Date.now() - foregroundStartedAt,
-              answerCacheInvalidated: true,
-            }));
-          }
-        }
-        if (foregroundRepair.skippedGaps > 0 || foregroundRepair.queuedTasks > 0 || (foregroundRepair.acceptedSourceIds?.length ?? 0) > 0) {
-          const waited = await this.waitForActiveAnswerGapRepairs(
-            repairSpaceId,
-            answerGapIdsForRefinement(answer, originalGapIds),
-            foregroundBudgetMs, input.signal,
-          );
-          if (waited) {
-            input = await refreshAnswerCandidateWindowAfterRepair(input);
-            answer = withRefinementTaskIds(
-              await answerKnowledgeQuery({
-                store: this.store,
-                llm: this.options.llm,
-                objectProfiles: this.options.objectProfiles,
-              }, input),
-              foregroundTaskIds,
-            );
-            if (answerHasUsableEvidence(answer)) {
-              return withAnswerRefinement(answer, answerRefinementFromRepair(this.completedRepairEvidence(foregroundRepair, repairSpaceId, originalGapIds, answer), 'repaired', {
-                waitedMs: Date.now() - foregroundStartedAt,
-                answerCacheInvalidated: true,
-              }));
-            }
-          }
-        }
-      }
-      assertAnswerVerificationActive(input.signal);
-      const refinementGapIds = answerGapIdsForRefinement(answer, originalGapIds);
-      const refinement = await this.selfImprove({
-        knowledgeSpaceId: repairSpaceId,
-        gapIds: refinementGapIds,
-        reason: 'answer',
-        limit: Math.max(1, refinementGapIds.length),
-        deferRepair: true, signal: input.signal,
+    if (input.autoRepairGaps === false || !this.options.gapRepairer || answer.answer.gaps.length === 0) return answer;
+    const repairSpaceId = answerRepairSpaceId(answer);
+    const originalGapIds = answer.answer.gaps
+      .filter((gap) => readString(readRecord(gap.metadata).gapKind) === 'answer')
+      .map((gap) => gap.id);
+    const foregroundBudgetMs = foregroundAnswerRepairBudget(input, answer);
+    const startedAt = Date.now();
+    let foregroundRepair = emptySelfImproveResult();
+    if (foregroundBudgetMs > 0) {
+      foregroundRepair = await this.repairAnswerGaps({
+        answer, signal: input.signal,
+        maxRunMs: foregroundBudgetMs,
+        limit: answer.answer.gaps.length,
       });
       assertAnswerVerificationActive(input.signal);
-      this.runAnswerRefinementInBackground(repairSpaceId, refinementGapIds);
-      const taskIds = uniqueStrings([
-        ...foregroundTaskIds,
-        ...refinement.taskIds,
-        ...this.taskIdsForGaps(repairSpaceId, refinementGapIds),
-      ]);
-      if (taskIds.length > 0) {
-        return withAnswerRefinement(withRefinementTaskIds(answer, taskIds), answerRefinementFromRepair(
-          mergeSelfImproveResults(foregroundRepair, refinement),
-          repairAnswerStatus(answer, foregroundRepair, refinement),
-          {
-            waitedMs: Date.now() - foregroundStartedAt,
-            answerCacheInvalidated: (foregroundRepair.linkedRepairs > 0 || (foregroundRepair.promotedFactCount ?? 0) > 0),
-          },
-        ));
+      let evidenceChanged = foregroundRepair.linkedRepairs > 0 || (foregroundRepair.promotedFactCount ?? 0) > 0;
+      if (!evidenceChanged) {
+        // Only a repair of these gaps that is running right now is worth waiting for.
+        const waited = await this.waitForActiveAnswerGapRepairs(repairSpaceId, originalGapIds,
+          Math.max(0, foregroundBudgetMs - (Date.now() - startedAt)), input.signal);
+        evidenceChanged = waited && originalGapIds.some((id) => {
+          const gap = this.store.getNode(id);
+          return gap !== null && isRepairedAnswerGap(gap);
+        });
+      }
+      if (evidenceChanged) {
+        input = await refreshAnswerCandidateWindowAfterRepair(input);
+        answer = withRefinementTaskIds(await answerOnce(input), foregroundRepair.taskIds);
+        assertAnswerVerificationActive(input.signal);
+        if (answerHasUsableEvidence(answer)) {
+          return withAnswerRefinement(answer, answerRefinementFromRepair(this.completedRepairEvidence(foregroundRepair, repairSpaceId, originalGapIds, answer), 'repaired', {
+            waitedMs: Date.now() - startedAt,
+            answerCacheInvalidated: true,
+          }));
+        }
       }
     }
-    return answer;
+    // The answer stands; repair of what it could not establish goes on in the background.
+    const refinementGapIds = answerGapIdsForRefinement(answer, originalGapIds);
+    const taskIds = uniqueStrings([...foregroundRepair.taskIds, ...this.taskIdsForGaps(repairSpaceId, refinementGapIds)]);
+    // Every gap still inside the retry window of an earlier attempt: nothing runs until then.
+    const waitingUntil = this.gapsWaitingUntil(refinementGapIds);
+    if (waitingUntil === undefined) this.runAnswerRefinementInBackground(repairSpaceId, refinementGapIds);
+    const status: KnowledgeSemanticAnswerRefinement['status'] = (foregroundRepair.acceptedSourceIds?.length ?? 0) > 0 || (foregroundRepair.promotedFactCount ?? 0) > 0
+      ? 'incomplete' : waitingUntil !== undefined || this.isBackgroundWorkPaused() ? 'deferred' : 'active';
+    const refinement = answerRefinementFromRepair(foregroundRepair, status, {
+      waitedMs: Date.now() - startedAt,
+      answerCacheInvalidated: foregroundRepair.linkedRepairs > 0 || (foregroundRepair.promotedFactCount ?? 0) > 0,
+    });
+    const reason = refinement.reason ?? (waitingUntil !== undefined
+      ? `An earlier repair of this question found nothing to add; the next attempt is due at ${new Date(waitingUntil).toISOString()}.`
+      : status === 'active' ? 'Repair continues in the background; ask again for an updated answer.'
+        : status === 'deferred' ? 'Background knowledge work is paused; repair resumes when it is allowed again.' : undefined);
+    return withAnswerRefinement(withRefinementTaskIds(answer, taskIds), {
+      ...refinement,
+      refinementTaskIds: taskIds,
+      ...(reason !== undefined ? { reason } : {}),
+      ...(waitingUntil !== undefined ? { nextRepairAttemptAt: waitingUntil } : {}),
+    });
   }
 
   async repairAnswerGaps(input: {
@@ -352,6 +336,7 @@ export class KnowledgeSemanticService {
     });
   }
 
+  /** Unforced: a gap the foreground repair just attempted waits out its retry window instead of being searched again. */
   private runAnswerRefinementInBackground(spaceId: string, gapIds: readonly string[]): void {
     if (!this.options.gapRepairer || gapIds.length === 0) return;
     this.queueBackgroundSelfImprove({
@@ -360,7 +345,6 @@ export class KnowledgeSemanticService {
       reason: 'answer',
       limit: Math.max(1, gapIds.length),
       maxRunMs: 30_000,
-      force: true,
     });
   }
 
@@ -566,6 +550,20 @@ export class KnowledgeSemanticService {
       promotedFactCount: Math.max(result.promotedFactCount ?? 0, promoted.size) };
   }
 
+  /** The earliest next attempt when every named gap is inside the retry window of an earlier attempt; otherwise undefined. */
+  private gapsWaitingUntil(gapIds: readonly string[]): number | undefined {
+    if (gapIds.length === 0) return undefined;
+    let earliest = Infinity;
+    const now = Date.now();
+    for (const id of gapIds) {
+      const gap = this.store.getNode(id);
+      const next = gap?.metadata.nextRepairAttemptAt;
+      if (!gap || gap.status !== 'active' || readString(gap.metadata.repairStatus) === 'repaired' || typeof next !== 'number' || next <= now) return undefined;
+      earliest = Math.min(earliest, next);
+    }
+    return earliest;
+  }
+
   private taskIdsForGaps(spaceId: string, gapIds: readonly string[]): readonly string[] {
     const wanted = new Set(gapIds);
     if (wanted.size === 0) return [];
@@ -582,6 +580,8 @@ export class KnowledgeSemanticService {
   ): Promise<boolean> {
     if (gapIds.length === 0 || maxWaitMs <= 0) return false;
     const keys = gapIds.map((gapId) => `${spaceId}:${gapId}`);
+    // Nothing running: there is nothing to wait for.
+    if (!keys.some((key) => this.activeGapRepairs.has(key))) return false;
     const deadlineAt = Number.isFinite(maxWaitMs) ? Date.now() + maxWaitMs : Infinity;
     for (;;) {
       assertAnswerVerificationActive(signal);
@@ -642,13 +642,16 @@ function answerRepairSpaceId(answer: KnowledgeSemanticAnswerResult): string {
   return answer.spaceId;
 }
 
+/** How long a subject-scoped ask waits for its own repair when the caller set no timeout. */
+export const DEFAULT_FOREGROUND_ANSWER_REPAIR_MS = 20_000;
+
 function foregroundAnswerRepairBudget(
   input: KnowledgeSemanticAnswerInput,
   answer: KnowledgeSemanticAnswerResult,
 ): number {
   if (!answerNeedsForegroundRepair(input, answer)) return 0;
   return typeof input.timeoutMs === 'number' && Number.isFinite(input.timeoutMs) && input.timeoutMs > 0
-    ? input.timeoutMs : Infinity;
+    ? input.timeoutMs : DEFAULT_FOREGROUND_ANSWER_REPAIR_MS;
 }
 
 function answerNeedsForegroundRepair(
@@ -704,17 +707,6 @@ function withAnswerRefinement(
       refinement,
     },
   };
-}
-
-function repairAnswerStatus(
-  answer: KnowledgeSemanticAnswerResult,
-  foreground: KnowledgeSemanticSelfImproveResult,
-  queued: KnowledgeSemanticSelfImproveResult,
-): KnowledgeSemanticAnswerRefinement['status'] {
-  if (answerHasUsableEvidence(answer)) return 'repaired';
-  if ((foreground.acceptedSourceIds?.length ?? 0) > 0 || (foreground.promotedFactCount ?? 0) > 0) return 'incomplete';
-  if (queued.queuedTasks > 0 || foreground.queuedTasks > 0 || foreground.skippedGaps > 0) return 'active';
-  return 'deferred';
 }
 
 function answerRefinementFromRepair(

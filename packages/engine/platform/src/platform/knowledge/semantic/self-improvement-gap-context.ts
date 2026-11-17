@@ -91,7 +91,8 @@ export async function buildGapContext(
   ]);
   const guard = captureRepairSubjectReadSet(store, gap, [], options.signal, options.shouldStop);
   const directSources = sourceIds.map((id) => sourcesById.get(id)).filter((source): source is KnowledgeSourceRecord => Boolean(source));
-  guard.watch('subject-edges', () => store.listEdges());
+  // The edges at the gap and its sources, by window generation, not a copy of every edge.
+  guard.edges('subject-edges', [`node:${gap.id}`, ...sourceIds.map((id) => `source:${id}`)]);
   const selected = await canonicalRepairSubjectNodes({ store, spaceId, context: { gap }, evidenceSources: directSources, ...options,
     text: `${gap.title} ${gap.summary ?? ''}`,
     objectProfiles,
@@ -136,6 +137,8 @@ export async function classifyGap(
   let usefulEvidence = false;
   let assertCurrent = context.assertCurrent;
   assertCurrent?.();
+  // `force` re-reads a gap marked repaired; it never bypasses the retry window.
+  if (status !== 'repaired' && nextAttemptAt && nextAttemptAt > Date.now()) return { action: 'skip', reason: 'Gap repair retry window has not elapsed.', status: 'retry_wait', markAttempt: true, assertCurrent };
   if (!force && (status === 'repaired' || hasRepairEdge(context))) {
     const guard = createSemanticWriteGuard(store, options.signal, options.shouldStop);
     guard.watch(`gap:${context.gap.id}`, () => store.getNode(context.gap.id), context.gap);
@@ -154,7 +157,6 @@ export async function classifyGap(
   }
   const repairedWithFacts = status === 'repaired' && usefulEvidence;
   if (!force && repairedWithFacts) return { action: 'skip', reason: 'Gap already has promoted repair facts.', status: 'repaired', assertCurrent };
-  if (!force && status !== 'repaired' && nextAttemptAt && nextAttemptAt > Date.now()) return { action: 'skip', reason: 'Gap repair retry window has not elapsed.', status: 'retry_wait', markAttempt: true, assertCurrent };
   if (!force && hasRepairEdge(context) && usefulEvidence) return { action: 'skip', reason: 'Gap already has promoted repair facts.', status: 'already_repaired', assertCurrent };
   if (isDefaultUnanchoredAnswerGap(context)) {
     return { action: 'skip', reason: 'Default answer gaps without a linked subject are not automatically web-repaired.', status: 'needs_context', markAttempt: true, assertCurrent };
@@ -192,7 +194,7 @@ export async function linkRepairSources(
   signal?: AbortSignal,
 ): Promise<number> {
   const guard = createSemanticWriteGuard(store, signal, shouldStop);
-  guard.watch('repair-link-edges', () => store.listEdges());
+  guard.edges('repair-link-edges', [`node:${gap.id}`, ...sourceIds.map((id) => `source:${id}`)]);
   const sources = [...new Set(sourceIds)].flatMap(id => {
     const source = guard.source(id);
     return source && getKnowledgeSpaceId(source) === spaceId ? [source] : [];

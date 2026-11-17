@@ -1,7 +1,8 @@
 import { requireSemanticKnowledge } from '../decision-policy.js';
 import { assertAnswerVerificationActive } from './answer-verification/budget.js';
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
-import { assertJudgmentInput, JudgmentInputError } from '../../gate/judgment-input.js';
+import { assertJudgmentInput } from '../../gate/judgment-input.js';
+import type { AnswerUnsettledTally } from './answer-source-ranking.js';
 import { answerFactRerank, answerQueryIntent } from './ranking/fact-rerank.js';
 import type { KnowledgeNodeRecord } from '../types.js';
 import { readString } from './utils.js';
@@ -11,7 +12,9 @@ export class KnowledgeFactSelectionHeldError extends Error {
   constructor() { super('Knowledge fact relevance did not settle; no fact was selected.'); }
 }
 
-export async function filterFactsForQuery(query: string, facts: readonly KnowledgeNodeRecord[], signal?: AbortSignal): Promise<KnowledgeNodeRecord[]> {
+/** Facts a reading says bear on the query. A fact whose reading does not settle is left out and counted in `tally`. */
+export async function filterFactsForQuery(query: string, facts: readonly KnowledgeNodeRecord[], signal?: AbortSignal,
+  tally?: AnswerUnsettledTally): Promise<KnowledgeNodeRecord[]> {
   requireSemanticKnowledge();
   assertAnswerVerificationActive(signal);
   const byId = new Map(facts.filter((fact) => fact.status === 'active').map((fact) => [fact.id, fact]));
@@ -24,16 +27,12 @@ export async function filterFactsForQuery(query: string, facts: readonly Knowled
   } }));
   assertJudgmentInput({ query, candidates: candidates.map((candidate) => candidate.content) });
   const port = judgmentPort('engine.knowledge.answer-fact-rank');
-  const model = port.model, version = JSON.stringify({ facts });
-  const current = () => {
-    assertAnswerVerificationActive(signal);
-    if (judgmentPort('engine.knowledge.answer-fact-rank') !== port || port.model !== model || JSON.stringify({ facts }) !== version) throw new KnowledgeFactSelectionHeldError();
-  };
+  const current = () => { assertAnswerVerificationActive(signal); };
   const { ranked } = await answerFactRerank.rerank(port, query, candidates, { site: 'engine.knowledge.answer-fact-rank', beforeAttempt: current, ...(signal ? { signal } : {}) });
   current();
   for (const item of ranked) if (item.decisionId !== undefined) port.recorder?.recordAction(item.decisionId, item.reading.verdict === 'yes' && item.reading.outcome === 'act' ? 'selected: query-supporting fact' : `not selected: ${item.reading.verdict} (${item.reading.outcome})`);
   const accepted = ranked.filter((item) => item.reading.verdict === 'yes' && item.reading.outcome === 'act');
-  if (ranked.some((item) => item.reading.outcome !== 'act')) throw new KnowledgeFactSelectionHeldError();
+  if (tally) tally.unsettled += ranked.filter((item) => item.reading.outcome !== 'act').length;
   return accepted.sort((a, b) => b.probability - a.probability || a.id.localeCompare(b.id)).map((item) => byId.get(item.id)!);
 }
 

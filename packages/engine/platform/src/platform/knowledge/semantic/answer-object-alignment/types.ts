@@ -24,6 +24,8 @@ export interface AnswerObjectAlignmentPlan {
   readonly integrationIntent?: AnswerObjectBoolean | undefined;
   readonly accepted: readonly AnswerObjectReading[];
   readonly rejected: readonly AnswerObjectReading[];
+  /** Readings that did not settle (or whose request failed); their candidates are left out. */
+  readonly unsettled: number;
   readonly model?: string | undefined;
   readonly requestedModel?: string | undefined;
 }
@@ -34,5 +36,9 @@ export class KnowledgeAnswerObjectAlignmentHeldError extends Error {
     super(`Knowledge answer object alignment held (${reason}); no linked-object selection was authorized.`);
   }
 }
-export const ANSWER_OBJECT_LIMITS = Object.freeze({ candidates: Number.POSITIVE_INFINITY, selected: Number.POSITIVE_INFINITY, associations: Number.POSITIVE_INFINITY,
-  characters: Number.POSITIVE_INFINITY, concurrency: 4, defaultTimeoutMs: 0, timeoutMs: 2_147_483_647 });
+/**
+ * One answer reads at most `candidates` objects (shortlisted in code), each
+ * with at most `associations` links and text values cut at `contentChars`.
+ */
+export const ANSWER_OBJECT_LIMITS = Object.freeze({ candidates: 8, associations: 24, contentChars: 2_000,
+  concurrency: 4, defaultTimeoutMs: 0, timeoutMs: 2_147_483_647 });

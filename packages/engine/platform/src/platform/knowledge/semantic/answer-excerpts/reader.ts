@@ -1,147 +1,95 @@
-import { activateClassicFallback } from '../../../runtime/decision-policy.js';
-import { DecisionModelsDisabledError, judgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
-import { toJson, type JsonValue, type JudgmentPort } from '@goodvibes-jev/judgment';
-import { snapshotJudgmentInput } from '../../../gate/judgment-input.js';
-import { freezeSupport } from '../verification/projection.js';
-import { answerExcerptSelection } from './battery.js';
+import { assertJudgmentInput } from '../../../gate/judgment-input.js';
+import { judge } from '../../../runtime/judge.js';
+import { knowledgeTerms } from '../../passages.js';
+import { ANSWER_EXCERPT_SLOTS, answerExcerptSelection, answerExcerptState, type AnswerExcerptReadingSource } from './battery.js';
 import { answerExcerptSpans } from './spans.js';
-import { ANSWER_EXCERPT_LIMITS as LIMITS, KnowledgeAnswerExcerptHeldError as Held,
-  type AnswerExcerptInput, type AnswerExcerptSelection, type AnswerExcerptCandidate } from './types.js';
+import { ANSWER_EXCERPT_LIMITS as LIMITS, type AnswerExcerptDocument, type AnswerExcerptSpan } from './types.js';
 export * from './types.js';
 export { answerExcerptSpans } from './spans.js';
-function record(value: unknown): value is Record<string, unknown> { return value !== null && typeof value === 'object' && !Array.isArray(value); }
-function snapshotInputs(inputs: readonly AnswerExcerptInput[]): readonly AnswerExcerptInput[] {
-  // Capture once and preflight the complete selected pass before bounds or ports.
-  const snapshot = snapshotJudgmentInput(inputs);
-  if (!Array.isArray(snapshot)) throw new Held('malformed');
-  if (snapshot.length > LIMITS.inputs) throw new Held('budget');
-  const references = new Set<string>();
-  for (const input of snapshot) {
-    if (!record(input) || Object.keys(input).some((key) => !['reference', 'query', 'source', 'context', 'documents'].includes(key))
-      || typeof input.reference !== 'string' || !/^source-[1-9]\d*$/.test(input.reference) || references.has(input.reference)
-      || typeof input.query !== 'string' || !input.query.trim() || typeof input.context !== 'string'
-      || !record(input.source) || Object.keys(input.source).some((key) => !['title', 'sourceType', 'uri'].includes(key))
-      || typeof input.source.title !== 'string' || typeof input.source.sourceType !== 'string' || typeof input.source.uri !== 'string'
-      || !Array.isArray(input.documents)) throw new Held('malformed');
-    references.add(input.reference);
-    if (input.documents.length > LIMITS.documents) throw new Held('budget');
-    const documents = new Set<string>();
-    for (const document of input.documents) {
-      if (!record(document) || Object.keys(document).some((key) => !['reference', 'kind', 'text'].includes(key))
-        || typeof document.reference !== 'string' || !/^document-[1-9]\d*$/.test(document.reference) || documents.has(document.reference)
-        || !['source-summary', 'source-description', 'extraction'].includes(String(document.kind)) || typeof document.text !== 'string') throw new Held('malformed');
-      documents.add(document.reference);
-    }
-  }
-  if (JSON.stringify(snapshot).length > LIMITS.characters) throw new Held('budget');
-  return snapshot as unknown as readonly AnswerExcerptInput[];
-}
-function checkedPort(port: JudgmentPort, beforeAsk: () => void): JudgmentPort {
-  return { ...port, model: port.model, async ask(request) {
-    beforeAsk();
-    const result = { ...await port.ask(request) };
-    if (!result?.answers || typeof result.model !== 'string' || !result.model.trim()
-      || typeof result.requestedModel !== 'string' || !result.requestedModel.trim()
-      || (result.decisionId !== undefined && (typeof result.decisionId !== 'string' || !result.decisionId.trim()))) throw new Held('malformed');
-    const answers = Object.fromEntries(Object.keys(request.questions).map((name) => {
-      const answer: unknown = result.answers[name];
-      if (!record(answer) || answer.type !== 'noul' || typeof answer.noul !== 'number' || !Number.isFinite(answer.noul)
-        || answer.noul < 0 || answer.noul > 1) throw new Held('malformed');
-      return [name, { type: 'noul' as const, noul: answer.noul }];
-    })) as typeof result.answers;
-    return { ...result, answers };
-  } };
+
+export interface AnswerExcerptReading {
+  readonly spans: readonly AnswerExcerptSpan[];
+  /** `model`/`cache`: the reading chose the spans; `local`: it did not settle and the best-matching passages were kept. */
+  readonly decidedBy: 'model' | 'cache' | 'local';
+  /** Spans of the source that were not shown to the reading. */
+  readonly omitted: number;
+  readonly decisionId?: string | undefined;
 }
 
-/** Synchronous complete-pass preparation lets callers protect even later sources
- * before earlier relevance/fact readings. No provider is acquired until read().
+function termScore(text: string, terms: readonly string[]): number {
+  const lower = text.toLowerCase();
+  let total = 0;
+  for (const term of terms) if (lower.includes(term)) total += term.length >= 5 || /\d/.test(term) ? 2 : 1;
+  return total;
+}
+
+/**
+ * The spans one reading is shown: those sharing the most words with the
+ * question (and the caller's hints) first, at most `passages` of them within
+ * `requestBytes`, returned in document order. When no span shares a word the
+ * leading spans are taken. `ranked` is best first, for the local fallback.
  */
-export function prepareAnswerExcerptReadings(inputs: readonly AnswerExcerptInput[], options: {
-  readonly signal?: AbortSignal | undefined; readonly timeoutMs?: number | undefined;
-  readonly assertCurrent?: (() => void) | undefined;
-  readonly observeVerdict?: ((verdict: 'yes' | 'no') => void) | undefined;
-  readonly observeModel?: ((model: string, requestedModel: string) => void) | undefined;
-} = {}) {
-  if (options.signal?.aborted) throw new Held('aborted');
-  const snapshots = snapshotInputs(inputs);
-  const timeoutMs = options.timeoutMs;
-  if (timeoutMs !== undefined && (!Number.isFinite(timeoutMs) || timeoutMs < 0 || timeoutMs > LIMITS.timeoutMs)) throw new Held('budget');
-  const jobs: { inputIndex: number; candidate: AnswerExcerptCandidate; state: Record<string, JsonValue> }[] = [];
+export function shortlistAnswerExcerptSpans(query: string, hints: readonly unknown[], documents: readonly AnswerExcerptDocument[]): {
+  readonly shortlist: readonly AnswerExcerptSpan[]; readonly ranked: readonly AnswerExcerptSpan[]; readonly omitted: number;
+} {
+  const spans = answerExcerptSpans(documents);
+  const terms = knowledgeTerms([query, ...hints]);
+  const scored = spans.map((span, order) => ({ span, order, score: termScore(span.text, terms) }));
+  const matching = scored.filter((entry) => entry.score > 0).sort((left, right) => right.score - left.score || left.order - right.order);
+  const ranked = matching.length ? matching : scored;
+  const encoder = new TextEncoder();
+  const chosen: typeof scored = [];
   let bytes = 0;
-  for (const [inputIndex, input] of snapshots.entries()) {
-    let reference = 0;
-    const add = (candidate: AnswerExcerptCandidate) => {
-      if (jobs.length >= LIMITS.requests) throw new Held('budget');
-      const json = toJson({ ...input, candidate });
-      if (!json || typeof json !== 'object' || Array.isArray(json)) throw new Held('malformed');
-      bytes += new TextEncoder().encode(JSON.stringify({ state: json, questions: answerExcerptSelection.items })).byteLength + 1_024;
-      if (bytes > LIMITS.bytes) throw new Held('budget');
-      jobs.push({ inputIndex, candidate, state: freezeSupport(json) as Record<string, JsonValue> });
-    };
-    for (const document of input.documents) for (const span of answerExcerptSpans(document)) {
-      add({ reference: `candidate-${++reference}`, text: span.text, spans: [span] });
-    }
-    // Some extractors store a table heading, rows and footnotes in different
-    // fields. A full-field bundle retains their original associations and exact
-    // local provenance, rather than forcing a misleading isolated row.
-    const whole = input.documents.filter((document) => document.text.trim()).map((document, index) => ({
-      reference: `span-${index + 1}`, document: document.reference, start: 0, end: document.text.length, text: document.text,
-    }));
-    if (whole.length > 1) add({ reference: `candidate-${++reference}`, text: whole.map((span) => span.text).join('\n\n'), spans: whole });
+  for (const entry of ranked) {
+    if (chosen.length >= LIMITS.passages) break;
+    const size = encoder.encode(entry.span.text).byteLength;
+    if (bytes + size > LIMITS.requestBytes) continue;
+    bytes += size;
+    chosen.push(entry);
   }
-  let configured: JudgmentPort | undefined, configuredModel: string | undefined;
-  const assertCurrent = () => {
-    if (options.signal?.aborted) throw new Held('aborted');
-    options.assertCurrent?.();
-    if (configured) {
-      let current: JudgmentPort;
-      try { current = judgmentPort('engine.knowledge.answer-excerpt-selection'); } catch (error) { if (error instanceof DecisionModelsDisabledError) throw error; throw new Held('stale'); }
-      if (current !== configured || configured.model !== configuredModel) throw new Held('stale');
-    }
-  };
-  const read = async (references?: ReadonlySet<string>): Promise<readonly AnswerExcerptSelection[]> => {
-    if (references && [...references].some((reference) => !snapshots.some((input) => input.reference === reference))) throw new Held('malformed');
-    const selectedJobs = jobs.filter((job) => !references || references.has(snapshots[job.inputIndex]!.reference));
-    assertCurrent();
-    if (!selectedJobs.length) return freezeSupport(snapshots.map((input) => ({ reference: input.reference, spans: [] })));
-    const controller = new AbortController();
-    let stoppedError: unknown, stoppedOnce = false, rejectStopped: (error: unknown) => void = () => {};
-    const stopped = new Promise<never>((_resolve, reject) => { rejectStopped = reject; });
-    const stop = (error: unknown) => { if (!stoppedOnce) { stoppedOnce = true; stoppedError = error; } controller.abort(); rejectStopped(stoppedError); };
-    const abort = () => stop(new Held('aborted'));
-    options.signal?.addEventListener('abort', abort, { once: true });
-    const timer = timeoutMs === undefined || timeoutMs === 0 ? undefined : setTimeout(() => stop(new Held('budget')), timeoutMs);
-    const check = () => { if (stoppedOnce) throw stoppedError; assertCurrent(); };
-    const run = async () => {
-      check(); configured = judgmentPort('engine.knowledge.answer-excerpt-selection'); configuredModel = configured.model;
-      const port = checkedPort(configured, check);
-      let model: string | undefined, requestedModel: string | undefined, next = 0;
-      const selected: boolean[] = [];
-      await Promise.all(Array.from({ length: Math.min(LIMITS.concurrency, selectedJobs.length) }, async () => {
-        while (next < selectedJobs.length) {
-          check(); const index = next++, job = selectedJobs[index]!;
-          try {
-            const result = await answerExcerptSelection.run(port, job.state, { signal: controller.signal, site: answerExcerptSelection.name });
-            check();
-            if ((model !== undefined && result.result.model !== model) || (requestedModel !== undefined && result.result.requestedModel !== requestedModel)) throw new Held('stale');
-            model = result.result.model; requestedModel = result.result.requestedModel;
-            const reading = result.readings.excerptUseful;
-            if (reading.outcome !== 'act' || reading.verdict === 'uncertain') throw new Held('unsettled');
-            options.observeModel?.(model, requestedModel);
-            options.observeVerdict?.(reading.verdict);
-            check();
-            selected[index] = reading.verdict === 'yes';
-            result.recordAction(`settled exact excerpt ${reading.verdict}; source ranking and write authority are separate`);
-          } catch (error) { const failure = error instanceof Held || error instanceof DecisionModelsDisabledError || activateClassicFallback(error) ? error : new Held('unavailable'); stop(failure); throw failure; }
-        }
-      }));
-      check();
-      return freezeSupport(snapshots.map((input, inputIndex) => ({ reference: input.reference,
-        spans: selectedJobs.filter((job, index) => job.inputIndex === inputIndex && selected[index]).flatMap((job) => job.candidate.spans) })));
-    };
-    try { return await Promise.race([run(), stopped]); }
-    catch (error) { controller.abort(); if (error instanceof DecisionModelsDisabledError || activateClassicFallback(error)) throw error; throw error instanceof Held ? error : new Held(error instanceof JudgmentPortMissingError ? 'unconfigured' : 'unavailable'); }
-    finally { clearTimeout(timer); options.signal?.removeEventListener('abort', abort); }
-  };
-  return { read, assertCurrent };
+  return { shortlist: [...chosen].sort((left, right) => left.order - right.order).map((entry) => entry.span),
+    ranked: chosen.map((entry) => entry.span), omitted: spans.length - chosen.length };
+}
+
+/**
+ * One request reads the shortlisted spans of one source. A span the reading
+ * says yes to is kept; when no span settles (no decision model, deadline,
+ * unsure) the best-matching spans are kept instead, so a packet or a search
+ * hit still quotes the source. Never throws for an unsettled reading.
+ */
+export async function readAnswerExcerpts(input: {
+  readonly query: string;
+  readonly source: AnswerExcerptReadingSource;
+  readonly context: string;
+  readonly hints?: readonly unknown[] | undefined;
+  readonly documents: readonly AnswerExcerptDocument[];
+  readonly signal?: AbortSignal | undefined;
+}): Promise<AnswerExcerptReading> {
+  const { shortlist, ranked, omitted } = shortlistAnswerExcerptSpans(input.query, input.hints ?? [], input.documents);
+  if (shortlist.length === 0) return { spans: [], decidedBy: 'local', omitted };
+  const state = answerExcerptState({ query: input.query, source: input.source, context: input.context, passages: shortlist });
+  assertJudgmentInput(state);
+  const slots = ANSWER_EXCERPT_SLOTS.slice(0, shortlist.length);
+  const outcome = await judge({
+    site: answerExcerptSelection.name, battery: answerExcerptSelection, only: slots, state,
+    ...(input.signal ? { signal: input.signal } : {}),
+    settle: (readings): readonly number[] | null | undefined => {
+      let settled = false;
+      const kept = slots.flatMap((slot, index) => {
+        const reading = readings[slot];
+        if (reading?.outcome === 'act' && (reading.verdict === 'yes' || reading.verdict === 'no')) settled = true;
+        return reading?.outcome === 'act' && reading.verdict === 'yes' ? [index] : [];
+      });
+      return settled ? kept : undefined;
+    },
+    fallback: (): readonly number[] | null => null,
+    describe: (kept) => kept === null ? 'best-matching passages kept' : `passages: ${kept.length} of ${slots.length}`,
+  });
+  if (outcome.value === null) {
+    const local = new Set(ranked.slice(0, LIMITS.fallbackPassages));
+    return { spans: shortlist.filter((span) => local.has(span)), decidedBy: 'local', omitted };
+  }
+  const kept = new Set(outcome.value);
+  return { spans: shortlist.filter((_span, index) => kept.has(index)), decidedBy: outcome.source === 'cache' ? 'cache' : 'model', omitted,
+    ...(outcome.decisionId ? { decisionId: outcome.decisionId } : {}) };
 }

@@ -1,39 +1,49 @@
-import { freezeSupport } from '../verification/projection.js';
-import { ANSWER_EXCERPT_LIMITS as LIMITS, KnowledgeAnswerExcerptHeldError as Held,
-  type AnswerExcerptDocument, type AnswerExcerptSpan } from './types.js';
+import { ANSWER_EXCERPT_LIMITS as LIMITS, type AnswerExcerptDocument, type AnswerExcerptSpan } from './types.js';
 
-/** Mechanical paragraph boundaries only: no short-sentence floor or token windows.
- * Single newlines keep tables and label/value rows intact. Offer the adjacent
- * blocks and the whole document so subject headings and late exceptions can
- * remain in the selected original span, not just in hidden reading context.
+/**
+ * Paragraph-sized spans of the fields, with exact offsets. Blank lines end a
+ * paragraph; single newlines keep table rows and label/value lines together.
+ * A paragraph longer than `passageChars` is cut at line ends, then at the
+ * limit. A span whose text already appeared in an earlier field (the same body
+ * stored as `searchText` and as `text`) is kept once.
  */
-export function answerExcerptSpans(document: AnswerExcerptDocument): readonly AnswerExcerptSpan[] {
-  const text = document.text;
-  const blocks: { start: number; end: number }[] = [];
-  const append = (start: number, end: number) => {
-    while (start < end && /\s/u.test(text[start]!)) start++;
-    while (end > start && /\s/u.test(text[end - 1]!)) end--;
-    if (start < end) blocks.push({ start, end });
-  };
-  let start = 0;
-  for (const boundary of text.matchAll(/\r?\n[ \t]*\r?\n/g)) {
-    append(start, boundary.index); start = boundary.index + boundary[0].length;
-  }
-  append(start, text.length);
-  const spans: AnswerExcerptSpan[] = [];
+export function answerExcerptSpans(documents: readonly AnswerExcerptDocument[], maxChars = LIMITS.passageChars): AnswerExcerptSpan[] {
   const seen = new Set<string>();
-  const add = (start: number, end: number) => {
-    const key = `${start}:${end}`; if (seen.has(key)) return;
-    seen.add(key);
-    if (spans.length >= LIMITS.candidates) throw new Held('budget');
-    spans.push({ reference: `span-${spans.length + 1}`, document: document.reference, start, end, text: text.slice(start, end) });
-  };
-  for (let index = 0; index < blocks.length; index++) {
-    const block = blocks[index]!; add(block.start, block.end);
-    add(blocks[Math.max(0, index - 1)]!.start, blocks[Math.min(blocks.length - 1, index + 1)]!.end);
+  const spans: AnswerExcerptSpan[] = [];
+  for (const document of documents) {
+    const text = document.text;
+    const push = (start: number, end: number) => {
+      while (start < end && /\s/u.test(text[start]!)) start++;
+      while (end > start && /\s/u.test(text[end - 1]!)) end--;
+      if (start >= end) return;
+      const key = text.slice(start, end).replace(/\s+/g, ' ').toLowerCase();
+      if (seen.has(key)) return;
+      seen.add(key);
+      spans.push({ field: document.field, kind: document.kind, start, end, text: text.slice(start, end) });
+    };
+    const block = (start: number, end: number) => {
+      if (end - start <= maxChars) { push(start, end); return; }
+      let from = start;
+      let lineStart = start;
+      while (lineStart < end) {
+        const newline = text.indexOf('\n', lineStart);
+        const lineEnd = newline === -1 || newline >= end ? end : newline + 1;
+        if (lineEnd - from > maxChars && lineStart > from) { push(from, lineStart); from = lineStart; }
+        if (lineEnd - from > maxChars) {
+          // One line longer than the limit.
+          for (let cut = from; cut < lineEnd; cut += maxChars) push(cut, Math.min(lineEnd, cut + maxChars));
+          from = lineEnd;
+        }
+        lineStart = lineEnd;
+      }
+      if (from < end) push(from, end);
+    };
+    let start = 0;
+    for (const boundary of text.matchAll(/\r?\n[ \t]*\r?\n/g)) {
+      block(start, boundary.index);
+      start = boundary.index + boundary[0].length;
+    }
+    block(start, text.length);
   }
-  // Indentation or trailing whitespace can be meaningful (for example code).
-  // Always offer the entire original field, not merely the trimmed blocks.
-  if (blocks.length) add(0, text.length);
-  return freezeSupport(spans);
+  return spans;
 }

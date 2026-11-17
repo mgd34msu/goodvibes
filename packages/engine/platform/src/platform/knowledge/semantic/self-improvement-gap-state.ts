@@ -97,7 +97,9 @@ export async function markGapRepairAttempt(
     title: gap.title,
     summary: gap.summary,
     aliases: gap.aliases,
-    status: gap.status,
+    // A repaired gap is retired, as a suppressed one is: it leaves the
+    // candidate set, so later runs spend their slots on gaps still open.
+    status: details.status === 'repaired' ? 'stale' : gap.status,
     confidence: gap.confidence,
     sourceId: gap.sourceId,
     metadata: {

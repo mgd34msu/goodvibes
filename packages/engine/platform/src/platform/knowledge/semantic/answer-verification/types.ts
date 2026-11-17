@@ -25,6 +25,17 @@ export interface KnowledgeAnswerQuality {
   readonly decisionIds: readonly string[];
   /** Local citation provenance. Store identities are never sent to the judgment port. */
   readonly evidenceReferences?: readonly { readonly reference: string; readonly sourceId: string; readonly extractionId: string }[] | undefined;
+  /** Readings that did not settle; each left its candidate out instead of withholding the answer. */
+  readonly unsettled?: number | undefined;
+  /** Where the quoted passages of the answer's sources are (field and half-open offsets), so the answer can cite them. */
+  readonly excerpts?: readonly KnowledgeAnswerExcerpt[] | undefined;
+}
+export interface KnowledgeAnswerExcerpt {
+  readonly sourceId: string;
+  readonly extractionId?: string | undefined;
+  readonly field: string;
+  readonly start: number;
+  readonly end: number;
 }
 export interface VerifiedAnswerSelection {
   readonly candidate?: AnswerCandidate | undefined;

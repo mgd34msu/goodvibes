@@ -3,7 +3,6 @@ import { getKnowledgeSpaceId, isHomeAssistantKnowledgeSpace } from '../../spaces
 import { isGeneratedKnowledgeSource } from '../../generated-projections.js';
 import type { KnowledgeStore } from '../../store.js';
 import type { KnowledgeNodeRecord, KnowledgeSourceRecord } from '../../types.js';
-import { createSemanticWriteGuard } from '../primary-source-plan.js';
 import { freezeSupport } from '../verification/projection.js';
 import { readString, readStringArray } from '../utils.js';
 import { KnowledgeAnswerQualityHeldError as Held, type AnswerEvidenceProjection } from './types.js';
@@ -55,14 +54,17 @@ function associated(fact: KnowledgeNodeRecord, sourceId: string, store: Knowledg
       && edge.toKind === 'node' && edge.toId === fact.id && edge.relation === 'supports_fact' && edge.metadata.deleted !== true);
 }
 
-/** Exact local records stay local; only labelled extraction evidence enters model state. */
+/**
+ * Exact local records stay local; only labelled extraction evidence enters
+ * model state. An answer is a read of one snapshot: nothing here is watched or
+ * re-read, and the evidence is what the synthesis and the verification see.
+ */
 export function prepareAnswerEvidence(input: {
   readonly store: KnowledgeStore; readonly spaceId: string; readonly query: string;
   readonly sources: readonly KnowledgeSourceRecord[]; readonly facts: readonly KnowledgeNodeRecord[];
-  readonly subjects: readonly KnowledgeNodeRecord[]; readonly signal?: AbortSignal | undefined;
+  readonly subjects: readonly KnowledgeNodeRecord[];
 }) {
   for (const value of [...input.sources, ...input.facts, ...input.subjects]) assertPlainRecord(value);
-  const guard = createSemanticWriteGuard(input.store, input.signal);
   const matches = (value: KnowledgeNodeRecord | KnowledgeSourceRecord) => getKnowledgeSpaceId(value) === input.spaceId
     || (input.spaceId === 'homeassistant' && isHomeAssistantKnowledgeSpace(getKnowledgeSpaceId(value)));
   const sources = [...new Map(input.sources.filter(matches).map((source) => [source.id, source])).values()];
@@ -70,19 +72,9 @@ export function prepareAnswerEvidence(input: {
   if (sources.length > ANSWER_VERIFICATION_LIMITS.evidence) throw new Held('budget');
   const evidence: AnswerEvidenceProjection[] = [];
   const references: { readonly reference: string; readonly sourceId: string; readonly extractionId: string }[] = [];
-  for (const node of [...facts, ...subjects]) {
-    assertPlainRecord(node); guard.watch(`node:${node.id}`, () => input.store.getNode(node.id), node);
-  }
-  const sourceIds = new Set(sources.map((source) => source.id));
-  const nodeIds = new Set([...facts, ...subjects].map((node) => node.id));
-  guard.watch('answer-source-subject-edges', () => input.store.listEdges().filter((edge) =>
-    (edge.fromKind === 'source' && sourceIds.has(edge.fromId)) || (edge.toKind === 'source' && sourceIds.has(edge.toId))
-    || (edge.fromKind === 'node' && nodeIds.has(edge.fromId)) || (edge.toKind === 'node' && nodeIds.has(edge.toId))));
   for (const source of sources) {
-    assertPlainRecord(source); guard.watch(`source:${source.id}`, () => input.store.getSource(source.id), source);
     const extraction = input.store.getExtractionBySourceId(source.id);
     if (extraction) assertPlainRecord(extraction);
-    guard.watch(`extraction:${source.id}`, () => input.store.getExtractionBySourceId(source.id), extraction);
     if (isGeneratedKnowledgeSource(source) || !extraction || source.status === 'stale' || source.status === 'failed') continue;
     if (extraction.sourceId !== source.id || getKnowledgeSpaceId(extraction) !== getKnowledgeSpaceId(source)) throw new Held('malformed');
     const text = extractionText(extraction);
@@ -98,8 +90,5 @@ export function prepareAnswerEvidence(input: {
   // Full selected content, before any generation request and without clipping.
   assertJudgmentInput({ query: input.query, evidence });
   if (JSON.stringify({ query: input.query, evidence }).length > ANSWER_VERIFICATION_LIMITS.characters) throw new Held('budget');
-  guard.assertCurrent();
-  return { evidence: freezeSupport(structuredClone(evidence)), references: freezeSupport(references), guard,
-    assertCurrent() { try { guard.assertCurrent(); } catch { throw new Held(input.signal?.aborted ? 'aborted' : 'stale'); } },
-  };
+  return { evidence: freezeSupport(structuredClone(evidence)), references: freezeSupport(references) };
 }

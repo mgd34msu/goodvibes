@@ -108,9 +108,10 @@ const OPEN_REFINEMENT_TARGETS: readonly KnowledgeRefinementTaskState[] = [
 /**
  * A refinement task is re-detected on every self-improvement run, so any open
  * state (including retryable `blocked` and `failed`) may move to any state.
- * `closed`, `suppressed` and `cancelled` are decisions about this task and are
- * final: the task id is derived from the gap, so a gap whose task is final
- * is reported as not repaired instead of getting a new task.
+ * `closed` means the gap was repaired; the repaired gap is retired, and when
+ * the same gap is observed again its task moves back to `detected` for a new
+ * attempt (the task id is derived from the gap). `suppressed` and `cancelled`
+ * are decisions about the gap and are final.
  */
 export const knowledgeRefinementTaskLifecycle = defineLifecycle<KnowledgeRefinementTaskState>('knowledge refinement task', {
   detected: OPEN_REFINEMENT_TARGETS,
@@ -123,7 +124,7 @@ export const knowledgeRefinementTaskLifecycle = defineLifecycle<KnowledgeRefinem
   blocked: OPEN_REFINEMENT_TARGETS,
   needs_review: OPEN_REFINEMENT_TARGETS,
   failed: OPEN_REFINEMENT_TARGETS,
-  closed: [],
+  closed: ['detected'],
   suppressed: [],
   cancelled: [],
 });
@@ -639,6 +640,12 @@ export interface KnowledgePacket {
   readonly droppedForBudget: number;
   /** True when the token budget was a binding constraint (droppedForBudget > 0). */
   readonly budgetExhausted: boolean;
+  /**
+   * Records in scope, how many of them were read for relevance (a stated
+   * shortlist, the rest ranked out locally), and how many readings did not
+   * settle and were left out.
+   */
+  readonly candidates?: { readonly total: number; readonly considered: number; readonly unsettled: number } | undefined;
 }
 
 export interface KnowledgeItemView {

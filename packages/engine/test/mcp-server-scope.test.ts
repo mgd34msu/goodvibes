@@ -1,16 +1,15 @@
-// Proves: A call outside an MCP server's allowed paths or hosts, or to a blocked or quarantined server, is sent.
-// Red when: The registry sends a tool call its scope check refused (a path outside allowedPaths, by `..`, relative or direct, or a host outside allowedHosts), or one to a blocked server or a quarantined one the owner has not approved.
+// Proves: A call outside an MCP server's allowed paths or hosts, to a blocked or quarantined server, or to a tool the owner denied, is sent.
+// Red when: The registry sends a tool call its scope check refused (a path outside allowedPaths, by `..`, relative or direct, or a host outside allowedHosts), one to a blocked server or a quarantined one the owner has not approved, or one to a tool the owner denied with `/mcp deny`.
 /**
  * An MCP server is third-party code; the scope the owner gives it (allowed
- * paths and hosts, its trust mode, a quarantine) is his only hold on what it
+ * paths and hosts, its trust mode, a quarantine, a tool he denied) is his only hold on what it
  * is asked to do. The real registry and client, connected over stdio to a
  * stand-in MCP server that records every tool call it receives, show which
  * calls reach it.
  * The owner's approval of a quarantine lets the call through again, so the
- * refusals are the scope's and not a broken connection.
- *
- * A per-tool deny is not here: `McpPermissionManager.denyTool` has no caller
- * outside its own class, so no owner action can set one today.
+ * refusals are the scope's and not a broken connection; the tool the owner
+ * then denies (`registry.denyServerTool`, what `/mcp deny` calls) is the one
+ * that call just reached.
  */
 import { afterEach, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
@@ -45,7 +44,7 @@ process.stdin.on('data', (chunk) => {
 const cleanups: Array<() => Promise<void> | void> = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
 
-test('only calls inside the server\'s scope reach it; a blocked or unapproved quarantined server receives nothing', async () => {
+test('only calls inside the server\'s scope reach it; a blocked or unapproved quarantined server, or a tool the owner denied, receives nothing', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'gv-mcp-scope-')));
   cleanups.push(() => rmSync(root, { recursive: true, force: true }));
   const allowed = join(root, 'allowed'), record = join(root, 'received.log'), script = join(root, 'stand-in.cjs');
@@ -67,10 +66,11 @@ test('only calls inside the server\'s scope reach it; a blocked or unapproved qu
     blocked: (registry.setServerTrustMode('locked', 'blocked'), await call('locked', join(allowed, 'blocked.txt'))),
     quarantined: (registry.quarantineSchema('files', 'operator_flagged'), await call('files', join(allowed, 'quarantined.txt'))),
     approved: (registry.approveSchemaQuarantine('files', 'owner'), await call('files', join(allowed, 'approved.txt'))),
+    denied: (registry.denyServerTool('files', 'read_file'), await call('files', join(allowed, 'denied.txt'))),
   };
   const received = existsSync(record) ? readFileSync(record, 'utf8').trim().split('\n') : [];
   expect({ outcome, received }).toEqual({
-    outcome: { inside: 'sent', outside: 'refused', climbsOut: 'refused', relative: 'refused', otherHost: 'refused', blocked: 'refused', quarantined: 'refused', approved: 'sent' },
+    outcome: { inside: 'sent', outside: 'refused', climbsOut: 'refused', relative: 'refused', otherHost: 'refused', blocked: 'refused', quarantined: 'refused', approved: 'sent', denied: 'refused' },
     received: [join(allowed, 'notes.txt'), join(allowed, 'approved.txt')],
   });
 });

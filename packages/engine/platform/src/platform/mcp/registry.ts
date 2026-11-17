@@ -963,6 +963,7 @@ export class McpRegistry {
     quarantineApprovedBy?: string | undefined;
     sessionTrustMode?: McpTrustMode | undefined;
     sessionRole?: McpServerRole | undefined;
+    deniedTools?: string[] | undefined;
     configuredTrustMode: McpTrustMode;
     configuredRole: McpServerRole;
     phase: McpClientPhase;
@@ -974,9 +975,11 @@ export class McpRegistry {
       const freshnessRecord = this.freshness.getRecord(server.name);
       const config = this.serverConfigs.get(server.name);
       const session = this.sessionPolicy.get(server.name);
+      const deniedTools = [...(permissions?.toolOverrides.values() ?? [])].filter((entry) => entry.verdict === 'deny').map((entry) => entry.toolName);
       return {
         ...(session?.trustMode !== undefined ? { sessionTrustMode: session.trustMode } : {}),
         ...(session?.role !== undefined ? { sessionRole: session.role } : {}),
+        ...(deniedTools.length > 0 ? { deniedTools } : {}),
         configuredTrustMode: config?.trustMode ?? MCP_DEFAULT_TRUST_MODE,
         configuredRole: config?.role ?? 'general',
         name: server.name,
@@ -1051,6 +1054,28 @@ export class McpRegistry {
     this.permissions.setServerRole(serverName, role);
     this.sessionPolicy.set(serverName, { ...this.sessionPolicy.get(serverName), role });
     this._emitPolicyUpdate(serverName);
+  }
+
+  /**
+   * Refuse one of a server's tools for this session, whatever its trust mode
+   * and scope allow. The deny outlives reconnects and config reloads, like a
+   * session trust mode, and ends with the process, the server's removal or
+   * {@link clearServerToolDenial}. A call to the tool not yet sent is refused.
+   */
+  denyServerTool(serverName: string, toolName: string): void {
+    this.ensurePolicyOwner(serverName, `tool '${toolName}'`);
+    this.invalidatePolicyLifetime(serverName, `its tool '${toolName}' was denied`);
+    this.permissions.denyTool(serverName, toolName, 'denied by the owner for this session');
+    this._emitPolicyUpdate(serverName);
+  }
+
+  /** End this session's deny of one tool, so its trust mode and scope decide it again; false when it had none. */
+  clearServerToolDenial(serverName: string, toolName: string): boolean {
+    if (this.permissions.getServerPermissions(serverName)?.toolOverrides.get(toolName)?.verdict !== 'deny') return false;
+    this.invalidatePolicyLifetime(serverName, `its tool '${toolName}' was allowed again`);
+    this.permissions.clearToolOverride(serverName, toolName);
+    this._emitPolicyUpdate(serverName);
+    return true;
   }
 
   /**

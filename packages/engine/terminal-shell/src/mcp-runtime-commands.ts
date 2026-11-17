@@ -49,6 +49,7 @@ export function createMcpRuntimeCommands<Context extends McpCommandContext>(
     '/mcp add <name> <command|https-url> ...; options: --scope project|global, --role <role>, --trust constrained|ask-on-risk|blocked, --env KEY=VALUE (command servers), --header Name=Value (url servers), --path <path>, --host <host>';
   const MCP_TRUST_COMMAND_USAGE = '/mcp trust <server> <constrained|ask-on-risk|blocked|config>';
   const MCP_ROLE_COMMAND_USAGE = '/mcp role <server> <general|docs|filesystem|git|database|browser|automation|ops|remote|config>';
+  const MCP_DENY_COMMAND_USAGE = '/mcp deny <server> <tool> [config]';
   interface ParsedMcpAddArgs {
     readonly scope: McpConfigScope;
     readonly server: McpServerConfig;
@@ -246,7 +247,7 @@ export function createMcpRuntimeCommands<Context extends McpCommandContext>(
       secretArgs: { flags: ['--env', '--header'] },
       description: 'Manage MCP servers and their tools',
       ...(policy.hidden ? { hidden: true } : {}),
-      usage: '[servers|review|tools [<server>]|config|add|remove|reload|auth-review|repair [server]]',
+      usage: '[servers|review|tools [<server>]|config|add|remove|reload|auth-review|repair [server]|trust|role|deny <server> <tool> [config]]',
       argsHint: '[servers|review|tools|config|add|remove]',
       async handler(args, ctx) {
         const print = (message: string) => ctx.print(message);
@@ -457,6 +458,33 @@ export function createMcpRuntimeCommands<Context extends McpCommandContext>(
           }
           refuse(`Usage: ${MCP_ROLE_COMMAND_USAGE}`);
         }
+        if (subcommand === 'deny') {
+          const serverName = commandArgs[1];
+          const toolName = commandArgs[2];
+          const tail = commandArgs[3];
+          if (!serverName || !toolName || (tail !== undefined && tail !== 'config') || commandArgs.length > 4) refuse(`Usage: ${MCP_DENY_COMMAND_USAGE}`);
+          if (!knownServer(serverName, `tool ${toolName}`)) return;
+          if (!mcpApi.denyServerTool || !mcpApi.clearServerToolDenial) refuse(`MCP tool ${toolName} not changed: this runtime cannot deny a single tool.`, `Use /mcp trust ${serverName} blocked to refuse the whole server.`);
+          if (tail === 'config') {
+            let cleared: boolean;
+            try {
+              cleared = mcpApi.clearServerToolDenial(serverName, toolName);
+            } catch (error) {
+              refuse(`MCP tool ${toolName} not changed: ${summarizeError(error)}`);
+            }
+            print(cleared
+              ? `${serverName} tool ${toolName} is no longer denied; its trust mode and scope decide each call again.`
+              : `${serverName} tool ${toolName} was not denied this session; its trust mode and scope decide each call.`);
+            return;
+          }
+          try {
+            mcpApi.denyServerTool(serverName, toolName);
+          } catch (error) {
+            refuse(`MCP tool ${toolName} not denied: ${summarizeError(error)}`);
+          }
+          print(`Denied MCP tool ${toolName} on ${serverName} for this session only: every call to it is refused, whatever the server's trust mode and scope allow, until \`/mcp deny ${serverName} ${toolName} config\` or a restart.`);
+          return;
+        }
         if (subcommand === 'add') {
           let parsedAdd: ParsedMcpAddArgs;
           try {
@@ -628,7 +656,7 @@ export function createMcpRuntimeCommands<Context extends McpCommandContext>(
       const quarantine = s.schemaFreshness === 'quarantined' ? ` review reason ${s.quarantineReason ?? 'unknown'}` : '';
       const connection = formatMcpConnection(s);
       lines.push(
-        `  ${connection.label}  ${s.name}  trust=${formatMcpTrustMode(s.trustMode)}${sessionNote(s.sessionTrustMode, s.configuredTrustMode, formatMcpTrustMode)}  role=${formatMcpRole(s.role)}${sessionNote(s.sessionRole, s.configuredRole, formatMcpRole)}${freshness}${quarantine}${pathScope}${hostScope}`,
+        `  ${connection.label}  ${s.name}  trust=${formatMcpTrustMode(s.trustMode)}${sessionNote(s.sessionTrustMode, s.configuredTrustMode, formatMcpTrustMode)}  role=${formatMcpRole(s.role)}${sessionNote(s.sessionRole, s.configuredRole, formatMcpRole)}${freshness}${quarantine}${pathScope}${hostScope}${s.deniedTools?.length ? ` denied ${s.deniedTools.join(',')} (this session)` : ''}`,
         ...connection.detail,
       );
     }

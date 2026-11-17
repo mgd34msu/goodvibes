@@ -44,6 +44,8 @@ export interface McpServerSecurityRecord {
   /** A trust mode or role set for this session; it outlives reconnects and reloads until cleared or the process exits. */
   readonly sessionTrustMode?: McpTrustMode | undefined;
   readonly sessionRole?: McpServerRole | undefined;
+  /** Tools the owner denied for this session; absent when none. */
+  readonly deniedTools?: readonly string[] | undefined;
   /** The values the server's config gives, which apply again once a session value is cleared. */
   readonly configuredTrustMode?: McpTrustMode | undefined;
   readonly configuredRole?: McpServerRole | undefined;
@@ -89,6 +91,10 @@ export interface McpApi {
   setServerRole(serverName: string, role: McpServerRole): void;
   /** End this session's trust mode or role so the configured one applies; false when none was set. */
   clearServerSessionPolicy?(serverName: string, field: 'trustMode' | 'role'): boolean;
+  /** Refuse one of the server's tools for this session, whatever its trust mode and scope allow. */
+  denyServerTool?(serverName: string, toolName: string): void;
+  /** End this session's deny of one tool; false when it had none. */
+  clearServerToolDenial?(serverName: string, toolName: string): boolean;
   quarantineSchema(serverName: string, reason: QuarantineReason, detail?: string): void;
   approveSchemaQuarantine(serverName: string, operatorId: string): void;
 }
@@ -120,6 +126,10 @@ export interface McpApiRegistry {
   setServerRole(serverName: string, role: McpServerRole): void;
   /** End this session's trust mode or role so the configured one applies; false when none was set. */
   clearServerSessionPolicy?(serverName: string, field: 'trustMode' | 'role'): boolean;
+  /** Refuse one of the server's tools for this session, whatever its trust mode and scope allow. */
+  denyServerTool?(serverName: string, toolName: string): void;
+  /** End this session's deny of one tool; false when it had none. */
+  clearServerToolDenial?(serverName: string, toolName: string): boolean;
   quarantineSchema(serverName: string, reason: QuarantineReason, detail?: string): void;
   approveSchemaQuarantine(serverName: string, operatorId: string): void;
 }
@@ -170,6 +180,12 @@ export function createMcpApi(registry: McpApiRegistry): McpApi {
     },
     ...(registry.clearServerSessionPolicy
       ? { clearServerSessionPolicy: (serverName: string, field: 'trustMode' | 'role') => registry.clearServerSessionPolicy!(serverName, field) }
+      : {}),
+    ...(registry.denyServerTool
+      ? { denyServerTool: (serverName: string, toolName: string) => registry.denyServerTool!(serverName, toolName) }
+      : {}),
+    ...(registry.clearServerToolDenial
+      ? { clearServerToolDenial: (serverName: string, toolName: string) => registry.clearServerToolDenial!(serverName, toolName) }
       : {}),
     quarantineSchema(serverName, reason, detail) {
       registry.quarantineSchema(serverName, reason, detail);

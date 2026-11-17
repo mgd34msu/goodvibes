@@ -1,6 +1,7 @@
 import { createCliSecretsCommand } from '@goodvibes-jev/engine/terminal-shell/cli-secrets-command';
 import { createCliWorkspaceCommands } from '@goodvibes-jev/engine/terminal-shell/cli-workspace-commands';
 import { createCliSubscriptionView } from '@goodvibes-jev/engine/terminal-shell/cli-subscription-view';
+import { cliCommandRefusal } from '@goodvibes-jev/engine/terminal-shell/cli-output';
 import '@goodvibes-jev/engine/platform/platform/sessions';
 import 'node:fs';
 import { join } from 'node:path';
@@ -279,7 +280,7 @@ export const { handleSessions, handleTasks } = createCliWorkspaceCommands<CliCom
   verbs: (_runtime, services) => services.daemonVerbs,
   async submit(runtime, rest) {
     const prompt = rest.join(' ').trim();
-    if (!prompt) return 'Usage: goodvibes tasks submit <prompt>';
+    if (!prompt) return cliCommandRefusal(runtime.cli, 'usage', 'Usage: goodvibes tasks submit <prompt>');
     const runCli = {
       ...runtime.cli,
       command: 'run' as const,
@@ -287,6 +288,7 @@ export const { handleSessions, handleTasks } = createCliWorkspaceCommands<CliCom
       positionals: [prompt],
     };
     const code = await runNonInteractiveAgent({ ...runtime, cli: runCli });
-    return code === 0 ? '' : `Task submit failed with exit code ${code}`;
+    // The run printed its own outcome; its exit code is the command's.
+    return { output: code === 0 ? '' : `Task submit failed with exit code ${code}`, exitCode: code };
   },
 });

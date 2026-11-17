@@ -1,4 +1,4 @@
-import { yesNo, formatJsonOrText } from './cli-output.js';
+import { cliCommandDone, cliCommandRefusal, yesNo, formatJsonOrText, type CliCommandOutput } from './cli-output.js';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import {
   formatProviderModel,
@@ -97,8 +97,9 @@ export function createCliProviderViews<Runtime extends CliProviderRuntime, Servi
     if (policy.inlineReceipts) return 'Model ' + verb + ': ' + model + (!known ? '\n  warning: ' + warning : '');
     return ['Model ' + verb, '  model ' + model, ...(!known ? ['  warning ' + warning] : [])].join('\n');
   }
-  async function renderProviders(runtime: Runtime): Promise<string> {
-    return await withRuntimeServices(runtime, async (services) => {
+  async function renderProviders(runtime: Runtime): Promise<CliCommandOutput> {
+    const usage = (text: string): CliCommandOutput => cliCommandRefusal(runtime.cli, 'usage', text);
+    return await withRuntimeServices(runtime, async (services): Promise<CliCommandOutput> => {
       const [sub = 'list', ...rest] = runtime.cli.commandArgs;
       const snapshots = await listProviderRuntimeSnapshots(
         services.providerRegistry,
@@ -116,7 +117,7 @@ export function createCliProviderViews<Runtime extends CliProviderRuntime, Servi
           authRoutes,
           authRouteSummary: summarizeProviderAuthRoutes(authRoutes),
         };
-        return formatJsonOrText(runtime.cli)(
+        return cliCommandDone(formatJsonOrText(runtime.cli)(
           value,
           [
             'GoodVibes current provider',
@@ -126,11 +127,11 @@ export function createCliProviderViews<Runtime extends CliProviderRuntime, Servi
             `  via: ${value.configuredVia}`,
             `  auth routes: ${value.authRouteSummary}`,
           ].join('\n'),
-        );
+        ));
       }
       if (sub === 'use' || sub === 'set') {
         const provider = rest[0];
-        if (!provider) return `Usage: ${policy.binary(runtime)} providers use <provider> [modelRegistryKey]`;
+        if (!provider) return usage(`Usage: ${policy.binary(runtime)} providers use <provider> [modelRegistryKey]`);
         const providerModels = services.providerRegistry
           .getSelectableModels()
           .filter((model) => model.provider === provider || model.registryKey.startsWith(`${provider}:`));
@@ -142,22 +143,27 @@ export function createCliProviderViews<Runtime extends CliProviderRuntime, Servi
           // Without a model to save, an unknown provider is a typo: writing it would leave the next turn failing on a provider that does not exist.
           if (!requestedModel) {
             const known = snapshots.map((snapshot) => snapshot.providerId);
-            return `Unknown provider: ${provider}. Nothing was changed. Known providers: ${known.join(', ') || 'none'}. To save a provider that is not in the local catalog, name its model: ${policy.binary(runtime)} providers use ${provider} <modelRegistryKey>`;
+            return cliCommandRefusal(runtime.cli, 'provider_not_found',
+              `Unknown provider: ${provider}. Nothing was changed. Known providers: ${known.join(', ') || 'none'}. To save a provider that is not in the local catalog, name its model: ${policy.binary(runtime)} providers use ${provider} <modelRegistryKey>`,
+              [`${policy.binary(runtime)} providers use ${provider} <modelRegistryKey>`]);
           }
           runtime.configManager.setDynamic('provider.model', formatProviderModel(provider, requestedModel));
-          return providerReceipt(provider, requestedModel, false);
+          return cliCommandDone(providerReceipt(provider, requestedModel, false));
         }
         runtime.configManager.setDynamic('provider.model', selected.registryKey);
-        return providerReceipt(selected.provider, selected.registryKey, true);
+        return cliCommandDone(providerReceipt(selected.provider, selected.registryKey, true));
       }
       if (sub === 'inspect' || sub === 'show') {
         const provider = rest[0];
-        if (!provider) return `Usage: ${policy.binary(runtime)} providers inspect <provider>`;
+        if (!provider) return usage(`Usage: ${policy.binary(runtime)} providers inspect <provider>`);
         const snapshot = snapshots.find((candidate) => candidate.providerId === provider);
-        if (!snapshot) return `No provider found${policy.inlineReceipts ? ': ' : ' '}${provider}`;
+        if (!snapshot) {
+          return cliCommandRefusal(runtime.cli, 'provider_not_found', `No provider found${policy.inlineReceipts ? ': ' : ' '}${provider}`,
+            [`${policy.binary(runtime)} providers list`]);
+        }
         const setup = await classifyProviderSetup(snapshot, { site: policy.surface + '.providers.inspect.setup' });
         const authRoutes = snapshot.runtime.auth?.routes ?? [];
-        return formatJsonOrText(runtime.cli)(
+        return cliCommandDone(formatJsonOrText(runtime.cli)(
           {
             ...snapshot,
             setup,
@@ -175,10 +181,10 @@ export function createCliProviderViews<Runtime extends CliProviderRuntime, Servi
             ...authRoutes.map((route) => `    ${formatProviderAuthRoute(route)}`),
             `  detail: ${snapshot.runtime.auth?.detail ?? snapshot.runtime.notes?.join('; ') ?? ''}`,
           ].join('\n'),
-        );
+        ));
       }
       if (sub !== 'list')
-        return `Usage: ${policy.binary(runtime)} providers [list|current|inspect <provider>|use <provider> [modelRegistryKey]]`;
+        return usage(`Usage: ${policy.binary(runtime)} providers [list|current|inspect <provider>|use <provider> [modelRegistryKey]]`);
       const value = await Promise.all(
         snapshots.map(async (snapshot) => ({
           ...(await classifyProviderSetup(snapshot, { site: policy.surface + '.providers.list.setup' })),
@@ -193,7 +199,7 @@ export function createCliProviderViews<Runtime extends CliProviderRuntime, Servi
           authRouteSummary: summarizeProviderAuthRoutes(snapshot.runtime.auth?.routes),
         })),
       );
-      return formatJsonOrText(runtime.cli)(
+      return cliCommandDone(formatJsonOrText(runtime.cli)(
         value,
         [
           'GoodVibes providers',
@@ -201,12 +207,13 @@ export function createCliProviderViews<Runtime extends CliProviderRuntime, Servi
             `  ${provider.current ? '*' : ' '} ${provider.provider.padEnd(18)} setup${policy.inlineReceipts ? '=' : ' '}${provider.setupClass} configured${policy.inlineReceipts ? '=' : ' '}${yesNo(provider.configured)} via${policy.inlineReceipts ? '=' : ' '}${provider.configuredVia ?? 'n/a'} models${policy.inlineReceipts ? '=' : ' '}${provider.models} routes${policy.inlineReceipts ? '=' : ' '}${provider.authRouteSummary} ${provider.detail ?? ''}`.trimEnd(),
           ),
         ].join('\n'),
-      );
+      ));
     });
   }
 
-  async function renderModels(runtime: Runtime): Promise<string> {
-    return await withRuntimeServices(runtime, async (services) => {
+  async function renderModels(runtime: Runtime): Promise<CliCommandOutput> {
+    const usage = (text: string): CliCommandOutput => cliCommandRefusal(runtime.cli, 'usage', text);
+    return await withRuntimeServices(runtime, async (services): Promise<CliCommandOutput> => {
       const [subOrFilter, ...rest] = runtime.cli.commandArgs;
       const current = services.providerRegistry.getCurrentModel().registryKey;
       const providerSnapshots = await listProviderRuntimeSnapshots(
@@ -238,7 +245,7 @@ export function createCliProviderViews<Runtime extends CliProviderRuntime, Servi
           providerConfigured: providerSnapshot?.runtime.auth?.configured ?? true,
           setup,
         };
-        return formatJsonOrText(runtime.cli)(
+        return cliCommandDone(formatJsonOrText(runtime.cli)(
           value,
           [
             'GoodVibes current model',
@@ -248,63 +255,69 @@ export function createCliProviderViews<Runtime extends CliProviderRuntime, Servi
             `  provider configured: ${yesNo(value.providerConfigured)}`,
             `  context: ${value.contextWindowKnown ? value.contextWindow.toLocaleString() : 'unknown'}`,
           ].join('\n'),
-        );
+        ));
       }
       if (subOrFilter === 'use' || subOrFilter === 'set') {
         const modelKey = rest[0];
-        if (!modelKey) return `Usage: ${policy.binary(runtime)} models use <registryKey>`;
+        if (!modelKey) return usage(`Usage: ${policy.binary(runtime)} models use <registryKey>`);
         const model = services.providerRegistry
           .getSelectableModels()
           .find((candidate) => candidate.registryKey === modelKey || candidate.id === modelKey);
         if (!model) {
           const provider = explicitProviderOfRegistryKey(modelKey);
           if (!provider) {
-            return `Unknown model: ${modelKey}. Nothing was changed. Name the provider to save a model that is not in the local catalog: ${policy.binary(runtime)} models use <provider>:${modelKey}`;
+            return cliCommandRefusal(runtime.cli, 'model_not_found',
+              `Unknown model: ${modelKey}. Nothing was changed. Name the provider to save a model that is not in the local catalog: ${policy.binary(runtime)} models use <provider>:${modelKey}`,
+              [`${policy.binary(runtime)} models use <provider>:${modelKey}`]);
           }
           runtime.configManager.setDynamic('provider.model', formatProviderModel(provider, modelKey));
           await services.favoritesStore.recordUsage(modelKey);
-          return modelReceipt('selected', modelKey, false, provider);
+          return cliCommandDone(modelReceipt('selected', modelKey, false, provider));
         }
         runtime.configManager.setDynamic('provider.model', model.registryKey);
         await services.favoritesStore.recordUsage(model.registryKey);
-        return modelReceipt('selected', model.registryKey, true);
+        return cliCommandDone(modelReceipt('selected', model.registryKey, true));
       }
       if (subOrFilter === 'pin' || subOrFilter === 'unpin') {
         const modelKey = rest[0];
-        if (!modelKey) return `Usage: ${policy.binary(runtime)} models ${subOrFilter} <registryKey>`;
+        if (!modelKey) return usage(`Usage: ${policy.binary(runtime)} models ${subOrFilter} <registryKey>`);
         if (subOrFilter === 'pin') {
           const known = services.providerRegistry
             .getSelectableModels()
             .some((candidate) => candidate.registryKey === modelKey);
-          if (!known) return `Unknown model: ${modelKey}. Nothing was pinned. Use a registry key from \`${policy.binary(runtime)} models\`.`;
+          if (!known) {
+            return cliCommandRefusal(runtime.cli, 'model_not_found',
+              `Unknown model: ${modelKey}. Nothing was pinned. Use a registry key from \`${policy.binary(runtime)} models\`.`,
+              [`${policy.binary(runtime)} models`]);
+          }
           await services.favoritesStore.pinModel(modelKey);
         } else await services.favoritesStore.unpinModel(modelKey);
-        return modelReceipt(subOrFilter === 'pin' ? 'pinned' : 'unpinned', modelKey, true);
+        return cliCommandDone(modelReceipt(subOrFilter === 'pin' ? 'pinned' : 'unpinned', modelKey, true));
       }
       if (subOrFilter === 'pinned') {
         const pinned = await services.favoritesStore.getPinned();
-        return formatJsonOrText(runtime.cli)(
+        return cliCommandDone(formatJsonOrText(runtime.cli)(
           { pinned },
           [`GoodVibes pinned models (${pinned.length})`, ...pinned.map((model) => `  ${model}`)].join('\n'),
-        );
+        ));
       }
       if (subOrFilter === 'recent') {
         const recent = await services.favoritesStore.getRecentModels(25);
-        return formatJsonOrText(runtime.cli)(
+        return cliCommandDone(formatJsonOrText(runtime.cli)(
           { recent },
           [`GoodVibes recent models (${recent.length})`, ...recent.map((model) => `  ${model}`)].join('\n'),
-        );
+        ));
       }
       if (policy.syntheticCatalog && (subOrFilter === 'chain' || subOrFilter === 'chains')) {
         // List synthetic model fallback ladders, backend composition for each synthetic model.
         const canonicalModels = services.providerRegistry.getSyntheticCanonicalModels();
         if (canonicalModels.length === 0) {
-          return formatJsonOrText(runtime.cli)([], 'No synthetic models found in the current catalog.');
+          return cliCommandDone(formatJsonOrText(runtime.cli)([], 'No synthetic models found in the current catalog.'));
         }
         const filterKey = rest[0]?.toLowerCase();
         const filtered = filterKey ? canonicalModels.filter((m) => m.id.toLowerCase().includes(filterKey)) : canonicalModels;
         const value = buildSyntheticChainEntries(filtered);
-        return formatJsonOrText(runtime.cli)(value, formatSyntheticChainText(value, filterKey));
+        return cliCommandDone(formatJsonOrText(runtime.cli)(value, formatSyntheticChainText(value, filterKey)));
       }
       const filter = subOrFilter === 'list' ? rest[0]?.toLowerCase() : subOrFilter?.toLowerCase();
       const matching = services.providerRegistry
@@ -338,7 +351,7 @@ export function createCliProviderViews<Runtime extends CliProviderRuntime, Servi
           };
         }),
       );
-      return formatJsonOrText(runtime.cli)(
+      return cliCommandDone(formatJsonOrText(runtime.cli)(
         value,
         [
           `GoodVibes models${filter ? ` (${filter})` : ''}`,
@@ -350,7 +363,7 @@ export function createCliProviderViews<Runtime extends CliProviderRuntime, Servi
             return `  ${model.current ? '*' : ' '} ${model.registryKey.padEnd(42)} setup${policy.inlineReceipts ? '=' : ' '}${model.setupClass} ${policy.inlineReceipts ? 'ctx=' : 'context '}${model.contextWindowKnown ? model.contextWindow.toLocaleString() : 'unknown'}${synthLabel} ${model.displayName}`;
           }),
         ].join('\n'),
-      );
+      ));
     });
   }
   return { renderProviders, renderModels };

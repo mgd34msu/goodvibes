@@ -37,13 +37,36 @@ export function renderCliCommandResult(
   };
 }
 
-/** Legacy text-command status mapping, with product-specific prefixes supplied at construction. Used only by handlers that still return text; a handler that returns a `CommandResult` goes through `renderCliCommandResult`. */
-export function commandTextExitCode(output: string, usagePrefixes: readonly string[], failurePrefixes: readonly string[]): number {
-  if (usagePrefixes.some((prefix) => output.startsWith(prefix))) return 2;
-  if (failurePrefixes.some((prefix) => output.startsWith(prefix))) return 1;
-  if (['No stored ', 'No pending ', 'No model ', 'No provider ', 'No auth ', 'No subscription ', 'Unknown ', 'Ambiguous ', 'Not stored', 'Session not found'].some((prefix) => output.startsWith(prefix)))
-    return 1;
-  return output === 'Bundle has no config object to import.' ? 1 : 0;
+/** What a CLI command printed and the exit code its outcome decided (docs/exit-codes.md). */
+export interface CliCommandOutput {
+  readonly output: string;
+  readonly exitCode: number;
+}
+
+/** The kind of a refusal caused by the command line itself; it exits 2. */
+export const CLI_USAGE_REFUSAL_KIND = 'usage';
+
+/** The command did what it says: exit 0. */
+export function cliCommandDone(output: string): CliCommandOutput {
+  return { output, exitCode: 0 };
+}
+
+/**
+ * A refusal, decided where the command knows it: the sentence at a terminal,
+ * `{ ok: false, kind, error, next? }` under `--output json`, so a script that
+ * asked for JSON gets JSON. Kind `usage` exits 2, any other kind exits 1.
+ */
+export function cliCommandRefusal(
+  cli: { readonly flags: { readonly outputFormat?: string | undefined } },
+  kind: string,
+  error: string,
+  next?: readonly string[],
+): CliCommandOutput {
+  const json = cli.flags.outputFormat === 'json';
+  return {
+    output: json ? JSON.stringify({ ok: false, kind, error, ...(next && next.length > 0 ? { next } : {}) }, null, 2) : error,
+    exitCode: kind === CLI_USAGE_REFUSAL_KIND ? 2 : 1,
+  };
 }
 
 export function commandJsonOrText(

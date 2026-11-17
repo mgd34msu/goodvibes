@@ -46,7 +46,6 @@ import {
   urlHostForBindHost,
   probeTcp,
   readAuthPaths,
-  exitCodeForText,
   readOptionValues,
   commandValues,
   readPassword,
@@ -198,14 +197,14 @@ export async function handleGoodVibesCliCommand(runtime: CliCommandRuntime): Pro
         return { handled: true, exitCode: result.exitCode };
       }
       case 'providers': {
-        const output = await renderProviders(runtime);
-        console.log(output);
-        return { handled: true, exitCode: exitCodeForText(output) };
+        const result = await renderProviders(runtime);
+        console.log(result.output);
+        return { handled: true, exitCode: result.exitCode };
       }
       case 'models': {
-        const output = await renderModels(runtime);
-        console.log(output);
-        return { handled: true, exitCode: exitCodeForText(output) };
+        const result = await renderModels(runtime);
+        console.log(result.output);
+        return { handled: true, exitCode: result.exitCode };
       }
       case 'auth': {
         const result = await renderAuth(runtime);
@@ -213,9 +212,9 @@ export async function handleGoodVibesCliCommand(runtime: CliCommandRuntime): Pro
         return { handled: true, exitCode: result.exitCode };
       }
       case 'subscription': {
-        const output = await renderSubscriptions(runtime);
-        console.log(output);
-        return { handled: true, exitCode: exitCodeForText(output) };
+        const result = await renderSubscriptions(runtime);
+        console.log(result.output);
+        return { handled: true, exitCode: result.exitCode };
       }
       case 'secrets': {
         const result = await runSecrets(runtime);
@@ -223,15 +222,15 @@ export async function handleGoodVibesCliCommand(runtime: CliCommandRuntime): Pro
         return { handled: true, exitCode: result.exitCode };
       }
       case 'sessions': {
-        const output = await handleSessions(runtime);
-        if (output === null) return { handled: false, exitCode: 0 };
-        console.log(output);
-        return { handled: true, exitCode: exitCodeForText(output) };
+        const result = await handleSessions(runtime);
+        if (result === null) return { handled: false, exitCode: 0 };
+        console.log(result.output);
+        return { handled: true, exitCode: result.exitCode };
       }
       case 'tasks': {
-        const output = await handleTasks(runtime);
-        if (output) console.log(output);
-        return { handled: true, exitCode: exitCodeForText(output) };
+        const result = await handleTasks(runtime);
+        if (result.output) console.log(result.output);
+        return { handled: true, exitCode: result.exitCode };
       }
       case 'surfaces': {
         const result = await handleSurfacesCommand(runtime);

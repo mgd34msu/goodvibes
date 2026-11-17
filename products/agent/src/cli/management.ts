@@ -1,5 +1,4 @@
-import { commandTextExitCode } from '@goodvibes-jev/engine/terminal-shell/cli-output';
-import { yesNo, formatJsonOrText } from '@goodvibes-jev/engine/terminal-shell/cli-output';
+import { cliCommandDone, cliCommandRefusal, formatJsonOrText, type CliCommandOutput } from '@goodvibes-jev/engine/terminal-shell/cli-output';
 export { yesNo, formatJsonOrText } from '@goodvibes-jev/engine/terminal-shell/cli-output';
 import { createCliProviderViews } from '@goodvibes-jev/engine/terminal-shell/cli-provider-views';
 import { openBrowser } from '@goodvibes-jev/engine/terminal-shell/cli-environment';
@@ -33,7 +32,7 @@ import { formatProviderAuthRoute } from './provider-auth-routes.ts';
 import './provider-classification.ts';
 import { handleBundleCommand } from './bundle-command.ts';
 import { handleImportCommand } from './import-command.ts';
-import { handleSecrets, handleSessions, handleTasks, renderPairing, renderSubscriptions, taskSubmitRefusal } from './management-commands.ts';
+import { handleSessions, handleTasks, renderPairing, renderSubscriptions, runSecrets, taskSubmitRefusal } from './management-commands.ts';
 import {
   handleAgentKnowledgeCommand,
   handleAgentKnowledgeShortcutCommand,
@@ -67,10 +66,6 @@ export interface CliCommandRuntime {
 interface CliCommandResult {
   readonly handled: boolean;
   readonly exitCode: number;
-}
-
-function exitCodeForText(output: string): number {
-  return commandTextExitCode(output, ['Usage:', 'Invalid ', 'Unsupported'], ['Session not found', 'Unknown task', 'Task submit failed ']);
 }
 
 export function getNestedValue(source: unknown, key: string): unknown {
@@ -124,7 +119,7 @@ export async function runNonInteractiveAgent(runtime: CliCommandRuntime): Promis
   return runNativeHeadlessCommand(runtime);
 }
 
-async function renderAuth(runtime: CliCommandRuntime): Promise<string> {
+async function renderAuth(runtime: CliCommandRuntime): Promise<CliCommandOutput> {
   const [sub = 'status'] = runtime.cli.commandArgs;
   const blocked = new Set([
     'add-user',
@@ -138,14 +133,18 @@ async function renderAuth(runtime: CliCommandRuntime): Promise<string> {
     'clear-bootstrap',
   ]);
   if (blocked.has(sub)) {
-    return [
-      'Unsupported: connected-host auth user/session administration is outside GoodVibes Agent.',
-      'GoodVibes Agent does not create, delete, rotate, revoke, or clear connected-host users, sessions, or bootstrap credentials.',
-      'Use the owning GoodVibes host for auth administration.',
-    ].join('\n');
+    // A verb this binary does not take is a command-line error: exit 2, as for any usage refusal.
+    return {
+      ...cliCommandRefusal(runtime.cli, 'unsupported_in_agent', [
+        'Unsupported: connected-host auth user/session administration is outside GoodVibes Agent.',
+        'GoodVibes Agent does not create, delete, rotate, revoke, or clear connected-host users, sessions, or bootstrap credentials.',
+        'Use the owning GoodVibes host for auth administration.',
+      ].join('\n'), ['Use the owning GoodVibes host for auth administration.']),
+      exitCode: 2,
+    };
   }
   if (sub !== 'status' && sub !== 'review' && sub !== 'list' && sub !== 'users' && sub !== 'sessions') {
-    return 'Usage: goodvibes-agent auth [status|review|users|sessions]';
+    return cliCommandRefusal(runtime.cli, 'usage', 'Usage: goodvibes-agent auth [status|review|users|sessions]');
   }
   const paths = readAuthPaths(runtime);
   const value = {
@@ -159,7 +158,7 @@ async function renderAuth(runtime: CliCommandRuntime): Promise<string> {
     permissionMode: runtime.configManager.get('permissions.mode'),
   };
   if (sub === 'users' || sub === 'sessions') {
-    return formatJsonOrText(runtime.cli)(
+    return cliCommandDone(formatJsonOrText(runtime.cli)(
       value,
       [
         `GoodVibes Agent auth ${sub}`,
@@ -169,9 +168,9 @@ async function renderAuth(runtime: CliCommandRuntime): Promise<string> {
         `  ${sub} managed outside Agent`,
         '  Agent does not enumerate or mutate connected-host users/sessions from the local CLI.',
       ].join('\n'),
-    );
+    ));
   }
-  return formatJsonOrText(runtime.cli)(
+  return cliCommandDone(formatJsonOrText(runtime.cli)(
     value,
     [
       'GoodVibes Agent auth',
@@ -184,7 +183,7 @@ async function renderAuth(runtime: CliCommandRuntime): Promise<string> {
       '  next goodvibes-agent providers',
       '  next goodvibes-agent subscription providers',
     ].join('\n'),
-  );
+  ));
 }
 
 export async function handleGoodVibesCliCommand(runtime: CliCommandRuntime): Promise<CliCommandResult> {
@@ -197,19 +196,19 @@ export async function handleGoodVibesCliCommand(runtime: CliCommandRuntime): Pro
       case 'run':
         return { handled: true, exitCode: await runNonInteractiveAgent(runtime) };
       case 'providers': {
-        const output = await renderProviders(runtime);
-        console.log(output);
-        return { handled: true, exitCode: exitCodeForText(output) };
+        const result = await renderProviders(runtime);
+        console.log(result.output);
+        return { handled: true, exitCode: result.exitCode };
       }
       case 'models': {
-        const output = await renderModels(runtime);
-        console.log(output);
-        return { handled: true, exitCode: exitCodeForText(output) };
+        const result = await renderModels(runtime);
+        console.log(result.output);
+        return { handled: true, exitCode: result.exitCode };
       }
       case 'auth': {
-        const output = await renderAuth(runtime);
-        console.log(output);
-        return { handled: true, exitCode: exitCodeForText(output) };
+        const result = await renderAuth(runtime);
+        console.log(result.output);
+        return { handled: true, exitCode: result.exitCode };
       }
       case 'compat': {
         const result = await handleCompatCommand(runtime);
@@ -301,20 +300,20 @@ export async function handleGoodVibesCliCommand(runtime: CliCommandRuntime): Pro
         return { handled: true, exitCode: result.exitCode };
       }
       case 'subscription': {
-        const output = await renderSubscriptions(runtime);
-        console.log(output);
-        return { handled: true, exitCode: exitCodeForText(output) };
+        const result = await renderSubscriptions(runtime);
+        console.log(result.output);
+        return { handled: true, exitCode: result.exitCode };
       }
       case 'secrets': {
-        const output = await handleSecrets(runtime);
-        console.log(output);
-        return { handled: true, exitCode: exitCodeForText(output) };
+        const result = await runSecrets(runtime);
+        console.log(result.output);
+        return { handled: true, exitCode: result.exitCode };
       }
       case 'sessions': {
-        const output = await handleSessions(runtime);
-        if (output === null) return { handled: false, exitCode: 0 };
-        console.log(output);
-        return { handled: true, exitCode: exitCodeForText(output) };
+        const result = await handleSessions(runtime);
+        if (result === null) return { handled: false, exitCode: 0 };
+        console.log(result.output);
+        return { handled: true, exitCode: result.exitCode };
       }
       case 'tasks': {
         // Submitting is refused here, where that is known: the Agent's task workflow belongs to the host.
@@ -323,9 +322,9 @@ export async function handleGoodVibesCliCommand(runtime: CliCommandRuntime): Pro
           console.log(runtime.cli.flags.outputFormat === 'json' ? JSON.stringify(refusal, null, 2) : refusal.text);
           return { handled: true, exitCode: 2 };
         }
-        const output = await handleTasks(runtime);
-        if (output) console.log(output);
-        return { handled: true, exitCode: exitCodeForText(output) };
+        const result = await handleTasks(runtime);
+        if (result.output) console.log(result.output);
+        return { handled: true, exitCode: result.exitCode };
       }
       case 'pair': {
         const result = await renderPairing(runtime);

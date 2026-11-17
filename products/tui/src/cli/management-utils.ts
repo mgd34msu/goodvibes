@@ -1,4 +1,3 @@
-import { commandTextExitCode } from '@goodvibes-jev/engine/terminal-shell/cli-output';
 import { yesNo, formatJsonOrText } from '@goodvibes-jev/engine/terminal-shell/cli-output';
 export { yesNo, formatJsonOrText } from '@goodvibes-jev/engine/terminal-shell/cli-output';
 import { getLocalNetworkIp } from '@goodvibes-jev/engine/terminal-shell/cli-environment';
@@ -19,6 +18,8 @@ export {
   isPresentConfigValue,
 } from '@goodvibes-jev/engine/terminal-shell/cli-arguments';
 import { runNativeHeadlessCommand } from './native-headless-command.ts';
+import { createDaemonConfigClient } from '@goodvibes-jev/engine/platform/platform/runtime/client';
+import { createDaemonVerbCaller } from '../runtime/client/operator-endpoint.ts';
 /**
  * management-utils.ts, shared CLI utility functions.
  *
@@ -54,10 +55,6 @@ import type { RuntimeEndpointId } from '@goodvibes-jev/engine/terminal-shell';
 import type { CliCommandRuntime } from '@goodvibes-jev/engine/terminal-shell';
 import '../utils/browser.ts';
 
-export function exitCodeForText(output: string): number {
-  return commandTextExitCode(output, ['Usage:', 'Invalid '], ['Session not found:', 'Unknown task:', 'Task submit failed ']);
-}
-
 export function readPassword(args: readonly string[]): string | null {
   const explicit = readOptionValue(args, '--password');
   if (explicit !== undefined) return explicit;
@@ -82,6 +79,32 @@ function connectHostForBindHost(host: string): string {
 export function urlHostForBindHost(host: string): string {
   if (host === '0.0.0.0' || host === '::') return getLocalNetworkIp();
   return host || '127.0.0.1';
+}
+
+/**
+ * Runs a one-shot command's settings writes the way the terminal makes them:
+ * while the daemon is reachable a daemon-owned setting is sent to it (the one
+ * writer of its file); with none reachable it is written to the daemon's file
+ * for it to read when it starts. Returns what the command returned and the
+ * settings the daemon refused, each already put back in this process's view.
+ */
+export async function withDaemonSettingsRoute<T>(
+  runtime: CliCommandRuntime,
+  run: () => T | Promise<T>,
+): Promise<{ readonly result: T; readonly refused: readonly { readonly key: string; readonly error: unknown }[] }> {
+  const config = runtime.configManager;
+  const daemonConfig = createDaemonConfigClient(createDaemonVerbCaller({ configManager: config, homeDirectory: runtime.homeDirectory }));
+  const detach = config.attachDaemonRoute({
+    reachable: () => daemonConfig.reachable(),
+    write: (key, value) => daemonConfig.set(key, value),
+    ...(daemonConfig.reset ? { reset: (key: string) => daemonConfig.reset!(key) } : {}),
+  });
+  try {
+    const result = await run();
+    return { result, refused: await config.settleDaemonWrites() };
+  } finally {
+    detach();
+  }
 }
 
 export function enableServicePosture(config: ConfigManager): void {

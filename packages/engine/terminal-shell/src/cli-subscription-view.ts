@@ -1,4 +1,4 @@
-import { yesNo, formatJsonOrText } from './cli-output.js';
+import { cliCommandDone, cliCommandRefusal, yesNo, formatJsonOrText, type CliCommandOutput } from './cli-output.js';
 import {
   getSubscriptionProviderConfig,
   listAvailableSubscriptionProviders,
@@ -67,14 +67,17 @@ export function createCliSubscriptionView<Runtime extends SubscriptionRuntime, S
           field('tokenType', record.tokenType),
           field('expiresAt', record.expiresAt ? policy.time(record.expiresAt) : 'n/a'),
         ].join('\n');
-  async function renderSubscriptions(runtime: Runtime): Promise<string> {
-    return await withRuntimeServices(runtime, async (services) => {
+  async function renderSubscriptions(runtime: Runtime): Promise<CliCommandOutput> {
+    const usage = (text: string): CliCommandOutput => cliCommandRefusal(runtime.cli, 'usage', text);
+    const noProvider = (provider: string): CliCommandOutput => cliCommandRefusal(runtime.cli, 'subscription_provider_not_found',
+      `No subscription provider found${separator}${provider}`, [`${policy.binary(runtime)} subscription providers`]);
+    return await withRuntimeServices(runtime, async (services): Promise<CliCommandOutput> => {
       const [sub = 'list', ...rest] = runtime.cli.commandArgs;
       const subscriptions = services.subscriptionManager.list();
       const pending = services.subscriptionManager.listPending();
       const available = listAvailableSubscriptionProviders(services.serviceRegistry.getAll());
       if (sub === 'providers') {
-        return formatJsonOrText(runtime.cli)(
+        return cliCommandDone(formatJsonOrText(runtime.cli)(
           available,
           [
             'GoodVibes subscription providers',
@@ -84,14 +87,15 @@ export function createCliSubscriptionView<Runtime extends SubscriptionRuntime, S
                 : `  ${provider.provider}  origin ${provider.source}  redirect ${provider.oauth.redirectUri}`,
             ),
           ].join('\n'),
-        );
+        ));
       }
       if (sub === 'inspect' || sub === 'show') {
         const provider = rest[0];
-        if (!provider) return `Usage: ${policy.binary(runtime)} subscription inspect <provider>`;
+        if (!provider) return usage(`Usage: ${policy.binary(runtime)} subscription inspect <provider>`);
         const resolved = getSubscriptionProviderConfig(provider, services.serviceRegistry.get(provider));
         if (!resolved && !services.subscriptionManager.get(provider) && !services.subscriptionManager.getPending(provider)) {
-          return `No stored or available subscription provider named ${provider}.`;
+          return cliCommandRefusal(runtime.cli, 'subscription_provider_not_found', `No stored or available subscription provider named ${provider}.`,
+            [`${policy.binary(runtime)} subscription providers`]);
         }
         const inspection = await inspectProviderAuth(provider, {
           serviceRegistry: services.serviceRegistry,
@@ -99,7 +103,7 @@ export function createCliSubscriptionView<Runtime extends SubscriptionRuntime, S
           secretsManager: services.secretsManager,
         });
         const stored = services.subscriptionManager.get(provider);
-        return formatJsonOrText(runtime.cli)(
+        return cliCommandDone(formatJsonOrText(runtime.cli)(
           { provider, resolved, inspection, stored },
           [
             `GoodVibes subscription ${provider}`,
@@ -120,17 +124,17 @@ export function createCliSubscriptionView<Runtime extends SubscriptionRuntime, S
             ...inspection.issues.map((issue) => field('issue', String(issue))),
             ...inspection.nextActions.map((action) => field('next', String(action))),
           ].join('\n'),
-        );
+        ));
       }
       if ((sub === 'login' && rest[1]?.toLowerCase() !== 'finish') || sub === 'start') {
         const provider = rest[0];
         const mode = sub === 'start' ? 'start' : rest[1]?.toLowerCase();
-        if (!provider || mode !== 'start') return `Usage: ${policy.binary(runtime)} subscription login <provider> start [--open]`;
+        if (!provider || mode !== 'start') return usage(`Usage: ${policy.binary(runtime)} subscription login <provider> start [--open]`);
         const resolved = getSubscriptionProviderConfig(provider, services.serviceRegistry.get(provider));
-        if (!resolved) return `No subscription provider found${separator}${provider}`;
+        if (!resolved) return noProvider(provider);
         const started = await services.subscriptionManager.beginOAuthLogin(provider, oauthForSurface(resolved.oauth));
         const openResult = runtime.cli.flags.open || hasCommandFlag(rest, '--open') ? openBrowser(started.authorizationUrl) : null;
-        return [
+        return cliCommandDone([
           `Subscription OAuth started${separator}${provider}`,
           field('source', policy.source(resolved.source)),
           field('state', String(started.pending.state)),
@@ -140,38 +144,44 @@ export function createCliSubscriptionView<Runtime extends SubscriptionRuntime, S
           `  next${separator}${policy.binary(runtime)} subscription login ${provider} finish <code-or-url>`,
           policy.inline ? '  authorizationUrl:' : '  authorization URL',
           `  ${started.authorizationUrl}`,
-        ].join('\n');
+        ].join('\n'));
       }
       if (sub === 'finish' || (sub === 'login' && rest[1]?.toLowerCase() === 'finish')) {
         const provider = sub === 'finish' ? rest[0] : rest[0];
         const codeInput = sub === 'finish' ? rest[1] : rest[2];
-        if (!provider || !codeInput) return `Usage: ${policy.binary(runtime)} subscription login <provider> finish <code-or-url>`;
+        if (!provider || !codeInput) return usage(`Usage: ${policy.binary(runtime)} subscription login <provider> finish <code-or-url>`);
         const resolved = getSubscriptionProviderConfig(provider, services.serviceRegistry.get(provider));
-        if (!resolved) return `No subscription provider found: ${provider}`;
+        if (!resolved) return noProvider(provider);
         const authorization = readAuthorizationInput(codeInput, services.subscriptionManager.getPending(provider)?.state);
-        if (!authorization.ok) return authorization.reason;
+        if (!authorization.ok) {
+          return cliCommandRefusal(runtime.cli, 'authorization_not_accepted', authorization.reason,
+            [`${policy.binary(runtime)} subscription login ${provider} start`]);
+        }
         const code = authorization.code;
         const record = await services.subscriptionManager.completeOAuthLogin(provider, oauthForSurface(resolved.oauth), code);
-        return storedReceipt(provider, record);
+        return cliCommandDone(storedReceipt(provider, record));
       }
       if (sub === 'refresh') {
         const provider = rest[0];
-        if (!provider) return `Usage: ${policy.binary(runtime)} subscription refresh <provider>`;
+        if (!provider) return usage(`Usage: ${policy.binary(runtime)} subscription refresh <provider>`);
         const resolved = getSubscriptionProviderConfig(provider, services.serviceRegistry.get(provider));
-        if (!resolved) return `No subscription provider found: ${provider}`;
+        if (!resolved) return noProvider(provider);
         const record = await services.subscriptionManager.refreshOAuthToken(provider, resolved.oauth);
-        return policy.inline
+        return cliCommandDone(policy.inline
           ? `Subscription refreshed: ${provider} expires=${record.expiresAt ? policy.time(record.expiresAt) : 'n/a'}`
-          : ['Subscription refreshed ' + provider, field('expiresAt', record.expiresAt ? policy.time(record.expiresAt) : 'n/a')].join('\n');
+          : ['Subscription refreshed ' + provider, field('expiresAt', record.expiresAt ? policy.time(record.expiresAt) : 'n/a')].join('\n'));
       }
       if (sub === 'logout' || sub === 'remove') {
         const provider = rest[0];
-        if (!provider) return `Usage: ${policy.binary(runtime)} subscription logout <provider>`;
+        if (!provider) return usage(`Usage: ${policy.binary(runtime)} subscription logout <provider>`);
         const removed = services.subscriptionManager.logout(provider);
-        return removed ? `Subscription removed${separator}${provider}` : `No stored subscription session existed for ${provider}.`;
+        return removed
+          ? cliCommandDone(`Subscription removed${separator}${provider}`)
+          : cliCommandRefusal(runtime.cli, 'subscription_not_stored', `No stored subscription session existed for ${provider}.`,
+            [`${policy.binary(runtime)} subscription list`]);
       }
       if (sub !== 'list' && sub !== 'status' && sub !== 'review') {
-        return `Usage: ${policy.binary(runtime)} subscription [list|providers|inspect <provider>|login <provider> start|finish <code-or-url>|refresh <provider>|logout <provider>]`;
+        return usage(`Usage: ${policy.binary(runtime)} subscription [list|providers|inspect <provider>|login <provider> start|finish <code-or-url>|refresh <provider>|logout <provider>]`);
       }
       const value = {
         subscriptions: subscriptions.map((sub) => ({
@@ -182,7 +192,7 @@ export function createCliSubscriptionView<Runtime extends SubscriptionRuntime, S
         })),
         pending: pending.map((sub) => ({ provider: sub.provider, createdAt: sub.createdAt })),
       };
-      return formatJsonOrText(runtime.cli)(
+      return cliCommandDone(formatJsonOrText(runtime.cli)(
         value,
         [
           'GoodVibes subscriptions',
@@ -194,7 +204,7 @@ export function createCliSubscriptionView<Runtime extends SubscriptionRuntime, S
           pending.length === 0 ? field('pending', 'none') : '  pending' + (policy.inline ? ':' : ''),
           ...pending.map((sub) => `    ${sub.provider} created${policy.inline ? '=' : ' '}${policy.time(sub.createdAt)}`),
         ].join('\n'),
-      );
+      ));
     });
   }
   return { renderSubscriptions };

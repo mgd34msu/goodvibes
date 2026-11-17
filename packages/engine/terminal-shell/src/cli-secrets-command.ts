@@ -6,7 +6,7 @@ import {
   type SecretsManager,
   type SecretScope,
 } from '@goodvibes-jev/engine/platform/platform/config';
-import { formatJsonOrText, yesNo } from './cli-output.js';
+import { cliCommandDone, cliCommandRefusal, formatJsonOrText, yesNo, type CliCommandOutput } from './cli-output.js';
 const SECRET_WRITE_FLAGS: ReadonlySet<string> = new Set(['--user', '--project', '--secure', '--plaintext', '--stdin']);
 const SECRET_DELETE_FLAGS: ReadonlySet<string> = new Set(['--user', '--project', '--secure', '--plaintext']);
 
@@ -18,14 +18,9 @@ async function readProcessStdin(): Promise<string> {
 }
 
 /** What the command printed and the exit code its outcome decided. */
-export interface CliSecretsResult {
-  readonly output: string;
-  readonly exitCode: number;
-}
+export type CliSecretsResult = CliCommandOutput;
 
-const ok = (output: string): CliSecretsResult => ({ output, exitCode: 0 });
-const refused = (output: string): CliSecretsResult => ({ output, exitCode: 1 });
-const usageError = (output: string): CliSecretsResult => ({ output, exitCode: 2 });
+const ok = cliCommandDone;
 
 interface CliSecretRuntime {
   readonly cli: { readonly commandArgs: readonly string[]; readonly flags: { readonly outputFormat?: string | undefined } };
@@ -44,6 +39,8 @@ export function createCliSecretsCommand<Runtime extends CliSecretRuntime>(policy
     `Usage: ${policy.binary(runtime)} secrets [list|providers|test <ref>|set <KEY> <value>|link <KEY> <ref>|delete <KEY>]`;
 
   async function runSecrets(runtime: Runtime): Promise<CliSecretsResult> {
+    const refused = (kind: string, text: string): CliSecretsResult => cliCommandRefusal(runtime.cli, kind, text);
+    const usageError = (text: string): CliSecretsResult => cliCommandRefusal(runtime.cli, 'usage', text);
     const secrets = policy.createSecrets(runtime);
     const [sub = 'list', ...rest] = runtime.cli.commandArgs;
     if (sub === 'providers') {
@@ -66,26 +63,25 @@ export function createCliSecretsCommand<Runtime extends CliSecretRuntime>(policy
       const resolved = await resolveSecretRef(ref, { resolveLocalSecret: (key) => secrets.get(key) });
       const value = { ref: describeSecretRef(ref), resolved: Boolean(resolved.value) };
       // A ref that does not resolve is a failed test, in text and in JSON alike.
-      const report = value.resolved ? ok : refused;
-      return report(formatJsonOrText(runtime.cli)(
+      return { ...ok(formatJsonOrText(runtime.cli)(
         value,
         policy.inline
           ? `[secrets] ${value.ref}: ${value.resolved ? 'resolved <redacted>' : 'missing'}`
           : ['GoodVibes secret test', '  ref ' + value.ref, '  result ' + (value.resolved ? 'resolved <redacted>' : 'missing')].join('\n'),
-      ));
+      )), exitCode: value.resolved ? 0 : 1 };
     }
     if (sub === 'set' || sub === 'link') {
       const flags = new Set(rest.filter((arg) => arg.startsWith('--')));
       const setUsage = `Usage: ${policy.binary(runtime)} secrets ${sub} <KEY> <value> [--user|--project] [--secure|--plaintext] (or <KEY> --stdin to read the value from standard input)`;
       const unknownFlags = [...flags].filter((flag) => !SECRET_WRITE_FLAGS.has(flag));
       if (unknownFlags.length > 0) {
-        return refused(`Not stored: unknown option ${unknownFlags.join(', ')}. A value that starts with -- or contains spaces must be quoted as one argument, or read with --stdin. ${setUsage}`);
+        return refused('unknown_option', `Not stored: unknown option ${unknownFlags.join(', ')}. A value that starts with -- or contains spaces must be quoted as one argument, or read with --stdin. ${setUsage}`);
       }
       const positionals = rest.filter((arg) => !arg.startsWith('--'));
       const [key, ...valueParts] = positionals;
       // The value is exactly one argument: joining several would store a different secret than the one typed.
       if (valueParts.length > 1) {
-        return refused(`Not stored: ${valueParts.length} values were given for ${key}. Quote the value as one argument, or read it with --stdin. ${setUsage}`);
+        return refused('too_many_values', `Not stored: ${valueParts.length} values were given for ${key}. Quote the value as one argument, or read it with --stdin. ${setUsage}`);
       }
       const value = flags.has('--stdin') ? (valueParts.length === 0 ? await (policy.readStdin ?? readProcessStdin)() : '') : (valueParts[0] ?? '');
       if (!key || !value) return usageError(setUsage);
@@ -112,16 +108,16 @@ export function createCliSecretsCommand<Runtime extends CliSecretRuntime>(policy
       const flags = new Set(rest.filter((arg) => arg.startsWith('--')));
       // A mistyped scope flag would otherwise widen the delete to every scope and medium.
       const unknownFlags = [...flags].filter((flag) => !SECRET_DELETE_FLAGS.has(flag));
-      if (unknownFlags.length > 0) return refused(`Nothing deleted: unknown option ${unknownFlags.join(', ')}. ${deleteUsage}`);
+      if (unknownFlags.length > 0) return refused('unknown_option', `Nothing deleted: unknown option ${unknownFlags.join(', ')}. ${deleteUsage}`);
       const positionals = rest.filter((arg) => !arg.startsWith('--'));
       const [key] = positionals;
       if (!key) return usageError(deleteUsage);
-      if (positionals.length > 1) return refused(`Nothing deleted: ${positionals.length} keys were given; delete one key at a time. ${deleteUsage}`);
+      if (positionals.length > 1) return refused('too_many_keys', `Nothing deleted: ${positionals.length} keys were given; delete one key at a time. ${deleteUsage}`);
       const removed = await secrets.deleteWithReceipt(key, {
         scope: policy.deleteScope(key, flags.has('--user') ? 'user' : flags.has('--project') ? 'project' : undefined),
         medium: flags.has('--secure') ? 'secure' : flags.has('--plaintext') ? 'plaintext' : undefined,
       });
-      if (removed.length === 0) return refused(`No stored secret named ${key}${flags.size > 0 ? ` in the ${[...flags].map((flag) => flag.slice(2)).join(' ')} store` : ''}. Nothing was deleted; \`${policy.binary(runtime)} secrets list\` shows the stored keys.`);
+      if (removed.length === 0) return refused('secret_not_stored', `No stored secret named ${key}${flags.size > 0 ? ` in the ${[...flags].map((flag) => flag.slice(2)).join(' ')} store` : ''}. Nothing was deleted; \`${policy.binary(runtime)} secrets list\` shows the stored keys.`);
       const stores = removed.map((entry) => `${entry.scope}/${entry.medium}`);
       return ok(policy.inline
         ? `[secrets] Deleted: ${key} (removed from ${stores.join(', ')})`
@@ -148,9 +144,5 @@ export function createCliSecretsCommand<Runtime extends CliSecretRuntime>(policy
       ].join('\n'),
     ));
   }
-  /** The printed text alone, for a caller that has not moved to `runSecrets` yet. */
-  async function handleSecrets(runtime: Runtime): Promise<string> {
-    return (await runSecrets(runtime)).output;
-  }
-  return { runSecrets, handleSecrets };
+  return { runSecrets };
 }

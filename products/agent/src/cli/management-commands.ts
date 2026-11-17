@@ -66,7 +66,7 @@ export const { renderSubscriptions } = createCliSubscriptionView<CliCommandRunti
   time: (timestamp) => appendTemporalLabel(new Date(timestamp).toISOString(), timestamp),
 });
 
-export const { handleSecrets } = createCliSecretsCommand<CliCommandRuntime>({
+export const { runSecrets } = createCliSecretsCommand<CliCommandRuntime>({
   createSecrets: (runtime) => createRuntimeSecretsManager({
     projectRoot: runtime.workingDirectory, globalHome: runtime.homeDirectory, surfaceRoot: GOODVIBES_AGENT_SURFACE_ROOT,
     configManager: runtime.configManager, daemonHome: resolveGoodVibesDaemonHome(runtime.homeDirectory),
@@ -90,7 +90,8 @@ export const { handleSessions, handleTasks } = createCliWorkspaceCommands<CliCom
   time: (timestamp) => appendTemporalLabel(new Date(timestamp).toISOString(), timestamp),
   allowSubmit: false,
   verbs: (runtime) => createAgentDaemonVerbCaller({ configManager: runtime.configManager, homeDirectory: runtime.homeDirectory, invokeTimeoutMs: 15_000 }),
-  async submit(_runtime, _rest) {
-    return taskSubmitRefusal().text;
+  async submit(runtime, _rest) {
+    const refusal = taskSubmitRefusal();
+    return { output: runtime.cli.flags.outputFormat === 'json' ? JSON.stringify(refusal, null, 2) : refusal.text, exitCode: 2 };
   },
 });

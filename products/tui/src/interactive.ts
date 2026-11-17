@@ -922,6 +922,8 @@ async function main(prepared: PreparedShellCliRuntime) {
     provider: runtime.provider,
     toolCount,
     lastSessionId: readLastSessionPointer({ surface: ctx.services.surface }) ?? undefined,
+    // The palette key as bound (the person's keybindings.json included), for the splash hint.
+    commandPaletteKey: ctx.services.keybindingsManager.getComboLabel('command-palette'),
   };
 
   const renderFrame = () => {

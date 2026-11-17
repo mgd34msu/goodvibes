@@ -433,7 +433,10 @@ export class ConversationManager {
     for (let i = this.messages.length - 1; i >= 0; i--) {
       const msg = this.messages[i];
       if (msg?.role === 'user' && !isVerificationRuntimeMessage(this, i)) {
-        return typeof msg.content === 'string' ? msg.content : null;
+        if (typeof msg.content === 'string') return msg.content;
+        // A message with attachments: its text is the text parts, in order.
+        const text = msg.content.flatMap((part) => (part.type === 'text' ? [part.text] : [])).join('\n');
+        return text || null;
       }
     }
     return null;

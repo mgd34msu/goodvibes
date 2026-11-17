@@ -38,6 +38,8 @@ export interface AgentToolRegistryDeps {
   readonly homeDirectory: string;
   /** The runtime session id, read fresh on every call. */
   readonly resolveSessionId: () => string;
+  /** The owner's message for the current turn, read live; a `profile` person lookup is checked against it. */
+  readonly currentOwnerMessage?: () => string | null;
 }
 
 export interface AgentToolRegistry {
@@ -146,6 +148,7 @@ export function composeAgentToolRegistry(deps: AgentToolRegistryDeps): AgentTool
     gatewayMethods: services.gatewayMethods,
     // The Agent's own calls: a write it makes for the owner presents its delegated credential.
     remote: connectedHostFamilyRemote({ configManager, homeDirectory: services.shellPaths.homeDirectory, actor: 'agent' }),
+    ...(deps.currentOwnerMessage ? { currentOwnerMessage: deps.currentOwnerMessage } : {}),
     shellPaths: services.shellPaths,
     artifactStore: services.artifactStore,
     notificationConfig: configManager,

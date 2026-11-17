@@ -328,7 +328,7 @@ export function createAgentHostedTurn(deps: AgentHostedTurnDeps): HostedSurfaceT
     // admission and the Agent's settings routing. This registry has no harness,
     // so goodvibes_context stays the platform's, declared as a read, as here.
     decorateWorkerRegistry: (registry) => decorateAgentWorkerRegistry(registry),
-    registerTools({ registry, workspaceRoot, sessionId, floor, daemonRequests, providerRegistry }) {
+    registerTools({ registry, workspaceRoot, sessionId, floor, daemonRequests, providerRegistry, ownerTurnText }) {
       // The daemon keeps one project work plan, for its own project; a session in
       // another workspace has no plan of its own here and is told so on a call.
       const ownProject = resolve(deps.workPlan.projectRoot) === resolve(workspaceRoot);
@@ -350,6 +350,8 @@ export function createAgentHostedTurn(deps: AgentHostedTurnDeps): HostedSurfaceT
         // write the Agent makes for the owner its delegated one, which the daemon
         // gives that pairing's scopes and native authority.
         remote: connectedHostFamilyRemote({ ...connectedHost, actor: 'agent' }),
+        // A person lookup is checked against the operator's own message for this turn.
+        ...(ownerTurnText ? { currentOwnerMessage: ownerTurnText } : {}),
         memoryRegistry: deps.memoryRegistry,
         memoryAccess: deps.memoryAccess,
         shellPaths: createShellPathService({ workingDirectory: workspaceRoot, homeDirectory: deps.homeDirectory }),

@@ -335,11 +335,17 @@ export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions)
 
   if (options.floor.devicePosture) registerDevicePhoneTool(toolRegistry, options.floor.devicePosture);
 
+  // The user message the current turn answers; a surface prompt ranks its context against it.
+  let turnText: string | null = null;
+  // The same message when an authenticated operator sent it (an operator's input
+  // or a native conversation turn); null for a turn channel or automation input started.
+  let ownerTurnText: string | null = null;
   // The surface's own tools go in after the platform's, once per composed session.
   const surfaceTurn = options.surfaceTurn;
   let surfaceTools: HostedSurfaceTools | undefined;
   try {
     surfaceTools = surfaceTurn?.registerTools({ registry: toolRegistry, sessionId, workspaceRoot: options.workspaceRoot, floor: options.floor, providerRegistry,
+      ownerTurnText: () => ownerTurnText,
       ...(options.daemonRequests ? { daemonRequests: options.daemonRequests } : {}) });
   } catch (error) {
     // Nothing else holds this session yet: release what was composed so far.
@@ -353,8 +359,6 @@ export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions)
     });
     throw error;
   }
-  // The user message the current turn answers; a surface prompt ranks its context against it.
-  let turnText: string | null = null;
   // One composition per model-request signal: a turn's retries and tool rounds share it.
   const surfacePromptBySignal = new WeakMap<AbortSignal, Promise<string>>();
   const getSystemPrompt = surfaceTurn
@@ -498,6 +502,7 @@ export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions)
       await withUntrustedContentScope(contentScope, async () => {
         // A running turn composed its prompt at its first request; this text is the next turn's.
         turnText = text;
+        ownerTurnText = submitOptions?.operatorInput === true ? text : null;
         if (submitOptions?.operatorInput === true && !orchestrator.isTurnInFlight && !orchestrator.isThinking) ledger.startTurn();
         await withExecutionModeOwner(modeOwner, () => orchestrator.handleUserInput(text, undefined, {
           awaitQueuedTurn: true,
@@ -520,6 +525,7 @@ export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions)
         || (before !== 'unclaimed' && before !== 'retryable')) throw new Error(`Native turn cannot be queued or replayed: it is ${before}`);
       orchestrator.bindNativeConversationProject(source.projectId);
       turnText = source.text;
+      ownerTurnText = source.text;
       await withUntrustedContentScope(contentScope, () => withExecutionModeOwner(modeOwner, () => orchestrator.handleUserInput(source.text, undefined, { nativeConversationTurnPermit: permit, requireImmediateNativeTurn: true,
         origin: { source: 'native-hosted-conversation', surface: 'service', metadata: { inputId, correlationId } } })));
       const after = readNativeConversationTurnStatus(permit);

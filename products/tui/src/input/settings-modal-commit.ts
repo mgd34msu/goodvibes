@@ -17,9 +17,7 @@ import { isSecretConfigKey } from '../config/secret-config.ts';
 import { setSecretBackedSettingValue, type SettingsSecretsManager } from './settings-modal-secrets.ts';
 import { parseNumberEditBuffer } from '@goodvibes-jev/engine/terminal-shell/settings-behavior';
 import { buildMcpEntries } from './settings-modal-data.ts';
-import { isWorktreeSetupListConfigKey, parseWorktreeSetupListInput } from './worktree-setup-config.ts';
-import { isSandboxExecListConfigKey, parseSandboxExecListInput } from './sandbox-exec-config.ts';
-import { isExecEnvScrubAllowlistConfigKey, parseExecEnvScrubAllowlistInput } from './exec-env-scrub-config.ts';
+import { parseListSettingEdit } from './settings-modal-lists.ts';
 import type { SettingsDaemonCredentialWriter } from './settings-modal-secrets.ts';
 import type { McpEntry, SettingEntry } from './settings-modal-types.ts';
 
@@ -137,19 +135,17 @@ export function commitEditValue(ctx: CommitEditContext): boolean {
     return false;
   }
 
-  if (isWorktreeSetupListConfigKey(setting.key)) {
-    // Comma-separated display/edit convention for the array-backed
-    // worktree.setup.* keys, see worktree-setup-config.ts.
-    ctx.setValue(setting.key, parseWorktreeSetupListInput(ctx.editBuffer));
-  } else if (isSandboxExecListConfigKey(setting.key)) {
-    // Same comma-separated convention for the array-backed
-    // sandbox.egressAllowlist / sandbox.workspaceWritable keys, see
-    // sandbox-exec-config.ts.
-    ctx.setValue(setting.key, parseSandboxExecListInput(ctx.editBuffer));
-  } else if (isExecEnvScrubAllowlistConfigKey(setting.key)) {
-    // Same comma-separated convention for permissions.execEnvScrubAllowlist
-    //, see exec-env-scrub-config.ts.
-    ctx.setValue(setting.key, parseExecEnvScrubAllowlistInput(ctx.editBuffer));
+  // List rows (worktree.setup.*, the sandbox lists, the env-scrub allowlist)
+  // go through the one list codec, settings-modal-lists.ts.
+  const listEdit = parseListSettingEdit(setting.key, ctx.editBuffer);
+  if (listEdit && !listEdit.ok) {
+    ctx.rejectEdit?.(`Not saved: ${listEdit.reason}; ${setting.key} was not changed.`);
+    ctx.setEditingMode(false);
+    ctx.setEditBuffer('');
+    return false;
+  }
+  if (listEdit) {
+    ctx.setValue(setting.key, listEdit.value);
   } else if (setting.type === 'string' && isSecretConfigKey(setting.key)) {
     const write = setSecretBackedSettingValue({
       key: setting.key,

@@ -15,6 +15,7 @@ import { handleConfirmInput } from '../views/confirm-state.ts';
 import type { FlagEntry, McpEntry, SettingEntry, SubscriptionEntry } from './settings-modal-types.ts';
 import { buildMcpEntries, buildSubscriptionEntries } from './settings-modal-data.ts';
 import { modelPickerLaunchForKey } from '@goodvibes-jev/engine/terminal-shell/settings-behavior';
+import { listSettingEditText } from './settings-modal-lists.ts';
 import type { ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
 import type { SubscriptionManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { ServiceInspectionQuery } from '@/runtime/index.ts';
@@ -113,9 +114,9 @@ export function activateSelected(ctx: ActivateSelectedContext): void {
     ctx.setEditingMode(true);
     ctx.setEditBuffer(JSON.stringify(entry.currentValue ?? {}));
   } else if (setting.type === 'string' || setting.type === 'number') {
-    // Enter inline edit mode
+    // Enter inline edit mode; a list row starts from text that parses back to the same list.
     ctx.setEditingMode(true);
-    ctx.setEditBuffer(String(entry.currentValue ?? ''));
+    ctx.setEditBuffer(listSettingEditText(setting.key as ConfigKey, entry.currentValue) ?? String(entry.currentValue ?? ''));
   }
 }
 

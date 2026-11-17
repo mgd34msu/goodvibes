@@ -9,4 +9,12 @@ export * from './shell-paths.js';
 export * from './surface-root.js';
 export * from './system-message-policy.js';
 export * from './worktree/registry.js';
+export {
+  deriveWorktreeSetup,
+  readWorktreeSetupChoice,
+  worktreeSetupSettingValue,
+  type WorktreeSetupChoice,
+  type WorktreeSetupConfig,
+  type WorktreeSetupListSetting,
+} from './worktree/setup.js';
 export * from './ecosystem/catalog.js';

@@ -1,13 +1,15 @@
 import { type ConfigSettingDefinition, intRange, numRange, port } from './schema-shared.js';
 
 /**
- * Per-project worktree cold-start setup (resolveWorktreeSetupConfig). Both fields
- * are lists, read whole (`get('worktree.setup.commands')` or
- * getCategory('worktree').setup). GoodVibesConfig (schema-types.ts) imports
+ * Per-project worktree cold-start setup (resolveEffectiveWorktreeSetup). Each
+ * field is a list used as given, `{ mode: 'none' }` for nothing, or an empty
+ * list (or `{ mode: 'auto' }`) to derive it from the repository. Read whole
+ * (`get('worktree.setup.commands')`). GoodVibesConfig (schema-types.ts) imports
  * this interface as `worktree`.
  */
+export type WorktreeSetupListValue = string[] | { mode: 'auto' | 'none' };
 export interface WorktreeConfig {
-  setup: { commands: string[]; carryOverGlobs: string[] };
+  setup: { commands: WorktreeSetupListValue; carryOverGlobs: WorktreeSetupListValue };
 }
 
 /**
@@ -31,7 +33,7 @@ export const runtimeConfigDefaults = {
     },
     maxParallelToolCalls: 8,
     unifiedTasks: true,
-    pluginLifecycle: false,
+    pluginLifecycle: true,
     mcpLifecycle: true,
     toolBudget: {
       enforced: false,

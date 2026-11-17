@@ -32,10 +32,6 @@ export interface CommandDef {
   shortcut?: string;
   /** Execute the command */
   run: () => void;
-  /** Explicit server identity for a recent chat; never send its browser title. */
-  judgmentSource?: { readonly kind: 'chat'; readonly sessionId: string };
-  /** Local session snapshot revision. It is never sent as an authorization claim. */
-  sourceRevision?: number;
 }
 type Listener = () => void;
 
@@ -48,15 +44,9 @@ const registry: CommandRegistry = {
   commands: new Map(),
   listeners: new Set(),
 };
-let registryRevision = 0;
-
 function notify(): void {
-  registryRevision++;
   registry.listeners.forEach((fn) => fn());
 }
-
-/** Invalidates pending semantic results when registration or session data changes. */
-export function getCommandRegistryRevision(): number { return registryRevision; }
 
 /**
  * Register a command. If a command with the same id already exists,
@@ -65,7 +55,6 @@ export function getCommandRegistryRevision(): number { return registryRevision; 
 export function registerCommand(def: CommandDef): void {
   registry.commands.set(def.id, Object.freeze({ ...def,
     ...(def.keywords === undefined ? {} : { keywords: Object.freeze([...def.keywords]) }),
-    ...(def.judgmentSource === undefined ? {} : { judgmentSource: Object.freeze({ ...def.judgmentSource }) }),
   }));
   notify();
 }

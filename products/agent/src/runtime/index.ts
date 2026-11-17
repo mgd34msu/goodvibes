@@ -234,10 +234,10 @@ export {
   // Declare-once product storage handle (see platform/runtime/session-surface.ts):
   // every session-persistence / SessionManager / checkpoint call site threads
   // this through instead of re-deriving workingDirectory/homeDirectory/surfaceRoot
-  // independently. consumeRecovery/removeRecoveryPoint are the prompted
-  // resume/discard primitives for a surface-backed recovery flow (load-then-delete,
-  // and delete-without-load, respectively).
-  createSessionSurface, consumeRecovery,
+  // independently. removeRecoveryPoint is the prompted discard primitive for a
+  // surface-backed recovery flow (delete without load); restoring goes through
+  // applyRecoverySnapshot.
+  createSessionSurface,
   // The reclaim half of those same artefacts: one bounded sweep of the sessions
   // directory that removes what no live session can ever use again, discloses
   // what it removed, and never touches the session in use.
@@ -324,7 +324,6 @@ export type RecoveryFileInfo = Operations.RecoveryFileInfo;
 export type SessionSurface = Operations.SessionSurface;
 export type SurfaceIdentity = Operations.SurfaceIdentity;
 export type SessionPersistenceOptions = Operations.SessionPersistenceOptions;
-export type RecoveryConsumeResult = Operations.RecoveryConsumeResult;
 export type RecoveryRemoveResult = Operations.RecoveryRemoveResult;
 export type RemoteSupervisorSnapshot = Operations.RemoteSupervisorSnapshot;
 export type DistributedPeerKind = Operations.DistributedPeerKind;

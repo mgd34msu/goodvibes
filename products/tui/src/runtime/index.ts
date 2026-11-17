@@ -292,7 +292,6 @@ export {
   writeLastSessionPointer,
   readLastSessionPointer,
   createSessionSurface,
-  consumeRecovery,
   removeRecoveryPoint,
   checkRecoveryForSession,
   exportRemoteArtifactForAgent,

@@ -53,7 +53,7 @@ import type { BootstrapContext } from './runtime/bootstrap.ts';
 import { startFirstRenderFollowups, type DaemonRepairPrompt } from './shell/first-render-followups.ts';
 import './tools/agent-harness-model-routing.ts';
 import './tools/agent-harness-setup-model-helpers.ts';
-import { consumeRecovery, removeRecoveryPoint } from '@/runtime/index.ts';
+import { removeRecoveryPoint } from '@/runtime/index.ts';
 import type { SessionSnapshot } from '@/runtime/index.ts';
 import { buildAgentRecoveryApply } from './shell/recovery-apply.ts';
 import { handleBlockingShellInput, type PendingPermissionState } from './shell/blocking-input.ts';
@@ -1292,7 +1292,6 @@ async function main() {
       recoveryPending,
       abortTurn: () => orchestrator.abort(),
       composerEmpty: input.prompt.length === 0,
-      conversation,
       systemMessageRouter,
       render,
       // Keyed to the OFFERED snapshot's sessionId (recoveryPending) so a
@@ -1305,7 +1304,6 @@ async function main() {
         hydrateSessionUsage: commandContext.session?.hydrateSessionUsage,
         notify: (line) => systemMessageRouter.high(line),
       }),
-      consumeRecovery: () => consumeRecovery(ctx.services.surface, recoveryPending ?? undefined).snapshot,
       removeRecoveryPoint: () => {
         removeRecoveryPoint(ctx.services.surface, recoveryPending ?? undefined);
       },

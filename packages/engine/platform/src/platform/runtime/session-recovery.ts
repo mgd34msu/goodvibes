@@ -202,7 +202,7 @@ export function writeRecoveryFile(
  * scoped directory is cleared: this is the explicit FULL-RESET path, for a
  * caller that genuinely means "discard all crash state for this surface". It
  * is deliberately NOT what the prompted/silent recovery flows use,
- * `consumeRecovery`, `removeRecoveryPoint` and `autoRestoreRecovery` retire
+ * `applyRecoverySnapshot`, `removeRecoveryPoint` and `autoRestoreRecovery` retire
  * exactly the one snapshot file they offered or loaded, so accepting one
  * session's snapshot can never destroy another session's. The full reset also
  * does NOT touch the legacy shared directory, which is shared across every
@@ -381,7 +381,7 @@ export function checkRecoveryFile(options?: SessionPersistenceOptions): Recovery
  * and friends): loading the store copy directly would silently drop the tail of
  * messages that only the snapshot holds, so the consumer asks here first and
  * routes a non-null answer through its recovery prompt instead of resuming the
- * shorter copy. Like the keyed forms of `consumeRecovery` /
+ * shorter copy. Like the keyed forms of `applyRecoverySnapshot` /
  * `removeRecoveryPoint`, it finds the snapshot in whichever directory it
  * actually lives (canonical first, then the legacy shared dir).
  */
@@ -467,6 +467,8 @@ function parseRecoveryFile(recoveryFile: string, expectedSessionId?: string, exp
   if (meta['type'] !== 'meta') throw new Error('Invalid recovery header');
   if (expectedSessionId !== undefined && meta['sessionId'] !== expectedSessionId) throw new Error('Recovery snapshot belongs to another session');
   const snapshot: SessionSnapshot = {
+    // When the snapshot was written: journal records after it are newer than it.
+    timestamp: typeof meta['timestamp'] === 'number' && Number.isFinite(meta['timestamp']) ? meta['timestamp'] : undefined,
     title: typeof meta['title'] === 'string' ? meta['title'] : undefined,
     titleSource: meta['titleSource'] as ConversationTitleSource | undefined,
     returnContext: loadedReturnContext(meta['returnContext']),
@@ -581,53 +583,6 @@ export function autoRestoreRecovery(
   return { snapshot, info, receipt, retired };
 }
 
-/** The outcome of the prompted "yes, resume it" recovery flow (`consumeRecovery`). */
-export interface RecoveryConsumeResult {
-  /** The loaded conversation, or null when there was nothing to consume. */
-  readonly snapshot: SessionSnapshot | null;
-  /** True once a recovery snapshot was found, loaded, and deleted. */
-  readonly consumed: boolean;
-}
-
-/**
- * The "yes, resume it" primitive for a consumer's PROMPTED recovery flow (as
- * opposed to `autoRestoreRecovery`'s silent path): loads a session's recovery
- * snapshot and deletes its file in one operation, load-then-delete. If the
- * load finds nothing (or fails; `loadRecoveryConversation` converts a read
- * failure into `null` rather than throwing), the snapshot file is left
- * untouched, retirement only follows a successful load, so a bad read can
- * never destroy data that was never actually recovered.
- *
- * Contract: the platform never applies the loaded snapshot to any conversation on
- * its own here. The caller decides what happens to the messages it gets
- * back, this keeps the prompted path honest, so retirement can't be
- * forgotten (unlike a hand-rolled load-then-maybe-delete sequence, where a
- * consumer can forget the delete half entirely).
- *
- * Exactly ONE snapshot is retired: the file that was loaded, in whichever
- * directory it actually lives (canonical or the legacy shared dir). Omitting
- * `sessionId` selects the newest snapshot, the same one `checkRecoveryFile`
- * offers, and still retires only that one file. Another session's
- * never-loaded snapshot is never collateral damage.
- */
-export function consumeRecovery(surface: SessionSurface, sessionId?: string): RecoveryConsumeResult {
-  const options: SessionPersistenceOptions = { surface };
-  let path: string | undefined;
-  try {
-    path = pickRecoverySnapshotPath(options, sessionId);
-  } catch (error) {
-    logger.warn('[Recovery] Consume failed to resolve a snapshot', { error: summarizeError(error) });
-    return { snapshot: null, consumed: false };
-  }
-  if (!path) return { snapshot: null, consumed: false };
-  const loaded = loadRecoveryConversationAt(path, sessionId);
-  if (!loaded) {
-    return { snapshot: null, consumed: false };
-  }
-  const consumed = deleteRecoverySnapshotAt(path, loaded.physical);
-  return { snapshot: loaded.snapshot, consumed };
-}
-
 /** The outcome of the prompted "no, and remove it" recovery flow (`removeRecoveryPoint`). */
 export interface RecoveryRemoveResult {
   /** True when a recovery snapshot existed on disk and was deleted; false when there was nothing to remove. */
@@ -637,11 +592,10 @@ export interface RecoveryRemoveResult {
 /**
  * The "no, and remove it" primitive for a consumer's prompted recovery flow:
  * deletes a session's recovery snapshot WITHOUT loading it, and reports
- * honestly whether there was anything there to delete. Like `consumeRecovery`,
- * this never touches any conversation object, it only clears the on-disk
- * snapshot.
+ * honestly whether there was anything there to delete. It never touches any
+ * conversation object, it only clears the on-disk snapshot.
  *
- * Symmetrically with `consumeRecovery`, exactly ONE snapshot is retired: the
+ * Exactly ONE snapshot is retired: the
  * identified one, in whichever directory it actually lives. Omitting
  * `sessionId` declines the snapshot currently being offered (the newest) and
  * removes only that file, every other session's snapshot survives untouched.

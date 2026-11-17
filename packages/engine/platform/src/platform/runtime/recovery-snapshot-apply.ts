@@ -11,8 +11,9 @@
  * What lives here and what does not
  * ─────────────────────────────────
  * Here: read the snapshot, check what came back is a conversation,
- * put it on the live conversation, retire the snapshot, fold in any journal records newer than it,
- * and report how many messages ended up there.
+ * put it on the live conversation, fold in any journal records newer than it,
+ * save the result to the session store, retire the snapshot, and report how
+ * many messages ended up there.
  *
  * Not here: WHETHER to restore. That is a question for the user, asked in
  * whatever idiom a surface has, a terminal modal, a chat reply, an operator
@@ -34,7 +35,7 @@
  *     user gave. There is no flag, no config key, and no default that produces
  *     one, a caller that has not asked has nothing to pass.
  *  2. Retirement happens INSIDE this function, once the conversation has
- *     accepted the snapshot. A caller cannot apply a snapshot and keep it:
+ *     accepted the snapshot and the session store holds it. A caller cannot apply a snapshot and keep it:
  *     applying is the same operation as retiring it. That closes the hand-rolled
  *     "load, apply, forget to delete" sequence, which is how the same crash
  *     conversation gets offered again on the next launch. A snapshot the
@@ -95,9 +96,9 @@ export interface ApplyRecoverySnapshotOptions {
   /** The live conversation to restore into. */
   readonly conversation: RestorableConversation;
   /**
-   * Persist the restored conversation so the gap is durably closed. Best-effort
-   *, a failure here does not fail the restore, the same contract journal
-   * replay keeps.
+   * Persist the restored conversation to the session store. A failure does not
+   * fail the restore, but the snapshot is then kept on disk, since it is the
+   * only durable copy of the restored messages.
    */
   readonly persistSnapshot: (messages: ConversationMessageSnapshot[]) => void;
   /** The user's answer, from {@link confirmRecoveryRestore}. */
@@ -119,9 +120,11 @@ export interface ApplyRecoverySnapshotResult {
   /** Set when `applied` is false. */
   readonly refusal?: RecoveryApplyRefusal | undefined;
   /**
-   * True once the snapshot file is gone: after a successful apply, and after an
-   * `unusable-snapshot` refusal. False for `no-snapshot` and `apply-failed`,
-   * where the file is left on disk, and when the file could not be deleted.
+   * True once the snapshot file is gone: after a successful apply whose result
+   * was saved to the session store, and after an `unusable-snapshot` refusal.
+   * False for `no-snapshot` and `apply-failed`, where the file is left on disk,
+   * when the restored session could not be saved, and when the file could not
+   * be deleted.
    */
   readonly retired: boolean;
   /** Messages the conversation holds once the snapshot (plus any journal tail) is in place. 0 when nothing was applied. */
@@ -137,7 +140,7 @@ const NOTHING_REPLAYED: ReplayIntoConversationResult = { replayed: 0, hadCorrupt
 /**
  * What a loaded snapshot has to carry to be worth applying.
  *
- * `consumeRecovery` already guarantees the file parsed as JSON. This is the
+ * The loader already guarantees the file parsed as JSON. This is the
  * next question: is what parsed actually a conversation? A snapshot truncated
  * mid-write parses into an object with no usable `messages`, and applying that
  * resets a live conversation to nothing, the restore would destroy exactly
@@ -243,17 +246,28 @@ export function applyRecoverySnapshot(options: ApplyRecoverySnapshotOptions): Ap
       journalReplay: NOTHING_REPLAYED,
     };
   }
-  const retired = retire();
-
   // Anything the journal recorded after the snapshot was written goes on top,
   // so a restore is never older than the last thing the process managed to log.
+  // A snapshot without its write time (an older file) replays every record.
+  let persisted = false;
   const journalReplay = replayJournalForSession({
     surface,
     sessionId,
     snapshotTimestamp: readOptionalNumber(snapshot, 'timestamp') ?? 0,
     conversation,
-    persistSnapshot,
+    persistSnapshot: (replayed) => { persistSnapshot(replayed); persisted = true; },
   });
+  // The session store holds the restored messages before the snapshot goes:
+  // until then the snapshot is the only durable copy of them.
+  if (!persisted && journalReplay.replayed === 0) {
+    try {
+      persistSnapshot(messages);
+      persisted = true;
+    } catch (error) {
+      logger.warn('[Recovery] The restored session could not be saved; the snapshot is kept for the next launch', { sessionId, error: summarizeError(error) });
+    }
+  }
+  const retired = persisted ? retire() : false;
 
   return {
     applied: true,

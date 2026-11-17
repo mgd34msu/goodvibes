@@ -15,8 +15,13 @@ export async function handleHomeAssistantSurfaceWebhook(
 ): Promise<Response> {
   const enabled = Boolean(context.configManager.get('surfaces.homeassistant.enabled'));
   const secret = await resolveHomeAssistantWebhookSecret(context);
+  // Closed until both are set: without a secret anyone who can reach the daemon could post as Home Assistant.
   if (!enabled || !secret) {
-    return Response.json({ error: 'Home Assistant ingress is not configured' }, { status: 503 });
+    return Response.json({
+      error: !enabled
+        ? 'Home Assistant ingress is off. Set surfaces.homeassistant.enabled to true to accept its messages.'
+        : 'Home Assistant ingress has no webhook secret, so it accepts nothing. Set surfaces.homeassistant.webhookSecret and send it in the x-goodvibes-homeassistant-secret header.',
+    }, { status: 503 });
   }
 
   // The secret travels in a header, so an unauthenticated caller is refused

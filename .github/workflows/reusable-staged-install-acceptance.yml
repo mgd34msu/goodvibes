@@ -170,6 +170,10 @@ jobs:
           PREVIOUS_SOURCE: ${{ inputs.previous-source }}
         run: |
           set -euo pipefail
+          if [ -z "$PREVIOUS_TAG" ] || [ -z "$PREVIOUS_SOURCE" ]; then
+            echo "::error::The previous release is named only in part (tag '$PREVIOUS_TAG', source '$PREVIOUS_SOURCE'); the upgrade check needs both. Fix the previous-release resolver output and rerun."
+            exit 1
+          fi
           [[ "$TOOLING_SHA" =~ ^[0-9a-f]{40}$ ]]
           [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
           [[ "$PREVIOUS_SOURCE" =~ ^[0-9a-f]{40}$ ]]

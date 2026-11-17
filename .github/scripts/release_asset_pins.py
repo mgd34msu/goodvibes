@@ -109,7 +109,8 @@ def resume_existing_assets(assets, checks, incoming, checksum_name='SHA256SUMS.t
     # uploaded again, but only from a candidate with exactly the digest the manifest recorded.
     for name in sorted(set(checks) - set(assets)):
         assert name in incoming and incoming[name]['sha256'] == checks[name], (
-            f'A previously checksummed immutable asset is missing and no candidate has its recorded digest: {name}')
+            f'A previously checksummed immutable asset is missing and no candidate has its recorded digest: {name}. '
+            f'Rerun with the original build output of this release, whose bytes match the checksum manifest.')
     pending = sorted(set(assets) - set(checks) - {checksum_name})
     for name in pending:
         assert name in incoming and assets[name]['digest'] == 'sha256:' + incoming[name]['sha256'] and assets[name]['size'] == incoming[name]['size'], (

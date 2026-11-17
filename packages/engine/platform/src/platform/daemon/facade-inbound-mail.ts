@@ -660,7 +660,7 @@ type FurtherMailboxReading =
   | { readonly kind: 'unwatched'; readonly account: string; readonly reason: string };
 
 /** The secret a further account's password is read from when its entry names none. */
-export function furtherMailboxPasswordKey(account: string): string {
+function furtherMailboxPasswordKey(account: string): string {
   const name = account.toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '');
   return `GOODVIBES_EMAIL_INBOUND_${name.length > 0 ? name : 'ACCOUNT'}_PASSWORD`;
 }

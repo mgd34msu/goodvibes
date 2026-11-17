@@ -76,7 +76,7 @@ function normalizeMemoryAction(value: unknown): AgentMemoryAction | null {
   if (action === 'curator' || action === 'learning' || action === 'learning_curator' || action === 'queue' || action === 'review_queue' || action === 'plan') return 'curator';
   if (action === 'candidate' || action === 'learning_candidate' || action === 'card' || action === 'inspect_candidate') return 'candidate';
   if (action === 'list' || action === 'records' || action === 'memories') return 'list';
-  if (action === 'search' || action === 'find' || action === 'lookup') return 'search';
+  if (action === 'search' || action === 'find' || action === 'lookup' || action === 'recall') return 'search';
   if (action === 'get' || action === 'show' || action === 'inspect' || action === 'read') return 'get';
   if (action === 'create' || action === 'add' || action === 'remember') return 'create';
   if (action === 'update' || action === 'edit') return 'update';

@@ -88,7 +88,7 @@ export function createMcpElicitationApprovalHandler(
         summary: `MCP server "${request.serverName}" requests input: ${request.message}`,
         reasons: [
           `The "${request.serverName}" MCP server issued an elicitation/create request.`,
-          'Approving returns your input to the server; declining refuses it.',
+          'Approving tells the server you agree; declining refuses it.',
         ],
         surface: 'platform',
         blastRadius: 'external',
@@ -118,13 +118,15 @@ export function createMcpElicitationApprovalHandler(
  * apps): questions go to the product's own approval prompt, except in `yolo`
  * mode, where the person chose not to be interrupted, and in `plan` mode, where
  * nothing runs; there the question goes back to the agent instead. Reading the
- * mode is two settings lookups.
+ * mode is two settings lookups. The prompt is an approve/deny card, so it is
+ * offered only plain confirmations; a form with fields goes back to the agent.
  */
 export function createMcpPersonElicitation(
   requestApproval: Parameters<typeof createMcpElicitationApprovalHandler>[0],
   config: Pick<ConfigManager, 'get'>,
 ): McpPersonElicitation {
   return {
+    collectsFields: false,
     available: () => {
       const mode = effectivePermissionMode(config.get('permissions.mode'), config.get('behavior.autoApprove') === true);
       return mode !== 'yolo' && mode !== 'plan';

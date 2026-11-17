@@ -21,6 +21,12 @@ import type { McpElicitationHandler, McpElicitationOutcome, McpElicitationReques
 export interface McpPersonElicitation {
   readonly available: () => boolean;
   readonly ask: McpElicitationHandler;
+  /**
+   * Whether the surface can fill in a form's fields. When it cannot (the
+   * approve/deny card), a question with fields goes back to the agent instead
+   * of being shown, since an empty accept does not answer it.
+   */
+  readonly collectsFields?: boolean | undefined;
 }
 
 export interface McpElicitationContext {
@@ -76,8 +82,21 @@ export function createMcpAutonomousElicitationHandler(host: ExternalPermissionHo
       return resolved.outcome;
     }
     if (person?.available()) {
+      // The person's surface is an approve/deny card: it can agree to a plain
+      // confirmation but cannot fill in a form's fields. An empty accept is not
+      // an answer to a form, so a question with fields goes to the agent, which
+      // can ask the person in the conversation and call again with the values.
+      const fields = formFieldNames(request.requestedSchema);
+      if (fields.length > 0 && !person.collectsFields) {
+        logResolution(request, 'decline', `${resolved.reason}; the server's form asks for ${fields.join(', ')}, which the approval card cannot collect, so the question goes back to the agent in the tool result`);
+        return handBack();
+      }
       try {
         const outcome = await person.ask(request, context);
+        if (outcome.action === 'accept' && !answersForm(request.requestedSchema, outcome.content)) {
+          logResolution(request, 'decline', `${resolved.reason}; the person approved, but the reply does not fill in the server's form, so the question goes back to the agent in the tool result`);
+          return handBack();
+        }
         logResolution(request, outcome.action, `${resolved.reason}; shown to the person, who ${outcome.action === 'accept' ? 'answered it' : 'declined it'}`);
         return outcome;
       } catch (error) {
@@ -88,6 +107,18 @@ export function createMcpAutonomousElicitationHandler(host: ExternalPermissionHo
     logResolution(request, 'decline', `${resolved.reason}; no person can be asked here, so the question goes back to the agent in the tool result`);
     return handBack();
   };
+}
+
+/** The field names a server form asks for; empty for a plain confirmation. */
+function formFieldNames(schema: Record<string, unknown> | undefined): readonly string[] {
+  const properties = schema?.['properties'];
+  return properties && typeof properties === 'object' && !Array.isArray(properties) ? Object.keys(properties) : [];
+}
+
+/** Whether an accept's content is a valid answer: none for a confirmation, otherwise content the form admits. */
+function answersForm(schema: Record<string, unknown> | undefined, content: Record<string, unknown> | undefined): boolean {
+  if (content === undefined || Object.keys(content).length === 0) return formFieldNames(schema).length === 0;
+  return schema !== undefined && elicitationContent(schema, content) !== null;
 }
 
 function logResolution(request: McpElicitationRequest, action: McpElicitationOutcome['action'], reason: string): void {

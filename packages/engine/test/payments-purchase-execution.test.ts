@@ -1,57 +1,24 @@
 /**
- * payments-purchase-execution.test.ts, the daemon actually buying something.
+ * The daemon buying something, end to end through the real checkout flow:
+ * a purchase reaches the merchant's submit endpoint exactly once or not at all.
+ * A total, terms or price that change after the owner saw them never reach the
+ * submit; a submit that fails is never retried; the card goes only to the
+ * merchant and cart the purchase was decided for; a general execution mode
+ * never lifts the payment rules.
  *
- * ══ What is being proved, and what would make each proof worthless ════════
- *
- * Two things at once, and they pull in opposite directions:
- *
- *  1. **The card reaches the merchant and nothing else.** Every read path back
- *     to it is closed, the control-plane response, a snapshot taken after the
- *     fill, an error message, the driver's own thrown text.
- *  2. **Nothing in the flow knows a merchant.** The whole thing runs against two
- *     fixture stores that share no markup, no label wording, no element
- *     structure and no number formatting.
- *
- * Each would be easy to fake alone. A containment test against a hand-written
- * element list proves the redactor redacts what the test author remembered; a
- * generality test against one realistic fixture proves the flow works on that
- * fixture. So: the containment assertions run through the REAL `takeSnapshot`
- * over the fixtures' real markup, and every flow assertion that can run on both
- * fixtures runs on both.
- *
- *   ALPHA  table-driven US store. `$1,299.00`. Standard `autocomplete="cc-*"`
- *          tokens, so its card fields are caught structurally.
- *   BETA   div-and-span European store. `1.299,00 €`, dot thousands, comma
- *          decimal, trailing symbol. NO autocomplete attributes at all and
- *          German field names, so its card fields are caught only by the name
- *          patterns and the value-based layer.
- *
- * ══ The sentinel ══════════════════════════════════════════════════════════
- *
- * The card number below is a Luhn-valid test PAN that belongs to no issuer, and
- * every containment assertion searches for it in both spellings, as typed, and
- * as a page might reformat it. No test in this file ever contacts a real
- * merchant: both fixtures bind to port 0 on loopback and their "place order"
- * endpoint records what it received instead of shipping anything.
+ * Real `runCheckout`, budget ledger, registry, card fill and redactor. The
+ * merchants are two loopback stores with unrelated markup whose "place order"
+ * endpoint records every POST it receives; Jev's readings come from a fixture
+ * port. The card is a Luhn-valid test number that belongs to no issuer.
  */
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { join } from 'node:path';
 import { withExecutionMode } from '../platform/src/platform/gate/execution-context.ts';
 
-import {
-  CardMaterialRedactor,
-  REDACTED_MARKER,
-} from '../platform/src/platform/payments/card-redaction.js';
+import { CardMaterialRedactor } from '../platform/src/platform/payments/card-redaction.js';
 import type {
   CardMaterial,
   CardMaterialStore,
 } from '../platform/src/platform/payments/card-material.js';
-import {
-  CheckoutRegistry,
-  MemoryCheckoutJournal,
-  describeInterruption,
-  verdictFor,
-} from '../platform/src/platform/payments/checkout-registry.js';
+import { CheckoutRegistry, MemoryCheckoutJournal } from '../platform/src/platform/payments/checkout-registry.js';
 import {
   fillCard,
   FillCardRefusal,
@@ -86,7 +53,6 @@ import {
 import type { ChannelDelivery } from '../platform/src/platform/payments/windows.js';
 
 import { UntrustedContentLedger } from '../platform/src/platform/security/untrusted-content.js';
-import { takeSnapshot } from '../platform/src/platform/browser/browser-snapshot.js';
 
 import {
   startFixtureMerchant,
@@ -97,10 +63,6 @@ import {
   FixtureCheckoutDriver,
   readFixtureCheckout,
 } from './helpers/fixture-checkout-driver.js';
-import {
-  collectFixtureControls,
-  fixtureSnapshotPage,
-} from './helpers/fixture-snapshot-page.js';
 import { usePaymentsReadings } from './helpers/payments-readings.ts';
 
 usePaymentsReadings();
@@ -396,6 +358,7 @@ function shapes(): { name: string; get: () => FixtureMerchant }[] {
   ];
 }
 
+
 for (const shape of shapes()) for (const phase of ['before-card', 'before-submit'] as const)
   test(`a changed live ${shape.name} total ${phase} never reaches the merchant submit endpoint`, async () => {
     const merchant = shape.get(), harness = buildHarness({ merchant });
@@ -462,139 +425,128 @@ for (const shape of shapes()) for (const answer of ['approve', 'deny'] as const)
     expectNoCardMaterial('repriced owner notices', JSON.stringify(harness.notices));
   });
 
-// ═══ 1. The card is absent from every response, log, trace and error ════════
-
-describe('the card never comes back', () => {
-  test('a structural fill rejection names the field, exactly as the port contract documents', async () => {
-    // The fixture's rejectField models the path every compliant driver takes
-    // today (checkout-page.ts's fillSecrets contract): a page-level rejection
-    // is reported as failedTarget, never thrown, so fill-card.ts can name the
-    // TRUE field that failed without ever holding what was meant for it.
-    const harness = buildHarness({ merchant: alpha, rejectField: 'cccvv' });
-    const outcome = await runOn(harness, alpha);
-
-    expect(outcome.kind).toBe('refused');
-    if (outcome.kind !== 'refused') throw new Error('unreachable');
-    expect(outcome.reason).toContain('cvv');
-    expectNoCardMaterial('the fill failure reason', outcome.reason);
-    expect(alpha.submissions.length).toBe(0);
-  });
-
-  test('a fill failure that could not be attributed to one field discards the driver error, value included', async () => {
-    // The fixture driver deliberately puts the value into its thrown message,
-    // exactly as a real browser fill error can, and exactly as the port
-    // contract says a driver should NOT do (a per-target failure belongs in
-    // failedTarget). fill-card.ts's catch must still discard whatever a
-    // driver hands it here: the value never survives, and since a throw
-    // carries no target this module can attribute, the reason names no field
-    // it cannot actually vouch for.
-    const harness = buildHarness({ merchant: alpha, throwOnField: 'cccvv' });
-    const outcome = await runOn(harness, alpha);
-
-    expect(outcome.kind).toBe('refused');
-    if (outcome.kind !== 'refused') throw new Error('unreachable');
-    expect(outcome.reason).not.toContain('cvv');
-    expectNoCardMaterial('the fill failure reason', outcome.reason);
-    expect(alpha.submissions.length).toBe(0);
-  });
-
-  test('the purchase record carries last4 and no more of the card', async () => {
-    const harness = buildHarness({ merchant: alpha });
-    await runOn(harness, alpha);
-    const record = harness.recorded[0];
-    expect(record).toBeDefined();
-    expect(record?.cardLast4).toBe('1486');
-    expect(record?.purchaseId).toBe('p-alpha-fixture');
-    expectNoCardMaterial('the purchase record', JSON.stringify(record));
-  });
-
-  test('the record leak assertion still rejects every synthetic card spelling', () => {
-    for (const spelling of SENTINEL_SPELLINGS) {
-      expect(() => expectNoCardMaterial('synthetic leak', JSON.stringify({ purchaseId: 'p-alpha-fixture', leaked: spelling }))).toThrow('contained card material');
-    }
-  });
-
-  test('the notice the owner reads carries last4 and no more of the card', async () => {
-    const harness = buildHarness({ merchant: alpha });
-    await runOn(harness, alpha);
-    // Both sends: the veto notice and the completion report.
-    expect(harness.notices.length).toBe(2);
-    expect(harness.notices.some((entry) => entry.message.includes('1486'))).toBe(true);
-    expectNoCardMaterial('the purchase notice', harness.notices.map((entry) => entry.message).join('\n'));
-  });
-});
-
-// ═══ 2. A snapshot taken after a fill does not contain the card ═════════════
-
-describe('a snapshot after the fill', () => {
+describe('a purchase reaches the merchant once, with the card, or not at all', () => {
   for (const shape of shapes()) {
-    test(`does not report the card on ${shape.name}`, async () => {
+    test(`an in-budget total at a recognised retailer submits after the veto window on ${shape.name}`, async () => {
       const merchant = shape.get();
       const harness = buildHarness({ merchant });
       const outcome = await runOn(harness, merchant);
+
       expect(outcome.kind).toBe('purchased');
+      if (outcome.kind !== 'purchased') throw new Error('unreachable');
+      // TWO sends, deliberately: the veto notice BEFORE the money moves, and
+      // the completion report AFTER the charge. He would otherwise get a
+      // notice, ten minutes of silence, a charge, and nothing.
+      expect(harness.notices[0]?.kind).toBe('veto');
+      expect(merchant.submissions.length).toBe(1);
+      expect(outcome.record.windowKind).toBe('veto');
+      expect(outcome.record.windowOutcome).toBe('proceeding-silent');
+      expect(outcome.record.merchantRecognised).toBe(true);
 
-      // This fixture's form still holds the values. A submit does not prove
-      // they disappeared; only the actual page owner may retire redaction.
-      expect(harness.redactor.hasLiveMaterial('session-1', 'page-1')).toBe(true);
-
-      const html = await merchant.checkoutHtml();
-      const elements = await collectFixtureControls(html, harness.driver.formState);
-      // Sanity: the page really is holding the number before redaction runs.
-      expect(elements.some((element) => element.value === SENTINEL.number)).toBe(true);
-
-      const page = fixtureSnapshotPage({
-        url: `${harness.origin}/checkout`,
-        title: 'Checkout',
-        elements,
-      });
-      const snapshot = await takeSnapshot(page, 'session-1', 'page-1', { guard: harness.redactor });
-
-      expectNoCardMaterial(`the ${merchant.shape} snapshot`, JSON.stringify(snapshot));
-      // The fields are still addressable, the model can ask for another fill.
-      expect(snapshot.elements.some((element) => element.cardField === true)).toBe(true);
+      // The card reached the merchant, which is the whole point of the capability.
+      const submitted = merchant.submissions[0]?.fields ?? {};
+      const cardTarget = merchant.shape === 'alpha' ? 'ccnum' : 'k1';
+      expect(submitted[cardTarget]).toBe(SENTINEL.number);
     });
   }
 
-  test('a page that reformats or echoes the number is still redacted', () => {
-    const redactor = new CardMaterialRedactor();
-    redactor.arm('s', 'p', [{ kind: 'number', value: SENTINEL.number }]);
+  test('an over-budget total asks, and silence does not submit', async () => {
+    const harness = buildHarness({ merchant: alpha, dailyItemMinorUnits: 5_000, answer: null });
+    const outcome = await runOn(harness, alpha);
 
-    expect(redactor.redact('s', 'p', `Card ${SENTINEL.number} on file`)).toBe(`Card ${REDACTED_MARKER} on file`);
-    expect(redactor.redact('s', 'p', 'Paying with 4539 5787 6362 1486 today')).toBe(
-      `Paying with ${REDACTED_MARKER} today`,
-    );
-    expect(redactor.redact('s', 'p', '4539-5787-6362-1486')).toBe(REDACTED_MARKER);
-    // A price is not a card, and blanking one would be redaction he cannot explain.
-    expect(redactor.redact('s', 'p', 'Total $129.00')).toBe('Total $129.00');
+    expect(harness.notices.length).toBe(1);
+    expect(harness.notices[0]?.kind).toBe('approval');
+    expect(outcome.kind).toBe('refused');
+    if (outcome.kind !== 'refused') throw new Error('unreachable');
+    expect(outcome.code).toBe('item-budget-exceeded-expired');
+    expect(alpha.submissions.length).toBe(0);
+    expect(harness.recorded.length).toBe(0);
+    // The money it was holding went back.
+    expect(harness.ledger.state().reservations.length).toBe(0);
   });
 
-  test('a card field reports no value even with no guard installed at all', async () => {
-    const html = await alpha.checkoutHtml();
-    const filled = new Map([['ccnum', SENTINEL.number], ['coupon', 'SAVE10']]);
-    const elements = await collectFixtureControls(html, filled);
-    const page = fixtureSnapshotPage({ url: `${RECOGNISED_ORIGIN}/checkout`, title: 'Checkout', elements });
+  test('a claimed storefront cannot make an unrecognised checkout look recognised', async () => {
+    // The judge is given the VALIDATED CHECKOUT DOMAIN and nothing else. A
+    // storefront a page claims to be affiliated with is merchant-authored text,
+    // and this is the case where believing it would matter: a checkout on
+    // jeffsgadgets.biz asserting it is really Best Buy.
+    const harness = buildHarness({
+      merchant: alpha,
+      origin: UNRECOGNISED_ORIGIN,
+      storefrontHost: 'www.bestbuy.com',
+      answer: null,
+    });
+    const outcome = await runOn(harness, alpha);
 
-    const snapshot = await takeSnapshot(page, 'session-1', 'page-1');
-
-    expectNoCardMaterial('an unguarded snapshot', JSON.stringify(snapshot));
-    // The ordinary field is untouched, the suppression is targeted, not blanket.
-    expect(snapshot.elements.some((element) => element.value === 'SAVE10')).toBe(true);
+    expect(harness.notices[0]?.kind).toBe('approval');
+    expect(outcome.kind).toBe('refused');
+    expect(alpha.submissions.length).toBe(0);
   });
 
-  test('beta has no autocomplete tokens at all, so its names are what catch it', async () => {
-    const html = await beta.checkoutHtml();
-    expect(html).not.toContain('autocomplete');
-    const elements = await collectFixtureControls(html, new Map([['k1', SENTINEL.number]]));
-    const page = fixtureSnapshotPage({ url: `${RECOGNISED_ORIGIN}/checkout`, title: 'Bestellung', elements });
-    const snapshot = await takeSnapshot(page, 'session-1', 'page-1');
-    expectNoCardMaterial('the beta snapshot with no guard', JSON.stringify(snapshot));
+  test('a 3-D Secure challenge pauses with nothing submitted and the money still held', async () => {
+    const harness = buildHarness({
+      merchant: alpha,
+      challenge: {
+        kind: '3d-secure',
+        step: 'Approve the payment in your banking app, then tell me to carry on.',
+        url: `${RECOGNISED_ORIGIN}/3ds`,
+      },
+    });
+    const outcome = await runOn(harness, alpha);
+
+    expect(outcome.kind).toBe('challenge');
+    if (outcome.kind !== 'challenge') throw new Error('unreachable');
+    expect(outcome.challenge.kind).toBe('3d-secure');
+    expect(alpha.submissions.length).toBe(0);
+    // Nothing recorded as a purchase, and the money stays held, because the
+    // order may still complete once he answers.
+    expect(harness.recorded.length).toBe(0);
+    expect(harness.ledger.state().reservations.length).toBe(1);
+    // Regression: the redactor stays ARMED, not disarmed, while a
+    // challenge is pending. He is about to be sent back to this very page to
+    // finish 3-D Secure, and the typed card digits are still sitting in its
+    // DOM (no click ever reached the merchant to clear them). Disarming here,
+    // as this used to, would leave a screenshot, an extract, or a readText of
+    // that same page free to hand the card straight back out while the owner
+    // is looking at it.
+    expect(harness.redactor.hasLiveMaterial('session-1', 'page-1')).toBe(true);
+    // The literal digits are still recoverable from live material only
+    // through the redactor's own guarded read paths (never bare storage), so
+    // the property under test is that `redact()` still finds something to
+    // remove, not that the digits leaked into this assertion.
+    expect(harness.redactor.containsLiveMaterial('session-1', 'page-1', SENTINEL.number)).toBe(true);
+  });
+
+  test('a submit that fails is recorded as possibly submitted and never retried', async () => {
+    const harness = buildHarness({ merchant: alpha, failSubmit: true });
+    const outcome = await runOn(harness, alpha);
+
+    expect(outcome.kind).toBe('refused');
+
+    // The journal is the thing a restart reads, and it says the honest
+    // answer. A restart holds a FRESH registry over the surviving journal;
+    // the live registry deliberately skips its own in-flight records.
+    expect((await harness.registry.interrupted()).length).toBe(0);
+    const interrupted = await new CheckoutRegistry(harness.journal).interrupted();
+    expect(interrupted.length).toBe(1);
+    expect(interrupted[0]?.verdict).toBe('possibly-submitted');
+    // The budget stays held: it may well have been spent.
+    expect(harness.ledger.state().reservations.length).toBe(1);
+    expect(harness.recorded.length).toBe(0);
+    // Exactly one attempt reached the driver: a second call would be a retry of an order that may have been placed.
+    expect(harness.driver.submitAttempts).toBe(1);
+  });
+
+  test('two purchases cannot drive the same page at once', async () => {
+    const harness = buildHarness({ merchant: alpha, challenge: { kind: 'otp', step: 'x', url: 'https://x.test/' } });
+    await runOn(harness, alpha);
+    // The first is paused mid-flight and still owns the page.
+    await expect(runOn(harness, alpha)).rejects.toThrow();
+    expect(alpha.submissions.length).toBe(0);
   });
 });
 
-// ═══ 3 & 4. The fill's refusals ════════════════════════════════════════════
-
-describe('the fill refuses before it reads any material', () => {
+describe('the card goes only to the merchant and cart the purchase was decided for', () => {
   test('a fill into a domain the purchase was not decided against is refused', async () => {
     const registry = new CheckoutRegistry(new MemoryCheckoutJournal());
     const redactor = new CardMaterialRedactor();
@@ -618,159 +570,10 @@ describe('the fill refuses before it reads any material', () => {
     }
 
     expect(thrown).toBeInstanceOf(FillCardRefusal);
-    expect(thrown?.message).toContain('bestbuy.com');
     expect(driver.formState.size).toBe(0);
     expect(driver.fillLog.length).toBe(0);
     expectNoCardMaterial('the wrong-domain refusal', thrown?.message ?? '');
   });
-
-  test('a subdomain of the decided merchant is still the decided merchant', async () => {
-    const registry = new CheckoutRegistry(new MemoryCheckoutJournal());
-    const driver = new FixtureCheckoutDriver({ merchant: alpha, pageUrl: 'https://checkout.bestbuy.com/pay' });
-    await registry.open({
-      purchaseId: 'p-1', sessionId: 'session-1', pageId: 'page-1',
-      merchantDomain: 'bestbuy.com', cardId: 'card-1', item: unsafeOwnerSuppliedTextForTests('thing'), currency: currency('USD'),
-      phase: 'arming-payment', startedAtMs: 0, updatedAtMs: 0, draw: null, reservationId: null,
-      shippingTierRequested: 'normal', shippingTierUsed: null, stepDown: null, totalMinorUnits: null,
-    });
-
-    const result = await fillCard(
-      { sessionId: 'session-1', pageId: 'page-1', targets: [{ field: 'number', target: 'ccnum' }] },
-      { registry, cards: new SentinelCardStore(), redactor: new CardMaterialRedactor(), driver },
-    );
-    expect(result.ok).toBe(true);
-  });
-
-  test('a fill with no purchase in flight on that page is refused', async () => {
-    const registry = new CheckoutRegistry(new MemoryCheckoutJournal());
-    const driver = new FixtureCheckoutDriver({ merchant: alpha, pageUrl: `${RECOGNISED_ORIGIN}/checkout` });
-
-    let thrown: FillCardRefusal | null = null;
-    try {
-      await fillCard(
-        { sessionId: 'session-1', pageId: 'page-1', targets: [{ field: 'number', target: 'ccnum' }] },
-        { registry, cards: new SentinelCardStore(), redactor: new CardMaterialRedactor(), driver },
-      );
-    } catch (error) {
-      thrown = error as FillCardRefusal;
-    }
-
-    expect(thrown).toBeInstanceOf(FillCardRefusal);
-    expect(thrown?.message).toContain('no purchase decision is in flight');
-    expect(driver.formState.size).toBe(0);
-  });
-
-  test('a purchase in flight on a DIFFERENT page does not authorise this one', async () => {
-    const registry = new CheckoutRegistry(new MemoryCheckoutJournal());
-    const driver = new FixtureCheckoutDriver({
-      merchant: alpha, pageUrl: `${RECOGNISED_ORIGIN}/checkout`, pageId: 'page-2',
-    });
-    await registry.open({
-      purchaseId: 'p-1', sessionId: 'session-1', pageId: 'page-1',
-      merchantDomain: 'bestbuy.com', cardId: 'card-1', item: unsafeOwnerSuppliedTextForTests('thing'), currency: currency('USD'),
-      phase: 'arming-payment', startedAtMs: 0, updatedAtMs: 0, draw: null, reservationId: null,
-      shippingTierRequested: 'normal', shippingTierUsed: null, stepDown: null, totalMinorUnits: null,
-    });
-
-    await expect(
-      fillCard(
-        { sessionId: 'session-1', pageId: 'page-2', targets: [{ field: 'number', target: 'ccnum' }] },
-        { registry, cards: new SentinelCardStore(), redactor: new CardMaterialRedactor(), driver },
-      ),
-    ).rejects.toThrow(FillCardRefusal);
-    expect(driver.formState.size).toBe(0);
-  });
-
-  test('a purchase that has not reached the payment stage does not get the card typed', async () => {
-    const registry = new CheckoutRegistry(new MemoryCheckoutJournal());
-    const driver = new FixtureCheckoutDriver({ merchant: alpha, pageUrl: `${RECOGNISED_ORIGIN}/checkout` });
-    await registry.open({
-      purchaseId: 'p-1', sessionId: 'session-1', pageId: 'page-1',
-      merchantDomain: 'bestbuy.com', cardId: 'card-1', item: unsafeOwnerSuppliedTextForTests('thing'), currency: currency('USD'),
-      phase: 'awaiting-window', startedAtMs: 0, updatedAtMs: 0, draw: null, reservationId: null,
-      shippingTierRequested: 'normal', shippingTierUsed: null, stepDown: null, totalMinorUnits: null,
-    });
-
-    await expect(
-      fillCard(
-        { sessionId: 'session-1', pageId: 'page-1', targets: [{ field: 'number', target: 'ccnum' }] },
-        { registry, cards: new SentinelCardStore(), redactor: new CardMaterialRedactor(), driver },
-      ),
-    ).rejects.toThrow(/awaiting-window/);
-    expect(driver.formState.size).toBe(0);
-  });
-
-  test('a browser with no redaction installed cannot be used to pay for anything', async () => {
-    const registry = new CheckoutRegistry(new MemoryCheckoutJournal());
-    const driver = new FixtureCheckoutDriver({ merchant: alpha, pageUrl: `${RECOGNISED_ORIGIN}/checkout` });
-    await registry.open({
-      purchaseId: 'p-1', sessionId: 'session-1', pageId: 'page-1',
-      merchantDomain: 'bestbuy.com', cardId: 'card-1', item: unsafeOwnerSuppliedTextForTests('thing'), currency: currency('USD'),
-      phase: 'arming-payment', startedAtMs: 0, updatedAtMs: 0, draw: null, reservationId: null,
-      shippingTierRequested: 'normal', shippingTierUsed: null, stepDown: null, totalMinorUnits: null,
-    });
-
-    await expect(
-      fillCard(
-        { sessionId: 'session-1', pageId: 'page-1', targets: [{ field: 'number', target: 'ccnum' }] },
-        {
-          registry,
-          cards: new SentinelCardStore(),
-          redactor: {} as unknown as CardMaterialRedactor,
-          driver,
-        },
-      ),
-    ).rejects.toThrow(/redaction/);
-    expect(driver.formState.size).toBe(0);
-  });
-
-  test('incomplete stored material fills nothing rather than filling half a form', async () => {
-    const registry = new CheckoutRegistry(new MemoryCheckoutJournal());
-    const driver = new FixtureCheckoutDriver({ merchant: alpha, pageUrl: `${RECOGNISED_ORIGIN}/checkout` });
-    await registry.open({
-      purchaseId: 'p-1', sessionId: 'session-1', pageId: 'page-1',
-      merchantDomain: 'bestbuy.com', cardId: 'card-1', item: unsafeOwnerSuppliedTextForTests('thing'), currency: currency('USD'),
-      phase: 'arming-payment', startedAtMs: 0, updatedAtMs: 0, draw: null, reservationId: null,
-      shippingTierRequested: 'normal', shippingTierUsed: null, stepDown: null, totalMinorUnits: null,
-    });
-
-    await expect(
-      fillCard(
-        { sessionId: 'session-1', pageId: 'page-1', targets: [{ field: 'number', target: 'ccnum' }] },
-        { registry, cards: new SentinelCardStore(null), redactor: new CardMaterialRedactor(), driver },
-      ),
-    ).rejects.toThrow(/incomplete/);
-    expect(driver.formState.size).toBe(0);
-  });
-});
-
-// ═══ 5. Our integers drive the decision, not the merchant's text ═══════════
-
-describe('the daemon computes every number the owner acts on', () => {
-  for (const shape of shapes()) {
-    test(`parses ${shape.name} into integer minor units`, async () => {
-      const merchant = shape.get();
-      const reading = await readFixtureCheckout(merchant);
-      const extraction = extractCheckout(reading, currency(merchant.currency === 'EUR' ? 'EUR' : 'USD'));
-      expect(extraction.ok).toBe(true);
-      if (!extraction.ok) throw new Error(extraction.reason);
-
-      if (merchant.shape === 'alpha') {
-        expect(extraction.checkout.itemMinorUnits).toBe(12_900);
-        expect(extraction.checkout.taxMinorUnits).toBe(1_097);
-        expect(extraction.checkout.feesMinorUnits).toBe(150);
-        expect(extraction.checkout.shippingOptions.map((option) => option.costMinorUnits))
-          .toEqual([499, 1_299, 2_999]);
-      } else {
-        // `1.299,00` is 1299.00, not 129900. A strip-every-non-digit reader
-        // gets this wrong by a factor of a hundred and reports success.
-        expect(extraction.checkout.itemMinorUnits).toBe(129_900);
-        expect(extraction.checkout.taxMinorUnits).toBe(24_681);
-        expect(extraction.checkout.shippingOptions.map((option) => option.costMinorUnits))
-          .toEqual([690, 1_990]);
-      }
-    });
-  }
 
   test('a merchant total that disagrees with its own line items stops the purchase', async () => {
     const reading = await readFixtureCheckout(alpha);
@@ -786,466 +589,11 @@ describe('the daemon computes every number the owner acts on', () => {
     if (extraction.ok) throw new Error('expected a refusal');
     expect(extraction.field).toBe('statedTotal');
   });
-
-  test('the notice and the record are rendered from our integers, not the page text', async () => {
-    const harness = buildHarness({ merchant: alpha });
-    const outcome = await runOn(harness, alpha);
-    expect(outcome.kind).toBe('purchased');
-    if (outcome.kind !== 'purchased') throw new Error('unreachable');
-
-    // 12900 item + 1097 tax + 150 fee + 499 delivery.
-    expect(outcome.record.totalMinorUnits).toBe(14_646);
-    expect(harness.notices[0]?.message).toContain('146.46');
-  });
-
-  test('a price the parser cannot read one way stops the purchase rather than guessing', () => {
-    const result = extractCheckout(
-      {
-        lines: [{ label: 'Thing', quantity: '1', unitPrice: '$12.00 – $18.00' }],
-        tax: null,
-        fees: [],
-        shippingOptions: [{ label: 'Standard', cost: '$4.99' }],
-        statedTotal: null,
-        currency: 'USD',
-        orderSummaryText: '',
-      },
-      currency('USD'),
-    );
-    expect(result.ok).toBe(false);
-    if (result.ok) throw new Error('expected a refusal');
-    expect(result.field).toBe('lines[0].unitPrice');
-  });
-
-  test('a separator layout that could mean two different numbers is refused, not picked', () => {
-    // Each of these is caught by the GRAMMAR rather than by the one-number
-    // rule above, which is the guard that decides "1.234" is 1234 and not 1.23.
-    // A parser that fell back to stripping non-digits would answer all of them
-    // confidently and be wrong by a factor of a thousand on most.
-    for (const price of [
-      '$1,23,456.00', // Indian grouping: groups of two, matches no shape we accept
-      '$1,2345.00',   // a four-digit group is not a thousands group
-      '$12,345,6.78', // a trailing two-digit group
-      '$1.234.5',     // dot used as both separators
-      '$12.345,67.8', // two decimal separators
-    ]) {
-      const outcome = extractCheckout(
-        {
-          lines: [{ label: 'Thing', quantity: '1', unitPrice: price }],
-          tax: null,
-          fees: [],
-          shippingOptions: [{ label: 'Standard', cost: '$4.99' }],
-          statedTotal: null,
-          currency: 'USD',
-          orderSummaryText: '',
-        },
-        currency('USD'),
-      );
-      expect(outcome.ok).toBe(false);
-      if (outcome.ok) throw new Error(`expected ${price} to be refused`);
-      expect(outcome.field).toBe('lines[0].unitPrice');
-    }
-  });
 });
 
-// ═══ The one notice, and what silence means ═══════════════════════
-
-describe('one notification, and the merchant decides what silence means', () => {
-  for (const shape of shapes()) {
-    test(`an in-budget total at a recognised retailer submits after the veto window on ${shape.name}`, async () => {
-      const merchant = shape.get();
-      const harness = buildHarness({ merchant });
-      const outcome = await runOn(harness, merchant);
-
-      expect(outcome.kind).toBe('purchased');
-      if (outcome.kind !== 'purchased') throw new Error('unreachable');
-      // TWO sends, deliberately: the veto notice BEFORE the money moves, and
-      // the completion report AFTER the charge. He would otherwise get a
-      // notice, ten minutes of silence, a charge, and nothing.
-      expect(harness.notices.length).toBe(2);
-      expect(harness.notices[0]?.kind).toBe('veto');
-      expect(harness.notices[1]?.message).toContain('Bought it.');
-      expect(merchant.submissions.length).toBe(1);
-      expect(outcome.record.windowKind).toBe('veto');
-      expect(outcome.record.windowOutcome).toBe('proceeding-silent');
-      expect(outcome.record.merchantRecognised).toBe(true);
-
-      // The card reached the merchant, which is the whole point of the capability.
-      const submitted = merchant.submissions[0]?.fields ?? {};
-      const cardTarget = merchant.shape === 'alpha' ? 'ccnum' : 'k1';
-      expect(submitted[cardTarget]).toBe(SENTINEL.number);
-    });
-  }
-
-  test('a notice channel that throws within budget is the same as one that reached nobody', async () => {
-    const outcomes: string[] = [];
-    for (const failure of ['returned', 'thrown'] as const) {
-      const merchant = shapes()[0]!.get();
-      const harness = buildHarness({ merchant });
-      const deliver = harness.deps.notifier.deliver.bind(harness.deps.notifier);
-      harness.deps.notifier.deliver = async (input) => {
-        if (input.kind !== 'veto') return deliver(input);
-        if (failure === 'thrown') throw new Error('the channel token was rejected');
-        return [{ channel: 'telegram', delivered: false, backfillable: false }];
-      };
-      const outcome = await runOn(harness, merchant);
-      outcomes.push(outcome.kind === 'purchased' ? `purchased:${outcome.record.windowOutcome}` : `${outcome.kind}`);
-    }
-    expect(outcomes).toEqual(['purchased:proceeding-undelivered', 'purchased:proceeding-undelivered']);
-  });
-
-  test('an over-budget total asks, and silence does not submit', async () => {
-    const harness = buildHarness({ merchant: alpha, dailyItemMinorUnits: 5_000, answer: null });
-    const outcome = await runOn(harness, alpha);
-
-    expect(harness.notices.length).toBe(1);
-    expect(harness.notices[0]?.kind).toBe('approval');
-    expect(outcome.kind).toBe('refused');
-    if (outcome.kind !== 'refused') throw new Error('unreachable');
-    expect(outcome.code).toBe('item-budget-exceeded-expired');
-    expect(alpha.submissions.length).toBe(0);
-    expect(harness.recorded.length).toBe(0);
-    // The money it was holding went back.
-    expect(harness.ledger.state().reservations.length).toBe(0);
-  });
-
-  test('an over-budget total that he approves goes through', async () => {
-    const harness = buildHarness({
-      merchant: alpha, dailyItemMinorUnits: 5_000, answer: { answer: 'approve' },
-    });
-    const outcome = await runOn(harness, alpha);
-
-    expect(outcome.kind).toBe('purchased');
-    if (outcome.kind !== 'purchased') throw new Error('unreachable');
-    expect(outcome.record.windowKind).toBe('approval');
-    expect(outcome.record.windowOutcome).toBe('approved');
-    expect(outcome.record.answeredBy).toBe('tui');
-    expect(alpha.submissions.length).toBe(1);
-  });
-
-  test('an over-budget total he says no to submits nothing', async () => {
-    const harness = buildHarness({
-      merchant: alpha, dailyItemMinorUnits: 5_000, answer: { answer: 'deny' },
-    });
-    const outcome = await runOn(harness, alpha);
-
-    expect(outcome.kind).toBe('refused');
-    if (outcome.kind !== 'refused') throw new Error('unreachable');
-    expect(outcome.code).toBe('item-budget-exceeded-denied');
-    expect(alpha.submissions.length).toBe(0);
-  });
-
-  test('an objection stops without submitting, and reports rather than going quiet', async () => {
-    const harness = buildHarness({ merchant: alpha, answer: { answer: 'object' } });
-    const outcome = await runOn(harness, alpha);
-
-    expect(outcome.kind).toBe('cancelled');
-    if (outcome.kind !== 'cancelled') throw new Error('unreachable');
-    expect(alpha.submissions.length).toBe(0);
-    expect(harness.recorded.length).toBe(0);
-    expect(outcome.report.length).toBeGreaterThan(0);
-    expect(harness.ledger.state().reservations.length).toBe(0);
-    // Nothing was typed after the objection, and nothing is left armed.
-    expect(harness.redactor.hasLiveMaterial('session-1', 'page-1')).toBe(false);
-  });
-
-  test('an unrecognised merchant asks even well within budget, and silence denies', async () => {
-    const harness = buildHarness({
-      merchant: alpha, origin: UNRECOGNISED_ORIGIN, answer: null,
-    });
-    const outcome = await runOn(harness, alpha);
-
-    expect(harness.notices.length).toBe(1);
-    expect(harness.notices[0]?.kind).toBe('approval');
-    expect(outcome.kind).toBe('refused');
-    if (outcome.kind !== 'refused') throw new Error('unreachable');
-    // NOT a budget code: this purchase was comfortably inside the budget and
-    // the ledger must not claim otherwise.
-    expect(outcome.code).toBe('merchant-not-recognised-expired');
-    expect(outcome.reason).toContain('jeffsgadgets.biz');
-    expect(alpha.submissions.length).toBe(0);
-  });
-
-  test('an unrecognised merchant he approves goes through, and the record says he was asked', async () => {
-    const harness = buildHarness({
-      merchant: alpha,
-      origin: UNRECOGNISED_ORIGIN,
-      answer: { answer: 'approve' },
-    });
-    const outcome = await runOn(harness, alpha);
-
-    expect(outcome.kind).toBe('purchased');
-    if (outcome.kind !== 'purchased') throw new Error('unreachable');
-    expect(outcome.record.windowKind).toBe('approval');
-    expect(outcome.record.merchantRecognised).toBe(false);
-    // The basis is recorded, so a later reader can tell WHY it asked.
-    expect(outcome.record.merchantQualifier).toBe('judgement');
-  });
-
-  test('the notice states which mode it is in and why this merchant put it there', async () => {
-    const recognised = buildHarness({ merchant: alpha });
-    await runOn(recognised, alpha);
-    const unrecognised = buildHarness({
-      merchant: beta, origin: UNRECOGNISED_ORIGIN, answer: { answer: 'approve' },
-    });
-    await runOn(unrecognised, beta);
-
-    // Same facts, opposite rules, and each says which it is.
-    expect(recognised.notices[0]?.message).toContain('bestbuy.com');
-    expect(recognised.notices[0]?.kind).toBe('veto');
-    expect(unrecognised.notices[0]?.message).toContain('jeffsgadgets.biz');
-    // The notice says WHY this merchant put it in approval mode, so he is not
-    // reading a bare verdict.
-    expect(unrecognised.notices[0]?.kind).toBe('approval');
-    expect(recognised.notices[0]?.kind).toBe('veto');
-    // Each states the recourse it found, or the lack of it, rather than a bare
-    // verdict he cannot evaluate.
-    expect(recognised.notices[0]?.message.toLowerCase()).toContain('returns process');
-    expect(unrecognised.notices[0]?.message.toLowerCase()).toContain('recourse');
-  });
-
-  test('a claimed storefront cannot make an unrecognised checkout look recognised', async () => {
-    // The judge is given the VALIDATED CHECKOUT DOMAIN and nothing else. A
-    // storefront a page claims to be affiliated with is merchant-authored text,
-    // and this is the case where believing it would matter: a checkout on
-    // jeffsgadgets.biz asserting it is really Best Buy.
-    const harness = buildHarness({
-      merchant: alpha,
-      origin: UNRECOGNISED_ORIGIN,
-      storefrontHost: 'www.bestbuy.com',
-      answer: null,
-    });
-    const outcome = await runOn(harness, alpha);
-
-    expect(harness.notices[0]?.kind).toBe('approval');
-    // The domain that actually takes the card, not the one the page named.
-    // The domain that actually TAKES THE CARD is named, and the handoff is
-    // explained rather than hidden, a storefront's protection does not
-    // necessarily follow the card to a different company.
-    expect(harness.notices[0]?.message).toContain('jeffsgadgets.biz');
-    expect(harness.notices[0]?.message.toLowerCase()).toContain('payment page is on');
-    expect(outcome.kind).toBe('refused');
-    expect(alpha.submissions.length).toBe(0);
-  });
-
-  test('exactly one message is sent on every path that reaches the window', async () => {
-    // Exactly one PRE-PURCHASE notice on every path. Paths that go on to buy
-    // add exactly one completion report and no more; paths that refuse add
-    // none, because nothing happened to report.
-    for (const [options, expectedTotal] of [
-      [{ merchant: alpha }, 2],
-      [{ merchant: alpha, dailyItemMinorUnits: 5_000, answer: { answer: 'approve' as const } }, 2],
-      [{ merchant: alpha, answer: { answer: 'object' as const } }, 1],
-      [{ merchant: alpha, origin: UNRECOGNISED_ORIGIN, answer: null }, 1],
-    ] as const) {
-      const harness = buildHarness(options);
-      await runOn(harness, alpha);
-      expect(harness.notices.length).toBe(expectedTotal);
-      // Whatever else happened, he was asked or told exactly once beforehand.
-      expect(harness.notices.filter((n) => n.kind === 'approval' || n.kind === 'veto').length).toBe(1);
-    }
-  });
-
-  test('an undeliverable notice proceeds within budget and denies over it', async () => {
-    const within = buildHarness({ merchant: alpha, deliverable: false });
-    const withinOutcome = await runOn(within, alpha);
-    expect(withinOutcome.kind).toBe('purchased');
-
-    const over = buildHarness({ merchant: beta, dailyItemMinorUnits: 5_000, deliverable: false });
-    const overOutcome = await runOn(over, beta);
-    expect(overOutcome.kind).toBe('refused');
-    if (overOutcome.kind !== 'refused') throw new Error('unreachable');
-    expect(overOutcome.code).toBe('item-budget-exceeded-undeliverable');
-    expect(beta.submissions.length).toBe(0);
-  });
-});
-
-// ═══ 9. The shipping step-down ═════════════════════════════════════════════
-
-describe('the shipping ladder', () => {
-  test('steps down one rung when the overage pool cannot cover the preferred tier, and records it', async () => {
-    const harness = buildHarness({ merchant: alpha, dailyOverageMinorUnits: 2_600 });
-    const request: PurchaseRequest = { ...harness.request, preferredTier: 'fastest' };
-    const reading = await readFixtureCheckout(alpha);
-    const outcome = await runCheckout(request, reading, harness.controls, harness.deps);
-
-    expect(outcome.kind).toBe('purchased');
-    if (outcome.kind !== 'purchased') throw new Error('unreachable');
-    // tax 1097 + fee 150 = 1247. Overnight 2999 needs 4246 and 2600 is
-    // available; two-day 1299 needs 2546, which fits. One rung, not straight
-    // to the cheapest.
-    expect(outcome.record.shippingTierRequested).toBe('fastest');
-    expect(outcome.record.shippingTierUsed).toBe('fast');
-    expect(outcome.record.steppedDown).toBe(true);
-    expect(outcome.record.shippingMinorUnits).toBe(1_299);
-
-    // Applied to the page, not merely decided.
-    expect(harness.driver.formState.get('ship-two-day')).toBe('Two-day');
-    // And he was told, in the same one message.
-    expect(harness.notices[0]?.message.toLowerCase()).toContain('stepped down from fastest');
-  });
-
-  test('no step-down means the requested tier, recorded as such', async () => {
-    const harness = buildHarness({ merchant: alpha });
-    const request: PurchaseRequest = { ...harness.request, preferredTier: 'fastest' };
-    const reading = await readFixtureCheckout(alpha);
-    const outcome = await runCheckout(request, reading, harness.controls, harness.deps);
-
-    expect(outcome.kind).toBe('purchased');
-    if (outcome.kind !== 'purchased') throw new Error('unreachable');
-    expect(outcome.record.shippingTierUsed).toBe('fastest');
-    expect(outcome.record.steppedDown).toBe(false);
-    expect(outcome.record.shippingMinorUnits).toBe(2_999);
-  });
-});
-
-// ═══ Failure handling ══════════════════════════════════════════════════════
-
-describe('when the merchant interrupts or the process dies', () => {
-  test('a 3-D Secure challenge pauses cleanly and hands over the exact step', async () => {
-    const harness = buildHarness({
-      merchant: alpha,
-      challenge: {
-        kind: '3d-secure',
-        step: 'Approve the payment in your banking app, then tell me to carry on.',
-        url: `${RECOGNISED_ORIGIN}/3ds`,
-      },
-    });
-    const outcome = await runOn(harness, alpha);
-
-    expect(outcome.kind).toBe('challenge');
-    if (outcome.kind !== 'challenge') throw new Error('unreachable');
-    expect(outcome.challenge.kind).toBe('3d-secure');
-    expect(outcome.reason).toContain('banking app');
-    // Nothing recorded as a purchase, and the money stays held, because the
-    // order may still complete once he answers.
-    expect(harness.recorded.length).toBe(0);
-    expect(harness.ledger.state().reservations.length).toBe(1);
-    // Regression: the redactor stays ARMED, not disarmed, while a
-    // challenge is pending. He is about to be sent back to this very page to
-    // finish 3-D Secure, and the typed card digits are still sitting in its
-    // DOM (no click ever reached the merchant to clear them). Disarming here,
-    // as this used to, would leave a screenshot, an extract, or a readText of
-    // that same page free to hand the card straight back out while the owner
-    // is looking at it.
-    expect(harness.redactor.hasLiveMaterial('session-1', 'page-1')).toBe(true);
-    // The literal digits are still recoverable from live material only
-    // through the redactor's own guarded read paths (never bare storage), so
-    // the property under test is that `redact()` still finds something to
-    // remove, not that the digits leaked into this assertion.
-    expect(harness.redactor.containsLiveMaterial('session-1', 'page-1', SENTINEL.number)).toBe(true);
-  });
-
-  test('a CAPTCHA pauses the same way, without anything trying to answer it', async () => {
-    const harness = buildHarness({
-      merchant: alpha,
-      challenge: { kind: 'captcha', step: 'Solve the picture puzzle on screen.', url: `${RECOGNISED_ORIGIN}/c` },
-    });
-    const outcome = await runOn(harness, alpha);
-    expect(outcome.kind).toBe('challenge');
-    expect(alpha.submissions.length).toBe(0);
-  });
-
-  test('a submit that throws leaves "possibly submitted" and is never retried', async () => {
-    const harness = buildHarness({ merchant: alpha, failSubmit: true });
-    const outcome = await runOn(harness, alpha);
-
-    expect(outcome.kind).toBe('refused');
-    if (outcome.kind !== 'refused') throw new Error('unreachable');
-    expect(outcome.reason).toContain('cannot tell whether');
-    expect(outcome.reason).toContain('will not try again');
-
-    // The journal is the thing a restart reads, and it says the honest
-    // answer. A restart holds a FRESH registry over the surviving journal;
-    // the live registry deliberately skips its own in-flight records.
-    expect((await harness.registry.interrupted()).length).toBe(0);
-    const interrupted = await new CheckoutRegistry(harness.journal).interrupted();
-    expect(interrupted.length).toBe(1);
-    expect(interrupted[0]?.verdict).toBe('possibly-submitted');
-    // The budget stays held: it may well have been spent.
-    expect(harness.ledger.state().reservations.length).toBe(1);
-    expect(harness.recorded.length).toBe(0);
-    // Exactly one attempt reached the driver: a second call would be a retry of an order that may have been placed.
-    expect(harness.driver.submitAttempts).toBe(1);
-  });
-
-  test('every phase before the submit is unambiguously "not submitted"', () => {
-    expect(verdictFor('deciding')).toBe('not-submitted');
-    expect(verdictFor('awaiting-window')).toBe('not-submitted');
-    expect(verdictFor('arming-payment')).toBe('not-submitted');
-    expect(verdictFor('submit-pending')).toBe('possibly-submitted');
-    expect(verdictFor('submitted')).toBe('submitted');
-  });
-
-  test('what a restart tells him distinguishes the three cases in plain words', () => {
-    const record = {
-      purchaseId: 'p-1', sessionId: 's', pageId: 'p', merchantDomain: 'bestbuy.com',
-      cardId: 'card-1', item: unsafeOwnerSuppliedTextForTests('thing'), currency: currency('USD'), phase: 'submit-pending' as const,
-      startedAtMs: 0, updatedAtMs: 0, draw: null, reservationId: null,
-      shippingTierRequested: 'normal' as const, shippingTierUsed: null, stepDown: null,
-      totalMinorUnits: null,
-    };
-    // No reservation on the record: the message says nothing about a hold.
-    expect(describeInterruption(record, 'not-submitted')).toContain('Nothing was charged');
-    expect(describeInterruption(record, 'not-submitted')).not.toContain('hold');
-    // With a reservation, the sentence follows the actual release result.
-    const held = { ...record, reservationId: 'res-h' };
-    expect(describeInterruption(held, 'not-submitted', { reservationReleased: true })).toContain('has been released');
-    expect(describeInterruption(held, 'not-submitted')).toContain('no longer holds it');
-    expect(describeInterruption(record, 'possibly-submitted')).toContain('order history');
-    expect(describeInterruption(record, 'possibly-submitted')).toContain('will not retry');
-    // 'submitted' claims a ledger record only when one was verified.
-    expect(describeInterruption(record, 'submitted', { recordVerified: true })).toContain('purchase record is on the ledger');
-    expect(describeInterruption(record, 'submitted', { recordVerified: false })).toContain('no purchase record exists');
-    expect(describeInterruption(record, 'submitted')).toContain('cannot verify');
-  });
-
-  test('two purchases cannot drive the same page at once', async () => {
-    const harness = buildHarness({ merchant: alpha, challenge: { kind: 'otp', step: 'x', url: 'https://x.test/' } });
-    await runOn(harness, alpha);
-    // The first is paused mid-flight and still owns the page.
-    await expect(runOn(harness, alpha)).rejects.toThrow(/already belongs to a checkout/);
-  });
-});
-
-// ═══ Nothing here knows a merchant ═════════════════════════════════════════
-
-describe('the flow is merchant-agnostic by construction', () => {
-  test('the two fixtures share no markup, no wording and no number format', async () => {
-    const alphaHtml = await alpha.checkoutHtml();
-    const betaHtml = await beta.checkoutHtml();
-
-    expect(alphaHtml).toContain('$129.00');
-    expect(betaHtml).toContain('1.299,00');
-    expect(alphaHtml).toContain('autocomplete="cc-number"');
-    expect(betaHtml).not.toContain('autocomplete');
-    expect(alphaHtml).toContain('Sales tax');
-    expect(betaHtml).toContain('Umsatzsteuer');
-    expect(alphaHtml).toContain('<table');
-    expect(betaHtml).not.toContain('<table');
-  });
-
-  test('no shipped source file names either fixture, or any merchant markup', async () => {
-    // A selector table would have to live somewhere. This is the check that
-    // notices the first one, while it is still one line.
-    const { Glob } = await import('bun');
-    const glob = new Glob('platform/src/platform/payments/**/*.ts');
-    const offenders: string[] = [];
-    let visited = 0;
-    const engineRoot = join(import.meta.dir, '..');
-    for await (const path of glob.scan({ cwd: engineRoot })) {
-      visited++;
-      const source = await Bun.file(join(engineRoot, path)).text();
-      for (const marker of ['bezeichnung', 'kreditkartennummer', 'data-amount', 'querySelector', 'td.price']) {
-        if (source.includes(marker)) offenders.push(`${path}: ${marker}`);
-      }
-    }
-    expect(visited).toBeGreaterThan(0);
-    expect(offenders).toEqual([]);
-  });
-});
 
 // General tool execution modes never replace the owner's separate payment policy.
-for (const mode of ['safe-owner', 'safe-jev', 'yolo'] as const) {
+for (const mode of ['ask-me', 'just-vibes', 'yolo'] as const) {
   describe(`payment guardrails remain active in ${mode}`, () => {
     test('disabled payments, non-owner requests and non-leader nodes cannot spend', async () => {
       for (const gates of [

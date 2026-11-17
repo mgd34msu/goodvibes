@@ -154,6 +154,8 @@ export const ENUM_VALUE_DESCRIPTIONS: Record<string, Record<string, string>> = {
     'meta-cloud': SHARED_SETTING_ENUM_DESCRIPTIONS['surfaces.whatsapp.provider']['meta-cloud'],
     bridge: 'Use a bridge endpoint URL/token flow instead of direct Meta Cloud API delivery.',
   },
+  'batch.mode': SHARED_SETTING_ENUM_DESCRIPTIONS['batch.mode'],
+  'batch.fallback': SHARED_SETTING_ENUM_DESCRIPTIONS['batch.fallback'],
 };
 
 export function formatDefaultForEntry(entry: SettingEntry): string {

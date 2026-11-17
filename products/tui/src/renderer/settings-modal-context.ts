@@ -48,15 +48,8 @@ export const ENUM_VALUE_DESCRIPTIONS: Record<string, Record<string, string>> = {
     require_secure: SHARED_SETTING_ENUM_DESCRIPTIONS['storage.secretPolicy']['require_secure'],
     plaintext_allowed: SHARED_SETTING_ENUM_DESCRIPTIONS['storage.secretPolicy']['plaintext_allowed'],
   },
-  'batch.mode': {
-    off: 'Keep daemon work on the immediate local path.',
-    explicit: 'Use batch only when callers explicitly request batch execution.',
-    'eligible-by-default': 'Queue every non-streaming OpenAI-compatible chat completion as a batch unless it asks to run live; terminal and web chat stays live.',
-  },
-  'batch.fallback': {
-    live: 'A batch job for a provider that cannot batch runs at once on the live path, at live prices, and comes back already finished.',
-    fail: 'A batch job for a provider that cannot batch is refused, and nothing is sent.',
-  },
+  'batch.mode': SHARED_SETTING_ENUM_DESCRIPTIONS['batch.mode'],
+  'batch.fallback': SHARED_SETTING_ENUM_DESCRIPTIONS['batch.fallback'],
   'controlPlane.hostMode': {
     local: 'Bind only to this computer.',
     network: 'Bind for LAN access using the default network host; other machines are served once controlPlane.enabled is on.',

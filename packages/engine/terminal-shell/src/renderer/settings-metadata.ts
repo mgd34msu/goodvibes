@@ -112,6 +112,15 @@ export const SHARED_SETTING_ENUM_DESCRIPTIONS = {
   'surfaces.whatsapp.provider': {
     'meta-cloud': 'Use Meta Cloud API credentials and identifiers.',
   },
+  'batch.mode': {
+    off: 'Keep daemon work on the immediate local path.',
+    explicit: 'Use batch only when callers explicitly request batch execution.',
+    'eligible-by-default': 'Queue every non-streaming OpenAI-compatible chat completion as a batch unless it asks to run live; terminal and web chat stays live.',
+  },
+  'batch.fallback': {
+    live: 'A batch job for a provider that cannot batch runs at once on the live path, at live prices, and comes back already finished.',
+    fail: 'A batch job for a provider that cannot batch is refused, and nothing is sent.',
+  },
 } as const;
 
 export function settingCategoryLabel(key: string, labels: Readonly<Record<string, string>>): string {

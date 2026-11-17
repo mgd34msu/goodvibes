@@ -48,6 +48,7 @@ import {
   emitDeliveryStarted,
   emitDeliverySucceeded,
 } from '../runtime/emitters/deliveries.js';
+import { emitBatchJobSettled } from '../runtime/emitters/providers.js';
 import { DaemonSurfaceActionHelper } from './surface-actions.js';
 import { DaemonTransportEventsHelper } from './transport-events.js';
 import { DaemonHttpRouter } from './http/router.js';
@@ -715,6 +716,21 @@ export function createDaemonFacadeCollaborators(
   const batchManager = new DaemonBatchManager({
     configManager: runtime.configManager,
     providerRegistry: runtime.runtimeServices.providerRegistry,
+    // A finished job is published on the event stream, so a surface shows its result without polling.
+    onJobSettled: (job) => {
+      const bus = runtime.runtimeBus;
+      if (!bus || job.status === 'queued' || job.status === 'submitting' || job.status === 'submitted' || job.status === 'running') return;
+      emitBatchJobSettled(bus, { sessionId: 'daemon-batch', source: 'daemon-batch', traceId: job.id }, {
+        jobId: job.id,
+        status: job.status,
+        provider: job.provider,
+        model: job.model,
+        completedAt: job.completedAt ?? job.updatedAt,
+        ...(job.providerBatchId !== undefined ? { providerBatchId: job.providerBatchId } : {}),
+        ...(job.error?.code !== undefined ? { errorCode: job.error.code } : {}),
+        ...(job.error !== undefined ? { errorMessage: job.error.message } : {}),
+      });
+    },
   });
   batchManager.start();
   const httpRouter = new DaemonHttpRouter({

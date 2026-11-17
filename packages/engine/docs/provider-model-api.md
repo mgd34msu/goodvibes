@@ -247,7 +247,7 @@ curl -X PATCH \
 
 ## SSE: `providers`-domain events
 
-The daemon emits five event types on the `providers` RuntimeEventBus domain. Subscribers on a stream that includes the providers domain receive all of them.
+The daemon emits six event types on the `providers` RuntimeEventBus domain. Subscribers on a stream that includes the providers domain receive all of them.
 
 | Event `type` | Emitted when | Payload fields |
 |--------------|--------------|----------------|
@@ -256,6 +256,7 @@ The daemon emits five event types on the `providers` RuntimeEventBus domain. Sub
 | `MODEL_FALLBACK` | The runtime falls back from one model to another | `from: string`, `to: string`, `provider: string` |
 | `PROVIDER_VOICE_USAGE` | One billable voice call on a metered provider (a local engine emits nothing) | `provider: string`, optional `modelId: string`, `kind: 'tts' \| 'stt'`, `billableUnits: number`, `unit: 'characters' \| 'seconds'` |
 | `MODEL_CHANGED` | The current model is switched (see below) | `registryKey: string`, `provider: string`, optional `previous: { registryKey, provider }` |
+| `BATCH_JOB_SETTLED` | A daemon batch job reaches its final state | `jobId: string`, `status: 'completed' \| 'failed' \| 'cancelled' \| 'expired' \| 'dead_lettered'`, `provider: string`, `model: string`, `completedAt: number`, optional `providerBatchId`, `errorCode`, `errorMessage` |
 
 
 ### `MODEL_CHANGED`

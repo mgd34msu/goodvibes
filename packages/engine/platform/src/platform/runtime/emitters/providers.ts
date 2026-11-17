@@ -4,6 +4,7 @@
 import { createEventEnvelope } from '../events/envelope.js';
 import type { RuntimeEventBus } from '../events/index.js';
 import type { EmitterContext } from './index.js';
+import type { ProviderEvent } from '../../../events/providers.js';
 
 export function emitProvidersChanged(
   bus: RuntimeEventBus,
@@ -36,6 +37,15 @@ export function emitModelFallback(
   data: { from: string; to: string; provider: string }
 ): void {
   bus.emit('providers', createEventEnvelope('MODEL_FALLBACK', { type: 'MODEL_FALLBACK', ...data }, ctx));
+}
+
+/** Emit BATCH_JOB_SETTLED when a daemon batch job reaches its final state. */
+export function emitBatchJobSettled(
+  bus: RuntimeEventBus,
+  ctx: EmitterContext,
+  data: Omit<Extract<ProviderEvent, { type: 'BATCH_JOB_SETTLED' }>, 'type'>,
+): void {
+  bus.emit('providers', createEventEnvelope('BATCH_JOB_SETTLED', { type: 'BATCH_JOB_SETTLED', ...data }, ctx));
 }
 
 export function emitModelChanged(

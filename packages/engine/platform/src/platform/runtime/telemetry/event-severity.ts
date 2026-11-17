@@ -39,6 +39,7 @@ export const EVENT_SEVERITY: Readonly<Record<AnyRuntimeEvent['type'], TelemetryS
   AUTOMATION_RUN_COMPLETED: 'info',
   AUTOMATION_RUN_FAILED: 'error',
   AUTOMATION_RUN_STARTED: 'debug',
+  BATCH_JOB_SETTLED: 'info',
   BUDGET_EXCEEDED_COST: 'warn',
   BUDGET_EXCEEDED_MS: 'warn',
   BUDGET_EXCEEDED_TOKENS: 'warn',

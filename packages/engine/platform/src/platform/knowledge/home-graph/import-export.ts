@@ -1,5 +1,5 @@
 import { activationSourceIds, activationSubjectIds, projectNodeActivation, snapshotNodeInput } from '../activation/projection.js';
-import { NODE_ACTIVATION_LIMITS, KnowledgeNodeActivationHeldError, type KnowledgeNodeActivationOptions } from '../activation/types.js';
+import type { KnowledgeNodeActivationOptions } from '../activation/types.js';
 import type { KnowledgeStore } from '../store.js';
 import { buildHomeGraphMetadata } from './helpers.js';
 import { readHomeGraphState } from './state.js';
@@ -44,7 +44,6 @@ export async function importHomeGraphSpace(
   const sourceInputs = (input.data.sources ?? []).map((source) => ({ ...source, metadata: buildHomeGraphMetadata(input.spaceId, input.installationId, source.metadata) }));
   const extractionInputs = (input.data.extractions ?? []).map((extraction) => ({ ...extraction, metadata: buildHomeGraphMetadata(input.spaceId, input.installationId, extraction.metadata) }));
   const nodeInputs = (input.data.nodes ?? []).map((node) => ({ ...node, metadata: buildHomeGraphMetadata(input.spaceId, input.installationId, node.metadata) }));
-  if (nodeInputs.length > NODE_ACTIVATION_LIMITS.nodes) throw new KnowledgeNodeActivationHeldError('budget');
   await store.init();
   const sourceById = new Map(sourceInputs.map((source) => [source.id, source]));
   const extractionBySourceId = new Map(extractionInputs.map((extraction) => [extraction.sourceId, extraction]));

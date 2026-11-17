@@ -2,7 +2,7 @@ import type { JsonValue } from '@goodvibes-jev/judgment';
 /**
  * What one serving reading may send to the decision model: the passages of the
  * node's sources that bear on it, never whole documents. The number of nodes in
- * a pass is local work and is not limited (`nodes` and `bytes` are unbounded).
+ * a pass is local work and is not limited.
  */
 export const NODE_ACTIVATION_LIMITS = Object.freeze({
   /** Extracted passages sent with one reading, across all of the node's sources. */
@@ -11,7 +11,6 @@ export const NODE_ACTIVATION_LIMITS = Object.freeze({
   requestBytes: 64 * 1024,
   /** Longest passage; a longer paragraph is cut at sentence ends. */
   passageChars: 1_200,
-  nodes: Number.POSITIVE_INFINITY, bytes: Number.POSITIVE_INFINITY,
   concurrency: 4, timeoutMs: 2_147_483_647, defaultTimeoutMs: 0,
 });
 export interface KnowledgeNodeActivationOptions {

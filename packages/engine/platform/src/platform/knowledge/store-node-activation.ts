@@ -101,7 +101,6 @@ async function prepareOwnedNodeActivationPass(store: KnowledgeStore, drafts: rea
   };
   assertNative();
   if (options.timeoutMs !== undefined && (!Number.isInteger(options.timeoutMs) || options.timeoutMs < 0 || options.timeoutMs > LIMITS.timeoutMs)) throw new Held('budget');
-  if (drafts.length > LIMITS.nodes) throw new Held('budget');
   const identities = new Map<string, string>();
   for (const { record } of drafts) {
     const key = JSON.stringify([record.kind, record.slug]);
@@ -110,7 +109,6 @@ async function prepareOwnedNodeActivationPass(store: KnowledgeStore, drafts: rea
     identities.set(key, record.id);
   }
   const proposed = new Map(drafts.map((draft) => [draft.record.id, draft.record]));
-  let localBytes = 0;
   let nodes: PreparedNode[] = [], direct: (KnowledgeNodeRecord | undefined)[] = [];
   let completed: KnowledgePreparedNodeWrites | undefined;
   const cacheWrites = new Map<number, { readonly reference: string; readonly observation: string | null }>();
@@ -134,8 +132,6 @@ async function prepareOwnedNodeActivationPass(store: KnowledgeStore, drafts: rea
       let nativeActivationState: ReturnType<KnowledgeStore['getNodeActivationState']>;
       try { nativeActivationState = readset.capture(draft.record.id, evidence.map(entry => entry.id), subjects.map(entry => entry.id), observationReference(observed)); }
       catch (error) { if (error instanceof Held) throw error; throw new Held('malformed'); }
-      localBytes += new TextEncoder().encode(JSON.stringify({ input: draft.input, evidence, subjects })).byteLength;
-      if (localBytes > LIMITS.bytes * 4) throw new Held('budget');
       return { ...draft, preserveObservation: !changedEvidence, nativeActivationState, references, evidence, subjects, observed };
     });
     direct = nodes.map((draft, index): KnowledgeNodeRecord | undefined => {

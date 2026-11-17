@@ -160,13 +160,9 @@ export {
 export {
   readClientCredentialsFromJson,
   clientCredentialsFromInput,
-  shouldMigrateLegacyCredentials,
-  LEGACY_MIGRATION_CONFIG_KEY,
   type GoogleClientCredentials,
   type GoogleClientIntakeRoute,
   type GoogleClientIntakeResult,
-  type LegacyCredentialLocation,
-  type LegacyMigrationOutcome,
 } from './client-intake.js';
 
 export {

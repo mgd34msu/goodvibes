@@ -27,7 +27,4 @@ export interface GoogleConnectorConfig {
     projectId: string;
     publishingStatus: string;
   };
-  credentials: {
-    migratedFrom: string;
-  };
 }

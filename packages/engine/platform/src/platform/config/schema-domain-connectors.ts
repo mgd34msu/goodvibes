@@ -37,7 +37,6 @@ const CALENDAR_CONNECTOR_DEFAULTS: CalendarConnectorConfig = {
 /** Defaults for the connector's `google` section: the Cloud project and the OAuth app's state. */
 const GOOGLE_CONNECTOR_DEFAULTS: GoogleConnectorConfig = {
   oauth: { projectId: '', publishingStatus: '' },
-  credentials: { migratedFrom: '' },
 };
 
 export const connectorConfigDefaults: {
@@ -94,13 +93,6 @@ export const connectorConfigSettings: ConfigSettingDefinition[] = [
     default: '',
     description:
       'The OAuth consent screen\'s last-known publishing status ("testing" or "in-production"), cached after being read from the Cloud Console since it cannot be probed any other way. An app left in "Testing" is issued refresh tokens that expire after seven days; moving it to "In production" (self-certified, no Google review needed) removes that expiry. Empty until a setup or verification run has read it.',
-  },
-  {
-    key: 'google.credentials.migratedFrom',
-    type: 'string',
-    default: '',
-    description:
-      'Marker recording that a legacy on-disk Google credential (from before credentials lived in the encrypted secret store) was already migrated in, so migration is not repeated on every start. Names where it came from; holds no credential value itself.',
   },
 ];
 

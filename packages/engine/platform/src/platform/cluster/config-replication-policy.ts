@@ -172,13 +172,6 @@ const NODE_LOCAL_CONFIG_KEYS: readonly string[] = [
   // and copying it to a node whose daemon home is elsewhere would point that
   // node at a file that does not exist there.
   'profile.path',
-  // "This machine has already read the legacy plaintext credential files that
-  // were sitting in its own home directory." It is a statement about one
-  // filesystem, not about the group: another node has its own home directory,
-  // may well have its own stranded copy of those files, and needs to make its
-  // own pass. Replicating the marker would tell it the work was done and leave
-  // the credentials sitting in the clear where nobody looks again.
-  'google.credentials.migratedFrom',
   // Mailbox password references kept under `email.*` name a secret in this
   // node's own store; the mailbox settings replicate with `surfaces.`.
   'email.passwordRef',

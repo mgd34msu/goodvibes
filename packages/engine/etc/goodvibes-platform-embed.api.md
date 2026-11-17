@@ -285,6 +285,7 @@ export interface PermissionPromptDecision {
     reason?: string | undefined;
     remember?: boolean | undefined;
     rememberTier?: RememberTier | undefined;
+    settledBy?: 'sandbox' | undefined;
 }
 
 // @public (undocumented)
@@ -303,6 +304,7 @@ export interface PermissionPromptRequest {
     //
     // (undocumented)
     category: PermissionCategory;
+    containable?: true | undefined;
     // Warning: (ae-forgotten-export) The symbol "OwnerOnlyKind" needs to be exported by the entry point embed.d.ts
     ownerOnly?: OwnerOnlyKind | undefined;
     rememberOptions?: readonly RememberTierOption[] | undefined;

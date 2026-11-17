@@ -61,6 +61,7 @@ import { resolveHostedModelDefinition } from './model-route.js';
 import { createHostedSessionRuntime, newHostedSessionId, type HostedSessionContractSink, type HostedSessionRuntime } from './session-runtime.js';
 import type { HostedContractRunners } from '../contract/operator-service.js';
 import { HostedWorkspaceFloors, type HostedWorkspaceFloorFactory, type HostedWorkspaceFloorLease } from './workspace-floor.js';
+import type { HostedSurfaceTurn, HostedSurfaceTurns } from './surface-turn.js';
 import { hostedLifecycleCallbacks } from './lifecycle-callbacks.js';
 import { HostedSessionStore, type HostedSessionLoadReport } from './store.js';
 import { HostedSessionSpineIntake, type HostedSessionSpine } from './spine-intake.js';
@@ -132,6 +133,13 @@ export interface HostedSessionManagerOptions {
   readonly runtimeBus: RuntimeEventBus;
   /** The base system prompt for a hosted turn, per session. */
   readonly systemPrompt: (input: { readonly sessionId: string; readonly workspaceRoot: string }) => string;
+  /**
+   * The product turns this host offers by origin surface (surface-turn.ts): a
+   * session created for one of them runs with that surface's tools and prompt,
+   * on create and on every rebuild. Omitted, or no entry for the surface ⇒ the
+   * platform tools and `systemPrompt`.
+   */
+  readonly surfaceTurns?: HostedSurfaceTurns | undefined;
   /** Registers each hosted session's live-turn controls; omitted ⇒ the session verbs cannot reach hosted turns. */
   readonly liveTurns?: HostedLiveTurnRegistry | undefined;
   /** The shared session broker, so hosted sessions appear in `sessions.list`. */
@@ -240,6 +248,12 @@ export class HostedSessionManager {
       now: () => this.now(),
       alertOwner: (text) => this.alerter?.(text),
     });
+  }
+
+  /** The product turn a session created for `originSurface` runs as, spread into its runtime options. */
+  private surfaceTurnFor(originSurface: string | undefined): { readonly surfaceTurn?: HostedSurfaceTurn } {
+    const turn = originSurface ? this.options.surfaceTurns?.[originSurface] : undefined;
+    return turn ? { surfaceTurn: turn } : {};
   }
 
   /** Where an incident nobody is attached to see goes. Wired by the daemon. */
@@ -523,6 +537,7 @@ export class HostedSessionManager {
         systemPrompt: this.options.systemPrompt({ sessionId, workspaceRoot }),
         ...(model === undefined ? {} : { model }),
         ...(input.originSurface ? { originSurface: input.originSurface } : {}),
+        ...this.surfaceTurnFor(input.originSurface),
         contracts: this.sessionContracts(sessionId),
         isSessionResumable: token => this.isSessionHeld(token),
         permissionModeChanged: mode => this.savePermissionMode(sessionId, mode),
@@ -1049,6 +1064,7 @@ export class HostedSessionManager {
         ...(model === undefined ? {} : { model }),
         // Rebuilding as the host would move client-owned settings mid-life.
         ...(live.record.originSurface ? { originSurface: live.record.originSurface } : {}),
+        ...this.surfaceTurnFor(live.record.originSurface),
         contracts: this.sessionContracts(live.record.id),
         ...(live.record.permissionMode ? { permissionMode: live.record.permissionMode } : {}),
         isSessionResumable: token => this.isSessionHeld(token),

@@ -52,6 +52,7 @@ import {
   type HostedSessionLoadReport,
   type HostedSessionSpine,
   type HostedWorkspaceFloorFactory,
+  type HostedSurfaceTurns,
 } from '../hosted-sessions/index.js';
 import type { RuntimeServices } from '../runtime/services.js';
 import { CONVERSATIONAL_DIAGNOSIS_SECTION } from '../agents/conversational-contract.js';
@@ -71,6 +72,13 @@ export interface DaemonHostedSessionsOptions {
    * Omitted ⇒ a plain statement of what the session is.
    */
   readonly systemPrompt?: ((input: { readonly sessionId: string; readonly workspaceRoot: string }) => string) | undefined;
+  /**
+   * The product turns this daemon hosts by origin surface: a session created
+   * with `originSurface: 'agent'` runs as the Agent's turn (its tools and its
+   * prompt, with `systemPrompt` as the base) when `agent` is here. A surface
+   * with no entry gets the platform tools and `systemPrompt`.
+   */
+  readonly surfaceTurns?: HostedSurfaceTurns | undefined;
   /** Where session state is written. Omitted ⇒ `<injected home>/.goodvibes/hosted-sessions`. */
   readonly stateDirectory?: string | undefined;
   /** Whether a workspace root is acceptable. Omitted ⇒ it must be an existing directory. */
@@ -147,6 +155,7 @@ export function composeHostedSessions(input: HostedSessionCompositionInput): Hos
     },
     runtimeBus: input.runtimeBus,
     systemPrompt: input.options.systemPrompt ?? defaultHostedSystemPrompt,
+    ...(input.options.surfaceTurns === undefined ? {} : { surfaceTurns: input.options.surfaceTurns }),
     liveTurns: input.liveTurns,
     ...(input.spine === undefined ? {} : { spine: input.spine }),
     ...(input.cloudflareAuthToken === undefined ? {} : { cloudflareAuthToken: input.cloudflareAuthToken }),

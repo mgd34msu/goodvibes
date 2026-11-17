@@ -30,6 +30,7 @@ import { HostedSessionUnavailableError } from './errors.js';
 import type { HostedWorkspaceFloor } from './workspace-floor.js';
 import { createContractIntake } from '../contract/intake-route.js';
 import { observeSessionContracts } from './session-contracts.js';
+import type { HostedSurfaceTools, HostedSurfaceTurn } from './surface-turn.js';
 import { askingQuestions, type QuestionAsker } from '../agents/agent-owner-questions.js';
 import { watchSessionAnswers, type SessionAnswerWatch } from '../agents/agent-inlets.js';
 import { callingAgentId } from '../agents/calling-agent.js';
@@ -130,6 +131,13 @@ export interface HostedSessionRuntimeOptions {
    * them in its conversation and lists nothing.
    */
   readonly contracts?: HostedSessionContractSink | undefined;
+  /**
+   * The origin surface's own turn (surface-turn.ts): its tools join the
+   * platform's in this session's registry, and each model request's system
+   * prompt is composed by it, with `systemPrompt` as its base. Omitted ⇒ the
+   * platform tools and `systemPrompt` as it is.
+   */
+  readonly surfaceTurn?: HostedSurfaceTurn | undefined;
 }
 
 /** The engine's side of a session's contracts. */
@@ -300,6 +308,38 @@ export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions)
 
   if (options.floor.devicePosture) registerDevicePhoneTool(toolRegistry, options.floor.devicePosture);
 
+  // The surface's own tools go in after the platform's, once per composed session.
+  const surfaceTurn = options.surfaceTurn;
+  let surfaceTools: HostedSurfaceTools | undefined;
+  try {
+    surfaceTools = surfaceTurn?.registerTools({ registry: toolRegistry, sessionId, workspaceRoot: options.workspaceRoot, floor: options.floor, providerRegistry });
+  } catch (error) {
+    // Nothing else holds this session yet: release what was composed so far.
+    answers?.dispose();
+    if (answers && hostedSessionWatches.get(sessionId) === answers) hostedSessionWatches.delete(sessionId);
+    hostedTurnSessions.delete(modeOwner);
+    promptLifetime.abort();
+    void registeredTools.dispose().catch((disposeError: unknown) => {
+      logger.debug('[hosted-sessions] tool state disposal raised', { sessionId, error: summarizeError(disposeError) });
+    });
+    throw error;
+  }
+  // The user message the current turn answers; a surface prompt ranks its context against it.
+  let turnText: string | null = null;
+  // One composition per model-request signal: a turn's retries and tool rounds share it.
+  const surfacePromptBySignal = new WeakMap<AbortSignal, Promise<string>>();
+  const getSystemPrompt = surfaceTurn
+    ? (signal?: AbortSignal): string | Promise<string> => {
+      const existing = signal ? surfacePromptBySignal.get(signal) : undefined;
+      if (existing) return existing;
+      const composed = Promise.resolve(surfaceTurn.systemPrompt({
+        sessionId, workspaceRoot: options.workspaceRoot, basePrompt: options.systemPrompt, providerRegistry, turnText, signal,
+      }));
+      if (signal) surfacePromptBySignal.set(signal, composed);
+      return composed;
+    }
+    : (): string => options.systemPrompt;
+
   const orchestrator = new Orchestrator({
     conversation,
     // A hosted session has no viewport. The scroll seam is the renderer's, and
@@ -309,7 +349,7 @@ export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions)
     scrollToEnd: () => {},
     toolRegistry,
     permissionManager: services.permissionManager,
-    getSystemPrompt: () => options.systemPrompt,
+    getSystemPrompt,
     hookDispatcher: services.hookDispatcher,
     flagManager: services.featureFlags,
     runtimeBus: services.runtimeBus,
@@ -417,6 +457,8 @@ export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions)
       // evidence that turn's pending send is judged against. Channel and
       // automation input never starts one, so their exposure accumulates.
       await withUntrustedContentScope(contentScope, async () => {
+        // A running turn composed its prompt at its first request; this text is the next turn's.
+        turnText = text;
         if (submitOptions?.operatorInput === true && !orchestrator.isTurnInFlight && !orchestrator.isThinking) ledger.startTurn();
         await withExecutionModeOwner(modeOwner, () => orchestrator.handleUserInput(text, undefined, {
           awaitQueuedTurn: true,
@@ -437,6 +479,7 @@ export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions)
       if (orchestrator.isTurnInFlight || orchestrator.isThinking
         || (before !== 'unclaimed' && before !== 'retryable')) throw new Error(`Native turn cannot be queued or replayed: it is ${before}`);
       orchestrator.bindNativeConversationProject(source.projectId);
+      turnText = source.text;
       await withUntrustedContentScope(contentScope, () => withExecutionModeOwner(modeOwner, () => orchestrator.handleUserInput(source.text, undefined, { nativeConversationTurnPermit: permit, requireImmediateNativeTurn: true,
         origin: { source: 'native-hosted-conversation', surface: 'service', metadata: { inputId, correlationId } } })));
       const after = readNativeConversationTurnStatus(permit);
@@ -470,6 +513,9 @@ export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions)
       // The session's key-value state is saved when its tools shut down; a session that ends here would otherwise lose it.
       void registeredTools.dispose().catch((error: unknown) => {
         logger.debug('[hosted-sessions] tool state disposal raised', { sessionId, error: summarizeError(error) });
+      });
+      void Promise.resolve().then(() => surfaceTools?.dispose?.()).catch((error: unknown) => {
+        logger.debug('[hosted-sessions] surface tool disposal raised', { sessionId, error: summarizeError(error) });
       });
     },
   };

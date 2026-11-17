@@ -35,6 +35,14 @@ export type {
 
 export { createHostedSessionRuntime, hostedAgentAsker, newHostedSessionId } from './session-runtime.js';
 export type { HostedOwnerQuestions, HostedSessionContractSink, HostedSessionRuntime, HostedSessionRuntimeOptions } from './session-runtime.js';
+export type {
+  HostedSessionProviderRegistry,
+  HostedSurfacePromptInput,
+  HostedSurfaceTools,
+  HostedSurfaceToolsInput,
+  HostedSurfaceTurn,
+  HostedSurfaceTurns,
+} from './surface-turn.js';
 
 // A hosted session as the host of the contracts it starts, and the external
 // work adapter that dispatches contract work into hosted sessions.

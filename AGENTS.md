@@ -29,7 +29,7 @@ bun run test:live   # files under test/live/ (the sandbox proofs)
 bun run test:e2e    # files under src/test/e2e/ (the built binaries)
 ```
 
-The limits are fixed: 5 seconds per test, 10 seconds per file (30 under `test/live/` and `src/test/e2e/`), 600 file-seconds for the default suite. A file past its limit is killed and fails. Before anything runs, the runner parses every selected file and refuses the whole run, naming file and line, on `Bun.sleep`, a promise resolved by `setTimeout`, a snapshot, `mock.module`, `.skip`/`.todo`/`.skipIf`, or a timeout or retry argument. A file that runs no test, skips one, tries the network or leaves a process running fails. The run ends with the ten slowest files, the file-seconds per group, and a line of files run, passed, failed and refused.
+The limits are fixed: 5 seconds per test, 10 seconds per file (30 under `test/live/` and `src/test/e2e/`), 600 file-seconds for the default suite. A file past its limit is killed and fails. Measured 2026-11-17 on 12 cores (11 workers) with other work running (load average 9 to 28): the default suite, 131 files, took 22.6 to 30.2 s and 200 to 264 file-seconds over ten runs in a row; `test:live`, 4 files, 0.8 s and 2.6 file-seconds; `test:e2e`, 2 files, 7.4 s and 13.3 file-seconds. Before anything runs, the runner parses every selected file and refuses the whole run, naming file and line, on `Bun.sleep`, a promise resolved by `setTimeout`, a snapshot, `mock.module`, `.skip`/`.todo`/`.skipIf`, or a timeout or retry argument. A file that runs no test, skips one, tries the network or leaves a process running fails. The run ends with the ten slowest files, the file-seconds per group, and a line of files run, passed, failed and refused.
 
 ## Typecheck
 

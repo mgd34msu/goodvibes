@@ -1,3 +1,4 @@
+import { refusal, refusalErrorBody } from '@goodvibes-jev/engine/errors';
 import type { DaemonBatchManager } from '../../batch/index.js';
 import { DaemonBatchError } from '../../batch/index.js';
 import type { CreateDaemonBatchJobInput } from '../../batch/types.js';
@@ -23,6 +24,7 @@ export const BATCH_ROUTES: readonly { readonly method: string; readonly path: st
   { method: 'POST', path: '/api/batch/jobs' },
   { method: 'GET', path: '/api/batch/jobs/{jobId}' },
   { method: 'POST', path: '/api/batch/jobs/{jobId}/cancel' },
+  { method: 'POST', path: '/api/batch/provider-batches/{providerBatchId}/cancel' },
   { method: 'POST', path: '/api/batch/tick' },
 ];
 
@@ -70,6 +72,13 @@ export async function dispatchBatchRoutes(
     });
   }
 
+  const providerBatchCancelMatch = pathname.match(/^\/api\/batch\/provider-batches\/([^/]+)\/cancel$/);
+  if (providerBatchCancelMatch && req.method === 'POST') {
+    const providerBatchId = decodePathSegment(providerBatchCancelMatch[1]!);
+    if (providerBatchId === null) return Response.json({ error: 'Malformed provider batch id in path', code: 'INVALID_BATCH_REQUEST' }, { status: 400 });
+    return handleBatchError(async () => Response.json(await context.batchManager.cancelProviderBatch(providerBatchId)));
+  }
+
   if (pathname === '/api/batch/tick' && req.method === 'POST') {
     const bodyOrErr = await context.parseOptionalJsonBody(req);
     if (bodyOrErr instanceof Response) return bodyOrErr;
@@ -88,6 +97,16 @@ async function handleBatchError(run: () => Promise<Response>): Promise<Response>
     return await run();
   } catch (error: unknown) {
     if (error instanceof DaemonBatchError) {
+      // A refusal that says what state it leaves and what to do next carries both on the wire.
+      if (error.state !== undefined) {
+        return Response.json(refusalErrorBody(refusal({
+          code: error.code,
+          state: error.state,
+          reason: error.message,
+          next: error.next ?? [],
+          status: error.status,
+        })), { status: error.status });
+      }
       return Response.json({ error: error.message, code: error.code }, { status: error.status });
     }
     const message = error instanceof Error ? error.message : String(error);

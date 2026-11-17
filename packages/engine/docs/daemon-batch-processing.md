@@ -49,7 +49,7 @@ Provider runtime metadata exposes `usage.batch` so clients can discover whether 
 
 ## Daemon API
 
-All routes require the same daemon auth as other daemon APIs. Queuing, cancelling and ticking spend provider budget, so `POST /api/batch/jobs`, `POST /api/batch/jobs/{jobId}/cancel` and `POST /api/batch/tick` also need the admin role; the read routes do not.
+All routes require the same daemon auth as other daemon APIs. Queuing, cancelling and ticking spend provider budget, so `POST /api/batch/jobs`, `POST /api/batch/jobs/{jobId}/cancel`, `POST /api/batch/provider-batches/{providerBatchId}/cancel` and `POST /api/batch/tick` also need the admin role; the read routes do not.
 
 | Route | Method | Behavior |
 |---|---:|---|
@@ -58,6 +58,7 @@ All routes require the same daemon auth as other daemon APIs. Queuing, cancellin
 | `/api/batch/jobs` | `GET` | Lists recent jobs. Supports `?limit=100`. |
 | `/api/batch/jobs/{jobId}` | `GET` | Reads one job, by its id or by the `jobId` a Cloudflare Worker answered when it queued the job. |
 | `/api/batch/jobs/{jobId}/cancel` | `POST` | Cancels a queued job. A job cancelled while its batch is being submitted to the provider stays cancelled. A job already at the provider is refused with `409 BATCH_JOB_ALREADY_SUBMITTED`, which names its provider batch, because the provider runs that batch as a whole. |
+| `/api/batch/provider-batches/{providerBatchId}/cancel` | `POST` | Cancels a whole provider batch at the provider and marks its jobs. Returns `{ providerBatchId, providerStatus, jobs }`: `providerStatus` is `cancelled` once the provider stopped, or `running` while it winds down, in which case requests it finished first are collected by the next pass and the rest are marked cancelled when it ends. `404 BATCH_PROVIDER_BATCH_NOT_FOUND` when no job belongs to the id; `409 BATCH_PROVIDER_CANCEL_UNSUPPORTED` when the provider has no cancel call. |
 | `/api/batch/tick` | `POST` | Submits eligible queued jobs and polls submitted provider batches. Body may include `{ "force": true }`. |
 
 Example:
@@ -117,7 +118,9 @@ Jobs are persisted under the daemon config directory in `batch-jobs/`, one file 
 | `400` | `INVALID_BATCH_REQUEST` | The job is missing required fields (for example `request.messages`). |
 | `413` | `QUEUE_PAYLOAD_TOO_LARGE` | The queued job payload exceeds the maximum allowed size. |
 | `413` | `BATCH_REQUEST_TOO_LARGE` | The batch request exceeds 4 MiB. Split it into smaller jobs. |
-| `409` | `BATCH_JOB_ALREADY_SUBMITTED` | The job is already in a provider batch, which runs as a whole; the response names that batch. |
+| `409` | `BATCH_JOB_ALREADY_SUBMITTED` | The job is already in a provider batch, which runs as a whole. The body's `state` says where the job is and `next` names `POST /api/batch/provider-batches/{providerBatchId}/cancel`. |
+| `404` | `BATCH_PROVIDER_BATCH_NOT_FOUND` | No job belongs to the provider batch id given to the provider-batch cancel route. |
+| `409` | `BATCH_PROVIDER_CANCEL_UNSUPPORTED` | The provider has no API call to cancel a batch; cancel it in the provider's console or wait for the result. |
 | `409` | `BATCH_PROVIDER_UNSUPPORTED` | The target provider does not expose a provider Batch API adapter. |
 | `409` | `BATCH_PROVIDER_NOT_CONFIGURED` | The target provider lacks the API-key credentials required for Batch API use. |
 | `500` | `BATCH_STORE_UNAVAILABLE` | The `batch-jobs/` directory could not be read; the message names it. |

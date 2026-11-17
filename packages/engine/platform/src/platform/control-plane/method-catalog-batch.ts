@@ -21,7 +21,7 @@ import {
 } from './method-catalog-shared.js';
 
 const OPEN_OBJECT_SCHEMA = objectSchema({}, [], { additionalProperties: true });
-const JOB_STATUS_SCHEMA = stringEnumSchema(['queued', 'submitted', 'running', 'completed', 'failed', 'cancelled', 'expired', 'dead_lettered']);
+const JOB_STATUS_SCHEMA = stringEnumSchema(['queued', 'submitting', 'submitted', 'running', 'completed', 'failed', 'cancelled', 'expired', 'dead_lettered']);
 const BATCH_MODE_SCHEMA = stringEnumSchema(['off', 'explicit', 'eligible-by-default']);
 
 /** One job as the daemon stores it. `request`, `result` and any `error.raw` carry provider-shaped data, so they stay open. */
@@ -144,13 +144,29 @@ export const builtinGatewayBatchMethodDescriptors: readonly GatewayMethodDescrip
   methodDescriptor({
     id: 'batch.jobs.cancel',
     title: 'Cancel Batch Job',
-    description: 'Cancel a queued job. A job already in a terminal state is returned unchanged; a job already submitted to the provider is refused with 409, because provider batches cancel as a whole. Needs an admin.',
+    description: 'Cancel a queued job. A job already in a terminal state is returned unchanged; a job already submitted to the provider is refused with 409 BATCH_JOB_ALREADY_SUBMITTED, because provider batches cancel as a whole: the refusal names the provider batch and `next` points at batch.providerBatches.cancel. Needs an admin.',
     category: 'batch',
     scopes: ['write:batch'],
     access: 'admin',
     http: { method: 'POST', path: '/api/batch/jobs/{jobId}/cancel' },
     inputSchema: objectSchema({ jobId: STRING_SCHEMA }, ['jobId']),
     outputSchema: BATCH_JOB_ENVELOPE_SCHEMA,
+  }),
+  methodDescriptor({
+    id: 'batch.providerBatches.cancel',
+    title: 'Cancel Provider Batch',
+    description: 'Cancel a whole provider batch at the provider (the `providerBatchId` shown on a submitted job) and mark its jobs. `providerStatus` is what the provider answered: `cancelled` when it stopped, `running` while it is still winding down, in which case requests it finished before the cancel are collected by the next pass and the rest are marked cancelled when it ends. `jobs` is every job of that batch as the cancel left it. A batch whose jobs are all finished is returned unchanged. Refused with BATCH_PROVIDER_BATCH_NOT_FOUND (404) when no job belongs to the id and BATCH_PROVIDER_CANCEL_UNSUPPORTED (409) when the provider has no cancel call. Needs an admin.',
+    category: 'batch',
+    scopes: ['write:batch'],
+    access: 'admin',
+    effect: 'outward',
+    http: { method: 'POST', path: '/api/batch/provider-batches/{providerBatchId}/cancel' },
+    inputSchema: objectSchema({ providerBatchId: STRING_SCHEMA }, ['providerBatchId']),
+    outputSchema: objectSchema({
+      providerBatchId: STRING_SCHEMA,
+      providerStatus: stringEnumSchema(['queued', 'submitted', 'running', 'completed', 'failed', 'cancelled', 'expired']),
+      jobs: arraySchema(BATCH_JOB_SCHEMA),
+    }, ['providerBatchId', 'providerStatus', 'jobs']),
   }),
   methodDescriptor({
     id: 'batch.run',

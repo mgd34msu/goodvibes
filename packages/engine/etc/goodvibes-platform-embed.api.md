@@ -303,7 +303,6 @@ export interface PermissionPromptRequest {
     //
     // (undocumented)
     category: PermissionCategory;
-    rememberEffect?: 'skips-ask' | 'owner-asked-again' | undefined;
     rememberOptions?: readonly RememberTierOption[] | undefined;
     // (undocumented)
     tool: string;

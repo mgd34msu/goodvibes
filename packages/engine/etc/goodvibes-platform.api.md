@@ -1276,6 +1276,7 @@ export function createRuntimeEventFeeds<TDomain extends string, TEvent extends E
 export function createSharedRegexTester(options: {
     readonly operation: string;
     readonly timeoutMs?: number | undefined;
+    readonly maxPatternChars?: number | undefined;
 }): SharedRegexTester;
 
 // @public (undocumented)
@@ -39393,11 +39394,6 @@ export type RuntimeEventRecord = {
 };
 
 // @public
-export const RuntimeEventRecordSchema: z.ZodObject<{
-    type: z.ZodString;
-}, z.core.$catchall<z.ZodUnknown>>;
-
-// @public
 export type RuntimeEventTurnScope = 'session-current' | 'off' | {
     readonly turnId: string;
 };
@@ -39500,16 +39496,8 @@ export interface SerializedEventEnvelope<TEvent extends EventLike = EventLike> {
     readonly type: string;
 }
 
-// @public
-export const SerializedEventEnvelopeSchema: z.ZodObject<{
-    type: z.ZodString;
-    ts: z.ZodOptional<z.ZodNumber>;
-    traceId: z.ZodOptional<z.ZodString>;
-    sessionId: z.ZodOptional<z.ZodString>;
-    source: z.ZodOptional<z.ZodString>;
-    payload: z.ZodUnknown;
-}, z.core.$strip>;
-
+// Warning: (ae-forgotten-export) The symbol "SerializedEventEnvelopeSchema" needs to be exported by the entry point index.d.ts
+//
 // @public (undocumented)
 export type SerializedEventEnvelopeShape = z.infer<typeof SerializedEventEnvelopeSchema>;
 
@@ -39626,7 +39614,7 @@ export function settleCategory(fixed: DaemonErrorCategory | undefined, status: n
 // @public
 export interface SharedRegexTester extends AsyncDisposable {
     // (undocumented)
-    test(source: string, input: string, signal?: AbortSignal): Promise<boolean>;
+    test(source: string, input: string, signal?: AbortSignal, flags?: string): Promise<boolean>;
 }
 
 // @public (undocumented)
@@ -40469,18 +40457,8 @@ export type TurnLimitSource = (typeof TURN_LIMIT_SOURCES)[number];
 // @public (undocumented)
 export type TurnStopReason = 'completed' | 'empty_response' | 'preflight_failed' | 'context_overflow' | 'provider_exhausted' | 'provider_error' | 'hook_denied' | 'tool_loop_circuit_breaker' | 'cancelled' | 'unexpected_error';
 
-// @public (undocumented)
-export const TypedSerializedEventEnvelopeSchema: z.ZodObject<{
-    type: z.ZodString;
-    ts: z.ZodOptional<z.ZodNumber>;
-    traceId: z.ZodOptional<z.ZodString>;
-    sessionId: z.ZodOptional<z.ZodString>;
-    source: z.ZodOptional<z.ZodString>;
-    payload: z.ZodObject<{
-        type: z.ZodString;
-    }, z.core.$catchall<z.ZodUnknown>>;
-}, z.core.$strip>;
-
+// Warning: (ae-forgotten-export) The symbol "TypedSerializedEventEnvelopeSchema" needs to be exported by the entry point index.d.ts
+//
 // @public (undocumented)
 export type TypedSerializedEventEnvelopeShape = z.infer<typeof TypedSerializedEventEnvelopeSchema>;
 

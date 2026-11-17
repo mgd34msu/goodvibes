@@ -127,6 +127,13 @@ function slug(input: string): string {
   return input.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80) || 'item';
 }
 
+/** A short stable key for text that tells two findings of one rule or server apart (FNV-1a, base 36). */
+function textKey(text: string): string {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < text.length; index++) { hash ^= text.charCodeAt(index); hash = Math.imul(hash, 0x01000193) >>> 0; }
+  return hash.toString(36);
+}
+
 function safeText(value: unknown, fallback = 'n/a'): string {
   if (typeof value === 'string' && value.trim()) return value.trim();
   if (typeof value === 'number' || typeof value === 'boolean') return String(value);
@@ -185,24 +192,24 @@ function buildTokenFindings(securitySnapshot: Record<string, unknown> | null): r
   const audit = isRecord(securitySnapshot?.audit) ? securitySnapshot.audit : null;
   const results = readRecordArray(audit?.results);
   return results
-    .map((result, index): SecurityFinding | null => {
+    .map((result): SecurityFinding | null => {
       const scope = isRecord(result.scope) ? result.scope : {};
       const rotation = isRecord(result.rotation) ? result.rotation : {};
-      const label = safeText(result.label, `token-${index + 1}`);
+      const label = safeText(result.label, '');
       const scopeOutcome = safeText(scope.outcome);
       const rotationOutcome = safeText(rotation.outcome);
       const blocked = result.blocked === true;
       if (!blocked && scopeOutcome === 'ok' && rotationOutcome === 'ok') return null;
       const severity: SecurityFindingSeverity = blocked || rotationOutcome === 'overdue' ? 'blocker' : 'warn';
       return {
-        findingId: `token-${slug(label)}-${index + 1}`,
+        findingId: label ? `token-${slug(label)}` : `token-${textKey(`${safeText(scope.policyId)}|${scopeOutcome}|${rotationOutcome}`)}`,
         source: 'token',
         severity,
-        title: `Token ${label}`,
+        title: `Token ${label || 'without a label'}`,
         summary: `Scope ${scopeOutcome}; rotation ${rotationOutcome}; blocked ${blocked ? 'yes' : 'no'}.`,
         route: '/security tokens',
         detail: {
-          tokenLabel: label,
+          tokenLabel: label || 'n/a',
           policyId: safeText(scope.policyId),
           scopeOutcome,
           rotationOutcome,
@@ -217,16 +224,16 @@ function buildTokenFindings(securitySnapshot: Record<string, unknown> | null): r
 function buildPolicyFindings(policySnapshot: unknown): readonly SecurityFinding[] {
   if (!isRecord(policySnapshot)) return [];
   const lintFindings = readRecordArray(policySnapshot.lintFindings);
-  const findings = lintFindings.map((finding, index): SecurityFinding => {
+  const findings = lintFindings.map((finding): SecurityFinding => {
     const level = safeText(finding.level ?? finding.severity, 'warn').toLowerCase();
     const severity: SecurityFindingSeverity = level === 'error' || level === 'blocker' ? 'blocker' : level === 'info' ? 'info' : 'warn';
-    const rule = safeText(finding.ruleId ?? finding.rule ?? finding.code, `policy-${index + 1}`);
+    const rule = safeText(finding.ruleId ?? finding.rule ?? finding.code, '');
     const message = safeText(finding.message ?? finding.summary ?? finding.reason, 'Policy lint finding');
     return {
-      findingId: `policy-${slug(rule)}-${index + 1}`,
+      findingId: `policy-${rule ? `${slug(rule)}-` : ''}${textKey(message)}`,
       source: 'policy',
       severity,
-      title: `Policy ${rule}`,
+      title: `Policy ${rule || 'lint'}`,
       summary: message,
       route: '/security review',
       detail: {
@@ -268,12 +275,12 @@ function mcpAttackPathFindings(securitySnapshot: Record<string, unknown> | null)
 
 function buildMcpFindings(securitySnapshot: Record<string, unknown> | null, attackPathFindings = mcpAttackPathFindings(securitySnapshot)): readonly SecurityFinding[] {
   const mcpServers = readRecordArray(securitySnapshot?.mcpServers);
-  const attackFindings = attackPathFindings.map((finding, index): SecurityFinding => {
-    const serverName = safeText(finding.serverName, `server-${index + 1}`);
+  const attackFindings = attackPathFindings.map((finding): SecurityFinding => {
+    const serverName = safeText(finding.serverName, 'unnamed-server');
     const severityRaw = safeText(finding.severity, 'warn').toLowerCase();
     const severity: SecurityFindingSeverity = severityRaw === 'critical' || severityRaw === 'high' || severityRaw === 'blocker' ? 'blocker' : severityRaw === 'info' ? 'info' : 'warn';
     return {
-      findingId: `mcp-attack-${slug(serverName)}-${index + 1}`,
+      findingId: `mcp-attack-${slug(serverName)}-${textKey(`${safeText(finding.route)}|${safeText(finding.reason)}`)}`,
       source: 'mcp',
       severity,
       title: `MCP attack path ${serverName}`,
@@ -396,15 +403,25 @@ function readSecuritySnapshot(context: CommandContext): Record<string, unknown> 
   return readSecuritySnapshotReading(context).snapshot;
 }
 
+/**
+ * Finding ids come from each finding's own identity (token label, rule and
+ * message, server and route), so an id stays the same when another finding is
+ * resolved. Two findings with the same identity keep it with a count suffix.
+ */
 export function buildSecurityFindings(context: CommandContext, securitySnapshot = readSecuritySnapshot(context),
   policySnapshot: unknown = context.extensions.policyRuntimeState?.getSnapshot()): readonly SecurityFinding[] {
+  const seen = new Map<string, number>();
   return [
     ...buildTokenFindings(securitySnapshot),
     ...buildPolicyFindings(policySnapshot),
     ...buildMcpFindings(securitySnapshot),
     ...buildPluginFindings(securitySnapshot),
     ...buildIncidentFindings(securitySnapshot),
-  ].sort((a, b) => severityRank(a.severity) - severityRank(b.severity) || a.findingId.localeCompare(b.findingId));
+  ].map((finding) => {
+    const count = (seen.get(finding.findingId) ?? 0) + 1;
+    seen.set(finding.findingId, count);
+    return count === 1 ? finding : { ...finding, findingId: `${finding.findingId}-${count}` };
+  }).sort((a, b) => severityRank(a.severity) - severityRank(b.severity) || a.findingId.localeCompare(b.findingId));
 }
 
 function countByString(records: readonly Record<string, unknown>[], key: string, value: string): number {
@@ -417,7 +434,7 @@ export function securityPostureCatalogStatus(context: CommandContext): Record<st
     modes: ['security_posture', 'security_finding'],
     status: securitySnapshot ? 'available' : 'unavailable',
     ...(!securitySnapshot && reason ? { unavailableReason: reason } : {}),
-    findings: securitySnapshot ? buildSecurityFindings(context).length : 0,
+    findings: securitySnapshot ? buildSecurityFindings(context, securitySnapshot).length : 0,
     readOnly: true,
   };
 }
@@ -432,9 +449,9 @@ function captureSecurityRequest(context: CommandContext, args: AgentHarnessSecur
     ['platform', 'secretsManager', 'list'], ['extensions', 'policyRuntimeState', 'getSnapshot'],
   ]);
   const capturedAt = Date.now();
-  const securitySnapshot = readSecuritySnapshot(context);
+  const { snapshot: securitySnapshot, reason: unavailableReason } = readSecuritySnapshotReading(context);
   const policySnapshot = context.extensions.policyRuntimeState?.getSnapshot() ?? null;
-  return { request, securitySnapshot, policySnapshot, capturedAt };
+  return { request, securitySnapshot, unavailableReason, policySnapshot, capturedAt };
 }
 
 /** The counted sections of the security summary, derived only from the snapshot and the findings built from it. */
@@ -475,10 +492,9 @@ export function securitySnapshotSummary(securitySnapshot: Record<string, unknown
 }
 
 export async function securityPostureSummary(context: CommandContext, args: AgentHarnessSecurityArgs, options: CatalogRankingOptions = {}): Promise<Record<string, unknown>> {
-  const { request, securitySnapshot, policySnapshot, capturedAt } = captureSecurityRequest(context, args, options);
+  const { request, securitySnapshot, unavailableReason: reason, policySnapshot, capturedAt } = captureSecurityRequest(context, args, options);
   args = request.input;
   if (!securitySnapshot) {
-    const { reason } = readSecuritySnapshotReading(context);
     // Policy lint findings come from their own snapshot and stay useful without the security read model.
     const policyFindings = buildPolicyFindings(policySnapshot);
     const returnedFindings = policyFindings.slice(0, readLimit(args.limit, 100));

@@ -49,6 +49,9 @@ interface InboxMessage {
   readonly date: string;
   readonly unread: boolean;
   readonly bodyPreview: string;
+  /** From the daemon's inbox mirror: `not-screened` when only code checked it for credential and card text. */
+  readonly screening?: 'screened' | 'not-screened';
+  readonly screeningReason?: string;
 }
 
 /** Full message, exactly the daemon's `email.inbox.read` output shape. */
@@ -92,8 +95,13 @@ export function renderInboxList(messages: readonly InboxMessage[], notes: InboxP
   for (const message of messages) {
     const mark = message.unread ? '●' : ' ';
     const label = notes.labels?.get(message.uid);
-    const tag = label === 'spam' ? '[spam] ' : label === 'priority' ? '[priority] ' : '';
+    const tag = `${label === 'spam' ? '[spam] ' : label === 'priority' ? '[priority] ' : ''}${message.screening === 'not-screened' ? '[not screened] ' : ''}`;
     lines.push(`  ${mark} ${String(message.uid).padStart(6)}  ${truncate(message.from, 28).padEnd(28)}  ${tag}${truncate(message.subject, 48)}`);
+  }
+  const notScreened = messages.filter((message) => message.screening === 'not-screened');
+  if (notScreened.length > 0) {
+    const reasons = [...new Set(notScreened.map((message) => message.screeningReason).filter((reason): reason is string => typeof reason === 'string'))];
+    lines.push(`  Not screened: ${notScreened.length} message${notScreened.length === 1 ? ' was' : 's were'} checked by code only${reasons.length > 0 ? ` (${reasons.join('; ')})` : ''}.`);
   }
   if (unreadableLine) lines.push(unreadableLine);
   lines.push('', '  /mail read <uid>: open one message');

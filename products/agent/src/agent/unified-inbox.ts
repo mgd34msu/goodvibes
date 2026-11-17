@@ -107,6 +107,10 @@ export interface UnifiedInboxInboundMessageItem {
   readonly attachmentCount: number;
   /** The inbox's triage label for this message's current content; null until it is scored. */
   readonly triageLabel: 'spam' | 'priority' | 'normal' | null;
+  /** Whether privacy screening read its text (`not-screened`: only code checked it); null when the provider does not say. */
+  readonly screening: 'screened' | 'not-screened' | null;
+  /** Why it was not screened; null unless `screening` is `not-screened`. */
+  readonly screeningReason: string | null;
 }
 
 export type UnifiedInboxItem =
@@ -316,6 +320,8 @@ function toInboundMessageItem(raw: Record<string, unknown>): UnifiedInboxInbound
     threadId: readStringOrNull(raw, 'threadId'),
     attachmentCount: typeof raw.attachmentCount === 'number' ? raw.attachmentCount : 0,
     triageLabel: raw.triageLabel === 'spam' || raw.triageLabel === 'priority' || raw.triageLabel === 'normal' ? raw.triageLabel : null,
+    screening: raw.screening === 'screened' || raw.screening === 'not-screened' ? raw.screening : null,
+    screeningReason: raw.screening === 'not-screened' ? readStringOrNull(raw, 'screeningReason') : null,
   };
 }
 
@@ -567,7 +573,7 @@ function thirdPartyInboxLines(inbox: UnifiedInbox): readonly string[] {
     lines.push('Inbound Messages');
     for (const item of inboundMessageItems.slice(0, 10)) {
       const heading = item.subject ?? item.bodyPreview.slice(0, 60);
-      lines.push(`- [${item.provider}${item.unread ? ' unread' : ''}] ${item.from}: ${heading}`);
+      lines.push(`- [${item.provider}${item.unread ? ' unread' : ''}${item.screening === 'not-screened' ? ' not screened' : ''}] ${item.from}: ${heading}`);
     }
   }
 
@@ -616,6 +622,11 @@ export function formatUnifiedInbox(inbox: UnifiedInbox, options: { readonly thir
 
   for (const source of sources) {
     lines.push(`  ${source.name}: ${source.state} (${source.itemCount} items) route=${source.route}`);
+  }
+  const notScreened = inbox.inboundMessageItems.filter((item) => item.screening === 'not-screened');
+  if (notScreened.length > 0) {
+    const reasons = [...new Set(notScreened.map((item) => item.screeningReason).filter((reason): reason is string => reason !== null))];
+    lines.push(`  Not screened: ${notScreened.length} inbound message(s) were checked by code only${reasons.length > 0 ? ` (${reasons.join('; ')})` : ''}.`);
   }
 
   const thirdParty = thirdPartyInboxLines(inbox);

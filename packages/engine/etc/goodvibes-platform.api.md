@@ -12930,6 +12930,8 @@ export interface OperatorMethodOutputMap {
             triageScore?: number;
             triageLabel?: string;
             triageTags?: readonly string[];
+            screening?: "not-screened" | "screened";
+            screeningReason?: string;
         })[];
         total: number;
         truncated: boolean;
@@ -20901,6 +20903,8 @@ export interface OperatorMethodOutputMap {
             bodyPreview: string;
             messageId: string;
             triageLabel?: "normal" | "priority" | "spam";
+            screening?: "not-screened" | "screened";
+            screeningReason?: string;
         })[];
         total: number;
         unreadable?: readonly ({

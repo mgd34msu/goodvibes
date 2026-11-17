@@ -542,6 +542,9 @@ export function MailView({ tabs }: MailViewProps = {}) {
               trailing={<>
                 {labels.get(message.uid) === 'spam' ? <Chip size="sm" tone="warn">Spam</Chip> : null}
                 {labels.get(message.uid) === 'priority' ? <Chip size="sm" tone="info">Priority</Chip> : null}
+                {message.screening === 'not-screened'
+                  ? <Chip size="sm" title={message.screeningReason ?? 'Only code checked this message for credential and card text.'}>Not screened</Chip>
+                  : null}
                 <span className="mail-row__date">{formatShort(message.date)}</span>
               </>}
             />

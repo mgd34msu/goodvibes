@@ -4574,7 +4574,9 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "triageLabel": "sample",
           "triageTags": [
             "sample"
-          ]
+          ],
+          "screening": "screened",
+          "screeningReason": "sample"
         }
       ],
       "total": 0,
@@ -12530,7 +12532,9 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "unread": false,
           "bodyPreview": "sample",
           "messageId": "sample",
-          "triageLabel": "spam"
+          "triageLabel": "spam",
+          "screening": "screened",
+          "screeningReason": "sample"
         }
       ],
       "total": 0,

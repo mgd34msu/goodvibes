@@ -7511,7 +7511,9 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "triageLabel": "sample",
           "triageTags": [
             "sample"
-          ]
+          ],
+          "screening": "screened",
+          "screeningReason": "sample"
         }
       ],
       "total": 0,
@@ -15445,7 +15447,9 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "unread": false,
           "bodyPreview": "sample",
           "messageId": "sample",
-          "triageLabel": "spam"
+          "triageLabel": "spam",
+          "screening": "screened",
+          "screeningReason": "sample"
         }
       ],
       "total": 0,

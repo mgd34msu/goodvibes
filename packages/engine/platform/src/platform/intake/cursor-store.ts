@@ -6,7 +6,8 @@
 //
 // Tables:
 //   items(id PK, provider, kind, fromDigest, subjectPreview, bodyPreview,
-//         routeId, receivedAt INT, unread INT, triage_revision TEXT, seq INT)
+//         routeId, receivedAt INT, unread INT, triage_revision TEXT, seq INT,
+//         screening TEXT, screeningReason TEXT)
 //   cursors(provider PK, nextSince INT)        one row per provider, or per
 //                                              conversation as `provider:conversation`
 //   mail_generations(provider PK, uidValidity) the mailbox generation a pushed mail
@@ -134,7 +135,9 @@ const SCHEMA: string[] = [
      receivedAt INTEGER NOT NULL,
      unread INTEGER NOT NULL,
      triage_revision TEXT,
-     seq INTEGER
+     seq INTEGER,
+     screening TEXT,
+     screeningReason TEXT
    )`,
   `CREATE INDEX IF NOT EXISTS idx_items_provider_received
      ON items(provider, receivedAt)`,
@@ -171,6 +174,8 @@ interface ItemRow {
   triageLabel?: string | null;
   triageScore?: number | null;
   triageTags?: string | null;
+  screening?: string | null;
+  screeningReason?: string | null;
 }
 
 /**
@@ -312,6 +317,10 @@ export class InboxCursorStore {
         this.store.run('UPDATE items SET seq = rowid');
       }
       this.store.run('CREATE INDEX IF NOT EXISTS idx_items_seq ON items(seq)');
+      // A store made before rows said whether they were screened gains the columns empty; its rows
+      // say nothing until the mailbox reader writes them again, and new rows say it at once.
+      if (!columns.some(column => column.name === 'screening')) this.store.run('ALTER TABLE items ADD COLUMN screening TEXT');
+      if (!columns.some(column => column.name === 'screeningReason')) this.store.run('ALTER TABLE items ADD COLUMN screeningReason TEXT');
       // Receipts stored before the battery was recorded name none, so they lend
       // no label and their rows are scored once more.
       const receiptColumns = this.store.all<{ name: string }>('PRAGMA table_info(triage_receipts)');
@@ -579,7 +588,8 @@ export class InboxCursorStore {
     // revision and was decided by the current battery version.
     const rows = this.store.all<ItemRow>(
       `SELECT items.id AS id, provider, kind, fromDigest, subjectPreview, bodyPreview,
-              routeId, receivedAt, unread, r.label AS triageLabel, r.score AS triageScore, r.tags AS triageTags
+              routeId, receivedAt, unread, screening, screeningReason,
+              r.label AS triageLabel, r.score AS triageScore, r.tags AS triageTags
          FROM items LEFT JOIN triage_receipts r
            ON r.id = items.id AND r.revision = items.triage_revision AND r.status = 'settled' AND r.battery = ?
          ${where}
@@ -604,7 +614,7 @@ export class InboxCursorStore {
     this.assertOpen();
     const rows = this.store.all<ItemRow & { revision: string }>(
       `SELECT items.id AS id, provider, kind, fromDigest, subjectPreview, bodyPreview, routeId, receivedAt, unread,
-              items.triage_revision AS revision
+              screening, screeningReason, items.triage_revision AS revision
          FROM items LEFT JOIN triage_receipts r ON r.id = items.id AND r.revision = items.triage_revision
         WHERE provider = ? AND items.triage_revision IS NOT NULL
           AND (r.id IS NULL OR r.status <> 'settled' OR r.battery IS NOT ?)
@@ -811,6 +821,11 @@ function rowToItem(row: ItemRow): InboundChannelItem {
     unread: Number(row.unread) !== 0,
   };
   if (row.routeId != null) item.routeId = row.routeId;
+  if (row.screening === 'screened') item.screening = 'screened';
+  else if (row.screening === 'not-screened') {
+    item.screening = 'not-screened';
+    if (typeof row.screeningReason === 'string' && row.screeningReason.length > 0) item.screeningReason = row.screeningReason;
+  }
   if (row.triageLabel === 'spam' || row.triageLabel === 'priority' || row.triageLabel === 'normal') {
     item.triageLabel = row.triageLabel;
     if (typeof row.triageScore === 'number') item.triageScore = row.triageScore;
@@ -837,13 +852,17 @@ function captureMailItems(provider: string, input: readonly InboundChannelItem[]
       || typeof item.subjectPreview !== 'string' || item.subjectPreview.length > 200
       || typeof item.bodyPreview !== 'string' || item.bodyPreview.length > 500
       || !Number.isFinite(item.receivedAt) || typeof item.unread !== 'boolean'
-      || (item.routeId !== undefined && typeof item.routeId !== 'string')) {
+      || (item.routeId !== undefined && typeof item.routeId !== 'string')
+      || (item.screening !== undefined && item.screening !== 'screened' && item.screening !== 'not-screened')
+      || (item.screeningReason !== undefined && (typeof item.screeningReason !== 'string' || item.screeningReason.length > 300))) {
       throw new Error('A mail inbox row is malformed');
     }
     return {
       id: item.id, provider, kind: item.kind, fromDigest: item.fromDigest,
       subjectPreview: item.subjectPreview, bodyPreview: item.bodyPreview, receivedAt: item.receivedAt,
       unread: item.unread, ...(item.routeId === undefined ? {} : { routeId: item.routeId }),
+      ...(item.screening === undefined ? {} : { screening: item.screening }),
+      ...(item.screening === 'not-screened' && item.screeningReason !== undefined ? { screeningReason: item.screeningReason } : {}),
     };
   });
 }
@@ -862,21 +881,24 @@ function upsertRows(store: HandlerSqliteTransaction, items: readonly InboundChan
         AND (CASE items.kind WHEN 'dm' THEN 'direct' WHEN 'thread' THEN 'thread' ELSE 'service' END)
           IS (CASE excluded.kind WHEN 'dm' THEN 'direct' WHEN 'thread' THEN 'thread' ELSE 'service' END)
         AND items.subjectPreview IS excluded.subjectPreview AND items.bodyPreview IS excluded.bodyPreview
-        AND items.unread IS excluded.unread`;
+        AND items.unread IS excluded.unread
+        AND items.screening IS excluded.screening AND items.screeningReason IS excluded.screeningReason`;
   for (const item of items) {
     if (!existing.has(item.id)) { inserted += 1; existing.add(item.id); }
     store.run(`INSERT INTO items
-      (id, provider, kind, fromDigest, subjectPreview, bodyPreview, routeId, receivedAt, unread, seq)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      (id, provider, kind, fromDigest, subjectPreview, bodyPreview, routeId, receivedAt, unread, seq, screening, screeningReason)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
       triage_revision = CASE WHEN ${unchanged} THEN items.triage_revision ELSE NULL END,
       seq = CASE WHEN ${unchanged} THEN items.seq ELSE excluded.seq END,
       provider = excluded.provider, kind = excluded.kind,
       fromDigest = excluded.fromDigest, subjectPreview = excluded.subjectPreview,
       bodyPreview = excluded.bodyPreview, routeId = COALESCE(excluded.routeId, items.routeId),
-      receivedAt = excluded.receivedAt, unread = excluded.unread`,
+      receivedAt = excluded.receivedAt, unread = excluded.unread,
+      screening = excluded.screening, screeningReason = excluded.screeningReason`,
     [item.id, item.provider, item.kind, item.fromDigest, item.subjectPreview, item.bodyPreview,
-      item.routeId ?? null, item.receivedAt, item.unread ? 1 : 0, next]);
+      item.routeId ?? null, item.receivedAt, item.unread ? 1 : 0, next, item.screening ?? null,
+      item.screening === 'not-screened' ? item.screeningReason ?? null : null]);
     next += 1;
     // SQLite issues only an actual new/changed message revision; identical
     // polling never mints then discards a new identifier.

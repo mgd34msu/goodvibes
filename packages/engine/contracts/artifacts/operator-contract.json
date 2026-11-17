@@ -28771,7 +28771,7 @@
       {
         "id": "channels.inbox.list",
         "title": "List Channel Inbox",
-        "description": "Return the merged inbound message feed (Slack DMs, Discord messages, email threads) from the host's synced provider mirror, newest first. Read-only; no provider write. Every known provider reports its own state in `providers`, including the unconfigured and the failing ones, so a short list is never ambiguous, and `partial` is true whenever a configured provider's items are missing because its last sync failed. Page with ?limit and ?cursor (opaque, from nextCursor); ?since=<cursor> returns only items committed after a previous answer's `cursor` watermark (the store's commit sequence, not a time); ?provider=<id> narrows to one provider; `uids` (a list of mail UIDs) returns only those messages of the live mailbox, matched by the email provider's current account and mailbox generation, so a client can look up a listed page without reading the feed. Each provider with triage says in `triage` whether new messages are being labelled and, when not, why and what turns it on; channels.inbox.triage labels a page now.",
+        "description": "Return the merged inbound message feed (Slack DMs, Discord messages, email threads) from the host's synced provider mirror, newest first. Read-only; no provider write. Every known provider reports its own state in `providers`, including the unconfigured and the failing ones, so a short list is never ambiguous, and `partial` is true whenever a configured provider's items are missing because its last sync failed. Page with ?limit and ?cursor (opaque, from nextCursor); ?since=<cursor> returns only items committed after a previous answer's `cursor` watermark (the store's commit sequence, not a time); ?provider=<id> narrows to one provider; `uids` (a list of mail UIDs) returns only those messages of the live mailbox, matched by the email provider's current account and mailbox generation, so a client can look up a listed page without reading the feed. Each provider with triage says in `triage` whether new messages are being labelled and, when not, why and what turns it on; channels.inbox.triage labels a page now. An email item says in `screening` whether privacy screening read its text: `not-screened` (with `screeningReason`) when only code checked it for credential and card text; its subject is always the sender's own.",
         "category": "channels",
         "source": "builtin",
         "access": "authenticated",
@@ -28865,6 +28865,16 @@
                     "items": {
                       "type": "string"
                     }
+                  },
+                  "screening": {
+                    "type": "string",
+                    "enum": [
+                      "screened",
+                      "not-screened"
+                    ]
+                  },
+                  "screeningReason": {
+                    "type": "string"
                   }
                 },
                 "required": [
@@ -76979,7 +76989,7 @@
       {
         "id": "email.inbox.list",
         "title": "List Email Inbox",
-        "description": "Return inbox message summaries fetched live from the configured IMAP account, newest first (ordered by server-assigned UID, never by the sender-written Date header). Read-only (EXAMINE / BODY.PEEK); never marks messages read. `before` pages backwards: pass the smallest UID of the page you have to get the next older page; `total` counts every match. When the server answered for a message and the daemon could not read the answer, the page is short and `unreadable` says so, an omitted message is not by itself evidence that it was deleted. A message the daemon's inbox mirror has labelled carries `triageLabel` (spam, priority or normal); one not labelled yet has none.",
+        "description": "Return inbox message summaries fetched live from the configured IMAP account, newest first (ordered by server-assigned UID, never by the sender-written Date header). Read-only (EXAMINE / BODY.PEEK); never marks messages read. `before` pages backwards: pass the smallest UID of the page you have to get the next older page; `total` counts every match. When the server answered for a message and the daemon could not read the answer, the page is short and `unreadable` says so, an omitted message is not by itself evidence that it was deleted. A message the daemon's inbox mirror has labelled carries `triageLabel` (spam, priority or normal); one not labelled yet has none. A message the mirror holds carries `screening`: `screened`, or `not-screened` when only code checked it for credential and card text, with `screeningReason`.",
         "category": "email",
         "source": "builtin",
         "access": "authenticated",
@@ -77048,6 +77058,16 @@
                       "priority",
                       "normal"
                     ]
+                  },
+                  "screening": {
+                    "type": "string",
+                    "enum": [
+                      "screened",
+                      "not-screened"
+                    ]
+                  },
+                  "screeningReason": {
+                    "type": "string"
                   }
                 },
                 "required": [

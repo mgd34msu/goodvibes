@@ -27,18 +27,22 @@ export interface EmailInboxAccount {
   readonly security: 'tls' | 'plaintext';
 }
 /**
- * No privacy screening route is available (no decision model in use, or the
- * hosted screening consent or credentials are missing): mail is still kept,
- * checked only by code for credential and card text, and every row says it was
- * not screened.
+ * No privacy screening route is available (the hosted screening consent or its
+ * credentials are missing): mail is still kept, checked only by code for
+ * credential and card text, and every row says it was not screened
+ * (`screening: 'not-screened'` with the reason).
  */
 export interface UnscreenedMailOptions {
   readonly kind: 'unscreened';
   readonly authority: Pick<LocalSourceScreeningAuthority, 'ownerId' | 'revision' | 'signal' | 'assertCurrent'>;
 }
 export type EmailInboxScreening = ProtectedSourceOwnerOptions | UnscreenedMailOptions;
-/** What a row of mail no screening route read starts with, on every surface that lists the inbox. */
-export const NOT_SCREENED_LABEL = '[Not screened]';
+
+/** Why a row was checked by code only, as every surface that lists the inbox shows it. */
+const NOT_SCREENED_REASONS = {
+  route: 'no privacy screening route is set up (hosted inbox screening consent or its credentials are missing), so only code checked it for credential and card text',
+  model: 'no decision model was in use when it was read, so only code checked it for credential and card text',
+} as const;
 export interface EmailInboxOwnerOptions {
   readonly identity: AccountInboxIdentity;
   readonly account: EmailInboxAccount;
@@ -149,6 +153,7 @@ export function createEmailInboxOwner(options: EmailInboxOwnerOptions): EmailInb
   };
   current();
   const screeningOptions = options.screening;
+  const unscreened = 'kind' in screeningOptions && screeningOptions.kind === 'unscreened';
   const screening = 'kind' in screeningOptions && screeningOptions.kind === 'unscreened'
     ? createClassicProtectedSourceOwner({ ownerId: screeningOptions.authority.ownerId, revision: screeningOptions.authority.revision,
       signal, assertCurrent: current })
@@ -241,10 +246,12 @@ export function createEmailInboxOwner(options: EmailInboxOwnerOptions): EmailInb
       }
       const subject = projected[projected.length - 2]!;
       const body = projected[projected.length - 1]!;
-      // Only code checked this message (no decision model, or no screening route): the row says so.
-      const shown = judged.receipt.provenance === 'classic' ? `${NOT_SCREENED_LABEL} ${subject}` : subject;
+      // Only code checked this message (no decision model, or no screening route): the row says so, the subject stays as sent.
+      const screened = judged.receipt.provenance !== 'classic';
       rows.push({ id: input.id, provider: 'email', kind: 'dm', fromDigest, ...(routeId === undefined ? {} : { routeId }),
-        subjectPreview: prefix(shown, 200), bodyPreview: prefix(body, 500), receivedAt: input.sentAt, unread: input.unread });
+        subjectPreview: prefix(subject, 200), bodyPreview: prefix(body, 500), receivedAt: input.sentAt, unread: input.unread,
+        ...(screened ? { screening: 'screened' as const }
+          : { screening: 'not-screened' as const, screeningReason: unscreened ? NOT_SCREENED_REASONS.route : NOT_SCREENED_REASONS.model }) });
       // The message's own date: mail written before a purchase can never confirm it.
       observations.push({ id: input.id, senderAddress: input.from, subject, body, receivedAtMs: input.sentAt });
     } finally {

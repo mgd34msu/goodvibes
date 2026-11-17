@@ -61,7 +61,14 @@ export interface EmailGatewayMessageSummary {
   readonly messageId: string;
   /** The daemon's triage label, when its inbox mirror holds a settled one for this message. */
   readonly triageLabel?: 'spam' | 'priority' | 'normal';
+  /** Whether privacy screening read this message in the daemon's inbox mirror; `not-screened`: only code checked it. */
+  readonly screening?: 'screened' | 'not-screened';
+  /** Why it was not screened; present only with `not-screened`. */
+  readonly screeningReason?: string;
 }
+
+/** What the daemon's inbox mirror says about one listed message. */
+export type EmailMirrorFacts = Pick<EmailGatewayMessageSummary, 'triageLabel' | 'screening' | 'screeningReason'>;
 
 export interface EmailGatewayAttachment {
   readonly filename: string;
@@ -245,30 +252,37 @@ function readOptionalCount(value: unknown): number | undefined {
 }
 
 /** Reads the daemon's own inbox mirror for the listed UIDs (`channels.inbox.list` with `uids`). */
-export type EmailTriageLabelReader = (uids: readonly number[]) => Promise<ReadonlyMap<number, NonNullable<EmailGatewayMessageSummary['triageLabel']>>>;
+export type EmailTriageLabelReader = (uids: readonly number[]) => Promise<ReadonlyMap<number, EmailMirrorFacts>>;
 
 /**
- * The triage labels of these UIDs from the daemon's inbox mirror, in process:
- * one indexed lookup of exactly the listed rows, no feed read and no second
- * request from the client. Best effort: no mirror, or one that cannot be read
- * now, leaves the list unlabelled.
+ * The triage labels and screening of these UIDs from the daemon's inbox mirror,
+ * in process: one indexed lookup of exactly the listed rows, no feed read and no
+ * second request from the client. Best effort: no mirror, or one that cannot be
+ * read now, leaves the list unlabelled.
  */
 export function catalogTriageLabelReader(catalog: GatewayMethodCatalog): EmailTriageLabelReader {
   return async (uids) => {
-    const labels = new Map<number, NonNullable<EmailGatewayMessageSummary['triageLabel']>>();
-    if (uids.length === 0 || !catalog.hasHandler('channels.inbox.list')) return labels;
+    const facts = new Map<number, EmailMirrorFacts>();
+    if (uids.length === 0 || !catalog.hasHandler('channels.inbox.list')) return facts;
     try {
       const mirror = await catalog.invoke('channels.inbox.list', { body: { provider: 'email', uids: [...uids] }, context: {} }) as {
-        readonly items?: readonly { readonly id?: unknown; readonly triageLabel?: unknown }[];
+        readonly items?: readonly { readonly id?: unknown; readonly triageLabel?: unknown; readonly screening?: unknown; readonly screeningReason?: unknown }[];
       };
       for (const item of mirror.items ?? []) {
         if (typeof item.id !== 'string') continue;
         const uid = Number(item.id.slice(item.id.lastIndexOf(':') + 1));
+        if (!Number.isSafeInteger(uid)) continue;
         const label = item.triageLabel;
-        if (Number.isSafeInteger(uid) && (label === 'spam' || label === 'priority' || label === 'normal')) labels.set(uid, label);
+        const screening = item.screening === 'screened' || item.screening === 'not-screened' ? item.screening : undefined;
+        const found: EmailMirrorFacts = {
+          ...(label === 'spam' || label === 'priority' || label === 'normal' ? { triageLabel: label } : {}),
+          ...(screening ? { screening } : {}),
+          ...(screening === 'not-screened' && typeof item.screeningReason === 'string' ? { screeningReason: item.screeningReason } : {}),
+        };
+        if (Object.keys(found).length > 0) facts.set(uid, found);
       }
     } catch { /* No mirror now: the list is shown unlabelled. */ }
-    return labels;
+    return facts;
   };
 }
 
@@ -282,13 +296,13 @@ export function createEmailInboxListHandler(service: EmailGatewayService, triage
       ...(params.before === undefined ? {} : { before: readUid(params.before) }),
     });
     if (!triageLabels || result.messages.length === 0) return result;
-    const labels = await triageLabels(result.messages.map((message) => message.uid));
-    if (labels.size === 0) return result;
+    const facts = await triageLabels(result.messages.map((message) => message.uid));
+    if (facts.size === 0) return result;
     return {
       ...result,
       messages: result.messages.map((message) => {
-        const triageLabel = labels.get(message.uid);
-        return triageLabel === undefined ? message : { ...message, triageLabel };
+        const found = facts.get(message.uid);
+        return found === undefined ? message : { ...message, ...found };
       }),
     };
   };

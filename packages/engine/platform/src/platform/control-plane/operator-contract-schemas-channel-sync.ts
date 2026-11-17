@@ -43,6 +43,12 @@ export const CHANNEL_INBOX_ITEM_SCHEMA = objectSchema({
   triageScore: NUMBER_SCHEMA,
   triageLabel: STRING_SCHEMA,
   triageTags: arraySchema(STRING_SCHEMA),
+  // Whether privacy screening read the row's text: `screened`, or `not-screened`
+  // when only code checked it for credential and card text (no decision model in
+  // use, or no screening route), with `screeningReason` saying which. The
+  // subject is always the sender's own. Absent when the provider does not say.
+  screening: { type: 'string', enum: ['screened', 'not-screened'] },
+  screeningReason: STRING_SCHEMA,
 }, ['id', 'provider', 'kind', 'from', 'bodyPreview', 'receivedAt', 'unread']);
 
 /**

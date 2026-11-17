@@ -14,7 +14,8 @@
  *  - one delivered message is announced to the owner exactly once and
  *    recorded once;
  *  - with no decision model and no screening consent the message is still in
- *    the mail inbox (channels.inbox.list), once, labelled not screened;
+ *    the mail inbox (channels.inbox.list), once, subject as sent, with
+ *    `screening: 'not-screened'` and the reason;
  *  - nothing more is announced while nothing more arrives;
  *  - after a daemon restart the same message is not announced again, and a
  *    message that arrived while the daemon was down is announced once.
@@ -131,14 +132,16 @@ try {
     `notices ${noticesAbout(subject).length} ${short(noticesAbout(subject).map((post) => post.body.message), 300)}; records naming it ${recordsAbout(subject)}`,
     announced === true && noticesAbout(subject).length === 1 && recordsAbout(subject) === 1);
 
-  // The same message is in the mail inbox once, labelled as not screened (no decision model, no screening consent).
+  // The same message is in the mail inbox once, its subject as sent, its `screening` field `not-screened` with the reason
+  // (no decision model, no screening consent).
   const inMailInbox = await waitFor(async () => {
     const found = await inboxRowsAbout(token2, subject);
     return found.rows.length > 0 ? found : undefined;
   }, 30_000, 500) ?? await inboxRowsAbout(token2, subject);
   journey.check('the message is in the mail inbox once, labelled not screened', 'GET /api/channels/inbox?provider=email',
     `rows naming it ${inMailInbox.rows.length} ${short(inMailInbox.rows, 400)}; answer ${short(inMailInbox.text, 600)}`,
-    inMailInbox.rows.length === 1 && String(inMailInbox.rows[0]!.subject ?? inMailInbox.rows[0]!.subjectPreview ?? '').startsWith(`[Not screened] ${subject}`));
+    inMailInbox.rows.length === 1 && inMailInbox.rows[0]!.subject === subject && inMailInbox.rows[0]!.screening === 'not-screened'
+      && typeof inMailInbox.rows[0]!.screeningReason === 'string' && /no decision model|screening route/.test(String(inMailInbox.rows[0]!.screeningReason)));
 
   // Nothing more arrives: nothing more is announced.
   await Bun.sleep(8_000);

@@ -70,6 +70,9 @@ export interface ChannelInboxItem {
   triageScore?: number;
   triageLabel?: 'spam' | 'priority' | 'normal';
   triageTags?: string[];
+  /** Whether privacy screening read the row's text; `not-screened` rows were checked by code only. */
+  screening?: 'screened' | 'not-screened';
+  screeningReason?: string;
 }
 
 /**
@@ -283,6 +286,10 @@ export function toWireItem(item: InboundChannelItem): ChannelInboxItem {
   };
   if (item.subjectPreview.length > 0) wire.subject = item.subjectPreview;
   if (item.routeId != null) wire.routeId = item.routeId;
+  if (item.screening !== undefined) {
+    wire.screening = item.screening;
+    if (item.screening === 'not-screened' && item.screeningReason !== undefined) wire.screeningReason = item.screeningReason;
+  }
   if (item.triageLabel !== undefined) {
     wire.triageLabel = item.triageLabel;
     if (item.triageScore !== undefined) wire.triageScore = item.triageScore;

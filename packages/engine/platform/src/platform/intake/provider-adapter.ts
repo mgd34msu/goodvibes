@@ -46,7 +46,18 @@ export interface InboundChannelItem {
   triageLabel?: 'spam' | 'priority' | 'normal';
   triageScore?: number;
   triageTags?: string[];
+  /**
+   * Whether privacy screening read the row's text (`screened`) or only code
+   * checked it for credential and card text (`not-screened`, with the reason).
+   * Set by the provider when it stores the row; absent when it does not say.
+   */
+  screening?: InboxScreeningState;
+  /** Why the row was not screened; present only with `not-screened`. */
+  screeningReason?: string;
 }
+
+/** Whether privacy screening read an inbox row's text. */
+export type InboxScreeningState = 'screened' | 'not-screened';
 
 export type ProviderState = 'ready' | 'unavailable' | 'empty' | 'pending';
 

@@ -103,6 +103,16 @@ export function withExecutionModeOwner<T>(owner: ExecutionModeOwner, run: () => 
   return executionOwner.run(owner, run);
 }
 
+/**
+ * Work that outlives the call that started it (a spawned worker agent): it
+ * leaves that call's invocation scope, which ends when the call returns, so
+ * the work's own tool calls are not refused as stale, and keeps only the
+ * session's mode owner, which each of its calls reads its mode from.
+ */
+export function detachedFromInvocation<T>(owner: ExecutionModeOwner | undefined, run: () => T): T {
+  return executionMode.exit(() => owner ? executionOwner.run(owner, run) : run());
+}
+
 export function currentExecutionModeOwner(): ExecutionModeOwner | undefined {
   const owner = executionOwner.getStore();
   owner?.getRevision();

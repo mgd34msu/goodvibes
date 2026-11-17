@@ -2,7 +2,7 @@ import { bindContractInputAuthority } from '../../contract/input-authority.js';
 import { classicAgentInput } from './classic-policy.js';
 import { decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
 import { currentTurnSurfaceId, withTurnSurfaceId } from '../../security/turn-boundary.js';
-import { currentExecutionModeOwner, withExecutionModeOwner, type ExecutionModeOwner } from '../../gate/execution-context.js';
+import { currentExecutionModeOwner, detachedFromInvocation, type ExecutionModeOwner } from '../../gate/execution-context.js';
 import { AgentCapacityError } from './capacity-error.js';
 import { bindContractActionSource, bindContractActionSignal, bindContractPlanConsumer } from './contract-binding.js';
 import type { AgentConstructionBinding } from './contract-binding.js';
@@ -705,7 +705,7 @@ export class AgentManager {
         const execute = () => {
           if (controller.signal.aborted || record.status === 'cancelled') return Promise.resolve();
           const owner = this.executionModeOwners.get(record);
-          return this.runUnderTriggerSurface(record, () => owner ? withExecutionModeOwner(owner, () => executor.runAgent(record)) : executor.runAgent(record));
+          return this.runUnderTriggerSurface(record, () => detachedFromInvocation(owner, () => executor.runAgent(record)));
         };
         const boundary = this.executionBoundaries.get(id);
         begin((boundary === undefined ? execute() : Promise.resolve().then(() => boundary(execute))).catch((error) => {
@@ -854,7 +854,7 @@ export class AgentManager {
           }, { agentId: record.id, wake: true });
         }
         const owner = this.executionModeOwners.get(record);
-        return this.runUnderTriggerSurface(record, () => owner ? withExecutionModeOwner(owner, () => executor.runAgent(record)) : executor.runAgent(record));
+        return this.runUnderTriggerSurface(record, () => detachedFromInvocation(owner, () => executor.runAgent(record)));
       };
       const boundary = this.executionBoundaries.get(agentId);
       return boundary === undefined ? execute() : boundary(execute);

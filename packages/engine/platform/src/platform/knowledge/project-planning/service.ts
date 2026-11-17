@@ -113,6 +113,8 @@ export class ProjectPlanningService {
   private runtimeBusEpoch = 0;
   /** Tail of the edit chain for each work plan; see mutateWorkPlan(). */
   private readonly workPlanMutations = new Map<string, Promise<void>>();
+  /** The stored row each work plan read came from, so its edit is published against that row. */
+  private readonly workPlanReads = new WeakMap<ProjectWorkPlanArtifact, KnowledgeSourceSnapshot>();
 
   /**
    * Native composition. The default project is the configured workspace's:
@@ -319,7 +321,7 @@ export class ProjectPlanningService {
         ...existing,
         tasks: sortWorkPlanTasks([...existing.tasks, task]),
         updatedAt: now,
-      });
+      }, existing);
       const snapshot = snapshotFromWorkPlan(space, workPlan);
       this.emitWorkPlanTaskCreated(snapshot, task);
       return {
@@ -382,7 +384,7 @@ export class ProjectPlanningService {
         ...existing,
         tasks: sortWorkPlanTasks(existing.tasks.map((entry) => entry.taskId === input.taskId ? task : entry)),
         updatedAt: now,
-      });
+      }, existing);
       const snapshot = snapshotFromWorkPlan(space, workPlan);
       this.emitWorkPlanTaskUpdated(snapshot, task, previousTask);
       if (previousTask.status !== task.status) {
@@ -440,7 +442,7 @@ export class ProjectPlanningService {
         ...existing,
         tasks,
         updatedAt: now,
-      });
+      }, existing);
       const snapshot = snapshotFromWorkPlan(space, workPlan);
       for (const task of tasks) {
         const previousTask = previousById.get(task.taskId);
@@ -467,7 +469,7 @@ export class ProjectPlanningService {
         ...existing,
         tasks: existing.tasks.filter((task) => task.taskId !== input.taskId),
         updatedAt: now,
-      });
+      }, existing);
       const snapshot = snapshotFromWorkPlan(space, workPlan);
       this.emitWorkPlanTaskDeleted(snapshot, deletedTask);
       return {
@@ -505,7 +507,7 @@ export class ProjectPlanningService {
         ...existing,
         tasks: existing.tasks.filter((task) => !statuses.has(task.status)),
         updatedAt: now,
-      });
+      }, existing);
       const snapshot = snapshotFromWorkPlan(space, workPlan);
       for (const task of cleared) {
         this.emitWorkPlanTaskDeleted(snapshot, task, true);
@@ -578,17 +580,31 @@ export class ProjectPlanningService {
     return this.getArtifactSnapshot(spaceId, kind, id).source;
   }
 
+  /**
+   * The work plan as stored, read once with the row generation it was read at.
+   * The edit that follows is published against that generation, so a write by
+   * another process in between is refused and retried, never overwritten.
+   */
   private getWorkPlanArtifact(
     space: { readonly projectId: string; readonly knowledgeSpaceId: string },
     workPlanId: string,
   ): ProjectWorkPlanArtifact {
-    const source = this.getArtifactSource(space.knowledgeSpaceId, 'work-plan', workPlanId);
-    const value = source ? readWorkPlan(source) : null;
+    return this.readWorkPlanArtifact(space, workPlanId).plan;
+  }
+
+  private readWorkPlanArtifact(
+    space: { readonly projectId: string; readonly knowledgeSpaceId: string },
+    workPlanId: string,
+  ): { readonly plan: ProjectWorkPlanArtifact; readonly snapshot: KnowledgeSourceSnapshot } {
+    const snapshot = this.getArtifactSnapshot(space.knowledgeSpaceId, 'work-plan', workPlanId);
+    const value = snapshot.source ? readWorkPlan(snapshot.source) : null;
     if (value && typeof value === 'object' && !Array.isArray(value)) {
-      return normalizeWorkPlanArtifact(value as Partial<ProjectWorkPlanArtifact>, space, workPlanId);
+      const plan = normalizeWorkPlanArtifact(value as Partial<ProjectWorkPlanArtifact>, space, workPlanId);
+      this.workPlanReads.set(plan, snapshot);
+      return { plan, snapshot };
     }
     const now = Date.now();
-    return {
+    const plan: ProjectWorkPlanArtifact = {
       id: workPlanId,
       projectId: space.projectId,
       knowledgeSpaceId: space.knowledgeSpaceId,
@@ -596,14 +612,18 @@ export class ProjectPlanningService {
       createdAt: now,
       updatedAt: now,
     };
+    this.workPlanReads.set(plan, snapshot);
+    return { plan, snapshot };
   }
 
+  /** Publishes the edited plan against the row generation `read` was taken at. */
   private async saveWorkPlanArtifact(
     space: { readonly projectId: string; readonly knowledgeSpaceId: string },
     workPlan: ProjectWorkPlanArtifact,
+    read: ProjectWorkPlanArtifact,
   ): Promise<ProjectWorkPlanArtifact> {
     const normalized = normalizeWorkPlanArtifact(workPlan, space, workPlan.id);
-    await this.upsertArtifactSource(space, 'work-plan', normalized.id, normalized);
+    await this.upsertArtifactSource(space, 'work-plan', normalized.id, normalized, undefined, this.workPlanReads.get(read));
     return normalized;
   }
 
@@ -613,9 +633,10 @@ export class ProjectPlanningService {
     id: string,
     value: ProjectPlanningState | ProjectPlanningDecision | ProjectPlanningLanguageArtifact | ProjectWorkPlanArtifact,
     observation = planningRowsObservation(),
+    read?: KnowledgeSourceSnapshot,
   ): Promise<KnowledgeSourceRecord> {
     observation();
-    const previous = this.getArtifactSnapshot(space.knowledgeSpaceId, kind, id);
+    const previous = read ?? this.getArtifactSnapshot(space.knowledgeSpaceId, kind, id);
     const current = observation;
     let durable = false;
     try {

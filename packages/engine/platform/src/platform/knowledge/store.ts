@@ -3,12 +3,12 @@ import { createHomeGraphNodeIdentityIndexes, HomeGraphIdentityHeldError, type Ho
 import { createSemanticNodeIdentityIndex, type SemanticNodeSelector, type SemanticIssueSelector } from './store-semantic-node-selector.js';
 import { createSemanticFactIdentityIndex, SemanticIdentityHeldError, type SemanticFactSelector } from './store-semantic-fact-selector.js';
 import { savedGeneratedProjectionIdentity, projectionIdentityParams, KnowledgeProjectionIdentityHeldError, type GeneratedProjectionIdentity } from './store-generated-projection-selector.js';
-import { createKnowledgeRowRevisions, knowledgeRawRowForAdmission } from './store-row-revisions.js';
+import { createKnowledgeRowRevisions } from './store-row-revisions.js';
 import { withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { KnowledgeRecordAdmissionHeldError, knowledgeEdgeSnapshotFromRows, knowledgeRecordGenerationFromRows, knowledgeRecordSnapshotFromRows, type KnowledgeRecordSnapshot } from './store-record-snapshot.js';
 import { sameKnowledgeRecord, captureKnowledgeStoreInput, copyKnowledgeRepresentation, prepareKnowledgeOwnedClocks } from './store-record-representation.js';
-import { captureOwnedJson, JudgmentInputError, snapshotJudgmentInput } from '../gate/judgment-input.js';
+import { JudgmentInputError, snapshotJudgmentInput } from '../gate/judgment-input.js';
 import { validateCurrentKnowledgeSchema, validateKnowledgeSchemaV12, validateKnowledgeSchemaV13, validateKnowledgeSchemaV14, validateKnowledgeSchemaV15, validateKnowledgeSchemaV16 } from './store-current-schema-validation.js';
 import { createKnowledgeNodeContentRevisions } from './store-node-content-revisions.js';
 import { createKnowledgeNodeActivationCache } from './store-node-activation-cache.js';
@@ -1044,19 +1044,16 @@ export class KnowledgeStore {
   /**
    * Publish a bounded owner-selected source set in one existing coordinated
    * transaction. Every row and the reader remain current at the commit boundary.
+   * The caller admits its input once, where it enters; rows already stored were
+   * admitted when they were written, so a write is not a second admission of
+   * either (a work-plan mark no longer re-scans the whole plan three times).
    */
   async upsertOwnedCanonicalSources(
     writes: readonly { readonly input: KnowledgeSourceUpsertInput; readonly generation: string | null }[],
     assertCurrent: () => void,
     published: (sources: readonly KnowledgeSourceSnapshot[], successor: () => void) => void,
   ): Promise<readonly KnowledgeSourceSnapshot[]> {
-    const captured = captureOwnedJson(writes) as typeof writes;
-    for (const [key, descriptor] of Object.entries(Object.getOwnPropertyDescriptors(captured))) {
-      const index = Number(key);
-      if (key !== 'length' && (!Number.isInteger(index) || index < 0 || String(index) !== key || index >= captured.length)) {
-        snapshotJudgmentInput({ [key]: descriptor.value });
-      }
-    }
+    const captured = writes;
     await this.init();
     assertCurrent();
     const result = await this.sqlite.transactPersisted<readonly KnowledgeSourceSnapshot[]>((db) => {
@@ -1084,19 +1081,13 @@ export class KnowledgeStore {
           // or replace a historical ID selected from metadata. Older generic
           // callers without an artifact tuple keep their exact-ID CAS below.
           if ((selected.source && selected.source.id !== input.id) || selected.generation !== generation) {
-            snapshotJudgmentInput(write);
             throw new KnowledgeSourcePublicationHeldError('state-changed');
           }
         }
         const current = readKnowledgeSourceSnapshot(db, { id: input.id });
-        if (current.generation !== generation) { snapshotJudgmentInput(write); throw new KnowledgeSourcePublicationHeldError('state-changed'); }
-        snapshotJudgmentInput({ ...write, generation: generation === null ? null : { kind: 'selected-native-source-revision' } });
-        // Admission owns the original persisted values, never the numeric
-        // compatibility view. Generic metadata and caller lastCrawledAt are not
-        // rewritten. A legacy clock can migrate only after this full admission.
-        snapshotJudgmentInput(knowledgeRawRowForAdmission(current.raw));
-        snapshotJudgmentInput(current.source?.metadata);
-        snapshotJudgmentInput(current.source?.tags);
+        if (current.generation !== generation) throw new KnowledgeSourcePublicationHeldError('state-changed');
+        // Generic metadata and caller lastCrawledAt are not rewritten; a legacy
+        // clock is migrated only when it reads as a valid time.
         if (current.raw) for (const key of ['created_at', 'updated_at'] as const) {
           const value = current.raw[key];
           const timestamp = typeof value === 'number' ? value : typeof value === 'string' ? Date.parse(value) : NaN;

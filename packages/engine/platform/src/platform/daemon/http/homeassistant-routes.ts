@@ -492,7 +492,11 @@ export class HomeAssistantConversationRoutes {
     // TUI, web or other operator's chat by naming its id.
     const session = this.context.chatManager.getSession(sessionId);
     if (!session || !isHomeAssistantChatSession(session)) {
-      return Response.json({ ok: false, sessionId, error: 'Unknown Home Assistant chat session.' }, { status: 404 });
+      return Response.json({
+        ok: false,
+        sessionId,
+        error: `No Home Assistant conversation has session ${sessionId}; this route stops only conversations Home Assistant started. Pass the sessionId or messageId from that conversation's reply.`,
+      }, { status: 404 });
     }
     // Named by messageId only: stop that turn, not whatever newer utterance now holds the session.
     const byMessageOnly = !readString(body.sessionId ?? body.session_id) && indexed !== undefined;

@@ -42,7 +42,13 @@
 import type { ChannelIngressPolicyInput, ChannelPolicyDecision, ChannelPolicyManager } from '../channels/index.js';
 import { logger } from '../utils/logger.js';
 import { JudgmentInputError, judgmentInputProblem, type JudgmentInputProblem } from '../gate/judgment-input.js';
-import { cardShapeKinds, findCardNumberShapes, renderCardShapeRefusal, type CardShapeFinding } from '../security/card-shapes.js';
+import {
+  cardShapeKinds,
+  findCardNumberShapes,
+  findLabelledCardShapes,
+  renderCardShapeRefusal,
+  type CardShapeFinding,
+} from '../security/card-shapes.js';
 import type { InboundReading } from './inbound-reading.js';
 import { isSecurityCodeAwaited } from '../payments/security-code-requests.js';
 import { readsAsSecurityCode } from '../payments/entry-surface.js';
@@ -115,21 +121,35 @@ export async function refuseCardShapedIngress(
 
 /**
  * The refusal a reading decides: the message's one inbound reading says it
- * gives a card's security code or expiry (a confident reading; an unsure one
- * refuses nothing), or a purchase is waiting for its security code and the
- * short number typed here reads as that code.
+ * gives a card's security code or expiry, or a purchase is waiting for its
+ * security code and the short number typed here reads as that code.
+ *
+ * A card question no answer settled is not a pass. When the model read the
+ * message and was unsure, the detail is refused unless the answer was a
+ * confident no. When no model answered (decision models off, none
+ * configured, past the deadline), code decides: a month/year pair or a short
+ * number the words just before it label as an expiry or a security code.
  */
 export async function refuseCardTalk(
   deps: SurfaceCardGateDeps,
   input: ChannelIngressPolicyInput,
-  card: InboundReading['card'],
+  reading: Pick<InboundReading, 'card' | 'source'>,
 ): Promise<ChannelPolicyDecision | null> {
   const text = input.text;
   if (typeof text !== 'string' || text.length === 0) return null;
-  if (card.securityCode || card.expiry) {
+  const { card } = reading;
+  const modelRead = reading.source === 'model' || reading.source === 'cache';
+  const labelled = !modelRead && (card.unsure.securityCode || card.unsure.expiry)
+    ? new Set(findLabelledCardShapes(text).map((finding) => finding.kind))
+    : null;
+  const unsettled = (kind: 'securityCode' | 'expiry', shape: 'security-code' | 'expiry'): boolean =>
+    card.unsure[kind] && (modelRead || labelled?.has(shape) === true);
+  const securityCode = card.securityCode || unsettled('securityCode', 'security-code');
+  const expiry = card.expiry || unsettled('expiry', 'expiry');
+  if (securityCode || expiry) {
     return refuseCardShapes(deps, input, [
-      ...(card.securityCode ? [{ kind: 'security-code' as const, startIndex: 0, length: 0 }] : []),
-      ...(card.expiry ? [{ kind: 'expiry' as const, startIndex: 0, length: 0 }] : []),
+      ...(securityCode ? [{ kind: 'security-code' as const, startIndex: 0, length: 0 }] : []),
+      ...(expiry ? [{ kind: 'expiry' as const, startIndex: 0, length: 0 }] : []),
     ]);
   }
   // While a purchase waits for its security code, a short number typed here

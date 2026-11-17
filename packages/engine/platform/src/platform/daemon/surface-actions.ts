@@ -448,7 +448,7 @@ export class DaemonSurfaceActionHelper {
         ...(ask ? { approval: approvalProposal(ask) } : {}),
       }, { signal: lifecycle });
 
-    const cardTalk = reading ? await refuseCardTalk(cardDeps, input, reading.card) : null;
+    const cardTalk = reading ? await refuseCardTalk(cardDeps, input, reading) : null;
     if (cardTalk) return cardTalk;
 
     // An answer to a pending work proposal is consumed here, on the shared

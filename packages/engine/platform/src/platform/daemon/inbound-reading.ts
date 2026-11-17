@@ -46,8 +46,16 @@ export interface InboundReading {
   readonly proposal?: ProposalAnswer | 'unsure' | undefined;
   /** Set when an ask was offered. */
   readonly approval?: ApprovalAnswer | 'unsure' | undefined;
-  /** Card details the message gives, read with confidence. An unsure reading gives none. */
-  readonly card: { readonly securityCode: boolean; readonly expiry: boolean };
+  /**
+   * Card details the message gives, read with confidence (`securityCode`,
+   * `expiry`), and the card questions code found worth asking that no answer
+   * settled (`unsure`): the model was unsure, slow, absent or switched off.
+   */
+  readonly card: {
+    readonly securityCode: boolean;
+    readonly expiry: boolean;
+    readonly unsure: { readonly securityCode: boolean; readonly expiry: boolean };
+  };
   /** `none`: nothing applied and nothing was asked. */
   readonly source: 'model' | 'cache' | 'fallback' | 'none';
   readonly why?: string | undefined;
@@ -92,6 +100,8 @@ const settledChoice = <C extends string>(reading: { readonly choice: C; readonly
   reading !== undefined && reading.outcome === 'act' ? reading.choice : 'unsure';
 const confidentYes = (reading: { readonly verdict: string; readonly outcome: string } | undefined): boolean =>
   reading !== undefined && reading.verdict === 'yes' && reading.outcome === 'act';
+const settled = (reading: { readonly outcome: string } | undefined): boolean =>
+  reading !== undefined && reading.outcome === 'act';
 
 /** Ask the questions that apply, in one request; resolves `source: 'none'` without a request when none does. */
 export async function readInboundMessage(questions: InboundQuestions, options: { readonly signal?: AbortSignal | undefined } = {}): Promise<InboundReading> {
@@ -107,7 +117,8 @@ export async function readInboundMessage(questions: InboundQuestions, options: {
     ...(questions.intent === true ? { intent: 'unsure' as const } : {}),
     ...(questions.proposal !== undefined ? { proposal: 'unsure' as const } : {}),
     ...(questions.approval !== undefined ? { approval: 'unsure' as const } : {}),
-    card: { securityCode: false, expiry: false },
+    // Nothing answered the card questions code found worth asking.
+    card: { securityCode: false, expiry: false, unsure: candidates },
     source: 'none',
   };
   if (only.length === 0) return unsure;
@@ -130,6 +141,10 @@ export async function readInboundMessage(questions: InboundQuestions, options: {
       card: {
         securityCode: candidates.securityCode && confidentYes(readings.security_code),
         expiry: candidates.expiry && confidentYes(readings.expiry),
+        unsure: {
+          securityCode: candidates.securityCode && !settled(readings.security_code),
+          expiry: candidates.expiry && !settled(readings.expiry),
+        },
       },
       source: 'model',
     }),

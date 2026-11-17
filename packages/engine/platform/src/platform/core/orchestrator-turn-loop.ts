@@ -963,8 +963,8 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
         memoryRecordIds: [...turnMemoryRecordIds],
         contractSession,
       });
-      // The batch's results are in the conversation: the crash snapshot is written now,
-      // so a crash later in the turn loses at most the batch in flight.
+      // The batch's results are in the conversation: the crash snapshot takes them
+      // (coalesced to one write per few seconds, runtime/session-persistence.ts).
       if (context.runtimeBus) emitToolsDone(context.runtimeBus, context.emitterContext(context.turnId), { turnId: context.turnId });
       completionGuard.noteToolResults(round.results);
       for (const result of round.results) {

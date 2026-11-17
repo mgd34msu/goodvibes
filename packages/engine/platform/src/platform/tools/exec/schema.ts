@@ -17,7 +17,8 @@ export const EXEC_TOOL_SCHEMA = {
           cmd: {
             type: 'string',
             description: 'Shell command to execute via sh -c. Special values manage background processes started'
-              + ' with background: true: "bg_list", "bg_status <process_id>", "bg_output <process_id>", "bg_stop <process_id>".',
+              + ' with background: true: "bg_list", "bg_status <process_id>", "bg_output <process_id> [tail=<bytes>|from=<byte>]",'
+              + ' "bg_stop <process_id>". bg_output reads the saved output: tail= the last bytes, from= onward from a byte offset.',
           },
           cmd_base64: {
             type: 'string',
@@ -61,7 +62,7 @@ export const EXEC_TOOL_SCHEMA = {
             type: 'boolean',
             description:
               'Run detached, returns immediately with a process_id.'
-              + ' Manage it with later exec calls whose cmd is "bg_list", "bg_status <id>", "bg_output <id>" or "bg_stop <id>".',
+              + ' Manage it with later exec calls whose cmd is "bg_list", "bg_status <id>", "bg_output <id> [tail=<bytes>|from=<byte>]" or "bg_stop <id>".',
           },
           retry: {
             type: 'object',

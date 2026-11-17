@@ -289,8 +289,8 @@ export const COMPLETION_COMMANDS: readonly CompletionCommand[] = [
   {
     name: 'plugin',
     aliases: ['plugin', 'plugins'],
-    description: 'Scaffold a plugin, validate a plugin directory, or manage capability bundles',
-    subcommands: ['init', 'validate', 'bundles'],
+    description: 'Scaffold, validate or trust a plugin, or manage capability bundles',
+    subcommands: ['init', 'validate', 'bundles', 'trust', 'verify', 'capabilities'],
   },
   {
     name: 'host',

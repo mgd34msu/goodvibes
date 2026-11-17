@@ -114,7 +114,7 @@ export function syncTerminalNotifierQueues(
     for (const gone of shown) {
       if (now.has(gone)) continue;
       dispatch.syncIntegration(
-        { id: gone, displayName: gone[0]!.toUpperCase() + gone.slice(1), category: 'communication', status: 'unconfigured', enabled: false, successCount: 0, errorCount: 0 },
+        { id: gone, displayName: gone[0]!.toUpperCase() + gone.slice(1), category: 'communication', status: 'unconfigured', enabled: false, successCount: 0, errorCount: 0, meta: {} },
         'bootstrap.notifier',
       );
     }

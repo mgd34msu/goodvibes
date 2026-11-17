@@ -1239,8 +1239,10 @@ export class MemoryStore {
   }
 
   /**
-   * Save in the background, for the synchronous writes (update, review,
-   * delete) that cannot wait. A failed commit is counted and logged; the
+   * Commit what this call wrote, for the synchronous writes (update, review,
+   * delete) that cannot wait. Statements run in one turn share one SQLite
+   * transaction, so a burst of writes is one commit and nothing is exported
+   * or copied. A failed commit is logged and counted in `unsavedChanges`; the
    * write it carried is not on disk.
    */
   private persist(): void {

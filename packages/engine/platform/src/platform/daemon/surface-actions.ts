@@ -209,17 +209,16 @@ export class DaemonSurfaceActionHelper {
     // fills it; the gated trySpawnAgent below reads it.
     const origin: { current: SurfaceIngressOrigin | null } = { current: null };
     const lifecycle = this.controlAbort.signal;
-    // The registered policy record the message was admitted under. A record is
-    // replaced on every change, so one identity compare says whether it moved.
-    const registeredPolicy = (surface: ChannelIngressPolicyInput['surface']) => this.context.channelPolicy.listPolicies().find(policy => policy.surface === surface);
-    let authorization: { text: string; surface: ChannelIngressPolicyInput['surface']; record: ChannelPolicyDecision['policy'] | undefined; operator: boolean } | null = null;
+    // The surface policy revision the message was admitted under: one integer compare says whether it moved.
+    const policyRevision = (surface: ChannelIngressPolicyInput['surface']) => this.context.channelPolicy.revision(surface);
+    let authorization: { text: string; surface: ChannelIngressPolicyInput['surface']; revision: number; operator: boolean } | null = null;
     const commands = new WeakMap<SurfaceControlReading, () => void>();
     // Commands read from an admitted sender who is not the channel's owner. They address
     // any run or agent id and carry no origin, so only the owner may act on them.
     const nonOperatorCommands = new WeakSet<SurfaceControlReading>();
     const authorizationCurrent = (accepted: typeof authorization) => {
       lifecycle.throwIfAborted();
-      if (!accepted || accepted !== authorization || registeredPolicy(accepted.surface) !== accepted.record) {
+      if (!accepted || accepted !== authorization || policyRevision(accepted.surface) !== accepted.revision) {
         throw new Error('Surface ingress authorization is no longer current');
       }
     };
@@ -238,7 +237,7 @@ export class DaemonSurfaceActionHelper {
           // A sender with no identity is admitted by its surface secret, which only an
           // empty allowlist allows; an identified sender is the operator only as the owner.
           const operator = input.userId === undefined || isChannelOwner(decision, input.userId);
-          authorization = { text: input.text ?? '', surface: input.surface, record: registeredPolicy(input.surface), operator };
+          authorization = { text: input.text ?? '', surface: input.surface, revision: policyRevision(input.surface), operator };
           if (decision.intent !== undefined && origin.current) origin.current = { ...origin.current, intent: decision.intent };
         }
         // A protected-input refusal must not stay readable from the cell the gated
@@ -359,13 +358,13 @@ export class DaemonSurfaceActionHelper {
       queueSurfaceReplyFromBinding: this.context.queueSurfaceReplyFromBinding,
       workProposals: this.context.workProposals,
       readingOptions: { ...readingOptions, signal },
-      // The policy record a gated message was admitted under: one identity compare where the reading is acted on.
+      // The policy revision a gated message was admitted under: one integer compare where the reading is acted on.
       captureReadingSource: (origin: SurfaceIngressOrigin | null) => {
         const surface = origin?.surface as ChannelIngressPolicyInput['surface'] | undefined;
-        const record = surface ? this.context.channelPolicy.listPolicies().find(entry => entry.surface === surface) : undefined;
+        const revision = surface ? this.context.channelPolicy.revision(surface) : 0;
         return () => {
           signal.throwIfAborted();
-          if (surface && this.context.channelPolicy.listPolicies().find(entry => entry.surface === surface) !== record) {
+          if (surface && this.context.channelPolicy.revision(surface) !== revision) {
             throw new Error('Conversation source policy changed');
           }
         };
@@ -386,9 +385,9 @@ export class DaemonSurfaceActionHelper {
   async authorizeSurfaceIngress(input: ChannelIngressPolicyInput): Promise<AuthorizedIngress> {
     // Source admission must precede every semantic reader.
     // This shares the policy owner's rules but cannot seed, audit or retain text.
-    const preflight = await this.context.channelPolicy.preflightIngress(input);
-    if (!preflight.allowed) {
-      const denial = await this.context.channelPolicy.recordDeniedIngress(input);
+    const checked = await this.context.channelPolicy.evaluateIngress(input, { admit: false });
+    if (!checked.allowed) {
+      const denial = await this.context.channelPolicy.recordDeniedIngress(input, checked);
       if (!denial.allowed) return denial;
     }
     // A card number or protected credential input is refused before anything
@@ -400,14 +399,15 @@ export class DaemonSurfaceActionHelper {
     const cardRefusal = await refuseCardShapedIngress(cardDeps, input);
     if (cardRefusal) return cardRefusal;
     // The audit record this writes masks every digit, so it holds no card value whatever the reading says.
-    const decision = await this.context.channelPolicy.evaluateIngress(input, { recordDenied: false });
-    if (!decision.allowed) { await this.context.channelPolicy.recordDeniedIngress(input); return decision; }
+    // The decision made above is reused while the surface's policy revision has not moved.
+    const decision = await this.context.channelPolicy.evaluateIngress(input, { recordDenied: false, decided: checked });
+    if (!decision.allowed) { await this.context.channelPolicy.recordDeniedIngress(input, decision); return decision; }
     const lifecycle = this.controlAbort.signal;
-    const admittedUnder = this.context.channelPolicy.listPolicies().find(policy => policy.surface === input.surface);
+    const admittedUnder = this.context.channelPolicy.revision(input.surface);
     // The policy that admitted the message is compared once, where an answer is about to be acted on.
     const assertReplyCurrent = () => {
       lifecycle.throwIfAborted();
-      if (this.context.channelPolicy.listPolicies().find(policy => policy.surface === input.surface) !== admittedUnder) {
+      if (this.context.channelPolicy.revision(input.surface) !== admittedUnder) {
         throw new Error('The original reply owner policy is no longer current');
       }
     };

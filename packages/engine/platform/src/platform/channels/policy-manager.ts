@@ -41,7 +41,21 @@ const MAX_AUDIT_RECORDS = 500;
  */
 const AUDIT_FLUSH_INTERVAL_MS = 1_000;
 
+/** One frozen default per surface, so an unconfigured surface reads as the same record every time. */
+const defaultPolicies = new Map<ChannelSurface, ChannelPolicyRecord>();
+
 function defaultPolicy(surface: ChannelSurface): ChannelPolicyRecord {
+  let policy = defaultPolicies.get(surface);
+  if (!policy) {
+    const fresh = newDefaultPolicy(surface);
+    for (const value of Object.values(fresh)) if (value && typeof value === 'object') Object.freeze(value);
+    policy = Object.freeze(fresh);
+    defaultPolicies.set(surface, policy);
+  }
+  return policy;
+}
+
+function newDefaultPolicy(surface: ChannelSurface): ChannelPolicyRecord {
   return {
     surface,
     enabled: true,
@@ -57,7 +71,7 @@ function defaultPolicy(surface: ChannelSurface): ChannelPolicyRecord {
     allowlistGroupIds: [],
     allowedCommands: [],
     groupPolicies: [],
-    updatedAt: Date.now(),
+    updatedAt: 0,
     metadata: {},
   };
 }
@@ -328,6 +342,8 @@ export class ChannelPolicyManager {
   /** Where owner claims are asked; absent, the first identified sender becomes the owner. */
   private ownerInbox: ChannelOwnerClaimInbox | null = null;
   private ownerInboxUnsubscribe: (() => void) | null = null;
+  /** Per surface, moved by every change of its policy record; a decision carries the one it was made under. */
+  readonly #revisions = new Map<ChannelSurface, number>();
 
   constructor(
     options: {
@@ -354,6 +370,7 @@ export class ChannelPolicyManager {
 
   private async load(): Promise<void> {
     const snapshot = validateChannelPolicySnapshot(await this.store.load());
+    for (const surface of this.policies.keys()) this.#moved(surface);
     this.policies.clear();
     this.audit.length = 0;
     for (const policy of snapshot?.policies ?? []) {
@@ -371,6 +388,7 @@ export class ChannelPolicyManager {
         metadata: policy.metadata ?? {},
         ownerId: settledOwner({ ownerId: policy.ownerId, allowlistUserIds: policy.allowlistUserIds ?? [], groupPolicies: policy.groupPolicies ?? [] }),
       });
+      this.#moved(policy.surface);
     }
     this.audit.push(...(snapshot?.audit ?? []));
     this.loaded = true;
@@ -386,6 +404,18 @@ export class ChannelPolicyManager {
 
   getPolicy(surface: ChannelSurface): ChannelPolicyRecord {
     return this.policies.get(surface) ?? defaultPolicy(surface);
+  }
+
+  /**
+   * The surface's policy revision. A decision carries the revision it was
+   * made under, so "is that decision still current" is one integer compare.
+   */
+  revision(surface: ChannelSurface): number {
+    return this.#revisions.get(surface) ?? 0;
+  }
+
+  #moved(surface: ChannelSurface): void {
+    this.#revisions.set(surface, this.revision(surface) + 1);
   }
 
   /**
@@ -522,16 +552,18 @@ export class ChannelPolicyManager {
     const owned: ChannelPolicyRecord = ownerId === next.ownerId ? next
       : { ...next, ownerId, ownerSince: ownerId === undefined ? undefined : Date.now() };
     this.policies.set(surface, owned);
+    this.#moved(surface);
     return owned;
   }
 
-  /** Same deterministic rules as ingress evaluation, without audit, logging or owner seeding. */
-  async preflightIngress(input: ChannelIngressPolicyInput): Promise<ChannelPolicyDecision> {
-    await this.start();
-    return this.decideIngress(input);
+  /** A decision the caller already made under the current revision, or a fresh one. */
+  private decisionFor(input: ChannelIngressPolicyInput, decided: ChannelPolicyDecision | undefined): ChannelPolicyDecision {
+    return decided !== undefined && decided.revision === this.revision(input.surface) && decided.policy.surface === input.surface
+      ? decided : this.decideIngress(input);
   }
 
   private decideIngress(input: ChannelIngressPolicyInput): ChannelPolicyDecision {
+    const revision = this.revision(input.surface);
     const policy = this.getPolicy(input.surface);
     const conversationKind = normalizeConversationKind(input);
     const parentKind = conversationKind === 'thread'
@@ -597,12 +629,25 @@ export class ChannelPolicyManager {
       matchedScope: matchedGroupPolicy ? 'group' : 'surface',
       effectiveRequireMention: requireMention,
       effectiveAllowedCommands: allowedCommands,
+      revision,
     };
   }
 
-  async evaluateIngress(input: ChannelIngressPolicyInput, options: { readonly recordDenied?: boolean } = {}): Promise<ChannelPolicyDecision> {
+  /**
+   * Decide a message under the surface policy. With `admit: false` this is
+   * the decision alone (no audit, no owner seeding, no claim), for a caller
+   * that must refuse a source before anything reads its text; it then passes
+   * that decision back as `decided`, and it is reused while the surface's
+   * revision has not moved, so a message is decided once.
+   */
+  async evaluateIngress(input: ChannelIngressPolicyInput, options: {
+    readonly recordDenied?: boolean;
+    readonly admit?: boolean;
+    readonly decided?: ChannelPolicyDecision;
+  } = {}): Promise<ChannelPolicyDecision> {
     await this.start();
-    const decision = this.decideIngress(input);
+    const decision = this.decisionFor(input, options.decided);
+    if (options.admit === false) return decision;
     if (decision.reason === 'owner-claim-pending') this.raiseOwnerClaim(input, decision);
     // Source-scoped callers may refuse fresh denials without retaining text.
     if (!decision.allowed && options.recordDenied === false) return decision;
@@ -634,6 +679,7 @@ export class ChannelPolicyManager {
         if (this.policies.get(input.surface) === effectivePolicy) {
           if (before) this.policies.set(input.surface, before);
           else this.policies.delete(input.surface);
+          this.#moved(input.surface);
         }
         throw error;
       }
@@ -646,15 +692,22 @@ export class ChannelPolicyManager {
 
     this.recordIngressAudit(input, { ...decision, reason, policy: effectivePolicy }, true);
 
-    return { ...decision, reason, policy: effectivePolicy,
+    // Seeding the owner is a change of the record: the decision carries the revision it now stands under.
+    return { ...decision, reason, policy: effectivePolicy, revision: this.revision(input.surface),
       ...(matchedGroupPolicy ? { matchedGroupPolicy: effectivePolicy.groupPolicies.find(entry => entry.id === matchedGroupPolicy.id) } : {}),
     };
   }
 
-  /** Preserve a denied source's bookkeeping without retaining its text or arbitrary metadata. */
-  async recordDeniedIngress(input: ChannelIngressPolicyInput): Promise<ChannelPolicyDecision> {
+  /**
+   * Preserve a denied source's bookkeeping without retaining its text or
+   * arbitrary metadata. A sender waiting on an owner claim gets the claim
+   * raised here too (it holds no message text), so the owner is asked
+   * whichever path refused the message.
+   */
+  async recordDeniedIngress(input: ChannelIngressPolicyInput, decided?: ChannelPolicyDecision): Promise<ChannelPolicyDecision> {
     await this.start();
-    const decision = this.decideIngress(input);
+    const decision = this.decisionFor(input, decided);
+    if (decision.reason === 'owner-claim-pending') this.raiseOwnerClaim(input, decision);
     if (!decision.allowed) this.recordIngressAudit(input, decision, false);
     return decision;
   }

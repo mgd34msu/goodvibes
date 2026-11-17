@@ -19,7 +19,7 @@ const SECRET = 'measure-webhook-secret';
 
 const inboundMessage: Scenario = {
   name: 'inbound-message',
-  drives: 'handleGenericWebhookSurface with a JSON POST (secret header) -> channel policy (ChannelPolicyManager.preflightIngress, the card-shape gate, evaluateIngress: the core of SurfaceActionHelper.authorizeSurfaceIngress; the pending-proposal consumption step is not driven) -> RouteBindingManager.upsertBinding (real AutomationRouteStore file) -> SharedSessionBroker.submitMessage on a store of 50 sessions x 200 messages -> trySpawnAgent (counting stub: the turn-dispatch boundary) -> bindAgent. Each run posts as a new external conversation.',
+  drives: 'handleGenericWebhookSurface with a JSON POST (secret header) -> channel policy (ChannelPolicyManager.evaluateIngress deciding once, the card-shape gate, evaluateIngress admitting with that decision: the core of SurfaceActionHelper.authorizeSurfaceIngress; the pending-proposal consumption step is not driven) -> RouteBindingManager.upsertBinding (real AutomationRouteStore file) -> SharedSessionBroker.submitMessage on a store of 50 sessions x 200 messages -> trySpawnAgent (counting stub: the turn-dispatch boundary) -> bindAgent. Each run posts as a new external conversation.',
   entries: [
     `${P}/adapters/webhook/index.ts:23 handleGenericWebhookSurface`,
     `${P}/daemon/surface-actions.ts:354 SurfaceActionHelper.authorizeSurfaceIngress (core steps reproduced)`,
@@ -40,15 +40,15 @@ const inboundMessage: Scenario = {
       routeBindings,
       sessionBroker: b.broker,
       async authorizeSurfaceIngress(input) {
-        const preflight = await channelPolicy.preflightIngress(input);
-        if (!preflight.allowed) {
-          const denial = await channelPolicy.recordDeniedIngress(input);
+        const checked = await channelPolicy.evaluateIngress(input, { admit: false });
+        if (!checked.allowed) {
+          const denial = await channelPolicy.recordDeniedIngress(input, checked);
           if (!denial.allowed) return denial;
         }
         const card = await refuseCardShapedIngress({ channelPolicy } as unknown as Parameters<typeof refuseCardShapedIngress>[0], input);
         if (card) return card;
-        const decision = await channelPolicy.evaluateIngress(input, { recordDenied: false });
-        if (!decision.allowed) { await channelPolicy.recordDeniedIngress(input); return decision; }
+        const decision = await channelPolicy.evaluateIngress(input, { recordDenied: false, decided: checked });
+        if (!decision.allowed) { await channelPolicy.recordDeniedIngress(input, decision); return decision; }
         return decision;
       },
       trySpawnAgent: () => { spawned++; return { id: `agent-measure-${spawned}` } as never; },

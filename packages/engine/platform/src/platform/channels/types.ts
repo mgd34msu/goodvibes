@@ -422,6 +422,8 @@ export interface ChannelPolicyDecision {
   readonly matchedScope?: ChannelPolicyMatchScope | undefined;
   readonly effectiveRequireMention?: boolean | undefined;
   readonly effectiveAllowedCommands?: readonly string[] | undefined;
+  /** The surface's policy revision the decision was made under (`ChannelPolicyManager.revision`). */
+  readonly revision?: number | undefined;
 }
 
 export type ChannelSecretBackend =

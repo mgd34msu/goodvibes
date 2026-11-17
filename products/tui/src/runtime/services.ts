@@ -271,7 +271,7 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
       sessionBroker.setContinuationRunner(continuationRunner);
       wireSessionDispatch.setContinuationRunner(continuationRunner);
       const focusTracker = new FocusTracker();
-      // Every turn is recorded as a run /replay can load (one line per turn, tool and task event).
+      // Every turn is recorded as a run /replay can load, written once when the turn ends.
       const replayRecording = startReplayRecording({
         runtimeBus: options.runtimeBus,
         replayEngine: base.replayEngine,

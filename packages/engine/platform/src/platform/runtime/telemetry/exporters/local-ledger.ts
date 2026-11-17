@@ -252,6 +252,51 @@ export class LocalLedgerExporter implements SpanExporter {
   }
 
   /**
+   * Record several entries in one append: what a recorder that holds a turn's
+   * events until the turn ends writes, so a turn costs one disk write rather
+   * than one per event. Each line gets the same at-rest redaction as
+   * `recordEvent`; an entry that cannot be serialized is logged and left out.
+   */
+  recordEvents(entries: readonly LedgerEntry[]): void {
+    if (entries.length === 0) return;
+    for (const runId of new Set(entries.map((entry) => entry.runId))) this._storeSnapshotIfRunStarts(runId);
+    const lines: string[] = [];
+    for (const entry of entries) {
+      let serialized: string;
+      try {
+        serialized = JSON.stringify(entry);
+      } catch (err) {
+        logger.warn('[local-ledger] ledger write failed', {
+          error: summarizeError(err),
+          ledgerFilePath: this.ledgerFilePath,
+          runId: entry.runId,
+          rev: entry.rev,
+          eventName: entry.eventName,
+        });
+        continue;
+      }
+      if (this.atRestPolicy.redact) this.ledgerWriter.write(serialized, (line) => { lines.push(line); });
+      else lines.push(serialized);
+    }
+    if (lines.length === 0) return;
+    try {
+      appendFileSync(this.ledgerFilePath, `${lines.join('\n')}\n`, 'utf8');
+    } catch (err) {
+      logger.warn('[local-ledger] ledger write failed', {
+        error: summarizeError(err),
+        ledgerFilePath: this.ledgerFilePath,
+        runId: entries[0]!.runId,
+        entries: lines.length,
+      });
+    }
+    this.entriesSinceRetention += lines.length;
+    if (this.entriesSinceRetention >= RETENTION_EVERY_ENTRIES) {
+      this.entriesSinceRetention = 0;
+      this._enforceRetention();
+    }
+  }
+
+  /**
    * Read all ledger entries for a given run.
    *
    * Parses the ledger file line-by-line. Malformed lines are skipped.

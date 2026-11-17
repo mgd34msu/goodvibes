@@ -220,7 +220,7 @@ export type SerializedRuntimeEnvelope = Transport.SerializedRuntimeEnvelope;
 // /workplan and /delegate.)
 export {
   ToolContractVerifier, McpLifecycleManager, McpPermissionManager, McpSchemaFreshnessTracker, buildMcpAttackPathReview, createMcpLifecycleManager,
-  DEFAULT_RECONNECT_CONFIG, ALL_CAPABILITIES, PLUGIN_CAPABILITIES, HIGH_RISK_CAPABILITIES, PluginLifecycleManager, PluginQuarantineEngine,
+  DEFAULT_RECONNECT_CONFIG, ALL_CAPABILITIES, PLUGIN_CAPABILITIES, HIGH_RISK_CAPABILITIES, PluginQuarantineEngine,
   PluginTrustStore, SAFE_CAPABILITIES, filterCapabilitiesByTrust, hasCapability, isHighRiskCapability, isPluginOperational,
   isPluginReloadable, isPluginTerminal, resolveCapabilityManifest, validateManifestV2, validatePluginSignature, LOW_QUALITY_THRESHOLD,
   computeQualityScore, createCompactionManager, describeScore, escalateStrategy, isTerminalCompactionState, reachableFromCompactionState,

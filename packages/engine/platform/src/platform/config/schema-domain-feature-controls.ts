@@ -95,9 +95,9 @@ export const featureControlSettings: ConfigSetting[] = [
   {
     key: 'runtime.pluginLifecycle',
     type: 'boolean',
-    default: false,
+    default: true,
     description:
-      'Structured plugin lifecycle with init/teardown phases and health integration. Restart to apply. Default off until the plugin catalog work lands.',
+      'Publishes each plugin\'s lifecycle (loading, loaded, active, error, unloading, disabled, with the reason) as plugin events: the runtime store\'s plugin view, automation triggers on plugin loaded or failed, and tracing read them. Read at each event, so a change applies at once. Off: plugins load, run and unload the same, and nothing is reported. Default on.',
   },
   {
     key: 'runtime.mcpLifecycle',

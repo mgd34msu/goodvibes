@@ -233,7 +233,6 @@ export {
   ALL_CAPABILITIES,
   PLUGIN_CAPABILITIES,
   HIGH_RISK_CAPABILITIES,
-  PluginLifecycleManager,
   PluginQuarantineEngine,
   PluginTrustStore,
   SAFE_CAPABILITIES,
@@ -327,8 +326,8 @@ export {
 // (TS2484). This applies to every class name in the grouped re-export above
 // (AcpTaskAdapter, OpsControlPlane, OpsIllegalActionError,
 // OpsTargetNotFoundError, ToolContractVerifier, McpLifecycleManager,
-// McpPermissionManager, McpSchemaFreshnessTracker, PluginLifecycleManager,
-// PluginQuarantineEngine, PluginTrustStore, RemoteRunnerRegistry,
+// McpPermissionManager, McpSchemaFreshnessTracker, PluginQuarantineEngine,
+// PluginTrustStore, RemoteRunnerRegistry,
 // RemoteSupervisor, DistributedRuntimeManager), their instance types are
 // forwarded automatically and are not redeclared below.
 // The declare-once storage handle (platform/runtime/session-surface.ts) plus

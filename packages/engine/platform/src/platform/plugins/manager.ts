@@ -26,6 +26,15 @@ import { isHighRiskCapability, resolveCapabilityManifest } from '../runtime/plug
 import type { PluginCapability, PluginManifestV2 } from '../runtime/plugins/types.js';
 import { summarizeError } from '../utils/error-display.js';
 import { DEFAULT_PLUGIN_QUIESCE_TIMEOUT_MS, PluginClosedError, PluginInFlightTracker } from './in-flight.js';
+import type { RuntimeEventBus } from '../runtime/events/index.js';
+import {
+  emitPluginActive,
+  emitPluginDisabled,
+  emitPluginError,
+  emitPluginLoaded,
+  emitPluginLoading,
+  emitPluginUnloading,
+} from '../runtime/emitters/plugins.js';
 
 /**
  * PluginState, Persisted state for all plugins.
@@ -86,6 +95,14 @@ const DEFAULT_STATE: PluginState = { enabled: {}, enabledDirs: {}, config: {}, t
 export interface PluginManagerOptions {
   readonly pathOptions: PluginPathOptions;
   readonly stateFilePath?: string | undefined;
+  /**
+   * Receives the plugin lifecycle events (loading, loaded, active, error,
+   * unloading, disabled) that the runtime store, automation triggers and
+   * tracing read. Without one the manager runs the same and reports nothing.
+   */
+  readonly runtimeBus?: RuntimeEventBus | undefined;
+  /** `runtime.pluginLifecycle` (the `plugin-lifecycle` gate), read at each event; absent means on. */
+  readonly featureFlags?: { isEnabled(flagId: string): boolean } | undefined;
 }
 
 /** Outcome of PluginManager.reload(). */
@@ -161,9 +178,13 @@ export class PluginManager {
   private readonly subscribers = new Set<() => void>();
   private readonly pathOptions: PluginPathOptions;
   private readonly stateFilePath: string;
+  private readonly runtimeBus: RuntimeEventBus | undefined;
+  private readonly featureFlags: PluginManagerOptions['featureFlags'];
 
   constructor(options: PluginManagerOptions) {
     this.pathOptions = options.pathOptions;
+    this.runtimeBus = options.runtimeBus;
+    this.featureFlags = options.featureFlags;
     if (!options.stateFilePath) {
       throw new Error('PluginManager requires an explicit stateFilePath.');
     }
@@ -400,7 +421,7 @@ export class PluginManager {
       const loaded = this.plugins.get(name);
       if (!loaded) return;
       try {
-        await this.unload(loaded);
+        await this.unload(loaded, 'quarantined');
       } finally {
         this.plugins.delete(name);
         this.notifySubscribers();
@@ -488,7 +509,7 @@ export class PluginManager {
       const loaded = this.plugins.get(name);
       if (loaded) {
         try {
-          await this.unload(loaded);
+          await this.unload(loaded, 'disabled');
         } catch (error) {
           cleanupError = error;
         }
@@ -547,7 +568,7 @@ export class PluginManager {
           const loaded = this.plugins.get(name);
           if (loaded) {
             try {
-              await this.unload(loaded);
+              await this.unload(loaded, 'reloading');
             } catch (error) {
               cleanupFailed.push(name);
               if (error instanceof PluginCleanupError) this.cleanupErrors.add(error);
@@ -626,7 +647,7 @@ export class PluginManager {
       const errors: unknown[] = [...this.cleanupErrors];
       for (const loaded of [...this.acquired]) {
         try {
-          await this.unload(loaded);
+          await this.unload(loaded, 'shutting down');
         } catch (error) {
           errors.push(error);
         }
@@ -693,8 +714,18 @@ export class PluginManager {
     const names = this.ownedCalls.get(tracker) ?? new Set<string>();
     this.ownedCalls.set(tracker, names);
     names.add(discovered.manifest.name);
-    const loaded = await loadPlugin(discovered, deps, cacheBust, { throwOnCleanupError: true, onFailure });
-    if (loaded) this.acquired.add(loaded);
+    const pluginId = discovered.manifest.name;
+    this.emitLifecycle(pluginId, 'loading', (bus, ctx) => emitPluginLoading(bus, ctx, { pluginId, path: discovered.pluginDir }));
+    let reason: string | undefined;
+    const loaded = await loadPlugin(discovered, deps, cacheBust, { throwOnCleanupError: true,
+      onFailure: (failure) => { reason ??= failure; onFailure?.(failure); } });
+    if (loaded) {
+      this.acquired.add(loaded);
+      this.emitLifecycle(pluginId, 'loaded', (bus, ctx) => emitPluginLoaded(bus, ctx, { pluginId, version: loaded.manifest.version, capabilities: [...((loaded.manifest as { capabilities?: string[] }).capabilities ?? [])] }));
+      this.emitLifecycle(pluginId, 'active', (bus, ctx) => emitPluginActive(bus, ctx, { pluginId }));
+    } else {
+      this.emitLifecycle(pluginId, 'error', (bus, ctx) => emitPluginError(bus, ctx, { pluginId, error: reason ?? 'the plugin did not start', fatal: true }));
+    }
     return loaded;
   }
 
@@ -716,16 +747,25 @@ export class PluginManager {
     } catch (error) {
       if (!(error instanceof PluginCleanupError)) throw error;
       this.cleanupErrors.add(error);
+      const pluginId = discovered.manifest.name;
+      this.emitLifecycle(pluginId, 'error', (bus, ctx) => emitPluginError(bus, ctx, { pluginId, error: failure ?? summarizeError(error), fatal: true }));
       return { loaded: null, cleanupError: error, ...(failure !== undefined ? { failure } : {}) };
     }
   }
 
-  private unload(loaded: LoadedPlugin): Promise<void> {
+  private unload(loaded: LoadedPlugin, reason: string): Promise<void> {
     const prior = this.unloading.get(loaded);
     if (prior) return prior;
+    const pluginId = loaded.manifest.name;
     const pending = Promise.resolve().then(async () => {
+      this.emitLifecycle(pluginId, 'unloading', (bus, ctx) => emitPluginUnloading(bus, ctx, { pluginId, reason }));
       try {
         await unloadPlugin(loaded, { throwOnCleanupError: true });
+        this.emitLifecycle(pluginId, 'disabled', (bus, ctx) => emitPluginDisabled(bus, ctx, { pluginId, reason }));
+      } catch (error) {
+        // Cleanup threw, but the instance is inactive either way.
+        this.emitLifecycle(pluginId, 'error', (bus, ctx) => emitPluginError(bus, ctx, { pluginId, error: `cleanup failed while ${reason}: ${summarizeError(error)}`, fatal: false }));
+        throw error;
       } finally {
         this.acquired.delete(loaded);
         // A settled unload is not cached: the instance is inactive after it,
@@ -738,6 +778,21 @@ export class PluginManager {
   }
 
   // ─── Private helpers ────────────────────────────────────────────────────────
+
+  /** Publish one lifecycle event; a listener that throws never changes what the manager did. */
+  private emitLifecycle(
+    pluginId: string,
+    phase: string,
+    emit: (bus: RuntimeEventBus, ctx: { readonly sessionId: string; readonly traceId: string; readonly source: string }) => void,
+  ): void {
+    const bus = this.runtimeBus;
+    if (!bus || this.featureFlags?.isEnabled('plugin-lifecycle') === false) return;
+    try {
+      emit(bus, { sessionId: 'plugin-manager', traceId: `plugin-manager:${pluginId}:${phase}`, source: 'plugin-manager' });
+    } catch (error) {
+      logger.warn(`[plugins] ${pluginId}: ${phase} event listener failed`, { error: summarizeError(error) });
+    }
+  }
 
   private async loadEnabledPlugins(): Promise<void> {
     if (!this.deps) return;

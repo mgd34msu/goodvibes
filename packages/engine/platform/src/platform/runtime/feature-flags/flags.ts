@@ -89,14 +89,10 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     id: 'plugin-lifecycle',
     name: 'Plugin Lifecycle',
     description:
-      'Enables the plugin lifecycle with structured init/teardown phases and health integration.',
-    defaultState: 'disabled',
+      'Publishes each plugin\'s lifecycle (loading, loaded, active, error, unloading, disabled, with the reason) as plugin events: the runtime store\'s plugin view, automation triggers on plugin loaded or failed, and tracing read them. Read at each event, so a change applies at once. Off: plugins load, run and unload the same, and nothing is reported.',
+    defaultState: 'enabled',
     tier: 4,
-    runtimeToggleable: false,
-    notOperable: {
-      reason: 'no-runtime-wiring',
-      detail: 'No GoodVibes product starts the structured plugin lifecycle yet, so this setting changes nothing. Plugins load through the standard plugin manager.',
-    },
+    runtimeToggleable: true,
   },
   {
     id: 'mcp-lifecycle',

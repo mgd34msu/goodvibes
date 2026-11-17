@@ -872,6 +872,8 @@ function buildRuntimeGraph(product: ProductComposition, disposalScope: AsyncDisp
       homeDir: shellPaths.homeDirectory,
     },
     stateFilePath: shellPaths.resolveUserPath(surfaceRoot, 'plugins.json'),
+    runtimeBus: options.runtimeBus,
+    featureFlags,
   });
   const workflow = createWorkflowServices({ workingDirectory: shellPaths.workingDirectory });
   disposalScope.registry.add('hook action dispatch', hookDispatcher.setHookActions(workflow.hookActions, featureFlags));

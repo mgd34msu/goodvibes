@@ -1,13 +1,15 @@
 import { type ConfigSettingDefinition, intRange, numRange, port } from './schema-shared.js';
 
 /**
- * Per-project worktree cold-start setup (resolveWorktreeSetupConfig). Both fields
- * are lists, read whole (`get('worktree.setup.commands')` or
- * getCategory('worktree').setup). GoodVibesConfig (schema-types.ts) imports
+ * Per-project worktree cold-start setup (resolveEffectiveWorktreeSetup). Each
+ * field is a list used as given, `{ mode: 'none' }` for nothing, or an empty
+ * list (or `{ mode: 'auto' }`) to derive it from the repository. Read whole
+ * (`get('worktree.setup.commands')`). GoodVibesConfig (schema-types.ts) imports
  * this interface as `worktree`.
  */
+export type WorktreeSetupListValue = string[] | { mode: 'auto' | 'none' };
 export interface WorktreeConfig {
-  setup: { commands: string[]; carryOverGlobs: string[] };
+  setup: { commands: WorktreeSetupListValue; carryOverGlobs: WorktreeSetupListValue };
 }
 
 /**
@@ -31,7 +33,7 @@ export const runtimeConfigDefaults = {
     },
     maxParallelToolCalls: 8,
     unifiedTasks: true,
-    pluginLifecycle: false,
+    pluginLifecycle: true,
     mcpLifecycle: true,
     toolBudget: {
       enforced: false,
@@ -269,7 +271,7 @@ export const runtimePrimaryConfigSettings: ConfigSettingDefinition[] = [
     key: 'controlPlane.enabled',
     type: 'boolean',
     default: false,
-    description: 'Informational: whether the standalone control-plane HTTP server is meant to run. Status and readiness checks report it; changing it does not start or stop a running listener.',
+    description: 'Whether the control plane is served to other machines. Off (default): the daemon listener answers only requests from this machine (loopback or one of its own addresses), whatever controlPlane.hostMode binds, and refuses any other address with CONTROL_PLANE_LOCAL_ONLY naming this setting. On: every address the binding reaches is served (paired devices, the web UI from another device, a reverse proxy). Takes effect on the next request; the outbound relay has its own switch (relay.enabled).',
   },
   {
     key: 'controlPlane.gateway',
@@ -309,8 +311,8 @@ export const runtimePrimaryConfigSettings: ConfigSettingDefinition[] = [
   {
     key: 'controlPlane.streamMode',
     type: 'enum',
-    default: 'sse',
-    description: 'Informational: the live update stream mode reported to control-plane clients. It is echoed in status; the SSE and WebSocket endpoints are both served whatever it says.',
+    default: 'both',
+    description: 'Which live update stream the daemon listener serves: sse serves GET /api/control-plane/events only, websocket serves the /api/control-plane/ws upgrade only, both serves both. The other one is refused with STREAM_MODE_NOT_SERVED naming this setting. The terminal apps and the web UI read the Server-Sent Events stream, so websocket alone leaves them without live updates. Takes effect on the next request.',
     enumValues: ['sse', 'websocket', 'both'],
   },
   {

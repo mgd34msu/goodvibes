@@ -1,8 +1,8 @@
 /**
  * Plugin lifecycle system types.
  *
- * Types here extend the store domain types with the richer capability
- * manifest and transition models used by the PluginLifecycleManager.
+ * Types here extend the store domain types with the capability manifest the
+ * plugin manager resolves and the lifecycle state machine's transition result.
  */
 
 import type { PluginLifecycleState } from '../store/domains/plugins.js';
@@ -102,119 +102,8 @@ export interface PluginManifestV2 extends PluginManifest {
 // ── State machine ─────────────────────────────────────────────────────────────
 
 /**
- * A single recorded state transition for a plugin.
- */
-export interface PluginTransition {
-  /** The plugin name this transition applies to. */
-  readonly pluginName: string;
-  /** State before the transition. */
-  readonly from: PluginLifecycleState;
-  /** State after the transition. */
-  readonly to: PluginLifecycleState;
-  /** Unix timestamp (ms) when the transition occurred. */
-  readonly ts: number;
-  /** Optional human-readable reason (e.g. error message, disable reason). */
-  readonly reason?: string | undefined;
-}
-
-/**
  * Result of a state machine transition attempt.
  */
 export type TransitionResult =
   | { ok: true; from: PluginLifecycleState; to: PluginLifecycleState }
   | { ok: false; reason: string };
-
-// ── Health check ─────────────────────────────────────────────────────────────
-
-/**
- * Result of a plugin health check (used during hot-reload).
- */
-export interface PluginHealthCheckResult {
-  /** Whether the plugin is considered healthy after the check. */
-  readonly healthy: boolean;
-  /** Human-readable status message. */
-  readonly message: string;
-  /** Duration of the health check in milliseconds. */
-  readonly durationMs: number;
-}
-
-// ── Runtime plugin record ─────────────────────────────────────────────────────
-
-/**
- * PluginLifecycleRecord, full runtime record for a plugin tracked by the
- * PluginLifecycleManager. Extends the basic RuntimePlugin from the store
- * domain with the capability manifest and transition history.
- */
-export interface PluginLifecycleRecord {
-  /** Plugin name (filesystem identifier). */
-  readonly name: string;
-  /** Plugin version string. */
-  readonly version: string;
-  /** Current lifecycle state. */
-  state: PluginLifecycleState;
-  /** Resolved capability manifest. */
-  capabilities: PluginCapabilityManifest;
-  /** Last N state transitions (capped at MAX_TRANSITION_HISTORY). */
-  transitions: PluginTransition[];
-  /** Epoch ms when the plugin was last successfully activated. */
-  activatedAt?: number | undefined;
-  /** Epoch ms when the plugin last transitioned to error. */
-  errorAt?: number | undefined;
-  /** Last error message, if any. */
-  lastError?: string | undefined;
-  /** Whether a hot-reload is currently in progress for this plugin. */
-  reloading: boolean;
-  /** Trust tier assigned to this plugin. Defaults to 'untrusted'. */
-  trustTier: import('./trust.js').PluginTrustTier;
-  /** Whether this plugin is currently quarantined. */
-  quarantined: boolean;
-}
-
-/** Maximum transition history entries kept per plugin. */
-export const MAX_TRANSITION_HISTORY = 50;
-
-// ── Manager options ───────────────────────────────────────────────────────────
-
-/**
- * Options accepted by `createPluginLifecycleManager()`.
- */
-export interface PluginLifecycleManagerOptions {
-  /**
-   * Session ID injected into emitted events.
-   * Defaults to an empty string when not provided.
-   */
-  sessionId?: string | undefined;
-  /**
-   * Optional policy callback invoked during capability resolution.
-   * Return `true` to grant the capability, `false` to deny.
-   * Defaults to a permissive policy that grants all valid capabilities.
-   */
-  capabilityPolicy?: ((pluginName: string, capability: PluginCapability) => boolean) | undefined;
-  /**
-   * Optional trust tier resolver. Called during capability resolution to
-   * determine the effective trust tier for capability filtering.
-   * Return the tier for the given plugin name.
-   * Defaults to 'untrusted' for all plugins when not provided.
-   */
-  trustTierResolver?: ((pluginName: string) => import('./trust.js').PluginTrustTier) | undefined;
-  /**
-   * Runtime event bus used for lifecycle emission.
-   * When omitted, the manager creates an isolated in-memory bus.
-   */
-  runtimeBus?: import('../events/index.js').RuntimeEventBus | undefined;
-  /**
-   * Trust store to read and write tiers in. Pass the persisted store so a tier set here and the one
-   * the host enforces are the same record. Defaults to a store private to this manager.
-   */
-  trustStore?: import('./trust.js').PluginTrustStore | undefined;
-  /**
-   * Quarantine engine to apply and consult. Pass the persisted engine so a restored quarantine is
-   * in force for plugins registered here. Defaults to an engine private to this manager.
-   */
-  quarantine?: import('./quarantine.js').PluginQuarantineEngine | undefined;
-}
-
-/** What `PluginLifecycleManager.unloadPlugin` did: the plugin is now disabled, or the reason it was left as it was. */
-export type PluginUnloadResult =
-  | { readonly unloaded: true; /** Set when the plugin's cleanup threw; the plugin is still disabled. */ readonly cleanupError?: string | undefined }
-  | { readonly unloaded: false; readonly reason: string };

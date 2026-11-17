@@ -584,6 +584,8 @@ function composeClientRuntimeServices(
   const pluginManager = new PluginManager({
     pathOptions: { cwd: shellPaths.workingDirectory, homeDir: shellPaths.homeDirectory },
     stateFilePath: shellPaths.resolveUserPath(surfaceRoot, 'plugins.json'),
+    runtimeBus: options.runtimeBus,
+    featureFlags,
   });
 
   const sessionManager = new SessionManager(workingDirectory, { surfaceRoot });

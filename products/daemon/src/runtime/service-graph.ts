@@ -414,6 +414,8 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
         homeDir: shellPaths.homeDirectory,
       },
       stateFilePath: shellPaths.resolveUserPath(GOODVIBES_DAEMON_SURFACE_ROOT, 'plugins.json'),
+      runtimeBus: options.runtimeBus,
+      featureFlags,
     });
     disposalScope.ownUntilRegistered('plugins', () => pluginManager.close());
     const workflow = createWorkflowServices({ workingDirectory: shellPaths.workingDirectory });

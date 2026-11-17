@@ -47,7 +47,6 @@ export {
   ALL_CAPABILITIES,
   ALL_CAPABILITIES as PLUGIN_CAPABILITIES,
   HIGH_RISK_CAPABILITIES,
-  PluginLifecycleManager,
   PluginQuarantineEngine,
   PluginTrustStore,
   SAFE_CAPABILITIES,

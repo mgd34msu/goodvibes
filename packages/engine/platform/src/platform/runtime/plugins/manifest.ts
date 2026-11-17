@@ -21,7 +21,7 @@ import { type PluginTrustTier, filterCapabilitiesByTrust } from './trust.js';
 /**
  * Default capability policy: grant all valid capabilities.
  *
- * Callers can supply a stricter policy via PluginLifecycleManagerOptions.
+ * Callers can supply a stricter policy to resolveCapabilityManifest.
  */
 function defaultPolicy(_pluginName: string, _capability: PluginCapability): boolean {
   return true;

@@ -45,9 +45,8 @@ export interface QuarantineRecord {
  * PluginQuarantineEngine, Tracks quarantined plugins and applies/revokes
  * capability restrictions.
  *
- * This is intentionally separate from the PluginLifecycleManager so that
- * quarantine can be applied without triggering a full state machine transition.
- * The lifecycle manager delegates to this engine when quarantine is requested.
+ * The plugin manager owns one engine, restores its records from the plugin
+ * state file and unloads a plugin when it is quarantined.
  */
 export class PluginQuarantineEngine {
   private readonly records = new Map<string, QuarantineRecord>();

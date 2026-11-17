@@ -1,26 +1,6 @@
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { type JudgmentReadingOptions } from './judgment-authority.js';
 
-/**
- * @deprecated Never consulted: a regular expression runs in the isolated
- * executor whatever any reading says, and contract schema patterns run
- * natively. Kept only so the client options that still name it compile.
- */
-export interface RegexReadingCapability {
-  readonly signal: AbortSignal;
-  readonly assertCurrent: () => void;
-}
-/** @deprecated See {@link RegexReadingCapability}. */
-export interface ContractRegexReadingContext {
-  readonly kind: 'operator' | 'peer';
-  readonly methodId: string;
-  readonly outputSchema: Readonly<Record<string, unknown>>;
-  readonly signal?: AbortSignal | undefined;
-  readonly assertCurrent: () => void;
-}
-/** @deprecated See {@link RegexReadingCapability}. */
-export type ContractRegexReadingFactory = (context: ContractRegexReadingContext) => RegexReadingCapability;
-
 export interface RegexAdmissionOptions extends JudgmentReadingOptions {
   readonly operation: string;
   readonly maxPatternChars?: number | undefined;

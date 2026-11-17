@@ -11,7 +11,7 @@ import {
 /**
  * Peer-platform-specific behaviour flags (not transport configuration).
  */
-export interface PeerApiClientBehaviorOptions extends Pick<PeerRemoteClientOptions, 'regexReading' | 'getRegexReading'> {
+export interface PeerApiClientBehaviorOptions extends Pick<PeerRemoteClientOptions, 'validateResponses'> {
   /**
    * When `true` (default), response bodies are checked against the peer
    * contract's JSON Schema shape before typed calls return.
@@ -83,8 +83,6 @@ export function createPeerApiClient(options: PeerApiClientOptions): PeerApiClien
   const transport = createHttpTransport(options);
   const remote = createPeerRemoteClient(transport, getPeerContract(), {
     validateResponses: options.validateResponses !== false,
-    regexReading: options.regexReading,
-    getRegexReading: options.getRegexReading,
   });
   return {
     ...remote,

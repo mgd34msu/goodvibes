@@ -1,4 +1,3 @@
-import type { RegexReadingCapability, ContractRegexReadingFactory } from '@goodvibes-jev/engine/errors';
 import { ContractError } from '@goodvibes-jev/engine/errors';
 import type { PeerContractManifest, PeerEndpointContract } from '@goodvibes-jev/engine/contracts';
 import type {
@@ -32,10 +31,6 @@ export interface PeerRemoteClientOptions {
    * @defaultValue true
    */
   readonly validateResponses?: boolean | undefined;
-  /** Authenticated request-owned regex reader supplied by browser composition. */
-  readonly regexReading?: RegexReadingCapability | undefined;
-  /** Creates a reader bound to this exact method/schema/request; required for browser compositions without an installed port. */
-  readonly getRegexReading?: ContractRegexReadingFactory | undefined;
 }
 
 /**
@@ -174,15 +169,10 @@ export function createPeerRemoteClient(
   ): Promise<T> {
     const endpoint = requireEndpoint(contract, endpointId);
     if (clientOptions.validateResponses === false) return invokeContractRoute<T>(transport, endpoint, input, options);
-    const getRegexReading = clientOptions.getRegexReading, configuredReading = clientOptions.regexReading;
     const signal = options.signal;
     return invokeContractRoute<T>(transport, endpoint, input, options).then(async (body) => {
       signal?.throwIfAborted();
-      const outputSchema = endpoint.outputSchema;
-      const reading = getRegexReading && outputSchema
-        ? getRegexReading({ kind: 'peer', methodId: endpointId, outputSchema, signal, assertCurrent: () => signal?.throwIfAborted() })
-        : configuredReading;
-      await validateJsonSchemaResponse(endpoint, body, { signal, reading });
+      await validateJsonSchemaResponse(endpoint, body, { signal });
       return body;
     });
   }
@@ -229,7 +219,7 @@ function isMutatingRoute(method: unknown): boolean {
   return typeof method === 'string' && !['GET', 'HEAD'].includes(method.toUpperCase());
 }
 
-async function validateJsonSchemaResponse(endpoint: PeerEndpointContract, body: unknown, options: { readonly signal?: AbortSignal | undefined; readonly reading?: RegexReadingCapability | undefined }): Promise<void> {
+async function validateJsonSchemaResponse(endpoint: PeerEndpointContract, body: unknown, options: { readonly signal?: AbortSignal | undefined }): Promise<void> {
   const schema = endpoint.outputSchema;
   if (!schema || typeof schema !== 'object') return;
   const failure = await firstJsonSchemaFailureAsync(schema as Record<string, unknown>, body, options);

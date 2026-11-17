@@ -1,4 +1,3 @@
-import type { RegexReadingCapability, ContractRegexReadingFactory } from '@goodvibes-jev/engine/errors';
 import { ContractError, GoodVibesError } from '@goodvibes-jev/engine/errors';
 import type { OperatorContractManifest, OperatorMethodContract } from '@goodvibes-jev/engine/contracts';
 import type {
@@ -32,12 +31,17 @@ export interface OperatorRemoteClientStreamOptions extends ContractStreamOptions
 
 /** Internal options for `createOperatorRemoteClient`. */
 export interface OperatorRemoteClientOptions {
-  /** Factory that maps a method id to its Zod response schema, when available. */
+  /**
+   * A caller's own Zod response schema for a method id, used instead of the
+   * contract's output schema where it returns one. The operator API client
+   * supplies none: the contract's output schema is the one owner of a
+   * response's shape.
+   */
   readonly getResponseSchema?: ((methodId: string) => ContractInvokeOptions['responseSchema']) | undefined;
   /**
    * When on, every JSON response is checked against its method's output schema
-   * in the operator contract (or against the Zod schema from
-   * `getResponseSchema` where one exists), once, before `invoke` resolves. A
+   * in the operator contract (or against a Zod schema from `getResponseSchema`
+   * or the call's `responseSchema`), once, before `invoke` resolves. A
    * mismatch rejects with a `ContractError` naming the method and the field.
    * Off skips the check entirely. Server-sent event stream payloads are
    * validated by their realtime event schemas at the transport boundary.
@@ -45,10 +49,6 @@ export interface OperatorRemoteClientOptions {
    * @defaultValue true
    */
   readonly validateResponses?: boolean | undefined;
-  /** Authenticated request-owned regex reader supplied by browser composition. */
-  readonly regexReading?: RegexReadingCapability | undefined;
-  /** Creates a reader bound to this exact method/schema/request; required for browser compositions without an installed port. */
-  readonly getRegexReading?: ContractRegexReadingFactory | undefined;
 }
 
 /**
@@ -250,7 +250,7 @@ export interface OperatorResponseValidationOptions {
 
 type ResponseValidator = (
   body: unknown,
-  options: OperatorResponseValidationOptions & { readonly reading?: RegexReadingCapability | undefined },
+  options: OperatorResponseValidationOptions,
 ) => Promise<void>;
 
 const responseValidators = new WeakMap<OperatorMethodContract, ResponseValidator>();
@@ -358,11 +358,7 @@ export function createOperatorRemoteClient(
     const validate = responseValidatorFor(method);
     const signal = options.signal;
     return request.then(async (body) => {
-      const outputSchema = method.outputSchema;
-      const reading = clientOptions.getRegexReading && outputSchema
-        ? clientOptions.getRegexReading({ kind: 'operator', methodId, outputSchema, signal, assertCurrent: () => signal?.throwIfAborted() })
-        : clientOptions.regexReading;
-      await validate(body, { signal, reading });
+      await validate(body, { signal });
       return body;
     });
   }

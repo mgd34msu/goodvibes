@@ -2,8 +2,7 @@ import type {
   OperatorMethodContract,
   OperatorMethodId,
 } from '@goodvibes-jev/engine/contracts';
-import { getOperatorContract, OPERATOR_METHOD_IDS } from '@goodvibes-jev/engine/contracts';
-import * as ContractZodSchemas from '@goodvibes-jev/engine/contracts';
+import { getOperatorContract } from '@goodvibes-jev/engine/contracts';
 import {
   createHttpTransport,
   type HttpTransport,
@@ -12,11 +11,9 @@ import {
 import {
   createOperatorRemoteClient,
   type OperatorRemoteClient,
-  type OperatorRemoteClientOptions,
   type OperatorRemoteClientInvokeOptions,
   type OperatorRemoteClientStreamOptions,
 } from './client-core.js';
-import { buildSchemaRegistry } from './schema-registry.js';
 
 /**
  * Options for constructing an `OperatorApiClient` instance via `createOperatorApiClient`.
@@ -25,26 +22,18 @@ import { buildSchemaRegistry } from './schema-registry.js';
  * Typically created indirectly by `createGoodVibesPlatform`, pass operator-level
  * options as part of `GoodVibesPlatformOptions` instead.
  */
-export interface OperatorApiClientOptions extends HttpTransportOptions, Pick<OperatorRemoteClientOptions, 'regexReading' | 'getRegexReading'> {
+export interface OperatorApiClientOptions extends HttpTransportOptions {
   /**
    * When `true` (default), every JSON response is validated once against its
-   * method's output schema in the operator contract before `invoke` resolves;
-   * the few methods with a hand-written Zod schema in the contracts package use
-   * that instead. A mismatch rejects with a `ContractError` that names the
-   * method and the field, so a daemon of another version is reported as such.
-   * Set to `false` to receive raw bodies with no check at all.
+   * method's output schema in the operator contract before `invoke` resolves.
+   * A mismatch rejects with a `ContractError` that names the method and the
+   * field, so a daemon of another version is reported as such. A call that
+   * passes its own `responseSchema` is checked against that instead. Set to
+   * `false` to receive raw bodies with no check at all.
    *
    * @defaultValue true
    */
   readonly validateResponses?: boolean | undefined;
-}
-
-let contractZodSchemas: ReturnType<typeof buildSchemaRegistry> | undefined;
-
-/** The contracts package's Zod response schemas by method id, found once per process. */
-function zodResponseSchemas(): ReturnType<typeof buildSchemaRegistry> {
-  contractZodSchemas ??= buildSchemaRegistry(OPERATOR_METHOD_IDS, ContractZodSchemas);
-  return contractZodSchemas;
 }
 
 /**
@@ -113,17 +102,10 @@ export type OperatorApiClient =
  * const sessions = await operator.sessions.list();
  */
 export function createOperatorApiClient(options: OperatorApiClientOptions): OperatorApiClient {
-  const validateResponses = options.validateResponses !== false;
   const transport = createHttpTransport(options);
   const contract = getOperatorContract();
-  const schemaRegistry = validateResponses ? zodResponseSchemas() : undefined;
   const remote = createOperatorRemoteClient(transport, contract, {
-    validateResponses,
-    regexReading: options.regexReading,
-    getRegexReading: options.getRegexReading,
-    getResponseSchema: schemaRegistry
-      ? (methodId) => schemaRegistry[methodId]
-      : undefined,
+    validateResponses: options.validateResponses !== false,
   });
   return {
     ...remote,

@@ -5,6 +5,14 @@ import { REASONING_EFFORT_SEVERITY } from '../../providers/reasoning-effort.js';
 /** The agent tool's definition as written; {@link AGENT_TOOL_SCHEMA} adds the per-field notes from the field rules. */
 const AGENT_TOOL_DEFINITION: ToolDefinition = {
   name: 'agent',
+  activity: {
+    doing: 'Running', did: 'ran', object: 'an agent', objects: 'agents',
+    byAction: {
+      read: { doing: 'Checking', did: 'checked', object: 'agents' },
+      send: { doing: 'Messaging', did: 'messaged', object: 'an agent', objects: 'agents' },
+      delete: { doing: 'Stopping', did: 'stopped', object: 'an agent', objects: 'agents' },
+    },
+  },
   // Sent in full on every model request (see ToolDefinition.core).
   core: true,
   description:
@@ -232,7 +240,7 @@ const AGENT_TOOL_DEFINITION: ToolDefinition = {
       // mode: message
       message: {
         type: 'string',
-        description: 'Message content to send to an agent (mode: message).',
+        description: 'Message content to send to an agent (mode: message). Sent to the id a delegation returned (a contract), it goes to the agents working that contract\'s units now, and the result lists them.',
       },
       kind: {
         type: 'string',

@@ -803,6 +803,46 @@ export function createAgentTool(config: AgentToolConfig): Tool {
           return { success: false, error: `Agent '${record.id}' is ${record.status} and has no active turn to consume this message. No message was queued. Read its retained result with mode=get; continue only unfinished authorized work with a focused assignment when needed.` };
         }
 
+        // A contract's owner record runs no turn loop, so nothing would read a
+        // message queued for it. The instruction goes to the agents working
+        // the contract's units now, and the result says which received it.
+        if (record.contractRole === 'owner' && record.contractId) {
+          const contract = config.contractRunner.get(record.contractId);
+          if (!contract) {
+            return { success: false, error: `Agent '${record.id}' is the owner of contract ${record.contractId}, which is no longer loaded here. No message was queued. Use mode=contract-history to read its result.` };
+          }
+          const working = contract.units.filter((unit) => unit.activeAgentId !== undefined
+            && manager.getStatus(unit.activeAgentId)?.status === 'running');
+          const unitStates = contract.units.map((unit) => `${unit.id} ${unit.status}`).join(', ') || 'none planned yet';
+          if (working.length === 0) {
+            return { success: false, error: `Agent '${record.id}' is contract ${contract.id} (status ${contract.status}); no unit agent is working now to read this (units: ${unitStates}). No message was queued. Send it again once a unit is working (mode=contracts shows them), or cancel the contract and start again with the changed requirement.` };
+          }
+          const text = `Instruction from the owner of contract ${contract.id}: ${input.message}`;
+          const delivered: { unitId: string; agentId: string }[] = [];
+          const refused: string[] = [];
+          for (const unit of working) {
+            const agentId = unit.activeAgentId!;
+            if (config.messageBus.send('orchestrator', agentId, text, { kind: input.kind ?? 'directive', ttlMs: AGENT_MESSAGE_TTL_MS })) delivered.push({ unitId: unit.id, agentId });
+            else refused.push(unit.id);
+          }
+          if (delivered.length === 0) {
+            return { success: false, error: `Communication to the agents of contract ${contract.id} (units ${refused.join(', ')}) was blocked by policy. No message was queued.` };
+          }
+          return {
+            success: true,
+            output: JSON.stringify({
+              agentId: record.id,
+              contractId: contract.id,
+              sent: true,
+              content: input.message,
+              kind: input.kind ?? 'directive',
+              deliveredTo: delivered,
+              ...(refused.length ? { blockedUnits: refused } : {}),
+              delivery: `Queued for the agents working units ${delivered.map((item) => item.unitId).join(', ')}; each reads it at the start of its next turn. Units that start later do not receive it (units: ${unitStates}).`,
+            }),
+          };
+        }
+
         const sent = config.messageBus.send('orchestrator', input.agentId, input.message, {
           kind: input.kind ?? 'directive',
           ttlMs: AGENT_MESSAGE_TTL_MS,

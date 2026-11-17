@@ -88,11 +88,11 @@ export const CAPABILITY_REGISTRY: readonly AdvertisedCapability[] = [
     id: 'agent-knowledge',
     title: 'Agent Knowledge',
     level: 'certified',
-    scenarioId: 'agent-knowledge-ask-isolated',
+    scenarioId: 'agent-knowledge-search-isolated',
     surfaces: ['onboarding-context', 'agent_knowledge'],
     advertisedNames: ['Agent Knowledge', 'Knowledge'],
     readinessNote:
-      'Isolated per-home knowledge with source provenance. A live check exercises the isolated ask route in each release report, and answers fail closed when provenance is missing.',
+      'Isolated per-home knowledge with source provenance. A live check in each release report seeds one probe through the Agent ingest route and one through the default route, then proves Agent search returns the first and not the second; answers fail closed when provenance is missing.',
   },
   {
     id: 'local-model-cookbook',

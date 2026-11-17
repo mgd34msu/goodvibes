@@ -62,7 +62,9 @@ export class SessionPickerModal extends SavedSessionPickerState {
 
     try {
       const loaded = await loadSavedSessionIntoLive(context, this.sessionManager, session.name);
-      this.statusMessage = sessionLoadedMessage(session.name, loaded.messageCount);
+      // What the load left out (a damaged side branch) is said now, before the next save drops it.
+      this.statusMessage = [sessionLoadedMessage(session.name, loaded.messageCount), ...loaded.notices].join(' ');
+      for (const line of loaded.notices) context.print(line);
       return true;
     } catch (e) {
       this.statusMessage = `Error ${summarizeError(e)}`;

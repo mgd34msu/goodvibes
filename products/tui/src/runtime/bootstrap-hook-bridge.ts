@@ -12,7 +12,7 @@ import type { SharedSessionBroker } from '@goodvibes-jev/engine/platform/platfor
 import type { SessionSpineClient } from '@goodvibes-jev/engine/platform/platform/runtime/session-spine';
 import type { SessionManager } from '@goodvibes-jev/engine/platform/platform/sessions';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
-import { resumeSessionCore, type SessionAgentRecordSink, type SessionResumeOutcome } from '../core/session-resume-core.ts';
+import { describeResumeShortfalls, resumeSessionCore, type SessionAgentRecordSink, type SessionResumeOutcome } from '../core/session-resume-core.ts';
 import type { SessionSurface } from '@/runtime/index.ts';
 
 export interface ResumeSessionOptions {
@@ -149,6 +149,12 @@ export function createResumeSessionHandler(options: ResumeSessionOptions): (sess
         },
         hookError: 'Hook bridge fire error',
       });
+      // A quiet caller (/load, /session resume) prints these itself; the picker
+      // and the start-up resume rely on this line, so a left-out damaged branch
+      // is named before the next save drops it.
+      if (!call.quiet) {
+        for (const line of describeResumeShortfalls(outcome)) options.conversation.log(line, { fg: activeTokens().warning });
+      }
       options.requestRender();
       return outcome;
     } catch (error) {

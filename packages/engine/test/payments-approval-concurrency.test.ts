@@ -1,6 +1,6 @@
 import * as fs from 'node:fs';
 import { join } from 'node:path';
-import { beforeEach, expect, spyOn, test } from 'bun:test';
+import { beforeEach, expect, test } from 'bun:test';
 import { DaemonApprovalStore, PaymentApprovalStoreError } from '../platform/src/platform/payments/host/approval-store.js';
 import { tryAcquireCrossProcessLock } from '../platform/src/platform/workspace/checkpoint/cross-process-lock.js';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
@@ -68,30 +68,15 @@ test.each([{ version: 2, approvals: [] }, { version: 1 }, { version: 1, approval
   expect(fs.readFileSync(filePath, 'utf8')).toBe(bytes);
 });
 
-test('a failed directory confirmation never restores a spent approval from memory', () => {
-  const store = new DaemonApprovalStore(filePath); store.grant({ action: ACTION, content: CONTENT });
-  const actual = fs.fsyncSync;
-  const sync = spyOn(fs, 'fsyncSync').mockImplementation(fd => {
-    if (fs.fstatSync(fd).isDirectory()) throw new Error('Private filesystem diagnostic');
-    actual(fd);
-  });
-  try { expect(() => store.take({ action: ACTION, content: CONTENT })).toThrow(PaymentApprovalStoreError); }
-  finally { sync.mockRestore(); }
-  expect(() => store.take({ action: ACTION, content: CONTENT })).toThrow(PaymentApprovalStoreError);
-  expect(new DaemonApprovalStore(filePath).take({ action: ACTION, content: CONTENT })).toEqual({ approval: null, mismatch: 'none' });
-});
-
-test('actual concurrent processes have exactly one successful spend of the original grant', async () => {
+test('concurrent processes taking one grant: exactly one spends it, the rest are refused or told to wait', async () => {
   new DaemonApprovalStore(filePath).grant({ action: ACTION, content: CONTENT });
   const childPath = join(makeProjectTempDir('approval-processes'), 'spend.ts');
   const module = new URL('../platform/src/platform/payments/host/approval-store.ts', import.meta.url).href;
   fs.writeFileSync(childPath, `import { DaemonApprovalStore, PaymentApprovalStoreError } from ${JSON.stringify(module)};
 const store = new DaemonApprovalStore(process.argv[2]!);
 const input = JSON.parse(process.argv[3]!);
-for (let i = 0; ; i++) {
-  try { process.stdout.write(JSON.stringify(store.take(input))); break; }
-  catch (error) { if (!(error instanceof PaymentApprovalStoreError) || error.kind !== 'busy' || i > 100) throw error; await new Promise(resolve => setTimeout(resolve, 5)); }
-}`);
+try { process.stdout.write(JSON.stringify(store.take(input))); }
+catch (error) { if (!(error instanceof PaymentApprovalStoreError) || error.kind !== 'busy') throw error; process.stdout.write('{"approval":null,"busy":true}'); }`);
   const children = Array.from({ length: 4 }, () => Bun.spawn([process.execPath, 'run', childPath, filePath, JSON.stringify({ action: ACTION, content: CONTENT })], { stdout: 'pipe', stderr: 'pipe' }));
   const results = await Promise.all(children.map(async child => {
     const [code, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);

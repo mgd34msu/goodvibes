@@ -4,7 +4,7 @@ import { ConfigurationError } from '@goodvibes-jev/engine/errors';
 import { logger } from '../utils/logger.js';
 import net from 'node:net';
 import { randomBytes } from 'node:crypto';
-import { DAEMON_CHALLENGE_HEADER, DAEMON_PROOF_HEADER, isValidDaemonIdentityProof } from '../daemon/identity-proof.js';
+import { DAEMON_CHALLENGE_HEADER, DAEMON_PROOF_HEADER, verifyDaemonIdentityAnswer } from '../daemon/identity-proof.js';
 import { summarizeError } from '../utils/error-display.js';
 import { createTimeoutController } from '../utils/fetch-with-timeout.js';
 import { VERSION } from '../version.js';
@@ -259,8 +259,9 @@ async function probeGoodVibesDaemonIdentity(
     let response = await request(false);
     if (bearer) {
       // The daemon proves on every answer, whatever its status, that it holds the
-      // token and listens on the port dialled here; anything else on the port never
-      // receives the token, and a proof-less answer (a 200 included) is not the daemon.
+      // token and answers at the address dialled here (its listening port, a public
+      // address it declares, or an https name whose certificate it holds); anything
+      // else never receives the token, and a proof-less answer (a 200 included) is not the daemon.
       const proof = response.headers.get(DAEMON_PROOF_HEADER);
       if (!proof) {
         // A daemon started before proofs existed keeps running across a host upgrade; it cannot be told apart from a stranger, so the token stays unsent.
@@ -269,7 +270,7 @@ async function probeGoodVibesDaemonIdentity(
           reason: `The configured token was not sent: whatever answers ${host}:${port} gave no identity proof, which a GoodVibes daemon started by an older version does not give either. If that is the daemon, stop it so this host can start a current one`,
         };
       }
-      if (!isValidDaemonIdentityProof(bearer, challenge, proof, port)) {
+      if (!verifyDaemonIdentityAnswer(bearer, challenge, response.headers, { port, scheme })) {
         return {
           kind: 'unauthorized',
           reason: `The configured token was not sent: whatever answers ${host}:${port} did not prove it is the GoodVibes daemon listening there that holds it`,

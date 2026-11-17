@@ -1,4 +1,4 @@
-import { answerDaemonChallenge, DAEMON_CHALLENGE_HEADER, DAEMON_PROOF_HEADER } from '../identity-proof.js';
+import { DAEMON_CHALLENGE_HEADER, daemonIdentityHeaders, dialledPort } from '../identity-proof.js';
 import { createServingSettingsPrecondition } from './settings-precondition.js';
 import { createServingSettingsImportPrecondition } from './settings-import-precondition.js';
 import type { ConfigManager } from '../../config/manager.js';
@@ -344,6 +344,21 @@ export class DaemonHttpRouter {
     return this.context.listenerBinding?.().port ?? readControlPlaneBinding((key) => this.getConfigValue(key)).port;
   }
 
+  /**
+   * The ports of the public addresses this daemon declares as its own
+   * (`controlPlane.publicBaseUrl`, and `web.publicBaseUrl`, which a Tailscale
+   * serve sets): a host that dials one of them can verify the identity proof.
+   */
+  private publicPorts(): number[] {
+    const ports: number[] = [];
+    for (const key of ['controlPlane.publicBaseUrl', 'web.publicBaseUrl']) {
+      const value = this.getConfigValue(key);
+      const port = typeof value === 'string' && value.trim() ? dialledPort(value.trim()) : undefined;
+      if (port !== undefined) ports.push(port);
+    }
+    return ports;
+  }
+
   private getConfigValue(key: string): unknown {
     const getter = (this.context.configManager as { readonly get?: unknown }).get;
     return typeof getter === 'function' ? getter.call(this.context.configManager, key) : undefined;
@@ -386,8 +401,10 @@ export class DaemonHttpRouter {
         const observed = new Response(response.body, response);
         // Every answer to a host's identity challenge carries the proof, whatever its
         // status, so a host never takes a proof-less answer (a 200 included) for the daemon.
-        const proof = req.headers.has(DAEMON_CHALLENGE_HEADER) ? answerDaemonChallenge(req, this.context.authToken(), this.listeningPort()) : null;
-        if (proof) observed.headers.set(DAEMON_PROOF_HEADER, proof);
+        if (req.headers.has(DAEMON_CHALLENGE_HEADER)) {
+          const identity = daemonIdentityHeaders(req, this.context.authToken(), this.listeningPort(), this.publicPorts());
+          for (const [name, value] of Object.entries(identity)) observed.headers.set(name, value);
+        }
         try { observed.headers.set(DECISION_MODEL_POLICY_HEADER, JSON.stringify(decisionModelPolicyState())); }
         catch (error) {
           // An explicit policy setting write can retire its own request scope

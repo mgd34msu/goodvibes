@@ -225,6 +225,17 @@ export function subscriptionState(record: Pick<ProviderSubscription, 'expiresAt'
   return record.expiresAt - now <= SUBSCRIPTION_EXPIRING_SOON_MS ? 'expiring' : 'active';
 }
 
+/**
+ * The same state as a provider auth route's freshness, which is what the
+ * token resolver acts on: a session the provider ended (`revoked`) or that
+ * lapsed with no refresh token is `expired`; a lapsed access token with a
+ * refresh token is renewed on the next request, so it is `healthy`.
+ */
+export function subscriptionAuthFreshness(record: Pick<ProviderSubscription, 'expiresAt' | 'refreshToken' | 'revokedAt'>, now = Date.now()): 'healthy' | 'expiring' | 'expired' {
+  const state = subscriptionState(record, now);
+  return state === 'revoked' || state === 'expired' ? 'expired' : state === 'expiring' ? 'expiring' : 'healthy';
+}
+
 /** A check that the subscription store did not change while a status read ran. */
 export function captureSubscriptionReadSource(owner: SubscriptionManager): () => void {
   return owner.captureReadSource();

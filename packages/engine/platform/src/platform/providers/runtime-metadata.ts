@@ -1,4 +1,5 @@
 import { listBuiltinSubscriptionProviders } from '../config/subscription-providers.js';
+import { subscriptionAuthFreshness } from '../config/subscriptions.js';
 import type { ProviderAuthRouteDescriptor, ProviderRuntimeMetadataDeps } from './interface.js';
 
 export interface StandardProviderAuthOptions {
@@ -57,13 +58,6 @@ export function deriveProviderApiKeyEnvVar(providerId: string): string {
   return `${stem}_API_KEY`;
 }
 
-function determineFreshness(expiresAt?: number): 'healthy' | 'expiring' | 'expired' {
-  if (typeof expiresAt !== 'number' || !Number.isFinite(expiresAt)) return 'healthy';
-  if (expiresAt <= Date.now()) return 'expired';
-  if (expiresAt <= Date.now() + 24 * 60 * 60 * 1000) return 'expiring';
-  return 'healthy';
-}
-
 /**
  * Fold the per-route truth into the aggregate `auth.configured` / `auth.detail`
  * pair a provider reports.
@@ -107,13 +101,10 @@ export async function buildStandardProviderAuthRoutes(
   const subscription = deps.subscriptionManager.get(subscriptionProviderId);
   const pendingSubscription = deps.subscriptionManager.getPending(subscriptionProviderId);
   const hasSubscriptionRoute = builtinSubscriptions.has(subscriptionProviderId) || subscription != null || pendingSubscription != null;
-  // A revocation stamp overrides the timestamp: the authorization server
-  // refused this session's grant, so deriving "healthy" from expiresAt would
-  // show a green light over a login every send is going to fail.
   // A stored session is judged on its own state even while a new login is
   // pending; the pending state stands alone only when there is no session.
   const subscriptionFreshness = subscription
-    ? (subscription.revokedAt !== undefined ? 'expired' : determineFreshness(subscription.expiresAt))
+    ? subscriptionAuthFreshness(subscription)
     : pendingSubscription
       ? 'pending'
       : 'unconfigured';

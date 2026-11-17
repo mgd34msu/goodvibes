@@ -5,7 +5,7 @@ import type { ProviderRegistry } from '../../providers/registry.js';
 import type { ProviderRuntimeMetadata } from '../../providers/interface.js';
 import { decodeJwtPayload } from '../auth/oauth-core.js';
 import type { ServiceRegistry } from '../../config/service-registry.js';
-import type { SubscriptionManager } from '../../config/subscriptions.js';
+import { subscriptionAuthFreshness, type SubscriptionManager } from '../../config/subscriptions.js';
 
 export type ProviderAuthRoute = 'api-key' | 'subscription' | 'service-oauth' | 'unconfigured';
 export type ProviderAuthFreshness = 'healthy' | 'expiring' | 'expired' | 'pending' | 'unconfigured';
@@ -113,13 +113,6 @@ function defaultProviderEnvKeys(providerId: string): readonly string[] {
   return normalized ? [`${normalized}_API_KEY`, `${normalized}_KEY`] : [];
 }
 
-function determineSubscriptionFreshness(expiresAt?: number): ProviderAuthFreshness {
-  if (typeof expiresAt !== 'number' || !Number.isFinite(expiresAt)) return 'healthy';
-  if (expiresAt <= Date.now()) return 'expired';
-  if (expiresAt <= Date.now() + 24 * 60 * 60 * 1000) return 'expiring';
-  return 'healthy';
-}
-
 export async function buildProviderAccountSnapshot(
   deps: ProviderAccountSnapshotDeps,
 ): Promise<ProviderAccountSnapshot> {
@@ -181,7 +174,10 @@ export async function buildProviderAccountSnapshot(
       } catch {
         runtimeMetadata = undefined;
       }
-      const subscriptionFreshness = subscription ? determineSubscriptionFreshness(subscription.expiresAt) : 'unconfigured';
+      // The state the token resolver acts on: ended by the provider or lapsed
+      // without a refresh token is expired; a refreshable session is healthy.
+      const subscriptionFreshness: ProviderAuthFreshness = subscription ? subscriptionAuthFreshness(subscription) : 'unconfigured';
+      const subscriptionEnded = subscription?.revokedAt !== undefined;
       // A provider outside the built-in key table (a custom or service-backed
       // one) has its key under the service's token name, the names its runtime
       // declares, or the conventional <ID>_API_KEY; environment first, then the store.
@@ -232,10 +228,12 @@ export async function buildProviderAccountSnapshot(
 
       if (subscription) {
         const subscriptionIssues: string[] = [];
-        if (subscriptionFreshness === 'expired') {
-          subscriptionIssues.push('Stored subscription session is expired.');
+        if (subscriptionEnded) {
+          subscriptionIssues.push('The provider ended this subscription session; it is signed out.');
+        } else if (subscriptionFreshness === 'expired') {
+          subscriptionIssues.push('Stored subscription session has expired and has no refresh token.');
         } else if (subscriptionFreshness === 'expiring') {
-          subscriptionIssues.push('Stored subscription session expires within 24 hours.');
+          subscriptionIssues.push('Stored subscription session expires within 24 hours and cannot renew itself.');
         }
         routeRecords.push({
           route: 'subscription',
@@ -264,15 +262,21 @@ export async function buildProviderAccountSnapshot(
       }
 
       if (routes.includes('subscription') && routes.includes('api-key')) {
-        issues.push('Provider has both subscription and API-key auth paths; routing must remain explicit.');
-        recommendedActions.push({ description: 'Review provider routing before switching models or auth paths.' });
+        // Both routes stored is an ordinary configuration, not an issue: the
+        // subscription's override setting decides which one is sent.
+        notes.push(subscriptionOverridesApiKey
+          ? 'Both a subscription and an API key are stored; the subscription overrides the API key.'
+          : 'Both a subscription and an API key are stored; the API key is used because the subscription does not override ambient keys.');
       }
-      if (subscriptionFreshness === 'expired') {
-        issues.push('Stored subscription session is expired and needs refresh.');
-        recommendedActions.push({ description: `Refresh or replace the ${providerId} subscription session before relying on it.`, command: { name: 'subscription', args: ['login', providerId, 'start'] } });
+      if (subscriptionEnded) {
+        issues.push('The provider ended the stored subscription session; sign in again to use it.');
+        recommendedActions.push({ description: `Sign in to ${providerId} again; the provider ended the stored session.`, command: { name: 'subscription', args: ['login', providerId, 'start'] } });
+      } else if (subscriptionFreshness === 'expired') {
+        issues.push('Stored subscription session has expired and cannot refresh itself; sign in again to use it.');
+        recommendedActions.push({ description: `Sign in to ${providerId} again; the stored session expired and holds no refresh token.`, command: { name: 'subscription', args: ['login', providerId, 'start'] } });
       } else if (subscriptionFreshness === 'expiring') {
-        issues.push('Stored subscription session is nearing expiry.');
-        recommendedActions.push({ description: `Renew or verify the ${providerId} subscription session soon to avoid route drift.`, command: { name: 'subscription', args: ['login', providerId, 'start'] } });
+        issues.push('Stored subscription session expires within 24 hours and cannot refresh itself.');
+        recommendedActions.push({ description: `Sign in to ${providerId} again before the stored session expires.`, command: { name: 'subscription', args: ['login', providerId, 'start'] } });
       }
       if (pending) {
         issues.push('Provider has a pending OAuth login that has not been completed yet.');

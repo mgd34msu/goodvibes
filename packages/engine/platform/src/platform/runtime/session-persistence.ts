@@ -224,9 +224,6 @@ function resolveLastSessionStorePathIfKnown(
 
 function retireDanglingPointer(sessionId: string, options?: SessionPersistenceOptions): void {
   try {
-    // Another process may have pointed it at a live session since this one read it;
-    // only a pointer that still names the missing session is retired.
-    if (readLastSessionPointer(options) !== sessionId) return;
     const pointerPath = resolveLastSessionPointerPath(options);
     unlinkSync(pointerPath);
     logger.info('retired last-session pointer to a session that no longer exists', { sessionId });

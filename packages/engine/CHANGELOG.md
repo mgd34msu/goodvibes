@@ -2,24 +2,33 @@
 
 ## [3.3.0] - 2026-11-17
 
-The full write-up, with measured speed figures and upgrade notes, is in
+The full write-up, with upgrade notes and measured speed figures, is in
 [docs/releases/3.3.0.md](https://github.com/mgd34msu/goodvibes/blob/v3.3.0/docs/releases/3.3.0.md).
 
 ### Added
 
 - Add the permission modes `ask-me`, `jev-decides` (the default), `just-vibes`
   and `yolo` to `permissions.mode`. Code settles facts (reads, edits inside the
-  workspace, calls a saved rule covers) with no model request; a closed list of
-  owner-only items always asks the owner; Jev, the decision model, answers
-  judgment calls with a deadline and a fallback. `--just-vibes` and `--yolo`
-  pick a mode for one launch.
-- Ship a passing gate calibration record for `jev-latest`, so the default
-  `jev-decides` mode lets Jev decide on that model; on another model the
-  unchosen default asks as `ask-me` does.
+  workspace, calls a saved rule covers) with no model request; owner-only items
+  (granting access, loosening a setting, an "always ask me" rule, a change
+  asked for from a channel, an unrecoverable deletion the program recognises
+  in shell commands, file operations and operator methods, a new recipient,
+  untrusted-derived content, a contract change) come to the owner and are never
+  answered by Jev; Jev answers judgment calls with a deadline and a fallback.
+  `--just-vibes` and `--yolo` pick a mode for one launch.
+- Ship a passing gate calibration record for the hosted endpoint and
+  `jev-latest`; the unchosen default `jev-decides` lets Jev decide only when
+  every target a decision can reach matches it, and otherwise asks as `ask-me`
+  does.
 - Add `/decisions` (what Jev decided for you, with undo, never, always and
   ask) and `/held` (what `just-vibes` held, to approve or set aside).
 - Attach one decision object (state, who decided, reason, next step) to every
   tool result that is not a plain success.
+- Add `goodvibes acp`, which runs GoodVibes as an Agent Client Protocol agent
+  over stdio, and `goodvibes-daemon mcp serve`, which serves a running
+  daemon's operator methods to an MCP client over stdio; methods that change
+  state or are marked dangerous are served only with `--allow-write` or
+  `--allow-destructive`.
 - Add one owner inbox per home, shared by the daemon, both terminal apps and
   the web UI, with `/questions` (alias `/inbox`); the `query` tool leaves the
   owner a question and the answer reaches the asking agent or session.
@@ -27,22 +36,23 @@ The full write-up, with measured speed figures and upgrade notes, is in
 - Run independent tool calls of one model response side by side, capped by
   `runtime.maxParallelToolCalls` (default 8), with results returned in the
   order issued.
-- Send less common tool definitions as one line each, with a tool that loads a
-  full definition on request.
+- Send less common tool definitions as one line each; the first call to one
+  returns its full definition.
 - Add per-tool MCP rules: `/mcp deny <server> <tool> [--keep]`,
   `/mcp allow <server> <tool>` and `/mcp clear <server> <tool>`, also in
-  Settings, the `/mcp` form, the daemon routes and the web UI.
+  Settings, the `/mcp` form, the daemon routes and the web UI. An allowed tool
+  is not held to the server's path and host scope.
 - Add a `screening` field (`screened`, or `not-screened` with a reason) to mail
   inbox rows, and build the mail inbox unscreened when no screening route is
   available.
 - Offer the owner, once per limit, to set a spending limit the first time a
-  purchase meets it at 0. Add `payments.confirmEveryPurchase` (off by default),
-  standing authorisations for scheduled purchases (`/payments standing`) and
-  approvals over channels other than Telegram.
+  purchase meets it at 0. Add `payments.confirmEveryPurchase` (off by default)
+  and standing authorisations for scheduled purchases (`/payments standing`).
 - Add `judgment.decisionDeadlineMs` (default 1500 ms) for decisions a person or
   tool call waits on.
 - Add the shared work plan (`~/.goodvibes/work-plans.sqlite`) with the
-  `work_plan` tool, `/work-plan` and the web UI Work Plan view.
+  `work_plan` tool, `/work-plan` in the terminal app, `/workplan` in the Agent
+  and the web UI Work Plan view.
 - Add `/trust workspace trusted|restricted` to the Agent.
 - Add `docs/exit-codes.md`, one table of exit codes for every program.
 - Pin the model catalog to one models.dev snapshot checked by SHA-256.
@@ -50,89 +60,78 @@ The full write-up, with measured speed figures and upgrade notes, is in
 ### Changed
 
 - Rename the `judgment.policy` values to `Hybrid` (the default), `Decision
-  Model Only` and `No Decision Model`. With no decision model set, every policy
-  runs without one and reports nothing as an error; the products always say
-  when no decision model is in use. A saved `Default - On`, `Preferred` or
-  `Classic - Off` is reported and the product runs on `Hybrid`.
+  Model Only` and `No Decision Model`, and read a saved `Default - On`,
+  `Preferred` or `Classic - Off` as `Decision Model Only`, `Hybrid` and `No
+  Decision Model` without rewriting the file. With no decision model set, every
+  policy runs without one and reports nothing as an error; the products always
+  say when no decision model is in use.
 - Read saved `permissions.mode` values from earlier releases as the new modes
   (`safe-owner` as `ask-me`, `safe-jev` as `jev-decides`) without rewriting
   the file.
 - Load no repository `hooks.json` and start no MCP server a repository's
   `.mcp/mcp.json` or `.goodvibes/mcp.json` names until the workspace is
-  trusted. Keep workspace trust in the user's own register; a project's
-  `trust.json` is not honoured.
+  trusted. Keep workspace trust in the user's own register.
 - Limit a project settings file to display, behaviour, contract, worktree and
   stricter permission settings; a project's `services.json` and secret store
   add only what the owner's own store or confirmation allows.
 - Buy within the owner's limits without asking, after a veto window; outside
   them, stop and name the limit and by how much. Apply the per-purchase
-  ceiling to the total, the card's issuer cap and the default card on every
-  path, and refuse order buttons outside the purchase flow.
+  ceiling to the total, and the card's issuer cap and the default card.
 - Make `Shift+Tab` change the mode of the current session only.
 - Make `/mode quiet|balanced|operator` the one print level in both terminal
   apps.
-- Store daemon sessions per session with messages appended; open a 3.2.0
-  session store by moving it to the new layout.
-- Keep the knowledge store in one SQLite file with one writer; open a 3.2.0
-  store in the new format.
+- Record a call that a lower layer settled as that layer's decision, never as
+  the owner's approval.
+- Store daemon sessions per session with messages appended; move a 3.2.0
+  session store to the new layout on first start.
+- Keep the knowledge store in one SQLite file; upgrade a 3.2.0 store in place
+  after taking a copy.
 - Have the daemon write and refresh its own service definition; the installers
   call `install-service` and `refresh-service`.
-- Return refusals from the daemon in one shape (code, state, reason, next step)
-  over HTTP and WebSocket; answer 409 `DECISION_MODELS_DISABLED` when a feature
-  needs a decision model and none is in use.
+- Answer 409 `DECISION_MODELS_DISABLED` when a daemon feature needs a decision
+  model and none is in use.
 - Stop rewriting old settings keys at load and moving settings or credentials
   between stores at start; unknown keys are reported.
-- Remove worktrees that earlier versions created (no created-by record) with
-  what they hold, deleting a branch only when it is merged; prune clean,
-  unmerged worktrees after 14 days.
+- Clean up worktrees at every start without removing one that holds
+  uncommitted or untracked changes; never force a removal; save commits on a
+  detached HEAD to a `goodvibes/saved-<commit>` branch first; delete a branch
+  only when merged; show at start, in `/status` and in the daemon's log what
+  was removed and what is kept for the owner's decision, with the commands to
+  save, keep or discard it.
+- Make an ordinary read cost no decision-model request (one before), a
+  twelve-call turn 2 decision requests instead of 16, a 200-record knowledge
+  search 24 instead of 200 and an Agent route plan 3 instead of 614, as counted
+  by the repository's measurement harness; `status` and `--version` start in
+  a fifth to a third of the time, run from source.
+- Stop rewriting the whole session store on every heartbeat and message, and
+  the whole mail record file on every inbound email.
 - Rewrite the test suites to 151 files (142 in the default suite with 475
   cases), each opening with the risk it proves; CI runs
   `bun run validate --job <job>` in 12 jobs.
 
-### Fixed
-
-- Make an ordinary read cost no decision-model request (one before), a
-  twelve-call turn 2 decision requests instead of 16, a 200-record knowledge
-  search 24 instead of 200 and an Agent route plan 3 instead of 614, as
-  measured by the repository's measurement harness; start-up of `status` and
-  `--version` takes a third of the time or less.
-- Stop rewriting the whole session store on every heartbeat and message, and
-  the whole mail record file on every inbound email.
-- Record a call that a lower layer settled as that layer's decision, never as
-  the owner's approval.
-- Fix the default `jev-decides` mode reading an empty model name when
-  `judgment.model` is unset, so it now reads the model requests use.
-- Fix purchases the Agent starts from a checkout page, a purchase waiting on
-  the owner across a daemon restart, and a mailbox catching up before its
-  channel routes were read.
-- Many more fixes across the turn loop, channels, contracts, knowledge, the
-  terminal apps and the web UI; see the release notes.
-
 ### Security
 
-- Stop putting the shared operator token in pairing links and QR codes; revoke
-  a device's minted tokens and open connections with the device.
-- Limit sign-in attempts per address and hash passwords off the event loop;
-  stop counting proxied or cross-site requests as the owner's machine.
-- Stop users without the admin role from reading the owner's transcripts,
-  session titles, task prompts and private records.
-- Keep credentials and short passwords in commands out of decision-model
-  requests.
-- Keep fetch, webhook callbacks and calendar feeds off private hosts unless the
-  owner lists them.
-- Verify the Teams Bot Framework token on each activity.
+- Make a pairing link or QR code pair one device and carry nothing else;
+  revoking a device revokes the tokens it minted and ends its open
+  connections.
+- Limit sign-in attempts per address; treat only a direct connection from the
+  same machine as the owner's machine.
+- Let each signed-in user read only what their role allows, in requests and in
+  event streams.
+- Never send a call whose arguments hold a credential to the decision model.
+- Keep fetch off private-network hosts the owner has not listed.
+- Authenticate Teams activities on every request.
 
 ### Removed
 
 - Remove the output modes (`default`, `vibecoding`, `justvibes`).
-- Remove the `team`, `packet` and `worklist` tools and their files; agent
-  cohorts, spawn context and the work plan do their jobs.
+- Remove the `team`, `packet` and `worklist` tools and stop reading their
+  files; agent cohorts, spawn context and the work plan do their jobs.
 - Remove `payments.checkout.fillCard`; the daemon-run purchase types the card.
 - Remove `goodvibes-daemon migrate-service`, `/triggers migrate` and the
   trigger migrate method.
-- Remove the `config` form of `/mcp deny`, `/policy promote --force`, the
-  feature flag `killed` state, the state inspector and the `vaporwave` theme
-  name.
+- Remove the `config` form of `/mcp deny`, the feature flag `killed` state and
+  the state inspector.
 - Remove the settings `controlPlane.allowRemote`, `email.*`,
   `surfaces.email.imapHost`, `imapPort`, `imapUser`, `imapPassword` and
   `username`, `google.credentials.migratedFrom`, `google.oauth.refreshToken`,
@@ -140,7 +139,8 @@ The full write-up, with measured speed figures and upgrade notes, is in
   `permissions.backgroundAgents`, `release.channel`, `sandbox.replIsolation`,
   `sandbox.vmBackend`, `sandbox.windowsMode` and `tools.contractVerification`.
 - Stop reading data the product no longer uses: `queries.json`, the team,
-  packet and worklist files, `triggers-v2.json` and `triggers.json`, transcript
+  packet and worklist files, `triggers-v2.json` and `triggers.json`, per-app
+  `memory.sqlite` files never folded into the shared store, transcript
   journals, the old shared recovery directory and single-file companion chats.
 
 ## [3.2.0] - 2026-11-13

@@ -15,6 +15,7 @@
 
 import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { registerAgentGoogleTool, type GoogleCalendarHost } from './google-tool.js';
+import type { DaemonExpectationClient } from './session-expectations.js';
 import { startLoopbackListener } from '@goodvibes-jev/engine/platform/platform/google/node';
 import type { ConfigManager, SecretsManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
@@ -36,6 +37,11 @@ export interface GoogleToolWiringDeps {
    * approval prompt is wired, and the refusal then says so.
    */
   readonly approvals?: { readonly store: OwnerApprovalStore; readonly gesture: string } | undefined;
+  /**
+   * The daemon's verification-mail book, the one a signup alias (`accounts`)
+   * opened its watch in; `mail.verification` with an expectation id waits on it.
+   */
+  readonly expectations?: DaemonExpectationClient | undefined;
 }
 
 function readGoogleConfiguration(config: ConfigManager, key: string): unknown {
@@ -54,6 +60,7 @@ export function captureGoogleConnectionCurrent(deps: Pick<GoogleToolWiringDeps, 
 export function wireAgentGoogleTool(registry: ToolRegistry, deps: GoogleToolWiringDeps): void {
   registerAgentGoogleTool(registry, {
     calendarHost: deps.calendarHost,
+    expectations: deps.expectations,
     homeDirectory: deps.homeDirectory,
     configManager: deps.configManager,
     secretsManager: deps.secretsManager,

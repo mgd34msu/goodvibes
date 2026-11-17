@@ -127,8 +127,9 @@ export interface AgentTurnToolDeps {
   readonly inProcessHost?: AgentInProcessHost | undefined;
   /**
    * The daemon's verification-mail book, which a signup alias (`accounts`)
-   * opens its watch in: this daemon's own in a turn it hosts. Absent: the
-   * session book, as in the Agent's own process.
+   * opens its watch in and `google` action:"mail.verification" waits on: this
+   * daemon's own in a turn it hosts, the connected daemon's in the Agent's own
+   * process. Absent, or no daemon reachable: the session book.
    */
   readonly accountExpectations?: DaemonExpectationClient | undefined;
   /** The home's one memory store, and this process's access to it: local, or the daemon's once adopted. */
@@ -187,7 +188,8 @@ export function registerAgentTurnTools(registry: ToolRegistry, deps: AgentTurnTo
   registerAgentLearningConsolidationTool(registry, deps.shellPaths, deps.memoryRegistry, deps.memoryAccess);
   registerAgentChannelSendTool(registry, deps.channelDeliveryRouter, { shellPaths: deps.shellPaths });
   if (deps.browser) registerAgentBrowserTool(registry, deps.browser);
-  wireAgentGoogleTool(registry, deps.google);
+  // The google tool waits on the same book the accounts alias opened its watch in.
+  wireAgentGoogleTool(registry, deps.accountExpectations ? { ...deps.google, expectations: deps.accountExpectations } : deps.google);
 }
 
 /**

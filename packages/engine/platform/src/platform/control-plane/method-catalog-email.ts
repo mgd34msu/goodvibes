@@ -124,6 +124,38 @@ const EMAIL_EXPECTATION_OPENED_SCHEMA = objectSchema({
 }, [...EMAIL_EXPECTATION_REQUIRED, 'watching']);
 
 /**
+ * Where one expectation stands after a wait. `state` says which of the other
+ * fields are present: `waiting` carries the open expectation (with remainingMs)
+ * and `arrivals`; `arrived` the closed expectation, the message id, when, and the
+ * `token` (a link with its host, or a code); `expired` and `capability-lost`
+ * carry `detail` and `arrivals`; `cancelled` the expectation; `unknown` only the
+ * `id` asked about. `watching` says whether a mailbox is being read right now.
+ */
+const EMAIL_EXPECTATION_WAIT_SCHEMA = objectSchema({
+  state: { type: 'string', enum: ['waiting', 'arrived', 'expired', 'capability-lost', 'cancelled', 'unknown'] },
+  id: STRING_SCHEMA,
+  expectation: EMAIL_EXPECTATION_SCHEMA,
+  arrivals: arraySchema(objectSchema({
+    messageId: STRING_SCHEMA,
+    at: STRING_SCHEMA,
+    reason: STRING_SCHEMA,
+  }, ['messageId', 'at', 'reason'])),
+  messageId: STRING_SCHEMA,
+  at: STRING_SCHEMA,
+  token: objectSchema({
+    kind: { type: 'string', enum: ['link', 'code'] },
+    url: STRING_SCHEMA,
+    linkHost: STRING_SCHEMA,
+    code: STRING_SCHEMA,
+  }, ['kind']),
+  detail: STRING_SCHEMA,
+  watching: objectSchema({
+    running: BOOLEAN_SCHEMA,
+    reason: STRING_SCHEMA,
+  }, ['running', 'reason']),
+}, ['state']);
+
+/**
  * One persisted cursor, disclosed.
  *
  * `position` is a STRING on both sources deliberately. A Gmail `historyId` is
@@ -396,7 +428,7 @@ export const builtinGatewayEmailMethodDescriptors: readonly GatewayMethodDescrip
     }, ['drafts', 'total', 'mailbox']),
   }),
   /**
-   * The three expectation verbs carry NO `http` binding, unlike the mail
+   * The four expectation verbs carry NO `http` binding, unlike the mail
    * verbs above.
    *
    * They are not a REST surface. They are how an already-authorized
@@ -462,6 +494,18 @@ export const builtinGatewayEmailMethodDescriptors: readonly GatewayMethodDescrip
       cancelled: BOOLEAN_SCHEMA,
       expectation: EMAIL_EXPECTATION_SCHEMA,
     }, ['cancelled']),
+  }),
+  methodDescriptor({
+    id: 'email.expectation.wait',
+    transport: ['ws'],
+    title: 'Wait For Verification Message',
+    description:
+      'Where one expectation stands, waiting up to timeoutMs (default 0, at most 60000) for it to change. state "arrived" carries the verification link or code the daemon took from the matching message (token); "waiting" lists matching messages that held none (arrivals); "expired", "capability-lost" and "cancelled" say how it ended, with detail; "unknown" means no expectation with that id is open or remembered. watching says whether a mailbox is being read right now, so "nothing yet" is never confused with "nobody is looking". Call it again while the state is "waiting".',
+    category: 'email',
+    scopes: ['read:email'],
+    access: 'admin',
+    inputSchema: objectSchema({ id: STRING_SCHEMA, timeoutMs: NUMBER_SCHEMA }, ['id']),
+    outputSchema: EMAIL_EXPECTATION_WAIT_SCHEMA,
   }),
   /**
    * The inbound watcher's disclosure verb (§9).

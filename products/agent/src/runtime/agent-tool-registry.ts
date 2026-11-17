@@ -14,6 +14,7 @@ import {
   type GoogleToolWiringDeps,
 } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { wrapAgentContextToolForAgentPolicy } from '../tools/agent-context-policy.ts';
+import { createDaemonExpectationClient } from '@goodvibes-jev/engine/terminal-shell/agent-turn/session-expectations';
 import { connectedHostFamilyRemote } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { compactRegisteredToolDefinitions } from '../tools/tool-definition-compaction.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
@@ -158,6 +159,10 @@ export function composeAgentToolRegistry(deps: AgentToolRegistryDeps): AgentTool
     workPlan: services.workPlan,
     // The connected host the operator tools call, and the owner's mail address for signup aliases.
     settings: configManager,
+    // The connected daemon's verification-mail book: it watches the mailbox, so a
+    // signup alias opens its watch there and google mail.verification waits on it.
+    // With no daemon reachable the accounts tool falls back to the session book.
+    accountExpectations: createDaemonExpectationClient(services.daemonVerbs),
     // This process's own browser, built on the first call that needs one.
     browser: {
       browser: agentBrowserToolBackend({

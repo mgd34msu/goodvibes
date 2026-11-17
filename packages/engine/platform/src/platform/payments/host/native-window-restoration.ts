@@ -18,8 +18,8 @@ import type { PaymentNoticeTarget } from '../notice-delivery.js';
 import { capturePaymentNoticeReceipt } from '../notice-receipt.js';
 import { PaymentReplyWindowError, type PaymentReplyInbox } from '../reply-inbox.js';
 import { recoverInterruptedWindow } from '../windows.js';
-import { daemonNoticeRouter } from './notifier.js';
-import { prepareRestoredPaymentReplyWindow } from './restored-reply-window.js';
+import { daemonNoticeRouter, purchaseInboxKey } from './notifier.js';
+import { prepareRestoredPaymentReplyWindow, type RestoredInboxWindow } from './restored-reply-window.js';
 import type { CheckoutComposition } from './checkout-handlers.js';
 
 const telegramNumber = (value: string | undefined, negative = false): boolean => value !== undefined
@@ -34,6 +34,8 @@ export interface NativeCheckoutWindowRestorationOptions {
   readonly replies: PaymentReplyInbox;
   readonly router: Pick<ChannelDeliveryRouter, 'deliver'> & Partial<Pick<ChannelDeliveryRouter, 'deliverWithReceipt'>>;
   readonly isPaymentsLeader: () => boolean;
+  /** The owner inbox window notices are posted to; a window that reached it resumes from its item. */
+  readonly ownerInbox?: RestoredInboxWindow['port'] | undefined;
 }
 
 export function createNativeCheckoutWindowRestorer(options: NativeCheckoutWindowRestorationOptions): NonNullable<CheckoutComposition['restoreWindow']> {
@@ -42,7 +44,7 @@ export function createNativeCheckoutWindowRestorer(options: NativeCheckoutWindow
   const revoke = options.pairing.revokeNativeContinuation.bind(options.pairing);
   const scopes = options.scopes.grantedScopes.bind(options.scopes), seamFor = options.seam;
   const leader = options.isPaymentsLeader, config = options.config, replies = options.replies;
-  const router = daemonNoticeRouter(options.router), catalog = options.catalog;
+  const router = daemonNoticeRouter(options.router), catalog = options.catalog, ownerInbox = options.ownerInbox;
   return async (request, owner) => {
     const readHistory = owner.readReplyHistory?.bind(owner);
     await waitForGatewayScopePolicyBootstrap(catalog, owner.signal); owner.assertCurrent();
@@ -94,6 +96,9 @@ export function createNativeCheckoutWindowRestorer(options: NativeCheckoutWindow
           const retiredWindow = new AbortController(), signal = AbortSignal.any([windowOwner.signal, retiredWindow.signal]);
           const windowCurrent = () => { signal.throwIfAborted(); current(); windowOwner.assertCurrent?.(); };
           const delivered = checkpoint.record.windowDeliveries?.filter(delivery => delivery.delivered) ?? [];
+          // The owner-inbox delivery is read back from the inbox's own store; every other one is a Telegram recipient.
+          const inboxDelivery = delivered.find(delivery => delivery.channel === 'owner-inbox');
+          if (inboxDelivery && !ownerInbox) throw new PaymentReplyWindowError('source-unavailable');
           // The same order the boot sweep states: only a window whose every
           // delivered channel keeps its replies across a restart resumes.
           // Reopen uncovered delivered recipients only, at the exact acknowledged
@@ -102,7 +107,8 @@ export function createNativeCheckoutWindowRestorer(options: NativeCheckoutWindow
           const rule = recoverInterruptedWindow({ deliveries: delivered, deadlinePassed: Date.now() > (checkpoint.record.windowDeadlineMs ?? 0) });
           if (rule.outcome !== 'resume') throw new PaymentReplyWindowError('source-unavailable');
           const targets: PaymentNoticeTarget[] = [];
-          const receipts = delivered.map(delivery => {
+          const telegramDelivered = delivered.filter(delivery => delivery.channel !== 'owner-inbox');
+          const receipts = telegramDelivered.map(delivery => {
             const receipt = capturePaymentNoticeReceipt(delivery.receipt, 'telegram');
             if (!receipt?.accountId || !telegramNumber(receipt.conversationId, true) || !telegramNumber(receipt.messageId)
               || receipt.threadId !== undefined && !telegramNumber(receipt.threadId)) throw new PaymentReplyWindowError('source-unavailable');
@@ -114,11 +120,12 @@ export function createNativeCheckoutWindowRestorer(options: NativeCheckoutWindow
           });
           const restored = prepareRestoredPaymentReplyWindow({ purchaseId: request.purchaseId, checkpoint,
             recipients: receipts.map((receipt, index) => {
-              const delivery = delivered[index], target = targets[index];
+              const delivery = telegramDelivered[index], target = targets[index];
               if (!delivery || !target) throw new CheckoutOwnershipError();
               return { receipt, delivery, target };
             }), readHistory, replies, router, signal, assertCurrent: windowCurrent,
-            renewMinutes: kind === 'approval' ? request.host.configuration.approvalMinutes : request.host.configuration.vetoMinutes });
+            renewMinutes: kind === 'approval' ? request.host.configuration.approvalMinutes : request.host.configuration.vetoMinutes,
+            ...(inboxDelivery && ownerInbox ? { inbox: { port: ownerInbox, key: purchaseInboxKey(request.purchaseId, kind), delivery: inboxDelivery } } : {}) });
           return Object.freeze({ ...restored, cancel: () => { retiredWindow.abort(); restored.cancel(); } });
         } }),
       });

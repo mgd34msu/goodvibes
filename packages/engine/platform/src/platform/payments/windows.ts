@@ -234,9 +234,12 @@ export function advanceVeto(state: VetoState, event: VetoEvent): VetoState {
 /**
  * Channels whose replies a restart can read back: the daemon archives every
  * owner reply to a Telegram notice before it confirms the update, and the
- * native poller drains what arrived while it was down into that archive.
+ * native poller drains what arrived while it was down into that archive. The
+ * owner inbox keeps each window's item and its answer in the home's store
+ * (answerable from a terminal app while the daemon is down), found again by
+ * the item's key.
  */
-export const RESTART_READABLE_CHANNELS: readonly CommandAuthorityChannel[] = Object.freeze(['telegram']);
+export const RESTART_READABLE_CHANNELS: readonly CommandAuthorityChannel[] = Object.freeze(['telegram', 'owner-inbox']);
 
 /**
  * What a restart does with a purchase that was waiting for the owner's reply.

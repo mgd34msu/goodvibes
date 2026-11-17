@@ -44,6 +44,7 @@ export { configBackedAddressStore } from './address-store.js';
 
 export { channelBackedPaymentNotifier, withOwnerInbox } from './notifier.js';
 export type { PaymentOwnerInbox } from './notifier.js';
+export type { RestoredInboxWindow } from './restored-reply-window.js';
 
 export {
   HandlerError,

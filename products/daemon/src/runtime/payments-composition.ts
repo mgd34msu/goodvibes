@@ -45,7 +45,7 @@ import {
   registerPaymentsMethods,
   type CheckoutComposition,
   type PaymentNotifier,
-  type PaymentOwnerInbox,
+  type RestoredInboxWindow,
   type PaymentsSecretStore,
 } from '@goodvibes-jev/engine/platform/platform/payments';
 import { GOODVIBES_DAEMON_SURFACE_ROOT } from '../config/surface.js';
@@ -76,9 +76,10 @@ export interface PaymentsCompositionOptions {
   /**
    * The owner inbox: every purchase notice is also posted there and can be
    * answered there, so a window always reaches the owner (terminal apps and web
-   * UI) whatever payments.notifyChannels names.
+   * UI) whatever payments.notifyChannels names. A window that reached it is
+   * resumed after a restart from the item's recorded answer.
    */
-  readonly ownerInbox?: PaymentOwnerInbox | undefined;
+  readonly ownerInbox?: RestoredInboxWindow['port'] | undefined;
 }
 
 /** Most messages remembered so a poll that offers one again is not reported twice. */
@@ -278,7 +279,7 @@ export function createPaymentsServices(options: PaymentsCompositionOptions): Pay
     ...(options.paymentContinuationOwner ? { restoreWindow: createNativeCheckoutWindowRestorer({
       ...options.paymentContinuationOwner, catalog: options.gatewayMethods, config,
       seam: options.checkoutSeam, replies: paymentReplies, router: options.channelDeliveryRouter,
-      isPaymentsLeader: options.isPaymentsLeader,
+      isPaymentsLeader: options.isPaymentsLeader, ownerInbox: options.ownerInbox,
     }), retireContinuation: options.paymentContinuationOwner.pairing.revokeNativeContinuation.bind(options.paymentContinuationOwner.pairing) } : {}),
     merchantJudge: createJevMerchantJudge(),
     untrusted: getProcessUntrustedContentLedger(),

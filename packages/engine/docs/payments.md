@@ -713,9 +713,18 @@ both terminal apps (`/questions`) and the web UI list and answer
 `approve`/`deny` or `go`/`stop`, the first answer from any channel or the inbox
 settles the window, and the item is withdrawn when the window closes. So an
 in-budget purchase is always announced and waits its veto window, even with
-`notifyChannels` empty. The inbox is not restart-readable for a window
-(`RESTART_READABLE_CHANNELS` stays `telegram`): a restart during a window it
-reached ends the purchase unbought.
+`notifyChannels` empty. The inbox is restart-readable for a window
+(`RESTART_READABLE_CHANNELS` is `telegram` and `owner-inbox`): the item and its
+answer live in the home's owner-inbox store, which a terminal app answers
+directly while the daemon is down, and the item is found again by its key
+`purchase:<purchaseId>:<approval|veto>` (`payments/host/restored-reply-window.ts`).
+After a restart an answer recorded by the deadline settles the window (`stop`
+or `deny`, or an answer that is neither option, at once; `go` or `approve`
+once every Telegram recipient's replies are covered), no answer by a passed
+deadline is the window's silence, and a window still open keeps waiting on the
+same item. A store without the item, or a daemon composed without the inbox,
+cannot prove what was answered, so that purchase ends unbought and the owner is
+told.
 
 ### 8.2.2 Answering is not entering, and these must never be merged
 

@@ -128,9 +128,27 @@ const INBOX_NOTICE_LIFETIME_MS = 7 * 24 * 60 * 60 * 1000;
 
 const INBOX_DETAIL_CHARS = 4000;
 
-function inboxAnswer(kind: PaymentWindowKind, option: string | undefined): NonNullable<NotifierAnswer>['answer'] | null {
+/** An owner-inbox answer to a purchase window, as the reply a channel would carry; null when it is neither option. */
+export function inboxAnswer(kind: PaymentWindowKind, option: string | undefined): NonNullable<NotifierAnswer>['answer'] | null {
   if (kind === 'approval') return option === 'approve' ? 'approve' : option === 'deny' ? 'deny' : null;
   return option === 'go' ? 'acknowledge' : option === 'stop' ? 'object' : null;
+}
+
+/** The key a purchase's window item is posted under; a restart finds the item, and its answer, by it. */
+export function purchaseInboxKey(purchaseId: string, kind: PaymentWindowKind | 'notice'): string {
+  return `purchase:${purchaseId}:${kind}`;
+}
+
+/** The owner-inbox item for one purchase notice or window. */
+export function purchaseInboxItem(kind: PaymentWindowKind | 'notice', message: string, expiresAt: number, purchaseId?: string): NewOwnerItem {
+  return {
+    kind: 'purchase',
+    title: INBOX_TITLES[kind],
+    detail: message.length > INBOX_DETAIL_CHARS ? `${message.slice(0, INBOX_DETAIL_CHARS - 1)}…` : message,
+    options: kind === 'notice' ? ['ok'] : INBOX_OPTIONS[kind],
+    expiresAt,
+    ...(purchaseId === undefined ? {} : { key: purchaseInboxKey(purchaseId, kind), metadata: { purchaseId } }),
+  };
 }
 
 /**
@@ -142,9 +160,9 @@ function inboxAnswer(kind: PaymentWindowKind, option: string | undefined): NonNu
  * is withdrawn when the window closes. A notice that needs no answer (a
  * confirmation, a recovery settlement) is posted with one `ok` option. A post
  * that fails is reported as undelivered on `owner-inbox` and never stops the
- * channel sends. The owner inbox keeps no replies across a restart for the
- * window (it is not in RESTART_READABLE_CHANNELS), so a restart during a window
- * it reached ends the purchase unbought, the safe direction.
+ * channel sends. The item and its answer live in the home's owner-inbox store,
+ * so a restart during the window reads the answer back by the item's key
+ * (restored-reply-window.ts) and the window can resume.
  *
  * Cost: one record-log append per notice, one per answer or withdrawal.
  */
@@ -163,14 +181,7 @@ export function withOwnerInbox(
   };
   const post = (kind: PaymentWindowKind | 'notice', message: string, purchaseId?: string): OwnerItem | null => {
     try {
-      return inbox.postNow({
-        kind: 'purchase',
-        title: INBOX_TITLES[kind],
-        detail: message.length > INBOX_DETAIL_CHARS ? `${message.slice(0, INBOX_DETAIL_CHARS - 1)}…` : message,
-        options: kind === 'notice' ? ['ok'] : INBOX_OPTIONS[kind],
-        expiresAt: expiry(kind),
-        ...(purchaseId === undefined ? {} : { key: `purchase:${purchaseId}:${kind}`, metadata: { purchaseId } }),
-      }).item;
+      return inbox.postNow(purchaseInboxItem(kind, message, expiry(kind), purchaseId)).item;
     } catch (error) {
       logger.warn('A purchase notice could not be posted to the owner inbox', { error: error instanceof Error ? error.message : String(error) });
       return null;

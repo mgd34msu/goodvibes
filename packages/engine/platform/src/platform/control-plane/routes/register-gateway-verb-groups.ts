@@ -83,6 +83,7 @@ import { registerWorkspacesGatewayMethods } from './workspaces.js';
 import { openWorkspaceRegistrationStore } from '../../workspace/registration/index.js';
 import { UnifiedRewindService } from '../../rewind/index.js';
 import type { RewindConversationPort } from '../../rewind/index.js';
+import type { SessionSurface } from '../../runtime/session-surface.js';
 import { createEventEnvelope } from '../../runtime/events/index.js';
 import { emitCompanionTokenRevoked } from '../../runtime/emitters/security.js';
 import type { WorkspaceEvent } from '../../../events/workspace.js';
@@ -304,6 +305,13 @@ export interface GatewayVerbGroupDeps extends FleetCheckpointsSearchGatewayDeps,
    * in a plan warning rather than faked. The files half is unaffected either way.
    */
   readonly conversationRewindPort?: RewindConversationPort | null | undefined;
+  /**
+   * Where the turn anchors of the conversations `conversationRewindPort` holds
+   * are kept on disk. With it, a rewind applied through that port (or its undo)
+   * rewrites the anchors there at once, so a restart before the next turn does
+   * not bring back anchors for turns that were rewound away.
+   */
+  readonly rewindAnchorSurface?: SessionSurface | null | undefined;
   /**
    * The relay WebAuthn step-up ceremony service. When present, the
    * stepup.credentials.register + stepup.challenge.mint verbs are registered over
@@ -824,6 +832,7 @@ export function registerGatewayVerbGroups(catalog: GatewayMethodCatalog, deps: G
   const rewindService = new UnifiedRewindService({
     workspace: deps.workspaceCheckpointManager,
     conversation: conversationHosts,
+    ...(deps.rewindAnchorSurface ? { anchorSurface: deps.rewindAnchorSurface } : {}),
     ...(deps.runtimeBus
       ? {
         emit: (event: WorkspaceEvent, sessionId: string): void => {

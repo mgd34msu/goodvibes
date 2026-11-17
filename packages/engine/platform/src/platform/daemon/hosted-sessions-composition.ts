@@ -50,6 +50,7 @@ import {
   type HostedSessionEventPublisher,
   type HostedSessionManagerOptions,
   type HostedSessionLoadReport,
+  type HostedSessionConversations,
   type HostedSessionSpine,
   type HostedWorkspaceFloorFactory,
   type HostedSurfaceTurns,
@@ -79,6 +80,12 @@ export interface DaemonHostedSessionsOptions {
    * with no entry gets the platform tools and `systemPrompt`.
    */
   readonly surfaceTurns?: HostedSurfaceTurns | undefined;
+  /**
+   * Told of each hosted session's live conversation, so this daemon's rewind
+   * verbs can rewind it in place and know where its turns ended. Omitted ⇒
+   * conversation rewind of a hosted session is reported unavailable.
+   */
+  readonly conversations?: HostedSessionConversations | undefined;
   /** Where session state is written. Omitted ⇒ `<injected home>/.goodvibes/hosted-sessions`. */
   readonly stateDirectory?: string | undefined;
   /** Whether a workspace root is acceptable. Omitted ⇒ it must be an existing directory. */
@@ -157,6 +164,7 @@ export function composeHostedSessions(input: HostedSessionCompositionInput): Hos
     systemPrompt: input.options.systemPrompt ?? defaultHostedSystemPrompt,
     ...(input.options.surfaceTurns === undefined ? {} : { surfaceTurns: input.options.surfaceTurns }),
     liveTurns: input.liveTurns,
+    ...(input.options.conversations === undefined ? {} : { conversations: input.options.conversations }),
     ...(input.spine === undefined ? {} : { spine: input.spine }),
     ...(input.cloudflareAuthToken === undefined ? {} : { cloudflareAuthToken: input.cloudflareAuthToken }),
     ...(input.ownerQuestions === undefined ? {} : { ownerQuestions: input.ownerQuestions }),

@@ -33,11 +33,18 @@
 // one surface's conversation class, so nothing about it is terminal-specific.
 // ---------------------------------------------------------------------------
 
+import { unlinkSync } from 'node:fs';
+import { join } from 'node:path';
 import type {
   RewindAnchor,
   RewindConversationOutcome,
   RewindConversationPreview,
 } from '@goodvibes-jev/engine/platform/platform/rewind';
+import { captureTurnAnchor, clearTurnAnchors, persistTurnAnchors, recordTurnAnchor, restoreTurnAnchors } from '@goodvibes-jev/engine/platform/platform/rewind';
+import type { HostedSessionConversations, HostedSessionRuntime } from '@goodvibes-jev/engine/platform/platform/hosted-sessions';
+import { createSessionSurface, type SessionSurface } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { GOODVIBES_DAEMON_SURFACE_ROOT } from '../config/surface.js';
 import {
   createConversationRewindPort as createSharedConversationRewindPort,
   createConversationRewindScope,
@@ -132,4 +139,89 @@ export function unregisterSessionConversation(sessionId: string): void {
  */
 export function createSessionConversationRewindPort(options: ConversationRewindPortOptions = {}): ConversationRewindPort {
   return createConversationRewindPort((sessionId) => scope.findSessionConversation(sessionId), options);
+}
+
+// ---------------------------------------------------------------------------
+// Hosted sessions. Every conversation loop this daemon hosts registers here
+// while it is built, so rewind.plan/apply/undo serve it in place; its turn
+// boundaries are recorded as its turns complete, and the undo snapshots and
+// boundaries are kept on disk, so an undo or a rewind to an earlier turn still
+// works after the daemon restarted.
+// ---------------------------------------------------------------------------
+
+/** Where hosted sessions' rewind state is kept, beside the hosted session store. */
+export interface HostedRewindStorage {
+  /** One file per conversation rewind: the pre- and post-rewind copies its undo restores. */
+  readonly undoDir: string;
+  /**
+   * The turn-anchor sidecars' directory, carried as the `sessionsDir` of a
+   * surface because that is the handle the anchor store takes; nothing else of
+   * this surface is read.
+   */
+  readonly anchorSurface: SessionSurface;
+}
+
+interface ShellUserPaths { resolveUserPath(...segments: string[]): string }
+
+export function hostedRewindStorage(input: { readonly shellPaths: ShellUserPaths; readonly homeDirectory: string }): HostedRewindStorage {
+  const surface = createSessionSurface({ surfaceRoot: GOODVIBES_DAEMON_SURFACE_ROOT, workingDirectory: input.homeDirectory, homeDirectory: input.homeDirectory });
+  return {
+    undoDir: input.shellPaths.resolveUserPath('hosted-rewind', 'undo'),
+    anchorSurface: { ...surface, sessionsDir: input.shellPaths.resolveUserPath('hosted-rewind', 'anchors') },
+  };
+}
+
+type HostedConversation = HostedSessionRuntime['conversation'];
+
+/** The hosted conversations registered here, for their turn boundaries. */
+const hostedConversations = new Map<string, HostedConversation>();
+
+/**
+ * A hosted conversation as the rewind port drives it. A rewind and its undo
+ * both end with `rebuildHistory`, which is where the changed transcript is
+ * saved, so a restart brings back the conversation as the rewind left it.
+ */
+function rewindableHosted(sessionId: string, conversation: HostedConversation, save: () => Promise<void>): RewindableConversation {
+  return {
+    getMessageCount: () => conversation.getMessageCount(),
+    toJSON: () => conversation.toJSON(),
+    fromJSON: (json) => conversation.fromJSON(json as Parameters<HostedConversation['fromJSON']>[0]),
+    removeMessagesAfter: (count) => conversation.removeMessagesAfter(count),
+    rebuildHistory: () => {
+      void save().catch((error: unknown) => {
+        logger.warn('a rewound hosted conversation could not be saved; a restart brings back the transcript from before the rewind', { sessionId, error: summarizeError(error) });
+      });
+    },
+  };
+}
+
+/** The hosted-session engine's hook: register each hosted loop's conversation and record where its turns end. */
+export function hostedSessionConversations(storage: HostedRewindStorage): HostedSessionConversations {
+  return {
+    opened(sessionId, conversation, save) {
+      // Boundaries recorded before a restart or a rebuild, so earlier turns stay rewindable.
+      restoreTurnAnchors(sessionId, storage.anchorSurface);
+      hostedConversations.set(sessionId, conversation);
+      registerSessionConversation(sessionId, rewindableHosted(sessionId, conversation, save));
+    },
+    turnCompleted(sessionId, turnId) {
+      const conversation = hostedConversations.get(sessionId);
+      if (!conversation) return;
+      recordTurnAnchor(sessionId, captureTurnAnchor(turnId, {
+        getMessageCount: () => conversation.getMessageCount(),
+        getLastUserMessage: () => conversation.getLastUserMessage(),
+        getMessageAt: (index) => conversation.readMessagesInPlace()[index],
+      }));
+      // persistTurnAnchors logs its own cause; this turn stays rewindable until a restart.
+      persistTurnAnchors(sessionId, storage.anchorSurface);
+    },
+    closed(sessionId, ended) {
+      hostedConversations.delete(sessionId);
+      unregisterSessionConversation(sessionId);
+      if (!ended) return;
+      // A terminated session is never built again, so its boundaries have no reader left.
+      clearTurnAnchors(sessionId);
+      try { unlinkSync(join(storage.anchorSurface.sessionsDir, `${sessionId}.anchors.json`)); } catch { /* none was written */ }
+    },
+  };
 }

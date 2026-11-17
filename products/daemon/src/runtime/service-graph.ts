@@ -20,7 +20,7 @@ import { createNativeWorkLedgerOwner } from './work-ledger-composition.js';
 import { CONVERSATIONAL_CONTAINMENT } from '@goodvibes-jev/engine/platform/platform/hosted-sessions';
 import { wireMemoryPressureChannelNotice } from './notification-dispatch.js';
 import { createWorkspaceCheckpointing, daemonWorkspaceCheckpoints, type WorkspaceCheckpointing } from './workspace-checkpointing.js';
-import { createSessionConversationRewindPort } from './conversation-rewind-port.js';
+import { createSessionConversationRewindPort, hostedRewindStorage } from './conversation-rewind-port.js';
 import { createShellPathService } from './index.js';
 import type { DaemonHandlerCompositionOptions } from './daemon-handler-composition.js';
 import { createDaemonNativeWorkExecutionActivation } from './native-work-execution-activation.js';
@@ -162,6 +162,7 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
       hostedWorkspaces: () => [...new Set(sessionBroker.listSessions(Number.MAX_SAFE_INTEGER, { kind: 'hosted' }).map((record) => record.project))],
     });
     disposalScope.registry.add('hosted workspace checkpoints', () => workspaceCheckpoints.close());
+    const hostedRewind = hostedRewindStorage({ shellPaths, homeDirectory });
     // The daemon's approvals snapshot (approvals.list) reads the decisions the gate reports here.
     disposalScope.registry.add('gate events into the runtime store', registerGateRuntimeEvents(options.runtimeBus, graph.runtimeDispatch));
     const browserJudgment = options.createBrowserJudgment ? options.createBrowserJudgment(judgment)
@@ -255,7 +256,10 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
       // an unregistered workspace refuses with something actionable. Verbs naming a
       // hosted session, or a checkpoint its workspace holds, reach that workspace's manager.
       workspaceCheckpointManager: workspaceCheckpoints.gateway(daemonCheckpointing, workingDirectory),
-      conversationRewindPort: createSessionConversationRewindPort(), sessionBroker, secretsManager, stepUpService: graph.stepUpService,
+      // The conversations of the sessions this daemon hosts: their undo snapshots and turn boundaries outlive a restart.
+      conversationRewindPort: createSessionConversationRewindPort({ undoDir: hostedRewind.undoDir }),
+      rewindAnchorSurface: hostedRewind.anchorSurface,
+      sessionBroker, secretsManager, stepUpService: graph.stepUpService,
       // Fills the capture port with the owner-profile store and the occasions
       // service, so the `profile` tool a conversational turn is given has
       // somewhere real to write.

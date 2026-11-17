@@ -28,6 +28,7 @@ export {
 export type {
   HostedLiveTurnRegistry,
   HostedSessionAttachment,
+  HostedSessionConversations,
   HostedSessionEventPublisher,
   HostedSessionManagerOptions,
   HostedSessionSettings,

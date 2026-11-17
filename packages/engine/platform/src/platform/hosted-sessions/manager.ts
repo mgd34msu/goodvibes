@@ -117,6 +117,19 @@ export interface HostedSessionSettings {
   attachmentTtlMs?(): number;
 }
 
+/**
+ * What the host is told about each session's live conversation, so it can
+ * rewind that conversation in place and keep the turn boundaries a rewind cuts at.
+ */
+export interface HostedSessionConversations {
+  /** The session's loop was built (create or rebuild). `save` writes the transcript after a change made outside a turn, such as a rewind. */
+  opened(sessionId: string, conversation: HostedSessionRuntime['conversation'], save: () => Promise<void>): void;
+  /** One of the session's turns completed; the conversation is as that turn left it. */
+  turnCompleted(sessionId: string, turnId: string): void;
+  /** The session's loop was taken apart; `ended` when the session was terminated and will not be built again. */
+  closed(sessionId: string, ended: boolean): void;
+}
+
 /** Per-session live-turn registration, so the session verbs can reach a hosted turn. */
 export interface HostedLiveTurnRegistry {
   bindSession(sessionId: string, controls: SessionLiveTurnControls): void;
@@ -143,6 +156,8 @@ export interface HostedSessionManagerOptions {
   readonly surfaceTurns?: HostedSurfaceTurns | undefined;
   /** Registers each hosted session's live-turn controls; omitted ⇒ the session verbs cannot reach hosted turns. */
   readonly liveTurns?: HostedLiveTurnRegistry | undefined;
+  /** Told of each session's live conversation; omitted ⇒ the host cannot rewind a hosted conversation. */
+  readonly conversations?: HostedSessionConversations | undefined;
   /** The shared session broker, so hosted sessions appear in `sessions.list`. */
   readonly spine?: HostedSessionSpine | undefined;
   /** The daemon's bearer token, read live, handed to each session's tools for the Cloudflare status. */
@@ -593,6 +608,7 @@ export class HostedSessionManager {
       hostedLifecycleCallbacks.run(live, async () => {
         this.assertSessionUsable(live);
         this.options.liveTurns?.bindSession(sessionId, live.runtime!.liveTurnControls);
+        this.options.conversations?.opened(sessionId, live.runtime!.conversation, () => this.saveConversation(sessionId));
         this.assertSessionUsable(live);
         await this.spine.register(live.record);
         this.assertSessionUsable(live);
@@ -1097,6 +1113,7 @@ export class HostedSessionManager {
       this.assertSessionUsable(live);
       this.replayConversation(live, runtime);
       this.options.liveTurns?.bindSession(live.record.id, runtime.liveTurnControls);
+      this.options.conversations?.opened(live.record.id, runtime.conversation, () => this.saveConversation(live.record.id));
       this.assertSessionUsable(live);
       live.record = {
         ...live.record,
@@ -1151,6 +1168,7 @@ export class HostedSessionManager {
       step(() => { live.restoredConversation = runtime.conversation.toJSON(); });
       step(() => runtime.cancel());
       step(() => this.options.liveTurns?.unbindSession(live.record.id, runtime.liveTurnControls));
+      step(() => this.options.conversations?.closed(live.record.id, live.record.status === 'terminated'));
       step(() => runtime.dispose());
       live.runtime = null;
     }
@@ -1268,7 +1286,10 @@ export class HostedSessionManager {
     };
     this.busUnsubscribers.push(
       bus.on<Extract<TurnEvent, { type: 'TURN_SUBMITTED' }>>('TURN_SUBMITTED', (envelope) => mark(envelope.sessionId, 'running', 'hosted-session-turn-started', 'a turn was submitted', envelope.payload.turnId)),
-      bus.on('TURN_COMPLETED', (envelope) => mark(envelope.sessionId, 'idle', 'hosted-session-turn-ended', 'completed')),
+      bus.on<Extract<TurnEvent, { type: 'TURN_COMPLETED' }>>('TURN_COMPLETED', (envelope) => {
+        this.noteTurnCompleted(envelope.sessionId, envelope.payload.turnId);
+        mark(envelope.sessionId, 'idle', 'hosted-session-turn-ended', 'completed');
+      }),
       bus.on('TURN_ERROR', (envelope) => mark(envelope.sessionId, 'idle', 'hosted-session-turn-ended', 'errored')),
       bus.on('TURN_CANCEL', (envelope) => mark(envelope.sessionId, 'idle', 'hosted-session-turn-ended', 'cancelled')),
       bus.on<Extract<TurnEvent, { type: 'PREFLIGHT_FAIL' }>>('PREFLIGHT_FAIL', (envelope) => {
@@ -1318,6 +1339,24 @@ export class HostedSessionManager {
       return;
     }
     this.noteSaveOutcome(record.id);
+  }
+
+  /** Save a session's transcript after a change made outside a turn (a rewind, or its undo). */
+  private async saveConversation(sessionId: string): Promise<void> {
+    const live = this.sessions.get(sessionId);
+    if (!live?.runtime || live.record.status === 'terminated') return;
+    live.record = { ...live.record, messageCount: live.runtime.conversation.getMessageCount(), updatedAt: this.now() };
+    await this.persist(live.record);
+  }
+
+  /** Tell the host a hosted session's turn completed, before the turn's end is recorded. A host failure never reaches the bus. */
+  private noteTurnCompleted(sessionId: string | undefined, turnId: string): void {
+    if (!sessionId || !this.options.conversations || !this.sessions.get(sessionId)?.runtime) return;
+    try {
+      this.options.conversations.turnCompleted(sessionId, turnId);
+    } catch (error) {
+      logger.warn('[hosted-sessions] recording a completed turn for rewind failed', { sessionId, turnId, error: summarizeError(error) });
+    }
   }
 
   /** A save whose failure the caller must see: it is thrown, and kept on the record like any other. */

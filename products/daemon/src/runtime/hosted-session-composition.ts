@@ -75,6 +75,7 @@ import { createWorkspaceTrustDecisionAsk, trustGatedApprovalRaiser, WORKSPACE_TR
 import { GOODVIBES_DAEMON_SURFACE_ROOT } from '../config/surface.js';
 import type { RuntimeServices } from './runtime-services-types.js';
 import { daemonWorkspaceCheckpoints } from './workspace-checkpointing.js';
+import { hostedRewindStorage, hostedSessionConversations } from './conversation-rewind-port.js';
 import { createAgentHostedTurn } from '@goodvibes-jev/engine/terminal-shell/agent-turn/hosted-turn';
 
 /** The operator policy a session hosted by THIS daemon runs under. */
@@ -242,6 +243,9 @@ export function createHostedSessionOptions(services: RuntimeServices): DaemonHos
         secretsManager: services.secretsManager,
       }),
     },
+    // Each hosted loop's conversation, so rewind.plan/apply/undo serve it in this
+    // process; the storage is the one the daemon's rewind port reads.
+    conversations: hostedSessionConversations(hostedRewindStorage(services)),
     // Called for every session the engine binds to a workspace (create and
     // rebuild), so the session's turns reach that workspace's checkpoints.
     systemPrompt: (input) => {

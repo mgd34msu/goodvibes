@@ -220,9 +220,9 @@ export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions)
   // An answer to this session's question reaches its next model request, handed over when the owner gives it.
   const askerName = `session ${sessionId}`;
   const asker: QuestionAsker = { to: askerName, receive: (item) => {
-    if (disposed) return { delivered: false, to: askerName, reason: 'the session was closed before the answer came. The answer is kept on the question.' };
+    if (disposed) return { state: 'undeliverable', to: askerName, reason: 'the session was closed before the answer came. The answer is kept on the question.' };
     conversation.hostInstructions.set('replay', questionClosedText(item), { once: true, append: true });
-    return { delivered: true, to: askerName };
+    return { state: 'delivered', to: askerName };
   } };
   const ownerQuestions = inbox ? deliveringQuestions(inbox, () => asker) : undefined;
 

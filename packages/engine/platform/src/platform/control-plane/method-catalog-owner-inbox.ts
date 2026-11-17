@@ -6,6 +6,8 @@ import { methodDescriptor, type GatewayMethodDescriptor } from './method-catalog
 import {
   OWNER_INBOX_ANSWER_INPUT_SCHEMA,
   OWNER_INBOX_ANSWER_OUTPUT_SCHEMA,
+  OWNER_INBOX_DELIVERY_INPUT_SCHEMA,
+  OWNER_INBOX_DELIVERY_OUTPUT_SCHEMA,
   OWNER_INBOX_LIST_INPUT_SCHEMA,
   OWNER_INBOX_LIST_OUTPUT_SCHEMA,
   OWNER_INBOX_POST_INPUT_SCHEMA,
@@ -18,7 +20,7 @@ export const builtinGatewayOwnerInboxMethodDescriptors: readonly GatewayMethodDe
   methodDescriptor({
     id: 'inbox.list',
     title: 'List Owner Inbox',
-    description: 'Everything waiting on the owner in one list, newest first: permission asks (kind approval), questions agents left, channel claims, purchase windows and queued actions. `status` is open (default), closed or all; pass `itemId` to read one item wherever it ranks. `revision` moves on every change, so a surface can tell whether its copy is current by comparing one number.',
+    description: 'Everything waiting on the owner in one list, newest first: permission asks (kind approval), questions agents left, channel claims, purchase windows and queued actions. `status` is open (default), closed or all; pass `itemId` to read one item wherever it ranks. An answered question carries `delivery`: delivered to the agent or session that asked, waiting for that session to be opened again, or undeliverable with the reason. `revision` moves on every change, so a surface can tell whether its copy is current by comparing one number.',
     category: 'approvals',
     scopes: ['read:approvals'],
     transport: ['ws'],
@@ -28,7 +30,7 @@ export const builtinGatewayOwnerInboxMethodDescriptors: readonly GatewayMethodDe
   methodDescriptor({
     id: 'inbox.answer',
     title: 'Answer Owner Inbox Item',
-    description: 'Answer one open inbox item with one of its `options`, or with `text` when it has none (text may also accompany an option). An approval answered approve or deny is decided through the approval broker exactly as approvals.approve/deny would. The first answer wins: a later one, or an answer to a withdrawn or expired item, returns `applied: false` with a `refusal` naming who answered and from where (still 200, so a raced answer does not fail). Who answered is taken from the authenticated caller.',
+    description: 'Answer one open inbox item with one of its `options`, or with `text` when it has none (text may also accompany an option). An approval answered approve or deny is decided through the approval broker exactly as approvals.approve/deny would. The first answer wins: a later one, or an answer to a withdrawn or expired item, returns `applied: false` with a `refusal` naming who answered and from where (still 200, so a raced answer does not fail). For a question an agent or session asked, `delivery` says whether the answer reached it now, waits for its session to be opened again, or cannot reach it and why; the answer is kept either way. Who answered is taken from the authenticated caller.',
     category: 'approvals',
     access: 'admin',
     scopes: ['write:approvals'],
@@ -55,5 +57,15 @@ export const builtinGatewayOwnerInboxMethodDescriptors: readonly GatewayMethodDe
     transport: ['ws'],
     inputSchema: OWNER_INBOX_WITHDRAW_INPUT_SCHEMA,
     outputSchema: OWNER_INBOX_WITHDRAW_OUTPUT_SCHEMA,
+  }),
+  methodDescriptor({
+    id: 'inbox.delivery',
+    title: 'Report Owner Answer Delivery',
+    description: 'The asking session reports what became of the answer to a question it posted: `delivered` once the answer is in its conversation, `undeliverable` (with `reason`) when its session was deleted. Only the principal that posted the question may report, only on an answered question a session asked, and only once: a second report returns `applied: false` with a `refusal`, so exactly one terminal puts the answer in its conversation.',
+    category: 'approvals',
+    scopes: ['write:approvals'],
+    transport: ['ws'],
+    inputSchema: OWNER_INBOX_DELIVERY_INPUT_SCHEMA,
+    outputSchema: OWNER_INBOX_DELIVERY_OUTPUT_SCHEMA,
   }),
 ];

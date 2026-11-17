@@ -3,8 +3,8 @@
  * purchase windows and queued actions. Approvals are not stored here; they stay
  * in the approval broker and the inbox reads them from it.
  *
- * Kept on a record log: a post, an answer and a withdrawal are each one
- * appended line, synced before the call returns because the person or agent
+ * Kept on a record log: a post, an answer, a withdrawal and what became of an
+ * answer (handed to its asker, or not deliverable) are each one appended line, synced before the call returns because the person or agent
  * on the other side is told it is saved. The latest state of every item is
  * folded in memory at open, so a list is a map walk and an answer is one
  * append. One process (the daemon) writes the file.
@@ -41,19 +41,29 @@ export interface StoredOwnerItem {
   readonly metadata?: Readonly<Record<string, string | number | boolean>> | undefined;
 }
 
+/** What became of an answer: handed to the agent or session that asked, or not deliverable and why. */
+export interface StoredAnswerDelivery {
+  readonly state: 'delivered' | 'undeliverable';
+  readonly reason?: string | undefined;
+  readonly at: number;
+}
+
 export interface StoredOwnerEntry {
   readonly item: StoredOwnerItem;
   readonly answer?: OwnerAnswer | undefined;
   readonly answeredBy?: OwnerAnswerSource | undefined;
   readonly withdrawnReason?: string | undefined;
   readonly closedAt?: number | undefined;
+  /** Set once, after the answer: the first report wins. */
+  readonly delivery?: StoredAnswerDelivery | undefined;
   readonly updatedAt: number;
 }
 
 type QuestionLogRecord =
   | { readonly v: 1; readonly op: 'post'; readonly item: StoredOwnerItem }
   | { readonly v: 1; readonly op: 'answer'; readonly id: string; readonly answer: OwnerAnswer; readonly by: OwnerAnswerSource; readonly at: number }
-  | { readonly v: 1; readonly op: 'withdraw'; readonly id: string; readonly reason: string; readonly at: number };
+  | { readonly v: 1; readonly op: 'withdraw'; readonly id: string; readonly reason: string; readonly at: number }
+  | { readonly v: 1; readonly op: 'delivery'; readonly id: string; readonly state: StoredAnswerDelivery['state']; readonly reason?: string | undefined; readonly at: number };
 
 export type QuestionStoreAnswerResult =
   | { readonly applied: true; readonly entry: StoredOwnerEntry }
@@ -110,6 +120,14 @@ function decodeRecord(line: string): QuestionLogRecord {
     case 'withdraw':
       if (typeof value['id'] !== 'string' || typeof value['reason'] !== 'string' || typeof value['at'] !== 'number') throw new Error('malformed withdrawal');
       return { v: 1, op: 'withdraw', id: value['id'], reason: value['reason'], at: value['at'] };
+    case 'delivery':
+      if (typeof value['id'] !== 'string' || (value['state'] !== 'delivered' && value['state'] !== 'undeliverable')
+        || !optionalString(value['reason']) || typeof value['at'] !== 'number') throw new Error('malformed delivery');
+      return {
+        v: 1, op: 'delivery', id: value['id'], state: value['state'],
+        ...(typeof value['reason'] === 'string' ? { reason: value['reason'] } : {}),
+        at: value['at'],
+      };
     default:
       throw new Error('unknown record operation');
   }
@@ -136,7 +154,7 @@ export class QuestionStore implements RevisionSource {
     return this.#path;
   }
 
-  /** Moves on every post, answer and withdrawal. */
+  /** Moves on every post, answer, withdrawal and delivery report. */
   revision(): number {
     return this.#revision;
   }
@@ -197,6 +215,21 @@ export class QuestionStore implements RevisionSource {
     return { applied: true, entry: this.#entry(id) };
   }
 
+  /**
+   * Record what became of an answer. Only an answered item takes one, and only
+   * once: a second report changes nothing and returns the first.
+   */
+  recordDelivery(id: string, state: StoredAnswerDelivery['state'], reason: string | undefined, now: number): QuestionStoreAnswerResult | undefined {
+    const log = this.#open();
+    const entry = this.#entries.get(id);
+    if (!entry) return undefined;
+    if (entry.answer === undefined || entry.delivery !== undefined) return { applied: false, entry };
+    const record: QuestionLogRecord = { v: 1, op: 'delivery', id, state, ...(reason !== undefined ? { reason } : {}), at: now };
+    log.append(record);
+    this.#apply(record);
+    return { applied: true, entry: this.#entry(id) };
+  }
+
   close(): void {
     this.#log?.close();
     this.#log = null;
@@ -222,6 +255,16 @@ export class QuestionStore implements RevisionSource {
     const entry = this.#entries.get(record.id);
     if (!entry) {
       logger.warn('[owner-inbox] a record names an item the log does not hold', { path: this.#path, id: record.id });
+      return;
+    }
+    if (record.op === 'delivery') {
+      if (entry.answer === undefined || entry.delivery !== undefined) return;
+      this.#entries.set(record.id, {
+        ...entry,
+        delivery: { state: record.state, ...(record.reason !== undefined ? { reason: record.reason } : {}), at: record.at },
+        updatedAt: record.at,
+      });
+      this.#revision += 1;
       return;
     }
     // The first close wins; a later answer line in the log changes nothing.
@@ -250,8 +293,8 @@ export class QuestionStore implements RevisionSource {
     closed.sort((a, b) => (b.closedAt ?? 0) - (a.closedAt ?? 0));
     const dropped = new Set(closed.slice(MAX_CLOSED_ENTRIES).map((entry) => entry.item.id));
     for (const id of dropped) this.#entries.delete(id);
-    // A kept item has at most two records (post, close); rewrite only when the file holds twice that and more.
-    if (log.size < 4 * this.#entries.size + 100) return;
+    // A kept item has at most three records (post, close, delivery); rewrite only when the file holds twice that and more.
+    if (log.size < 6 * this.#entries.size + 100) return;
     void log.compact((record) => !dropped.has(record.op === 'post' ? record.item.id : record.id)).catch((error: unknown) => {
       logger.warn('[owner-inbox] could not compact the question log; it keeps growing until the next start', {
         path: this.#path,

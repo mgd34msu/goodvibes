@@ -76,7 +76,7 @@ export function callingAgentAsker(agents: { getStatus(id: string): AgentRecord |
   return {
     to,
     receive: (item) => tellRunningAgent(agentId, questionClosedText(item))
-      ? { delivered: true, to }
-      : { delivered: false, to, reason: notRunning(agents?.getStatus(agentId) ?? null) },
+      ? { state: 'delivered', to }
+      : { state: 'undeliverable', to, reason: notRunning(agents?.getStatus(agentId) ?? null) },
   };
 }

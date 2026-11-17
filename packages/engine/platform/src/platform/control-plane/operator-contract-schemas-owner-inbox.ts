@@ -1,6 +1,7 @@
 /**
  * Wire schemas for the owner inbox (inbox.list / inbox.answer / inbox.post /
- * inbox.withdraw): one list of what waits on the owner, approvals included.
+ * inbox.withdraw / inbox.delivery): one list of what waits on the owner,
+ * approvals included.
  */
 import {
   BOOLEAN_SCHEMA,
@@ -35,6 +36,13 @@ const REFUSAL_SCHEMA = objectSchema({
   status: NUMBER_SCHEMA,
 }, ['code', 'state', 'reason', 'next', 'retryable']);
 
+/** What became of an answer: delivered to its asker, waiting for the asking session to open, or not deliverable (with why). */
+const OWNER_ANSWER_DELIVERY_SCHEMA = objectSchema({
+  state: enumSchema(['delivered', 'waiting', 'undeliverable']),
+  to: STRING_SCHEMA,
+  reason: STRING_SCHEMA,
+}, ['state', 'to']);
+
 export const OWNER_ITEM_SCHEMA = objectSchema({
   id: STRING_SCHEMA,
   kind: OWNER_ITEM_KIND_SCHEMA,
@@ -52,6 +60,7 @@ export const OWNER_ITEM_SCHEMA = objectSchema({
   withdrawnReason: STRING_SCHEMA,
   key: STRING_SCHEMA,
   metadata: METADATA_SCHEMA,
+  delivery: OWNER_ANSWER_DELIVERY_SCHEMA,
 }, ['id', 'kind', 'status', 'title', 'detail', 'options', 'createdAt']);
 
 export const OWNER_INBOX_LIST_INPUT_SCHEMA = objectSchema({
@@ -71,13 +80,6 @@ export const OWNER_INBOX_ANSWER_INPUT_SCHEMA = objectSchema({
   option: STRING_SCHEMA,
   text: STRING_SCHEMA,
 }, ['itemId']);
-/** Whether the answer reached the agent or session that asked; absent when the asker hears it on the update stream itself. */
-const OWNER_ANSWER_DELIVERY_SCHEMA = objectSchema({
-  delivered: BOOLEAN_SCHEMA,
-  to: STRING_SCHEMA,
-  reason: STRING_SCHEMA,
-}, ['delivered', 'to']);
-
 export const OWNER_INBOX_ANSWER_OUTPUT_SCHEMA = objectSchema({
   applied: BOOLEAN_SCHEMA,
   item: OWNER_ITEM_SCHEMA,
@@ -106,3 +108,10 @@ export const OWNER_INBOX_WITHDRAW_INPUT_SCHEMA = objectSchema({
   reason: STRING_SCHEMA,
 }, ['itemId']);
 export const OWNER_INBOX_WITHDRAW_OUTPUT_SCHEMA = OWNER_INBOX_ANSWER_OUTPUT_SCHEMA;
+
+export const OWNER_INBOX_DELIVERY_INPUT_SCHEMA = objectSchema({
+  itemId: STRING_SCHEMA,
+  state: enumSchema(['delivered', 'undeliverable']),
+  reason: STRING_SCHEMA,
+}, ['itemId', 'state']);
+export const OWNER_INBOX_DELIVERY_OUTPUT_SCHEMA = OWNER_INBOX_ANSWER_OUTPUT_SCHEMA;

@@ -2,7 +2,7 @@ import type { ToolDefinition } from '../../types/tools.js';
 
 export const QUERY_TOOL_SCHEMA: ToolDefinition = {
   name: 'query',
-  description: 'Leave the owner a question and carry on working. The question goes to the owner\'s inbox, which he reads and answers later from either terminal app, the web UI or a push notification on his phone when push is on. When he answers, the answer is put on your next model request while you are still running; show (or list) reads it at any time. Nothing waits for it.',
+  description: 'Leave the owner a question and carry on working. The question goes to the owner\'s inbox, which he reads and answers later from either terminal app, the web UI or a push notification on his phone when push is on. When he answers, the answer is put on your next model request while you are still running, or when your session is next opened; show (or list) reads it at any time. Nothing waits for it.',
   parameters: {
     type: 'object',
     properties: {

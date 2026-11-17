@@ -3,14 +3,16 @@
  *
  * `/questions` lists what waits on the owner (permission asks, questions agents
  * left, channel claims, purchase windows, queued actions) and answers one.
- * `/decisions` lists what was decided, by whom and from where.
+ * `/decisions` lists what was decided, by whom and from where, and for an
+ * answered question whether the answer reached the agent or session that
+ * asked, waits for that session to be opened again, or cannot reach it.
  *
  * The products supply where the inbox is (the daemon's, reached over the
- * inbox.* verbs) and who is typing. A command the model runs may read the
+ * inbox.* verbs, or the terminal's own when there is no daemon) and who is typing. A command the model runs may read the
  * inbox but never answers it: the owner's answer is the owner's.
  */
 import { formatRefusal } from '@goodvibes-jev/engine/errors';
-import type { OwnerInboxPort, OwnerItem } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import type { OwnerAnswerDelivery, OwnerInboxPort, OwnerItem } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import type { TerminalSlashCommand } from './command-registry.js';
 import { stripDangerousAnsi } from './ansi-sanitize.js';
 
@@ -48,6 +50,23 @@ function answerText(item: OwnerItem): string {
   return parts.length > 0 ? text(parts.join(': ')) : '';
 }
 
+/** Where an answer is: with its asker, waiting for the asking session, or unable to reach it. */
+export function formatDelivery(delivery: OwnerAnswerDelivery): string {
+  const to = text(delivery.to);
+  if (delivery.state === 'delivered') return `delivered to ${to}`;
+  if (delivery.state === 'waiting') return `waiting for ${to} to be opened`;
+  return `not deliverable to ${to}${delivery.reason ? `: ${text(delivery.reason)}` : ''}`;
+}
+
+/** What the owner is told about an answer he just gave. */
+function deliveryNotice(delivery: OwnerAnswerDelivery | undefined): string {
+  if (delivery === undefined) return '';
+  const to = text(delivery.to);
+  if (delivery.state === 'delivered') return ` Sent to ${to}.`;
+  if (delivery.state === 'waiting') return ` ${delivery.reason ? text(delivery.reason) : `Saved; it will be delivered when ${to} is next opened.`}`;
+  return ` Saved, not deliverable to ${to}: ${delivery.reason ? text(delivery.reason) : 'it has ended.'}`;
+}
+
 /** One line for a list. */
 export function formatOwnerItemLine(item: OwnerItem): string {
   const choices = item.status === 'open'
@@ -55,6 +74,7 @@ export function formatOwnerItemLine(item: OwnerItem): string {
     : '';
   const closed = item.status === 'answered'
     ? ` -> ${answerText(item)}${item.answeredBy ? ` (${text(item.answeredBy.actor)}, ${text(item.answeredBy.surface)})` : ''}`
+      + (item.delivery ? ` [${formatDelivery(item.delivery)}]` : '')
     : item.status === 'open' ? '' : ` (${item.status}${item.withdrawnReason ? `: ${text(item.withdrawnReason)}` : ''})`;
   return `${shortId(item.id)}  ${item.kind}  ${text(item.title)}${choices}${closed}`;
 }
@@ -76,6 +96,10 @@ export function formatOwnerItemDetail(item: OwnerItem): string {
       : `Answer: /questions answer ${shortId(item.id)} <your answer>`);
   } else if (item.status === 'answered') {
     lines.push(`Answered: ${answerText(item)}${item.answeredBy ? ` by ${text(item.answeredBy.actor)} from ${text(item.answeredBy.surface)}` : ''}${item.closedAt ? ` at ${when(item.closedAt)}` : ''}`);
+    if (item.delivery) {
+      lines.push(`Delivery: ${formatDelivery(item.delivery)}`);
+      if (item.delivery.state === 'waiting' && item.delivery.reason) lines.push(text(item.delivery.reason));
+    }
   } else if (item.withdrawnReason) {
     lines.push(`Withdrawn: ${text(item.withdrawnReason)}`);
   }
@@ -180,11 +204,7 @@ export function createOwnerInboxCommands<Context extends OwnerInboxCommandContex
             : { text: words };
           const outcome = await inbox.answer(item.id, answer);
           if (outcome.applied) {
-            const delivery = outcome.delivery;
-            const handed = delivery === undefined ? ''
-              : delivery.delivered ? ` Sent to ${stripDangerousAnsi(delivery.to)}.`
-                : ` Not delivered to ${stripDangerousAnsi(delivery.to)}: ${stripDangerousAnsi(delivery.reason ?? 'it is not running')}`;
-            say(context, `[inbox] Answered ${shortId(outcome.item.id)}: ${answerText(outcome.item)}${handed}`);
+            say(context, `[inbox] Answered ${shortId(outcome.item.id)}: ${answerText(outcome.item)}${deliveryNotice(outcome.delivery)}`);
             return;
           }
           say(context, `[inbox] ${formatRefusal(outcome.refusal)}`);

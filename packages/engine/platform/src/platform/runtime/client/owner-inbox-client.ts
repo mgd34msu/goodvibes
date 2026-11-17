@@ -11,14 +11,14 @@ import { refusal } from '@goodvibes-jev/engine/errors';
 import type {
   NewOwnerItem,
   OwnerAnswer,
-  OwnerAnswerDelivery,
+  OwnerAnswerDeliveryReport,
   OwnerAnswerOutcome,
   OwnerInboxListFilter,
   OwnerInboxPort,
   OwnerItem,
   OwnerPostOutcome,
 } from '../../control-plane/owner-inbox.js';
-import { readOwnerItem } from '../../control-plane/owner-inbox.js';
+import { readOwnerAnswerDelivery, readOwnerItem } from '../../control-plane/owner-inbox.js';
 import type { DaemonVerbCaller } from './daemon-verbs.js';
 
 export interface OwnerInboxClient extends OwnerInboxPort {
@@ -26,6 +26,8 @@ export interface OwnerInboxClient extends OwnerInboxPort {
   post(item: NewOwnerItem & { readonly kind: 'question' | 'queued-action' }): Promise<OwnerPostOutcome>;
   /** Take back an item this surface posted. */
   withdraw(id: string, reason?: string): Promise<OwnerAnswerOutcome>;
+  /** Report that this surface put the answer to a question it posted into its conversation, or never can. */
+  reportDelivery(id: string, report: OwnerAnswerDeliveryReport): Promise<OwnerAnswerOutcome>;
 }
 
 function record(value: unknown): Record<string, unknown> {
@@ -38,17 +40,11 @@ function readItems(value: unknown): OwnerItem[] {
   return items.map(readOwnerItem).filter((item): item is OwnerItem => item !== undefined);
 }
 
-function readDelivery(value: unknown): OwnerAnswerDelivery | undefined {
-  const body = record(value);
-  if (typeof body['delivered'] !== 'boolean' || typeof body['to'] !== 'string') return undefined;
-  return { delivered: body['delivered'], to: body['to'], ...(typeof body['reason'] === 'string' ? { reason: body['reason'] } : {}) };
-}
-
 function readOutcome(value: unknown): OwnerAnswerOutcome {
   const body = record(value);
   const item = readOwnerItem(body['item']);
   if (body['applied'] === true && item) {
-    const delivery = readDelivery(body['delivery']);
+    const delivery = readOwnerAnswerDelivery(body['delivery']);
     return { applied: true, item, ...(delivery ? { delivery } : {}) };
   }
   const carried = record(body['refusal']);
@@ -102,6 +98,14 @@ export function createOwnerInboxClient(verbs: Pick<DaemonVerbCaller, 'probe' | '
     async withdraw(id: string, reason?: string) {
       reachable();
       return readOutcome(await verbs.invoke('inbox.withdraw', { itemId: id, ...(reason !== undefined ? { reason } : {}) }));
+    },
+    async reportDelivery(id: string, report: OwnerAnswerDeliveryReport) {
+      reachable();
+      return readOutcome(await verbs.invoke('inbox.delivery', {
+        itemId: id,
+        state: report.state,
+        ...(report.reason !== undefined ? { reason: report.reason } : {}),
+      }));
     },
   };
 }

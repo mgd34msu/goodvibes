@@ -13,7 +13,7 @@ import { join } from 'node:path';
 import { ServiceRegistry, SubscriptionManager, ToolLLM, resolveSecretInput, sharedSubscriptionsPath } from '@goodvibes-jev/engine/platform/platform/config';
 import { AutomationDeliveryManager, AutomationManager, automationActionBinding } from '@goodvibes-jev/engine/platform/platform/automation';
 import { ChannelPolicyManager } from '@goodvibes-jev/engine/platform/platform/channels';
-import { ApprovalBroker, GatewayMethodCatalog, SharedSessionBroker, controlPlaneStorePath, createOwnerInbox } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import { ApprovalBroker, GatewayMethodCatalog, SharedSessionBroker, controlPlaneStorePath, createOwnerInbox, sessionBrokerPresence } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import { AcpHostService } from '@goodvibes-jev/engine/platform/platform/acp';
 import { createMcpAutonomousElicitationHandler } from '@goodvibes-jev/engine/platform/platform/mcp';
 import { PersonalCaptureHolder } from '@goodvibes-jev/engine/platform/platform/personal-capture';
@@ -293,6 +293,8 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
       messageSender: agentMessageBus,
       conversationGateConfig: configManager, // without this the gate runs on DEFAULTS: an inbound message landing in a live session takes the handover and starts work whatever conversationGate.mode/gatedSurfaces say
     });
+    // Whether a terminal session that asked the owner something is open now: the broker's own record of it.
+    ownerInbox.useSessionPresence(sessionBrokerPresence(sessionBroker));
     // No continuation runner here: DaemonServer's facade installs the single one
     // (configureDaemonSessionContinuation) with the conversation gate, the reply
     // queue and the shared-session context. A second runner on this broker would

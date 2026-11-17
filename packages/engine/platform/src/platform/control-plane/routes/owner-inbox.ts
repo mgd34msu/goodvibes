@@ -17,7 +17,7 @@ import {
 import { GatewayVerbError } from './gateway-verb-error.js';
 import { readInvocationParams, requireStringValue } from './invocation-params.js';
 
-export type OwnerInboxGatewayService = Pick<OwnerInbox, 'listNow' | 'get' | 'answer' | 'postNow' | 'withdraw' | 'postedBy' | 'revision' | 'subscribe'>;
+export type OwnerInboxGatewayService = Pick<OwnerInbox, 'listNow' | 'get' | 'answer' | 'postNow' | 'withdraw' | 'reportDelivery' | 'postedBy' | 'revision' | 'subscribe'>;
 
 const LIST_STATUSES = new Set(['open', 'closed', 'all']);
 const KINDS = new Set<string>(['approval', 'question', 'claim', 'purchase', 'queued-action']);
@@ -142,17 +142,36 @@ export function createOwnerInboxPostHandler(inbox: OwnerInboxGatewayService): Ga
   };
 }
 
+/** Only the principal that posted an item may act for its asker (withdraw it, report its answer's delivery). */
+function requirePoster(inbox: OwnerInboxGatewayService, itemId: string, invocation: GatewayMethodInvocation, what: string): void {
+  if (!inbox.get(itemId)) throw new GatewayVerbError(`No inbox item has the id ${itemId}.`, 'NOT_FOUND', 404);
+  const poster = inbox.postedBy(itemId);
+  if (poster === undefined || poster !== invocation.context.principalId) {
+    throw new GatewayVerbError(`Only the caller that posted this item can ${what}.`, 'FORBIDDEN', 403);
+  }
+}
+
 export function createOwnerInboxWithdrawHandler(inbox: OwnerInboxGatewayService): GatewayMethodHandler {
   return async (invocation) => {
     const params = readInvocationParams(invocation);
     const itemId = requireStringValue(params['itemId'], 'itemId');
     const reason = optionalString(params['reason'], 'reason') ?? '';
-    if (!inbox.get(itemId)) throw new GatewayVerbError(`No inbox item has the id ${itemId}.`, 'NOT_FOUND', 404);
-    const poster = inbox.postedBy(itemId);
-    if (poster === undefined || poster !== invocation.context.principalId) {
-      throw new GatewayVerbError('Only the caller that posted this item can withdraw it.', 'FORBIDDEN', 403);
-    }
+    requirePoster(inbox, itemId, invocation, 'withdraw it');
     return outcomeResponse(inbox.withdraw(itemId, reason), 'itemId');
+  };
+}
+
+export function createOwnerInboxDeliveryHandler(inbox: OwnerInboxGatewayService): GatewayMethodHandler {
+  return async (invocation) => {
+    const params = readInvocationParams(invocation);
+    const itemId = requireStringValue(params['itemId'], 'itemId');
+    const state = requireStringValue(params['state'], 'state');
+    if (state !== 'delivered' && state !== 'undeliverable') {
+      throw new GatewayVerbError('Invalid state: expected delivered or undeliverable', 'INVALID_ARGUMENT', 400, 'state');
+    }
+    const reason = optionalString(params['reason'], 'reason');
+    requirePoster(inbox, itemId, invocation, 'report its delivery');
+    return outcomeResponse(inbox.reportDelivery(itemId, { state, ...(reason !== undefined ? { reason } : {}) }), 'itemId');
   };
 }
 
@@ -163,6 +182,7 @@ export function registerOwnerInboxGatewayMethods(catalog: GatewayMethodCatalog, 
     'inbox.answer': createOwnerInboxAnswerHandler(inbox),
     'inbox.post': createOwnerInboxPostHandler(inbox),
     'inbox.withdraw': createOwnerInboxWithdrawHandler(inbox),
+    'inbox.delivery': createOwnerInboxDeliveryHandler(inbox),
   };
   for (const [id, handler] of Object.entries(handlers)) {
     const descriptor = catalog.get(id);

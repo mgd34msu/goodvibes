@@ -12,6 +12,11 @@
  *
  * Callers own what is theirs alone: printing the outcome, and the publication
  * of the resumed session (last-session pointer, shared session, hooks).
+ *
+ * What waits for a session (the owner's answers to questions it asked while it
+ * was closed) is handed to it at the end of the routine, through the listener
+ * the app registered for its conversation with {@link whenSessionOpens}, so a
+ * headless run has it before its first request.
  */
 import type { SessionBranches, SessionManager, SessionMeta } from '@goodvibes-jev/engine/platform/platform/sessions';
 import type { SessionSurface } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
@@ -26,6 +31,24 @@ import {
   writeLivenessMarker,
   type ReplayIntoConversationResult,
 } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+/** Runs when a saved session becomes the live one in `conversation`; awaited by the resume routine. */
+export type SessionOpenedListener = (sessionId: string) => Promise<unknown>;
+
+const sessionOpenedListeners = new WeakMap<object, SessionOpenedListener>();
+
+/**
+ * Register what to do when a saved session is opened into `conversation`
+ * (every resume path: `/session resume`, `/load`, the pickers, start-up and
+ * headless resume flags). One listener per conversation; registering again
+ * replaces it. Returns the unregister function.
+ */
+export function whenSessionOpens(conversation: object, listener: SessionOpenedListener): () => void {
+  sessionOpenedListeners.set(conversation, listener);
+  return () => {
+    if (sessionOpenedListeners.get(conversation) === listener) sessionOpenedListeners.delete(conversation);
+  };
+}
+
 export interface SessionResumeRuntime {
   sessionId: string;
   model: string;
@@ -184,6 +207,16 @@ export async function resumeSessionCore(sessionId: string, deps: SessionResumeDe
   // Hydrate the footer's token counters from the resumed (+ journal-replayed)
   // history now, before the caller renders.
   attempt('restoring footer usage', () => deps.hydrateSessionUsage?.(), () => undefined);
+  // What waited for this session while it was closed goes into its conversation
+  // now, before the next request; a failure leaves it waiting for the next open.
+  const opened = sessionOpenedListeners.get(deps.conversation);
+  if (opened && deps.runtime.sessionId === sessionId) {
+    try {
+      await opened(sessionId);
+    } catch (error) {
+      logger.warn('session resume: handing over what waited for the session failed', { sessionId, error: summarizeError(error) });
+    }
+  }
   return {
     meta,
     savedMessageCount: messages.length,

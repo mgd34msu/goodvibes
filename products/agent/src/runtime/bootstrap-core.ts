@@ -55,7 +55,7 @@ import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { createUiRuntimeServices, type UiRuntimeServices } from './ui-services.ts';
 import { getTerminalSize } from '../shell/terminal-size.ts';
 import { composeAgentToolRegistry, decorateAgentWorkerRegistry } from './agent-tool-registry.ts';
-import { agentOwnerQuestions } from './client/owner-questions.ts';
+import { agentOwnerQuestions, wireOwnerQuestionSessions } from './client/owner-questions.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import { registerAgentRuntimeEvents } from './agent-runtime-events.ts';
 import { installAgentOrchestratorDependencies } from './agent-orchestrator-deps.ts';
@@ -275,6 +275,8 @@ export async function initializeBootstrapCore(
   );
 
   const bootstrapUnsubs: Array<() => void | Promise<void>> = [];
+  // A saved session is handed the owner's answers that waited for it when it is opened; deleting it settles its questions.
+  bootstrapUnsubs.push(wireOwnerQuestionSessions(services, { configManager, homeDirectory }, conversation, () => runtimeSessionIdRef.value));
   bootstrapUnsubs.push(stopRuntimeBindings);
   bootstrapUnsubs.push(disposeToolRegistry);
   bootstrapUnsubs.push(() => disposeTerminalFeatureFlags(featureFlags));

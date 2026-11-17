@@ -2,8 +2,9 @@
  * Questions agents left the owner (the daemon's owner inbox, `inbox.list`),
  * answered here with `inbox.answer`. The first answer from any surface wins; a
  * question already answered elsewhere says so instead of taking a second one.
- * The asking agent hears the answer on its next request; when the daemon knows
- * it could not hand it over (the agent has ended), the toast says so and why.
+ * An answer goes back to the agent or session that asked: the toast says
+ * whether it was delivered, waits for that session to be opened again, or
+ * cannot reach it and why, and recent answers are listed with that state.
  */
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -12,9 +13,14 @@ import { formatError } from '../../lib/errors';
 import { useToast } from '../../lib/toast';
 import { RowGroup } from '../../components/data-view/DataView';
 import { Button } from '../../components/ui/Button';
+import { Chip } from '../../components/ui/Chip';
 import { Input } from '../../components/ui/Field';
+import type { StatusTone } from '../../components/ui/StatusDot';
 
 const QUESTIONS_QUERY_KEY = ['owner-inbox', 'questions', 'open'] as const;
+const ANSWERS_QUERY_KEY = ['owner-inbox', 'questions', 'closed'] as const;
+/** Recent answers shown with where they are; older ones are in /decisions. */
+const ANSWERS_SHOWN = 20;
 
 interface OwnerQuestion {
   readonly id: string;
@@ -26,13 +32,68 @@ interface OwnerQuestion {
 }
 
 interface AnswerDelivery {
-  readonly delivered: boolean;
+  readonly state: 'delivered' | 'waiting' | 'undeliverable';
   readonly to: string;
   readonly reason?: string;
 }
 
+interface AnsweredQuestion {
+  readonly id: string;
+  readonly title: string;
+  readonly answer: string;
+  readonly delivery: AnswerDelivery;
+}
+
+const DELIVERY_STATES = new Set(['delivered', 'waiting', 'undeliverable']);
+
+function readDelivery(value: unknown): AnswerDelivery | undefined {
+  const delivery = value as Record<string, unknown> | null | undefined;
+  if (!delivery || typeof delivery.state !== 'string' || !DELIVERY_STATES.has(delivery.state) || typeof delivery.to !== 'string') return undefined;
+  return {
+    state: delivery.state as AnswerDelivery['state'],
+    to: delivery.to,
+    ...(typeof delivery.reason === 'string' && delivery.reason ? { reason: delivery.reason } : {}),
+  };
+}
+
+/** Answered questions whose answer has an asker to reach, newest first. */
+function readAnswered(value: unknown): AnsweredQuestion[] {
+  const items = (value as { items?: unknown } | null)?.items;
+  if (!Array.isArray(items)) return [];
+  return items.flatMap((raw): AnsweredQuestion[] => {
+    const item = raw as Record<string, unknown>;
+    const delivery = readDelivery(item.delivery);
+    if (typeof item.id !== 'string' || typeof item.title !== 'string' || item.kind !== 'question' || item.status !== 'answered' || !delivery) return [];
+    const answer = item.answer as { option?: unknown; text?: unknown } | undefined;
+    const words = [answer?.option, answer?.text].filter((part): part is string => typeof part === 'string' && part.length > 0).join(': ');
+    return [{ id: item.id, title: item.title, answer: words, delivery }];
+  });
+}
+
+const DELIVERY_TONE: Record<AnswerDelivery['state'], StatusTone> = { delivered: 'ok', waiting: 'info', undeliverable: 'warn' };
+
+function deliveryLabel(delivery: AnswerDelivery): string {
+  if (delivery.state === 'delivered') return `Delivered to ${delivery.to}`;
+  if (delivery.state === 'waiting') return `Waiting for ${delivery.to} to be opened`;
+  return `Not deliverable to ${delivery.to}`;
+}
+
+function AnsweredRow({ question }: { question: AnsweredQuestion }) {
+  const { delivery } = question;
+  return (
+    <li className="gv-row work-question">
+      <div className="gv-row__text work-question__body">
+        <div className="gv-row__title">{question.title}</div>
+        <div className="gv-row__meta">{question.answer}</div>
+        <Chip size="sm" tone={DELIVERY_TONE[delivery.state]}>{deliveryLabel(delivery)}</Chip>
+        {delivery.state !== 'delivered' && delivery.reason && <p className="work-question__detail">{delivery.reason}</p>}
+      </div>
+    </li>
+  );
+}
+
 type AnswerOutcome =
-  | { readonly applied: true; readonly delivery?: AnswerDelivery }
+  | { readonly applied: true; readonly delivery?: unknown }
   | { readonly applied: false; readonly refusal: { readonly reason: string; readonly next?: readonly string[] } };
 
 function readQuestions(value: unknown): OwnerQuestion[] {
@@ -89,7 +150,10 @@ function QuestionRow({ question, onAnswer, busy }: {
   );
 }
 
-/** "Questions for you": open questions from agents, answerable in place. Renders nothing when there are none. */
+/**
+ * "Questions for you": open questions from agents, answerable in place, and
+ * the recent answers with where each one is. Renders nothing when there are none.
+ */
 export function OwnerQuestions({ enabled }: { enabled: boolean }) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -100,31 +164,56 @@ export function OwnerQuestions({ enabled }: { enabled: boolean }) {
     refetchInterval: 30_000,
     retry: false,
   });
+  const answers = useQuery({
+    queryKey: ANSWERS_QUERY_KEY,
+    queryFn: async () => readAnswered(await platformClient.operator.invoke('inbox.list', { status: 'closed', kinds: ['question'], limit: ANSWERS_SHOWN })),
+    enabled,
+    refetchInterval: 30_000,
+    retry: false,
+  });
   const answer = useMutation({
     mutationFn: async (input: { itemId: string; option?: string; text?: string }) =>
       (await platformClient.operator.invoke('inbox.answer', input)) as AnswerOutcome,
     onSuccess: (outcome) => {
-      if (outcome.applied && outcome.delivery && !outcome.delivery.delivered) {
-        toast({ title: 'Answer saved, not delivered', description: `Not delivered to ${outcome.delivery.to}: ${outcome.delivery.reason ?? 'it is not running.'}`, tone: 'warning' });
-      } else if (outcome.applied) {
-        toast({ title: 'Answer sent', description: outcome.delivery ? `Sent to ${outcome.delivery.to}; it reads it on its next step.` : 'The agent reads it on its next step.', tone: 'success' });
-      } else toast({ title: 'Not sent', description: [outcome.refusal.reason, outcome.refusal.next?.[0]].filter(Boolean).join(' '), tone: 'warning' });
+      const delivery = outcome.applied ? readDelivery(outcome.delivery) : undefined;
+      if (!outcome.applied) {
+        toast({ title: 'Not sent', description: [outcome.refusal.reason, outcome.refusal.next?.[0]].filter(Boolean).join(' '), tone: 'warning' });
+      } else if (delivery?.state === 'undeliverable') {
+        toast({ title: 'Answer saved, not deliverable', description: `Not deliverable to ${delivery.to}: ${delivery.reason ?? 'it has ended.'}`, tone: 'warning' });
+      } else if (delivery?.state === 'waiting') {
+        toast({ title: 'Answer saved', description: delivery.reason ?? `It will be delivered when ${delivery.to} is next opened.`, tone: 'success' });
+      } else {
+        toast({ title: 'Answer sent', description: delivery ? `Sent to ${delivery.to}; it reads it on its next step.` : 'The asker reads it on its next step.', tone: 'success' });
+      }
     },
     onError: (error) => toast({ title: 'The answer was not sent', description: formatError(error), tone: 'danger' }),
-    onSettled: () => void queryClient.invalidateQueries({ queryKey: QUESTIONS_QUERY_KEY }),
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: QUESTIONS_QUERY_KEY });
+      void queryClient.invalidateQueries({ queryKey: ANSWERS_QUERY_KEY });
+    },
   });
   const open = enabled ? questions.data ?? [] : [];
-  if (open.length === 0) return null;
+  const answered = enabled ? answers.data ?? [] : [];
+  if (open.length === 0 && answered.length === 0) return null;
   return (
-    <RowGroup label="Questions for you" count={open.length}>
-      {open.map((question) => (
-        <QuestionRow
-          key={question.id}
-          question={question}
-          busy={answer.isPending}
-          onAnswer={(input) => answer.mutate({ itemId: question.id, ...input })}
-        />
-      ))}
-    </RowGroup>
+    <>
+      {open.length > 0 && (
+        <RowGroup label="Questions for you" count={open.length}>
+          {open.map((question) => (
+            <QuestionRow
+              key={question.id}
+              question={question}
+              busy={answer.isPending}
+              onAnswer={(input) => answer.mutate({ itemId: question.id, ...input })}
+            />
+          ))}
+        </RowGroup>
+      )}
+      {answered.length > 0 && (
+        <RowGroup label="Your answers" count={answered.length}>
+          {answered.map((question) => <AnsweredRow key={question.id} question={question} />)}
+        </RowGroup>
+      )}
+    </>
   );
 }

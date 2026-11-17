@@ -1,19 +1,24 @@
 /**
- * owner-inbox-updates.ts, how an agent that left the owner a question hears the
- * answer.
+ * owner-inbox-updates.ts, how a session that left the owner a question hears
+ * the answer.
  *
- * The `query` tool posts a question and the agent carries on. When the owner
- * answers (terminal, web UI, phone), the daemon publishes the item on
+ * The `query` tool posts a question and the agent carries on. The question is
+ * recorded as asked by the session (its id, in `answerSession`). When the owner
+ * answers (terminal, web UI, phone), the inbox publishes the item on
  * `owner-inbox-update`. {@link withAnswerDelivery} wraps the inbox the tool
  * posts to: while one of its questions is open it holds one subscription, and
- * when a question closes it goes to the agent that asked it, on that agent's
- * next request, while the agent runs; otherwise to the host, which tells the
- * asking conversation on its next request. With nothing open there is no
- * stream and no request.
+ * when a question is answered the session reports the answer delivered (the
+ * first report wins, so one terminal takes it) and puts it on the next model
+ * request of the spawned agent that asked while it runs, otherwise of the
+ * asking conversation. An answer given while the session was not open waits on
+ * the question; {@link AnswerDeliveringInbox.openSession} hands it over when
+ * the session is opened again. With nothing open there is no stream and no
+ * request.
  */
 
-import type { OwnerAnswerOutcome, OwnerInboxListFilter, OwnerItem } from '../../control-plane/owner-inbox.js';
-import { readOwnerItem } from '../../control-plane/owner-inbox.js';
+import type { OwnerAnswerDeliveryReport, OwnerAnswerOutcome, OwnerInboxListFilter, OwnerItem } from '../../control-plane/owner-inbox.js';
+import { OWNER_ANSWER_SESSION_METADATA, answerSessionOf, readOwnerItem } from '../../control-plane/owner-inbox.js';
+import type { HostInstructions } from '../../core/host-instructions.js';
 import type { QuestionInbox } from '../../tools/query/index.js';
 import { openServerSentEventStream } from '../transports/sse-stream.js';
 import { buildUrl } from '../transports/transport-paths.js';
@@ -91,11 +96,37 @@ export function questionClosedText(item: OwnerItem): string {
   return `[Owner answer] Your ${question} expired unanswered. Decide without it or ask again.`;
 }
 
+/** The inbox under {@link withAnswerDelivery}: the query tool's inbox plus the asking session's delivery report. */
+export type AnswerDeliveryPort = QuestionInbox & {
+  reportDelivery(id: string, report: OwnerAnswerDeliveryReport): OwnerAnswerOutcome | Promise<OwnerAnswerOutcome>;
+};
+
+/** The query tool's inbox that also hands answers to the session that asked. */
+export interface AnswerDeliveringInbox extends QuestionInbox {
+  /**
+   * The session `sessionId` was opened (resumed, loaded, continued, headless or
+   * in a terminal): answers that waited for it go into its conversation, once,
+   * and its open questions are watched again. Resolves with how many answers it
+   * handed over. One inbox list read; nothing when no daemon or local inbox holds anything.
+   */
+  openSession(sessionId: string): Promise<number>;
+  /**
+   * The saved session `sessionId` was deleted: its open questions are withdrawn
+   * and answers still waiting for it are reported not deliverable, so the owner
+   * sees why. One inbox list read, and one write per such question.
+   */
+  deleteSession(sessionId: string): Promise<void>;
+}
+
 export interface AnswerDeliveryOptions {
   /** Opens the inbox update stream (or an in-process subscription). */
   readonly watch: OwnerInboxUpdateWatch;
-  /** Hands a closed question to the conversation that asked it, or that spawned the agent that asked it when that agent has ended. */
-  readonly deliver: (item: OwnerItem) => void;
+  /**
+   * The host channel of the conversation running `sessionId` in this process,
+   * or undefined when that session is not the one open here. An answer goes
+   * onto its next model request (`replay`, once).
+   */
+  readonly hostFor: (sessionId: string | undefined) => Pick<HostInstructions, 'set'> | undefined;
   /**
    * The session a question belongs to when the caller did not say: a spawned
    * agent's questions belong to the conversation that spawned it.
@@ -103,12 +134,15 @@ export interface AnswerDeliveryOptions {
   readonly sessionId?: (() => string | undefined) | undefined;
 }
 
+/** How many of one session's questions a session open or delete reads; a session asks far fewer. */
+const SESSION_QUESTION_LIMIT = 500;
+
 /**
  * The inbox the `query` tool posts to, plus delivery of each answer to the
  * asking agent or conversation. One subscription is held only while one of its
  * questions is open; it closes when the last one closes.
  */
-export function withAnswerDelivery(inbox: QuestionInbox, options: AnswerDeliveryOptions): QuestionInbox {
+export function withAnswerDelivery(inbox: AnswerDeliveryPort, options: AnswerDeliveryOptions): AnswerDeliveringInbox {
   const pending = new Set<string>();
   // The spawned agent that asked each open question, when one did.
   const askingAgents = new Map<string, string>();
@@ -123,16 +157,33 @@ export function withAnswerDelivery(inbox: QuestionInbox, options: AnswerDelivery
     if (pending.delete(id)) closeWhenIdle();
   };
 
+  /**
+   * Put a closed question in front of whoever asked it. An answer is first
+   * reported delivered, and handed over only when that report is the one that
+   * counted: a session that is not open here, a report another terminal made
+   * first, or a daemon that cannot be reached leaves it waiting for the next
+   * open. True when it was handed over.
+   */
+  const handOver = async (item: OwnerItem, agentId: string | undefined): Promise<boolean> => {
+    const host = options.hostFor(item.sessionId);
+    if (!host) return false;
+    const text = questionClosedText(item);
+    if (item.status === 'answered' && answerSessionOf(item) !== undefined) {
+      const report = await inbox.reportDelivery(item.id, { state: 'delivered' });
+      if (!report.applied) return false;
+    }
+    if (agentId === undefined || !tellRunningAgent(agentId, text)) host.set('replay', text, { once: true, append: true });
+    return true;
+  };
+
   const settle = (item: OwnerItem): void => {
     if (item.status === 'open' || !pending.delete(item.id)) return;
     const agentId = askingAgents.get(item.id);
     askingAgents.delete(item.id);
-    try {
-      if (agentId === undefined || !tellRunningAgent(agentId, questionClosedText(item))) options.deliver(item);
-    } catch (error) {
-      logger.debug('[owner-inbox] delivering an answer failed', { itemId: item.id, error: summarizeError(error) });
-    }
     closeWhenIdle();
+    void handOver(item, agentId).catch((error: unknown) => {
+      logger.debug('[owner-inbox] delivering an answer failed; it waits for the session to be opened again', { itemId: item.id, error: summarizeError(error) });
+    });
   };
 
   const ensureWatching = (): void => {
@@ -156,11 +207,20 @@ export function withAnswerDelivery(inbox: QuestionInbox, options: AnswerDelivery
 
   const sessionId = (): string | undefined => options.sessionId?.() || undefined;
 
+  const sessionQuestions = (id: string): Promise<readonly OwnerItem[]> =>
+    inbox.list({ sessionId: id, kinds: ['question'], status: 'all', limit: SESSION_QUESTION_LIMIT });
+
   return {
     async post(item) {
       const session = item.sessionId ?? sessionId();
       const agentId = callingAgentId();
-      const outcome = await inbox.post(session ? { ...item, sessionId: session } : item);
+      // The asker is the session: the answer goes back into its conversation, now or when it is next opened.
+      const outcome = await inbox.post(session ? {
+        ...item,
+        sessionId: session,
+        askedBy: item.askedBy ?? (agentId !== undefined ? `agent ${agentId} in session ${session}` : `session ${session}`),
+        metadata: { ...item.metadata, [OWNER_ANSWER_SESSION_METADATA]: session },
+      } : item);
       if (outcome.item.status === 'open') {
         pending.add(outcome.item.id);
         if (agentId !== undefined && outcome.created) askingAgents.set(outcome.item.id, agentId);
@@ -181,6 +241,48 @@ export function withAnswerDelivery(inbox: QuestionInbox, options: AnswerDelivery
     async withdraw(id, reason): Promise<OwnerAnswerOutcome> {
       forget(id);
       return await inbox.withdraw(id, reason);
+    },
+    async openSession(id) {
+      let items: readonly OwnerItem[];
+      try {
+        items = await sessionQuestions(id);
+      } catch (error) {
+        logger.debug('[owner-inbox] reading the questions of an opened session failed; its answers wait for the next open', { sessionId: id, error: summarizeError(error) });
+        return 0;
+      }
+      let handed = 0;
+      for (const item of items) {
+        if (item.status === 'open') { pending.add(item.id); continue; }
+        if (item.status !== 'answered' || item.delivery?.state !== 'waiting') continue;
+        try {
+          if (await handOver(item, undefined)) handed += 1;
+        } catch (error) {
+          logger.debug('[owner-inbox] handing a waiting answer over failed; it waits for the next open', { itemId: item.id, error: summarizeError(error) });
+        }
+      }
+      if (pending.size > 0) ensureWatching();
+      return handed;
+    },
+    async deleteSession(id) {
+      let items: readonly OwnerItem[];
+      try {
+        items = await sessionQuestions(id);
+      } catch (error) {
+        logger.debug('[owner-inbox] reading the questions of a deleted session failed', { sessionId: id, error: summarizeError(error) });
+        return;
+      }
+      for (const item of items) {
+        try {
+          if (item.status === 'open') {
+            forget(item.id);
+            await inbox.withdraw(item.id, `its session ${id} was deleted`);
+          } else if (item.status === 'answered' && item.delivery?.state === 'waiting') {
+            await inbox.reportDelivery(item.id, { state: 'undeliverable', reason: `session ${id} was deleted before it was opened again. The answer is kept on the question.` });
+          }
+        } catch (error) {
+          logger.debug('[owner-inbox] settling a question of a deleted session failed', { itemId: item.id, error: summarizeError(error) });
+        }
+      }
     },
   };
 }

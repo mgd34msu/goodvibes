@@ -24,7 +24,7 @@ export {
   type CompanionMessagePayload,
 } from '@goodvibes-jev/engine/terminal-shell/companion-input';
 import { createTuiTurnPermissionManager, registerTuiTurnTools } from './turn-tool-composition.ts';
-import { terminalOwnerQuestions } from './client/owner-questions.ts';
+import { terminalOwnerQuestions, wireOwnerQuestionSessions } from './client/owner-questions.ts';
 import { readDaemonOperatorToken } from './daemon-operator-token.ts';
 import { readTuiNotificationsMetadataOnly } from '../config/host-settings.ts';
 import { ConversationManager } from '../core/conversation';
@@ -352,6 +352,8 @@ export async function initializeBootstrapCore(
   });
 
   const bootstrapUnsubs: Array<() => void | Promise<void>> = [];
+  // A saved session is handed the owner's answers that waited for it when it is opened; deleting it settles its questions.
+  bootstrapUnsubs.push(wireOwnerQuestionSessions(services, conversation, () => runtimeSessionIdRef.value));
   bootstrapUnsubs.push(stopRuntimeBindings);
   bootstrapUnsubs.push(disposeTurnTools);
   bootstrapUnsubs.push(() => disposeTerminalFeatureFlags(featureFlags));

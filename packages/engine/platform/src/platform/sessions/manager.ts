@@ -202,6 +202,7 @@ function legacySessionStem(name: string): string {
 
 export class SessionManager {
   private sessionsDir: string;
+  private readonly deletedListeners = new Set<(sessionId: string) => void>();
 
   constructor(
     baseDir: string,
@@ -715,6 +716,24 @@ export class SessionManager {
     } catch (e) {
       throw new Error(`Failed to delete session: ${summarizeError(e)}`);
     }
+    const sessionId = basename(filePath).replace(/\.jsonl$/, '');
+    for (const listener of [...this.deletedListeners]) {
+      try {
+        listener(sessionId);
+      } catch (err: unknown) {
+        logger.warn('SessionManager: a session-deleted listener failed', { sessionId, error: summarizeError(err) });
+      }
+    }
+  }
+
+  /**
+   * Run `listener` with the session's id after each session this manager
+   * deletes (what was waiting for that session, such as the owner's answers to
+   * its questions, is told it never will be). Returns the unsubscribe function.
+   */
+  onDeleted(listener: (sessionId: string) => void): () => void {
+    this.deletedListeners.add(listener);
+    return () => { this.deletedListeners.delete(listener); };
   }
 
   /**

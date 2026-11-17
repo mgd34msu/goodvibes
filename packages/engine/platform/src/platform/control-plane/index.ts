@@ -111,12 +111,15 @@ export type {
 } from './approval-broker.js';
 export { ApprovalBroker } from './approval-broker.js';
 export {
+  OWNER_ANSWER_SESSION_METADATA,
   OWNER_ANSWER_TO_METADATA,
   OWNER_ITEM_KINDS,
   OWNER_ITEM_LIMITS,
   OwnerInbox,
   OwnerInboxInputError,
+  answerSessionOf,
   createOwnerInbox,
+  readOwnerAnswerDelivery,
   readOwnerItem,
   validateNewOwnerItem,
 } from './owner-inbox.js';
@@ -124,6 +127,8 @@ export type {
   NewOwnerItem,
   OwnerAnswer,
   OwnerAnswerDelivery,
+  OwnerAnswerDeliveryReport,
+  OwnerAnswerDeliveryState,
   OwnerAnswerOutcome,
   OwnerAnswerRecipient,
   OwnerAnswerSource,
@@ -136,9 +141,12 @@ export type {
   OwnerItemKind,
   OwnerItemStatus,
   OwnerPostOutcome,
+  OwnerSessionPresence,
+  OwnerSessionPresenceProbe,
 } from './owner-inbox.js';
 export { QuestionStore } from './question-store.js';
-export type { StoredOwnerEntry, StoredOwnerItem, StoredOwnerItemKind } from './question-store.js';
+export { sessionBrokerPresence } from './owner-session-presence.js';
+export type { StoredAnswerDelivery, StoredOwnerEntry, StoredOwnerItem, StoredOwnerItemKind } from './question-store.js';
 export { registerOwnerInboxGatewayMethods } from './routes/owner-inbox.js';
 export { registerNotificationDeadLetterGatewayMethods, listNotificationDeadLetters, replayNotificationDeadLetters } from './routes/notification-dead-letters.js';
 export type { NotificationDeadLetterSources } from './routes/notification-dead-letters.js';

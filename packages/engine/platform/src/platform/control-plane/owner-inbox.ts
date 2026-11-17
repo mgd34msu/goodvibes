@@ -10,12 +10,21 @@
  * in the question store, a record log.
  *
  * The daemon owns the one instance. The terminal apps and the web UI reach it
- * through the `inbox.*` verbs; in-process producers call it directly. The first
- * answer wins; a later one changes nothing and is told who answered, from where.
+ * through the `inbox.*` verbs; in-process producers call it directly. A
+ * terminal app running with no daemon keeps its own instance over its own file
+ * (runtime/client/local-owner-inbox.ts). The first answer wins; a later one
+ * changes nothing and is told who answered, from where.
+ *
+ * An answer goes back to whoever asked: an agent or hosted session in this
+ * process at once, a terminal session through the update stream while it is
+ * open, or when it is next opened. Each answered question says which of
+ * delivered, waiting or not deliverable it is.
  *
  * Cost: a tool call that queues nothing costs nothing here. A post or an answer
- * is one synced append (approvals: the broker's own write). A list is a walk of
- * in-memory maps. `revision()` is an integer read.
+ * is one synced append (approvals: the broker's own write); an answer an agent
+ * took, or a session reported taking, is one more. A list is a walk of
+ * in-memory maps, plus one session-presence lookup (a map read) per answered
+ * session question still waiting. `revision()` is an integer read.
  */
 import { refusal, type Refusal } from '@goodvibes-jev/engine/errors';
 import type { ApprovalBroker, SharedApprovalRecord } from './approval-broker.js';
@@ -59,6 +68,8 @@ export interface OwnerItem {
   readonly withdrawnReason?: string | undefined;
   readonly key?: string | undefined;
   readonly metadata?: Readonly<Record<string, string | number | boolean>> | undefined;
+  /** For an answered question with an asker: whether the answer reached it, waits for it, or cannot reach it. */
+  readonly delivery?: OwnerAnswerDelivery | undefined;
 }
 
 /** What a producer posts. Approvals are raised through the approval broker, not posted. */
@@ -84,19 +95,22 @@ export interface OwnerInboxListFilter {
 }
 
 /**
- * Whether an answer reached the agent or session that asked, told to the owner
- * who gave it. Absent when the asker is not in the daemon (a terminal app hears
- * the answer on the update stream itself).
+ * What became of an answer: `delivered` (it is in the asking agent's or
+ * session's conversation), `waiting` (kept on the question until the asking
+ * session is next opened), `undeliverable` (the asker has ended or its session
+ * was deleted; `reason` says which). The answer stays on the item in every state.
  */
+export type OwnerAnswerDeliveryState = 'delivered' | 'waiting' | 'undeliverable';
+
 export interface OwnerAnswerDelivery {
-  readonly delivered: boolean;
-  /** Who the answer went to, or was meant for ("agent …", "session …"). */
+  readonly state: OwnerAnswerDeliveryState;
+  /** Who the answer went to, or is meant for ("agent …", "session …"). */
   readonly to: string;
-  /** Why it was not delivered. The answer stays on the item either way. */
+  /** For `waiting` and `undeliverable`: what happens next, or why it cannot arrive. */
   readonly reason?: string | undefined;
 }
 
-/** Hands an answered item to whoever asked it in this process, and says whether it arrived. */
+/** Hands an answered item to whoever asked it in this process, and says whether it arrived (`delivered` or `undeliverable`). */
 export type OwnerAnswerRecipient = (item: OwnerItem) => OwnerAnswerDelivery;
 
 /**
@@ -105,6 +119,50 @@ export type OwnerAnswerRecipient = (item: OwnerItem) => OwnerAnswerDelivery;
  * asker) tells the owner it was not delivered and to whom.
  */
 export const OWNER_ANSWER_TO_METADATA = 'answerTo';
+
+/**
+ * Metadata key naming the session that asked a question (a terminal app's
+ * conversation or one of its agents): the answer goes back into that session's
+ * conversation, now when it is open, otherwise when it is next opened.
+ */
+export const OWNER_ANSWER_SESSION_METADATA = 'answerSession';
+
+/**
+ * Whether a session is open in a terminal right now (`attached`), saved but not
+ * open (`closed`), or no longer exists (`gone`). Read from facts the inbox's
+ * owner already keeps: the daemon's session broker, or a terminal's own session
+ * store when it runs with no daemon.
+ */
+export type OwnerSessionPresence =
+  | { readonly state: 'attached' | 'closed'; readonly title?: string | undefined }
+  | { readonly state: 'gone' };
+export type OwnerSessionPresenceProbe = (sessionId: string) => OwnerSessionPresence;
+
+/** What the asking side reports about an answer it took (`delivered`) or can never take (`undeliverable`). */
+export interface OwnerAnswerDeliveryReport {
+  readonly state: 'delivered' | 'undeliverable';
+  readonly reason?: string | undefined;
+}
+
+/** The session an item's answer goes back to, when a session asked it. */
+export function answerSessionOf(item: Pick<OwnerItem, 'metadata'>): string | undefined {
+  const session = item.metadata?.[OWNER_ANSWER_SESSION_METADATA];
+  return typeof session === 'string' && session.length > 0 ? session : undefined;
+}
+
+function sessionLabel(sessionId: string, presence: OwnerSessionPresence | undefined): string {
+  const title = presence && presence.state !== 'gone' ? presence.title?.trim() : undefined;
+  return title ? `session ${sessionId} ("${clip(title, 60)}")` : `session ${sessionId}`;
+}
+
+/** The delivery state of an answered session question no report has settled yet: read, never written. */
+function sessionAnswerDelivery(sessionId: string, presence: OwnerSessionPresence | undefined): OwnerAnswerDelivery {
+  const to = sessionLabel(sessionId, presence);
+  if (presence?.state === 'gone') {
+    return { state: 'undeliverable', to, reason: `${to} no longer exists: it was deleted. The answer is kept on the question.` };
+  }
+  return { state: 'waiting', to, reason: `Saved; it will be delivered when ${to} is next opened.` };
+}
 
 export type OwnerAnswerOutcome =
   | { readonly applied: true; readonly item: OwnerItem; readonly delivery?: OwnerAnswerDelivery | undefined }
@@ -231,9 +289,21 @@ function storedStatus(entry: StoredOwnerEntry, now: number): OwnerItemStatus {
   return 'open';
 }
 
-function projectStored(entry: StoredOwnerEntry, now: number): OwnerItem {
+function storedDelivery(entry: StoredOwnerEntry, presence: OwnerSessionPresenceProbe | undefined): OwnerAnswerDelivery | undefined {
+  if (entry.answer === undefined) return undefined;
+  const session = answerSessionOf(entry.item);
+  const meantFor = entry.item.metadata?.[OWNER_ANSWER_TO_METADATA];
+  if (entry.delivery) {
+    const to = session !== undefined ? `session ${session}` : typeof meantFor === 'string' ? meantFor : entry.item.askedBy ?? 'the asker';
+    return { state: entry.delivery.state, to, ...(entry.delivery.reason !== undefined ? { reason: entry.delivery.reason } : {}) };
+  }
+  return session !== undefined ? sessionAnswerDelivery(session, presence?.(session)) : undefined;
+}
+
+function projectStored(entry: StoredOwnerEntry, now: number, presence?: OwnerSessionPresenceProbe): OwnerItem {
   const { item } = entry;
   const status = storedStatus(entry, now);
+  const delivery = storedDelivery(entry, presence);
   return {
     id: item.id,
     kind: item.kind,
@@ -252,6 +322,7 @@ function projectStored(entry: StoredOwnerEntry, now: number): OwnerItem {
     ...(entry.withdrawnReason !== undefined ? { withdrawnReason: entry.withdrawnReason } : {}),
     ...(item.key !== undefined ? { key: item.key } : {}),
     ...(item.metadata !== undefined ? { metadata: item.metadata } : {}),
+    ...(delivery !== undefined ? { delivery } : {}),
   };
 }
 
@@ -387,6 +458,8 @@ export interface OwnerInboxOptions {
   readonly questions: QuestionStore;
   /** The approval broker of the same composition. Absent: the inbox holds only its own items. */
   readonly approvals?: OwnerInboxApprovalSource | undefined;
+  /** Whether an asking session is open now; see {@link OwnerInbox.useSessionPresence}. */
+  readonly sessionPresence?: OwnerSessionPresenceProbe | undefined;
   readonly now?: (() => number) | undefined;
 }
 
@@ -398,11 +471,13 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort {
   readonly #listeners = new Set<OwnerInboxListener>();
   readonly #recipients = new Map<string, OwnerAnswerRecipient>();
   readonly #unsubscribeApprovals: (() => void) | undefined;
+  #presence: OwnerSessionPresenceProbe | undefined;
   #approvalRevision = 0;
 
   constructor(options: OwnerInboxOptions) {
     this.#questions = options.questions;
     this.#approvals = options.approvals;
+    this.#presence = options.sessionPresence;
     this.#now = options.now ?? Date.now;
     this.#unsubscribeApprovals = this.#approvals?.subscribe((record) => {
       this.#approvalRevision += 1;
@@ -410,14 +485,28 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort {
     });
   }
 
-  /** Moves on every post, answer and withdrawal, and on every approval change. Expiry by time does not move it. */
+  /** Moves on every post, answer, withdrawal and delivery report, and on every approval change. Expiry by time does not move it. */
   revision(): number {
     return this.#questions.revision() + this.#approvalRevision;
   }
 
+  /**
+   * Say where the inbox reads whether an asking session is open: the daemon's
+   * session broker, or a terminal's own sessions when there is no daemon. Read
+   * when a session's question is answered and when a list shows its answer;
+   * nothing is polled.
+   */
+  useSessionPresence(probe: OwnerSessionPresenceProbe): void {
+    this.#presence = probe;
+  }
+
+  #project(entry: StoredOwnerEntry, now: number): OwnerItem {
+    return projectStored(entry, now, this.#presence);
+  }
+
   get(id: string): OwnerItem | undefined {
     const entry = this.#questions.get(id);
-    if (entry) return projectStored(entry, this.#now());
+    if (entry) return this.#project(entry, this.#now());
     const approval = this.#approvals?.getApproval(id);
     return approval ? projectApproval(approval) : undefined;
   }
@@ -443,7 +532,7 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort {
       }
     }
     for (const entry of this.#questions.entries()) {
-      const item = projectStored(entry, now);
+      const item = this.#project(entry, now);
       if (matchesFilter(item, filter, kinds)) items.push(item);
     }
     items.sort(newestFirst);
@@ -463,10 +552,10 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort {
     const now = this.#now();
     if (item.key !== undefined) {
       const existing = this.#questions.findOpen(item.kind, item.key);
-      if (existing && storedStatus(existing, now) === 'open') return { created: false, item: projectStored(existing, now) };
+      if (existing && storedStatus(existing, now) === 'open') return { created: false, item: this.#project(existing, now) };
     }
     const entry = this.#questions.post({ ...item, ...(postedBy !== undefined ? { postedBy } : {}) }, now);
-    const projected = projectStored(entry, now);
+    const projected = this.#project(entry, now);
     this.#emit(projected);
     return { created: true, item: projected };
   }
@@ -486,7 +575,7 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort {
     const now = this.#now();
     const entry = this.#questions.get(id);
     if (entry) {
-      const item = projectStored(entry, now);
+      const item = this.#project(entry, now);
       if (item.status !== 'open') {
         this.#recipients.delete(id);
         return { applied: false, item, refusal: closedRefusal(item) };
@@ -495,11 +584,13 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort {
       if ('refusal' in checked) return { applied: false, item, refusal: checked.refusal };
       const result = this.#questions.answer(id, checked.answer, by, now);
       if (!result) return { applied: false, refusal: unknownRefusal(id) };
-      const answered = projectStored(result.entry, now);
+      const answered = this.#project(result.entry, now);
       if (!result.applied) return { applied: false, item: answered, refusal: closedRefusal(answered) };
-      this.#emit(answered);
-      const delivery = this.#deliver(answered);
-      return { applied: true, item: answered, ...(delivery ? { delivery } : {}) };
+      const delivery = this.#deliver(answered, now);
+      const latest = this.#questions.get(id);
+      const final = latest ? this.#project(latest, now) : answered;
+      this.#emit(final);
+      return { applied: true, item: final, ...(delivery ? { delivery } : {}) };
     }
     const approval = this.#approvals?.getApproval(id);
     if (!approval || !this.#approvals) return { applied: false, refusal: unknownRefusal(id) };
@@ -511,7 +602,7 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort {
     const now = this.#now();
     const result = this.#questions.withdraw(id, clip(reason.trim() || 'no longer needed', 500), now);
     if (!result) return { applied: false, refusal: unknownRefusal(id) };
-    const item = projectStored(result.entry, now);
+    const item = this.#project(result.entry, now);
     if (!result.applied) return { applied: false, item, refusal: closedRefusal(item) };
     this.#recipients.delete(id);
     this.#emit(item);
@@ -528,23 +619,87 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort {
     if (this.get(id)?.status === 'open') this.#recipients.set(id, recipient);
   }
 
-  #deliver(item: OwnerItem): OwnerAnswerDelivery | undefined {
+  /**
+   * The asking side's report on an answer: it took the answer into its
+   * conversation (`delivered`), or never can (`undeliverable`, its session was
+   * deleted). Only an answered question a session asked takes a report, once;
+   * a second one is refused and changes nothing, so a session that reports
+   * `delivered` first is the one that puts the answer in its conversation.
+   */
+  reportDelivery(id: string, report: OwnerAnswerDeliveryReport): OwnerAnswerOutcome {
+    const now = this.#now();
+    const entry = this.#questions.get(id);
+    if (!entry) return { applied: false, refusal: unknownRefusal(id) };
+    const item = this.#project(entry, now);
+    if (item.status !== 'answered' || answerSessionOf(item) === undefined) {
+      return {
+        applied: false,
+        item,
+        refusal: refusal({
+          code: 'NOT_A_SESSION_ANSWER',
+          state: item.status,
+          reason: item.status !== 'answered' ? 'This item has no answer to deliver.' : 'This answer goes to an agent the daemon runs; it reports its own delivery.',
+          next: ['Nothing to do.'],
+          status: 409,
+        }),
+      };
+    }
+    const reason = report.reason !== undefined ? clip(report.reason.trim(), 500) : undefined;
+    const result = this.#questions.recordDelivery(id, report.state, reason || undefined, now);
+    if (!result) return { applied: false, refusal: unknownRefusal(id) };
+    const updated = this.#project(result.entry, now);
+    if (!result.applied) {
+      return {
+        applied: false,
+        item: updated,
+        refusal: refusal({
+          code: 'ALREADY_REPORTED',
+          state: updated.delivery?.state ?? 'answered',
+          reason: `This answer was already reported ${updated.delivery?.state ?? 'handled'}.`,
+          next: ['Nothing to do; the first report stands.'],
+          status: 409,
+        }),
+      };
+    }
+    this.#emit(updated);
+    return { applied: true, item: updated, ...(updated.delivery ? { delivery: updated.delivery } : {}) };
+  }
+
+  /**
+   * Hand an answer to its asker and say what became of it. An agent or hosted
+   * session in this process takes it now (its outcome is recorded on the item);
+   * a session that asked from a terminal gets it there: at once when that
+   * session is open, otherwise when it is next opened, and the owner is told
+   * which. Only the terminal records that the answer reached its conversation.
+   */
+  #deliver(item: OwnerItem, now: number): OwnerAnswerDelivery | undefined {
     const recipient = this.#recipients.get(item.id);
     const meantFor = item.metadata?.[OWNER_ANSWER_TO_METADATA];
-    const to = typeof meantFor === 'string' ? meantFor : item.askedBy ?? 'the asker';
-    if (!recipient) {
-      return typeof meantFor === 'string'
-        ? { delivered: false, to, reason: 'it is no longer running: the daemon restarted after it asked. The answer is kept on the question.' }
-        : undefined;
+    if (recipient || typeof meantFor === 'string') {
+      const to = typeof meantFor === 'string' ? meantFor : item.askedBy ?? 'the asker';
+      let delivery: OwnerAnswerDelivery;
+      if (!recipient) {
+        delivery = { state: 'undeliverable', to, reason: 'it is no longer running: the daemon restarted after it asked. The answer is kept on the question.' };
+      } else {
+        this.#recipients.delete(item.id);
+        try {
+          delivery = recipient(item);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          logger.warn('[owner-inbox] handing an answer to its asker failed', { itemId: item.id, error: message });
+          delivery = { state: 'undeliverable', to, reason: `handing it over failed (${message}). The answer is kept on the question.` };
+        }
+      }
+      const state = delivery.state;
+      if (state !== 'waiting') this.#questions.recordDelivery(item.id, state, delivery.reason, now);
+      return delivery;
     }
-    this.#recipients.delete(item.id);
-    try {
-      return recipient(item);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      logger.warn('[owner-inbox] handing an answer to its asker failed', { itemId: item.id, error: message });
-      return { delivered: false, to, reason: `handing it over failed (${message}). The answer is kept on the question.` };
-    }
+    const session = answerSessionOf(item);
+    if (session === undefined) return undefined;
+    const presence = this.#presence?.(session);
+    // An open session takes the answer from the update stream and reports it delivered.
+    if (presence?.state === 'attached') return { state: 'delivered', to: sessionLabel(session, presence) };
+    return sessionAnswerDelivery(session, presence);
   }
 
   /**
@@ -677,17 +832,32 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort {
 export function createOwnerInbox(options: {
   readonly questionsPath: string;
   readonly approvals?: OwnerInboxApprovalSource | undefined;
+  readonly sessionPresence?: OwnerSessionPresenceProbe | undefined;
   readonly now?: (() => number) | undefined;
 }): OwnerInbox {
   return new OwnerInbox({
     questions: new QuestionStore({ path: options.questionsPath }),
     ...(options.approvals !== undefined ? { approvals: options.approvals } : {}),
+    ...(options.sessionPresence !== undefined ? { sessionPresence: options.sessionPresence } : {}),
     ...(options.now !== undefined ? { now: options.now } : {}),
   });
 }
 
 const ITEM_STATUSES: ReadonlySet<string> = new Set<OwnerItemStatus>(['open', 'answered', 'withdrawn', 'expired']);
 const ITEM_KINDS: ReadonlySet<string> = new Set<string>(OWNER_ITEM_KINDS);
+const DELIVERY_STATES: ReadonlySet<string> = new Set<OwnerAnswerDeliveryState>(['delivered', 'waiting', 'undeliverable']);
+
+/** Read an answer's delivery from the wire; undefined when it is not one. */
+export function readOwnerAnswerDelivery(value: unknown): OwnerAnswerDelivery | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  if (typeof record['state'] !== 'string' || !DELIVERY_STATES.has(record['state']) || typeof record['to'] !== 'string') return undefined;
+  return {
+    state: record['state'] as OwnerAnswerDeliveryState,
+    to: record['to'],
+    ...(typeof record['reason'] === 'string' ? { reason: record['reason'] } : {}),
+  };
+}
 
 /** Read an inbox item from the wire; undefined when it is not one. */
 export function readOwnerItem(value: unknown): OwnerItem | undefined {
@@ -700,5 +870,8 @@ export function readOwnerItem(value: unknown): OwnerItem | undefined {
     || typeof record['createdAt'] !== 'number') {
     return undefined;
   }
-  return record as unknown as OwnerItem;
+  if (record['delivery'] === undefined) return record as unknown as OwnerItem;
+  const { delivery: rawDelivery, ...rest } = record;
+  const delivery = readOwnerAnswerDelivery(rawDelivery);
+  return { ...(rest as unknown as OwnerItem), ...(delivery ? { delivery } : {}) };
 }

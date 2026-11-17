@@ -785,6 +785,7 @@ export class DaemonServer {
         logger,
         this.runtimeServices.stepUpService.createVerifier(),
         relayRequestFactsFrom(this.gatewayMethods, (req) => this.controlPlaneHelper.authenticateRequest(req)),
+        this.runtimeServices.stepUpService,
       );
       void this.relayReachability.start().catch((error: unknown) =>
         logger.warn('DaemonServer: relay reachability failed to start', { error: summarizeError(error) }),

@@ -13,6 +13,7 @@ import type { SerializedRelayIdentity } from '@goodvibes-jev/engine/transport-co
 import { isRelayTunneledRequest } from '@goodvibes-jev/engine/daemon-api';
 import { refusal, refusalErrorBody } from '@goodvibes-jev/engine/errors';
 import { createRelayReachability, type RelayReachability } from './reachability.js';
+import type { StepUpService } from './step-up-service.js';
 import {
   STEP_UP_ASSERTION_HEADER,
   callNeedsStepUp,
@@ -156,6 +157,32 @@ export function wrapDispatchWithStepUp(
 
 const IDENTITY_SECRET_KEY = 'relay.identity';
 
+/** How many step-up passkeys the daemon holds: a read, and the count as last read or written. */
+export type StepUpCredentialCount = Pick<StepUpService, 'credentialCount' | 'lastKnownCredentialCount'>;
+
+/**
+ * Refuse turning `relay.requireStepUpForMutations` on while no passkey is
+ * registered: every state-changing relay call would then be refused, and a
+ * passkey cannot be registered through the relay, so the owner would learn it
+ * only away from home. The store is read now, so the count is known by the
+ * time anyone writes the setting; an unread count is refused as unconfirmed.
+ */
+export function admitStepUpRequirement(configManager: Pick<ConfigManager, 'registerWriteAdmission'>, credentials: StepUpCredentialCount): () => void {
+  const refresh = (): void => { void credentials.credentialCount().catch(() => undefined); };
+  refresh();
+  return configManager.registerWriteAdmission('relay.requireStepUpForMutations', (value, current) => {
+    if (value !== true || current === true) return null;
+    const count = credentials.lastKnownCredentialCount();
+    if (count !== undefined && count > 0) return null;
+    // Read again, so a passkey registered by another process is seen on the next try.
+    refresh();
+    const register = 'Register a passkey with stepup.credentials.register over a direct connection to the daemon (not through the relay), then turn this on.';
+    return count === 0
+      ? { reason: 'no step-up passkey is registered, so requiring step-up would refuse every state-changing call through the relay, and a passkey cannot be registered through the relay.', next: [register] }
+      : { reason: 'the daemon has not finished reading its passkey store, so it cannot confirm a passkey is registered.', next: ['Try again in a moment.', register] };
+  });
+}
+
 /** The step-up challenge-mint REST path, exempt from the step-up gate (bootstrap) on a host with no catalog. */
 const STEP_UP_CHALLENGE_MINT_PATH = '/api/stepup/challenge';
 
@@ -174,7 +201,9 @@ export function buildDaemonRelayReachability(
   logger: { info(m: string, f?: Record<string, unknown>): void; warn(m: string, f?: Record<string, unknown>): void },
   verifyStepUp: StepUpAssertionVerifier,
   requestFacts?: RelayRequestFacts,
+  stepUpCredentials?: StepUpCredentialCount,
 ): RelayReachability {
+  if (stepUpCredentials) admitStepUpRequirement(configManager, stepUpCredentials);
   const gate: StepUpGateState = {
     relayEnabled: () => reachability.isEnabled(),
     requireStepUp: () => configManager.get('relay.requireStepUpForMutations'),

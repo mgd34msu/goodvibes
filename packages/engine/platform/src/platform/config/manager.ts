@@ -241,6 +241,15 @@ export interface DaemonWritePending {
   settle(): Promise<readonly DaemonWriteRefusal[]>;
 }
 
+/**
+ * A host's rule on one setting's new value, for a fact only the host knows
+ * (the daemon refusing to require step-up while no passkey is registered).
+ * Synchronous: it reads what the host already holds. Returns why the value is
+ * refused and what to do, or null to admit it.
+ */
+export type SettingWriteAdmission = (value: unknown, current: unknown) =>
+  { readonly reason: string; readonly next: readonly string[] } | null;
+
 /** One setting in a {@link ConfigManager.setMany} update. */
 export interface ConfigChange {
   readonly key: ConfigKey;
@@ -388,6 +397,8 @@ export class ConfigManager {
   // Private identities contain no authority grant and cannot be copied or forged.
   readonly #preparedMutations = new WeakMap<PreparedConfigMutation, PreparedMutationRecord>();
   readonly #preparedTransitions = new WeakMap<PreparedConfigMutationTransition, PreparedConfigMutation>();
+  /** Host rules on one setting's new value, registered by the composition that owns the fact they read. */
+  readonly #writeAdmissions = new Map<string, SettingWriteAdmission>();
   private readonly _listeners = new Map<string, Set<(newVal: unknown, oldVal: unknown) => void>>();
   /** Active config-file watch handle (external-edit live reload), or null. */
   private _fileWatch: ConfigFileWatchHandle | null = null;
@@ -765,6 +776,10 @@ export class ConfigManager {
     // (against the whole plan) and, for a write to this surface's own file,
     // the stricter project value that would undo it at the next start.
     const value = normalizePreparedValue(request.key, schema, requested, this.preparedAdmissionContext(request.key, destinations, projected));
+    if (request.operation === 'set') {
+      const hostRefusal = this.hostWriteRefusal(request.key, value);
+      if (hostRefusal) throw new ConfigError(`${request.key} was not changed: ${hostRefusal.reason} ${hostRefusal.next.join(' ')}`);
+    }
     const handle = Object.freeze({}) as PreparedConfigMutation;
     const record: PreparedMutationRecord = {
       facts: freezePreparedData({ operation: request.operation, key: request.key, value, destinations, incarnation }),
@@ -1395,6 +1410,8 @@ export class ConfigManager {
     if (!admission.ok) {
       throw new ConfigError(credentialValueRefusal(key, value) ? admission.reason : `Invalid value for ${key} (${admission.reason})`);
     }
+    const hostRefusal = this.hostWriteRefusal(key, admission.value);
+    if (hostRefusal) throw new ConfigError(`${key} was not changed: ${hostRefusal.reason} ${hostRefusal.next.join(' ')}`);
     if (!options.bypassManagedLock) {
       const lock = purePolicyRead ? readStrictManagedSettingLock(key, this.configDir) : getManagedSettingLock(key, this.configDir);
       if (lock) {
@@ -1403,6 +1420,22 @@ export class ConfigManager {
     }
     this.#resolvePath(key);
     return admission.value;
+  }
+
+  /**
+   * Add a host rule on one setting's new value, checked by set(), setDynamic(),
+   * setMany() and prepared changes after the value's own admission. One rule
+   * per key; registering again replaces it. Returns the removal.
+   */
+  registerWriteAdmission(key: ConfigKey, admit: SettingWriteAdmission): () => void {
+    this.#writeAdmissions.set(key, admit);
+    return () => { if (this.#writeAdmissions.get(key) === admit) this.#writeAdmissions.delete(key); };
+  }
+
+  /** The registered host rule's refusal of `value` for `key`, or null. */
+  private hostWriteRefusal(key: string, value: unknown): { readonly reason: string; readonly next: readonly string[] } | null {
+    const admit = this.#writeAdmissions.get(key);
+    return admit ? admit(value, readDotPath(this.#config, key).value) : null;
   }
 
   /**
@@ -1548,6 +1581,8 @@ export class ConfigManager {
         return invalid(key, admission.reason);
       }
       const value = admission.value;
+      const hostRefusal = this.hostWriteRefusal(key, value);
+      if (hostRefusal) return refuse({ code: 'CONFIG_HOST_REFUSED', reason: `${key} was not changed: ${hostRefusal.reason}`, next: hostRefusal.next, status: 409 });
       if (!options.bypassManagedLock) {
         const lock = getManagedSettingLock(key, this.configDir);
         if (lock) {

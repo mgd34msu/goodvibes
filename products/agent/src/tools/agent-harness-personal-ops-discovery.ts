@@ -1,5 +1,5 @@
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
-import { findOperatorContractMethod, operatorContractMethods as contractMethodIndex } from '../agent/operator-contract-routes.ts';
+import { findOperatorContractMethod, operatorContractMethods as contractMethodIndex } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import type { CommandContext } from '../input/command-registry.ts';
 import { captureCatalogData, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { EFFECT_ADMISSION_SENTENCE } from './agent-harness-effect-admission.ts';

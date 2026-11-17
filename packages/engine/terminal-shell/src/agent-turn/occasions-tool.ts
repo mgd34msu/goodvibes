@@ -59,10 +59,10 @@ import { randomBytes } from 'node:crypto';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { captureProfileDelegation } from '@goodvibes-jev/engine/platform/platform/owner-profile';
 import { assertCurrentToolEffect, ToolInputProjectionError, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
-import { captureCatalogData } from './agent-harness-catalog-ranking.ts';
-import { agentLocalStateWrite, assertAgentLocalStateCurrent, createAgentLocalStateInputProjector } from './agent-local-state-admission.ts';
-import { captureOccasionsGatewayCurrent, captureOccasionsGatewayLocalState } from '../agent/occasions-gateway.ts';
-import type { OccasionsGatewayInvoke } from '../agent/occasions-gateway.ts';
+import { captureCatalogData } from './catalog-data.js';
+import { agentLocalStateWrite, assertAgentLocalStateCurrent, createAgentLocalStateInputProjector } from './local-state-admission.js';
+import { captureOccasionsGatewayCurrent, captureOccasionsGatewayLocalState } from './occasions-gateway.js';
+import type { OccasionsGatewayInvoke } from './occasions-gateway.js';
 import {
   isOccasionsAnswerWord,
   isOccasionsKindWord,
@@ -88,7 +88,7 @@ import {
   type OccasionsPlansProposeInput,
   type OccasionsProposeInput,
   type OccasionsRecurrenceWord,
-} from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+} from './occasions-types.js';
 import {
   fail,
   isOutcome,
@@ -97,7 +97,7 @@ import {
   readString,
   type AgentOccasionsToolDeps,
   type ToolOutcome,
-} from './agent-occasions-outcome.ts';
+} from './occasions-outcome.js';
 import {
   handleGifts,
   handleList,
@@ -106,8 +106,8 @@ import {
   handleState,
   renderInterviewLines,
   renderInterviewResponse,
-} from './agent-occasions-reads.ts';
-import { isProfileAuthority, PROFILE_AUTHORITIES } from './agent-profile-types.ts';
+} from './occasions-reads.js';
+import { isProfileAuthority, PROFILE_AUTHORITIES } from './profile-types.js';
 
 const ACTION_METHODS: Readonly<Record<OccasionsAction, OccasionsMethodId>> = {
   list: OCCASIONS_METHOD_IDS.list, pending: OCCASIONS_METHOD_IDS.pending, state: OCCASIONS_METHOD_IDS.state,

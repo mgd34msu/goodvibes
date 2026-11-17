@@ -11,7 +11,7 @@ import {
   buildAutonomySchedulePrompt,
 } from './autonomy-schedule.ts';
 import { createConnectedHost, isHostFailure } from './connected-host-client.ts';
-import { findOperatorHttpBinding } from './operator-contract-routes.ts';
+import { findOperatorHttpBinding } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import {
   ROUTINE_SCHEDULE_LIST_METHOD,
   ROUTINE_SCHEDULE_ROUTE,

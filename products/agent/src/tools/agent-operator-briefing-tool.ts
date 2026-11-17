@@ -6,7 +6,7 @@ import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools
 import type { ShellPathService } from '@/runtime/index.ts';
 import type { AgentConnectedHostConfigReader } from '../agent/routine-schedule-promotion.ts';
 import { resolveAgentConnectedHostConnection } from '../agent/routine-schedule-promotion.ts';
-import { requireOperatorHttpBinding } from '../agent/operator-contract-routes.ts';
+import { requireOperatorHttpBinding } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 type WorkLedgerReadClient = ReturnType<typeof createOperatorWorkLedgerReadClient>;
 type WorkLedgerReadSnapshot = Awaited<ReturnType<WorkLedgerReadClient['readSnapshot']>>;

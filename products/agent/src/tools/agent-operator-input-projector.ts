@@ -5,13 +5,13 @@ import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { isDeepStrictEqual } from 'node:util';
 import type { ShellPathService } from '@/runtime/index.ts';
 import type { AgentConnectedHostConfigReader } from '../agent/routine-schedule-promotion.ts';
-import { operatorMethodIsReadOnly, resolveOperatorContractMethod } from '../agent/operator-contract-routes.ts';
+import { operatorMethodIsReadOnly, resolveOperatorContractMethod } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { getOperatorActions, isOperatorActionId, targetValue } from '../agent/operator-actions.ts';
 import { captureOperatorConnection } from '../agent/operator-connection-owner.ts';
 import { captureOperatorAutomationTarget, type OperatorAutomationTarget } from '../agent/operator-automation-target.ts';
 import { captureOperatorRequestPolicy } from '../agent/operator-request-policy.ts';
 
-export { assertSafeOperatorPathValue } from '../agent/operator-contract-routes.ts';
+export { assertSafeOperatorPathValue } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 // The method descriptors state whether a method sends something outward; built once, on first use.
 let builtinMethods: GatewayMethodCatalog | undefined;

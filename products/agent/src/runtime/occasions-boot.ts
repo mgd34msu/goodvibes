@@ -23,7 +23,8 @@
 import type { ConfigManager } from '../config/index.ts';
 import type { ConversationManager } from '../core/conversation.ts';
 import type { GatewayMethodCatalog } from '@goodvibes-jev/engine/platform/platform/control-plane';
-import { createOccasionsGatewayInvoke } from '../agent/occasions-gateway.ts';
+import { createOccasionsGatewayInvoke } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { connectedHostFamilyRemote } from '../agent/operator-gateway-call.ts';
 import {
   createOccasionsNudgeSurface,
   type OccasionsNudgeSurface,
@@ -77,8 +78,7 @@ export function installOccasionsNudging(deps: OccasionsBootDeps): OccasionsNudge
   const surface = createOccasionsNudgeSurface({
     invoke: createOccasionsGatewayInvoke({
       gatewayMethods: deps.gatewayMethods,
-      configManager: deps.configManager,
-      homeDirectory: deps.homeDirectory,
+      remote: connectedHostFamilyRemote({ configManager: deps.configManager, homeDirectory: deps.homeDirectory }),
     }),
     conversation: deps.conversation,
     requestRender: deps.requestRender,

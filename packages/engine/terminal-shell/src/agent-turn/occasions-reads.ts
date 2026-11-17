@@ -20,8 +20,8 @@
 
 import { homedir } from 'node:os';
 import { disclosedDateOf, type DisclosedDate } from '@goodvibes-jev/engine/platform/platform/security';
-import { getSessionUntrustedContentLedger } from '../trust/untrusted-content.ts';
-import { homeRelativePath } from './agent-harness-tool-utils.ts';
+import { getProcessUntrustedContentLedger as getSessionUntrustedContentLedger } from '@goodvibes-jev/engine/platform/platform/security';
+import { homeRelativePath } from './home-path.js';
 import {
   narrowOccasionsGifts,
   narrowOccasionsList,
@@ -32,13 +32,13 @@ import {
   OCCASIONS_METHOD_IDS,
   OCCASIONS_RESPONSE_UNREADABLE,
   type OccasionsInterviewResponse,
-} from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+} from './occasions-types.js';
 import {
   fail,
   ok,
   type AgentOccasionsToolDeps,
   type ToolOutcome,
-} from './agent-occasions-outcome.ts';
+} from './occasions-outcome.js';
 
 // ── The interview renderer, shared with the answer handlers ────────────────
 

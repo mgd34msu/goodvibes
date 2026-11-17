@@ -45,9 +45,9 @@ import { basename } from 'node:path';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { ToolInputProjectionError, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { PROFILE_FIELDS, PROSE_ONLY_SECTIONS, captureProfileDelegation } from '@goodvibes-jev/engine/platform/platform/owner-profile';
-import { captureProfileGatewayCurrent, captureProfileGatewayLocalState, type ProfileGatewayInvoke } from '../agent/owner-profile-gateway.ts';
-import { captureCatalogSnapshot } from './agent-harness-catalog-ranking.ts';
-import { agentLocalStateWrite, assertAgentLocalStateCurrent, createAgentLocalStateInputProjector } from './agent-local-state-admission.ts';
+import { captureProfileGatewayCurrent, captureProfileGatewayLocalState, type ProfileGatewayInvoke } from './profile-gateway.js';
+import { captureCatalogSnapshot } from './catalog-data.js';
+import { agentLocalStateWrite, assertAgentLocalStateCurrent, createAgentLocalStateInputProjector } from './local-state-admission.js';
 import {
   isProfileAuthority,
   narrowProfileGet,
@@ -65,7 +65,7 @@ import {
   type ProfileAuthority,
   type ProfileFieldResponse,
   type ProfileLineResponse,
-} from './agent-profile-types.ts';
+} from './profile-types.js';
 
 /**
  * The section whose lines are about people other than him. Held back from

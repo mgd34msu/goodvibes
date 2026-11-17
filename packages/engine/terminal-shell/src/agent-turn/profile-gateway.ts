@@ -22,20 +22,20 @@ import { captureOccasionsGatewayTarget } from '@goodvibes-jev/engine/platform/pl
 import type { ProfileMutationOptions } from '@goodvibes-jev/engine/platform/platform/owner-profile';
 import { dirname } from 'node:path';
 import type { OperatorMethodId, OperatorMethodInput } from '@goodvibes-jev/engine/platform/contracts';
-import { PROFILE_METHOD_IDS, type ProfileMethodId } from '../tools/agent-profile-types.ts';
+import { PROFILE_METHOD_IDS, type ProfileMethodId } from './profile-types.js';
 import {
   captureFamilyGatewayRoute,
   invokeFamilyGatewayMethod,
   operatorRouteLabel,
   type FamilyGatewayOptions,
-} from './operator-gateway-call.ts';
+} from './family-gateway.js';
 
 export interface ProfileGatewayResult {
   readonly ok: boolean;
   /** Raw daemon payload; the caller narrows it (tools/agent-profile-types.ts). */
   readonly data: unknown;
   /** Present only when `ok` is false. Safe to show him, it never carries a profile value. */
-  readonly error?: string;
+  readonly error?: string | undefined;
   /** Which route the call actually took, for honest "where did this answer come from". */
   readonly route: 'in-process' | 'connected-host' | 'unavailable';
 }

@@ -5,7 +5,8 @@
  * terminal: the operator policy, the capture contract and the vocabulary of the
  * tools it names, and the per-turn prompt composer with the stores it reads
  * (VIBE, project context, persona, skills, routines, reviewed memory) and its
- * receipt journal.
+ * receipt journal, and the Agent tools that need no terminal (`profile` and
+ * `occasions`, over the daemon's own verbs).
  */
 export { GOODVIBES_AGENT_OPERATOR_POLICY } from './operator-policy.js';
 export {
@@ -33,3 +34,15 @@ export * from './skill-standard.js';
 export * from './store-change-stamp.js';
 export * from './store-file.js';
 export * from './vibe-file.js';
+export * from './catalog-data.js';
+export * from './home-path.js';
+export * from './operator-contract-routes.js';
+export * from './family-gateway.js';
+export * from './profile-types.js';
+export * from './profile-gateway.js';
+export * from './profile-tool.js';
+export * from './occasions-gateway.js';
+export * from './occasions-outcome.js';
+export * from './occasions-reads.js';
+export * from './occasions-tool.js';
+export * from './local-state-admission.js';

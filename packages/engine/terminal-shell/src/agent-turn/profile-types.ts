@@ -23,7 +23,7 @@
  */
 
 import type { OperatorMethodInput, OperatorMethodOutput } from '@goodvibes-jev/engine/platform/contracts';
-import type { AuthoritySurface } from '../trust/untrusted-content.ts';
+import type { AuthoritySurface } from '@goodvibes-jev/engine/platform/platform/security';
 
 /** Every write takes one. Only `owner-direct` is accepted by the daemon (§7 layer 1). */
 export type ProfileAuthority = AuthoritySurface;

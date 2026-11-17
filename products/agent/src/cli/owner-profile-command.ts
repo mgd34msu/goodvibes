@@ -18,7 +18,8 @@ import { commandJsonOrText as jsonOrText } from '@goodvibes-jev/engine/terminal-
  *   this file logs a value, and `status` prints counts and field names only.
  */
 
-import { createProfileGatewayInvoke, type ProfileGatewayInvoke } from '../agent/owner-profile-gateway.ts';
+import { createProfileGatewayInvoke, type ProfileGatewayInvoke } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { connectedHostFamilyRemote } from '../agent/operator-gateway-call.ts';
 import {
   narrowProfileGet,
   narrowProfilePerson,
@@ -32,7 +33,7 @@ import {
   PROFILE_METHOD_IDS,
   PROFILE_RECORDING_SURFACE,
   PROFILE_RESPONSE_UNREADABLE,
-} from '../tools/agent-profile-types.ts';
+} from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { operatorFlagValue, parseOperatorCommandArgs } from './operator-command-args.ts';
 import type { CliCommandOutput } from './types.ts';
 import type { CliCommandRuntime } from './management.ts';
@@ -90,8 +91,7 @@ function gatewayFor(runtime: CliCommandRuntime): ProfileGatewayInvoke {
   // The CLI process composes no gateway catalog of its own, so every call goes
   // to the connected host that owns the file.
   return createProfileGatewayInvoke({
-    configManager: runtime.configManager,
-    homeDirectory: runtime.homeDirectory,
+    remote: connectedHostFamilyRemote({ configManager: runtime.configManager, homeDirectory: runtime.homeDirectory }),
   });
 }
 

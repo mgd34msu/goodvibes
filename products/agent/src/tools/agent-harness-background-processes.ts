@@ -11,7 +11,7 @@ import { rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-
 import { processClassificationOptions, spawnBackgroundProcess, type ProcessClassificationOptions } from './agent-harness-process-launch.ts';
 import { detachedProcessLogPath, findDetachedProcess, forgetDetachedProcess, listDetachedProcesses, readDetachedProcessLog, recordDetachedProcess, stopDetachedProcess,
   type DetachedProcessRecord } from './agent-harness-detached-processes.ts';
-import { operatorContractMethods, type OperatorContractMethodEntry } from '../agent/operator-contract-routes.ts';
+import { operatorContractMethods, type OperatorContractMethodEntry } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import type { BackgroundProcess, ProcessManager } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { CommandContext } from '../input/command-registry.ts';
 import { sudoExecutionPosture } from './agent-harness-sudo-posture.ts';

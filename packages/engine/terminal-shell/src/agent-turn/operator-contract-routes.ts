@@ -26,17 +26,17 @@ export type JsonRecord = Record<string, unknown>;
 /** The subset of a contract method entry this module reads. */
 export interface OperatorContractMethodEntry {
   readonly id: string;
-  readonly title?: string;
-  readonly description?: string;
-  readonly category?: string;
-  readonly access?: string;
-  readonly scopes?: readonly string[];
+  readonly title?: string | undefined;
+  readonly description?: string | undefined;
+  readonly category?: string | undefined;
+  readonly access?: string | undefined;
+  readonly scopes?: readonly string[] | undefined;
   readonly http?: {
-    readonly method?: string;
-    readonly path?: string;
+    readonly method?: string | undefined;
+    readonly path?: string | undefined;
   };
-  readonly inputSchema?: Record<string, unknown>;
-  readonly invokable?: boolean;
+  readonly inputSchema?: Record<string, unknown> | undefined;
+  readonly invokable?: boolean | undefined;
 }
 
 /** A method's HTTP binding, exactly as the contract states it. */

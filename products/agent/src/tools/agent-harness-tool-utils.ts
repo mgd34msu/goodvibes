@@ -8,12 +8,7 @@ import { inventoryDisclosure, withInventoryDisclosure } from './inventory-disclo
  * layout of the home directory are not needed by a model or a provider log;
  * the owner can still find the file.
  */
-export function homeRelativePath(path: string, home: string | null | undefined): string {
-  const root = home?.replace(/[\\/]+$/, '');
-  if (!root || !path) return path;
-  if (path === root) return '~';
-  return path.startsWith(`${root}/`) || path.startsWith(`${root}\\`) ? `~${path.slice(root.length)}` : path;
-}
+export { homeRelativePath } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 export function readString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';

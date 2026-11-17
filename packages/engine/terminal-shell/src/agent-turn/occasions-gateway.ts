@@ -36,20 +36,20 @@ import { captureOccasionsGatewayTarget } from '@goodvibes-jev/engine/platform/pl
 import { dirname } from 'node:path';
 import type { OccasionMutationOptions } from '@goodvibes-jev/engine/platform/platform/occasions';
 import type { OperatorMethodId, OperatorMethodInput } from '@goodvibes-jev/engine/platform/contracts';
-import { OCCASIONS_METHOD_IDS, type OccasionsMethodId } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { OCCASIONS_METHOD_IDS, type OccasionsMethodId } from './occasions-types.js';
 import {
   captureFamilyGatewayRoute,
   invokeFamilyGatewayMethod,
   operatorRouteLabel,
   type FamilyGatewayOptions,
-} from './operator-gateway-call.ts';
+} from './family-gateway.js';
 
 export interface OccasionsGatewayResult {
   readonly ok: boolean;
   /** Raw daemon payload; the caller narrows it (the engine's terminal-shell agent-turn/occasions-types.ts). */
   readonly data: unknown;
   /** Present only when `ok` is false. Safe to show him, it never carries a date. */
-  readonly error?: string;
+  readonly error?: string | undefined;
   /** Which route the call actually took, for honest "where did this answer come from". */
   readonly route: 'in-process' | 'connected-host' | 'unavailable';
 }

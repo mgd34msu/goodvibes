@@ -11,7 +11,7 @@
  * a second answer to "was this argument given".
  */
 
-import type { OccasionsGatewayInvoke } from '../agent/occasions-gateway.ts';
+import type { OccasionsGatewayInvoke } from './occasions-gateway.js';
 
 export type ToolOutcome = { readonly success: boolean; readonly output: string };
 

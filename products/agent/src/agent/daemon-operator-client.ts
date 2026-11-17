@@ -33,7 +33,7 @@ import {
   type HostFailureKind,
   type HostRefusal,
 } from './connected-host-client.ts';
-import { findOperatorHttpBinding, type JsonRecord } from './operator-contract-routes.ts';
+import { findOperatorHttpBinding, type JsonRecord } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 export { EXPLICIT_USER_REQUEST_HEADER };
 

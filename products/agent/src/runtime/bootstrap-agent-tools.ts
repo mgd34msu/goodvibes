@@ -15,8 +15,9 @@ import type { RuntimeServices } from './services.ts';
 import { bindControlCommands } from './control-surfaces.ts';
 import { missingConversationalCaptureTools } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
-import { createOccasionsGatewayInvoke } from '../agent/occasions-gateway.ts';
-import { createProfileGatewayInvoke } from '../agent/owner-profile-gateway.ts';
+import { createOccasionsGatewayInvoke } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { createProfileGatewayInvoke } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { connectedHostFamilyRemote } from '../agent/operator-gateway-call.ts';
 import { registerAgentAuditTool } from '../tools/agent-audit-tool.ts';
 import { registerAgentAutonomyTool } from '../tools/agent-autonomy-tool.ts';
 import { registerAgentCapabilityTool } from '../tools/agent-capability-tool.ts';
@@ -31,9 +32,9 @@ import { registerAgentHostTool } from '../tools/agent-host-tool.ts';
 import { installAgentMcpCallRoute } from '../tools/agent-mcp-call-route.ts';
 import { registerAgentMemoryTool } from '../tools/agent-memory-tool.ts';
 import { registerAgentModelsTool } from '../tools/agent-models-tool.ts';
-import { registerAgentOccasionsTool } from '../tools/agent-occasions-tool.ts';
+import { registerAgentOccasionsTool } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { registerAgentPersonalOpsTool } from '../tools/agent-personal-ops-tool.ts';
-import { registerAgentProfileTool } from '../tools/agent-profile-tool.ts';
+import { registerAgentProfileTool } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { registerAgentResearchTool } from '../tools/agent-research-tool.ts';
 import { registerAgentRouteTool } from '../tools/agent-route-tool.ts';
 import { registerAgentSecurityTool } from '../tools/agent-security-tool.ts';
@@ -118,8 +119,7 @@ export function registerAgentTools(deps: AgentToolRegistrationDeps): void {
   registerAgentOccasionsTool(toolRegistry, {
     invoke: createOccasionsGatewayInvoke({
       gatewayMethods: services.gatewayMethods,
-      configManager,
-      homeDirectory: services.shellPaths.homeDirectory,
+      remote: connectedHostFamilyRemote({ configManager, homeDirectory: services.shellPaths.homeDirectory }),
     }),
   });
   registerAgentPersonalOpsTool(toolRegistry, commandRegistry, commandContext);
@@ -131,8 +131,7 @@ export function registerAgentTools(deps: AgentToolRegistrationDeps): void {
   registerAgentProfileTool(toolRegistry, {
     invoke: createProfileGatewayInvoke({
       gatewayMethods: services.gatewayMethods,
-      configManager,
-      homeDirectory: services.shellPaths.homeDirectory,
+      remote: connectedHostFamilyRemote({ configManager, homeDirectory: services.shellPaths.homeDirectory }),
     }),
   });
   registerAgentResearchTool(toolRegistry, commandRegistry, commandContext);

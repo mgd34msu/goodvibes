@@ -101,7 +101,7 @@ import {
   occasionsRaiseLines,
   type OccasionsRaiseLedger,
 } from '../agent/occasions-nudge.ts';
-import type { OccasionsGatewayInvoke } from '../agent/occasions-gateway.ts';
+import type { OccasionsGatewayInvoke } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import {
   OCCASIONS_METHOD_IDS,
   narrowOccasionsPending,

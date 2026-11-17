@@ -38,7 +38,7 @@ import {
   type ConnectedHostOperatorToken,
 } from '../runtime/connected-host-auth.ts';
 import { agentHostPairingStorePath } from '../runtime/connected-host-pairing-store.ts';
-import { assertSafeOperatorPathValue, findOperatorContractMethod, findOperatorHttpBinding, READ_ONLY_HTTP_METHODS } from './operator-contract-routes.ts';
+import { assertSafeOperatorPathValue, findOperatorContractMethod, findOperatorHttpBinding, READ_ONLY_HTTP_METHODS } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 export type ConnectedHostSource = ConnectedHostCredentialSource;
 

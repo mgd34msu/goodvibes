@@ -247,6 +247,10 @@ declareLoosening('payments.majorRetailersExcluded', removesFromList('let an excl
 declareLoosening('payments.ebayMinSellerFeedbackCount', lowersThreshold('lower the eBay seller feedback a purchase needs'));
 declareLoosening('payments.ebayMinSellerPositivePercent', lowersThreshold('lower the eBay seller rating a purchase needs'));
 declareLoosening('payments.notifyChannels', addsToList('let another channel answer purchase approvals'));
+// Every limit is counted in this currency, so another one changes what each limit is worth.
+declareLoosening('payments.currency', { loosening: 'change the currency your spending limits are counted in', loosens: changes });
+// A purchase inside the limits goes without asking, so whoever sets the address receives it.
+declareLoosening('payments.shippingAddress.', { loosening: 'change where purchases are delivered', loosens: changes });
 
 function looseningFor(key: string): Loosening | undefined {
   const exact = EXACT_LOOSENING.get(key);

@@ -1189,6 +1189,24 @@ export class ConfigManager {
   }
 
   /**
+   * Whether this process may write a daemon-owned key into the daemon's file
+   * itself: it owns that file, the caller states no daemon is running, or its
+   * attached daemon route finds none to send the write to (the file is then
+   * what the daemon reads when it starts). A process that never attached a
+   * route cannot tell a running daemon from none, so it may not.
+   */
+  #mayWriteDaemonFile(options: ConfigSetOptions): boolean {
+    if (this.daemonTierOwner || options.daemonNotRunning === true) return true;
+    const route = this.#daemonRoute;
+    return route !== null && !route.reachable();
+  }
+
+  /** Refuses a daemon-owned write this process may not put in the daemon's file (see {@link #mayWriteDaemonFile}). */
+  #refuseDaemonFileWrite(key: string, options: ConfigSetOptions): void {
+    if (this.daemonTierPath !== null && isDaemonOwnedConfigKey(key) && !this.#mayWriteDaemonFile(options)) throw daemonOwnedRefusal(key);
+  }
+
+  /**
    * Take a daemon-owned value the daemon now holds into this process's view,
    * without writing any file: for a caller that already wrote it through the
    * daemon and awaited the answer.
@@ -1319,6 +1337,7 @@ export class ConfigManager {
       this.#forwardDaemonWrite(route, key, value, readDotPath(this.#config, key).value, false);
       return;
     }
+    this.#refuseDaemonFileWrite(key, options);
     const useDaemonTier = this.daemonTierPath !== null && isDaemonOwnedConfigKey(key);
     this.refuseBehindStricterProjectValue(key, value);
 
@@ -1473,7 +1492,8 @@ export class ConfigManager {
     // file for it to read at start; an agent's waits for the daemon.
     const daemonChange = admitted.find(change => change.tier === 'daemon');
     const route = daemonChange ? this.#routedDaemonWrite(daemonChange.key, options) : null;
-    if (daemonChange && !route && !this.daemonTierOwner && options.daemonNotRunning !== true && by.kind !== 'owner') {
+    const fileWritable = this.daemonTierOwner || options.daemonNotRunning === true || (by.kind === 'owner' && this.#mayWriteDaemonFile(options));
+    if (daemonChange && !route && !fileWritable) {
       return refuse({ code: 'CONFIG_DAEMON_OWNED', reason: daemonOwnedRefusal(daemonChange.key).message,
         next: [`goodvibes-daemon config set ${daemonChange.key} <value>`], status: 409 });
     }
@@ -2126,6 +2146,9 @@ export class ConfigManager {
       if (value === undefined) continue;
       const path = `${String(category)}.${field}`;
       refuseCredentialLeaves(path, value);
+      // A category patch cannot be sent to the daemon key by key, so a daemon-owned
+      // field is written here only where this process may write the daemon's file.
+      this.#refuseDaemonFileWrite(path, {});
       const schema = CONFIG_SCHEMA.find(setting => setting.key === path);
       if (schema) {
         const refusal = (schema.validate && !schema.validate(value) ? 'does not satisfy this setting\'s rules' : null)
@@ -2166,6 +2189,7 @@ export class ConfigManager {
     if (!(key in current) && ![...staged.overrides.keys()].some(entry => entry === hostKey || entry.startsWith(`${hostKey}.`))) return;
     const lock = getManagedSettingLock(hostKey as ConfigKey, this.configDir);
     if (lock) throw new ConfigError(`Setting ${hostKey} is locked by ${lock.source}: ${lock.reason}`);
+    this.#refuseDaemonFileWrite(hostKey, {});
     const previousValue = readDotPath(this.#config, hostKey).value;
     delete current[key];
     staged.retire(hostKey);
@@ -2207,6 +2231,7 @@ export class ConfigManager {
     if (key !== undefined) {
       const lock = getManagedSettingLock(key, this.configDir);
       if (lock) throw new ConfigError(`Setting ${key} is locked by ${lock.source}: ${lock.reason}`);
+      this.#refuseDaemonFileWrite(key, options);
     }
     // A per-tool permission has no schema row (tools register at runtime) but is still written by set() and can be
     // held by the project file, whose refusal tells the user to reset it.

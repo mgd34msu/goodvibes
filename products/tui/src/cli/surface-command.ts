@@ -12,8 +12,10 @@ import {
   isPresentConfigValue,
   probeTcp,
   readAuthPaths,
+  withDaemonSettingsRoute,
   yesNo,
 } from './management-utils.ts';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { serviceSettingsIssues } from './service-posture.ts';
 
 export const SURFACE_CONFIGS = [
@@ -108,6 +110,19 @@ function sharedSettingsLeftOn(config: ConfigManager, surfaceId: string): string[
 }
 
 export async function handleSurfacesCommand(runtime: CliCommandRuntime): Promise<{ readonly output: string; readonly exitCode: number }> {
+  const [sub = 'list'] = runtime.cli.commandArgs;
+  if (sub !== 'enable' && sub !== 'disable') return await surfacesCommand(runtime);
+  // A surface's settings are the daemon's: while it is reachable they are sent
+  // to it, otherwise written to its file for it to read when it starts.
+  const { result, refused } = await withDaemonSettingsRoute(runtime, () => surfacesCommand(runtime));
+  if (refused.length === 0) return result;
+  return {
+    output: [result.output, ...refused.map(({ key, error }) => `The daemon refused ${key}; it was not changed: ${summarizeError(error)}`)].join('\n'),
+    exitCode: 1,
+  };
+}
+
+async function surfacesCommand(runtime: CliCommandRuntime): Promise<{ readonly output: string; readonly exitCode: number }> {
   const config = runtime.configManager;
   const [sub = 'list', ...rest] = runtime.cli.commandArgs;
   const target = rest[0];

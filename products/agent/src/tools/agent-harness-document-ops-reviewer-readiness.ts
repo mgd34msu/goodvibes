@@ -1,7 +1,7 @@
 import type { ArtifactDescriptor } from '@goodvibes-jev/engine/platform/platform/artifacts';
 import type { CommandContext } from '../input/command-registry.ts';
-import { AgentDocumentRegistry, type AgentDocumentRecord } from '../agent/document-registry.ts';
-import { hasPurpose, PURPOSE_MODEL_COMPARE_ROUTE_DECISION } from './agent-review-packet-presets-core.ts';
+import { AgentDocumentRegistry, type AgentDocumentRecord } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { hasPurpose, PURPOSE_MODEL_COMPARE_ROUTE_DECISION } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import type { ReviewerReadinessCheck, ReviewerReadinessChecklist, ReviewerReadinessStatus } from './agent-harness-document-ops-types.ts';
 
 function readMetadataString(value: unknown): string {

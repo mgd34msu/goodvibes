@@ -24,7 +24,7 @@ export interface InventoryDisclosureInput {
   /** The exact call that returns the unfiltered list. */
   readonly listAllRoute: string;
   /** Optional extra facts worth stating, e.g. "2 of them are ready". */
-  readonly context?: readonly string[];
+  readonly context?: readonly string[] | undefined;
 }
 
 export interface InventoryDisclosure {

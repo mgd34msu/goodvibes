@@ -5,10 +5,8 @@ import { controlSurfacesFor } from './control-surfaces.ts';
 import { installAgentToolPolicyGuard } from '../tools/agent-tool-policy-guard.ts';
 import { registerAgentChannelSendTool } from '../tools/agent-channel-send-tool.ts';
 import { registerAgentAutonomyScheduleTool } from '../tools/agent-autonomy-schedule-tool.ts';
-import { registerAgentArtifactsTool } from '../tools/agent-artifacts-tool.ts';
 import { agentBrowserProfileRoot, agentBrowserScreenshotRoot } from './agent-browser.ts';
 import { registerAgentBrowserTool } from '../tools/agent-browser-tool.ts';
-import { registerAgentDocumentsTool } from '../tools/agent-documents-tool.ts';
 import { registerAgentAccountsTool } from '../tools/agent-accounts-tool.ts';
 import { AgentAccountRegistry, ACCOUNT_REGISTRY_PATH_SEGMENTS } from '@goodvibes-jev/engine/platform/platform/google';
 import { containsSecretLikeText } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
@@ -24,11 +22,10 @@ import { registerAgentOperatorActionTool } from '../tools/agent-operator-action-
 import { registerAgentOperatorBriefingTool } from '../tools/agent-operator-briefing-tool.ts';
 import { registerAgentOperatorMethodTool } from '../tools/agent-operator-method-tool.ts';
 import { registerAgentReminderScheduleTool } from '../tools/agent-reminder-schedule-tool.ts';
-import { registerAgentReviewPacketPresetsTool } from '../tools/agent-review-packet-presets-tool.ts';
 import { registerAgentReviewPacketShareTool } from '../tools/agent-review-packet-share-tool.ts';
 import { registerAgentResearchReportTool } from '../tools/agent-research-report-tool.ts';
-import { registerAgentResearchRunsTool } from '../tools/agent-research-runs-tool.ts';
-import { registerAgentResearchSourcesTool } from '../tools/agent-research-sources-tool.ts';
+import { registerAgentTurnTools } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { connectedHostFamilyRemote } from '../agent/operator-gateway-call.ts';
 import { registerAgentScheduleEditTool } from '../tools/agent-schedule-edit-tool.ts';
 import { registerAgentScheduleTool } from '../tools/agent-schedule-tool.ts';
 import { registerAgentWorkPlanTool } from '../tools/agent-work-plan-tool.ts';
@@ -159,7 +156,14 @@ export function composeAgentToolRegistry(deps: AgentToolRegistryDeps): AgentTool
     // different instance nothing reads.
     contextAccountingHolder: services.contextAccountingHolder,
   });
-  registerAgentArtifactsTool(toolRegistry, services.artifactStore, { projectRoot: services.shellPaths.workingDirectory });
+  // The Agent tools a turn has wherever it runs, the same list a turn the daemon
+  // hosts for the Agent registers (agent-turn's registerAgentTurnTools).
+  registerAgentTurnTools(toolRegistry, {
+    gatewayMethods: services.gatewayMethods,
+    remote: connectedHostFamilyRemote({ configManager, homeDirectory: services.shellPaths.homeDirectory }),
+    shellPaths: services.shellPaths,
+    artifactStore: services.artifactStore,
+  });
   registerAgentBrowserTool(toolRegistry, {
     screenshotDirectory: agentBrowserScreenshotRoot(services.shellPaths.homeDirectory),
     profileRoot: agentBrowserProfileRoot(services.shellPaths.homeDirectory),
@@ -195,18 +199,14 @@ export function composeAgentToolRegistry(deps: AgentToolRegistryDeps): AgentTool
       return readSurfaceEmailSettings((key) => (configManager as { get: (key: string) => unknown }).get(key)).fromAddress ?? null;
     },
   });
-  registerAgentDocumentsTool(toolRegistry, services.shellPaths, services.artifactStore);
   registerAgentKnowledgeIngestTool(toolRegistry, services.shellPaths, configManager);
   registerAgentChannelSendTool(toolRegistry, services.channelDeliveryRouter, { shellPaths: services.shellPaths });
   registerAgentKnowledgeTool(toolRegistry, services.shellPaths, configManager);
   registerAgentLearningConsolidationTool(toolRegistry, services.shellPaths, services.memoryRegistry, services.memorySpineClient);
   registerAgentLocalRegistryTool(toolRegistry, services.shellPaths, services.memoryRegistry, services.memorySpineClient);
   registerAgentMediaGenerateTool(toolRegistry, services.mediaProviders, services.artifactStore);
-  registerAgentResearchRunsTool(toolRegistry, services.shellPaths);
-  registerAgentResearchSourcesTool(toolRegistry, services.shellPaths);
   registerAgentResearchReportTool(toolRegistry, services.artifactStore, deps.researchReportSourceOwner ?? deps.researchSourceOwner,
     deps.researchReportSourceOwner ? 'report-only' : 'shared', deps.researchSourceOwner);
-  registerAgentReviewPacketPresetsTool(toolRegistry, services.artifactStore);
   registerAgentReviewPacketShareTool(toolRegistry, services.artifactStore, services.channelDeliveryRouter);
   registerAgentModelCompareTool(toolRegistry, {
     modelCatalog: services.providerRegistry,

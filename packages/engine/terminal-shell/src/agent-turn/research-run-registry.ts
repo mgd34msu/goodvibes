@@ -2,10 +2,10 @@ import { randomBytes } from 'node:crypto';
 import { existsSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { defineLifecycle, holdProcessLock, type HeldProcessLock } from '@goodvibes-jev/engine/platform/platform/utils';
-import type { ShellPathService } from '@/runtime/index.ts';
-import { readJsonStore, updateJsonStore, type JsonStoreSpec } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
-import { assertNoSecretLikeText } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+import { readJsonStore, updateJsonStore, type JsonStoreSpec } from './store-file.js';
+import { GOODVIBES_AGENT_SURFACE_ROOT } from './surface.js';
+import { assertNoSecretLikeText } from './persona-registry.js';
 
 export type AgentResearchRunStatus = 'planned' | 'running' | 'paused' | 'blocked' | 'cancelled' | 'completed' | 'failed';
 /**
@@ -51,44 +51,44 @@ export interface AgentResearchRunRecord {
   readonly sourceIds: readonly string[];
   readonly checkpoints: readonly AgentResearchRunCheckpoint[];
   /** The session that set the run `running`; a run whose session ended is paused. */
-  readonly runningSession?: string;
-  readonly reportArtifactId?: string;
-  readonly note?: string;
-  readonly error?: string;
+  readonly runningSession?: string | undefined;
+  readonly reportArtifactId?: string | undefined;
+  readonly note?: string | undefined;
+  readonly error?: string | undefined;
   readonly provenance: string;
   readonly createdAt: string;
   readonly updatedAt: string;
-  readonly startedAt?: string;
-  readonly pausedAt?: string;
-  readonly cancelledAt?: string;
-  readonly completedAt?: string;
-  readonly failedAt?: string;
+  readonly startedAt?: string | undefined;
+  readonly pausedAt?: string | undefined;
+  readonly cancelledAt?: string | undefined;
+  readonly completedAt?: string | undefined;
+  readonly failedAt?: string | undefined;
 }
 
 export interface AgentResearchRunCreateInput {
   readonly title: string;
   readonly question: string;
-  readonly goal?: string;
-  readonly plan?: readonly string[];
-  readonly nextSteps?: readonly string[];
-  readonly sourceIds?: readonly string[];
-  readonly note?: string;
-  readonly provenance?: string;
+  readonly goal?: string | undefined;
+  readonly plan?: readonly string[] | undefined;
+  readonly nextSteps?: readonly string[] | undefined;
+  readonly sourceIds?: readonly string[] | undefined;
+  readonly note?: string | undefined;
+  readonly provenance?: string | undefined;
 }
 
 export interface AgentResearchRunCheckpointInput {
-  readonly phase?: AgentResearchRunPhase;
-  readonly status?: AgentResearchRunStatus;
-  readonly progress?: number;
+  readonly phase?: AgentResearchRunPhase | undefined;
+  readonly status?: AgentResearchRunStatus | undefined;
+  readonly progress?: number | undefined;
   readonly note: string;
-  readonly nextSteps?: readonly string[];
-  readonly sourceIds?: readonly string[];
+  readonly nextSteps?: readonly string[] | undefined;
+  readonly sourceIds?: readonly string[] | undefined;
 }
 
 export interface AgentResearchRunCompletionInput {
-  readonly note?: string;
-  readonly reportArtifactId?: string;
-  readonly sourceIds?: readonly string[];
+  readonly note?: string | undefined;
+  readonly reportArtifactId?: string | undefined;
+  readonly sourceIds?: readonly string[] | undefined;
 }
 
 export interface AgentResearchRunSnapshot {

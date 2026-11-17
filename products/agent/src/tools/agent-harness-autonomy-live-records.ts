@@ -4,7 +4,7 @@ import type { ArtifactDescriptor } from '@goodvibes-jev/engine/platform/platform
 import { isDeepStrictEqual } from 'node:util';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { redactSensitiveData } from '@goodvibes-jev/engine/platform/platform/utils';
-import { AgentResearchRunRegistry, researchRunStorePath, type AgentResearchRunRecord } from '../agent/research-run-registry.ts';
+import { AgentResearchRunRegistry, researchRunStorePath, type AgentResearchRunRecord } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { summarizeResearchRunItem } from '../input/agent-workspace-local-library-snapshot.ts';
 import type { CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { modelReadingServicePath } from './agent-harness-model-reading-source.ts';

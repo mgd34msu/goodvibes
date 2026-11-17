@@ -34,6 +34,13 @@ import { createOccasionsGatewayInvoke } from './occasions-gateway.js';
 import { registerAgentProfileTool } from './profile-tool.js';
 import { registerAgentOccasionsTool } from './occasions-tool.js';
 import type { FamilyGatewayRemote } from './family-gateway.js';
+import { registerAgentArtifactsTool } from './artifacts-tool.js';
+import { registerAgentDocumentsTool } from './documents-tool.js';
+import { registerAgentResearchRunsTool } from './research-runs-tool.js';
+import { registerAgentResearchSourcesTool } from './research-sources-tool.js';
+import { registerAgentReviewPacketPresetsTool } from './review-packet-presets-tool.js';
+import type { ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
+import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 
 /** What the Agent turn tools are built from, in either process. */
 export interface AgentTurnToolDeps {
@@ -43,11 +50,16 @@ export interface AgentTurnToolDeps {
   readonly remote?: FamilyGatewayRemote | undefined;
   /** The owner's message for the current turn; a person lookup is refused unless it names the person. */
   readonly currentOwnerMessage?: (() => string | null | undefined) | undefined;
+  /** The turn's workspace and home: the Agent's project and user stores are resolved against it. */
+  readonly shellPaths: ShellPathService;
+  /** The home's artifact store, which artifacts, documents and review packets are kept in. */
+  readonly artifactStore: ArtifactStore;
 }
 
 /**
- * The Agent tools a turn has wherever it runs: the owner profile and occasions,
- * the two halves of the capture contract the operator policy carries.
+ * The Agent tools a turn has wherever it runs: the owner profile and occasions
+ * (the two halves of the capture contract the operator policy carries),
+ * artifacts, documents, research runs and sources, and review-packet presets.
  */
 export function registerAgentTurnTools(registry: ToolRegistry, deps: AgentTurnToolDeps): void {
   const family = {
@@ -59,6 +71,11 @@ export function registerAgentTurnTools(registry: ToolRegistry, deps: AgentTurnTo
     ...(deps.currentOwnerMessage ? { currentOwnerMessage: deps.currentOwnerMessage } : {}),
   });
   registerAgentOccasionsTool(registry, { invoke: createOccasionsGatewayInvoke(family) });
+  registerAgentArtifactsTool(registry, deps.artifactStore, { projectRoot: deps.shellPaths.workingDirectory });
+  registerAgentDocumentsTool(registry, deps.shellPaths, deps.artifactStore);
+  registerAgentResearchRunsTool(registry, deps.shellPaths);
+  registerAgentResearchSourcesTool(registry, deps.shellPaths);
+  registerAgentReviewPacketPresetsTool(registry, deps.artifactStore);
 }
 
 /**
@@ -73,12 +90,11 @@ export const AGENT_PROCESS_TOOL_NAMES: readonly string[] = Object.freeze([
   'execution', 'host', 'import_goodvibes_settings', 'memory', 'models', 'personal_ops', 'process', 'research', 'route',
   'security', 'sessions', 'settings', 'setup', 'support', 'terminal', 'vibe', 'workspace',
   // Tools over the Agent process's own stores and connections.
-  'accounts', 'agent_artifacts', 'agent_autonomy_schedule', 'agent_channel_send', 'agent_documents', 'agent_knowledge',
-  'agent_knowledge_ingest', 'agent_learning_consolidation', 'agent_local_registry', 'agent_media_generate',
-  'agent_model_compare', 'agent_notify', 'agent_operator_action', 'agent_operator_briefing', 'agent_operator_method',
-  'agent_reminder_schedule', 'agent_research_report', 'agent_research_runs', 'agent_research_sources',
-  'agent_review_packet_presets', 'agent_review_packet_share', 'agent_schedule_edit', 'agent_work_plan', 'browser',
-  'google', 'schedule',
+  'accounts', 'agent_autonomy_schedule', 'agent_channel_send', 'agent_knowledge', 'agent_knowledge_ingest',
+  'agent_learning_consolidation', 'agent_local_registry', 'agent_media_generate', 'agent_model_compare', 'agent_notify',
+  'agent_operator_action', 'agent_operator_briefing', 'agent_operator_method', 'agent_reminder_schedule',
+  'agent_research_report', 'agent_review_packet_share', 'agent_schedule_edit', 'agent_work_plan', 'browser', 'google',
+  'schedule',
 ]);
 
 const HOSTED_REFUSAL = {
@@ -90,7 +106,7 @@ const HOSTED_REFUSAL = {
 function hostedAgentSection(): string {
   return [
     '## This Agent turn is hosted by the daemon',
-    'You are the GoodVibes Agent, answering in a session the daemon hosts rather than in the Agent\'s own process. Your policy, persona, skills, routines and memory below are the Agent\'s, and `profile` and `occasions` are here, so recording what you learn works as the policy says.',
+    'You are the GoodVibes Agent, answering in a session the daemon hosts rather than in the Agent\'s own process. Your policy, persona, skills, routines and memory below are the Agent\'s, and `profile`, `occasions`, `agent_artifacts`, `agent_documents`, `agent_research_runs`, `agent_research_sources` and `agent_review_packet_presets` are here, so recording what you learn works as the policy says.',
     `These Agent tools run only in the Agent's own process and are not here: ${AGENT_PROCESS_TOOL_NAMES.map((name) => `\`${name}\``).join(', ')}. Where the policy names one of them, say which tool the request needs, that this hosted turn cannot run it, and that it runs when the owner continues in the GoodVibes Agent itself. A call to one is refused.`,
   ].join('\n');
 }
@@ -103,6 +119,8 @@ export interface AgentHostedTurnDeps {
   readonly memoryRegistry: MemoryRegistry;
   /** The daemon's gateway catalog, which serves the `profile.*` and `occasions.*` verbs in-process. */
   readonly gatewayMethods: GatewayMethodCatalog;
+  /** The home's artifact store. */
+  readonly artifactStore: ArtifactStore;
 }
 
 export function createAgentHostedTurn(deps: AgentHostedTurnDeps): HostedSurfaceTurn {
@@ -112,8 +130,12 @@ export function createAgentHostedTurn(deps: AgentHostedTurnDeps): HostedSurfaceT
   );
   const section = hostedAgentSection();
   return {
-    registerTools({ registry }) {
-      registerAgentTurnTools(registry, { gatewayMethods: deps.gatewayMethods });
+    registerTools({ registry, workspaceRoot }) {
+      registerAgentTurnTools(registry, {
+        gatewayMethods: deps.gatewayMethods,
+        shellPaths: createShellPathService({ workingDirectory: workspaceRoot, homeDirectory: deps.homeDirectory }),
+        artifactStore: deps.artifactStore,
+      });
       registry.declareElsewhere(AGENT_PROCESS_TOOL_NAMES, HOSTED_REFUSAL);
       return undefined;
     },

@@ -3,8 +3,8 @@ import { observeImportFile, assertImportFileCurrent } from '@goodvibes-jev/engin
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { assertJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
 import { SOURCE_SCREENING_LIMITS } from '@goodvibes-jev/engine/platform/platform/security';
-import { researchRunStorePath } from '../agent/research-run-registry.ts';
-import { researchSourceStorePath, type AgentResearchSourceRecord } from '../agent/research-source-registry.ts';
+import { researchRunStorePath } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { researchSourceStorePath, type AgentResearchSourceRecord } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { captureAsyncHarnessInput } from './agent-harness-async-input.ts';
 import { captureCatalogSnapshot, rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { modelReadingServicePath, withModelReadingSource } from './agent-harness-model-reading-source.ts';

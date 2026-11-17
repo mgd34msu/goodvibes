@@ -71,8 +71,10 @@ turns, its channel hand-offs, the web UI's GoodVibes Agent choice, or any client
 that names it) answers as the GoodVibes Agent: each model request gets the Agent's
 prompt (its operator policy and capture rules, VIBE, project context, persona,
 reviewed skills, routines and memory, read from the same `~/.goodvibes/agent`
-stores the Agent uses) and the session has the Agent's `profile` and `occasions`
-tools beside the platform tools. The Agent tools that run only in the Agent's own
+stores the Agent uses) and the session has the Agent's `profile`, `occasions`,
+`agent_artifacts`, `agent_documents`, `agent_research_runs`,
+`agent_research_sources` and `agent_review_packet_presets` tools beside the
+platform tools. The Agent tools that run only in the Agent's own
 process are named in that prompt, and a call to one is refused with the reason
 and the next step: continue in the GoodVibes Agent itself. Creation submits `initialPrompt` without waiting for its turn to finish.
 A creation response therefore does not prove successful model execution.

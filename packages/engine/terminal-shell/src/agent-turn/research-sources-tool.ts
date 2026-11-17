@@ -1,7 +1,7 @@
-import type { ShellPathService } from '@/runtime/index.ts';
+import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { assertCurrentToolEffect, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
-import { bindResearchLedgers, researchArtifactExists, unknownReportArtifact } from '../agent/research-ledgers.ts';
+import { bindResearchLedgers, researchArtifactExists, unknownReportArtifact } from './research-ledgers.js';
 import {
   AgentResearchSourceRegistry,
   researchSourceReportLine,
@@ -9,32 +9,32 @@ import {
   type AgentResearchSourceCredibility,
   type AgentResearchSourceRecord,
   type AgentResearchSourceStatus,
-} from '../agent/research-source-registry.ts';
-import { clampReadLimit } from './agent-harness-read-helpers.ts';
-import { confirmParameter, requestParameter } from './agent-harness-effect-admission.ts';
+} from './research-source-registry.js';
+import { clampReadLimit } from './read-helpers.js';
+import { confirmParameter, requestParameter } from './effect-admission.js';
 
 export interface AgentResearchSourcesToolArgs {
-  readonly mode?: unknown;
-  readonly id?: unknown;
-  readonly query?: unknown;
-  readonly status?: unknown;
-  readonly question?: unknown;
-  readonly title?: unknown;
-  readonly url?: unknown;
-  readonly publisher?: unknown;
-  readonly publishedAt?: unknown;
-  readonly accessedAt?: unknown;
-  readonly summary?: unknown;
-  readonly evidence?: unknown;
-  readonly credibility?: unknown;
-  readonly score?: unknown;
-  readonly tags?: unknown;
-  readonly note?: unknown;
-  readonly reportArtifactId?: unknown;
-  readonly includeReportLines?: unknown;
-  readonly limit?: unknown;
-  readonly confirm?: unknown;
-  readonly explicitUserRequest?: unknown;
+  readonly mode?: unknown | undefined;
+  readonly id?: unknown | undefined;
+  readonly query?: unknown | undefined;
+  readonly status?: unknown | undefined;
+  readonly question?: unknown | undefined;
+  readonly title?: unknown | undefined;
+  readonly url?: unknown | undefined;
+  readonly publisher?: unknown | undefined;
+  readonly publishedAt?: unknown | undefined;
+  readonly accessedAt?: unknown | undefined;
+  readonly summary?: unknown | undefined;
+  readonly evidence?: unknown | undefined;
+  readonly credibility?: unknown | undefined;
+  readonly score?: unknown | undefined;
+  readonly tags?: unknown | undefined;
+  readonly note?: unknown | undefined;
+  readonly reportArtifactId?: unknown | undefined;
+  readonly includeReportLines?: unknown | undefined;
+  readonly limit?: unknown | undefined;
+  readonly confirm?: unknown | undefined;
+  readonly explicitUserRequest?: unknown | undefined;
 }
 
 type AgentResearchSourcesMode = 'list' | 'search' | 'show' | 'bundle' | 'add' | 'review' | 'reject' | 'use' | 'delete';

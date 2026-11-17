@@ -10,7 +10,7 @@ import { personaStorePath } from '@goodvibes-jev/engine/terminal-shell/agent-tur
 import { routineStorePath } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { skillStorePath } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { assertAgentMemoryInput } from './agent-memory-input-guard.ts';
-import { captureAgentExportPath } from './agent-artifact-effect.ts';
+import { captureAgentExportPath } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 const contexts = new WeakMap<object, { readonly assertBeforeWrite: () => void; readonly assertLocation: () => void; readonly acceptOwnEffect: () => void }>();
 const readActions = new Set(['list', 'search', 'get']);

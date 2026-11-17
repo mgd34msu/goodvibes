@@ -4,12 +4,12 @@ import type { ProtectedSourceOwner } from '@goodvibes-jev/engine/platform/platfo
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { assertCurrentToolInvocation, assertCurrentToolExecution, assertCurrentToolEffect, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { CommandContext, CommandRegistry } from '../input/command-registry.ts';
-import { createAgentArtifactsTool } from './agent-artifacts-tool.ts';
+import { createAgentArtifactsTool } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { createAgentHarnessTool } from './agent-harness-tool.ts';
 import { createAgentResearchReportTool } from './agent-research-report-tool.ts';
-import { createAgentResearchRunsTool } from './agent-research-runs-tool.ts';
+import { createAgentResearchRunsTool } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { runAdmittedResearchRunner, runPublicSearch } from './agent-research-runner.ts';
-import { createAgentResearchSourcesTool } from './agent-research-sources-tool.ts';
+import { createAgentResearchSourcesTool } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { confirmParameter, requestParameter } from './agent-harness-effect-admission.ts';
 
 type AgentResearchAction =

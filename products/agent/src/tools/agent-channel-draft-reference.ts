@@ -7,7 +7,7 @@ import { channelDraftWireReference, historicalChannelDraftWireReference, matches
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import type { CommandContext } from '../input/command-registry.ts';
 import { channelDraftFilePath, getDraft, readChannelDrafts } from '../agent/channel-draft.ts';
-import { captureAgentExportPath } from './agent-artifact-effect.ts';
+import { captureAgentExportPath } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { captureCatalogData } from './agent-harness-catalog-ranking.ts';
 import { captureModelReadingSnapshotGuard } from './agent-harness-model-reading-source.ts';
 import { harnessCatalogInvocationAuthority } from './agent-harness-catalog-ingress.ts';

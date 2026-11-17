@@ -2,7 +2,7 @@ import type { ArtifactDescriptor, ArtifactRecord, ArtifactReference, ArtifactSto
 import type { ChannelDeliveryRequest, ChannelDeliveryRouter } from '@goodvibes-jev/engine/platform/platform/channels';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { ToolInputProjectionError, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
-import { agentArtifactEffectGuard, captureAgentArtifactSource } from './agent-artifact-effect.ts';
+import { agentArtifactEffectGuard, captureAgentArtifactSource } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { evaluateOutwardEffect, getSessionUntrustedContentLedger } from '../trust/untrusted-content.ts';
 import {
   buildAgentChannelDeliveryPreview,

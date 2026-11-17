@@ -11,12 +11,12 @@ import {
   researchRunLogTail,
   type AgentResearchRunRecord,
   type AgentResearchRunStatus,
-} from '../agent/research-run-registry.ts';
+} from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import {
   AgentResearchSourceRegistry,
   researchSourceReportLine,
   type AgentResearchSourceRecord,
-} from '../agent/research-source-registry.ts';
+} from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { browserControlPosture, type BrowserControlPosture } from './agent-harness-browser-control.ts';
 import type { CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { captureAsyncHarnessInput } from './agent-harness-async-input.ts';

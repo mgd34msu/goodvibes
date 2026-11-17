@@ -1,8 +1,8 @@
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { captureOwnedJson } from '@goodvibes-jev/engine/platform/platform/gate';
 import type { CommandContext } from '../input/command-registry.ts';
-import { AgentResearchRunRegistry, type AgentResearchRunRecord } from '../agent/research-run-registry.ts';
-import { AgentResearchSourceRegistry, researchSourceReportLine, type AgentResearchSourceRecord } from '../agent/research-source-registry.ts';
+import { AgentResearchRunRegistry, type AgentResearchRunRecord } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { AgentResearchSourceRegistry, researchSourceReportLine, type AgentResearchSourceRecord } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import type { AgentResearchToolArgs } from './agent-research-tool.ts';
 
 type ToolResult = Awaited<ReturnType<Tool['execute']>>;

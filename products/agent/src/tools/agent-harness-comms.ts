@@ -4,7 +4,7 @@ import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platfor
 import { captureCatalogData } from './agent-harness-catalog-ranking.ts';
 import { dirname } from 'node:path';
 import { captureHarnessLocalEffect } from './agent-harness-local-effect.ts';
-import { captureAgentExportPath } from './agent-artifact-effect.ts';
+import { captureAgentExportPath } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { harnessCatalogInvocationAuthority, retainHarnessCatalogCurrent } from './agent-harness-catalog-ingress.ts';
 import { resolveChannelDraftNativeReference } from './agent-channel-draft-reference.ts';
 import { captureOperatorConnection } from '../agent/operator-connection-owner.ts';

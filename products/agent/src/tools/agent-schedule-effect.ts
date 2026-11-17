@@ -7,7 +7,7 @@ import { captureOperatorAutomationTarget } from '../agent/operator-automation-ta
 import { executeOperatorMethodWithReceipt } from '../agent/operator-method-receipt.ts';
 import { scheduleNextRouteLines } from '../agent/schedule-next-routes.ts';
 import { getSessionUntrustedContentLedger } from '../trust/untrusted-content.ts';
-import { agentArtifactEffectGuard, captureAgentExportPath } from './agent-artifact-effect.ts';
+import { agentArtifactEffectGuard, captureAgentExportPath } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 let nextScheduleCall = 0;
 const captures = new WeakMap<object, { readonly shellPaths: ShellPathService; readonly configManager: AgentConnectedHostConfigReader;

@@ -16,7 +16,7 @@ export interface AgentDocumentComment {
   readonly status: AgentDocumentCommentStatus;
   readonly createdAt: string;
   readonly updatedAt: string;
-  readonly resolvedAt?: string;
+  readonly resolvedAt?: string | undefined;
 }
 
 export interface AgentDocumentSuggestion {
@@ -25,25 +25,25 @@ export interface AgentDocumentSuggestion {
   readonly body: string;
   readonly tags: readonly string[];
   /** The document version the suggestion was written against; accepting it over a later version is refused. */
-  readonly baseVersionId?: string;
-  readonly documentStatus?: AgentDocumentStatus;
+  readonly baseVersionId?: string | undefined;
+  readonly documentStatus?: AgentDocumentStatus | undefined;
   readonly summary: string;
   readonly rationale: string;
   readonly status: AgentDocumentSuggestionStatus;
   readonly createdAt: string;
   readonly updatedAt: string;
-  readonly resolvedAt?: string;
+  readonly resolvedAt?: string | undefined;
 }
 
 export interface AgentDocumentAttachment {
   readonly id: string;
   readonly artifactId: string;
   readonly label: string;
-  readonly note?: string;
-  readonly filename?: string;
-  readonly mimeType?: string;
-  readonly kind?: string;
-  readonly sizeBytes?: number;
+  readonly note?: string | undefined;
+  readonly filename?: string | undefined;
+  readonly mimeType?: string | undefined;
+  readonly kind?: string | undefined;
+  readonly sizeBytes?: number | undefined;
   readonly createdAt: string;
   readonly updatedAt: string;
 }
@@ -63,23 +63,23 @@ export interface AgentDocumentRecord {
   readonly comments: readonly AgentDocumentComment[];
   readonly suggestions: readonly AgentDocumentSuggestion[];
   readonly attachments: readonly AgentDocumentAttachment[];
-  readonly lastArtifactId?: string;
+  readonly lastArtifactId?: string | undefined;
 }
 
 export interface AgentDocumentCreateInput {
   readonly title: string;
   readonly body: string;
-  readonly tags?: readonly string[];
-  readonly summary?: string;
+  readonly tags?: readonly string[] | undefined;
+  readonly summary?: string | undefined;
 }
 
 export interface AgentDocumentUpdateInput {
-  readonly title?: string;
-  readonly body?: string;
-  readonly tags?: readonly string[];
-  readonly summary?: string;
-  readonly status?: AgentDocumentStatus;
-  readonly lastArtifactId?: string;
+  readonly title?: string | undefined;
+  readonly body?: string | undefined;
+  readonly tags?: readonly string[] | undefined;
+  readonly summary?: string | undefined;
+  readonly status?: AgentDocumentStatus | undefined;
+  readonly lastArtifactId?: string | undefined;
 }
 
 export interface AgentDocumentCommentInput {
@@ -87,22 +87,22 @@ export interface AgentDocumentCommentInput {
 }
 
 export interface AgentDocumentSuggestionInput {
-  readonly title?: string;
+  readonly title?: string | undefined;
   readonly body: string;
-  readonly tags?: readonly string[];
-  readonly status?: AgentDocumentStatus;
-  readonly summary?: string;
-  readonly rationale?: string;
+  readonly tags?: readonly string[] | undefined;
+  readonly status?: AgentDocumentStatus | undefined;
+  readonly summary?: string | undefined;
+  readonly rationale?: string | undefined;
 }
 
 export interface AgentDocumentAttachmentInput {
   readonly artifactId: string;
-  readonly label?: string;
-  readonly note?: string;
-  readonly filename?: string;
-  readonly mimeType?: string;
-  readonly kind?: string;
-  readonly sizeBytes?: number;
+  readonly label?: string | undefined;
+  readonly note?: string | undefined;
+  readonly filename?: string | undefined;
+  readonly mimeType?: string | undefined;
+  readonly kind?: string | undefined;
+  readonly sizeBytes?: number | undefined;
 }
 
 export interface AgentDocumentSnapshot {

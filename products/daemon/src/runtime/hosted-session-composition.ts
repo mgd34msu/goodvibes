@@ -233,6 +233,7 @@ export function createHostedSessionOptions(services: RuntimeServices): DaemonHos
         homeDirectory: services.homeDirectory,
         memoryRegistry: services.memoryRegistry,
         gatewayMethods: services.gatewayMethods,
+        artifactStore: services.artifactStore,
       }),
     },
     // Called for every session the engine binds to a workspace (create and

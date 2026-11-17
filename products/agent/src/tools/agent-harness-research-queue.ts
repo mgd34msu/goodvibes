@@ -7,7 +7,7 @@ import {
   AgentResearchSourceRegistry,
   researchSourceReportLine,
   type AgentResearchSourceRecord,
-} from '../agent/research-source-registry.ts';
+} from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { previewHarnessText } from './agent-harness-text.ts';
 import { clampReadLimit } from './agent-harness-read-helpers.ts';
 

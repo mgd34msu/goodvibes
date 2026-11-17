@@ -1,4 +1,4 @@
-import { previewHarnessText } from './agent-harness-text.ts';
+import { previewHarnessText } from './preview-text.js';
 
 /** A positive count no larger than `max`; anything that is not a finite number takes the fallback. */
 export function clampReadLimit(value: unknown, fallback: number, max: number): number {

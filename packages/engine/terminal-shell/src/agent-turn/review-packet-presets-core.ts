@@ -1,24 +1,24 @@
 import { randomUUID } from 'node:crypto';
 import type { ArtifactCreateInput, ArtifactDescriptor, ArtifactRecord, ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
 export interface AgentReviewPacketPresetsToolArgs {
-  readonly mode?: unknown;
-  readonly artifactId?: unknown;
-  readonly name?: unknown;
-  readonly documentId?: unknown;
-  readonly documentTitle?: unknown;
-  readonly documentExportArtifactId?: unknown;
-  readonly comparisonArtifactId?: unknown;
-  readonly judgmentArtifactId?: unknown;
-  readonly revealedJudgmentArtifactId?: unknown;
-  readonly routeDecisionArtifactId?: unknown;
-  readonly routeDecision?: unknown;
-  readonly handoffArtifactId?: unknown;
-  readonly handoffArchiveArtifactId?: unknown;
-  readonly relatedArtifactIds?: unknown;
-  readonly summary?: unknown;
-  readonly limit?: unknown;
-  readonly confirm?: unknown;
-  readonly explicitUserRequest?: unknown;
+  readonly mode?: unknown | undefined;
+  readonly artifactId?: unknown | undefined;
+  readonly name?: unknown | undefined;
+  readonly documentId?: unknown | undefined;
+  readonly documentTitle?: unknown | undefined;
+  readonly documentExportArtifactId?: unknown | undefined;
+  readonly comparisonArtifactId?: unknown | undefined;
+  readonly judgmentArtifactId?: unknown | undefined;
+  readonly revealedJudgmentArtifactId?: unknown | undefined;
+  readonly routeDecisionArtifactId?: unknown | undefined;
+  readonly routeDecision?: unknown | undefined;
+  readonly handoffArtifactId?: unknown | undefined;
+  readonly handoffArchiveArtifactId?: unknown | undefined;
+  readonly relatedArtifactIds?: unknown | undefined;
+  readonly summary?: unknown | undefined;
+  readonly limit?: unknown | undefined;
+  readonly confirm?: unknown | undefined;
+  readonly explicitUserRequest?: unknown | undefined;
 }
 
 export type AgentReviewPacketPresetArtifactStore = Pick<ArtifactStore, 'create'> & Partial<Pick<ArtifactStore, 'get' | 'list' | 'readContent' | 'delete'>>;
@@ -35,16 +35,16 @@ export type ReviewPacketArtifactRole =
   | 'related';
 
 export interface ReviewPacketPresetPacket {
-  readonly documentId?: string;
-  readonly documentTitle?: string;
-  readonly documentExportArtifactId?: string;
-  readonly comparisonArtifactId?: string;
-  readonly judgmentArtifactId?: string;
-  readonly revealedJudgmentArtifactId?: string;
-  readonly routeDecisionArtifactId?: string;
-  readonly routeDecision?: string;
-  readonly handoffArtifactId?: string;
-  readonly handoffArchiveArtifactId?: string;
+  readonly documentId?: string | undefined;
+  readonly documentTitle?: string | undefined;
+  readonly documentExportArtifactId?: string | undefined;
+  readonly comparisonArtifactId?: string | undefined;
+  readonly judgmentArtifactId?: string | undefined;
+  readonly revealedJudgmentArtifactId?: string | undefined;
+  readonly routeDecisionArtifactId?: string | undefined;
+  readonly routeDecision?: string | undefined;
+  readonly handoffArtifactId?: string | undefined;
+  readonly handoffArchiveArtifactId?: string | undefined;
   readonly relatedArtifactIds: readonly string[];
   readonly summary: string;
 }
@@ -59,7 +59,7 @@ export interface ReviewPacketPresetRecord {
   readonly packet: ReviewPacketPresetPacket;
   readonly refresh?: {
     readonly sourceArtifactId: string;
-    readonly sourcePresetId?: string;
+    readonly sourcePresetId?: string | undefined;
     readonly missingCount: number;
     readonly supersededCount: number;
     readonly unresolvedCount: number;
@@ -74,8 +74,8 @@ export interface ReviewPacketPresetRecord {
 
 export interface LoadedReviewPacketPreset {
   readonly descriptor: ArtifactDescriptor;
-  readonly record?: ArtifactRecord;
-  readonly body?: ReviewPacketPresetRecord;
+  readonly record?: ArtifactRecord | undefined;
+  readonly body?: ReviewPacketPresetRecord | undefined;
 }
 
 export interface ReviewPacketArtifactReference {
@@ -88,8 +88,8 @@ export interface ReviewPacketFreshnessMissing {
   readonly role: ReviewPacketArtifactRole;
   readonly label: string;
   readonly id: string;
-  readonly replacementId?: string;
-  readonly reason?: string;
+  readonly replacementId?: string | undefined;
+  readonly reason?: string | undefined;
 }
 
 export interface ReviewPacketFreshnessSuperseded {
@@ -191,14 +191,14 @@ export function parseMode(value: unknown): AgentReviewPacketPresetMode {
 }
 
 export function defaultPacketSummary(input: {
-  readonly documentId?: string;
-  readonly documentExportArtifactId?: string;
-  readonly comparisonArtifactId?: string;
-  readonly judgmentArtifactId?: string;
-  readonly revealedJudgmentArtifactId?: string;
-  readonly handoffArtifactId?: string;
-  readonly handoffArchiveArtifactId?: string;
-  readonly relatedArtifactIds?: readonly string[];
+  readonly documentId?: string | undefined;
+  readonly documentExportArtifactId?: string | undefined;
+  readonly comparisonArtifactId?: string | undefined;
+  readonly judgmentArtifactId?: string | undefined;
+  readonly revealedJudgmentArtifactId?: string | undefined;
+  readonly handoffArtifactId?: string | undefined;
+  readonly handoffArchiveArtifactId?: string | undefined;
+  readonly relatedArtifactIds?: readonly string[] | undefined;
 }): string {
   const sourceArtifactId = input.revealedJudgmentArtifactId
     || input.judgmentArtifactId
@@ -507,7 +507,7 @@ export function replacementForRole(input: {
   readonly packet: ReviewPacketPresetPacket;
   readonly current: ArtifactDescriptor | null;
   readonly artifacts: readonly ArtifactDescriptor[];
-  readonly store?: AgentReviewPacketPresetArtifactStore;
+  readonly store?: AgentReviewPacketPresetArtifactStore | undefined;
   readonly index: ReadonlyMap<string, ArtifactDescriptor>;
 }): { readonly artifact: ArtifactDescriptor; readonly reason: string } | null {
   const documentId = packetDocumentId(input.packet, input.store, input.index);
@@ -660,7 +660,7 @@ export function auditPresetFreshness(input: {
   readonly packet: ReviewPacketPresetPacket;
   readonly descriptor: ArtifactDescriptor;
   readonly artifacts: readonly ArtifactDescriptor[] | null;
-  readonly store?: AgentReviewPacketPresetArtifactStore;
+  readonly store?: AgentReviewPacketPresetArtifactStore | undefined;
 }): ReviewPacketFreshnessAudit {
   if (!input.artifacts) {
     return {

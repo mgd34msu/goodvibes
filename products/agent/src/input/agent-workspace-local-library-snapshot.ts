@@ -3,7 +3,7 @@ import type { AgentNoteRecord } from '../agent/note-registry.ts';
 import type { AgentPersonaRecord } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { formatAgentRecordOrigin } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { evaluateAgentRoutineReadiness, type AgentRoutineRecord } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { AgentResearchRunRegistry, researchRunLogTail } from '../agent/research-run-registry.ts';
+import { AgentResearchRunRegistry, researchRunLogTail } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { RoutineScheduleReceiptStore } from '../agent/routine-schedule-receipts.ts';
 import { evaluateAgentSkillBundleReadiness, evaluateAgentSkillReadiness, formatAgentSkillRequirement, type AgentSkillBundleRecord, type AgentSkillRecord } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import type { listAgentRuntimeProfiles, listAgentRuntimeProfileTemplates } from '../agent/runtime-profile.ts';

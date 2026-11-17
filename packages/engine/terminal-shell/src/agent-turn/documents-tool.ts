@@ -1,44 +1,44 @@
 import type { ArtifactDescriptor, ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
-import { agentArtifactEffectGuard, assertAgentArtifactBytes } from './agent-artifact-effect.ts';
-import { toolErrorText } from './tool-error-text.ts';
-import type { ShellPathService } from '@/runtime/index.ts';
+import { agentArtifactEffectGuard, assertAgentArtifactBytes } from './artifact-effect.js';
+import { toolErrorText } from './tool-error-text.js';
+import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 import {
   AgentDocumentRegistry,
   renderAgentDocumentMarkdown,
   type AgentDocumentRecord,
   type AgentDocumentStatus,
   type AgentDocumentVersion,
-} from '../agent/document-registry.ts';
-import { clampReadLimit } from './agent-harness-read-helpers.ts';
-import { confirmParameter, requestParameter } from './agent-harness-effect-admission.ts';
+} from './document-registry.js';
+import { clampReadLimit } from './read-helpers.js';
+import { confirmParameter, requestParameter } from './effect-admission.js';
 
 export type AgentDocumentsToolMode = 'list' | 'show' | 'create' | 'update' | 'review' | 'comment' | 'resolveComment' | 'suggest' | 'acceptSuggestion' | 'rejectSuggestion' | 'export' | 'insertArtifact' | 'attachArtifact';
 
 export interface AgentDocumentsToolArgs {
-  readonly mode?: unknown;
-  readonly documentId?: unknown;
-  readonly query?: unknown;
-  readonly title?: unknown;
-  readonly body?: unknown;
-  readonly tags?: unknown;
-  readonly status?: unknown;
-  readonly artifactId?: unknown;
-  readonly attachmentLabel?: unknown;
-  readonly attachmentNote?: unknown;
-  readonly commentId?: unknown;
-  readonly comment?: unknown;
-  readonly suggestionId?: unknown;
-  readonly suggestionRationale?: unknown;
-  readonly placement?: unknown;
-  readonly sectionTitle?: unknown;
-  readonly includeContent?: unknown;
-  readonly changeSummary?: unknown;
-  readonly includeVersions?: unknown;
-  readonly limit?: unknown;
-  readonly confirm?: unknown;
-  readonly explicitUserRequest?: unknown;
+  readonly mode?: unknown | undefined;
+  readonly documentId?: unknown | undefined;
+  readonly query?: unknown | undefined;
+  readonly title?: unknown | undefined;
+  readonly body?: unknown | undefined;
+  readonly tags?: unknown | undefined;
+  readonly status?: unknown | undefined;
+  readonly artifactId?: unknown | undefined;
+  readonly attachmentLabel?: unknown | undefined;
+  readonly attachmentNote?: unknown | undefined;
+  readonly commentId?: unknown | undefined;
+  readonly comment?: unknown | undefined;
+  readonly suggestionId?: unknown | undefined;
+  readonly suggestionRationale?: unknown | undefined;
+  readonly placement?: unknown | undefined;
+  readonly sectionTitle?: unknown | undefined;
+  readonly includeContent?: unknown | undefined;
+  readonly changeSummary?: unknown | undefined;
+  readonly includeVersions?: unknown | undefined;
+  readonly limit?: unknown | undefined;
+  readonly confirm?: unknown | undefined;
+  readonly explicitUserRequest?: unknown | undefined;
 }
 
 type AgentDocumentArtifactStore = Partial<Pick<ArtifactStore, 'create' | 'get' | 'readContent'>>;

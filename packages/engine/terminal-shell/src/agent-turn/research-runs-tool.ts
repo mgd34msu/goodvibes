@@ -1,7 +1,7 @@
-import type { ShellPathService } from '@/runtime/index.ts';
+import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { assertCurrentToolEffect, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
-import { bindResearchLedgers, researchArtifactExists, unknownReportArtifact } from '../agent/research-ledgers.ts';
+import { bindResearchLedgers, researchArtifactExists, unknownReportArtifact } from './research-ledgers.js';
 import {
   AgentResearchRunRegistry,
   researchRunLogTail,
@@ -10,29 +10,29 @@ import {
   type AgentResearchRunPhase,
   type AgentResearchRunRecord,
   type AgentResearchRunStatus,
-} from '../agent/research-run-registry.ts';
-import { confirmParameter, requestParameter } from './agent-harness-effect-admission.ts';
+} from './research-run-registry.js';
+import { confirmParameter, requestParameter } from './effect-admission.js';
 
 export interface AgentResearchRunsToolArgs {
-  readonly mode?: unknown;
-  readonly id?: unknown;
-  readonly query?: unknown;
-  readonly status?: unknown;
-  readonly title?: unknown;
-  readonly question?: unknown;
-  readonly goal?: unknown;
-  readonly plan?: unknown;
-  readonly phase?: unknown;
-  readonly progress?: unknown;
-  readonly note?: unknown;
-  readonly nextSteps?: unknown;
-  readonly sourceIds?: unknown;
-  readonly reportArtifactId?: unknown;
-  readonly error?: unknown;
-  readonly includeCheckpoints?: unknown;
-  readonly includeLogTail?: unknown;
-  readonly confirm?: unknown;
-  readonly explicitUserRequest?: unknown;
+  readonly mode?: unknown | undefined;
+  readonly id?: unknown | undefined;
+  readonly query?: unknown | undefined;
+  readonly status?: unknown | undefined;
+  readonly title?: unknown | undefined;
+  readonly question?: unknown | undefined;
+  readonly goal?: unknown | undefined;
+  readonly plan?: unknown | undefined;
+  readonly phase?: unknown | undefined;
+  readonly progress?: unknown | undefined;
+  readonly note?: unknown | undefined;
+  readonly nextSteps?: unknown | undefined;
+  readonly sourceIds?: unknown | undefined;
+  readonly reportArtifactId?: unknown | undefined;
+  readonly error?: unknown | undefined;
+  readonly includeCheckpoints?: unknown | undefined;
+  readonly includeLogTail?: unknown | undefined;
+  readonly confirm?: unknown | undefined;
+  readonly explicitUserRequest?: unknown | undefined;
 }
 
 type AgentResearchRunsMode =

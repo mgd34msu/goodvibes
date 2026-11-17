@@ -1,8 +1,8 @@
 import { defineLifecycle } from '@goodvibes-jev/engine/platform/platform/utils';
 import { openSqliteFile, type SqliteFile } from '@goodvibes-jev/engine/platform/platform/state';
-import type { ShellPathService } from '@/runtime/index.ts';
-import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
-import { assertNoSecretLikeText } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+import { GOODVIBES_AGENT_SURFACE_ROOT } from './surface.js';
+import { assertNoSecretLikeText } from './persona-registry.js';
 import type {
   AgentDocumentAttachment,
   AgentDocumentAttachmentInput,
@@ -18,7 +18,7 @@ import type {
   AgentDocumentSuggestionStatus,
   AgentDocumentUpdateInput,
   AgentDocumentVersion,
-} from './document-registry-types.ts';
+} from './document-registry-types.js';
 export type {
   AgentDocumentAttachment,
   AgentDocumentAttachmentInput,
@@ -34,7 +34,7 @@ export type {
   AgentDocumentSuggestionStatus,
   AgentDocumentUpdateInput,
   AgentDocumentVersion,
-} from './document-registry-types.ts';
+} from './document-registry-types.js';
 
 type AgentDocumentStorePaths = Pick<ShellPathService, 'resolveProjectPath'>;
 
@@ -390,7 +390,7 @@ export interface AgentDocumentWriteOptions {
    * replace text read before an await is refused when another write landed
    * in between, instead of undoing it.
    */
-  readonly expectedRevision?: number;
+  readonly expectedRevision?: number | undefined;
 }
 
 export class AgentDocumentRegistry {

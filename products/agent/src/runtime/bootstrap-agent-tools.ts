@@ -15,7 +15,6 @@ import type { RuntimeServices } from './services.ts';
 import { bindControlCommands } from './control-surfaces.ts';
 import { missingConversationalCaptureTools } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
-import { connectedHostFamilyRemote } from '../agent/operator-gateway-call.ts';
 import { registerAgentAuditTool } from '../tools/agent-audit-tool.ts';
 import { registerAgentAutonomyTool } from '../tools/agent-autonomy-tool.ts';
 import { registerAgentCapabilityTool } from '../tools/agent-capability-tool.ts';
@@ -31,7 +30,6 @@ import { installAgentMcpCallRoute } from '../tools/agent-mcp-call-route.ts';
 import { registerAgentMemoryTool } from '../tools/agent-memory-tool.ts';
 import { registerAgentModelsTool } from '../tools/agent-models-tool.ts';
 import { registerAgentPersonalOpsTool } from '../tools/agent-personal-ops-tool.ts';
-import { registerAgentTurnTools } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { registerAgentResearchTool } from '../tools/agent-research-tool.ts';
 import { registerAgentRouteTool } from '../tools/agent-route-tool.ts';
 import { registerAgentSecurityTool } from '../tools/agent-security-tool.ts';
@@ -106,16 +104,6 @@ export function registerAgentTools(deps: AgentToolRegistrationDeps): void {
   registerAgentHostTool(toolRegistry, commandRegistry, commandContext);
   registerAgentMemoryTool(toolRegistry, commandRegistry, commandContext);
   registerAgentModelsTool(toolRegistry, commandRegistry, commandContext);
-  // The owner profile and occasions, the two halves of the capture contract:
-  // the same list a turn the daemon hosts for the Agent registers (agent-turn's
-  // registerAgentTurnTools). Both hold no state; they call the daemon's
-  // `profile.*` and `occasions.*` verbs, in-process when this process carries
-  // the handlers and over the connected host otherwise, and decide nothing the
-  // daemon decides (docs/occasions.md §7).
-  registerAgentTurnTools(toolRegistry, {
-    gatewayMethods: services.gatewayMethods,
-    remote: connectedHostFamilyRemote({ configManager, homeDirectory: services.shellPaths.homeDirectory }),
-  });
   registerAgentPersonalOpsTool(toolRegistry, commandRegistry, commandContext);
   registerAgentResearchTool(toolRegistry, commandRegistry, commandContext);
   registerAgentRouteTool(toolRegistry, commandContext, { channelRegistry: services.channelPlugins });

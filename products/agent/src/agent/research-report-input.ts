@@ -1,5 +1,5 @@
 import { snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
-import { sanitizeResearchSourceUrl } from './research-source-registry.ts';
+import { sanitizeResearchSourceUrl } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 export interface AgentResearchReportSource {
   readonly title: string;

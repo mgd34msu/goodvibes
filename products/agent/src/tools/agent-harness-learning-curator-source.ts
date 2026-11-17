@@ -6,7 +6,7 @@ import { AgentNoteRegistry } from '../agent/note-registry.ts';
 import { AgentPersonaRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { AgentSkillRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { AgentRoutineRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { AgentResearchRunRegistry } from '../agent/research-run-registry.ts';
+import { AgentResearchRunRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { summarizeMemoryItem, summarizeNoteItem, summarizePersonaItem, summarizeSkillItem, summarizeSkillBundleItem, summarizeRoutineItem } from '../input/agent-workspace-local-library-snapshot.ts';
 import type { AgentWorkspaceLocalLibraryItem } from '../input/agent-workspace-types.ts';
 import type { CommandContext } from '../input/command-registry.ts';

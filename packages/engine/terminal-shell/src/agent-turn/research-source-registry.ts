@@ -1,8 +1,8 @@
 import { defineLifecycle } from '@goodvibes-jev/engine/platform/platform/utils';
-import type { ShellPathService } from '@/runtime/index.ts';
-import { readJsonStore, updateJsonStore, type JsonStoreSpec } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
-import { assertNoSecretLikeText } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+import { readJsonStore, updateJsonStore, type JsonStoreSpec } from './store-file.js';
+import { GOODVIBES_AGENT_SURFACE_ROOT } from './surface.js';
+import { assertNoSecretLikeText } from './persona-registry.js';
 
 export type AgentResearchSourceStatus = 'candidate' | 'reviewed' | 'rejected' | 'used';
 /**
@@ -25,54 +25,54 @@ export interface AgentResearchSourceRecord {
   readonly id: string;
   readonly question: string;
   readonly title: string;
-  readonly url?: string;
-  readonly publisher?: string;
-  readonly publishedAt?: string;
-  readonly accessedAt?: string;
+  readonly url?: string | undefined;
+  readonly publisher?: string | undefined;
+  readonly publishedAt?: string | undefined;
+  readonly accessedAt?: string | undefined;
   readonly summary: string;
-  readonly evidence?: string;
+  readonly evidence?: string | undefined;
   readonly credibility: AgentResearchSourceCredibility;
   readonly score: number;
   readonly status: AgentResearchSourceStatus;
   readonly tags: readonly string[];
-  readonly note?: string;
-  readonly usedInReportArtifactId?: string;
+  readonly note?: string | undefined;
+  readonly usedInReportArtifactId?: string | undefined;
   readonly provenance: string;
   readonly createdAt: string;
   readonly updatedAt: string;
-  readonly reviewedAt?: string;
-  readonly rejectedAt?: string;
-  readonly usedAt?: string;
+  readonly reviewedAt?: string | undefined;
+  readonly rejectedAt?: string | undefined;
+  readonly usedAt?: string | undefined;
 }
 
 export interface AgentResearchSourceCreateInput {
   readonly question: string;
   readonly title: string;
-  readonly url?: string;
-  readonly publisher?: string;
-  readonly publishedAt?: string;
-  readonly accessedAt?: string;
+  readonly url?: string | undefined;
+  readonly publisher?: string | undefined;
+  readonly publishedAt?: string | undefined;
+  readonly accessedAt?: string | undefined;
   readonly summary: string;
-  readonly evidence?: string;
-  readonly credibility?: AgentResearchSourceCredibility;
-  readonly score?: number;
-  readonly tags?: readonly string[];
-  readonly note?: string;
-  readonly provenance?: string;
+  readonly evidence?: string | undefined;
+  readonly credibility?: AgentResearchSourceCredibility | undefined;
+  readonly score?: number | undefined;
+  readonly tags?: readonly string[] | undefined;
+  readonly note?: string | undefined;
+  readonly provenance?: string | undefined;
 }
 
 export interface AgentResearchSourceReviewInput {
-  readonly credibility?: AgentResearchSourceCredibility;
-  readonly score?: number;
-  readonly note?: string;
-  readonly summary?: string;
-  readonly evidence?: string;
-  readonly tags?: readonly string[];
+  readonly credibility?: AgentResearchSourceCredibility | undefined;
+  readonly score?: number | undefined;
+  readonly note?: string | undefined;
+  readonly summary?: string | undefined;
+  readonly evidence?: string | undefined;
+  readonly tags?: readonly string[] | undefined;
 }
 
 export interface AgentResearchSourceUseInput {
-  readonly reportArtifactId?: string;
-  readonly note?: string;
+  readonly reportArtifactId?: string | undefined;
+  readonly note?: string | undefined;
 }
 
 export interface AgentResearchSourceSnapshot {

@@ -5,10 +5,10 @@ import { dirname, join } from 'node:path';
 import type { ArtifactDescriptor, ArtifactRecord, ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import type { ToolRegistry, ToolExecuteOptions } from '@goodvibes-jev/engine/platform/platform/tools';
-import { toolErrorText } from './tool-error-text.ts';
-import { agentArtifactEffectGuard, assertAgentArtifactBytes, captureAgentArtifactSource, captureAgentExportPath } from './agent-artifact-effect.ts';
-import { confirmParameter, requestParameter } from './agent-harness-effect-admission.ts';
-import { inventoryDisclosure } from './inventory-disclosure.ts';
+import { toolErrorText } from './tool-error-text.js';
+import { agentArtifactEffectGuard, assertAgentArtifactBytes, captureAgentArtifactSource, captureAgentExportPath } from './artifact-effect.js';
+import { confirmParameter, requestParameter } from './effect-admission.js';
+import { inventoryDisclosure } from './inventory-disclosure.js';
 import {
   packageArtifactFilename,
   safeArtifactExportFilename,
@@ -20,36 +20,36 @@ import {
   ZIP_MAX_BYTES,
   ZIP_MAX_ENTRIES,
   type ArtifactPackageEntry,
-} from './artifact-archive.ts';
+} from './artifact-archive.js';
 
 export interface AgentArtifactsToolArgs {
-  readonly mode?: unknown;
-  readonly artifactId?: unknown;
-  readonly artifactIds?: unknown;
-  readonly destinationPath?: unknown;
-  readonly overwrite?: unknown;
-  readonly query?: unknown;
-  readonly kind?: unknown;
-  readonly mimeType?: unknown;
-  readonly purpose?: unknown;
-  readonly source?: unknown;
-  readonly limit?: unknown;
-  readonly includeContent?: unknown;
-  readonly previewBytes?: unknown;
-  readonly confirm?: unknown;
-  readonly explicitUserRequest?: unknown;
+  readonly mode?: unknown | undefined;
+  readonly artifactId?: unknown | undefined;
+  readonly artifactIds?: unknown | undefined;
+  readonly destinationPath?: unknown | undefined;
+  readonly overwrite?: unknown | undefined;
+  readonly query?: unknown | undefined;
+  readonly kind?: unknown | undefined;
+  readonly mimeType?: unknown | undefined;
+  readonly purpose?: unknown | undefined;
+  readonly source?: unknown | undefined;
+  readonly limit?: unknown | undefined;
+  readonly includeContent?: unknown | undefined;
+  readonly previewBytes?: unknown | undefined;
+  readonly confirm?: unknown | undefined;
+  readonly explicitUserRequest?: unknown | undefined;
 }
 
 type AgentArtifactBrowserStore = Partial<Pick<ArtifactStore, 'get' | 'list' | 'readContent'>>;
 
 export interface AgentArtifactsToolOptions {
-  readonly projectRoot?: string;
+  readonly projectRoot?: string | undefined;
 }
 
 interface LoadedArtifact {
   readonly descriptor: ArtifactDescriptor;
-  readonly record?: ArtifactRecord;
-  readonly buffer?: Buffer;
+  readonly record?: ArtifactRecord | undefined;
+  readonly buffer?: Buffer | undefined;
 }
 
 interface ArtifactPackagePayload {
@@ -378,8 +378,7 @@ async function buildArtifactPackagePayload(
   const manifest = new PackageManifest();
   const entries: ArtifactPackageEntry[] = [];
 
-  for (let index = 0; index < loaded.length; index += 1) {
-    const { record, buffer } = loaded[index];
+  for (const [index, { record, buffer }] of loaded.entries()) {
     const relativePath = `artifacts/${packageArtifactFilename(record, index, usedFilenames)}`;
     entries.push({ path: relativePath, buffer, mimeType: record.mimeType });
     await manifest.add(record, relativePath, buffer.byteLength, options);

@@ -1,8 +1,8 @@
 import type { AgentResearchReportSource as ResearchSource } from '../agent/research-report-input.ts';
 import { prepareProtectedResearchReport, createAgentResearchReportProjector, bindAgentResearchSourceOwner, bindAgentResearchReportSourceOwner, type PreparedResearchReport } from '../agent/protected-research-report.ts';
-import { AgentResearchRunRegistry } from '../agent/research-run-registry.ts';
-import { AgentResearchSourceRegistry, type AgentResearchSourceRecord } from '../agent/research-source-registry.ts';
-import { bindResearchArtifacts, researchLedgers } from '../agent/research-ledgers.ts';
+import { AgentResearchRunRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { AgentResearchSourceRegistry, type AgentResearchSourceRecord } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { bindResearchArtifacts, researchLedgers } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import type { ShellPathService } from '@/runtime/index.ts';
 import type { ProtectedSourceOwner } from '@goodvibes-jev/engine/platform/platform/security';
 import type { ArtifactDescriptor, ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';

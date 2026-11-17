@@ -1,7 +1,22 @@
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { TerminalCommandRegistry } from './command-registry.js';
-interface TtsContext {
-  readonly platform: { readonly configManager: Pick<ConfigManager, 'get' | 'setDynamic' | 'save'>; readonly voiceService?: unknown };
+export interface AlwaysSpeakContext {
+  readonly platform: { readonly configManager: Pick<ConfigManager, 'setDynamic'>; readonly voiceService?: unknown };
+}
+/**
+ * The one switch for always-speak (`ui.voiceEnabled`), behind `/tts on|off`
+ * and `/voice enable|disable`: turning it on needs a voice service in this
+ * runtime, and the single-key write is the whole persistence.
+ */
+export function switchAlwaysSpeak(context: AlwaysSpeakContext, enabled: boolean): string {
+  if (enabled && !context.platform.voiceService) return 'Live TTS is not available in this runtime, so always-speak stays off.';
+  context.platform.configManager.setDynamic('ui.voiceEnabled', enabled);
+  return enabled
+    ? 'Always-speak mode enabled. Every submitted turn will be played through live TTS.'
+    : 'Always-speak mode disabled. Use /tts <prompt> to speak individual turns.';
+}
+interface TtsContext extends AlwaysSpeakContext {
+  readonly platform: { readonly configManager: Pick<ConfigManager, 'get' | 'setDynamic'>; readonly voiceService?: unknown };
   /** Returns whether anything was playing; a port that returns nothing is treated as having stopped playback. */
   readonly stopSpokenOutput?: (() => boolean | void) | undefined;
   readonly submitSpokenInput?: ((prompt: string) => void) | undefined;
@@ -31,17 +46,7 @@ export function createTtsRuntimeCommands<Context extends TtsContext>(policy: {
           return;
         }
         if (policy.alwaysSpeakControls && (first === 'on' || first === 'off')) {
-          if (first === 'on' && !context.platform.voiceService) {
-            context.print('Live TTS is not available in this runtime.');
-            return;
-          }
-          context.platform.configManager.setDynamic('ui.voiceEnabled', first === 'on');
-          context.platform.configManager.save();
-          context.print(
-            first === 'on'
-              ? 'Always-speak mode enabled. Every submitted turn will be played through live TTS.'
-              : 'Always-speak mode disabled. Use /tts <prompt> to speak individual turns.',
-          );
+          context.print(switchAlwaysSpeak(context, first === 'on'));
           context.renderRequest();
           return;
         }

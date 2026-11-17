@@ -78,10 +78,10 @@ const approvalMatrixCommand = createApprovalMatrixCommand<CommandContext>({
 });
 const voiceExperienceCommand = createVoiceExperienceCommand<CommandContext>({
   description:
-    'Review voice posture, manage the managed local-voice runtime and the wake-word models, and package portable voice interaction metadata',
+    'Review or toggle always-speak mode, manage the managed local-voice runtime and the wake-word models, and export or import the voice settings',
   usage:
-    '[review|status|setup --yes|enable --yes|disable --yes|wake status|wake setup --yes|bundle export <path> --yes|bundle inspect <path>]',
-  help: 'Usage: /voice [review|status|setup --yes|enable --yes|disable --yes|wake status|wake setup --yes|bundle export <path> --yes|bundle inspect <path>]',
+    '[review|status|setup --yes|enable|disable|wake status|wake setup --yes|bundle export <path> --yes|bundle inspect <path>|bundle import <path> --yes]',
+  help: 'Usage: /voice [review|status|setup --yes|enable|disable|wake status|wake setup --yes|bundle export <path> --yes|bundle inspect <path>|bundle import <path> --yes]',
   confirmMutations: true,
   reportFailure: true,
   paths: requireShellPaths,
@@ -221,8 +221,4 @@ const voiceExperienceCommand = createVoiceExperienceCommand<CommandContext>({
     '  next /voice status',
     '  next /voice setup --yes',
   ],
-  toggled: (next) => next
-    ? 'Always-speak mode enabled. Every submitted turn will be played through live TTS.'
-    : 'Always-speak mode disabled. Use /tts <prompt> to speak individual turns.',
-  notes: ['Voice is optional and local-first.', 'Operator review remains the primary review path for risky actions.'],
 });

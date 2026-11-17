@@ -18,7 +18,7 @@ GoodVibes Agent supports spoken turns as an Agent TUI feature. Text output remai
 
 `/tts stop` cancels queued spoken output and active playback without cancelling the text transcript.
 
-`ui.voiceEnabled` (shown in settings as "Always speak replies", switched with `/voice enable --yes` and `/voice disable --yes`) makes every submitted turn spoken aloud through live TTS. It does not open a microphone; listening is the wake-word capture described below. The setting is saved to Agent configuration, so it stays on across restarts until you turn it off.
+`ui.voiceEnabled` (shown in settings as "Always speak replies", switched with `/voice enable` and `/voice disable`; turning it on needs live TTS in this runtime) makes every submitted turn spoken aloud through live TTS. It does not open a microphone; listening is the wake-word capture described below. The setting is saved to Agent configuration, so it stays on across restarts until you turn it off. `/voice bundle export <path> --yes` writes the voice settings you changed (always-speak, `tts.*`, `voice.wake.*`) to a file, `/voice bundle inspect <path>` lists them, and `/voice bundle import <path> --yes` applies them as one update.
 
 `/config tts` opens the fullscreen configuration workspace for streaming provider, voice, and spoken-turn model routing.
 

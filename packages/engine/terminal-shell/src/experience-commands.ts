@@ -1,13 +1,14 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ConfigKey, ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 import type { TerminalSlashCommand } from './command-registry.js';
 import { requireYesFlag, stripYesFlag } from './command-confirmation.js';
-import { inspectVoiceBundle, type VoiceBundle } from './voice-settings-review.js';
+import { switchAlwaysSpeak } from './tts-runtime-commands.js';
+import { inspectVoiceBundle, isVoiceBundleKey, readVoiceBundle, type VoiceBundle } from './voice-settings-review.js';
 interface ExperienceContext {
   print(message: string): void;
-  readonly platform: { readonly configManager: Pick<ConfigManager, 'get' | 'setDynamic'> };
+  readonly platform: { readonly configManager: Pick<ConfigManager, 'get' | 'setDynamic' | 'setMany' | 'getSchema'>; readonly voiceService?: unknown };
 }
 export function createApprovalMatrixCommand<Context extends ExperienceContext>(policy: {
   readonly hidden?: boolean | undefined;
@@ -74,8 +75,6 @@ export function createVoiceExperienceCommand<Context extends ExperienceContext>(
     yes: boolean,
   ) => void | Promise<void>;
   readonly review: (enabled: boolean) => string[];
-  readonly toggled: (enabled: boolean) => string;
-  readonly notes: readonly string[];
 }): TerminalSlashCommand<Context> {
   return {
     name: 'voice',
@@ -100,21 +99,16 @@ export function createVoiceExperienceCommand<Context extends ExperienceContext>(
           return;
         }
         if (sub === 'enable' || sub === 'disable') {
-          if (!yes) {
-            requireYesFlag(ctx, sub + ' voice interaction', '/voice ' + sub + ' --yes');
-            return;
-          }
-          const next = sub === 'enable';
-          ctx.platform.configManager.setDynamic('ui.voiceEnabled', next);
-          ctx.print(policy.toggled(next));
+          // Same switch, same rule as /tts on|off: a reversible preference, so no confirmation.
+          ctx.print(switchAlwaysSpeak(ctx, sub === 'enable'));
           return;
         }
         if (sub === 'bundle') {
           const mode = commandArgs[1],
             path = commandArgs[2];
-          if (mode === 'export' || mode === 'inspect') {
+          if (mode === 'export' || mode === 'inspect' || mode === 'import') {
             if (!path) {
-              ctx.print(`Usage: /voice bundle ${mode} <path>${mode === 'export' && policy.confirmMutations ? ' --yes' : ''}`);
+              ctx.print(`Usage: /voice bundle ${mode} <path>${mode !== 'inspect' && policy.confirmMutations ? ' --yes' : ''}`);
               return;
             }
             const target = shellPaths.resolveWorkspacePath(path);
@@ -123,27 +117,50 @@ export function createVoiceExperienceCommand<Context extends ExperienceContext>(
                 requireYesFlag(ctx, 'export voice bundle to ' + path, '/voice bundle export <path> --yes');
                 return;
               }
-              const bundle: VoiceBundle = {
-                version: 1,
-                exportedAt: Date.now(),
-                enabled: Boolean(ctx.platform.configManager.get('ui.voiceEnabled')),
-                notes: policy.notes,
-              };
+              const config = ctx.platform.configManager;
+              const settings: Record<string, unknown> = {};
+              for (const setting of config.getSchema()) {
+                if (!isVoiceBundleKey(setting.key)) continue;
+                const value = config.get(setting.key);
+                if (JSON.stringify(value) !== JSON.stringify(setting.default)) settings[setting.key] = value;
+              }
+              const bundle: VoiceBundle = { version: 2, exportedAt: Date.now(), settings };
               mkdirSync(dirname(target), { recursive: true });
               writeFileSync(target, JSON.stringify(bundle, null, 2) + '\n', 'utf-8');
-              ctx.print('Voice bundle exported to ' + target);
+              ctx.print(`Voice bundle exported to ${target} (${Object.keys(settings).length} changed voice setting${Object.keys(settings).length === 1 ? '' : 's'}).`);
               return;
             }
             if (!existsSync(target)) {
               ctx.print('File not found: ' + target);
               return;
             }
+            let value: unknown;
             try {
-              const value: unknown = JSON.parse(readFileSync(target, 'utf-8'));
-              ctx.print(inspectVoiceBundle(value as VoiceBundle));
+              value = JSON.parse(readFileSync(target, 'utf-8'));
             } catch (error) {
               ctx.print('could not read voice bundle: ' + (error instanceof Error ? error.message : String(error)));
+              return;
             }
+            if (mode === 'inspect') {
+              ctx.print(inspectVoiceBundle(value));
+              return;
+            }
+            if (!yes) {
+              requireYesFlag(ctx, 'apply the voice settings in ' + path, '/voice bundle import <path> --yes');
+              return;
+            }
+            const read = readVoiceBundle(value);
+            if ('problem' in read) {
+              ctx.print('Nothing was applied. ' + read.problem);
+              return;
+            }
+            const changes = Object.entries(read.bundle.settings).map(([key, setting]) => ({ key: key as ConfigKey, value: setting }));
+            const result = ctx.platform.configManager.setMany(changes, { kind: 'owner', surface: 'voice' });
+            if (!result.ok) {
+              ctx.print(`Voice bundle not applied: ${result.refusal.reason} ${result.refusal.next.join(' ')}`.trim());
+              return;
+            }
+            ctx.print(`Voice bundle applied: ${result.saved.length} setting${result.saved.length === 1 ? '' : 's'} from ${target}.`);
             return;
           }
         }

@@ -183,13 +183,11 @@ export class ProfilePickerModal {
         applyProfileCategory(configManager, 'behavior', data.behavior, BEHAVIOR_KEYS, outcome);
       }
       if (outcome.failed.length > 0) {
-        // Nothing applied means nothing to persist; a partial load keeps what did apply.
-        if (outcome.applied.length > 0) configManager.save();
+        // Each applied key was saved by its own write; a partial load keeps what did apply.
         this.statusMessage = `${this.policy.loadedPrefix ?? 'Loaded profile: '}${profile.name} (partial: could not apply ${outcome.failed.join(', ')})`;
         if (outcome.applied.length === 0) this.statusMessage = `${this.policy.errorPrefix ?? 'Error: '}profile ${profile.name} was not loaded; the config rejected ${outcome.failed.join(', ')}`;
         return false;
       }
-      configManager.save();
       const skipped = outcome.skipped.length > 0 ? ` (not applied, this release does not take them from a profile: ${outcome.skipped.join(', ')})` : '';
       this.statusMessage = `${this.policy.loadedPrefix ?? 'Loaded profile: '}${profile.name}${skipped}`;
       return true;

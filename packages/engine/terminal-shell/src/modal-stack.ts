@@ -1,7 +1,7 @@
 import type { SelectionResult } from './selection-modal.js';
 import type { SurfaceModalHost, TrackedModal } from './surface-modal-host.js';
 
-interface OwnModal {
+export interface OwnModal {
     readonly active: boolean;
     close(): void;
 }
@@ -20,7 +20,6 @@ export interface HandlerModalOwner {
     selectionCallback: ((result: SelectionResult | null) => void) | null;
     readonly autocomplete: {
         reset(): void;
-        update(query: string): void;
     } | null;
     readonly settingsModal: OwnModal & {
         readonly editingMode: boolean;
@@ -53,10 +52,12 @@ export function ownModal(name: string, modal: () => OwnModal, reopen?: () => voi
  * `surfaceModals.track(...)`; a product adds its own (the Agent's workspace,
  * process monitor and live tail; the TUI's config surfaces and onboarding).
  *
- * Help, shortcuts, bookmarks, the context inspector, the MCP workspace and
- * command mode come back when the modal stacked above them closes. The rest
- * cannot: closing them discards what they showed (a selection's callback, a
- * file picker's insert position, the block a menu acted on).
+ * Help, shortcuts, bookmarks, the context inspector and the MCP workspace come
+ * back when the modal stacked above them closes. The rest cannot: closing them
+ * discards what they showed (a selection's callback, a file picker's insert
+ * position, the block a menu acted on). Command mode does not come back
+ * either: it ends when its command runs, and the command's own modal (settings
+ * from /settings) closing must leave an empty composer, not a fresh '/'.
  */
 export function createHandlerModals(owner: HandlerModalOwner, options: {
     /** Esc on command mode also clears what was typed after the slash; otherwise only a bare '/' goes. */
@@ -80,12 +81,6 @@ export function createHandlerModals(owner: HandlerModalOwner, options: {
                     owner.prompt = '';
                     owner.cursorPos = 0;
                 }
-            },
-            reopen: () => {
-                owner.commandMode = true;
-                owner.prompt = '/';
-                owner.cursorPos = 1;
-                owner.autocomplete?.update('');
             },
         },
         settings: {

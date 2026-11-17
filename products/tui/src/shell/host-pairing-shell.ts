@@ -29,9 +29,10 @@ export function wireHostPairingShell(options: {
       input.ensureInputCursorVisible();
       input.autocomplete?.reset(); input.syncFeedContextMutableFields(); render();
     },
-    // Nothing on the modal stack (command mode included: pairing would replace a half-typed command).
+    // No modal open but, at most, command mode: the /pair line that started this is still in it.
     canPresent: () => options.canPresent() && !input.concealedInput
-      && !input.surfaceModals.active && !input.searchManager.active && !input.historySearch.active,
+      && input.surfaceModals.modals().every((modal) => modal === input.modals.command)
+      && !input.searchManager.active && !input.historySearch.active,
     executeOwnerCommand: line => {
       const [name, ...args] = line.slice(1).trim().split(/\s+/);
       void commandRegistry.executeFromOwner(name!, args, commandContext, line)

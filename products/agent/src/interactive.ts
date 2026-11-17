@@ -918,7 +918,7 @@ async function main() {
         input.autocomplete?.reset();
         render();
       },
-      // Nothing on the modal stack, command mode included.
+      // No modal open but, at most, command mode: the command that started this is still in it.
       canPresent: () => {
         return !exiting &&
           pendingPermission === null &&
@@ -926,7 +926,7 @@ async function main() {
           !daemonRepairPrompt?.pending() &&
           !input.concealedInput &&
           !input.plainLineInput &&
-          !input.surfaceModals.active &&
+          input.surfaceModals.modals().every((modal) => modal === input.modals.command) &&
           !input.searchManager.active &&
           !input.historySearch.active &&
           !sessionViews.active;

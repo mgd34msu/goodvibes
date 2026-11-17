@@ -22,10 +22,9 @@ import { readTuiNotificationsMetadataOnly } from '../config/host-settings.ts';
  */
 import { FocusTracker } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import type { SharedSessionContinuationOutcome } from '@goodvibes-jev/engine/platform/platform/control-plane';
-import { composeRuntimeServices } from '@goodvibes-jev/engine/platform/platform/runtime/bootstrap';
+import { buildContinuationSpawnInput, composeRuntimeServices } from '@goodvibes-jev/engine/platform/platform/runtime/bootstrap';
 import { forwardGatewayMethodsToDaemon } from './gateway-daemon-forward.ts';
 import { terminalRunsRoutines } from './terminal-routines.ts';
-import { buildContinuationSpawnInput } from './continuation-spawn.ts';
 import { gateConsolidationToLocalWriter } from './memory-consolidation-gate.ts';
 import { createNotificationDispatcher, wireRuntimeNotificationBridge, wireMemoryPressureNotice } from './notification-dispatch.ts';
 import { resolveDaemonEnabled } from '@goodvibes-jev/engine/platform/platform/config';
@@ -219,7 +218,7 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
       // shared-session work rather than executing it under superseded rules.
       const clientBuildGuard = new ClientBuildGuard({ clientVersion: VERSION });
       type ContinuationRequest = Parameters<NonNullable<Parameters<typeof sessionBroker.setContinuationRunner>[0]>>[0];
-      const continuationRunner = async ({ task, input }: ContinuationRequest): Promise<SharedSessionContinuationOutcome> => {
+      const continuationRunner = async ({ task, input, routeBinding }: ContinuationRequest): Promise<SharedSessionContinuationOutcome> => {
         // Held, not declined with null: null reads as "consumed", and the message
         // would be lost instead of waiting for the restarted terminal.
         if (!clientBuildGuard.maySharedSessionWork()) {
@@ -229,9 +228,13 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
           });
           return { disposition: 'held', reason: 'this terminal build is below the daemon floor; restart it to process this message' };
         }
-        const record = agentManager.spawn(buildContinuationSpawnInput({ task, input }, {
+        // The platform's one spawn decision, the same the daemon and the Agent make: a
+        // conversational follow-up gets the conversational tool set and the write
+        // authority of the channel it arrived on.
+        const record = agentManager.spawn(buildContinuationSpawnInput({ task, input, ...(routeBinding ? { routeBinding } : {}) }, {
           configReader: config,
           modelCandidates: providerRegistry.listModels(),
+          sharedSessionContext: true,
         }));
         return { agentId: record.id };
       };

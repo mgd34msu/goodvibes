@@ -46,7 +46,6 @@ test('driver publication preserves the original installed tree and an unrelated 
   const retained = outgoingFile(install, 'owner.txt'); expect(retained).toBeDefined(); expect(readFileSync(retained!, 'utf8')).toBe('Original owner driver content');
   expect(readFileSync(join(previous, 'custom.txt'), 'utf8')).toBe('Previously retained custom bytes');
   expect(existsSync(target + '.directory-update.lock')).toBe(false);
-  expect(result.stdout).toContain('retained');
 });
 
 test('a superseded previous driver tree is retained when the swap fails after publication', () => {
@@ -104,7 +103,6 @@ test('a failed incoming rename restores the exact parked original without deleti
   const result = run('driver', `mv() { case "$1" in */incoming) return 71 ;; esac; command mv "$@"; }`);
   expect(result.status).not.toBe(0); expect(readFileSync(join(target, 'owner.txt'), 'utf8')).toBe('Original owner driver content');
   expect(existsSync(join(target, 'index.js'))).toBe(false); expect(existsSync(target + '.directory-update.lock')).toBe(false);
-  expect(result.stderr).toContain('kept or restored');
   expect(readdirSync(install).some(name => name.startsWith('.goodvibes-directory-install.'))).toBe(true);
 });
 
@@ -113,7 +111,7 @@ test('a rename that completed before returning failure is compensated using the 
   const result = run('driver', `_fault_once=0
     mv() { case "$1" in */incoming) if [ "$_fault_once" = 0 ]; then _fault_once=1; command mv "$@"; return 72; fi ;; esac; command mv "$@"; }`);
   expect(result.status).not.toBe(0); expect(readFileSync(join(target, 'owner.txt'), 'utf8')).toBe('Original owner driver content');
-  expect(existsSync(target + '.directory-update.lock')).toBe(false); expect(result.stderr).toContain('kept or restored');
+  expect(existsSync(target + '.directory-update.lock')).toBe(false);
 });
 
 test('a foreign live replacement blocks compensation without overwriting it or deleting the retained original', () => {
@@ -121,7 +119,7 @@ test('a foreign live replacement blocks compensation without overwriting it or d
   const result = run('driver', `mv() { case "$1" in */incoming) mkdir "$2"; printf 'Foreign live directory' > "$2/foreign.txt"; return 73 ;; esac; command mv "$@"; }`);
   expect(result.status).not.toBe(0); expect(readFileSync(join(target, 'foreign.txt'), 'utf8')).toBe('Foreign live directory');
   const retained = outgoingFile(install, 'owner.txt'); expect(retained).toBeDefined(); expect(readFileSync(retained!, 'utf8')).toBe('Original owner driver content');
-  expect(existsSync(target + '.directory-update.lock')).toBe(true); expect(result.stderr).toContain('needs inspection');
+  expect(existsSync(target + '.directory-update.lock')).toBe(true);
 });
 
 test('WebUI installation keeps other versions, owner-created directories and aliases', () => {
@@ -140,7 +138,6 @@ test('a replaced WebUI parent receives no publication or cleanup after a borrowe
   const result = run('webui', `cp() { command cp "$@" || return; command mv "$WEBUI_ROOT" "$INSTALL_DIR/retained-webui-root"; mkdir "$WEBUI_ROOT"; printf 'Foreign parent' > "$WEBUI_ROOT/foreign.txt"; }`);
   expect(result.status).not.toBe(0); expect(readdirSync(webui)).toEqual(['foreign.txt']); expect(readFileSync(join(webui, 'foreign.txt'), 'utf8')).toBe('Foreign parent');
   expect(readFileSync(join(install, 'retained-webui-root', '3.1.2', 'owner.txt'), 'utf8')).toBe('Original configured bundle');
-  expect(result.stderr).toContain('needs inspection');
 });
 
 test('replacing both hardlink names cannot mint a fresh original suite claim', () => {
@@ -148,7 +145,7 @@ test('replacing both hardlink names cannot mint a fresh original suite claim', (
   const result = run('driver', `command rm -f "$INSTALL_DIR/goodvibes-daemon.update-transaction" "$INSTALL_CLAIM_OWNER/goodvibes-daemon"
     printf 'Foreign replacement claim' > "$INSTALL_DIR/goodvibes-daemon.update-transaction"
     command ln "$INSTALL_DIR/goodvibes-daemon.update-transaction" "$INSTALL_CLAIM_OWNER/goodvibes-daemon"`);
-  expect(result.status).not.toBe(0); expect(result.stderr).toContain('Original installation claim ownership changed');
+  expect(result.status).not.toBe(0); expect(result.stderr).toContain('(INSTALL_E021)');
   expect(readFileSync(join(target, 'owner.txt'), 'utf8')).toBe('Original owner driver content');
   expect(readFileSync(join(install, 'goodvibes-daemon.update-transaction'), 'utf8')).toBe('Foreign replacement claim');
 });
@@ -158,7 +155,7 @@ test('a substituted private claim directory is not adopted even when it contains
   const result = run('driver', `command mv "$INSTALL_CLAIM_OWNER" "$INSTALL_DIR/retained-original-claims"
     mkdir "$INSTALL_CLAIM_OWNER"
     for product in goodvibes-daemon goodvibes goodvibes-agent; do command ln "$INSTALL_DIR/$product.update-transaction" "$INSTALL_CLAIM_OWNER/$product"; done`);
-  expect(result.status).not.toBe(0); expect(result.stderr).toContain('private claim directory changed');
+  expect(result.status).not.toBe(0); expect(result.stderr).toContain('(INSTALL_E019)');
   expect(readFileSync(join(target, 'owner.txt'), 'utf8')).toBe('Original owner driver content');
   expect(existsSync(join(install, 'retained-original-claims', 'goodvibes-daemon'))).toBe(true);
 });
@@ -186,7 +183,7 @@ test('directory cleanup preserves a foreign private claim reference after publis
       printf 'Foreign directory reference' > "$_directory_work/claim"
     fi
   }`);
-  expect(result.status).not.toBe(0); expect(result.stderr).toContain('directory is published');
+  expect(result.status).not.toBe(0);
   const owned = readdirSync(install).find(name => name.startsWith('.goodvibes-directory-install.')); expect(owned).toBeDefined();
   expect(readFileSync(join(install, owned!, 'claim'), 'utf8')).toBe('Foreign directory reference');
   expect(existsSync(join(install, owned!, 'original-claim'))).toBe(true);

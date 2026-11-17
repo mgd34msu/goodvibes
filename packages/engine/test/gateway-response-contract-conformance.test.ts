@@ -318,7 +318,7 @@ function occasionsHarness(): GatewayMethodCatalog {
       get: (key) => {
         if (key === 'daemon.timezone') return 'Europe/London';
         const short = key.startsWith('occasions.') ? key.slice('occasions.'.length) : key;
-        return (OCCASIONS_DEFAULTS as Record<string, unknown>)[short];
+        return (OCCASIONS_DEFAULTS as unknown as Record<string, unknown>)[short];
       },
       set: () => undefined,
     },
@@ -381,11 +381,39 @@ describe('occasions.* responses conform to the published contract', () => {
       said: "I'm in Porto the first week of October",
       authority: 'owner-direct',
     }, 'accepted');
+    const updated = await invokeAndCheck(catalog, 'occasions.update', {
+      occasionId: 'our anniversary',
+      date: '09-13',
+      confirmed: true,
+      surface: 'tui',
+      said: 'our anniversary is actually September 13th',
+      authority: 'owner-direct',
+    }, 'accepted change of date');
+    const plans = await invokeAndCheck(catalog, 'occasions.plans.list', {}, 'two declared ranges') as { plans: Array<{ id: string; title: string; from: string }> };
+    const porto = plans.plans.find((plan) => plan.title === 'Porto');
+    expect(porto).toBeDefined();
+    const planUpdated = await invokeAndCheck(catalog, 'occasions.plans.update', {
+      planId: porto!.id,
+      planFrom: porto!.from,
+      to: '2026-10-06',
+      confirmed: true,
+      surface: 'tui',
+      said: 'I stay in Porto until the sixth',
+      authority: 'owner-direct',
+    }, 'accepted change of range');
+    const planRemoved = await invokeAndCheck(catalog, 'occasions.plans.remove', {
+      planId: porto!.id,
+      planFrom: porto!.from,
+      confirmed: true,
+      authority: 'owner-direct',
+    }, 'accepted removal of a range');
     await invokeAndCheck(catalog, 'occasions.remove', {
       occasionId: 'our anniversary',
       confirmed: true,
       authority: 'owner-direct',
     }, 'accepted removal');
+    // Each write was accepted, so the payloads checked above are the accepted shapes, not refusals.
+    expect([updated, planUpdated, planRemoved].map((answer) => (answer as { ok: boolean }).ok)).toEqual([true, true, true]);
   });
 
   test('the answer and interview chain', async () => {

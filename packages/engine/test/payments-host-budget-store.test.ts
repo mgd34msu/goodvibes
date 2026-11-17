@@ -2,6 +2,8 @@
 // Red when: A parse failure is caught and treated as no spend: the snapshot answers instead of refusing, or the file is rewritten.
 // Proves: Money held for an unresolved checkout is handed back by a restart, a day change or a sweep, so the day's budget is overspent.
 // Red when: The durable ledger drops the hold-until-settled mark on write or sweeps the hold after its ordinary lifetime: a week later the reopened ledger shows the full budget, or the commit does not become spend.
+// Proves: The budget file goes missing while purchases are on record and the next start reads an unspent day.
+// Red when: The ledger answers a snapshot or takes a reserve over an absent file although history is on record, instead of refusing until accounting is restored.
 /**
  * The daemon's budget ledger on disk: a hold taken through one ledger is what
  * a second ledger over the same file sees a week later, so a restart never
@@ -10,7 +12,7 @@
  *
  * Real `DurableBudgetLedger` handles on one file.
  */
-import { readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { beforeEach, describe, expect, test } from 'bun:test';
 import type { BudgetLimits } from '../platform/src/platform/payments/budget.js';
@@ -55,6 +57,19 @@ test.each([
   writeFileSync(filePath, raw);
   expectUnavailable(new DurableBudgetLedger(filePath, clock));
 });
+
+test('a missing budget file funds nothing while purchases are on record; with none on record it starts empty', () => {
+  expectNothingFunded(new DurableBudgetLedger(filePath, clock, undefined, undefined, undefined, () => true));
+  const fresh = new DurableBudgetLedger(filePath, clock, undefined, undefined, undefined, () => false);
+  expect(fresh.snapshot(LIMITS, LATER, 'UTC').item.remaining).toBe(10_000);
+  expect(reserve(fresh, 'first', 1_000)?.itemMinorUnits).toBe(1_000);
+});
+
+function expectNothingFunded(ledger: DurableBudgetLedger): void {
+  expect(() => ledger.snapshot(LIMITS, LATER, 'UTC')).toThrow(PaymentBudgetUnavailableError);
+  expect(() => reserve(ledger, 'after-loss', 1)).toThrow(PaymentBudgetUnavailableError);
+  expect(existsSync(filePath)).toBe(false);
+}
 
 describe('a hold for a checkout not yet settled', () => {
   const limits: BudgetLimits = { dailyItemMinorUnits: 10_000, dailyOverageMinorUnits: 2_000,

@@ -47,8 +47,13 @@ or your `permissions.tools.*` setting allows run at once, and a deny rule
 refuses. In every mode but `yolo`, the owner-only items (granting access, loosening a security, judgment or payment setting, a call your own "always ask me" rule covers, a change asked for from a channel, a deletion nothing keeps a copy of, sending to a new recipient, sending content derived from untrusted text, and changing what a contract requires) always come to you, whether or not a decision model is set:
 asked, or held for the end of the run in `just-vibes`; Jev never answers one.
 The program recognises deletions itself in shell commands, file operations and
-operator methods that cannot be undone, and a new recipient as any address a
-call chooses that is not one of your own destinations. Spending over your
+operator methods that cannot be undone, and a new recipient as an address a
+call chooses that is not one of your own destinations, wherever it can read
+it: a tool's declared recipients, shell commands that mail or post to a
+messaging service, `fetch` requests to one, and MCP or plugin tools naming a
+mail address or phone number (the list is in the 3.3.0 release notes). A
+recipient it cannot read, such as one sent from inside a script, is a judgment
+call. Spending over your
 limits and payment steps are put to you by the payment windows in every mode,
 `yolo` included. What is left is a judgment
 call, and the table says who answers it.

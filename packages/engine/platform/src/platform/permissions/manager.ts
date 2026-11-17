@@ -23,6 +23,7 @@ import { assertPermissionActive, awaitPermission } from './cancellation.js';
 import { analyzePermissionRequest, withReading } from './analysis.js';
 
 import { decisionModelReady, effectivePermissionMode, presetForMode, type GatePreset, type GatePresetName } from '../gate/presets.js';
+import { gateDecisionsCalibrated } from '../gate/calibration.js';
 import { judgmentInputBoundary, runBoundary } from '../gate/boundary.js';
 import { readToolCall, shellCommandsIn } from '../gate/reading.js';
 import { currentExecutionMode, currentExecutionModeForReadDecision, currentExecutionModeOwner, isInvocationAdmitted, withExecutionMode } from '../gate/execution-context.js';
@@ -236,7 +237,13 @@ export interface PermissionConfigReader {
   /** Coherent owner-held frame. Must read owned state without invoking observers or host callbacks. */
   getAutonomousSnapshot?(): Readonly<{ permissions: PermissionConfigSnapshot['permissions']; autoApprove: boolean; directory: string | null; incarnation?: number }>;
   isAutoApproveEnabled(): boolean;
-  /** Whether a decision model is set up to answer (gate/presets.ts `decisionModelReady`); absent counts as ready. */
+  /**
+   * Whether a decision model works for the mode in force: it is set up to
+   * answer (gate/presets.ts `decisionModelReady`), and, when the mode is the
+   * shipped default rather than one the owner chose, a calibration run
+   * measured the gate's decisions on it (gate/calibration.ts). Absent counts
+   * as ready.
+   */
   isDecisionModelReady?(): boolean;
   getSnapshot(): PermissionConfigSnapshot;
   getWorkingDirectory(): string | null;
@@ -287,7 +294,7 @@ function capturePermissionConfiguration(reader: PermissionConfigReader, read: ()
 }
 
 export function createPermissionConfigReader(
-  configManager: Pick<ConfigManager, 'get' | 'getRaw' | 'getWorkingDirectory'> & Partial<Pick<ConfigManager, 'getAutonomousPermissionSnapshot' | 'flushConfigFileChanges'>>,
+  configManager: Pick<ConfigManager, 'get' | 'getRaw' | 'getWorkingDirectory'> & Partial<Pick<ConfigManager, 'getAutonomousPermissionSnapshot' | 'flushConfigFileChanges' | 'isExplicitlySet'>>,
 ): PermissionConfigReader {
   const snapshotAccessor = configManager.getAutonomousPermissionSnapshot;
   const permissionSnapshot = snapshotAccessor?.bind(configManager);
@@ -296,10 +303,16 @@ export function createPermissionConfigReader(
     ...(flushPendingChanges ? { flushPendingChanges } : {}),
     ...(permissionSnapshot ? { getAutonomousSnapshot: permissionSnapshot } : {}),
     isAutoApproveEnabled: () => isAutoApproveEnabled(configManager),
-    isDecisionModelReady: () => decisionModelReady({
-      policy: configManager.get('judgment.policy'), endpoint: configManager.get('judgment.endpoint'), model: configManager.get('judgment.model'),
-      keySource: configManager.get('judgment.keySource'), keyName: configManager.get('judgment.keyName'),
-    }),
+    isDecisionModelReady: () => {
+      const model = configManager.get('judgment.model');
+      if (!decisionModelReady({
+        policy: configManager.get('judgment.policy'), endpoint: configManager.get('judgment.endpoint'), model,
+        keySource: configManager.get('judgment.keySource'), keyName: configManager.get('judgment.keyName'),
+      })) return false;
+      // The owner's own choice of mode stands on a working model; the shipped
+      // default hands decisions to Jev only once they were measured on it.
+      return configManager.isExplicitlySet?.('permissions.mode') !== false || gateDecisionsCalibrated(String(model ?? ''));
+    },
     getSnapshot: permissionSnapshot
       ? () => ({ permissions: permissionSnapshot().permissions })
       : () => getConfigSnapshot(configManager),

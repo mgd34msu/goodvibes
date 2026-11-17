@@ -402,7 +402,7 @@ export const coreHeadConfigSettings: (ConfigSettingDefinition | ConfigSetting)[]
     default: 'jev-decides',
     description: 'Who decides what ordinary work does not settle. ask-me: you are asked about dangerous actions and owner-only decisions. '
       + 'jev-decides (default): Jev, the decision model, decides judgment calls and you are asked only owner-only decisions; '
-      + 'with no working decision model it behaves as ask-me. just-vibes: does as much as it can without interrupting you; '
+      + 'with no working decision model it behaves as ask-me, and while it is only the default (not chosen) it also does until a calibration run has measured Jev\'s decisions on the configured decision model. just-vibes: does as much as it can without interrupting you; '
       + 'Jev decides judgment calls when a decision model works, and anything that needs you is held and listed at the end. '
       + 'yolo: runs every action without safety denials (containment, secret storage and payment limits still apply). '
       + 'plan is a separate read-only planning posture.',

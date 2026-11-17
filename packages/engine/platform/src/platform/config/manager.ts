@@ -568,6 +568,11 @@ export class ConfigManager {
     return detachedConfigValue(resolveWithProfileFallback(key, parent[field], this.profileFallback)) as ConfigValue<K>;
   }
 
+  /** Whether a settings file or a runtime override holds this key, rather than the shipped default. One map lookup. */
+  isExplicitlySet(key: ConfigKey): boolean {
+    return this.runtimeState.sources.has(key) || this.runtimeState.overrides.has(key);
+  }
+
   /** Explicit stored value for settings edit/clear receipts, without profile disclosure. */
   getStored<K extends ConfigKey>(key: K): ConfigValue<K> {
     const { parent, field } = this.#resolvePath(key);

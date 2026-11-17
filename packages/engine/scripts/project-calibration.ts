@@ -7,9 +7,12 @@
  * Add --inventory-only to enumerate without contacting the service, --only a,b
  * for a repair run, or --provisional while the integrated source is changing.
  * --gate runs only the decisions the permission gate registers (the run that
- * decides whether Jev may stand in for the owner by default), and --record
- * <json> writes the compact calibration record products read to tell whether
- * those decisions were measured at their current versions.
+ * decides whether Jev may stand in for the owner by default) and writes the
+ * compact calibration record the product ships, platform/gate/gate-calibration-record.ts,
+ * which the permission manager reads to tell whether those decisions were
+ * measured at their current versions on the configured model (gate/calibration.ts).
+ * --record <path> writes the record elsewhere: a .ts path as that module, any
+ * other path as JSON.
  */
 import { mkdirSync, renameSync } from 'node:fs';
 import { dirname, relative, resolve } from 'node:path';
@@ -25,6 +28,28 @@ import { observeProjectSource, sameProjectSource } from './project-source-observ
 const REPO_ROOT = resolve(ENGINE_ROOT, '../..');
 /** The registry of every decision the permission gate makes. */
 const GATE_REGISTRY = 'platform/src/platform/gate/judgment-registry.ts';
+/** The record the product ships and reads (gate/calibration.ts); a --gate run writes it unless --record names another path. */
+const GATE_RECORD_MODULE = 'platform/src/platform/gate/gate-calibration-record.ts';
+
+/** The record as the module the product imports: the same type and export name, with this run's values. */
+function gateRecordModule(record: unknown): string {
+  return [
+    "import type { CalibrationRecord } from '@goodvibes-jev/judgment';",
+    '',
+    '/** A calibration record as the calibration script writes it: the run\'s measurements and the source it measured. */',
+    'export type GateCalibrationRecord = CalibrationRecord & { readonly source?: string };',
+    '',
+    '/**',
+    ' * The last calibration run over the decisions the permission gate registers,',
+    ' * written by `bun packages/engine/scripts/project-calibration.ts --gate` (a',
+    ' * paid run against the configured decision endpoint). Null until a run has',
+    ' * been recorded: the default mode then asks the owner instead of letting Jev',
+    ' * decide (gate/calibration.ts).',
+    ' */',
+    `export const GATE_CALIBRATION_RECORD: GateCalibrationRecord | null = ${JSON.stringify(record, null, 2)};`,
+    '',
+  ].join('\n');
+}
 const THIS_SCRIPT = relative(REPO_ROOT, import.meta.path);
 
 function sourceSnapshot() {
@@ -183,10 +208,12 @@ async function main(): Promise<void> {
     process.removeListener('SIGTERM', cancel);
   }
   const passed = await persist(true);
-  if (values.record !== undefined) {
-    const recordPath = resolve(values.record);
+  const recordTarget = values.record ?? (values.gate && values.only === undefined ? resolve(ENGINE_ROOT, GATE_RECORD_MODULE) : undefined);
+  if (recordTarget !== undefined) {
+    const recordPath = resolve(recordTarget);
+    const record = { ...calibrationRecord(currentReport(), config.model), passed, source: source.sha };
     mkdirSync(dirname(recordPath), { recursive: true });
-    await Bun.write(recordPath, `${JSON.stringify({ ...calibrationRecord(currentReport(), config.model), passed, source: source.sha }, null, 2)}\n`);
+    await Bun.write(recordPath, recordPath.endsWith('.ts') ? gateRecordModule(record) : `${JSON.stringify(record, null, 2)}\n`);
     console.log(`[project-calibration] record: ${recordPath}`);
   }
   console.log(formatReport(currentReport()));

@@ -82,6 +82,7 @@ export function createServingSettingsImportPrecondition(input: {
   };
   return createSettingsImportPreconditionHandler({
     lifetime: authority.settingsLifetime,
+    caller: (req) => authority.extractAuthToken(req),
     captureAuthority(req): Authority | null {
       const admin = authority.captureSettingsAdminAuthority(req), native = authority.captureNativeExecutionAuthority(req), expected = native?.current();
       // A paired device's own credential, or the operator token from this machine (whose native authority is the local owner's).

@@ -6,6 +6,7 @@ import { isDaemonOwnedConfigKey } from '../../config/config-ownership.js';
 import { isSecretBearingConfigKey } from '../../config/secret-bearing-config-keys.js';
 import { daemonSecretKeyFor } from '../../config/daemon-secret-keys.js';
 import { snapshotJudgmentInput } from '../../gate/judgment-input.js';
+import { extractOperatorAuthToken } from '../../security/http-auth.js';
 import type { DaemonControlPlaneHelper } from '../control-plane.js';
 
 export interface ServingSettingsAuthority {
@@ -37,6 +38,7 @@ export function createServingSettingsPrecondition(
     lifetime: authority.settingsLifetime,
     captureAuthority: (req) => authority.captureSettingsAdminAuthority(req),
     withAuthority: (req, captured, callback) => authority.withSettingsAdminAuthority(req, captured, callback),
+    caller: extractOperatorAuthToken,
     owner: {
       prepare(request): Prepared {
         assertServingOwner();

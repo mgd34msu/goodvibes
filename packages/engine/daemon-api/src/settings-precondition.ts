@@ -1,4 +1,4 @@
-import { createRequestReceiptTable, servingIdOf } from './single-use-reference-table.js';
+import { createRequestReceiptTable, requestFingerprint, servingIdOf } from './single-use-reference-table.js';
 
 /**
  * One request writes one setting. The caller sends the key, the value and the
@@ -80,6 +80,8 @@ interface Options<Prepared, Transition, Authority> {
   readonly lifetime: () => object | null;
   readonly captureAuthority: (req: Request) => Authority | null;
   readonly withAuthority: <T>(req: Request, authority: Authority, callback: (assertCurrent: () => void) => T) => T;
+  /** The credential the request was sent with; a `requestId` is remembered per caller. */
+  readonly caller?: (req: Request) => string;
 }
 function record(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -122,7 +124,8 @@ function readRequest(arm: Record<string, unknown>, extra: readonly string[]): Se
 export function createSettingsPreconditionHandler<Prepared, Transition, Authority>(
   options: Options<Prepared, Transition, Authority>,
 ): SettingsPreconditionHandler {
-  const answered = createRequestReceiptTable<Answer>();
+  // Only a write that happened is remembered; a refusal can be resent under the same id.
+  const answered = createRequestReceiptTable<Answer>(result => result.status === 200);
 
   const capture = (request: SettingsPreconditionRequest, requestLifetime: object | null): Answer => {
     const lifetime = options.lifetime();
@@ -194,7 +197,9 @@ export function createSettingsPreconditionHandler<Prepared, Transition, Authorit
         ...(typeof ifServing === 'string' ? { serving: ifServing } : {}) };
       const run = () => write(req, request, expected, typeof requestId === 'string' ? requestId : undefined, requestLifetime);
       if (typeof requestId !== 'string') return run().then(respond);
-      const remembered = answered.answer(requestId, `${request.operation}\u0000${request.key}`, run);
+      // The whole request decides "the same request": a different value or precondition under one id is a mismatch.
+      const fingerprint = requestFingerprint({ request, ifIncarnation: ifIncarnation ?? null, ifServing: ifServing ?? null });
+      const remembered = answered.answer(options.caller?.(req) ?? '', requestId, fingerprint, run);
       if (remembered === 'mismatch') {
         return respond(refusal(400, 'SETTINGS_PRECONDITION_INVALID', undefined, {
           state: 'nothing was applied', next: ['Send a new requestId for a different change'] }));

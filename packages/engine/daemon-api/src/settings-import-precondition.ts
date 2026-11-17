@@ -1,5 +1,5 @@
 import type { SettingsPreconditionReceipt } from './settings-precondition.js';
-import { createRequestReceiptTable, createSingleUseReferenceTable, servingIdOf } from './single-use-reference-table.js';
+import { createRequestReceiptTable, createSingleUseReferenceTable, requestFingerprint, servingIdOf } from './single-use-reference-table.js';
 import { isPairingStoreFault, settingsRefusalReason, type SettingsRefusalReason } from './settings-precondition.js';
 
 /**
@@ -47,6 +47,8 @@ interface Options<Prepared, Transition, Authority> {
   /** Server-owned admission over prepared value-safe facts, before the publication lease. */
   readonly admit: <T>(req: Request, authority: Authority, prepared: Prepared, assertCurrent: () => void,
     apply: (claim: () => void, assertAdmissionCurrent: () => void) => Promise<T>) => Promise<T>;
+  /** The credential the request was sent with; a `requestId` is remembered per caller. */
+  readonly caller?: (req: Request) => string;
 }
 function record(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -70,7 +72,8 @@ function readSettings(value: unknown): SettingsImportPreconditionRequest['settin
 
 export function createSettingsImportPreconditionHandler<Prepared, Transition, Authority>(options: Options<Prepared, Transition, Authority>): SettingsImportPreconditionHandler {
   const references = createSingleUseReferenceTable<{ prepared: Prepared; authority: Authority; lifetime: object; expiresAt: number }>();
-  const answered = createRequestReceiptTable<Answer>();
+  // Only an import that happened is remembered; a refusal can be resent under the same id.
+  const answered = createRequestReceiptTable<Answer>(result => result.status === 200);
   const synchronize = () => {
     const current = options.lifetime();
     references.synchronize(current);
@@ -141,8 +144,9 @@ export function createSettingsImportPreconditionHandler<Prepared, Transition, Au
         ...(typeof ifServing === 'string' ? { serving: ifServing } : {}) };
       const run = () => write(req, settings, expected, typeof requestId === 'string' ? requestId : undefined, requestLifetime);
       if (typeof requestId !== 'string') return respond(await run());
-      const fingerprint = settings.map(entry => entry.key).join('\u0000');
-      const remembered = answered.answer(requestId, fingerprint, run);
+      // The whole request decides "the same request": different values or preconditions under one id are a mismatch.
+      const fingerprint = requestFingerprint({ settings, ifIncarnation: ifIncarnation ?? null, ifServing: ifServing ?? null });
+      const remembered = answered.answer(options.caller?.(req) ?? '', requestId, fingerprint, run);
       if (remembered === 'mismatch') {
         return respond(refusal(400, 'SETTINGS_IMPORT_PRECONDITION_INVALID', undefined, {
           state: 'nothing was imported', next: ['Send a new requestId for a different import'] }));

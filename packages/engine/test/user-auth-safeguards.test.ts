@@ -1,5 +1,5 @@
-// Proves: A session ends at its expiry, and a user deleted or re-keyed from the command line loses access on the running daemon and is not brought back by its next write.
-// Red when: An expired session token is accepted, the running daemon keeps honouring a deleted user, or its next write of the user store restores a deleted user or an old password.
+// Proves: A session ends at its expiry, and a user deleted or given a new password, on the daemon or from the command line, loses access on the running daemon and is not brought back by its next write.
+// Red when: An expired session token is accepted, the running daemon keeps honouring a deleted user or a session opened with an old password, or its next write of the user store restores a deleted user or an old password.
 /**
  * Local auth: the last administrator cannot be deleted, an unreadable user
  * store is kept aside instead of overwritten, a failed hash upgrade does not
@@ -53,12 +53,22 @@ test('a host write after the CLI deleted or re-keyed a user does not bring the o
   expect(reread.getUser('dave')).not.toBeNull();
 });
 
-test('a running host stops honouring a user the CLI deleted, and ends that user\'s sessions', () => {
+test('a running host ends the sessions of a user deleted by the CLI, or whose password the host or the CLI changed', () => {
   const { host, cli, advance } = hostAndCli();
   const session = host.createSession('viewer');
+  const carolBeforeHostChange = host.createSession('carol');
   expect(host.validateSession(session.token)).not.toBeNull();
+  expect(host.validateSession(carolBeforeHostChange.token)).not.toBeNull();
   cli.deleteUser('viewer');
   advance(1_500);
   expect(host.validateSession(session.token)).toBeNull();
   expect(host.authenticate('viewer', 'viewer-password').ok).toBe(false);
+
+  host.rotatePassword('carol', 'carol-host-password');
+  expect(host.validateSession(carolBeforeHostChange.token)).toBeNull();
+  const carolBeforeCliChange = host.createSession('carol');
+  cli.rotatePassword('carol', 'carol-cli-password');
+  advance(1_500);
+  expect(host.validateSession(carolBeforeCliChange.token)).toBeNull();
+  expect(host.authenticate('carol', 'carol-host-password').ok).toBe(false);
 });

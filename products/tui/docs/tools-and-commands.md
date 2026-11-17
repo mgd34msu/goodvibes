@@ -9,10 +9,10 @@ GoodVibes ships a broad built-in tool set, organized into families. Every tool n
 | File and code operations | `read`, `write`, `edit`, `find`, `repo_map` |
 | Execution and inspection | `exec`, `analyze`, `inspect` |
 | Network and research | `fetch`, `web_search` |
-| Orchestration | `agent`, `workflow`, `task`, `team`, `worklist` |
+| Orchestration | `agent`, `workflow`, `task`, `work_plan` |
 | Runtime/control surfaces | `state`, `registry`, `control`, `channel`, `remote` |
 | External integration surfaces | `mcp` |
-| Structured query/eval surfaces | `repl`, `query`, `packet` |
+| Structured query/eval surfaces | `repl`, `query` |
 
 The tool registry is part of the main runtime and is shared across the TUI, agents, automation, and daemon-backed flows.
 
@@ -42,7 +42,6 @@ The tool registry is part of the main runtime and is shared across the TUI, agen
 | --- | --- |
 | `fetch` | HTTP retrieval and extraction |
 | `web_search` | Provider-backed search and evidence shaping |
-| `packet` | Compact knowledge/context packets |
 | `query` | Leave the owner a question and carry on; read his answer later |
 | `repl` | Evaluate a JavaScript or TypeScript snippet inside the command sandbox |
 
@@ -192,35 +191,32 @@ In-process subagent management. See [Agent system](#agent-system) below for arch
 Session state, persistent memory, telemetry, hooks, and the print level, all in one tool.
 
 - KV state: session-scoped key-value store with atomic persistence
-- Durable memory posture: inspect the reviewed knowledge store and related runtime state (the full durable-memory workflow lives under `/recall` and the knowledge modals)
+- Memory by key (`mode: "memory"`): get, set, list and delete project memories; each is one record in the project memory store, the record prompts retrieve, read and written through the daemon while it serves memory (the full durable-memory workflow lives under `/recall` and the knowledge modals)
 - Hook management: list, enable, disable, add, and remove hooks at runtime
 - Print level: read or set how much the app prints (`quiet`, `balanced`, `operator`), the same setting as `/mode` (`behavior.hitlMode`)
 - Analytics: every tool call this process ran (name, status, duration, result size; never arguments or results), queried by filter, exported as JSON/CSV, or summarized; kept in memory, the newest 10,000
-- Context and budget reporting: how many files this product has read or written in the workspace and their estimated tokens (kept across restarts; not the size of the project)
+- Budget and context: the session's measured token usage and turns, and its context window (last request size, window size, compaction), with how many files this product has read or written in the workspace
 
 ### workflow
 
-Workflow state machines, automation triggers, and scheduled tasks. See [Automation and scheduling](#automation-and-scheduling) below for the underlying contract model.
+Workflow state machines, hook actions, and scheduled commands. See [Automation and scheduling](#automation-and-scheduling) below for the underlying contract model.
 
 - Named workflow definitions: `contract` (starts a contract whose units are checked against acceptance criteria), `fix_loop`, `test_then_fix`, `review_only`
 - State machine with validated transitions: prevents invalid state changes
-- Automation triggers: fire shell commands when specific hook events occur, with optional JS conditions
+- Hook actions (`mode: "hook-actions"`): run a command when a hook event fires, with an optional condition over `event.*` and `payload.*`; schedules (`mode: "schedule"`) run a command on an interval and can be paused and resumed. Both are checked once when added (a refusal says why), run in the project root with credential variables withheld, list their last run, exit code and error, and last until the app exits; `/schedule` routines survive restarts
 - Scheduled jobs run by the automation manager: 5-field cron expressions read in an IANA timezone (a leap-day `0 0 29 2 *` is accepted; a day no named month has, such as `0 0 31 2 *`, is refused), fixed intervals and one-shot times, missed-run recording, per-job run history, and enable/disable control; persists to `.goodvibes/tui/automation-jobs.json`
 - Full lifecycle: start, transition, cancel, list active instances
 
-### task / team / worklist
+### task / work_plan / teams
 
 Structured execution and coordination beyond a single conversation turn.
 
 - `task`: create, inspect, block, cancel, depend, and hand off tasks across sessions
-- `team`: define teams, members, lanes, and role assignments
-- `worklist`: manage durable worklists with ownership and priority
+- `work_plan`: the project work plan `/work-plan` shows: add items, set their status, owner and notes, remove them, clear finished ones; spawned agents keep the same plan
+- Teams are `agent` cohorts: spawn the members with one `cohort` name, each with its template as its role and its `communicationLane`; brief each with `context` and `successCriteria`; `cohort-status` and `cohort-report` read the team back, and the fleet view shows the cohort beside each agent
 
-### packet / query
+### query
 
-Durable planning and note-keeping artifacts.
-
-- `packet`: keep your own notes as implementation packets / execution packets (create, revise, publish, list); they are stored in a file and are not sent to or consumed by anything else
 - `query`: leave the owner a question and carry on working. `ask` posts it to the owner inbox and returns its id at once; the owner sees it in `/questions` (alias `/inbox`) in either terminal app and, when push is on, as a notification on his phone, and answers it there. When the owner answers, the answer is passed to the asking conversation on its next model request (a spawned agent's question goes back to the conversation that spawned it); `show` and `list` read it back at any time; `withdraw` takes back a question that no longer matters. A `key` makes a repeated ask return the first open question instead of posting a second one. The tool is offered where the daemon's inbox is reachable
 
 ### mcp / remote / control

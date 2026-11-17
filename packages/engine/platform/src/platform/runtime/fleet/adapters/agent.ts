@@ -193,7 +193,9 @@ export function adaptAgent(record: AgentRecord, ctx: AgentAdapterContext): Proce
     }
   }
 
-  const label = record.contractRole ? `${record.template} (${record.contractRole})` : record.template;
+  // A cohort is how a team of agents is formed, so the fleet names it on each member.
+  const role = record.contractRole ? `${record.template} (${record.contractRole})` : record.template;
+  const label = record.cohort ? `${role} · ${record.cohort}` : role;
   const elapsedMs = Math.max(0, (record.completedAt ?? ctx.now) - record.startedAt);
 
   return {

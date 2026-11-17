@@ -377,6 +377,7 @@ export function projectAgentToolDependencies<
       /** The memory spine under the name the product gives it; `active` is true while memory goes over the wire. */
       readonly memorySpineClient?: { readonly active: boolean } | undefined;
       readonly memorySpine?: { readonly active: boolean } | undefined;
+      readonly workPlanStore?: unknown;
       readonly sandboxSessionRegistry: unknown;
       readonly workflow: unknown;
       readonly contextAccountingHolder: unknown;
@@ -420,6 +421,8 @@ export function projectAgentToolDependencies<
     sandboxSessionRegistry: input.services.sandboxSessionRegistry,
     workflowServices: input.services.workflow,
     contextAccountingHolder: input.services.contextAccountingHolder,
+    // A worker keeps the same project work plan as the conversation that spawned it.
+    workPlan: input.services.workPlanStore,
   } as {
     contractRunner: Input['services']['contractRunner'];
     permissionManager: Input['services']['permissionManager'];
@@ -453,5 +456,6 @@ export function projectAgentToolDependencies<
     sandboxSessionRegistry: Input['services']['sandboxSessionRegistry'];
     workflowServices: Input['services']['workflow'];
     contextAccountingHolder: Input['services']['contextAccountingHolder'];
+    workPlan: Input['services']['workPlanStore'];
   };
 }

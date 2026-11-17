@@ -53,10 +53,8 @@ import { createWorkflowServices, createWorkflowTool } from './workflow/index.js'
 import { createRegistryTool } from './registry-tool/index.js';
 import { createKeyedStateReclaimCheck, createSessionBoundKvState } from './session-kv-state.js';
 import { createTaskTool } from './task/index.js';
-import { createTeamTool } from './team/index.js';
-import { createWorklistTool } from './worklist/index.js';
+import { createWorkPlanTool, type WorkPlanToolStore } from './work-plan/index.js';
 import { createMcpTool } from './mcp/index.js';
-import { createPacketTool } from './packet/index.js';
 import { createQueryTool } from './query/index.js';
 import { createRemoteTool } from './remote-trigger/index.js';
 import { createReplTool } from './repl/index.js';
@@ -212,7 +210,6 @@ export { TRUST_TIER_EVENTS, classifyHostTrustTier, extractHostname } from './fet
 export type { TrustTierConfig } from './fetch/trust-tiers.js';
 export { repairToolCall } from './auto-repair.js';
 export { createMcpTool } from './mcp/index.js';
-export { createPacketTool } from './packet/index.js';
 export { createQueryTool } from './query/index.js';
 export type { QuestionInbox } from './query/index.js';
 export { createRegistryTool } from './registry-tool/index.js';
@@ -220,9 +217,9 @@ export { createRemoteTool } from './remote-trigger/index.js';
 export { createReplTool } from './repl/index.js';
 export { createStateTool } from './state/index.js';
 export { createTaskTool } from './task/index.js';
-export { createTeamTool } from './team/index.js';
 export { createWebSearchTool } from './web-search/index.js';
-export { createWorklistTool } from './worklist/index.js';
+export { createWorkPlanTool } from './work-plan/index.js';
+export type { WorkPlanToolStore } from './work-plan/index.js';
 
 type ToolContractFeatureFlags = Pick<FeatureFlagManager, 'isEnabled'>;
 
@@ -399,6 +396,8 @@ export function registerAllTools(
      * since a question nobody can see is not a question.
      */
     ownerQuestions?: import('./query/index.js').QuestionInbox | (() => import('./query/index.js').QuestionInbox) | undefined;
+    /** The project work plan the `work_plan` tool keeps (the store the work plan view shows). Absent: no `work_plan` tool. */
+    workPlan?: WorkPlanToolStore | undefined;
     capturedRegistry?: import('./registry-tool/captured-source.js').CapturedRegistryContext | undefined;
     /**
      * Settable holder for the context_accounting tool's session source. The tool
@@ -773,12 +772,11 @@ export function registerAllTools(
       ...(deps.resolveSessionId ? { resolveSessionId: deps.resolveSessionId } : {}),
     }),
   );
-  registerTool(createTeamTool({ workingDirectory, surfaceRoot: deps.surfaceRoot }));
-  registerTool(createWorklistTool({ workingDirectory, surfaceRoot: deps.surfaceRoot }));
+  // The model's checklist is the project work plan the user sees; a host with its own work plan tool leaves this out.
+  if (deps.workPlan) registerTool(createWorkPlanTool(deps.workPlan));
   if (mcpRegistry) {
     registerTool(createMcpTool(mcpRegistry));
   }
-  registerTool(createPacketTool({ workingDirectory, surfaceRoot: deps.surfaceRoot }));
   if (deps.ownerQuestions) {
     registerTool(createQueryTool({ inbox: deps.ownerQuestions, ...(deps.resolveSessionId ? { resolveSessionId: deps.resolveSessionId } : {}) }));
   }

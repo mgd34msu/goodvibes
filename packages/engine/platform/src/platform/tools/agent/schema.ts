@@ -22,6 +22,7 @@ const AGENT_TOOL_DEFINITION: ToolDefinition = {
     'contract-history (the decisions, checks and escalations of one contract, by contractId), ' +
     'cohort-status (JSON summary of all agents in a named cohort), ' +
     'cohort-report (markdown table report for all agents in a named cohort).' +
+    ' A team is a cohort: spawn its members with one cohort name, each with its template as its role and its communicationLane, brief each with context and successCriteria, and track the work items in the work plan; cohort-status and cohort-report read the team back, and the fleet view shows the cohort on each agent.' +
     ' Discovery: use mode=list to see all agents and their status, mode=templates to see available agent templates. ' +
     'Work handed to this tool with mode=spawn or batch-spawn runs as a contract: a planner splits it into units, and each unit is checked against its acceptance criteria while it works and told what to fix until it passes. ' +
     'The result carries contractStarted, contractId and the owner agent id; the owner agent reports the contract\'s answer when it ends. ' +

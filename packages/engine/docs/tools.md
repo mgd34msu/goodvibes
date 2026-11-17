@@ -13,7 +13,7 @@ For how tool-call arguments are parsed, validated, and dropped when malformed, s
 
 Every model request (the TUI, the Agent, worker agents, contract units, daemon hosted sessions and companion chat) carries the core tools in full: those whose definition says `core: true` (`read`, `find`, `edit`, `write`, `exec`, `fetch`, `agent`, `task`, `state`, `repl`, `web_search`). Every other registered tool is one line: its name, the first sentence of its description and `[parameters: tool_schema]`. The `tool_schema` tool returns the full definitions of the tools it names, and from the next request on those tools are sent in full. A call to a one-line tool that was not loaded is not run: its result is a refusal (`decision.state: refused`) that carries the tool's full definition and says to send the call again; the tool is sent in full from then on. Every call is checked against the tool's full schema either way.
 
-A tool can name the modes with which it only reads (`readModes` on its definition). A call in one of those modes is classed as a read; any other mode is decided by the permission gate as a change. The Agent sets these for `remote`, `channel`, `mcp`, `control`, `task`, `team`, `worklist`, `packet` and `query`.
+A tool can name the modes with which it only reads (`readModes` on its definition). A call in one of those modes is classed as a read; any other mode is decided by the permission gate as a change. The Agent sets these for `remote`, `channel`, `mcp`, `control`, `task` and `query`; `work_plan` declares `list` itself.
 
 ## Built-in tools
 
@@ -34,14 +34,12 @@ A tool can name the modes with which it only reads (`readModes` on its definitio
 | `repo_map` | Model-invoked repository outline | directory summary plus source files and their exports, ranked by import-graph centrality, unbounded unless a token budget is passed; no LLM and no process spawn |
 | `context_accounting` | Let the model read its own context composition | recall-contract floors and exclusions, per-turn injection records; measured token counts reported as fact, estimates flagged as estimates; for a worker agent it reports that worker's turns used and left (warning at 80% of the limit) once the host binds the worker as its source |
 | `state` | Store and inspect runtime state | get, set, list, clear, budget (the session's measured token usage and turns), context (the context window: last request size, window size, compaction), memory (get, set, list, delete by key: a memory is one record in the project memory store, the record prompts retrieve; while a connected host serves memory it is read and written there, and a write that cannot reach the store fails; a value holding a credential is refused), telemetry, mode; `list` returns the key inventory unless `view=full`; `set` of `runtime.workingDir` must be sent alone; `hooks` and `analytics` only when the host provides them; `analytics` reads recorded calls (the model cannot record rows) and its export is size-capped; an added hook needs a unique name and lasts for the session only; `hooks` lists registered hooks, and adding, enabling, disabling or removing one is always put to the owner (never settled by a mode, a category or a remembered answer, and never remembered), refused in plan mode, and refused when the session cannot ask |
-| `workflow` | Start and control workflows | start, status, transition, cancel, triggers, schedule |
+| `workflow` | Start and control workflows | start, status, transition, cancel, hook-actions (run a command when a hook event fires), schedule (run a command on an interval); hook actions and schedules last until the process exits |
 | `registry` | Discover skills/agents/tools | search, recommend, dependencies, preview, content; files are read only from `.goodvibes/skills` and `.goodvibes/agents` of the project and the home directory, after `..` and symlinks are resolved, and an `@include` that leaves those directories is refused |
 | `task` | Manage cross-session tasks | create, list, show, status, depend, cancel, handoff, handoffs, acknowledge, withdraw; the graph is shared by every terminal open in the project, and each change is seen by the others; a handoff blocks its task until the destination accepts it (`acknowledge`), the source takes it back (`withdraw`), or it expires after 30 days, and each of these returns the task to its earlier status; every result lists the handoffs waiting for the calling session |
-| `team` | Keep durable team notes | create, list, show, add/remove member, set lanes, delete; a record for the model and the user to read back, it does not change how agents are spawned or communicate |
-| `worklist` | Manage worklists | create, list, show, add, complete, reopen, remove |
+| `work_plan` | Keep the project work plan | list, add, update, set_status, remove, clear_completed; the items the work plan view shows, kept per project. Offered where the host has no work plan tool of its own (the Agent's is `agent_work_plan`). A team of agents is an `agent` cohort: spawn the members with one `cohort`, each with its template and `communicationLane`, brief each with `context` and `successCriteria`, and read the team back with `cohort-status` |
 | `mcp` | Inspect and operate MCP servers | servers, tools, schema, security, auth, quarantine/trust |
-| `packet` | Manage context packets | create, list, show, revise, publish |
-| `query` | Ask and answer structured questions | ask, list, show, answer, close |
+| `query` | Leave the owner a question | ask, show, list, withdraw; the question goes to the owner inbox (`/questions` in either terminal app, the web UI, and a push notification when push is on), and the answer is passed back to the asking conversation |
 | `remote` | Manage distributed runners | create-pool, pools, assign, unassign, contracts, artifacts, review, import-artifact |
 | `repl` | Evaluate bounded code when an isolating backend is available | eval, history |
 | `control` | Inspect host control data | commands, panels, subscriptions, sandbox presets |
@@ -59,8 +57,7 @@ current status and the moves that remain, for example
 
 | Tool | Rule |
 |---|---|
-| `query` | A query is `open`, then `answered`, then `closed`. An answer can be revised with another `answer` until the query is closed. A closed query cannot be answered or closed again. |
-| `packet` | A packet is published once. A second `publish` is refused and reports the original publish time. `revise` still works on a published packet and does not change its status. |
+| `query` | A question is `open` until the owner answers it or it is withdrawn; the first answer is kept, and a closed question cannot be answered or withdrawn again. |
 | `workflow` | `cancel` applies to a workflow that is still in progress. Cancelling a workflow that already finished or was already cancelled is refused with the reason, and its completion time is unchanged. |
 | `task` | `create` never replaces an existing task ref; use `status` to move it. A handoff to a session this host does not know, or of a finished task, is refused. A handoff marks the task `blocked` until the destination session runs `acknowledge` with the handoff id, which returns the task to the status it had. |
 

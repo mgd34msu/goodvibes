@@ -25,9 +25,6 @@ const AGENT_READ_MODES: Readonly<Record<string, ToolReadModes>> = Object.freeze(
   mcp: { field: 'mode', values: ['servers', 'tools', 'schema', 'resources', 'security', 'auth'] },
   control: { field: 'mode', values: ['commands', 'panels', 'subscriptions'] },
   task: { field: 'mode', values: ['list', 'show', 'handoffs'] },
-  team: { field: 'mode', values: ['list', 'show'] },
-  worklist: { field: 'mode', values: ['list', 'show'] },
-  packet: { field: 'mode', values: ['list', 'show'] },
   query: { field: 'mode', values: ['list', 'show'] },
 });
 

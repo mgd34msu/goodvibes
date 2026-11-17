@@ -703,6 +703,8 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
     });
     const agentToolDependencies = {
       ...(workspaceSwap ? { workspaceSwap } : {}),
+      // Workers keep the project work plan the work plan view shows.
+      workPlan: workPlanStore,
       toolExecutionObserver: (tool: string, args: Record<string, unknown>, success: boolean) => ciAutoWatchObserver?.(tool, args, success),
       contractRunner, contractHooks: contractRunner.hooks(),
       agentManager,

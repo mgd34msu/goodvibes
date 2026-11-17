@@ -126,6 +126,8 @@ type AgentOrchestratorToolDeps = {
   readonly memoryAccess?: import('../tools/state/memory-mirror.js').StateMemoryStore | undefined;
   /** True while memory is served by a connected host; without `memoryAccess` a worker's `state mode=memory` then fails instead of using a store the host does not serve. */
   readonly memoryRoutedOverWire?: (() => boolean) | undefined;
+  /** The project work plan a worker's `work_plan` tool keeps (registerAllTools); absent, workers have no `work_plan`. */
+  readonly workPlan?: import('../tools/work-plan/index.js').WorkPlanToolStore | undefined;
   /** Saves a working-directory change for the next start; `state set runtime.workingDir` uses it (registerAllTools). */
   readonly workspaceSwap?: import('../tools/state/index.js').StateSwapManager | undefined;
   /** Supplying it registers the `profile` capture tool. See registerAllTools. */

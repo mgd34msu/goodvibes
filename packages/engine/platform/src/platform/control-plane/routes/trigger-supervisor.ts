@@ -26,7 +26,7 @@ function translateOperation(error: unknown): never {
   if (error instanceof GatewayVerbError) throw error;
   if (error instanceof TriggerDefinitionError) throw new GatewayVerbError(error.message, 'TRIGGER_DEFINITION_INVALID', 400, error.field);
   const carried = readRefusal(error);
-  if (carried) throw new GatewayVerbError([carried.reason, ...carried.next].join('. '), carried.code, carried.status);
+  if (carried) throw new GatewayVerbError([carried.reason, ...carried.next].join('. '), carried.code, carried.status ?? 409);
   throw error;
 }
 function optionalStrings(value: unknown, field: string): string[] | undefined {

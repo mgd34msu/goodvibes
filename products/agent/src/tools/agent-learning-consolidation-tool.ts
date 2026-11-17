@@ -10,7 +10,7 @@ import type { ShellPathService } from '@/runtime/index.ts';
 import { AgentPersonaRegistry } from '../agent/persona-registry.ts';
 import { AgentRoutineRegistry } from '../agent/routine-registry.ts';
 import { AgentSkillRegistry } from '../agent/skill-registry.ts';
-import { MEMORY_CLASSES, MEMORY_REVIEW_STATES, MEMORY_SCOPES, MODES, WRITE_MODES, cloneRecord, deleteDuplicate, domainForCandidate, failure, getRecord, markDuplicateStale, nextGeneratedId, output, readLimit, readMode, readReceiptFile, readString, receiptId, receiptIdFromReceipt, receiptPath, requireConfirmedWrite, resolveCandidate, updateSurvivor, writeReceipt, type AgentLearningConsolidationDomain, type AgentLearningConsolidationToolArgs, type ConsolidationMemory, type LearningConsolidationReceipt } from './agent-learning-consolidation-core.ts';
+import { MEMORY_CLASSES, MEMORY_REVIEW_STATES, MEMORY_SCOPES, MODES, cloneRecord, deleteDuplicate, domainForCandidate, failure, getRecord, markDuplicateStale, nextGeneratedId, output, readLimit, readMode, readReceiptFile, readString, receiptId, receiptIdFromReceipt, receiptPath, requireConfirmedWrite, resolveCandidate, updateSurvivor, writeReceipt, type AgentLearningConsolidationDomain, type AgentLearningConsolidationToolArgs, type ConsolidationMemory, type LearningConsolidationReceipt } from './agent-learning-consolidation-core.ts';
 import type { LearningCandidate } from './agent-harness-learning-curator.ts';
 import { agentResearchSourceOwner } from '../agent/protected-research-report.ts';
 import { captureCatalogData, captureCatalogMethods } from './agent-harness-catalog-ranking.ts';
@@ -815,7 +815,7 @@ export function createAgentLearningConsolidationTool(shellPaths: ShellPathServic
         const mode = readMode(args.mode);
         // readMode falls back to preview; an unrecognised value must not quietly become a read.
         if (args.mode !== undefined && args.mode !== null && String(args.mode).trim() !== '' && !(typeof args.mode === 'string' && MODES.includes(args.mode as typeof mode))) {
-          return failure(`Unknown mode ${JSON.stringify(String(args.mode)).slice(0, 40)}. Valid values ${MODES.join(', ')}.`);
+          return failure(`Unknown mode ${JSON.stringify(String(args.mode)).slice(0, 40)}; nothing was read or changed. Valid values ${MODES.join(', ')}. Duplicates are consolidated with stale, then delete; the survivor is kept as it is.`);
         }
         const receiptSource = () => lstatSync(receiptPath(shellPaths), { throwIfNoEntry: false }) ? readFileSync(receiptPath(shellPaths), 'utf8') : null;
         let receiptsJson = receiptSource();
@@ -873,7 +873,6 @@ export function createAgentLearningConsolidationTool(shellPaths: ShellPathServic
         // continues to check authority rather than the pre-write revision.
         for (const guard of candidateGuards.values()) guard();
         if (mode === 'preview') return output(previewCandidate(candidate));
-        if (!WRITE_MODES.has(mode)) return failure(`Unknown mode. Valid values ${MODES.join(', ')}.`);
         if (mode !== 'stale' && mode !== 'delete') throw new ToolInputProjectionError('held');
         const explicitUserRequest = requireConfirmedWrite(rawArgs, mode, options);
         if (mode === 'stale') return output(await applyStale(shellPaths, memory, candidate, explicitUserRequest, beforeWrite, record));

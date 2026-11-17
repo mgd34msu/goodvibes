@@ -62,7 +62,6 @@ export interface LearningConsolidationReceiptFile {
 }
 
 export const MODES: readonly AgentLearningConsolidationMode[] = ['preview', 'stale', 'delete', 'rollback', 'recreate', 'receipts'];
-export const WRITE_MODES = new Set<AgentLearningConsolidationMode>(['stale', 'delete', 'rollback', 'recreate']);
 export const RECEIPT_LIMIT = 100;
 export const MEMORY_CLASSES = new Set(['decision', 'constraint', 'incident', 'pattern', 'fact', 'risk', 'runbook', 'architecture', 'ownership']);
 export const MEMORY_SCOPES = new Set(['session', 'project', 'team']);

@@ -19,8 +19,12 @@ export interface ParsedSlashCommand {
   readonly args: readonly string[];
 }
 
-/** The word from which a command takes the rest of the line as typed; given the words read so far. */
-export type SlashCommandRawRest = number | ((args: readonly string[]) => number | undefined);
+/**
+ * The word from which a command takes the rest of the line as typed; given the
+ * words read so far and, while there is one, the next word as typed (not yet
+ * read), so a rule can read leading flags as words and stop before the text.
+ */
+export type SlashCommandRawRest = number | ((args: readonly string[], upcoming?: string) => number | undefined);
 
 /** What a command declares about how its line is split. */
 export interface SlashCommandGrammar {
@@ -46,10 +50,11 @@ const QUOTES = new Set(['"', "'"]);
 
 /**
  * Splits `line` into words. `stopAfter` is asked after each complete word with
- * the words so far; when it returns true the scan stops and `rest` is the
- * offset where the next word would begin.
+ * the words so far and the next word as typed (undefined at the end of the
+ * line); when it returns true the scan stops and `rest` is the offset where the
+ * next word begins.
  */
-function scanWords(line: string, stopAfter?: (words: readonly string[]) => boolean): WordScan & { readonly rest?: number } {
+function scanWords(line: string, stopAfter?: (words: readonly string[], upcoming?: string) => boolean): WordScan & { readonly rest?: number } {
   const words: string[] = [];
   const starts: number[] = [];
   const emptyQuoted: boolean[] = [];
@@ -58,7 +63,11 @@ function scanWords(line: string, stopAfter?: (words: readonly string[]) => boole
   while (index < length) {
     while (index < length && /\s/.test(line[index]!)) index++;
     if (index >= length) break;
-    if (stopAfter?.(words)) return { words, starts, emptyQuoted, unclosedQuote: false, rest: index };
+    if (stopAfter) {
+      let end = index;
+      while (end < length && !/\s/.test(line[end]!)) end++;
+      if (stopAfter(words, line.slice(index, end))) return { words, starts, emptyQuoted, unclosedQuote: false, rest: index };
+    }
     const start = index;
     let word = '';
     let quoted = false;
@@ -97,9 +106,23 @@ function scanWords(line: string, stopAfter?: (words: readonly string[]) => boole
   return { words, starts, emptyQuoted, unclosedQuote: false };
 }
 
-function rawRestIndex(rule: SlashCommandRawRest | undefined, args: readonly string[]): number | undefined {
+function rawRestIndex(rule: SlashCommandRawRest | undefined, args: readonly string[], upcoming?: string): number | undefined {
   if (rule === undefined) return undefined;
-  return typeof rule === 'number' ? rule : rule(args);
+  return typeof rule === 'number' ? rule : rule(args, upcoming);
+}
+
+/**
+ * A `rawRest` rule for `<subcommand> [flags…] <free text>`: for one of
+ * `subcommands`, the flags typed right after it are read as words and the
+ * rest of the line, from the first word that is not one of `flags`, is kept
+ * as typed (spacing, line breaks and quotes included).
+ */
+export function rawRestAfterLeadingFlags(subcommands: readonly string[], flags: ReadonlySet<string>): SlashCommandRawRest {
+  return (args, upcoming) => {
+    if (!subcommands.includes((args[0] ?? '').toLowerCase())) return undefined;
+    if (!args.slice(1).every((word) => flags.has(word))) return undefined;
+    return upcoming !== undefined && flags.has(upcoming) ? undefined : args.length;
+  };
 }
 
 /**
@@ -116,9 +139,9 @@ export function splitSlashCommand(
   const name = nameMatch?.[1] ?? '';
   const grammar = name ? grammarOf?.(name) : undefined;
   const rule = grammar?.rawRest;
-  const scan = scanWords(text, rule === undefined ? undefined : (words) => {
+  const scan = scanWords(text, rule === undefined ? undefined : (words, upcoming) => {
     if (words.length === 0) return false;
-    return rawRestIndex(rule, words.slice(1)) === words.length - 1;
+    return rawRestIndex(rule, words.slice(1), upcoming) === words.length - 1;
   });
   if (scan.unclosedQuote) {
     return { ok: false, name, reason: `Not run: /${name} has an unclosed quote, so its words could land in the wrong places. Close the quote, then run it again.` };

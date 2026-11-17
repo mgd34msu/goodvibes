@@ -31,6 +31,7 @@
 
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import type { OperatorMethodOutput } from '@goodvibes-jev/engine/platform';
+import { rawRestAfterLeadingFlags } from '@goodvibes-jev/engine/terminal-shell/slash-command-parser';
 import {
   EXPLICIT_WRITE_INVOCATION_CONTEXT,
   claimIrreversibleWrite,
@@ -177,6 +178,8 @@ export function registerMailRuntimeCommands(registry: CommandRegistry): void {
     subcommands: { status: '', list: '[n]', read: '<uid>', draft: '<to | subject | body>', send: '[--yes] [--again] <to | subject | body>' },
     // --yes counts only before the recipient: the same word in a subject or body is text.
     leadingFlagsOnly: true,
+    // From the recipient on the line is taken as typed: the body keeps its spacing, line breaks and quotes.
+    rawRest: rawRestAfterLeadingFlags(['draft', 'send'], new Set(['--yes', ...COMPOSE_FLAGS])),
     confirm(args) {
       if ((args[0] ?? '').toLowerCase() !== 'send') return undefined;
       const parsed = parseComposeArgs(splitLeadingFlags(args.slice(1), COMPOSE_FLAGS).text);

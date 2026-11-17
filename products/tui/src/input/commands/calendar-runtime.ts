@@ -27,6 +27,7 @@
 
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { splitLeadingFlags } from './mail-runtime.ts';
+import { rawRestAfterLeadingFlags } from '@goodvibes-jev/engine/terminal-shell/slash-command-parser';
 import {
   EXPLICIT_WRITE_INVOCATION_CONTEXT,
   claimIrreversibleWrite,
@@ -173,6 +174,8 @@ export function registerCalendarRuntimeCommands(registry: CommandRegistry): void
     subcommands: { status: '', list: '[n]', get: '<id>', create: '[--yes] [--again] <title | start | end>' },
     // --yes counts only before the title: the same word inside the title is text.
     leadingFlagsOnly: true,
+    // From the title on the line is taken as typed: the title keeps its spacing and quotes.
+    rawRest: rawRestAfterLeadingFlags(['create'], new Set(['--yes', ...CREATE_FLAGS])),
     confirm(args) {
       if ((args[0] ?? '').toLowerCase() !== 'create') return undefined;
       const plan = planEventCreate(args.slice(1));

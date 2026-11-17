@@ -11,10 +11,14 @@
  * the contract, and `start` goes to the hosted session's floor when the
  * session id names a live hosted session, else to the daemon's own runner.
  *
- * One ownership rule covers all five methods: a caller sees and acts on a
- * contract only when its session is not owned by another principal
- * (`HostedContractRunners.ownedByOthers`). A contract of another principal's
- * session reads as not found, so its existence is not disclosed either.
+ * One ownership rule covers every method: a contract started over this
+ * surface by an identified caller records that principal, and only it sees and
+ * acts on the contract, for its whole life, whoever attaches to its session
+ * later and after the session ended. A contract without a recorded principal
+ * (one a hosted session's own turn started) follows its session: it is hidden
+ * from a caller when the session's identified owners do not include it
+ * (`HostedContractRunners.ownedByOthers`). A hidden contract reads as not
+ * found, so its existence is not disclosed either.
  *
  * Every choice here is code over ids and recorded statuses; nothing is judged.
  */
@@ -25,7 +29,7 @@ import { OwnerReplyRefusedError, type OwnerReplyOutcome } from './escalation.js'
 import type { ContractExternalWorkAdapter } from './external.js';
 import type { ContractRunner, UnitRetryOutcome } from './runner.js';
 import type { BudgetCeiling } from '../orchestration/types.js';
-import { isTerminalContractStatus, type ContractOrigin, type ContractView, type NativeContractSource, type StartContractInput } from './types.js';
+import { isTerminalContractStatus, type ContractOrigin, type ContractOwnership, type ContractView, type NativeContractSource, type StartContractInput } from './types.js';
 
 /** The session a contract started over the operator surface without a session belongs to. */
 export const OPERATOR_SESSION_ID = 'operator';
@@ -90,7 +94,7 @@ export interface OperatorStartedContract {
 export interface OperatorDispatchInput {
   /** The person's words, verbatim. */
   readonly ask: string;
-  /** The caller; it scopes the retry key. */
+  /** The caller; it owns the dispatched contract and its session, and scopes the retry key. */
   readonly principalId?: string | undefined;
   /** Absolute; inside the daemon's working directory. Omitted: the daemon's working directory. */
   readonly workspaceRoot?: string | undefined;
@@ -349,16 +353,23 @@ export function createContractOperatorService(deps: ContractOperatorServiceDeps)
   let dispatcher: OperatorWorkDispatcher | null = null;
   const runners = (): readonly Pick<ContractRunner, 'get' | 'list' | 'reply'>[] => [deps.runner, ...(nativeRunner === null ? [] : [nativeRunner]), ...(hostedRunners?.runners() ?? [])];
 
-  /** The one ownership rule: whether `caller` may see and act on a contract of `sessionId`. */
-  function visibleTo(sessionId: string, caller: OperatorCaller | undefined): boolean {
+  /** Whether `caller` may act in session `sessionId`: it is not owned by other identified principals. */
+  function sessionOpenTo(sessionId: string, caller: OperatorCaller | undefined): boolean {
     return caller === undefined || hostedRunners?.ownedByOthers?.(sessionId, caller.principalId) !== true;
+  }
+
+  /** The one ownership rule: whether `caller` may see and act on a contract. One string compare when it records its principal. */
+  function visibleTo(contract: ContractOwnership, caller: OperatorCaller | undefined): boolean {
+    if (caller === undefined) return true;
+    if (contract.ownerPrincipalId !== undefined) return contract.ownerPrincipalId === caller.principalId;
+    return sessionOpenTo(contract.sessionId, caller);
   }
 
   /** The runner holding a contract the caller may see, with its view; first found wins. */
   function holder(contractId: string, caller?: OperatorCaller): { readonly runner: Pick<ContractRunner, 'get' | 'list' | 'reply'>; readonly contract: ContractView } {
     for (const runner of runners()) {
       const contract = runner.get(contractId);
-      if (contract !== null && visibleTo(contract.sessionId, caller)) return { runner, contract };
+      if (contract !== null && visibleTo(contract, caller)) return { runner, contract };
       if (contract !== null) break;
     }
     throw new ContractOperatorError(`No contract ${contractId} on this daemon.`, 'CONTRACT_NOT_FOUND', 404);
@@ -375,7 +386,7 @@ export function createContractOperatorService(deps: ContractOperatorServiceDeps)
         'workspaceRoot',
       );
     }
-    if (input.sessionId !== undefined && !visibleTo(input.sessionId, { principalId: input.principalId })) {
+    if (input.sessionId !== undefined && !sessionOpenTo(input.sessionId, { principalId: input.principalId })) {
       throw new ContractOperatorError(
         `Hosted session ${input.sessionId} belongs to another caller, so a contract cannot be started in it from this identity. Omit sessionId, or attach to that session first.`,
         'SESSION_NOT_OWNED',
@@ -417,6 +428,7 @@ export function createContractOperatorService(deps: ContractOperatorServiceDeps)
       sessionId: input.sessionId ?? OPERATOR_SESSION_ID,
       origin,
       projectRoot: hosted?.workspaceRoot ?? input.workspaceRoot ?? deps.workingDirectory,
+      ...(input.principalId === undefined ? {} : { ownerPrincipalId: input.principalId }),
       ...(input.isolation === undefined ? {} : { isolation: input.isolation }),
     };
     if (input.idempotencyKey !== undefined && runner.startIdempotent !== undefined) {
@@ -436,10 +448,12 @@ export function createContractOperatorService(deps: ContractOperatorServiceDeps)
     const seen = new Set<string>();
     const contracts: ContractView[] = [];
     for (const runner of runners()) {
-      for (const contract of runner.list({ ...filter, includeInputSnapshot: false })) {
+      const admit = caller === undefined ? undefined : (owner: ContractOwnership): boolean => visibleTo(owner, caller);
+      for (const contract of runner.list({ ...filter, includeInputSnapshot: false, ...(admit === undefined ? {} : { admit }) })) {
         if (seen.has(contract.id)) continue;
         seen.add(contract.id);
-        if (!visibleTo(contract.sessionId, caller)) continue;
+        // A runner that does not apply `admit` (a custom one) is filtered here.
+        if (!visibleTo(contract, caller)) continue;
         contracts.push(contract);
       }
     }
@@ -457,7 +471,7 @@ export function createContractOperatorService(deps: ContractOperatorServiceDeps)
       for (const runner of runners()) {
         const contract = runner.get(contractId);
         if (contract === null) continue;
-        if (!visibleTo(contract.sessionId, caller)) return null;
+        if (!visibleTo(contract, caller)) return null;
         const view = projectContractOperatorView(contract);
         return options.includeInputFiles === true ? view : withoutInputFiles(view);
       }
@@ -466,7 +480,7 @@ export function createContractOperatorService(deps: ContractOperatorServiceDeps)
     status(contractId, caller) {
       for (const runner of runners()) {
         const contract = runner.get(contractId);
-        if (contract !== null) return visibleTo(contract.sessionId, caller) ? summarizeContract(contract) : null;
+        if (contract !== null) return visibleTo(contract, caller) ? summarizeContract(contract) : null;
       }
       return null;
     },
@@ -553,6 +567,8 @@ export function createContractOperatorService(deps: ContractOperatorServiceDeps)
         task: input.ask,
         metadata: {
           ...(input.workspaceRoot === undefined ? {} : { workspaceRoot: input.workspaceRoot }),
+          // The adapter records the caller as the owner of the session it creates and of the contract.
+          ...(input.principalId === undefined ? {} : { principalId: input.principalId }),
           // Keys are per caller: another caller's key never returns this caller's work.
           ...(input.idempotencyKey === undefined ? {} : { idempotencyKey: `${input.principalId ?? ''}\u0000${input.idempotencyKey}` }),
         },

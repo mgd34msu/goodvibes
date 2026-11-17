@@ -226,11 +226,15 @@ The daemon's operator methods `contracts.list`, `contracts.get`,
 `contracts.start`, `contracts.cancel` and `contracts.reply` (REST
 `/api/contracts...`) and `contracts.summaries`, `contracts.status`,
 `contracts.dispatch`, `contracts.remove`, `contracts.retryUnit` and `contracts.budget` (invoke) act through one service across the daemon's runner and each hosted floor's
-runner. All of them apply one session-ownership rule: a caller sees and acts
-on a contract only when its session is not owned by another principal; a
-contract of another principal's session reads as `CONTRACT_NOT_FOUND`
-(404), and starting one in such a session is refused with
-`SESSION_NOT_OWNED` (403). `contracts.remove` deletes an ended contract's
+runner. All of them apply one ownership rule. A contract an identified caller
+started (`contracts.start` or `contracts.dispatch`) records that principal
+(`ownerPrincipalId`) and belongs to it for its whole life, also after the
+caller detaches from the session or the session ends. A contract a hosted
+session's own turn started belongs to the session's identified owners: the
+principals that created it or attached to it, kept with the session across
+detaches and restarts. Another caller's contract reads as `CONTRACT_NOT_FOUND`
+(404) and is left out of lists, and starting one in a session other
+principals own is refused with `SESSION_NOT_OWNED` (403). `contracts.remove` deletes an ended contract's
 record (`CONTRACT_NOT_ENDED`, 409, while it runs; `CONTRACT_NATIVE`, 409, for
 native work, whose record its native execution keeps).
 `contracts.retryUnit` runs one unit of a running contract again: a working

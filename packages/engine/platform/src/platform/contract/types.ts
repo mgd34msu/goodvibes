@@ -175,6 +175,8 @@ export interface StartContractInput {
   readonly sessionId: string;
   readonly origin: ContractOrigin;
   readonly projectRoot: string;
+  /** The identified principal that started it over the operator surface; recorded as the contract's owner. */
+  readonly ownerPrincipalId?: string | undefined;
   /** Units proposed by an agent-tool batch or AgentInput.proposedUnits; the planner weighs them. */
   readonly proposedUnits?: readonly { readonly task: string; readonly template?: string | undefined }[] | undefined;
   /** The conversation agent that asked, when there is one. */
@@ -512,6 +514,12 @@ export interface Contract {
   readonly schemaVersion: number;
   readonly sessionId: string;
   readonly origin: ContractOrigin;
+  /**
+   * The identified principal that started it over the operator surface. Only
+   * that principal (and the daemon itself) sees and acts on it there, whoever
+   * is attached to its session later; absent, the session's owners decide.
+   */
+  readonly ownerPrincipalId?: string | undefined;
   readonly ask: string;
   readonly ownerAgentId: string;
   readonly parentAgentId?: string | undefined;
@@ -586,6 +594,12 @@ export type DeepReadonly<T> = T extends readonly (infer E)[]
     : T;
 
 export type ContractView = DeepReadonly<Contract>;
+
+/** What decides who may see a contract over the operator surface; a contract and its ended summary both carry it. */
+export interface ContractOwnership {
+  readonly sessionId: string;
+  readonly ownerPrincipalId?: string | undefined;
+}
 export type ContractGroupView = DeepReadonly<ContractGroup>;
 export type ContractUnitView = DeepReadonly<ContractUnit>;
 export type CriterionView = DeepReadonly<Criterion>;

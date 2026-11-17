@@ -170,7 +170,7 @@ export function createHostedSessionCreateHandler(service: HostedSessionVerbServi
         ...(initialPrompt === undefined ? {} : { initialPrompt }),
         ...(detachPolicy === undefined ? {} : { detachPolicy }),
         ...(clientId === undefined ? {} : { clientId }),
-        ...(clientId === undefined || principalId === undefined ? {} : { principalId }),
+        ...(principalId === undefined ? {} : { principalId }),
         ...(originSurface === undefined ? {} : { originSurface }),
       });
       return { session };

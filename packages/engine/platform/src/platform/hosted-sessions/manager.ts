@@ -311,7 +311,7 @@ export class HostedSessionManager {
         runtime: null,
         lease: null,
         restoredConversation: persisted.conversation,
-        attached: new HostedSessionAttachments(),
+        attached: new HostedSessionAttachments(persisted.owners ?? []),
         initialization: null, composition: null, parking: null, termination: null,
       });
       if (restored.terminated) {
@@ -592,7 +592,7 @@ export class HostedSessionManager {
         runtime,
         lease,
         restoredConversation: null,
-        attached: new HostedSessionAttachments(),
+        attached: new HostedSessionAttachments(input.principalId === undefined ? [] : [input.principalId]),
         initialization: null, composition: null, parking: null, termination: null,
       };
       if (input.clientId) live.attached.renew(input.clientId, at, this.attachmentLeaseMs(), input.principalId);
@@ -686,12 +686,15 @@ export class HostedSessionManager {
     // Attaching again is how a client renews: the call was always idempotent,
     // and this is the same "polling renews the lease" shape the rewind host
     // registration uses. See ./attachments.ts.
+    const newOwner = options?.principalId !== undefined && !live.attached.identifiedOwners().includes(options.principalId);
     live.attached.renew(clientId, this.now(), clampAttachmentLease(options?.leaseMs, this.attachmentLeaseMs()), options?.principalId);
     live.record = {
       ...live.record,
       attachedClients: live.attached.clientIds(),
       updatedAt: this.now(),
     };
+    // A new owner is saved with the session, so it still owns it (and its contracts) after a restart.
+    if (newOwner) await this.persist(live.record);
     this.publish('hosted-session-attached', live.record, { clientId });
     const history = this.history(live);
     if (live.runtime?.isRunning()) return { session: live.record, history };
@@ -1329,7 +1332,7 @@ export class HostedSessionManager {
     if (live?.released) return;
     const conversation = live?.runtime ? live.runtime.conversation.toJSON() : live?.restoredConversation ?? null;
     try {
-      await this.options.store.save(record, conversation);
+      await this.options.store.save(record, conversation, { owners: live?.attached.identifiedOwners() });
     } catch (error) {
       const reason = summarizeError(error);
       logger.warn('[hosted-sessions] persisting a session failed; it will not survive a restart', {
@@ -1363,7 +1366,7 @@ export class HostedSessionManager {
   /** A save whose failure the caller must see: it is thrown, and kept on the record like any other. */
   private async saveDurably(live: LiveSession, conversation: unknown): Promise<void> {
     try {
-      await this.options.store.save(live.record, conversation, { durable: true });
+      await this.options.store.save(live.record, conversation, { durable: true, owners: live.attached.identifiedOwners() });
     } catch (error) {
       this.noteSaveOutcome(live.record.id, summarizeError(error));
       throw error;

@@ -45,7 +45,7 @@ export const builtinGatewayContractMethodDescriptors: readonly GatewayMethodDesc
   methodDescriptor({
     id: 'contracts.list',
     title: 'List Contracts',
-    description: 'Every contract this daemon holds, newest first, each with its whole tree: the ask, the goal, the acceptance criteria with every Jev reading, the groups and units with their checks and nudges, open and answered owner escalations, decisions, usage, and the answer or status line once it ends. `sessionId` narrows the list to one session\'s contracts (a hosted session\'s, or a shared session\'s); ended contracts are left out unless `includeTerminal` is set. For a list view, `contracts.summaries` returns the same contracts as small summaries.',
+    description: 'Every contract this daemon holds, newest first, each with its whole tree: the ask, the goal, the acceptance criteria with every Jev reading, the groups and units with their checks and nudges, open and answered owner escalations, decisions, usage, and the answer or status line once it ends. `sessionId` narrows the list to one session\'s contracts (a hosted session\'s, or a shared session\'s); ended contracts are left out unless `includeTerminal` is set. For a list view, `contracts.summaries` returns the same contracts as small summaries. A contract an identified caller started belongs to that caller (`ownerPrincipalId`) for its whole life; one a hosted session\'s own turn started belongs to that session\'s identified owners. Contracts of another caller are left out here and read as CONTRACT_NOT_FOUND everywhere else.',
     category: 'contracts',
     scopes: ['read:fleet'],
     http: { method: 'GET', path: '/api/contracts' },

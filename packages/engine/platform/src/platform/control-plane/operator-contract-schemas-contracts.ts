@@ -325,6 +325,7 @@ export const CONTRACT_VIEW_SCHEMA = objectSchema({
   schemaVersion: NUMBER_SCHEMA,
   sessionId: STRING_SCHEMA,
   origin: enumSchema(CONTRACT_ORIGINS),
+  ownerPrincipalId: STRING_SCHEMA,
   ask: STRING_SCHEMA,
   selectedModel: objectSchema({ id: STRING_SCHEMA, provider: STRING_SCHEMA, registryKey: STRING_SCHEMA, displayName: STRING_SCHEMA }, ['id', 'provider', 'registryKey', 'displayName']),
   ownerAgentId: STRING_SCHEMA,

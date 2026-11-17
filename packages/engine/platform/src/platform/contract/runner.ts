@@ -85,6 +85,7 @@ import {
   newContractId,
   type Contract,
   type ContractFailureKind,
+  type ContractOwnership,
   type ContractRouteSelector,
   type ContractView,
   type StartContractInput,
@@ -261,7 +262,9 @@ export interface ContractRunner {
   inspectIntegration?(contractId: string): ContractIntegrationInspection;
   list(filter?: { readonly sessionId?: string | undefined; readonly includeTerminal?: boolean | undefined;
     /** Display summaries do not need the captured repository's file manifest. Full reads remain the default. */
-    readonly includeInputSnapshot?: boolean | undefined }): ContractView[];
+    readonly includeInputSnapshot?: boolean | undefined;
+    /** Keeps only the contracts this accepts; an ended one is asked from its summary, so a refused one is never read from disk. */
+    readonly admit?: ((owner: ContractOwnership) => boolean) | undefined }): ContractView[];
   /** Stops a contract and everything it runs. False when it is unknown or already ended. */
   cancel(contractId: string, reason: string): boolean;
   /**
@@ -1215,6 +1218,7 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
       schemaVersion: CURRENT_CONTRACT_SCHEMA_VERSION,
       sessionId: input.sessionId,
       origin: input.origin,
+      ...(input.ownerPrincipalId === undefined ? {} : { ownerPrincipalId: input.ownerPrincipalId }),
       ask: input.ask,
       ...(originalSource ? { originalSource, taskEvidence: [owner.task, input.taskEvidence].filter(Boolean).join('\n\n') } : input.taskEvidence === undefined ? {} : { taskEvidence: input.taskEvidence }),
       ownerAgentId: owner.id,
@@ -1679,9 +1683,10 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
       // Ended contracts are listed from their summaries; only those the filter keeps are read.
       const heldIds = new Set(held.map((contract) => contract.id));
       const ended = filter.includeTerminal !== true ? [] : deps.store.listEnded()
-        .filter((summary) => !heldIds.has(summary.id) && (filter.sessionId === undefined || summary.sessionId === filter.sessionId))
+        .filter((summary) => !heldIds.has(summary.id) && (filter.sessionId === undefined || summary.sessionId === filter.sessionId)
+          && (filter.admit === undefined || filter.admit(summary)))
         .flatMap((summary) => { const contract = deps.store.ended(summary.id); return contract === null ? [] : [contract]; });
-      return [...held, ...ended]
+      return [...held.filter((contract) => filter.admit === undefined || filter.admit(contract)), ...ended]
         .filter((contract) => filter.sessionId === undefined || contract.sessionId === filter.sessionId)
         .filter((contract) => filter.includeTerminal === true || !isTerminalContractStatus(contract.status))
         .map((contract) => withCheckpointWarning(structuredClone(filter.includeInputSnapshot === false

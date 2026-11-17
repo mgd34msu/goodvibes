@@ -51,18 +51,45 @@ export function clampAttachmentLease(requestedMs: number | undefined, fallbackMs
   return Math.min(Math.max(requested, HOSTED_ATTACHMENT_MIN_LEASE_MS), HOSTED_ATTACHMENT_MAX_LEASE_MS);
 }
 
-/** One hosted session's attachments, each with the moment its lease runs out. */
+/**
+ * One hosted session's attachments, each with the moment its lease runs out,
+ * and the session's identified owners.
+ *
+ * An owner is a principal that created the session or attached to it. It
+ * stays an owner when its client detaches, its lease runs out or the session
+ * ends: leaving does not hand the session's contracts to whoever comes next.
+ * The engine persists the owners with the session, so a restart keeps them.
+ */
 export class HostedSessionAttachments {
   private readonly leases = new Map<string, number>();
   /** The principal that first attached each client id, when the caller was identified. */
   private readonly owners = new Map<string, string>();
+  /** Every principal that identified itself on the session; never shrinks. */
+  private readonly principals: Set<string>;
+
+  constructor(principals: Iterable<string> = []) {
+    this.principals = new Set(principals);
+  }
 
   /** Attach or renew. Returns when the lease now runs out. */
   renew(clientId: string, at: number, leaseMs: number, principalId?: string): number {
     const expiresAt = at + clampAttachmentLease(leaseMs, HOSTED_ATTACHMENT_DEFAULT_LEASE_MS);
     this.leases.set(clientId, expiresAt);
     if (principalId !== undefined && !this.owners.has(clientId)) this.owners.set(clientId, principalId);
+    if (principalId !== undefined) this.principals.add(principalId);
     return expiresAt;
+  }
+
+  /** Records `principalId` as an owner of the session without an attachment (the creator, with no client). True when it was not one yet. */
+  addOwner(principalId: string): boolean {
+    if (this.principals.has(principalId)) return false;
+    this.principals.add(principalId);
+    return true;
+  }
+
+  /** The session's identified owners, as persisted with it. */
+  identifiedOwners(): string[] {
+    return [...this.principals];
   }
 
   /**
@@ -79,8 +106,8 @@ export class HostedSessionAttachments {
    * A session nobody identified themselves on has no owner to protect.
    */
   ownedByOthers(principalId: string | undefined): boolean {
-    if (this.owners.size === 0) return false;
-    return principalId === undefined || ![...this.owners.values()].includes(principalId);
+    if (this.principals.size === 0) return false;
+    return principalId === undefined || !this.principals.has(principalId);
   }
 
   delete(clientId: string): boolean {

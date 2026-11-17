@@ -4,8 +4,10 @@
  *
  * `dispatch` starts a contract in a hosted session: the one the request's
  * `metadata.sessionId` names (when `ownsSession` allows it), or a new one created for the dispatch in
- * `metadata.workspaceRoot` (else the adapter's default workspace). The
- * contract runs on that session's workspace floor, so its questions for the
+ * `metadata.workspaceRoot` (else the adapter's default workspace). A
+ * `metadata.principalId` (set by the operator surface from the authenticated
+ * caller, never from the request body) owns both the session it creates and the
+ * contract. The contract runs on that session's workspace floor, so its questions for the
  * owner are the session's replies and a turn in the session answers them.
  * `status` maps the contract to a snapshot (its status line, or its question
  * while it waits on the owner, as progress), `cancel` cancels it, and
@@ -123,6 +125,7 @@ export function createHostedContractWorkAdapter(deps: HostedContractWorkAdapterD
 
   const dispatchOnce: ContractExternalWorkAdapter['dispatch'] = async (request) => {
     let sessionId = metadataString(request.metadata, 'sessionId');
+    const principalId = metadataString(request.metadata, 'principalId');
     let created = false;
     if (sessionId !== undefined && !deps.hostedSessions.hosts(sessionId)) {
       throw new ContractOperatorError(`This daemon hosts no live session ${sessionId}.`, 'SESSION_NOT_LIVE', 409, 'sessionId');
@@ -135,7 +138,7 @@ export function createHostedContractWorkAdapter(deps: HostedContractWorkAdapterD
       const workspaceRoot = requested ?? deps.workspaceRoot;
       if (workspaceRoot === undefined) throw new ContractOperatorError('A dispatch without a hosted session needs metadata.workspaceRoot: no default workspace is set.', 'INVALID_ARGUMENT', 400, 'workspaceRoot');
       try {
-        sessionId = (await deps.hostedSessions.create({ workspaceRoot })).id;
+        sessionId = (await deps.hostedSessions.create({ workspaceRoot, ...(principalId === undefined ? {} : { principalId }) })).id;
       } catch (error) {
         // The manager owns where work may run; its refusal is the caller's argument error here.
         if (error instanceof HostedSessionArgumentError) throw new ContractOperatorError(error.message, 'INVALID_ARGUMENT', 400, 'workspaceRoot');
@@ -145,7 +148,7 @@ export function createHostedContractWorkAdapter(deps: HostedContractWorkAdapterD
     }
     let started;
     try {
-      started = await deps.runner.start({ ask: request.task, sessionId });
+      started = await deps.runner.start({ ask: request.task, sessionId, ...(principalId === undefined ? {} : { principalId }) });
     } catch (error) {
       // A session made for this dispatch would otherwise hold a slot and a workspace floor with nothing in it.
       if (created) await endSession(sessionId);

@@ -176,7 +176,11 @@ export interface CreateHostedSessionInput {
    * for one attachment lease; pass `detachPolicy: 'survive'` to keep it.
    */
   readonly clientId?: string | undefined;
-  /** The authenticated principal creating it; only that principal can later detach `clientId`. */
+  /**
+   * The authenticated principal creating it: an owner of the session from the
+   * start (with or without `clientId`), and the only principal that can later
+   * detach `clientId`.
+   */
   readonly principalId?: string | undefined;
   /**
    * The surface this session was created FOR, `agent`, `tui`, `webui`.

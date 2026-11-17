@@ -105,6 +105,8 @@ export interface EndedContractSummary {
   readonly id: string;
   readonly status: Contract['status'];
   readonly sessionId: string;
+  /** The contract's owning principal, so the operator surface filters a listing without reading the checkpoint. */
+  readonly ownerPrincipalId?: string | undefined;
   readonly createdAt: number;
   readonly completedAt?: number | undefined;
   readonly failureKind?: Contract['failureKind'] | undefined;
@@ -119,7 +121,8 @@ function isEndedSummary(value: unknown, id: string): value is EndedContractSumma
   if (!isRecord(value)) return false;
   return value['version'] === 1 && value['id'] === id && typeof value['status'] === 'string' && isTerminalContractStatus(value['status'] as Contract['status'])
     && typeof value['sessionId'] === 'string' && typeof value['createdAt'] === 'number' && typeof value['durable'] === 'boolean'
-    && (value['completedAt'] === undefined || typeof value['completedAt'] === 'number');
+    && (value['completedAt'] === undefined || typeof value['completedAt'] === 'number')
+    && (value['ownerPrincipalId'] === undefined || typeof value['ownerPrincipalId'] === 'string');
 }
 
 /** Where contracts.start records a caller's retry key, one small file per (principal, key). */
@@ -198,6 +201,7 @@ function isContractShape(value: unknown): value is Contract {
     && (value['isolation'] === 'worktree' || value['isolation'] === 'shared')
     && typeof value['status'] === 'string' && (CONTRACT_STATUSES as readonly string[]).includes(value['status'])
     && typeof value['sessionId'] === 'string'
+    && (value['ownerPrincipalId'] === undefined || typeof value['ownerPrincipalId'] === 'string')
     && typeof value['ownerAgentId'] === 'string'
     && typeof value['ask'] === 'string'
     && typeof value['projectRoot'] === 'string'
@@ -545,6 +549,7 @@ export class ContractStore {
         return;
       }
       const summary: EndedContractSummary = { version: 1, id: contract.id, status: contract.status, sessionId: contract.sessionId,
+        ...(contract.ownerPrincipalId === undefined ? {} : { ownerPrincipalId: contract.ownerPrincipalId }),
         createdAt: contract.createdAt, ...(contract.completedAt === undefined ? {} : { completedAt: contract.completedAt }),
         ...(contract.failureKind === undefined ? {} : { failureKind: contract.failureKind }), durable: contract.durableAdmission !== undefined };
       writeFileAtomic(path, JSON.stringify(summary));

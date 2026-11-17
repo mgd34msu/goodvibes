@@ -454,7 +454,17 @@ async function handleConfirm(
   if (isOutcome(taken)) return taken;
   const { token, proposal } = taken;
   if (proposal.target !== 'occasion') return fail([OCCASIONS_RESPONSE_UNREADABLE]);
-  const kind = readString(args.kind) || readString(proposal.values.kind);
+  // A kind the proposal already carries was read to him in its line, so it is
+  // held like every other field; a call may supply one only when it had none.
+  const proposedKind = readString(proposal.values.kind);
+  const givenKind = readString(args.kind);
+  if (proposedKind && givenKind && givenKind.toLowerCase() !== proposedKind.toLowerCase()) {
+    return fail([
+      `Proposal ${token} was for: ${proposal.line}. This call changes kind, so nothing was recorded.`,
+      'To record a different kind, call action:"propose" with it and read him the new line.',
+    ]);
+  }
+  const kind = proposedKind || givenKind;
   if (!kind) {
     return fail([
       `\`kind\` is required: ${OCCASIONS_KIND_WORDS.join(', ')}.`,

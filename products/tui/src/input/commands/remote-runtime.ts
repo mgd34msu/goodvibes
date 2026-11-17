@@ -310,6 +310,8 @@ export function registerRemoteRuntimeCommands(registry: CommandRegistry): void {
           context: `Self-hosted remote runner dispatched from session ${ctx.session.runtime.sessionId}. Follow ${template} discipline and return concise evidence.`,
           tools: [...templateDef.defaultTools],
           workingDirectory,
+          // The runner's progress events carry the session that dispatched it.
+          sessionId: ctx.session.runtime.sessionId,
         }, operation);
         const now = Date.now();
         remoteRunners.registerContract({
@@ -389,6 +391,8 @@ export function registerRemoteRuntimeCommands(registry: CommandRegistry): void {
           context: `Self-hosted remote runner dispatched from session ${ctx.session.runtime.sessionId} via pool ${poolId}. Follow ${template} discipline and return concise evidence.`,
           tools: [...templateDef.defaultTools],
           workingDirectory,
+          // The runner's progress events carry the session that dispatched it.
+          sessionId: ctx.session.runtime.sessionId,
         }, operation);
         const now = Date.now();
         remoteRunners.registerContract({
@@ -584,6 +588,8 @@ export function registerRemoteRuntimeCommands(registry: CommandRegistry): void {
           mode: 'spawn',
           task: artifact.task.task,
           template,
+          // The session's own agent: its model lists and reads it with the agent tool.
+          sessionId: ctx.session.runtime.sessionId,
           tools: [...ceiling.allowedTools],
           // Without this the spawn adds the template's default tools to the recorded set.
           restrictTools: true,

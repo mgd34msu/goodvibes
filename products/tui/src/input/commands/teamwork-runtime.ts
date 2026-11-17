@@ -139,7 +139,7 @@ type AgentManagerLike = ReturnType<typeof requireAgentManager>;
 const REMOTE_STEP_REFUSAL = 'A remote engineer runs on a remote runner, started with /remote dispatch engineer <description> typed in the terminal.';
 
 /** Start the agent a mode describes; null for a mode that runs remotely. */
-function startModeAgent(mode: TeamworkMode, title: string, manager: AgentManagerLike, extra: { readonly context?: string; readonly cohort?: string } = {}): { readonly id: string; readonly template: string } | null {
+function startModeAgent(mode: TeamworkMode, title: string, manager: AgentManagerLike, extra: { readonly sessionId: string; readonly context?: string; readonly cohort?: string }): { readonly id: string; readonly template: string } | null {
   if (mode.taskKind === 'acp') return null;
   const template = mode.template ?? 'general';
   const record = manager.spawn({
@@ -147,6 +147,8 @@ function startModeAgent(mode: TeamworkMode, title: string, manager: AgentManager
     task: title,
     template,
     executionProtocol: mode.executionProtocol,
+    // The session's own agent: its model lists and reads it with the agent tool.
+    sessionId: extra.sessionId,
     ...(extra.context ? { context: extra.context } : {}),
     ...(extra.cohort ? { cohort: extra.cohort } : {}),
   });
@@ -171,7 +173,7 @@ async function runRecipe(recipe: TeamworkRecipe, title: string, ctx: CommandCont
       : `Step 1 of ${recipe.steps.length} of the ${recipe.id} recipe (${recipe.summary}).`;
     let started: ReturnType<typeof startModeAgent>;
     try {
-      started = startModeAgent(mode, title, manager, { context, cohort });
+      started = startModeAgent(mode, title, manager, { sessionId: ctx.session.runtime.sessionId, context, cohort });
     } catch (error) {
       ctx.print(`[Teamwork ${recipe.id}] step ${index + 1} (${mode.id}) could not start: ${summarizeError(error)}. Not started: ${recipe.steps.slice(index).join(', ')}.`);
       return;
@@ -265,7 +267,7 @@ export function registerTeamworkRuntimeCommands(registry: CommandRegistry): void
             ctx.print(`Usage: /teamwork create-mode <${MODE_IDS}> <title...>`);
             return;
           }
-          const started = startModeAgent(mode, title, requireAgentManager(ctx));
+          const started = startModeAgent(mode, title, requireAgentManager(ctx), { sessionId: ctx.session.runtime.sessionId });
           ctx.print(started
             ? `Started agent ${started.id} (${started.template}, ${mode.executionProtocol}) for "${title}" in mode ${mode.id}; /agents shows its progress.`
             : `Nothing was started: ${REMOTE_STEP_REFUSAL}`);
@@ -391,6 +393,7 @@ export function registerTeamworkRuntimeCommands(registry: CommandRegistry): void
             mode: 'spawn',
             task: title,
             template: mode.id,
+            sessionId: ctx.session.runtime.sessionId,
             ...(mode.reading === 'settled' ? { executionProtocol: mode.executionProtocol } : {}),
           });
           ctx.print(`Started agent ${record.id} from archetype ${mode.id} (${familyLabel(mode)}, ${protocolLabel(mode)}) for "${title}"; /agents shows its progress.${mode.reading === 'undeclared' ? ` Its family is not declared, so it runs with its template's own protocol: ${mode.reason}.` : ''}`);

@@ -31,6 +31,8 @@ export function buildContinuationSpawnInput(
   return {
     mode: 'spawn',
     task,
+    // The agent answers this shared session; its reports and listings belong to it.
+    sessionId: input.sessionId,
     ...buildSharedSessionAgentSpawnRoutingInput(input.routing, { modelCandidates: deps.modelCandidates }),
     // `restrictTools` with no list would leave an empty registry, so it is set only for a stated list.
     ...(input.routing?.tools?.length ? { restrictTools: true } : {}),

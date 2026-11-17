@@ -1,5 +1,7 @@
 import type { GatewayMethodCatalog, GatewayMethodDescriptor } from '../../control-plane/method-catalog.js';
+import { grantedGatewayScopes } from '../../control-plane/method-catalog.js';
 import { missingScopeRefusal } from '@goodvibes-jev/engine/daemon-api/error-response';
+import { EngineErrorCodes } from '@goodvibes-jev/engine/errors';
 import type { AuthenticatedPrincipal } from '../http-policy.js';
 
 /** Who is calling, as the access and scope check reads it. */
@@ -42,6 +44,72 @@ export function refuseGatewayAccess(
   }
   const body = missingScopeRefusal(descriptor.id, descriptor.scopes, caller?.scopes);
   return body ? { status: 403, ok: false, body: { ...body } } : null;
+}
+
+/**
+ * The one admission check of a cataloged call, for every path a call takes:
+ * method dispatch over the wire, the live `isAuthorized(scopes)` a handler
+ * asks while it runs, and a call the daemon makes in-process on a caller's
+ * behalf. The method must be invokable through dispatch, the caller must meet
+ * its access level and hold every scope it lists, and every further scope the
+ * handler asks for. Returns the refusal, or null when allowed.
+ */
+export function refuseGatewayInvocation(
+  descriptor: Pick<GatewayMethodDescriptor, 'id' | 'access' | 'scopes' | 'invokable'>,
+  caller: GatewayAccessCaller | undefined,
+  requiredScopes: readonly string[] = [],
+): { status: number; ok: false; body: Record<string, unknown> } | null {
+  if (descriptor.invokable === false) {
+    return {
+      status: 400,
+      ok: false,
+      body: {
+        error: `Gateway method is cataloged but not invokable through method dispatch: ${descriptor.id}`,
+        // Machine-readable, following the EngineErrorCodes.SESSION_CLOSED precedent
+        // (session-broker.ts), consumers match on `code`, never on the message
+        // string. See the `invokable` field's doc comment (method-catalog-shared.ts)
+        // for what this status does and does not mean.
+        code: EngineErrorCodes.NOT_INVOKABLE,
+      },
+    };
+  }
+  const denied = refuseGatewayAccess(descriptor, caller);
+  if (denied || requiredScopes.length === 0 || descriptor.access === 'public' || descriptor.access === 'remote-peer') return denied;
+  const body = missingScopeRefusal(descriptor.id, requiredScopes, caller?.scopes);
+  return body ? { status: 403, ok: false, body: { ...body } } : null;
+}
+
+/** The scopes a catalog grants by default: the set it keeps, or one derived from its descriptors. */
+export function catalogGrantedScopes(
+  catalog: Pick<GatewayMethodCatalog, 'getAllScopes'> & { grantedScopes?(includeWrite: boolean): readonly string[] },
+  includeWrite: boolean,
+): readonly string[] {
+  return typeof catalog.grantedScopes === 'function' ? catalog.grantedScopes(includeWrite) : grantedGatewayScopes(catalog, includeWrite);
+}
+
+/** The default grant, narrowed to a stored list. A stored list never widens it. */
+export function narrowGatewayGrant(defaults: readonly string[], stored: readonly string[] | undefined): readonly string[] {
+  if (stored === undefined || stored.includes('*')) return defaults;
+  const allowed = new Set(stored);
+  return Object.freeze(defaults.filter(scope => allowed.has(scope)));
+}
+
+/**
+ * What a pairing-token caller holds: full operator authority (admin, and the
+ * catalog's whole read and write grant) unless its pairing stores a narrower
+ * list. The Agent's pairing (`client: 'agent'`) is minted with no list, so it
+ * holds the full grant; a call the daemon makes in-process as the Agent is
+ * held to this same caller.
+ */
+export function pairingTokenCaller(
+  catalog: Parameters<typeof catalogGrantedScopes>[0],
+  stored?: readonly string[] | undefined,
+): { readonly principalKind: 'token'; readonly admin: boolean; readonly scopes: readonly string[] } {
+  return {
+    principalKind: 'token',
+    admin: stored === undefined || stored.includes('*'),
+    scopes: narrowGatewayGrant(catalogGrantedScopes(catalog, true), stored),
+  };
 }
 
 interface GatewayBindingGateDeps {

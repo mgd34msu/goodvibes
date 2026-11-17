@@ -22,14 +22,13 @@ import { bindRequestContext, createRequestContext, isPrincipalCurrent, requestCo
 import type { ControlPlaneGateway, SharedSessionBroker } from '../control-plane/index.js';
 import type { GatewayMethodCatalog, GatewayMethodDescriptor } from '../control-plane/index.js';
 import type { GatewayMethodInvocationContext } from '../control-plane/method-catalog-shared.js';
-import { grantedGatewayScopes } from '../control-plane/method-catalog.js';
 import type { RuntimeEventDomain } from '../runtime/events/index.js';
 import { isRuntimeEventDomain } from '../runtime/events/index.js';
 import type { DistributedRuntimeManager } from '../runtime/remote/index.js';
 import { extractForwardedClientIp } from '../runtime/network/index.js';
 import { clientAddressOf, resolveClientAddress } from './client-address.js';
 import { resolveGatewayPathTemplate } from './helpers.js';
-import { refuseGatewayAccess } from './http/gateway-binding-gate.js';
+import { catalogGrantedScopes, narrowGatewayGrant, pairingTokenCaller, refuseGatewayInvocation } from './http/gateway-binding-gate.js';
 import { createAuthFailureAudit, type AuthFailureAudit } from './auth-failure-audit.js';
 import type { RuntimeEventBus } from '../runtime/events/index.js';
 import { summarizeError } from '../utils/error-display.js';
@@ -37,7 +36,6 @@ import { redactDiagnosticText } from '../utils/redaction.js';
 import { validateInvocationInput } from '../control-plane/invoke-input-validation.js';
 import { readGatewayVerbRefusal } from '../control-plane/routes/gateway-verb-error.js';
 import { authenticationRequiredResponse, buildErrorResponseBody, jsonErrorResponse } from './http/error-response.js';
-import { missingScopes } from './http/route-helpers.js';
 import { EngineErrorCodes } from '@goodvibes-jev/engine/errors';
 import {
   type AuthenticatedPrincipal,
@@ -596,20 +594,14 @@ export class DaemonControlPlaneHelper {
       // A paired device is a distinct, per-token principal (`pairing:<id>`) with
       // full operator authority unless its pairing stores a narrower list, so
       // step-up credentials key per token and a revoked device drops out cleanly.
-      const scopes = narrowGrant(this.getGrantedGatewayScopes(true), stored);
-      return {
-        principalId: pairingPrincipalId(authenticated.tokenId),
-        principalKind: 'token',
-        admin: stored === undefined || stored.includes('*'),
-        scopes,
-      };
+      return { principalId: pairingPrincipalId(authenticated.tokenId), ...pairingTokenCaller(this.context.gatewayMethods, stored) };
     }
     const admin = authenticated.roles.includes('admin');
     return {
       principalId: authenticated.username,
       principalKind: 'user',
       admin,
-      scopes: narrowGrant(this.getGrantedGatewayScopes(admin), stored),
+      scopes: narrowGatewayGrant(this.getGrantedGatewayScopes(admin), stored),
     };
   }
 
@@ -703,8 +695,7 @@ export class DaemonControlPlaneHelper {
   }
 
   getGrantedGatewayScopes(includeWrite: boolean): readonly string[] {
-    const catalog = this.context.gatewayMethods;
-    return typeof catalog.grantedScopes === 'function' ? catalog.grantedScopes(includeWrite) : grantedGatewayScopes(catalog, includeWrite);
+    return catalogGrantedScopes(this.context.gatewayMethods, includeWrite);
   }
 
   validateGatewayInvocation(
@@ -715,21 +706,7 @@ export class DaemonControlPlaneHelper {
       readonly admin?: boolean | undefined;
     },
   ): { status: number; ok: false; body: Record<string, unknown> } | null {
-    if (descriptor.invokable === false) {
-      return {
-        status: 400,
-        ok: false,
-        body: {
-          error: `Gateway method is cataloged but not invokable through method dispatch: ${descriptor.id}`,
-          // Machine-readable, following the EngineErrorCodes.SESSION_CLOSED precedent
-          // (session-broker.ts), consumers match on `code`, never on the message
-          // string. See the `invokable` field's doc comment (method-catalog-shared.ts)
-          // for what this status does and does not mean.
-          code: EngineErrorCodes.NOT_INVOKABLE,
-        },
-      };
-    }
-    return refuseGatewayAccess(descriptor, context);
+    return refuseGatewayInvocation(descriptor, context);
   }
 
   tryUpgradeControlPlaneWebSocket(
@@ -1172,10 +1149,8 @@ export class DaemonControlPlaneHelper {
       if (!known || !isPrincipalCurrent(known, this.authRevision())) known = this.describeRequestPrincipal(token);
       const fresh = known;
       return fresh !== null && fresh.principalId === captured.principalId && fresh.principalKind === captured.principalKind
-        && missingScopes(fresh.scopes, requiredScopes).length === 0
-        && missingScopes(captured.scopes, requiredScopes).length === 0
-        && this.validateGatewayInvocation(descriptor, fresh) === null
-        && this.validateGatewayInvocation(descriptor, captured) === null;
+        && refuseGatewayInvocation(descriptor, fresh, requiredScopes) === null
+        && refuseGatewayInvocation(descriptor, captured, requiredScopes) === null;
     };
   }
 
@@ -1434,9 +1409,3 @@ function storedScopesOf(authenticated: AuthenticatedOperatorRequest): readonly s
   return Array.isArray(stored) ? stored : undefined;
 }
 
-/** The default grant, narrowed to a stored list. A stored list never widens it. */
-function narrowGrant(defaults: readonly string[], stored: readonly string[] | undefined): readonly string[] {
-  if (stored === undefined || stored.includes('*')) return defaults;
-  const allowed = new Set(stored);
-  return Object.freeze(defaults.filter(scope => allowed.has(scope)));
-}

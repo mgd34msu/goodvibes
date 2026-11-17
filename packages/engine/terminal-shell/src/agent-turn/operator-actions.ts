@@ -1,9 +1,7 @@
 import type { OperatorMethodInput } from '@goodvibes-jev/engine/platform/contracts';
-import { createConnectedHost, isHostFailure, type HostCallApplied, type HostFailureKind, type HostRefusal } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { assertSafeOperatorPathValue, requireOperatorHttpBinding } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { scheduleNextRouteLines } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-
-export type JsonRecord = Record<string, unknown>;
+import { createConnectedHost, isHostFailure, type HostCallApplied, type HostFailureKind, type HostRefusal } from './connected-host-client.js';
+import { assertSafeOperatorPathValue, requireOperatorHttpBinding, type JsonRecord } from './operator-contract-routes.js';
+import { scheduleNextRouteLines } from './schedule-next-routes.js';
 
 export type ApprovalActionId = 'approvals.approve' | 'approvals.deny' | 'approvals.cancel';
 export type AutomationActionId =
@@ -78,7 +76,9 @@ export type OperatorActionParseResult = OperatorActionRequest | { readonly ok: f
 export interface OperatorActionConnection {
   readonly baseUrl: string;
   readonly token: string | null;
-  readonly tokenPath?: string;
+  readonly tokenPath?: string | undefined;
+  /** How the action reaches the host: absent, the network; in a daemon-hosted turn, the daemon's own request path. */
+  readonly fetch?: typeof fetch | undefined;
 }
 
 /**
@@ -164,7 +164,7 @@ export function getOperatorActions(): Record<OperatorActionId, OperatorActionDes
 // contract lookup, so it stays safe to read at module scope.
 export const OPERATOR_ACTION_IDS = Object.keys(OPERATOR_ACTION_SPECS) as readonly OperatorActionId[];
 
-export function isRecord(value: unknown): value is JsonRecord {
+function isRecord(value: unknown): value is JsonRecord {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
@@ -267,6 +267,7 @@ export async function postOperatorAction(
     baseUrl: connection.baseUrl,
     token: connection.token,
     credential: connection.tokenPath ?? 'the connected-host credential',
+    ...(connection.fetch === undefined ? {} : { fetch: connection.fetch }),
   }), { validateResponses: false });
   const input = { ...(request.body ?? {}), [request.descriptor.targetField]: request.targetId };
   try {

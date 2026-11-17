@@ -3,15 +3,14 @@ import { captureStrictJudgmentJson } from '@goodvibes-jev/engine/platform/platfo
 import { assertProjectionExecution, ToolInputProjectionError, type ToolInputProjector } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { isDeepStrictEqual } from 'node:util';
-import type { ShellPathService } from '@/runtime/index.ts';
-import type { AgentConnectedHostConfigReader } from '../agent/routine-schedule-promotion.ts';
-import { operatorMethodIsReadOnly, resolveOperatorContractMethod } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { getOperatorActions, isOperatorActionId, targetValue } from '../agent/operator-actions.ts';
-import { captureOperatorConnection } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { captureOperatorAutomationTarget, type OperatorAutomationTarget } from '../agent/operator-automation-target.ts';
-import { captureOperatorRequestPolicy } from '../agent/operator-request-policy.ts';
-
-export { assertSafeOperatorPathValue } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+import type { ConnectedHostConfigReader as AgentConnectedHostConfigReader } from './connected-host-client.js';
+import type { AgentInProcessHost } from './in-process-host.js';
+import { operatorMethodIsReadOnly, resolveOperatorContractMethod } from './operator-contract-routes.js';
+import { getOperatorActions, isOperatorActionId, targetValue } from './operator-actions.js';
+import { captureOperatorConnection } from './operator-connection-owner.js';
+import { captureOperatorAutomationTarget, type OperatorAutomationTarget } from './operator-automation-target.js';
+import { captureOperatorRequestPolicy } from './operator-request-policy.js';
 
 // The method descriptors state whether a method sends something outward; built once, on first use.
 let builtinMethods: GatewayMethodCatalog | undefined;
@@ -36,11 +35,9 @@ const contexts = new WeakMap<object, { readonly connection: CapturedConnection |
   readonly automation: OperatorAutomationTarget; readonly requestPolicy: ReturnType<typeof captureOperatorRequestPolicy> | undefined;
   readonly shellPaths: ShellPathService; readonly reader: AgentConnectedHostConfigReader; readonly kind: 'method' | 'action' }>();
 
-export { operatorMethodIsReadOnly };
-
 /** Capture connection authority before any repair or admission reading. */
 export function createOperatorInputProjector(shellPaths: ShellPathService, reader: AgentConnectedHostConfigReader,
-  kind: 'method' | 'action'): ToolInputProjector {
+  kind: 'method' | 'action', inProcess?: AgentInProcessHost): ToolInputProjector {
   return { async project(request) {
     request.assertCurrent(); request.signal?.throwIfAborted();
     const args = captureStrictJudgmentJson(request.args);
@@ -60,7 +57,7 @@ export function createOperatorInputProjector(shellPaths: ShellPathService, reade
       request.signal?.throwIfAborted();
       requestPolicy?.assertCurrent();
     };
-    const connection = preview ? undefined : captureOperatorConnection(shellPaths, reader, assertSource);
+    const connection = preview ? undefined : captureOperatorConnection(shellPaths, reader, assertSource, inProcess);
     let automation: OperatorAutomationTarget = { wireFields: {} };
     if (connection) {
       const input = kind === 'method' ? args.input : args;

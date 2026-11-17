@@ -1,34 +1,35 @@
 import { captureStrictJudgmentJson } from '@goodvibes-jev/engine/platform/platform/gate';
-import { isServiceMethodId, serviceExpectedOutcome, serviceLifecycleDecision, serviceOutcomeCertified, serviceReceiptEvidence } from './agent-service-lifecycle.ts';
+import { isServiceMethodId, serviceExpectedOutcome, serviceLifecycleDecision, serviceOutcomeCertified, serviceReceiptEvidence } from './service-lifecycle.js';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { assertCurrentToolInvocation, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { logger, redactStructuredDataAsync } from '@goodvibes-jev/engine/platform/platform/utils';
 import { isDeepStrictEqual } from 'node:util';
-import type { ShellPathService } from '@/runtime/index.ts';
-import type { AgentConnectedHostConfigReader } from '../agent/routine-schedule-promotion.ts';
-import { assertOperatorEffect, captureOperatorConnection } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { delegatedOperatorConnection, forgetDelegatedCredential } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { isOperatorAutomationTargetMethod } from '../agent/operator-automation-target.ts';
-import { publishOperatorMethodReceipt } from '../agent/operator-method-receipt.ts';
-import { appendOperatorQuery, operatorMethodIsReadOnly, READ_ONLY_HTTP_METHODS, resolveOperatorContractMethod, substituteOperatorPath } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { createOperatorInputProjector, operatorExecutionConnection, operatorExecutionWireInput, operatorExecutionRequestPolicy, operatorMethodIsOutward, operatorMethodIsOwnerOnly } from './agent-operator-input-projector.ts';
-import { confirmParameter, requestParameter } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+import type { ConnectedHostConfigReader as AgentConnectedHostConfigReader } from './connected-host-client.js';
+import type { AgentInProcessHost } from './in-process-host.js';
+import { assertOperatorEffect, captureOperatorConnection } from './operator-connection-owner.js';
+import { delegatedOperatorConnection, forgetDelegatedCredential } from './agent-delegation-credential.js';
+import { isOperatorAutomationTargetMethod } from './operator-automation-target.js';
+import { publishOperatorMethodReceipt } from './operator-method-receipt.js';
+import { appendOperatorQuery, operatorMethodIsReadOnly, READ_ONLY_HTTP_METHODS, resolveOperatorContractMethod, substituteOperatorPath } from './operator-contract-routes.js';
+import { createOperatorInputProjector, operatorExecutionConnection, operatorExecutionWireInput, operatorExecutionRequestPolicy, operatorMethodIsOutward, operatorMethodIsOwnerOnly } from './operator-input-projector.js';
+import { confirmParameter, requestParameter } from './effect-admission.js';
 
 type JsonRecord = Record<string, unknown>;
 
 interface OperatorContractMethod {
   readonly id: string;
-  readonly title?: string;
-  readonly category?: string;
-  readonly access?: string;
-  readonly scopes?: readonly string[];
+  readonly title?: string | undefined;
+  readonly category?: string | undefined;
+  readonly access?: string | undefined;
+  readonly scopes?: readonly string[] | undefined;
   readonly http?: {
-    readonly method?: string;
-    readonly path?: string;
-  };
-  readonly invokable?: boolean;
-  readonly outputSchema?: Record<string, unknown>;
-  readonly inputSchema?: Record<string, unknown>;
+    readonly method?: string | undefined;
+    readonly path?: string | undefined;
+  } | undefined;
+  readonly invokable?: boolean | undefined;
+  readonly outputSchema?: Record<string, unknown> | undefined;
+  readonly inputSchema?: Record<string, unknown> | undefined;
 }
 
 interface OperatorMethodToolArgs {
@@ -328,6 +329,7 @@ async function readResponseBody(response: Response): Promise<unknown> {
 export function createAgentOperatorMethodTool(
   shellPaths: ShellPathService,
   configManager: AgentConnectedHostConfigReader,
+  inProcess?: AgentInProcessHost,
 ): Tool {
   return {
     definition: {
@@ -440,9 +442,9 @@ export function createAgentOperatorMethodTool(
         assertInvocation();
         const projectedConnection = operatorExecutionConnection(rawArgs, options, shellPaths, configManager, 'method');
         if (!projectedConnection && requiresEffect) throw new Error('Connected operator effects require a registered source projection.');
-        const connection = projectedConnection ?? captureOperatorConnection(shellPaths, configManager, assertInvocation);
+        const connection = projectedConnection ?? captureOperatorConnection(shellPaths, configManager, assertInvocation, inProcess);
         const assertCurrent = () => { assertInvocation(); connection.assertCurrent(); };
-        if (!connection.token) return { success: false, error: 'auth_required: no connected-host operator token found.' };
+        if (!connection.token) return { success: false, error: `auth_required: ${connection.unavailable?.reason ?? 'no connected-host operator token found'}.` };
         const retainedPayload = operatorExecutionWireInput(route.payload, rawArgs, options, shellPaths, configManager, 'method');
         const wirePayload = AUTONOMOUS_PROFILE_METHOD_IDS.has(methodSnapshot.id)
           ? { ...retainedPayload, authority: 'autonomous',
@@ -465,7 +467,8 @@ export function createAgentOperatorMethodTool(
         // The owner-request signal for a purchase rides only on a call whose admission was just confirmed here.
         assertCurrent();
         stage = 'sending';
-        const response = await fetch(`${connection.baseUrl}${requestPath}`, {
+        // The connection's own transport: the network, or the daemon's request path in a turn it hosts.
+        const response = await (connection.fetch ?? fetch)(`${connection.baseUrl}${requestPath}`, {
           signal: options?.signal,
           redirect: 'error',
           method: route.httpMethod,
@@ -548,10 +551,16 @@ function operatorMethodFailure(stage: 'before-send' | 'sending' | 'answered', re
   return `outcome_unknown: ${methodId} was sent to the host${stage === 'answered' ? ` and the host answered HTTP ${httpStatus}` : ' and no answer was received'}, then it failed (${cause}). The daemon may have applied it. Read the current state with a list or status method before retrying, and do not repeat the call blindly.`;
 }
 
+/**
+ * `inProcess`: the daemon hosting this turn, which is then the connected host
+ * (in-process-host.ts); absent in the Agent's own process.
+ */
 export function registerAgentOperatorMethodTool(
   registry: ToolRegistry,
   shellPaths: ShellPathService,
   configManager: AgentConnectedHostConfigReader,
+  inProcess?: AgentInProcessHost,
 ): void {
-  registry.register(createAgentOperatorMethodTool(shellPaths, configManager), { inputProjection: createOperatorInputProjector(shellPaths, configManager, 'method') });
+  registry.register(createAgentOperatorMethodTool(shellPaths, configManager, inProcess),
+    { inputProjection: createOperatorInputProjector(shellPaths, configManager, 'method', inProcess) });
 }

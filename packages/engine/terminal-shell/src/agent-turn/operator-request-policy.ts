@@ -4,19 +4,19 @@ import { captureStrictJudgmentJson, judgmentInputBoundary } from '@goodvibes-jev
 import { CONTENT_DERIVATION_SITE } from '@goodvibes-jev/engine/platform/platform/security';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { isDeepStrictEqual } from 'node:util';
-import { evaluateOutwardEffect, getSessionUntrustedContentLedger } from '../trust/untrusted-content.ts';
-import { screenOutboundForCardMaterial } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { evaluateOutwardEffect, getProcessUntrustedContentLedger } from '@goodvibes-jev/engine/platform/platform/security';
+import { screenOutboundForCardMaterial } from './payments-channel-guard.js';
 import { decisionOrClassic } from '@goodvibes-jev/engine/platform/platform/runtime';
 import type { JudgmentPort } from '@goodvibes-jev/judgment/decisions';
 
 /** Retain the local source record; this does not mint execution or human authority. */
 export function captureOperatorRequestPolicy() {
-  const ledger = getSessionUntrustedContentLedger();
+  const ledger = getProcessUntrustedContentLedger();
   const origins = ledger.originsThisTurn, exposures = ledger.exposuresThisTurn, sources = ledger.taintSourcesThisTurn;
   const current = () => captureStrictJudgmentJson([origins.call(ledger), exposures.call(ledger), sources.call(ledger)]);
   const original = current();
   const assertCurrent = () => {
-    if (getSessionUntrustedContentLedger() !== ledger || ledger.originsThisTurn !== origins
+    if (getProcessUntrustedContentLedger() !== ledger || ledger.originsThisTurn !== origins
       || ledger.exposuresThisTurn !== exposures || ledger.taintSourcesThisTurn !== sources
       || !isDeepStrictEqual(current(), original)) throw new ToolInputProjectionError('stale');
   };

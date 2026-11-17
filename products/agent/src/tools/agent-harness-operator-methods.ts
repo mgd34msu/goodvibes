@@ -5,7 +5,7 @@ import { rankHarnessCatalog, type CatalogRankingOptions } from '@goodvibes-jev/e
 import { CATALOG_QUERIES } from './agent-harness-catalog-filters.ts';
 import { catalogEnvelope, catalogFilters } from './agent-harness-tool-utils.ts';
 import { EFFECT_ADMISSION_SENTENCE } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { operatorMethodIsOutward } from './agent-operator-input-projector.ts';
+import { operatorMethodIsOutward } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 export interface AgentHarnessOperatorMethodArgs {

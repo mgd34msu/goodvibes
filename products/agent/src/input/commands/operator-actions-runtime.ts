@@ -6,7 +6,7 @@ import {
   formatOperatorActionSuccess,
   postOperatorAction,
   type OperatorActionId,
-} from '../../agent/operator-actions.ts';
+} from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { resolveAgentConnectedHostConnection } from '../../agent/routine-schedule-promotion.ts';
 import { requireShellPaths } from './runtime-services.ts';
 import { commandRefusal, stripYesFlag } from './confirmation.ts';

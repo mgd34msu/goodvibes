@@ -43,6 +43,13 @@ import { registerAgentNotifyTool } from './notify-tool.js';
 import { registerAgentMediaGenerateTool } from './media-generate-tool.js';
 import { registerAgentReviewPacketShareTool } from './review-packet-share-tool.js';
 import { registerAgentWorkPlanTool, type AgentWorkPlanStore } from './work-plan-tool.js';
+import { registerAgentOperatorActionTool } from './operator-action-tool.js';
+import { registerAgentOperatorBriefingTool } from './operator-briefing-tool.js';
+import { registerAgentOperatorMethodTool } from './operator-method-tool.js';
+import { createAgentInProcessHost, type AgentInProcessHost } from './in-process-host.js';
+import { connectedHostBaseUrl } from './connected-host-dial.js';
+import type { ConnectedHostConfigReader } from './connected-host-client.js';
+import type { HostedDaemonRequestPath } from '@goodvibes-jev/engine/platform/platform/hosted-sessions';
 import { registerAgentChannelSendTool } from './channel-send-tool.js';
 import { registerAgentBrowserTool, type AgentBrowserToolOptions, type BrowserToolBackend } from './browser-tool.js';
 import { wireAgentGoogleTool, type GoogleToolWiringDeps } from './google-wiring.js';
@@ -78,6 +85,14 @@ export interface AgentTurnToolDeps {
   readonly channelDeliveryRouter: Parameters<typeof registerAgentReviewPacketShareTool>[2];
   /** The project work plan of this turn's workspace; absent where none is kept for it. */
   readonly workPlan?: AgentWorkPlanStore | undefined;
+  /** This process's settings: the connected host the operator tools call, and the owner's mail address. */
+  readonly settings: ConnectedHostConfigReader;
+  /**
+   * The daemon hosting this turn, which is then the operator tools' connected
+   * host, reached in process with the Agent's own credential for it
+   * (in-process-host.ts). Absent in the Agent's own process.
+   */
+  readonly inProcessHost?: AgentInProcessHost | undefined;
   /** The home's one memory store, and this process's access to it: local, or the daemon's once adopted. */
   readonly memoryRegistry: MemoryRegistry;
   readonly memoryAccess: MemoryAccess;
@@ -116,6 +131,9 @@ export function registerAgentTurnTools(registry: ToolRegistry, deps: AgentTurnTo
   registerAgentMediaGenerateTool(registry, deps.mediaProviders, deps.artifactStore);
   registerAgentNotifyTool(registry, deps.notificationConfig, deps.webhookNotifier);
   if (deps.workPlan) registerAgentWorkPlanTool(registry, deps.workPlan);
+  registerAgentOperatorActionTool(registry, deps.shellPaths, deps.settings, deps.inProcessHost);
+  registerAgentOperatorBriefingTool(registry, deps.shellPaths, deps.settings, deps.inProcessHost);
+  registerAgentOperatorMethodTool(registry, deps.shellPaths, deps.settings, deps.inProcessHost);
   registerAgentLocalRegistryTool(registry, deps.shellPaths, deps.memoryRegistry, deps.memoryAccess);
   registerAgentChannelSendTool(registry, deps.channelDeliveryRouter, { shellPaths: deps.shellPaths });
   if (deps.browser) registerAgentBrowserTool(registry, deps.browser);
@@ -144,8 +162,7 @@ export const AGENT_SHELL_TOOL_NAMES: readonly string[] = Object.freeze([
  */
 export const AGENT_NOT_YET_HOSTED_TOOL_NAMES: readonly string[] = Object.freeze([
   'accounts', 'agent_autonomy_schedule', 'agent_knowledge', 'agent_knowledge_ingest',
-  'agent_learning_consolidation', 'agent_model_compare', 'agent_operator_action',
-  'agent_operator_briefing', 'agent_operator_method', 'agent_reminder_schedule', 'agent_research_report',
+  'agent_learning_consolidation', 'agent_model_compare', 'agent_reminder_schedule', 'agent_research_report',
   'agent_schedule_edit', 'schedule',
 ]);
 
@@ -168,6 +185,7 @@ function hostedAgentSection(): string {
   return [
     '## This Agent turn is hosted by the daemon',
     'You are the GoodVibes Agent, answering in a session the daemon hosts rather than in the Agent\'s own process. Your policy, persona, skills, routines and memory below are the Agent\'s, and the Agent tools `profile`, `occasions`, `agent_artifacts`, `agent_documents`, `agent_research_runs`, `agent_research_sources`, `agent_review_packet_presets`, `agent_review_packet_share`, `agent_media_generate`, `agent_notify`, `agent_local_registry`, `agent_channel_send`, `browser` (the daemon\'s browser), `google` (the daemon\'s Google account and calendar) and, in the daemon\'s own project, `agent_work_plan` are here, so recording what you learn works as the policy says.',
+    'The connected-host operator tools `agent_operator_action`, `agent_operator_briefing` and `agent_operator_method` are here too: their host is this daemon, reached in process with the Agent\'s own credential, so each call is judged as the Agent\'s.',
     `These work through the Agent's own command registry and session and are not here: ${names(AGENT_SHELL_TOOL_NAMES)}. Use the platform tool that covers the same facts, or say the request runs when the owner continues in the GoodVibes Agent itself.`,
     `These are not in this hosted turn yet: ${names(AGENT_NOT_YET_HOSTED_TOOL_NAMES)}. Where the request needs one, say which and that it runs in the GoodVibes Agent itself. A call to any listed tool is refused.`,
   ].join('\n');
@@ -192,6 +210,8 @@ export interface AgentHostedTurnDeps {
   readonly channelDeliveryRouter: AgentTurnToolDeps['channelDeliveryRouter'];
   /** The daemon's project work plan, kept for its own project only. */
   readonly workPlan: AgentWorkPlanStore;
+  /** The daemon's settings: its control-plane address keys the Agent's credential for it; the owner's mail address. */
+  readonly settings: ConnectedHostConfigReader;
   /** The daemon's `browser.*` service, which `browser` drives; absent when the daemon composed no browser. */
   readonly browser?: BrowserToolBackend | undefined;
   /** The daemon's settings and credential stores, which hold the Google account `google` uses. */
@@ -205,11 +225,27 @@ export function createAgentHostedTurn(deps: AgentHostedTurnDeps): HostedSurfaceT
       .resolveUserPath(GOODVIBES_AGENT_SURFACE_ROOT, 'prompt-context-receipts.jsonl'),
   );
   const section = hostedAgentSection();
+  // One in-process host per daemon request path: the daemon is the operator tools' connected host.
+  let inProcess: { readonly requests: HostedDaemonRequestPath; readonly host: AgentInProcessHost } | null = null;
+  const inProcessHostFor = (requests: HostedDaemonRequestPath | undefined): AgentInProcessHost | undefined => {
+    if (!requests) return undefined;
+    const current = inProcess;
+    if (current?.requests === requests) return current.host;
+    const host = createAgentInProcessHost({
+      requests,
+      baseUrl: connectedHostBaseUrl(deps.settings.get('controlPlane.host'), deps.settings.get('controlPlane.port')),
+      homeDirectory: deps.homeDirectory,
+    });
+    // Resolving once starts making the Agent's credential for this daemon, so it is there for the first call.
+    host.connection();
+    inProcess = { requests, host };
+    return host;
+  };
   // Calendar calls go to the daemon's own `calendar.events.*` handlers, admitted as the paired Agent's.
   const calendarHost = inProcessGoogleCalendarHost(deps.gatewayMethods);
   const browser = deps.browser;
   return {
-    registerTools({ registry, workspaceRoot, sessionId, floor }) {
+    registerTools({ registry, workspaceRoot, sessionId, floor, daemonRequests }) {
       // The daemon keeps one project work plan, for its own project; a session in
       // another workspace has no plan of its own here and is told so on a call.
       const ownProject = resolve(deps.workPlan.projectRoot) === resolve(workspaceRoot);
@@ -219,6 +255,7 @@ export function createAgentHostedTurn(deps: AgentHostedTurnDeps): HostedSurfaceT
           next: 'Use agent_work_plan from the GoodVibes Agent opened in that workspace, or start the hosted session in the daemon\'s project.',
         });
       }
+      const operatorHost = inProcessHostFor(daemonRequests);
       registerAgentTurnTools(registry, {
         ...(ownProject ? { workPlan: deps.workPlan } : {}),
         inProcessCredentialKind: 'agent',
@@ -231,6 +268,8 @@ export function createAgentHostedTurn(deps: AgentHostedTurnDeps): HostedSurfaceT
         webhookNotifier: deps.webhookNotifier,
         mediaProviders: deps.mediaProviders,
         channelDeliveryRouter: deps.channelDeliveryRouter,
+        settings: deps.settings,
+        ...(operatorHost ? { inProcessHost: operatorHost } : {}),
         ...(browser ? { browser: {
           browser: () => browser,
           // A file: page is a local read, held to the same decision this session's read tool gets.

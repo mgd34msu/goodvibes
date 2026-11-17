@@ -3,10 +3,12 @@ import { getOperatorWorkLedgerProject } from '@goodvibes-jev/engine/platform/pla
 import { createOperatorWorkLedgerReadClient } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/operator-read-client';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
-import type { ShellPathService } from '@/runtime/index.ts';
-import type { AgentConnectedHostConfigReader } from '../agent/routine-schedule-promotion.ts';
-import { resolveAgentConnectedHostConnection } from '../agent/routine-schedule-promotion.ts';
-import { requireOperatorHttpBinding } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+import type { ConnectedHostConfigReader as AgentConnectedHostConfigReader } from './connected-host-client.js';
+import { readConnectedHostOperatorToken } from './connected-host-auth.js';
+import { connectedHostBaseUrl } from './connected-host-dial.js';
+import type { AgentInProcessHost } from './in-process-host.js';
+import { requireOperatorHttpBinding } from './operator-contract-routes.js';
 
 type WorkLedgerReadClient = ReturnType<typeof createOperatorWorkLedgerReadClient>;
 type WorkLedgerReadSnapshot = Awaited<ReturnType<WorkLedgerReadClient['readSnapshot']>>;
@@ -123,15 +125,34 @@ function unanswered(signal: AbortSignal, deadlineMs: number): string {
     ? `no answer within ${deadlineMs / 1000}s` : 'cancelled';
 }
 
+/** The host a briefing reads and how: the configured connected host over the network, or the daemon hosting this turn. */
+interface BriefingConnection {
+  readonly baseUrl: string;
+  readonly token: string | null;
+  readonly fetch: typeof fetch;
+  /** Why there is no credential, when the host said. */
+  readonly unavailable?: string | undefined;
+}
+
+function briefingConnection(configManager: AgentConnectedHostConfigReader, homeDirectory: string,
+  inProcess: AgentInProcessHost | undefined): BriefingConnection {
+  if (inProcess) {
+    const connection = inProcess.connection();
+    return { baseUrl: connection.baseUrl, token: connection.token, fetch: connection.fetch ?? fetch, unavailable: connection.unavailable?.reason };
+  }
+  const baseUrl = connectedHostBaseUrl(configManager.get('controlPlane.host'), configManager.get('controlPlane.port'));
+  return { baseUrl, token: readConnectedHostOperatorToken(homeDirectory, baseUrl).token, fetch };
+}
+
 async function fetchOperatorRoute(
-  baseUrl: string,
+  connection: BriefingConnection,
   token: string,
   route: OperatorRouteDescriptor,
   signal: AbortSignal,
   deadlineMs: number,
 ): Promise<OperatorRouteResult> {
   try {
-    const response = await fetch(`${baseUrl}${route.path}`, {
+    const response = await connection.fetch(`${connection.baseUrl}${route.path}`, {
       headers: { authorization: `Bearer ${token}` },
       signal,
     });
@@ -253,6 +274,7 @@ export function createAgentOperatorBriefingTool(
   shellPaths: ShellPathService,
   configManager: AgentConnectedHostConfigReader,
   deadlineMs: number = BRIEFING_DEADLINE_MS,
+  inProcess?: AgentInProcessHost,
 ): Tool {
   return {
     definition: {
@@ -269,15 +291,15 @@ export function createAgentOperatorBriefingTool(
     execute: async (_args, options) => {
       if (options?.signal?.aborted) return { success: false, error: 'briefing_cancelled: the call was cancelled before anything was read' };
       // The connection is resolved once; every read of this briefing uses it.
-      const connection = resolveAgentConnectedHostConnection(configManager, shellPaths.homeDirectory);
+      const connection = briefingConnection(configManager, shellPaths.homeDirectory, inProcess);
       const token = connection.token;
-      if (!token) return { success: false, error: 'auth_required: no connected-host operator token' };
+      if (!token) return { success: false, error: `auth_required: ${connection.unavailable ?? 'no connected-host operator token'}` };
       const signal = AbortSignal.any([AbortSignal.timeout(deadlineMs), ...(options?.signal ? [options.signal] : [])]);
       // No streams, subscriptions, retries, history, or lifecycle calls. The
       // snapshot reader is disposed when the briefing ends, which aborts its request.
       const platformClient = createBrowserGoodVibesPlatform({ baseUrl: connection.baseUrl,
         getAuthToken: () => token, retry: { maxAttempts: 1 },
-        fetch: (input, init) => fetch(input, { ...init, signal: init?.signal ? AbortSignal.any([init.signal, signal]) : signal }) });
+        fetch: (input, init) => connection.fetch(input, { ...init, signal: init?.signal ? AbortSignal.any([init.signal, signal]) : signal }) });
       let reader: WorkLedgerReadClient | undefined;
       const readNative = async (): Promise<NativeWorkReading> => {
         try {
@@ -300,7 +322,7 @@ export function createAgentOperatorBriefingTool(
         const routes = briefingRoutes().filter(route => route.id !== 'workLedger.project' && route.id !== 'workLedger.snapshot');
         const [nativeWork, results] = await Promise.all([
           readNative(),
-          Promise.all(routes.map(route => fetchOperatorRoute(connection.baseUrl, token, route, signal, deadlineMs))),
+          Promise.all(routes.map(route => fetchOperatorRoute(connection, token, route, signal, deadlineMs))),
         ]);
         if (options?.signal?.aborted) return { success: false, error: 'briefing_cancelled: the call was cancelled before the host answered' };
         return { success: true, output: formatBriefing(nativeWork, results) };
@@ -311,10 +333,15 @@ export function createAgentOperatorBriefingTool(
   };
 }
 
+/**
+ * `inProcess`: the daemon hosting this turn, which is then the host the
+ * briefing reads (in-process-host.ts); absent in the Agent's own process.
+ */
 export function registerAgentOperatorBriefingTool(
   registry: ToolRegistry,
   shellPaths: ShellPathService,
   configManager: AgentConnectedHostConfigReader,
+  inProcess?: AgentInProcessHost,
 ): void {
-  registry.register(createAgentOperatorBriefingTool(shellPaths, configManager));
+  registry.register(createAgentOperatorBriefingTool(shellPaths, configManager, BRIEFING_DEADLINE_MS, inProcess));
 }

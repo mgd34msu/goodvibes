@@ -12,9 +12,6 @@ import { registerAgentKnowledgeIngestTool } from '../tools/agent-knowledge-inges
 import { registerAgentKnowledgeTool } from '../tools/agent-knowledge-tool.ts';
 import { registerAgentLearningConsolidationTool } from '../tools/agent-learning-consolidation-tool.ts';
 import { registerAgentModelCompareTool } from '../tools/agent-model-compare-tool.ts';
-import { registerAgentOperatorActionTool } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { registerAgentOperatorBriefingTool } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { registerAgentOperatorMethodTool } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { registerAgentReminderScheduleTool } from '../tools/agent-reminder-schedule-tool.ts';
 import { registerAgentResearchReportTool } from '../tools/agent-research-report-tool.ts';
 import {
@@ -166,6 +163,8 @@ export function composeAgentToolRegistry(deps: AgentToolRegistryDeps): AgentTool
     mediaProviders: services.mediaProviders,
     channelDeliveryRouter: services.channelDeliveryRouter,
     workPlan: services.workPlan,
+    // The connected host the operator tools call, and the owner's mail address for signup aliases.
+    settings: configManager,
     // This process's own browser, built on the first call that needs one.
     browser: {
       browser: agentBrowserToolBackend({
@@ -232,9 +231,6 @@ export function composeAgentToolRegistry(deps: AgentToolRegistryDeps): AgentTool
       };
     },
   });
-  registerAgentOperatorActionTool(toolRegistry, services.shellPaths, configManager);
-  registerAgentOperatorBriefingTool(toolRegistry, services.shellPaths, configManager);
-  registerAgentOperatorMethodTool(toolRegistry, services.shellPaths, configManager);
   registerAgentAutonomyScheduleTool(toolRegistry, services.shellPaths, configManager);
   registerAgentReminderScheduleTool(toolRegistry, services.shellPaths, configManager, services.artifactStore);
   registerAgentScheduleEditTool(toolRegistry, services.shellPaths, configManager);

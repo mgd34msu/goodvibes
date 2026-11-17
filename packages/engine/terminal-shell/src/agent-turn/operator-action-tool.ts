@@ -3,11 +3,12 @@ import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools
 import { captureStrictJudgmentJson } from '@goodvibes-jev/engine/platform/platform/gate';
 import { redactSensitiveDataAsync } from '@goodvibes-jev/engine/platform/platform/utils';
 import { isDeepStrictEqual } from 'node:util';
-import type { ShellPathService } from '@/runtime/index.ts';
-import type { AgentConnectedHostConfigReader } from '../agent/routine-schedule-promotion.ts';
-import { assertOperatorEffect } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { findOperatorContractMethod } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { assertSafeOperatorPathValue, createOperatorInputProjector, operatorExecutionConnection, operatorExecutionWireInput, operatorExecutionRequestPolicy, operatorMethodIsOutward } from './agent-operator-input-projector.ts';
+import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+import type { ConnectedHostConfigReader as AgentConnectedHostConfigReader } from './connected-host-client.js';
+import type { AgentInProcessHost } from './in-process-host.js';
+import { assertOperatorEffect } from './operator-connection-owner.js';
+import { assertSafeOperatorPathValue, findOperatorContractMethod } from './operator-contract-routes.js';
+import { createOperatorInputProjector, operatorExecutionConnection, operatorExecutionWireInput, operatorExecutionRequestPolicy, operatorMethodIsOutward } from './operator-input-projector.js';
 import {
   buildOperatorActionRequest,
   formatOperatorActionFailure,
@@ -15,8 +16,8 @@ import {
   getOperatorActions,
   postOperatorAction,
   renderOperatorActionPath,
-} from '../agent/operator-actions.ts';
-import { confirmParameter, requestParameter } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+} from './operator-actions.js';
+import { confirmParameter, requestParameter } from './effect-admission.js';
 
 export function createAgentOperatorActionTool(
   shellPaths: ShellPathService,
@@ -93,7 +94,7 @@ export function createAgentOperatorActionTool(
         const connection = operatorExecutionConnection(rawArgs, options, shellPaths, configManager, 'action');
         if (!connection) throw new Error('Connected operator effects require a registered source projection.');
         const assertCurrent = () => { assertInvocation(); connection.assertCurrent(); };
-        if (!connection.token) return { success: false, error: 'auth_required: no connected-host operator token found.' };
+        if (!connection.token) return { success: false, error: `auth_required: ${connection.unavailable?.reason ?? 'no connected-host operator token found'}.` };
         const wireBody = operatorExecutionWireInput(request.body ?? {}, rawArgs, options, shellPaths, configManager, 'action');
         const wireRequest = { ...request, body: request.body === null && !Object.keys(wireBody).length ? null : wireBody };
         const requestPolicy = operatorExecutionRequestPolicy(rawArgs, options, shellPaths, configManager, 'action');
@@ -130,10 +131,15 @@ export function createAgentOperatorActionTool(
   };
 }
 
+/**
+ * `inProcess`: the daemon hosting this turn, which is then the connected host
+ * (in-process-host.ts); absent in the Agent's own process.
+ */
 export function registerAgentOperatorActionTool(
   registry: ToolRegistry,
   shellPaths: ShellPathService,
   configManager: AgentConnectedHostConfigReader,
+  inProcess?: AgentInProcessHost,
 ): void {
-  registry.register(createAgentOperatorActionTool(shellPaths, configManager), { inputProjection: createOperatorInputProjector(shellPaths, configManager, 'action') });
+  registry.register(createAgentOperatorActionTool(shellPaths, configManager), { inputProjection: createOperatorInputProjector(shellPaths, configManager, 'action', inProcess) });
 }

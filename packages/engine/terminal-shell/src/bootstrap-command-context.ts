@@ -375,8 +375,8 @@ export function projectAgentToolDependencies<
       readonly overflowHandler: unknown;
       readonly memoryRegistry: unknown;
       /** The memory spine under the name the product gives it; `active` is true while memory goes over the wire. */
-      readonly memorySpineClient?: { readonly active: boolean } | undefined;
-      readonly memorySpine?: { readonly active: boolean } | undefined;
+      readonly memorySpineClient?: ({ readonly active: boolean } & import('@goodvibes-jev/engine/platform/platform/runtime/memory-spine').MemoryAccess) | undefined;
+      readonly memorySpine?: ({ readonly active: boolean } & import('@goodvibes-jev/engine/platform/platform/runtime/memory-spine').MemoryAccess) | undefined;
       readonly workPlanStore?: unknown;
       readonly sandboxSessionRegistry: unknown;
       readonly workflow: unknown;
@@ -451,7 +451,7 @@ export function projectAgentToolDependencies<
     featureFlags: Input['services']['featureFlags'];
     overflowHandler: Input['services']['overflowHandler'];
     memoryRegistry: Input['services']['memoryRegistry'];
-    memoryAccess: Input['services']['memorySpineClient'] | Input['services']['memorySpine'];
+    memoryAccess: import('@goodvibes-jev/engine/platform/platform/runtime/memory-spine').MemoryAccess | undefined;
     memoryRoutedOverWire: () => boolean;
     sandboxSessionRegistry: Input['services']['sandboxSessionRegistry'];
     workflowServices: Input['services']['workflow'];

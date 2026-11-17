@@ -1332,17 +1332,6 @@ export class DaemonServer {
     return this.controlPlaneHelper.getGrantedGatewayScopes(includeWrite);
   }
 
-  private validateGatewayInvocation(
-    descriptor: import('../control-plane/index.js').GatewayMethodDescriptor,
-    context?: {
-      readonly principalKind?: 'user' | 'bot' | 'service' | 'token' | 'remote-peer' | undefined;
-      readonly scopes?: readonly string[] | undefined;
-      readonly admin?: boolean | undefined;
-    },
-  ): { status: number; ok: false; body: Record<string, unknown> } | null {
-    return this.controlPlaneHelper.validateGatewayInvocation(descriptor, context);
-  }
-
   private tryUpgradeControlPlaneWebSocket(
     req: Request,
     server: UpgradeCapableServer,

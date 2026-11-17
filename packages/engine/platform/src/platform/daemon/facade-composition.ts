@@ -786,7 +786,6 @@ export function createDaemonFacadeCollaborators(
     requireAuthenticatedSession: options.requireAuthenticatedSession,
     requireAdmin: options.requireAdmin,
     requireRemotePeer: options.requireRemotePeer,
-    validateGatewayInvocation: (descriptor, context) => controlPlaneHelper.validateGatewayInvocation(descriptor, context),
     invokeGatewayMethodCall: options.invokeGatewayMethodCall,
     queueSurfaceReplyFromBinding: (binding, input) => surfaceDeliveryHelper.queueSurfaceReplyFromBinding(binding, input),
     completeSurfaceReplyFromSurface: (input) => surfaceDeliveryHelper.completeSurfaceReplyFromSurface(input),

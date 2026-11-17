@@ -27,7 +27,7 @@ import {
   type UpdateAutomationJobInput,
 } from '../../automation/index.js';
 import type { ApprovalBroker, ControlPlaneGateway, SharedSessionBroker } from '../../control-plane/index.js';
-import type { GatewayMethodCatalog, GatewayMethodDescriptor } from '../../control-plane/index.js';
+import type { GatewayMethodCatalog } from '../../control-plane/index.js';
 import { buildOperatorContract } from '../../control-plane/operator-contract.js';
 import { CLIENT_COMPATIBILITY_FLOOR, CLIENT_COMPATIBILITY_FLOOR_HEADER } from '../../control-plane/client-compatibility.js';
 import { openScopedSessionEventStream } from './session-event-stream.js';
@@ -180,10 +180,6 @@ interface DaemonHttpRouterContext {
   readonly requireAuthenticatedSession: (req: Request) => { username: string; roles: readonly string[] } | null;
   readonly requireAdmin: (req: Request) => Response | null;
   readonly requireRemotePeer: (req: Request, scope?: string) => Promise<DistributedPeerAuth | Response>;
-  readonly validateGatewayInvocation: (
-    descriptor: GatewayMethodDescriptor,
-    context?: { readonly principalKind?: 'user' | 'bot' | 'service' | 'token' | 'remote-peer' | undefined; readonly scopes?: readonly string[] | undefined; readonly admin?: boolean | undefined },
-  ) => { status: number; ok: false; body: Record<string, unknown> } | null;
   readonly invokeGatewayMethodCall: (input: {
     readonly authToken: string;
     readonly methodId: string;

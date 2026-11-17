@@ -474,8 +474,8 @@ const SEARCH_CACHE_LIMIT = 64;
 const SEARCH_SITE = 'runtime.ecosystem.catalog-search';
 const TRUST_NOTE_SITE = 'runtime.ecosystem.trust-note-caution';
 
-/** Listed entry ids per (kind, query, catalog files' size and time): a repeated search costs no request. */
-const searchCache = new Map<string, readonly string[]>();
+/** Listed entry ids and the unchecked count per (kind, query, catalog files' size and time): a repeated search costs no request. */
+const searchCache = new Map<string, { readonly ids: readonly string[]; readonly unchecked: number }>();
 const pageQuestions = new Map<number, ReturnType<typeof catalogSearchAt>>();
 
 function pageQuestion(index: number): ReturnType<typeof catalogSearchAt> {
@@ -522,6 +522,23 @@ async function readSearchPage(
   return kept;
 }
 
+/** A catalog search's answer and how many entries it did not check. */
+export interface EcosystemCatalogSearch {
+  /** The entries that answer the query, best match first. */
+  readonly entries: EcosystemCatalogEntry[];
+  /**
+   * Entries past the one page read that share no word with the query: they
+   * were neither read nor listed. Zero when every entry was checked.
+   */
+  readonly unchecked: number;
+}
+
+/** The line a surface prints under a search that left entries unchecked, or undefined when none were. */
+export function describeUncheckedCatalogEntries(search: Pick<EcosystemCatalogSearch, 'unchecked'>): string | undefined {
+  if (search.unchecked <= 0) return undefined;
+  return `${search.unchecked} more ${search.unchecked === 1 ? 'entry was' : 'entries were'} not checked; narrow the query or list the catalog with no query.`;
+}
+
 /**
  * Catalog entries of `kind` that answer `query`, best match first. A blank
  * query lists every entry, in name order, with no reading. Otherwise the
@@ -530,8 +547,10 @@ async function readSearchPage(
  * in name order, so an entry described in other words is still read) go to
  * `engine.ecosystem.catalog-search` in ONE request, whatever the catalog's
  * size. A candidate is dropped only when read as a strong no; a ranked match
- * beyond the page is listed unread. When the request fails the policy decides
- * (the local ranking, or a report). The answer is remembered for the process
+ * beyond the page is listed unread, and the entries beyond the page that share
+ * no word with the query are counted in `unchecked`, so the answer never looks
+ * more complete than it is. When the request fails the policy decides (the
+ * local ranking over every entry, or a report). The answer is remembered for the process
  * by (kind, query, catalog files' size and time), so repeating a search, or
  * searching an unchanged catalog again, makes no request.
  */
@@ -540,31 +559,34 @@ export async function searchEcosystemCatalog(
   query: string,
   options: EcosystemCatalogPathOptions,
   run: { readonly signal?: AbortSignal } = {},
-): Promise<EcosystemCatalogEntry[]> {
+): Promise<EcosystemCatalogSearch> {
   run.signal?.throwIfAborted();
   const trimmed = query.trim();
   const entries = loadEcosystemCatalog(kind, options);
-  if (!trimmed || entries.length === 0) return entries;
+  if (!trimmed || entries.length === 0) return { entries, unchecked: 0 };
   const ranked = rankClassicCatalog(entries, trimmed, describeForRanking).map((match) => match.entry);
-  return decisionOrClassic(async () => {
+  return decisionOrClassic<EcosystemCatalogSearch>(async () => {
     const key = `${kind}\0${trimmed.toLocaleLowerCase()}\0${catalogStamp(kind, options)}`;
     const remembered = searchCache.get(key);
     if (remembered) {
       const byId = new Map(entries.map((entry) => [entry.id, entry]));
-      return remembered.flatMap((id) => byId.get(id) ?? []);
+      return { entries: remembered.ids.flatMap((id) => byId.get(id) ?? []), unchecked: remembered.unchecked };
     }
     const rankedIds = new Set(ranked.map((entry) => entry.id));
     const candidates = [...ranked, ...entries.filter((entry) => !rankedIds.has(entry.id))];
     const page = candidates.slice(0, SEARCH_PAGE_SIZE);
     const kept = await readSearchPage(trimmed, page, run.signal);
     const result = [...page.filter((_, index) => kept[index]), ...ranked.slice(SEARCH_PAGE_SIZE)];
+    // Past the page only the word matches are listed; the rest went unread.
+    const unchecked = Math.max(0, candidates.length - SEARCH_PAGE_SIZE) - Math.max(0, ranked.length - SEARCH_PAGE_SIZE);
     searchCache.delete(key);
-    searchCache.set(key, result.map((entry) => entry.id));
+    searchCache.set(key, { ids: result.map((entry) => entry.id), unchecked });
     while (searchCache.size > SEARCH_CACHE_LIMIT) searchCache.delete(searchCache.keys().next().value!);
-    return result;
+    return { entries: result, unchecked };
   }, () => {
     run.signal?.throwIfAborted();
-    return ranked;
+    // The local ranking compares the query with every entry: none is left unchecked.
+    return { entries: ranked, unchecked: 0 };
   });
 }
 

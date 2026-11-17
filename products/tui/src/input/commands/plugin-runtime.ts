@@ -1,7 +1,7 @@
 import type { PluginStatus } from '@goodvibes-jev/engine/platform/platform/plugins';
 import { getPluginDirectories, getUserPluginDirectory } from '@goodvibes-jev/engine/platform/platform/plugins';
 import type { CommandRegistry } from '../command-registry.ts';
-import { installEcosystemCatalogEntry, listInstalledEcosystemEntries, loadEcosystemCatalog, removeEcosystemCatalogEntry, reviewEcosystemCatalogEntry, searchEcosystemCatalog, updateInstalledEcosystemEntry, upsertEcosystemCatalogEntry, uninstallEcosystemCatalogEntry } from '@goodvibes-jev/engine/platform/platform/runtime/ecosystem/catalog';
+import { describeUncheckedCatalogEntries, installEcosystemCatalogEntry, listInstalledEcosystemEntries, loadEcosystemCatalog, removeEcosystemCatalogEntry, reviewEcosystemCatalogEntry, searchEcosystemCatalog, updateInstalledEcosystemEntry, upsertEcosystemCatalogEntry, uninstallEcosystemCatalogEntry } from '@goodvibes-jev/engine/platform/platform/runtime/ecosystem/catalog';
 import { openModalCommand, requireEcosystemCatalogPaths, requirePluginPathOptions } from './runtime-services.ts';
 import { parseScope } from './marketplace-runtime.ts';
 import { pluginTrustConfirmation, runPluginTrustSubcommand } from '@goodvibes-jev/engine/terminal-shell/plugin-trust-command';
@@ -121,18 +121,21 @@ export function registerPluginRuntimeCommands(registry: CommandRegistry): void {
       }
       if (sub === 'browse' || sub === 'catalog') {
         const query = args.slice(1).join(' ');
-        const entries = query
+        const search = query
           ? await searchEcosystemCatalog('plugin', query, ecosystemPaths)
-          : loadEcosystemCatalog('plugin', ecosystemPaths);
+          : { entries: loadEcosystemCatalog('plugin', ecosystemPaths), unchecked: 0 };
+        const { entries } = search;
+        const unchecked = describeUncheckedCatalogEntries(search);
         if (entries.length === 0) {
           ctx.print(query
-            ? `No curated plugin catalog entries matched "${query}".`
+            ? [`No curated plugin catalog entries matched "${query}".`, ...(unchecked ? [unchecked] : [])].join('\n')
             : 'No curated plugin catalog entries found. Add .goodvibes/tui/ecosystem/plugins.json to publish a local-first plugin catalog.');
           return;
         }
         ctx.print([
           `Curated Plugin Catalog (${entries.length})`,
           ...entries.map((entry) => `  ${entry.id}  ${entry.name}  [${entry.tags.join(', ') || 'untagged'}]  ${entry.summary}`),
+          ...(unchecked ? [`  ${unchecked}`] : []),
         ].join('\n'));
         return;
       }

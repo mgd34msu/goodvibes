@@ -1,6 +1,6 @@
 import type { CommandRegistry } from '../command-registry.ts';
 import { discoverSkills } from '../../views/skills-discovery.ts';
-import { installEcosystemCatalogEntry, listInstalledEcosystemEntries, loadEcosystemCatalog, removeEcosystemCatalogEntry, reviewEcosystemCatalogEntry, searchEcosystemCatalog, uninstallEcosystemCatalogEntry, updateInstalledEcosystemEntry, upsertEcosystemCatalogEntry } from '@goodvibes-jev/engine/platform/platform/runtime/ecosystem/catalog';
+import { describeUncheckedCatalogEntries, installEcosystemCatalogEntry, listInstalledEcosystemEntries, loadEcosystemCatalog, removeEcosystemCatalogEntry, reviewEcosystemCatalogEntry, searchEcosystemCatalog, uninstallEcosystemCatalogEntry, updateInstalledEcosystemEntry, upsertEcosystemCatalogEntry } from '@goodvibes-jev/engine/platform/platform/runtime/ecosystem/catalog';
 import { openModalCommand, requireEcosystemCatalogPaths, requireShellPaths } from './runtime-services.ts';
 import { parseScope } from './marketplace-runtime.ts';
 
@@ -69,16 +69,19 @@ export function registerSkillsRuntimeCommands(registry: CommandRegistry): void {
       }
       if (sub === 'browse' || sub === 'catalog') {
         const query = args.slice(1).join(' ');
-        const entries = query ? await searchEcosystemCatalog('skill', query, ecosystemPaths) : loadEcosystemCatalog('skill', ecosystemPaths);
+        const search = query ? await searchEcosystemCatalog('skill', query, ecosystemPaths) : { entries: loadEcosystemCatalog('skill', ecosystemPaths), unchecked: 0 };
+        const { entries } = search;
+        const unchecked = describeUncheckedCatalogEntries(search);
         if (entries.length === 0) {
           ctx.print(query
-            ? `No curated skill catalog entries matched "${query}".`
+            ? [`No curated skill catalog entries matched "${query}".`, ...(unchecked ? [unchecked] : [])].join('\n')
             : 'No curated skill catalog entries found. Add .goodvibes/tui/ecosystem/skills.json to publish a local-first skill catalog.');
           return;
         }
         ctx.print([
           `Curated Skill Catalog (${entries.length})`,
           ...entries.map((entry) => `  ${entry.id}  ${entry.name}  [${entry.tags.join(', ') || 'untagged'}]  ${entry.summary}`),
+          ...(unchecked ? [`  ${unchecked}`] : []),
         ].join('\n'));
         return;
       }

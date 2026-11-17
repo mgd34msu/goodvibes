@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
-import { exportEcosystemCatalogBundle, importEcosystemCatalogBundle, inspectEcosystemCatalogBundle, inspectInstalledEcosystemEntry, installEcosystemCatalogEntry, listEcosystemInstallBackups, listInstalledEcosystemEntries, loadEcosystemCatalog, rollbackInstalledEcosystemEntry, reviewEcosystemCatalogEntry, searchEcosystemCatalog, uninstallEcosystemCatalogEntry, updateInstalledEcosystemEntry } from '@goodvibes-jev/engine/platform/platform/runtime/ecosystem/catalog';
+import { describeUncheckedCatalogEntries, exportEcosystemCatalogBundle, importEcosystemCatalogBundle, inspectEcosystemCatalogBundle, inspectInstalledEcosystemEntry, installEcosystemCatalogEntry, listEcosystemInstallBackups, listInstalledEcosystemEntries, loadEcosystemCatalog, rollbackInstalledEcosystemEntry, reviewEcosystemCatalogEntry, searchEcosystemCatalog, uninstallEcosystemCatalogEntry, updateInstalledEcosystemEntry } from '@goodvibes-jev/engine/platform/platform/runtime/ecosystem/catalog';
 import type { EcosystemCatalogBundle, EcosystemCatalogEntry, EcosystemEntryKind } from '@/runtime/index.ts';
 import { openModalCommand, requireEcosystemCatalogPaths, requireReadModels, requireShellPaths } from './runtime-services.ts';
 import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
@@ -89,22 +89,30 @@ export function registerMarketplaceRuntimeCommands(registry: CommandRegistry): v
       }
       if (sub === 'browse') {
         const query = args.slice(1).join(' ');
-        const [pluginEntries, skillEntries, hookPackEntries, policyPackEntries] = await Promise.all([
-          query ? searchEcosystemCatalog('plugin', query, ecosystemPaths) : loadEcosystemCatalog('plugin', ecosystemPaths),
-          query ? searchEcosystemCatalog('skill', query, ecosystemPaths) : loadEcosystemCatalog('skill', ecosystemPaths),
-          query ? searchEcosystemCatalog('hook-pack', query, ecosystemPaths) : loadEcosystemCatalog('hook-pack', ecosystemPaths),
-          query ? searchEcosystemCatalog('policy-pack', query, ecosystemPaths) : loadEcosystemCatalog('policy-pack', ecosystemPaths),
+        const browse = (kind: 'plugin' | 'skill' | 'hook-pack' | 'policy-pack') => (query
+          ? searchEcosystemCatalog(kind, query, ecosystemPaths)
+          : Promise.resolve({ entries: loadEcosystemCatalog(kind, ecosystemPaths), unchecked: 0 }));
+        const [plugins, skills, hookPacks, policyPacks] = await Promise.all([
+          browse('plugin'), browse('skill'), browse('hook-pack'), browse('policy-pack'),
         ]);
+        const unchecked = (search: { readonly unchecked: number }) => {
+          const line = describeUncheckedCatalogEntries(search);
+          return line ? [`    ${line}`] : [];
+        };
         ctx.print([
           `Marketplace Browse${query ? ` (${query})` : ''}`,
-          `  plugins: ${pluginEntries.length}`,
-          ...pluginEntries.map((entry) => `    plugin  ${entry.id}  ${entry.name}  ${entry.summary}`),
-          `  skills: ${skillEntries.length}`,
-          ...skillEntries.map((entry) => `    skill   ${entry.id}  ${entry.name}  ${entry.summary}`),
-          `  hook packs: ${hookPackEntries.length}`,
-          ...hookPackEntries.map((entry) => `    hook-pack   ${entry.id}  ${entry.name}  ${entry.summary}`),
-          `  policy packs: ${policyPackEntries.length}`,
-          ...policyPackEntries.map((entry) => `    policy-pack ${entry.id}  ${entry.name}  ${entry.summary}`),
+          `  plugins: ${plugins.entries.length}`,
+          ...plugins.entries.map((entry) => `    plugin  ${entry.id}  ${entry.name}  ${entry.summary}`),
+          ...unchecked(plugins),
+          `  skills: ${skills.entries.length}`,
+          ...skills.entries.map((entry) => `    skill   ${entry.id}  ${entry.name}  ${entry.summary}`),
+          ...unchecked(skills),
+          `  hook packs: ${hookPacks.entries.length}`,
+          ...hookPacks.entries.map((entry) => `    hook-pack   ${entry.id}  ${entry.name}  ${entry.summary}`),
+          ...unchecked(hookPacks),
+          `  policy packs: ${policyPacks.entries.length}`,
+          ...policyPacks.entries.map((entry) => `    policy-pack ${entry.id}  ${entry.name}  ${entry.summary}`),
+          ...unchecked(policyPacks),
         ].join('\n'));
         return;
       }

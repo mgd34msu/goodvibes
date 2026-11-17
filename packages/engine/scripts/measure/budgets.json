@@ -1,0 +1,390 @@
+{
+  "about": "Speed budgets checked by `bun run measure:check` (packages/engine/scripts/measure/run.ts --check). Counts may not grow; bytes written may grow 10%; wall time is compared only as a ratio inside one run. To change a budget on purpose, run `bun run measure -- --write-budgets packages/engine/scripts/measure/budgets.json` (add --only <names> to rewrite only those scenarios) and commit the diff with the reason.",
+  "recorded": {
+    "commit": "5c95c9b70",
+    "measuredAt": "2026-11-17T16:01:15.517Z",
+    "bun": "1.3.14"
+  },
+  "scenarios": {
+    "agent-catalog-search": {
+      "counts": {
+        "decisionRequests": 0,
+        "providerRequests": 0,
+        "fileReads": 0,
+        "fileWrites": 0,
+        "fsyncs": 0,
+        "sqliteStatements": 0
+      },
+      "bytes": {
+        "bytesWritten": 0
+      }
+    },
+    "agent-route-plan": {
+      "counts": {
+        "decisionRequests": 3,
+        "providerRequests": 0,
+        "fileReads": 0,
+        "fileWrites": 0,
+        "fsyncs": 0,
+        "sqliteStatements": 5
+      },
+      "bytes": {
+        "bytesWritten": 0
+      }
+    },
+    "config-get": {
+      "counts": {
+        "decisionRequests": 0,
+        "providerRequests": 0,
+        "fileReads": 0,
+        "fileWrites": 0,
+        "fsyncs": 0,
+        "sqliteStatements": 0
+      },
+      "bytes": {
+        "bytesWritten": 0
+      }
+    },
+    "config-set": {
+      "counts": {
+        "decisionRequests": 0,
+        "providerRequests": 0,
+        "fileReads": 7,
+        "fileWrites": 2,
+        "fsyncs": 2,
+        "sqliteStatements": 2
+      },
+      "bytes": {
+        "bytesWritten": 187
+      }
+    },
+    "config-set-5-keys": {
+      "counts": {
+        "decisionRequests": 0,
+        "providerRequests": 0,
+        "fileReads": 7,
+        "fileWrites": 2,
+        "fsyncs": 2,
+        "sqliteStatements": 2
+      },
+      "bytes": {
+        "bytesWritten": 298
+      }
+    },
+    "contract-save-100-files": {
+      "counts": {
+        "decisionRequests": 0,
+        "providerRequests": 0,
+        "fileReads": 0,
+        "fileWrites": 1,
+        "fsyncs": 1,
+        "sqliteStatements": 0
+      },
+      "bytes": {
+        "bytesWritten": 494
+      }
+    },
+    "contract-save-5000-files": {
+      "counts": {
+        "decisionRequests": 0,
+        "providerRequests": 0,
+        "fileReads": 0,
+        "fileWrites": 1,
+        "fsyncs": 1,
+        "sqliteStatements": 0
+      },
+      "bytes": {
+        "bytesWritten": 494
+      }
+    },
+    "hosted-agent-request": {
+      "counts": {
+        "decisionRequests": 2,
+        "providerRequests": 1,
+        "fileReads": 3,
+        "fileWrites": 1,
+        "fsyncs": 0,
+        "sqliteStatements": 9,
+        "toolDefinitionsSent": 53,
+        "toolDefinitionsWithParameters": 12
+      },
+      "bytes": {
+        "bytesWritten": 2220,
+        "toolDefinitionBytesSent": 76445
+      }
+    },
+    "inbound-email-store": {
+      "counts": {
+        "decisionRequests": 0,
+        "providerRequests": 0,
+        "fileReads": 0,
+        "fileWrites": 2,
+        "fsyncs": 1,
+        "sqliteStatements": 2
+      },
+      "bytes": {
+        "bytesWritten": 509
+      }
+    },
+    "inbound-message": {
+      "counts": {
+        "decisionRequests": 0,
+        "providerRequests": 0,
+        "fileReads": 0,
+        "fileWrites": 5,
+        "fsyncs": 5,
+        "sqliteStatements": 0
+      },
+      "bytes": {
+        "bytesWritten": 39606
+      }
+    },
+    "knowledge-list-200": {
+      "counts": {
+        "decisionRequests": 0,
+        "providerRequests": 0,
+        "fileReads": 0,
+        "fileWrites": 0,
+        "fsyncs": 0,
+        "sqliteStatements": 1
+      },
+      "bytes": {
+        "bytesWritten": 0
+      }
+    },
+    "knowledge-search-200": {
+      "counts": {
+        "decisionRequests": 24,
+        "providerRequests": 0,
+        "fileReads": 0,
+        "fileWrites": 0,
+        "fsyncs": 0,
+        "sqliteStatements": 47
+      },
+      "bytes": {
+        "bytesWritten": 0
+      }
+    },
+    "knowledge-search-200-repeat": {
+      "counts": {
+        "decisionRequests": 0,
+        "providerRequests": 0,
+        "fileReads": 0,
+        "fileWrites": 0,
+        "fsyncs": 0,
+        "sqliteStatements": 11
+      },
+      "bytes": {
+        "bytesWritten": 0
+      }
+    },
+    "mailbox-poll-nothing-new": {
+      "counts": {
+        "decisionRequests": 0,
+        "providerRequests": 0,
+        "fileReads": 0,
+        "fileWrites": 0,
+        "fsyncs": 0,
+        "sqliteStatements": 0,
+        "imapCommands": 3,
+        "imapLogins": 0,
+        "imapConnections": 0
+      },
+      "bytes": {
+        "bytesWritten": 0
+      }
+    },
+    "memory-add": {
+      "counts": {
+        "decisionRequests": 0,
+        "providerRequests": 0,
+        "fileReads": 0,
+        "fileWrites": 0,
+        "fsyncs": 0,
+        "sqliteStatements": 11
+      },
+      "bytes": {
+        "bytesWritten": 0
+      }
+    },
+    "owner-inbox-question-answer": {
+      "counts": {
+        "decisionRequests": 0,
+        "providerRequests": 0,
+        "fileReads": 0,
+        "fileWrites": 0,
+        "fsyncs": 0,
+        "sqliteStatements": 10
+      },
+      "bytes": {
+        "bytesWritten": 0
+      }
+    },
+    "permission-decision-10-rules": {
+      "counts": {
+        "decisionRequests": 0,
+        "providerRequests": 0,
+        "fileReads": 0,
+        "fileWrites": 0,
+        "fsyncs": 0,
+        "sqliteStatements": 0
+      },
+      "bytes": {
+        "bytesWritten": 0
+      }
+    },
+    "permission-decision-100-rules": {
+      "counts": {
+        "decisionRequests": 0,
+        "providerRequests": 0,
+        "fileReads": 0,
+        "fileWrites": 0,
+        "fsyncs": 0,
+        "sqliteStatements": 0
+      },
+      "bytes": {
+        "bytesWritten": 0
+      }
+    },
+    "session-append-message": {
+      "counts": {
+        "decisionRequests": 0,
+        "providerRequests": 0,
+        "fileReads": 0,
+        "fileWrites": 1,
+        "fsyncs": 1,
+        "sqliteStatements": 0
+      },
+      "bytes": {
+        "bytesWritten": 239
+      }
+    },
+    "session-heartbeat": {
+      "counts": {
+        "decisionRequests": 0,
+        "providerRequests": 0,
+        "fileReads": 0,
+        "fileWrites": 0,
+        "fsyncs": 0,
+        "sqliteStatements": 0
+      },
+      "bytes": {
+        "bytesWritten": 0
+      }
+    },
+    "tool-exec-remembered": {
+      "counts": {
+        "decisionRequests": 1,
+        "providerRequests": 0,
+        "fileReads": 5,
+        "fileWrites": 0,
+        "fsyncs": 0,
+        "sqliteStatements": 2
+      },
+      "bytes": {
+        "bytesWritten": 0
+      }
+    },
+    "tool-read": {
+      "counts": {
+        "decisionRequests": 0,
+        "providerRequests": 0,
+        "fileReads": 1,
+        "fileWrites": 0,
+        "fsyncs": 0,
+        "sqliteStatements": 0
+      },
+      "bytes": {
+        "bytesWritten": 0
+      }
+    },
+    "turn-0-tools": {
+      "counts": {
+        "decisionRequests": 2,
+        "providerRequests": 1,
+        "fileReads": 0,
+        "fileWrites": 0,
+        "fsyncs": 0,
+        "sqliteStatements": 6,
+        "toolDefinitionsSent": 24
+      },
+      "bytes": {
+        "bytesWritten": 0,
+        "toolDefinitionBytesSent": 70382
+      }
+    },
+    "turn-12-tools": {
+      "counts": {
+        "decisionRequests": 3,
+        "providerRequests": 2,
+        "fileReads": 31,
+        "fileWrites": 1,
+        "fsyncs": 0,
+        "sqliteStatements": 6
+      },
+      "bytes": {
+        "bytesWritten": 17
+      }
+    },
+    "turn-8-reads": {
+      "counts": {
+        "decisionRequests": 2,
+        "providerRequests": 2,
+        "fileReads": 8,
+        "fileWrites": 0,
+        "fsyncs": 0,
+        "sqliteStatements": 4
+      },
+      "bytes": {
+        "bytesWritten": 0
+      }
+    },
+    "turn-8-slow-reads": {
+      "counts": {
+        "decisionRequests": 2,
+        "providerRequests": 2,
+        "fileReads": 8,
+        "fileWrites": 0,
+        "fsyncs": 0,
+        "sqliteStatements": 4
+      },
+      "bytes": {
+        "bytesWritten": 0
+      }
+    },
+    "work-plan-edit-200": {
+      "counts": {
+        "decisionRequests": 0,
+        "providerRequests": 0,
+        "fileReads": 0,
+        "fileWrites": 0,
+        "fsyncs": 0,
+        "sqliteStatements": 8
+      },
+      "bytes": {
+        "bytesWritten": 0
+      }
+    }
+  },
+  "startup": {
+    "startup-agent-status": {
+      "multipleOfFloor": 12.63
+    },
+    "startup-agent-version": {
+      "multipleOfFloor": 10.05
+    },
+    "startup-bun-floor": {},
+    "startup-daemon-serve": {
+      "multipleOfFloor": 51.93
+    },
+    "startup-daemon-version": {
+      "multipleOfFloor": 9.74
+    },
+    "startup-tui-status": {
+      "multipleOfFloor": 14.7
+    },
+    "startup-tui-version": {
+      "multipleOfFloor": 10.12
+    }
+  }
+}

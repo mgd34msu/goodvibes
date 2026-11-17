@@ -5,6 +5,12 @@
  * exits 1 naming each failure.
  *
  *   bun packages/engine/scripts/measure/run.ts [--only <name>[,<name>...]] [--out <file.json>]
+ *       [--check <budgets.json>] [--write-budgets <budgets.json>]
+ *
+ * --check compares the run with the recorded budgets (budgets.ts) and exits 1
+ * on any violation, printing scenario, measure, recorded and now for each.
+ * --write-budgets records this run as the budgets (with --only, only those
+ * scenarios are rewritten), so a deliberate change is one reviewed diff.
  *
  * Every in-process scenario runs in its own `bun worker.ts` process whose HOME,
  * XDG_* directories, GOODVIBES_HOME and TMPDIR point into a fresh temporary
@@ -13,33 +19,45 @@
  * attempt is refused and counted (instrument.ts). Start-up scenarios spawn the
  * products' source entries with the same isolation and report wall time only.
  */
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { SCENARIOS } from './scenarios/index.ts';
+import { budgetsFromRun, checkBudgets, formatViolations, STARTUP_FLOOR, WALL_RATIOS, type BudgetsFile, type ExtraMeasures, type MeasuredRun } from './budgets.ts';
 import { STARTUP_SCENARIOS, measureStartup, type StartupReport } from './startup.ts';
 import type { ScenarioReport } from './harness.ts';
 
 const HERE = import.meta.dir;
 const REPO = resolve(HERE, '../../../..');
 
-function parseArgs(argv: readonly string[]): { only: Set<string> | null; out: string | null } {
+interface Args { only: Set<string> | null; out: string | null; check: string | null; writeBudgets: string | null }
+
+const USAGE = 'bun packages/engine/scripts/measure/run.ts [--only <name>[,<name>...]] [--out <file.json>] [--check <budgets.json>] [--write-budgets <budgets.json>]';
+
+function parseArgs(argv: readonly string[]): Args {
   let only: Set<string> | null = null;
   let out: string | null = null;
+  let check: string | null = null;
+  let writeBudgets: string | null = null;
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]!;
     const value = (): string => { const next = argv[++i]; if (next === undefined) throw new Error(`${arg} needs a value`); return next; };
+    if (arg === '--') continue;
     if (arg === '--only') only = new Set(value().split(',').map((name) => name.trim()).filter(Boolean));
     else if (arg.startsWith('--only=')) only = new Set(arg.slice(7).split(',').map((name) => name.trim()).filter(Boolean));
     else if (arg === '--out') out = resolve(value());
     else if (arg.startsWith('--out=')) out = resolve(arg.slice(6));
+    else if (arg === '--check') check = resolve(value());
+    else if (arg.startsWith('--check=')) check = resolve(arg.slice(8));
+    else if (arg === '--write-budgets') writeBudgets = resolve(value());
+    else if (arg.startsWith('--write-budgets=')) writeBudgets = resolve(arg.slice(16));
     else if (arg === '--help' || arg === '-h') {
-      console.log('bun packages/engine/scripts/measure/run.ts [--only <name>[,<name>...]] [--out <file.json>]');
+      console.log(USAGE);
       console.log(`scenarios: ${[...SCENARIOS.map((s) => s.name), ...STARTUP_SCENARIOS.map((s) => s.name)].join(', ')}`);
       process.exit(0);
     } else throw new Error(`unknown argument ${arg}`);
   }
-  return { only, out };
+  return { only, out, check, writeBudgets };
 }
 
 /** A fresh isolated root; the returned env never inherits provider keys or config paths. */
@@ -57,12 +75,19 @@ export function isolatedEnv(root: string, extra: Record<string, string> = {}): R
   return { ...env, ...dirs, MEASURE_ROOT: root, NO_COLOR: '1', ...extra };
 }
 
+/** MEASURE_TRACE and MEASURE_TRACE_STACK reach the worker (instrument.ts); nothing else of the caller's environment does. */
+function traceEnv(): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const name of ['MEASURE_TRACE', 'MEASURE_TRACE_STACK']) if (process.env[name]) env[name] = process.env[name]!;
+  return env;
+}
+
 async function runWorker(name: string): Promise<ScenarioReport | { name: string; error: string }> {
   const root = mkdtempSync(join(tmpdir(), `gv-measure-${name}-`));
   const out = join(root, 'report.json');
   try {
     const child = Bun.spawn([process.execPath, '--no-env-file', join(HERE, 'worker.ts'), name, out], {
-      cwd: join(root, 'tmp'), env: isolatedEnv(root), stdout: 'pipe', stderr: 'pipe',
+      cwd: join(root, 'tmp'), env: isolatedEnv(root, traceEnv()), stdout: 'pipe', stderr: 'pipe',
     });
     const timer = setTimeout(() => child.kill('SIGKILL'), 180_000);
     const [stdout, stderr] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text()]);
@@ -105,9 +130,14 @@ export function formatTable(reports: ReadonlyArray<ScenarioReport | { name: stri
 }
 
 async function main(): Promise<void> {
-  const { only, out } = parseArgs(process.argv.slice(2));
+  const { only, out, check, writeBudgets } = parseArgs(process.argv.slice(2));
   const known = new Set([...SCENARIOS.map((s) => s.name), ...STARTUP_SCENARIOS.map((s) => s.name)]);
   for (const name of only ?? []) if (!known.has(name)) throw new Error(`unknown scenario ${name}; known: ${[...known].join(', ')}`);
+  // A start-up is judged against the floor measured in the same run.
+  if (only && (check || writeBudgets) && STARTUP_SCENARIOS.some((s) => only.has(s.name))) only.add(STARTUP_FLOOR);
+  // A wall-time ratio subtracts a reference scenario measured in the same run.
+  for (const ratio of WALL_RATIOS) if (only && check && only.has(ratio.scenario)) only.add(ratio.minus);
+  const budgets = check ? JSON.parse(readFileSync(check, 'utf8')) as BudgetsFile : null;
   const started = performance.now();
   const reports: Array<ScenarioReport | { name: string; error: string }> = [];
   for (const scenario of SCENARIOS) {
@@ -123,7 +153,12 @@ async function main(): Promise<void> {
   }
   console.log(formatTable(reports, startup));
   console.log('\n* test-only capability. Medians; counters include work that landed within 150 ms after the operation returned.');
-  const result = {
+  for (const report of reports) {
+    if (!('trace' in report) || !report.trace?.length) continue;
+    console.log(`\ntrace ${report.name} (last measured run, ${report.trace.length}):`);
+    for (const line of report.trace) console.log(`  ${line}`);
+  }
+  const result: MeasuredRun & { readonly totalMs: number } = {
     measuredAt: new Date().toISOString(),
     bun: Bun.version,
     commit: Bun.spawnSync(['git', '-C', REPO, 'rev-parse', '--short', 'HEAD']).stdout.toString().trim(),
@@ -144,6 +179,30 @@ async function main(): Promise<void> {
     console.error(`\n${failures.length} scenario(s) failed; their numbers are not reported:`);
     for (const failure of failures) console.error(`- ${failure.name}: ${failure.error.split('\n')[0]}`);
     process.exitCode = 1;
+  }
+  if (writeBudgets) {
+    if (failures.length > 0) {
+      console.error(`\nbudgets not written: every scenario must succeed first (${writeBudgets})`);
+    } else {
+      const extras = new Map<string, ExtraMeasures>(SCENARIOS.map((s) => [s.name, { counts: s.budgeted ?? [], bytes: s.budgetedBytes ?? [] }]));
+      // With --only, the other scenarios keep their recorded budgets; without it the file is rebuilt from this run alone.
+      const previous = only && existsSync(writeBudgets) ? JSON.parse(readFileSync(writeBudgets, 'utf8')) as BudgetsFile : undefined;
+      const next = budgetsFromRun(result, extras, previous);
+      mkdirSync(dirname(writeBudgets), { recursive: true });
+      writeFileSync(writeBudgets, `${JSON.stringify(next, null, 2)}\n`);
+      console.log(`\nwrote budgets ${writeBudgets}`);
+    }
+  }
+  if (budgets && check) {
+    const violations = checkBudgets(result, budgets, known);
+    const compared = reports.length + startup.length;
+    if (violations.length === 0) {
+      console.log(`\nbudgets: ${compared} scenario(s) within ${check}`);
+    } else {
+      console.error(`\nbudgets: ${violations.length} violation(s) against ${check}:`);
+      console.error(formatViolations(violations));
+      process.exitCode = 1;
+    }
   }
 }
 

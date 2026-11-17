@@ -26,6 +26,11 @@ export interface StartupReport {
   readonly command: string;
   readonly wallMs: { readonly median: number; readonly min: number; readonly max: number; readonly samples: readonly number[] };
   readonly exitCodes: readonly (number | null)[];
+  /**
+   * Median of the reference start-up (startup-bun-floor) run right before each
+   * sample, so the multiple compares two timings taken under the same machine load.
+   */
+  readonly floorMs?: number;
   readonly note?: string;
   readonly error?: string;
 }
@@ -96,19 +101,25 @@ async function once(scenario: StartupScenario, repo: string, envFor: (root: stri
   }
 }
 
+const median = (values: readonly number[]): number => [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)]!;
+
 export async function measureStartup(scenario: StartupScenario, repo: string, envFor: (root: string, extra: Record<string, string>) => Record<string, string>): Promise<StartupReport> {
+  const floor = STARTUP_SCENARIOS[0]!;
   const command = `bun ${scenario.entry} ${(typeof scenario.args === 'function' ? scenario.args(0) : scenario.args).join(' ')}`;
   try {
     await once(scenario, repo, envFor);
     const samples: number[] = [];
+    const floorSamples: number[] = [];
     const exitCodes: (number | null)[] = [];
     for (let i = 0; i < RUNS; i++) {
+      if (scenario !== floor) floorSamples.push((await once(floor, repo, envFor)).ms);
       const result = await once(scenario, repo, envFor);
       samples.push(result.ms);
       exitCodes.push(result.code);
     }
     const sorted = [...samples].sort((a, b) => a - b);
-    return { name: scenario.name, command, wallMs: { median: sorted[Math.floor(sorted.length / 2)]!, min: sorted[0]!, max: sorted.at(-1)!, samples }, exitCodes, note: scenario.note };
+    return { name: scenario.name, command, wallMs: { median: sorted[Math.floor(sorted.length / 2)]!, min: sorted[0]!, max: sorted.at(-1)!, samples }, exitCodes,
+      ...(floorSamples.length > 0 ? { floorMs: median(floorSamples) } : {}), note: scenario.note };
   } catch (error) {
     return { name: scenario.name, command, wallMs: { median: 0, min: 0, max: 0, samples: [] }, exitCodes: [], error: error instanceof Error ? error.message : String(error) };
   }

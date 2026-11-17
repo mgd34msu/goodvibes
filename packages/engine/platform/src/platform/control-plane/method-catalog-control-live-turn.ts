@@ -57,7 +57,7 @@ export const builtinGatewayControlLiveTurnMethodDescriptors: readonly GatewayMet
     title: 'List Queued Mid-Turn Messages',
     description: 'List the messages queued behind the current turn (submitted while the model was thinking), in delivery order. Queued messages remain editable and deletable until they are delivered; a delivered message no longer appears here. Any session with a live runtime on this daemon (the local runtime, addressable as `runtime`, and every session the daemon hosts) is resolvable; other session ids answer 404 SESSION_NOT_LOCAL.',
     category: 'sessions',
-    scopes: ['read:sessions'],
+    scopes: ['read:transcripts'],
     http: { method: 'GET', path: '/api/sessions/{sessionId}/queued-messages' },
     inputSchema: objectSchema({ sessionId: STRING_SCHEMA }, ['sessionId']),
     outputSchema: objectSchema({

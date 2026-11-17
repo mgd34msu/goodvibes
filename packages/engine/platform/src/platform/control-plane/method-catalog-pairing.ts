@@ -78,7 +78,7 @@ export const builtinGatewayPairingMethodDescriptors: readonly GatewayMethodDescr
     title: 'List Paired Device Tokens',
     description: 'List the per-pairing operator tokens (paired devices/browsers) as redacted views: id, user-visible name, created timestamp, last-seen timestamp, and mintedBy (the paired device that minted it, when one did). The token secret is never stored in listable form and is never returned.',
     category: 'pairing',
-    scopes: ['read:control-plane'],
+    scopes: ['read:pairing'],
     transport: ['ws'],
     outputSchema: objectSchema({
       tokens: arraySchema(PUBLIC_PAIRING_TOKEN_SCHEMA),

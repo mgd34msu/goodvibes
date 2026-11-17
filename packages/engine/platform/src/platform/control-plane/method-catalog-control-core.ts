@@ -412,7 +412,7 @@ export const builtinGatewayControlCoreMethodDescriptors: readonly GatewayMethodD
     title: 'Get Shared Session',
     description: 'Return metadata for a shared session.',
     category: 'sessions',
-    scopes: ['read:sessions'],
+    scopes: ['read:transcripts'],
     http: { method: 'GET', path: '/api/sessions/{sessionId}' },
     errorCodes: [SESSION_NOT_FOUND],
     inputSchema: objectSchema({ sessionId: STRING_SCHEMA }, ['sessionId']),
@@ -548,7 +548,7 @@ export const builtinGatewayControlCoreMethodDescriptors: readonly GatewayMethodD
     title: 'List Shared Session Messages',
     description: 'Return a page of retained session messages. Offset counts backward from the newest message; nextOffset reads the preceding page. History is retained until explicitly deleted.',
     category: 'sessions',
-    scopes: ['read:sessions'],
+    scopes: ['read:transcripts'],
     http: { method: 'GET', path: '/api/sessions/{sessionId}/messages' },
     errorCodes: [SESSION_NOT_FOUND],
     inputSchema: objectSchema({
@@ -591,7 +591,7 @@ export const builtinGatewayControlCoreMethodDescriptors: readonly GatewayMethodD
     title: 'List Shared Session Inputs',
     description: 'Return explicit session inputs, including queued follow-ups and delivered steering requests. A live surface collects work by filtering `state` (e.g. queued) and paging past a `since` createdAt cursor (exclusive), draining only inputs it has not yet collected.',
     category: 'sessions',
-    scopes: ['read:sessions'],
+    scopes: ['read:transcripts'],
     http: { method: 'GET', path: '/api/sessions/{sessionId}/inputs' },
     errorCodes: [SESSION_NOT_FOUND],
     inputSchema: objectSchema({

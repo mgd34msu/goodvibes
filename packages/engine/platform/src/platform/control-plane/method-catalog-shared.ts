@@ -359,9 +359,10 @@ function defaultMethodEffect(scopes: readonly string[]): GatewayMethodEffect {
  * paired devices. They are not in the default grant of a credential without
  * the admin role (method-catalog.ts `grantedGatewayScopes`); a paired device
  * whose pairing stores its own scope list holds them when the list names them.
- * `read:transcripts` and `read:pairing` are reserved for the transcript and
- * paired-device reads, which today share `read:sessions` and
- * `read:control-plane` with ordinary reads.
+ * `read:transcripts` covers every read that returns conversation text (shared
+ * session messages and inputs, queued messages, companion chat history and its
+ * stream); `read:pairing` covers the paired-device list. Session metadata
+ * (`sessions.list`, `sessions.search`) stays on `read:sessions`.
  */
 export const OWNER_PRIVATE_READ_SCOPES: ReadonlySet<string> = new Set([
   'read:email', 'read:profile', 'read:profile-document', 'read:payments', 'read:occasions', 'read:memory',

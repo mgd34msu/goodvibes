@@ -477,8 +477,6 @@ export async function initializeBootstrapCore(
     runtimeSessionIdRef,
     routeOrBuffer,
     orchestratorHandleUserInputRef,
-    conversation,
-    requestRender,
   });
 
   providerRegistry.startWatching(runtimeBus);

@@ -308,10 +308,6 @@ export function createBootstrapInboundInputPoller(deps: {
   readonly runtimeSessionIdRef: { readonly value: string };
   readonly routeOrBuffer: (text: string, priority: 'low' | 'high') => void;
   readonly orchestratorHandleUserInputRef: { readonly value: ((text: string) => void) | null };
-  /** No longer read: a steer waits for the orchestrator instead of being appended without a turn. */
-  readonly conversation?: unknown;
-  /** No longer read, for the same reason. */
-  readonly requestRender?: unknown;
 }): SessionInboundInputPoller {
   return new SessionInboundInputPoller({
     sessionId: () => deps.runtimeSessionIdRef.value || null,

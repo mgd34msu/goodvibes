@@ -86,16 +86,38 @@ export function trustGatedAsk(
         + 'Reads keep working; writes, commands and delegation are refused until it is answered. '
         + 'Answer the workspace trust request from an attached surface (the approvals list), then retry.',
     } as const;
+    // A question nobody could answer (no person at this surface, a dismissed
+    // prompt) refuses this request and leaves the workspace undecided; it is not
+    // a failure of the turn, and the next request asks again.
+    const notAnswered = {
+      approved: false,
+      reason: `Workspace trust${where} is undecided and the trust question was not answered here, so the workspace stays undecided. `
+        + 'Reads keep working; writes, commands and delegation are refused until it is trusted '
+        + '(/trust workspace trusted in the terminal app, or answer the workspace-trust prompt of a run started with --answer-permissions).',
+    } as const;
     if (options.waitMs === undefined) {
-      await awaitPermission(() => question.answer, signal);
+      try {
+        await awaitPermission(() => question.answer, signal);
+      } catch (error) {
+        assertPermissionActive(signal);
+        logger.info('workspace trust: the question was not answered; the request is refused', { workspace: manager.workspaceRoot, error: summarizeError(error) });
+        return notAnswered;
+      }
     } else {
       const remaining = question.openedAt + options.waitMs - Date.now();
       if (remaining <= 0) return unanswered;
       let timer: ReturnType<typeof setTimeout> | undefined;
-      const answered = await awaitPermission(() => Promise.race([
-        question.answer.then(() => true),
-        new Promise<false>((resolveWait) => { timer = setTimeout(() => resolveWait(false), remaining); }),
-      ]), signal).finally(() => clearTimeout(timer));
+      let answered: boolean;
+      try {
+        answered = await awaitPermission(() => Promise.race([
+          question.answer.then(() => true),
+          new Promise<false>((resolveWait) => { timer = setTimeout(() => resolveWait(false), remaining); }),
+        ]), signal).finally(() => clearTimeout(timer));
+      } catch (error) {
+        assertPermissionActive(signal);
+        logger.info('workspace trust: the question was not answered; the request is refused', { workspace: manager.workspaceRoot, error: summarizeError(error) });
+        return notAnswered;
+      }
       if (!answered) return unanswered;
     }
     assertPermissionActive(signal);
@@ -310,11 +332,12 @@ export class WorkspaceTrustManager {
     const decisionRevision = this.decisionRevision;
     await awaitPermission(() => this.load(), signal);
     if (this.decisionRevision !== decisionRevision) throw new Error('Workspace trust changed during autonomous preparation');
-    const revision = this.revision;
+    // Dispatch reads the decision in effect now, not the one seen at preparation:
+    // the call's own ask may raise the trust question, and its answer must let
+    // the call that asked run (or stop it, when the answer was a restriction).
     const assertCurrent = () => {
       assertPermissionActive(signal);
       if (this.pendingDecisions > 0) throw new Error('Workspace trust decision is pending');
-      if (this.revision !== revision) throw new Error('Workspace trust changed before autonomous dispatch');
       if (this.loadFault !== null && !this.isDecided() && !this.isCategoryAllowed(category)) {
         throw new Error(`Workspace trust record is unreadable (${this.loadFault}), so this workspace is treated as restricted for autonomous work. Choose a trust level to replace it.`);
       }

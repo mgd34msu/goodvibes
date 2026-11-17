@@ -34,7 +34,8 @@ import { createViewPanelAdapter } from '../views/view-panel-adapter.ts';
 import { createContractIntake } from '@goodvibes-jev/engine/platform/platform/contract';
 import { KeybindingsManager } from '../input/keybindings.ts';
 import { startReplayRecording } from '@goodvibes-jev/engine/platform/platform/core';
-import type { WorkspaceTrustLevel } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { WorkspaceTrustDecisionUnsettledError, type WorkspaceTrustLevel } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { GOODVIBES_TUI_SURFACE_ROOT } from '../config/surface.ts';
 import { createDaemonVerbCaller } from './client/operator-endpoint.ts';
@@ -87,8 +88,31 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
   // The trust question has one owner here: the terminal UI patches `trustPromptRef` once it exists, and
   // every trust gate (the turn's and the workers') asks through `requestTrustDecision`, which keeps a
   // single prompt open however many gates reach an undecided workspace at once.
+  // Before the UI exists (and in a headless run, where it never does) the question goes to the
+  // permission prompt: a script answering a `run --answer-permissions` sees it; otherwise nobody can
+  // answer, and an unanswered question leaves the workspace undecided rather than recording a choice
+  // nobody made.
   const trustPromptRef: { requestTrustDecision: () => Promise<WorkspaceTrustLevel> } = {
-    requestTrustDecision: async () => 'restricted',
+    requestTrustDecision: async () => {
+      const workspace = workingDirectory;
+      const decision = await localPromptRef.requestPermission({
+        callId: `workspace-trust-${randomUUID().slice(0, 8)}`,
+        tool: 'workspace-trust',
+        args: { workspace },
+        category: 'read',
+        analysis: {
+          classification: 'workspace-trust',
+          riskLevel: 'high',
+          summary: `Trust the workspace ${workspace}? Approving lets writes, commands and delegation run here and is remembered for this workspace.`,
+          reasons: [`${workspace} has no trust decision recorded.`, 'Refusing leaves it undecided: reads keep working, and this request is refused.'],
+          target: workspace,
+          targetKind: 'path',
+          blastRadius: 'local',
+        },
+      });
+      if (decision.approved) return 'trusted';
+      throw new WorkspaceTrustDecisionUnsettledError();
+    },
   };
   let pendingTrustDecision: Promise<WorkspaceTrustLevel> | null = null;
   const requestTrustDecision = (): Promise<WorkspaceTrustLevel> => {

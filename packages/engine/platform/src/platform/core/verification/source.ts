@@ -6,12 +6,12 @@ export const VERIFICATION_OVERVIEW_CHARACTERS = 16_000;
 let recordNamespace: string | undefined;
 let recordSequence = 0;
 
-/** An issued record identity, never a digest of source text or an approval.
- * Keep native random identity bytes out of the numeric-material alphabet.
- * A persistent source owner reuses the actual retained record when unchanged.
+/** An issued record identity, never a digest of source text or an approval:
+ * `<kind>-<process UUID>-<sequence>`. A persistent source owner reuses the
+ * actual retained record when unchanged.
  */
 export function issueVerificationId(kind: 's' | 'index' | 'e' | 'proposal' | 'history' | 'message' | 'context' | 'original' | 'repair'): string {
-  recordNamespace ??= crypto.randomUUID().replace(/\d/g, digit => 'ghijklmnop'[Number(digit)]!);
+  recordNamespace ??= crypto.randomUUID();
   recordSequence++;
   if (!Number.isSafeInteger(recordSequence)) throw new Error('Verification record identity exhausted');
   return `${kind}-${recordNamespace}-${recordSequence.toString(36)}`;

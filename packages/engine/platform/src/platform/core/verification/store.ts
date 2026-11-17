@@ -235,7 +235,7 @@ export class VerificationStore {
               || entry.messageRecords.some(record => !record || typeof record !== 'object' || Array.isArray(record)
                 || typeof record.id !== 'string' || !record.id || record.id.length > 256 || Object.keys(record).length !== 2
                 || ('message' in record ? !record.message || typeof record.message !== 'object' || Array.isArray(record.message)
-                  : !('contentCommitment' in record) || typeof record.contentCommitment !== 'string' || !/^[a-p]{64}$/.test(record.contentCommitment)))
+                  : !('contentCommitment' in record) || typeof record.contentCommitment !== 'string' || !/^[0-9a-p]{64}$/.test(record.contentCommitment)))
               || new Set(entry.messageRecords.map(record => record.id)).size !== entry.messageRecords.length))
               throw new VerificationHeldError('invalid archived message records');
             const recordedMessages = new Set(entry.messageRecords?.map(record => record.id));

@@ -26,7 +26,7 @@ import { cleanupKnowledgeArtifact, retireKnowledgeArtifactCleanup, type Artifact
 import type { KnowledgeArtifactReferenceOwner } from './artifact-reference-owner.js';
 import { KnowledgeSourcePublicationHeldError, knowledgeSourceSnapshotFromRows, planningSourceSnapshotFromRows, readPlanningSourceSnapshot, readKnowledgeSourceSnapshot, type KnowledgeSourceSnapshot, type KnowledgeSourceWriteResult } from './store-source-generation.js';
 import type { PlanningSourceIdentity } from './store-planning-source-selector.js';
-import { countWorkPlanTasksInSpace, listWorkPlanTaskRecordIds, readWorkPlanTaskImportRecord, workPlanTaskView, writeWorkPlanCommit, type WorkPlanTaskCommit, type WorkPlanTaskCommitResult, type WorkPlanTaskView } from './store-work-plan-tasks.js';
+import { countWorkPlanTasksInSpace, listWorkPlanTaskRecordIds, readWorkPlanStatusCounts, readWorkPlanTaskImportRecord, workPlanTaskView, writeWorkPlanCommit, type WorkPlanTaskCommit, type WorkPlanTaskCommitResult, type WorkPlanTaskView } from './store-work-plan-tasks.js';
 import { applyKnowledgeImport, assertKnowledgeImportRecordSizes, type KnowledgeImportInput, type KnowledgeImportReceipt, type PrepareKnowledgeImportGraph } from './store-import.js';
 import { prepareKnowledgeEdgeRecord, writeKnowledgeEdgeRow, findKnowledgeEdge } from './store-edge-writes.js';
 import { IndexedRecordMap, edgeEndpointKey, extractionSourceKey, nodeSlugKey, sourceUriKey } from './store-indexed-map.js';
@@ -748,6 +748,22 @@ export class KnowledgeStore {
   }
 
   /**
+   * The same read without waiting: for a caller that cannot await (a modal
+   * frame, a synchronous capture). Throws when the store has not opened yet.
+   */
+  readWorkPlanNow<T>(spaceId: string, workPlanId: string, read: (view: WorkPlanTaskView) => T): T {
+    if (this.closed) throw new Error('KnowledgeStore is closed');
+    if (!this.ready) throw new Error('The knowledge store is still opening; the work plan can be read in a moment.');
+    let value!: T;
+    this.sqlite.assertPersistedReadFrame(() => {
+      const legacy = readPlanningSourceSnapshot(this.sqlite, { spaceId, kind: 'work-plan', artifactId: workPlanId }).source;
+      value = read(workPlanTaskView(this.sqlite, spaceId, workPlanId, legacy));
+      return undefined;
+    });
+    return value;
+  }
+
+  /**
    * Read and change a work plan in one immediate transaction: `decide` sees the
    * stored rows (no other writer can commit in between) and names the rows to
    * write. A plan still stored as one knowledge source is moved out of it by the
@@ -767,7 +783,9 @@ export class KnowledgeStore {
         if (!this.sources.has(legacy.id)) this.sources.set(legacy.id, legacy);
         deleteKnowledgeSourceRecord(this.asRecordDeleteView(), legacy.id);
       }
-      return { changed: true, value: { value: decision.value, changed: true, head: { revision, updatedAt: decision.at } } };
+      // The plan as this commit left it, by status: one aggregate in the same transaction.
+      const statusCounts = readWorkPlanStatusCounts(db, spaceId, workPlanId);
+      return { changed: true, value: { value: decision.value, changed: true, head: { revision, updatedAt: decision.at }, statusCounts } };
     }, () => {});
     if (result.kind !== 'completed') throw new KnowledgeSourcePublicationHeldError('pending-local-changes');
     return result.value;

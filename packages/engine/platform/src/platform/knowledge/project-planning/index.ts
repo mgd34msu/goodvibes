@@ -1,5 +1,20 @@
-export { ProjectPlanningService } from './service.js';
-export type { ProjectPlanningServiceOptions } from './service.js';
+export { ProjectPlanningService, WorkPlanNotReadyError } from './service.js';
+export type { ProjectPlanningServiceOptions, WorkPlanTaskMatch } from './service.js';
+export {
+  ProjectWorkPlan,
+  WORK_PLAN_TASK_STATUSES,
+  captureWorkPlanTasks,
+  isWorkPlanTaskStatus,
+  nextWorkPlanTaskStatus,
+  summarizeWorkPlanCounts,
+} from './work-plan.js';
+export type {
+  ProjectWorkPlanOptions,
+  WorkPlanTaskFields,
+  WorkPlanTaskMutation,
+  WorkPlanTaskPatch,
+  WorkPlanTasksObservation,
+} from './work-plan.js';
 export {
   PROJECT_PLANNING_CONNECTOR_ID,
   PROJECT_PLANNING_TAG,

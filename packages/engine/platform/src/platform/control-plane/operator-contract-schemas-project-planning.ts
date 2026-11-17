@@ -132,6 +132,7 @@ export const PROJECT_WORK_PLAN_TASK_SCHEMA = objectSchema({
   contractId: STRING_SCHEMA,
   phaseId: STRING_SCHEMA,
   agentId: STRING_SCHEMA,
+  sessionId: STRING_SCHEMA,
   turnId: STRING_SCHEMA,
   decisionId: STRING_SCHEMA,
   sourceMessageId: STRING_SCHEMA,
@@ -186,12 +187,13 @@ export const PROJECT_WORK_PLAN_MUTATION_OUTPUT_SCHEMA = objectSchema({
   changed: BOOLEAN_SCHEMA,
   revision: NUMBER_SCHEMA,
   updatedAt: NUMBER_SCHEMA,
+  counts: PROJECT_WORK_PLAN_COUNTS_SCHEMA,
   task: PROJECT_WORK_PLAN_TASK_SCHEMA,
   previousTask: PROJECT_WORK_PLAN_TASK_SCHEMA,
   deletedTask: PROJECT_WORK_PLAN_TASK_SCHEMA,
   clearedTaskIds: STRING_LIST_SCHEMA,
   tasks: arraySchema(PROJECT_WORK_PLAN_TASK_SCHEMA),
-}, ['ok', 'projectId', 'knowledgeSpaceId', 'workPlanId', 'changed', 'revision', 'updatedAt'], { additionalProperties: true });
+}, ['ok', 'projectId', 'knowledgeSpaceId', 'workPlanId', 'changed', 'revision', 'updatedAt', 'counts'], { additionalProperties: true });
 
 export const PROJECT_PLANNING_STATUS_SCHEMA = objectSchema({
   ok: BOOLEAN_SCHEMA,
@@ -274,6 +276,7 @@ export const PROJECT_WORK_PLAN_TASK_INPUT_SCHEMA = objectSchema({
   contractId: STRING_SCHEMA,
   phaseId: STRING_SCHEMA,
   agentId: STRING_SCHEMA,
+  sessionId: STRING_SCHEMA,
   turnId: STRING_SCHEMA,
   decisionId: STRING_SCHEMA,
   sourceMessageId: STRING_SCHEMA,

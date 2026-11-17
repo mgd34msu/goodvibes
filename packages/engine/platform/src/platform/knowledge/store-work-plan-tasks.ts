@@ -77,6 +77,10 @@ export interface WorkPlanTaskView {
   task(taskId: string): StoredWorkPlanTask | null;
   tasks(statuses?: readonly string[]): StoredWorkPlanTask[];
   maxOrder(): number | null;
+  /** Live task ids that start with `prefix`, at most `limit` of them (a key range on the primary key). */
+  taskIdsWithPrefix(prefix: string, limit: number): string[];
+  /** Live tasks by status, one aggregate statement. */
+  statusCounts(): Record<string, number>;
 }
 
 /** What a commit writes: nothing when both lists are empty. `at` stamps the rows. */
@@ -92,6 +96,8 @@ export interface WorkPlanTaskCommitResult<T> {
   readonly changed: boolean;
   /** The plan's head after the commit (unchanged when nothing was written). */
   readonly head: WorkPlanHead;
+  /** Live tasks by status after a commit that wrote, read in its transaction. */
+  readonly statusCounts?: Record<string, number> | undefined;
 }
 
 type Db = Pick<SqlDatabase, 'exec'>;
@@ -103,6 +109,8 @@ export function workPlanTaskView(db: Db, spaceId: string, workPlanId: string, le
     task: taskId => readWorkPlanTask(db, spaceId, workPlanId, taskId),
     tasks: statuses => readWorkPlanTasks(db, spaceId, workPlanId, statuses),
     maxOrder: () => readWorkPlanMaxOrder(db, spaceId, workPlanId),
+    taskIdsWithPrefix: (prefix, limit) => readWorkPlanTaskIdsWithPrefix(db, spaceId, workPlanId, prefix, limit),
+    statusCounts: () => readWorkPlanStatusCounts(db, spaceId, workPlanId),
   };
 }
 
@@ -142,6 +150,24 @@ export function readWorkPlanTasks(db: Db, spaceId: string, workPlanId: string, s
   const filter = statuses?.length ? ` AND status IN (${statuses.map(() => '?').join(', ')})` : '';
   return storedTasks(db.exec(`SELECT ${TASK_COLUMNS} FROM project_work_plan_tasks
     WHERE space_id = ? AND work_plan_id = ? AND task_json IS NOT NULL${filter} ORDER BY sort_order`, [spaceId, workPlanId, ...(statuses ?? [])]));
+}
+
+export function readWorkPlanTaskIdsWithPrefix(db: Db, spaceId: string, workPlanId: string, prefix: string, limit: number): string[] {
+  if (!prefix) return [];
+  // [prefix, prefix + U+FFFF) is every id that starts with prefix; the range walks the primary key.
+  return (db.exec(`SELECT task_id FROM project_work_plan_tasks
+    WHERE space_id = ? AND work_plan_id = ? AND task_id >= ? AND task_id < ? AND task_json IS NOT NULL ORDER BY task_id LIMIT ?`,
+  [spaceId, workPlanId, prefix, `${prefix}￿`, limit])[0]?.values ?? [])
+    .map(row => row[0]).filter((value): value is string => typeof value === 'string');
+}
+
+export function readWorkPlanStatusCounts(db: Db, spaceId: string, workPlanId: string): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const [status, count] of db.exec(`SELECT status, COUNT(*) FROM project_work_plan_tasks
+    WHERE space_id = ? AND work_plan_id = ? AND task_json IS NOT NULL GROUP BY status`, [spaceId, workPlanId])[0]?.values ?? []) {
+    if (typeof status === 'string') counts[status] = Number(count);
+  }
+  return counts;
 }
 
 export function readWorkPlanMaxOrder(db: Db, spaceId: string, workPlanId: string): number | null {

@@ -52,12 +52,14 @@ import type {
   ProjectWorkPlanTaskDeleteInput,
   ProjectWorkPlanTaskGetInput,
   ProjectWorkPlanTaskListInput,
+  ProjectWorkPlanTaskMutationSource,
   ProjectWorkPlanTaskReorderInput,
   ProjectWorkPlanTaskResult,
   ProjectWorkPlanTaskStatus,
   ProjectWorkPlanTaskStatusInput,
   ProjectWorkPlanTaskUpdateInput,
 } from './types.js';
+import { nextWorkPlanTaskStatus } from './work-plan.js';
 
 type MutableProjectWorkPlanCounts = {
   -readonly [K in keyof ProjectWorkPlanCounts]: ProjectWorkPlanCounts[K];
@@ -68,6 +70,15 @@ type WorkPlanTaskCandidate = {
 } & {
   readonly title?: string | undefined;
 };
+
+/** How an in-process caller names a task: `matchPrefix` also accepts a unique prefix of its id. */
+export interface WorkPlanTaskMatch {
+  readonly matchPrefix?: boolean | undefined;
+}
+
+export class WorkPlanNotReadyError extends Error {
+  constructor() { super('The work plan is still opening; try again in a moment.'); this.name = 'WorkPlanNotReadyError'; }
+}
 
 export interface ProjectPlanningServiceOptions {
   /** Composition-owned startup writes on this same store, before any reading. */
@@ -81,8 +92,8 @@ export interface ProjectPlanningServiceOptions {
  * move to every state, including out of done, failed and cancelled. That is
  * deliberate and relied on: the contract plan sync re-opens a unit's task when
  * a later check finds its work failing (repair/retry), the checklist cycle
- * (workflow/work-plan-store.ts `nextWorkPlanStatus`) moves done/failed/
- * cancelled back to pending, and an operator may un-cancel through the status
+ * (`nextWorkPlanTaskStatus`) moves done/failed/cancelled back to pending, and
+ * an operator may un-cancel through the status
  * route. Nothing here is final, so no move is refused; declaring the table makes
  * that the answer in code. Narrowing it takes effect at updateWorkPlanTask.
  */
@@ -100,6 +111,8 @@ export class ProjectPlanningService {
   private readonly waitForStartup: (() => Promise<void>) | undefined;
   private runtimeBus: RuntimeEventBus | null;
   private runtimeBusEpoch = 0;
+  /** Set once the store opened and composition startup finished; a synchronous read needs both. */
+  private opened = false;
 
   /**
    * Native composition. The default project is the configured workspace's:
@@ -130,6 +143,13 @@ export class ProjectPlanningService {
   private async initialize(): Promise<void> {
     await this.store.init();
     await this.waitForStartup?.();
+    this.opened = true;
+  }
+
+  private assertOpened(): void {
+    if (this.opened && this.store.isReady) return;
+    void this.initialize().catch(() => undefined);
+    throw new WorkPlanNotReadyError();
   }
 
   attachRuntimeBus(runtimeBus: RuntimeEventBus | null | undefined): void {
@@ -276,8 +296,32 @@ export class ProjectPlanningService {
     });
   }
 
-  /** One task and the plan's revision: one row read. */
-  async getWorkPlanTask(input: ProjectWorkPlanTaskGetInput): Promise<ProjectWorkPlanTaskResult> {
+  /**
+   * The snapshot without waiting, for a caller that cannot await (a modal frame,
+   * a synchronous capture). Throws `WorkPlanNotReadyError` before the store opened.
+   */
+  getWorkPlanSnapshotNow(input: ProjectWorkPlanTaskListInput = {}): ProjectWorkPlanSnapshot {
+    this.assertOpened();
+    const space = this.resolveSpace(input);
+    const workPlanId = normalizeWorkPlanId(input.workPlanId);
+    return this.store.readWorkPlanNow(space.knowledgeSpaceId, workPlanId, (view) => snapshotFromTasks(space, workPlanId, workPlanEditView(space, workPlanId, view), {
+      status: input.status,
+      parentTaskId: input.parentTaskId,
+      contractId: input.contractId,
+      owner: input.owner,
+      limit: input.limit,
+    }));
+  }
+
+  /** The plan's revision without waiting: one indexed statement. */
+  getWorkPlanRevisionNow(input: ProjectPlanningSpaceInput & { readonly workPlanId?: string | undefined } = {}): number {
+    this.assertOpened();
+    const space = this.resolveSpace(input);
+    return this.store.readWorkPlanNow(space.knowledgeSpaceId, normalizeWorkPlanId(input.workPlanId), (view) => view.head.revision);
+  }
+
+  /** One task and the plan's revision: one row read (a prefix match, when asked for, is one key range). */
+  async getWorkPlanTask(input: ProjectWorkPlanTaskGetInput, match: WorkPlanTaskMatch = {}): Promise<ProjectWorkPlanTaskResult> {
     await this.initialize();
     const space = this.resolveSpace(input);
     const workPlanId = normalizeWorkPlanId(input.workPlanId);
@@ -289,7 +333,7 @@ export class ProjectPlanningService {
         knowledgeSpaceId: space.knowledgeSpaceId,
         workPlanId,
         revision: plan.revision,
-        task: plan.task(input.taskId),
+        task: match.matchPrefix ? plan.find(input.taskId) : plan.task(input.taskId),
       };
     });
   }
@@ -317,26 +361,47 @@ export class ProjectPlanningService {
     return { ...mutationResult(space, workPlanId, commit), task };
   }
 
-  async updateWorkPlanTask(input: ProjectWorkPlanTaskUpdateInput): Promise<ProjectWorkPlanMutationResult> {
+  async updateWorkPlanTask(input: ProjectWorkPlanTaskUpdateInput, match: WorkPlanTaskMatch = {}): Promise<ProjectWorkPlanMutationResult> {
     input = snapshotJudgmentInput(input) as ProjectWorkPlanTaskUpdateInput;
+    const patch = input.patch;
+    return this.editWorkPlanTask(input, () => patch, match);
+  }
+
+  /**
+   * Move a task to the next checklist status (pending, in progress, done, back to
+   * pending; blocked, failed and cancelled go to pending), decided from the task as
+   * stored in the edit's own transaction.
+   */
+  async cycleWorkPlanTaskStatus(input: ProjectWorkPlanTaskGetInput & { readonly source?: ProjectWorkPlanTaskMutationSource | undefined }, match: WorkPlanTaskMatch = {}): Promise<ProjectWorkPlanMutationResult> {
+    input = snapshotJudgmentInput(input) as typeof input;
+    const source = input.source;
+    return this.editWorkPlanTask(input, (previous) => ({ status: nextWorkPlanTaskStatus(previous.status), ...(source ? { source } : {}) }), match);
+  }
+
+  private async editWorkPlanTask(
+    input: ProjectPlanningSpaceInput & { readonly workPlanId?: string | undefined; readonly taskId: string },
+    makePatch: (previous: ProjectWorkPlanTask) => ProjectWorkPlanTaskUpdateInput['patch'],
+    match: WorkPlanTaskMatch,
+  ): Promise<ProjectWorkPlanMutationResult> {
     await this.initialize();
     const space = this.resolveSpace(input);
     const workPlanId = normalizeWorkPlanId(input.workPlanId);
     const commit = await this.commitWorkPlan(space, workPlanId, (plan, at) => {
-      const previousTask = plan.task(input.taskId);
+      const previousTask = match.matchPrefix ? plan.find(input.taskId) : plan.task(input.taskId);
       if (!previousTask) throw new Error(`Work plan task not found: ${input.taskId}`);
+      const patch = makePatch(previousTask);
       // A new status starts a new explanation and completion time: the old reason and
       // completedAt described the previous status.
-      const statusChanging = input.patch.status !== undefined && normalizeWorkPlanStatus(input.patch.status) !== previousTask.status;
+      const statusChanging = patch.status !== undefined && normalizeWorkPlanStatus(patch.status) !== previousTask.status;
       const carriedMetadata: Record<string, unknown> = { ...(previousTask.metadata ?? {}) };
-      if (statusChanging && !('statusReason' in (input.patch.metadata ?? {}))) delete carriedMetadata.statusReason;
+      if (statusChanging && !('statusReason' in (patch.metadata ?? {}))) delete carriedMetadata.statusReason;
       const task = normalizeWorkPlanTask({
         ...previousTask,
-        ...input.patch,
-        ...(statusChanging && input.patch.completedAt === undefined ? { completedAt: undefined } : {}),
+        ...patch,
+        ...(statusChanging && patch.completedAt === undefined ? { completedAt: undefined } : {}),
         metadata: {
           ...carriedMetadata,
-          ...(input.patch.metadata ?? {}),
+          ...(patch.metadata ?? {}),
         },
         taskId: previousTask.taskId,
         createdAt: previousTask.createdAt,
@@ -362,7 +427,7 @@ export class ProjectPlanningService {
     return { ...mutationResult(space, workPlanId, commit), task, previousTask };
   }
 
-  async setWorkPlanTaskStatus(input: ProjectWorkPlanTaskStatusInput): Promise<ProjectWorkPlanMutationResult> {
+  async setWorkPlanTaskStatus(input: ProjectWorkPlanTaskStatusInput, match: WorkPlanTaskMatch = {}): Promise<ProjectWorkPlanMutationResult> {
     // updateWorkPlanTask admits the input once.
     return this.updateWorkPlanTask({
       projectId: input.projectId,
@@ -376,7 +441,7 @@ export class ProjectPlanningService {
           ...(input.reason ? { statusReason: input.reason } : {}),
         },
       },
-    });
+    }, match);
   }
 
   /** Writes and announces only the tasks whose position changed. */
@@ -408,13 +473,13 @@ export class ProjectPlanningService {
     return { ...mutationResult(space, workPlanId, commit), tasks: commit.value.map((entry) => entry.task) };
   }
 
-  async deleteWorkPlanTask(input: ProjectWorkPlanTaskDeleteInput): Promise<ProjectWorkPlanMutationResult> {
+  async deleteWorkPlanTask(input: ProjectWorkPlanTaskDeleteInput, match: WorkPlanTaskMatch = {}): Promise<ProjectWorkPlanMutationResult> {
     input = snapshotJudgmentInput(input) as ProjectWorkPlanTaskDeleteInput;
     await this.initialize();
     const space = this.resolveSpace(input);
     const workPlanId = normalizeWorkPlanId(input.workPlanId);
     const commit = await this.commitWorkPlan(space, workPlanId, (plan) => {
-      const deletedTask = plan.task(input.taskId);
+      const deletedTask = match.matchPrefix ? plan.find(input.taskId) : plan.task(input.taskId);
       if (!deletedTask) throw new Error(`Work plan task not found: ${input.taskId}`);
       return { value: deletedTask, put: [], remove: [deletedTask.taskId] };
     });
@@ -457,13 +522,15 @@ export class ProjectPlanningService {
     workPlanId: string,
     decide: (plan: WorkPlanEditView, at: number) => { readonly value: T; readonly put: readonly ProjectWorkPlanTask[]; readonly remove: readonly string[] },
   ): Promise<WorkPlanCommit<T>> {
-    let unchanged = { revision: 0, updatedAt: 0 };
+    let unchanged: { revision: number; updatedAt: number; counts: ProjectWorkPlanCounts } = { revision: 0, updatedAt: 0, counts: countWorkPlanTasks([]) };
     const result = await this.store.commitWorkPlan(space.knowledgeSpaceId, workPlanId, (view) => {
       const plan = workPlanEditView(space, workPlanId, view);
-      unchanged = { revision: plan.revision, updatedAt: plan.updatedAt };
       const at = Date.now();
       const edit = decide(plan, at);
-      if (edit.put.length === 0 && edit.remove.length === 0) return { value: edit.value, put: [], remove: [], at };
+      if (edit.put.length === 0 && edit.remove.length === 0) {
+        unchanged = { revision: plan.revision, updatedAt: plan.updatedAt, counts: plan.counts() };
+        return { value: edit.value, put: [], remove: [], at };
+      }
       let put = edit.put;
       if (plan.legacyTasks.length > 0) {
         const named = new Set([...edit.put.map((task) => task.taskId), ...edit.remove]);
@@ -473,7 +540,7 @@ export class ProjectPlanningService {
       return { value: edit.value, put: put.map(workPlanTaskWrite), remove: edit.remove, at };
     });
     return result.changed
-      ? { value: result.value, changed: true, revision: result.head.revision, updatedAt: result.head.updatedAt ?? Date.now() }
+      ? { value: result.value, changed: true, revision: result.head.revision, updatedAt: result.head.updatedAt ?? Date.now(), counts: countsFromStatuses(result.statusCounts ?? {}) }
       : { value: result.value, changed: false, ...unchanged };
   }
 
@@ -595,6 +662,7 @@ interface WorkPlanCommit<T> {
   readonly changed: boolean;
   readonly revision: number;
   readonly updatedAt: number;
+  readonly counts: ProjectWorkPlanCounts;
 }
 
 /** A plan as one read or one commit sees it; tasks come from their rows, and from a plan still stored as one source. */
@@ -604,8 +672,11 @@ interface WorkPlanEditView {
   /** Tasks of a plan still stored as one knowledge source; empty once its first commit wrote them as rows. */
   readonly legacyTasks: readonly ProjectWorkPlanTask[];
   task(taskId: string): ProjectWorkPlanTask | null;
+  /** The task with this id, or the one task whose id starts with it; throws when several do. */
+  find(taskIdOrPrefix: string): ProjectWorkPlanTask | null;
   tasks(statuses?: readonly ProjectWorkPlanTaskStatus[]): ProjectWorkPlanTask[];
   nextOrder(): number;
+  counts(): ProjectWorkPlanCounts;
 }
 
 function workPlanEditView(space: WorkPlanSpace, workPlanId: string, view: WorkPlanTaskView): WorkPlanEditView {
@@ -616,20 +687,34 @@ function workPlanEditView(space: WorkPlanSpace, workPlanId: string, view: WorkPl
   // A task in both places (an older build wrote the source after the rows existed) is read from the newer copy.
   const newer = (row: ProjectWorkPlanTask | null, old: ProjectWorkPlanTask | undefined): ProjectWorkPlanTask | null =>
     !old ? row : !row || old.updatedAt > row.updatedAt ? old : row;
+  const task = (taskId: string): ProjectWorkPlanTask | null => {
+    const row = view.task(taskId);
+    return newer(row ? stored(row) : null, legacy.get(taskId));
+  };
+  const tasks = (statuses?: readonly ProjectWorkPlanTaskStatus[]): ProjectWorkPlanTask[] => {
+    if (legacy.size === 0) return sortWorkPlanTasks(view.tasks(statuses).map(stored));
+    const merged = new Map(view.tasks().map((row) => [row.taskId, stored(row)] as const));
+    for (const [taskId, old] of legacy) merged.set(taskId, newer(merged.get(taskId) ?? null, old)!);
+    return sortWorkPlanTasks([...merged.values()].filter((task) => !statuses || statuses.includes(task.status)));
+  };
   return {
     revision: view.head.revision,
     updatedAt: Math.max(view.head.updatedAt ?? 0, legacyPlan?.updatedAt ?? 0) || Date.now(),
     legacyTasks: [...legacy.values()],
-    task: (taskId) => {
-      const row = view.task(taskId);
-      return newer(row ? stored(row) : null, legacy.get(taskId));
+    task,
+    find: (taskIdOrPrefix) => {
+      const needle = taskIdOrPrefix.trim();
+      if (!needle) throw new Error('Work plan task id is required.');
+      const exact = task(needle);
+      if (exact) return exact;
+      const ids = new Set(view.taskIdsWithPrefix(needle, 8));
+      for (const taskId of legacy.keys()) if (taskId.startsWith(needle)) ids.add(taskId);
+      if (ids.size > 1) throw new Error(`Work plan task id "${needle}" is ambiguous: ${[...ids].sort().join(', ')}`);
+      const [only] = ids;
+      return only ? task(only) : null;
     },
-    tasks: (statuses) => {
-      if (legacy.size === 0) return sortWorkPlanTasks(view.tasks(statuses).map(stored));
-      const merged = new Map(view.tasks().map((row) => [row.taskId, stored(row)] as const));
-      for (const [taskId, old] of legacy) merged.set(taskId, newer(merged.get(taskId) ?? null, old)!);
-      return sortWorkPlanTasks([...merged.values()].filter((task) => !statuses || statuses.includes(task.status)));
-    },
+    counts: () => legacy.size > 0 ? countWorkPlanTasks(tasks()) : countsFromStatuses(view.statusCounts()),
+    tasks,
     nextOrder: () => {
       let max = view.maxOrder() ?? -1;
       for (const task of legacy.values()) max = Math.max(max, task.order);
@@ -662,6 +747,7 @@ function mutationResult(space: WorkPlanSpace, workPlanId: string, commit: WorkPl
     changed: commit.changed,
     revision: commit.revision,
     updatedAt: commit.updatedAt,
+    counts: commit.counts,
   };
 }
 
@@ -720,6 +806,7 @@ function normalizeWorkPlanTask(
     ...(typeof input.contractId === 'string' && input.contractId.trim() ? { contractId: input.contractId.trim() } : {}),
     ...(typeof input.phaseId === 'string' && input.phaseId.trim() ? { phaseId: input.phaseId.trim() } : {}),
     ...(typeof input.agentId === 'string' && input.agentId.trim() ? { agentId: input.agentId.trim() } : {}),
+    ...(typeof input.sessionId === 'string' && input.sessionId.trim() ? { sessionId: input.sessionId.trim() } : {}),
     ...(typeof input.turnId === 'string' && input.turnId.trim() ? { turnId: input.turnId.trim() } : {}),
     ...(typeof input.decisionId === 'string' && input.decisionId.trim() ? { decisionId: input.decisionId.trim() } : {}),
     ...(typeof input.sourceMessageId === 'string' && input.sourceMessageId.trim() ? { sourceMessageId: input.sourceMessageId.trim() } : {}),
@@ -827,6 +914,17 @@ function countWorkPlanTasks(tasks: readonly ProjectWorkPlanTask[]): ProjectWorkP
   };
   for (const task of tasks) {
     counts[task.status] += 1;
+  }
+  return counts;
+}
+
+/** Counts from the stored status column (one aggregate statement's rows). */
+function countsFromStatuses(byStatus: Readonly<Record<string, number>>): ProjectWorkPlanCounts {
+  const counts = countWorkPlanTasks([]) as MutableProjectWorkPlanCounts;
+  for (const status of ['pending', 'in_progress', 'blocked', 'done', 'failed', 'cancelled'] as const) {
+    const count = byStatus[status] ?? 0;
+    counts[status] = count;
+    counts.total += count;
   }
   return counts;
 }

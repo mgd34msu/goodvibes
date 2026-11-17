@@ -37,6 +37,8 @@ export interface ProjectWorkPlanTask {
   readonly contractId?: string | undefined;
   readonly phaseId?: string | undefined;
   readonly agentId?: string | undefined;
+  /** The session the task was recorded in (the conversation whose model or user added it). */
+  readonly sessionId?: string | undefined;
   readonly turnId?: string | undefined;
   readonly decisionId?: string | undefined;
   readonly sourceMessageId?: string | undefined;
@@ -98,6 +100,7 @@ export interface ProjectWorkPlanTaskCreateInput extends ProjectPlanningSpaceInpu
     readonly contractId?: string | undefined;
     readonly phaseId?: string | undefined;
     readonly agentId?: string | undefined;
+    readonly sessionId?: string | undefined;
     readonly turnId?: string | undefined;
     readonly decisionId?: string | undefined;
     readonly sourceMessageId?: string | undefined;
@@ -175,6 +178,8 @@ export interface ProjectWorkPlanMutationResult {
   readonly changed: boolean;
   readonly revision: number;
   readonly updatedAt: number;
+  /** The plan's task counts after the edit, read in the edit's own transaction. */
+  readonly counts: ProjectWorkPlanCounts;
   readonly task?: ProjectWorkPlanTask | undefined;
   readonly previousTask?: ProjectWorkPlanTask | undefined;
   readonly deletedTask?: ProjectWorkPlanTask | undefined;

@@ -130,8 +130,23 @@ export type {
 export { HomeGraphService, HOME_GRAPH_KNOWLEDGE_EXTENSION, HOME_GRAPH_NODE_KINDS, HOME_GRAPH_RELATIONS, MACHINE_WRITTEN_HOME_GRAPH_RELATIONS, REPAIRS_GAP_RELATION } from './home-graph/index.js';
 export {
   ProjectPlanningService,
+  ProjectWorkPlan,
+  WORK_PLAN_TASK_STATUSES,
+  WorkPlanNotReadyError,
+  captureWorkPlanTasks,
+  isWorkPlanTaskStatus,
+  nextWorkPlanTaskStatus,
   projectPlanningCanonicalUri,
   resolveProjectPlanningSpace,
+  summarizeWorkPlanCounts,
+} from './project-planning/index.js';
+export type {
+  ProjectWorkPlanOptions,
+  WorkPlanTaskFields,
+  WorkPlanTaskMatch,
+  WorkPlanTaskMutation,
+  WorkPlanTaskPatch,
+  WorkPlanTasksObservation,
 } from './project-planning/index.js';
 export type {
   ProjectPlanningAgentAssignment,

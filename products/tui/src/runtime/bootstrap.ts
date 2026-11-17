@@ -457,10 +457,11 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
     try {
       const outcome = await autostartInstalledDaemon({
         daemonMode: externalServices.daemonStatus.mode,
+        // The service's unit and pid file live under the login home the
+        // control resolves, not this app's tree home.
         control: createDaemonServiceControl({
           configManager,
           workingDirectory: services.workingDirectory,
-          homeDirectory: services.homeDirectory,
         }),
         isReachable: async () => (await sessionSpine.probeReachability()) === 'online',
       });

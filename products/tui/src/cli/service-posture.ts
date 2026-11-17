@@ -21,10 +21,10 @@ import { realpathSync } from 'node:fs';
 import { basename, delimiter, dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
-import { resolveDaemonServiceDefault } from '@goodvibes-jev/engine/platform/platform/daemon/daemon-service-default';
+import { resolveDaemonServiceDefault, resolveServiceUnitHome } from '@goodvibes-jev/engine/platform/platform/daemon/daemon-service-default';
+import { serviceStateDirectory } from '@goodvibes-jev/engine/platform/platform/daemon/service-manager';
 import type { PlatformServiceManager } from '@goodvibes-jev/engine/platform/platform/daemon';
 import { buildManagedDaemonServiceManager, resolveConfiguredServiceName } from '@goodvibes-jev/engine/terminal-shell/managed-daemon-service';
-import { homedir } from 'node:os';
 import type { ManagedServiceStatus } from '@goodvibes-jev/engine/platform/platform/daemon';
 import { resolveDaemonEnabled } from '@goodvibes-jev/engine/platform/platform/config';
 import { resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/platform/platform/config/goodvibes-home';
@@ -271,8 +271,9 @@ export function getServiceStateRoot(runtime: CliServiceRuntime): string {
   return resolveGoodVibesDaemonHome(runtime.homeDirectory);
 }
 
-function pidFilePath(runtime: CliServiceRuntime, platform: ManagedServiceStatus['platform']): string {
-  return join(getServiceStateRoot(runtime), 'service', `${platform}.pid`);
+/** The pid file the service manager writes: under the login home, the same for the daemon and both terminal apps. */
+function pidFilePath(platform: ManagedServiceStatus['platform']): string {
+  return join(serviceStateDirectory(resolveServiceUnitHome()), `${platform}.pid`);
 }
 
 /** The slice of the config manager that names the service; provenance is optional so callers holding only `get` still resolve. */
@@ -282,7 +283,7 @@ export interface CliServiceNameSource {
 }
 
 /** The daemon unit's name: the owner's `service.serviceName`, else the platform's one default (the installer's name). */
-export function resolveCliServiceName(configManager: CliServiceNameSource, homeDirectory: string = homedir()): string {
+export function resolveCliServiceName(configManager: CliServiceNameSource, homeDirectory: string = resolveServiceUnitHome()): string {
   return resolveConfiguredServiceName(configManager as Parameters<typeof resolveConfiguredServiceName>[0], resolveDaemonServiceDefault(homeDirectory));
 }
 
@@ -346,7 +347,9 @@ export function createPlatformServiceManager(runtime: CliServiceRuntime): Platfo
   return buildManagedDaemonServiceManager({
     binaryPath: resolveGoodVibesDaemonExecutable().command,
     homeDir: runtime.homeDirectory,
-    unitHomeDir: runtime.homeDirectory,
+    // The unit and its pid file go under the login home, as the daemon's own
+    // service manager reads them, whatever tree home this app runs on.
+    unitHomeDir: resolveServiceUnitHome(),
     daemonHomeDirectory: getServiceStateRoot(runtime),
     workingDirectory: runtime.homeDirectory,
     configManager: runtime.configManager,
@@ -416,7 +419,7 @@ export async function buildCliServicePosture(
     config,
     managed: {
       ...status,
-      pidPath: pidFilePath(runtime, status.platform),
+      pidPath: pidFilePath(status.platform),
       lastError: status.actionError ?? null,
     },
     endpoints,

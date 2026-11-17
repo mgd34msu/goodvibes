@@ -12,7 +12,6 @@
  * native cohort; a legacy binary alone is never described as that cohort.
  */
 import { spawnSync } from 'node:child_process';
-import { homedir } from 'node:os';
 import {
   applyVerifiedUpdate,
   captureUpdateFileIo,
@@ -309,7 +308,7 @@ export function restartHandedOverDaemon(
     // The manager reads settings through `get` alone.
     configManager: configManager as unknown as ConfigManager,
     workingDirectory: options.workingDirectory ?? process.cwd(),
-    homeDirectory: options.homeDirectory ?? homedir(),
+    ...(options.homeDirectory ? { homeDirectory: options.homeDirectory } : {}),
   });
   const installed = control.snapshot().filter((entry) => entry.installed);
   const target = installed.find((entry) => entry.running)

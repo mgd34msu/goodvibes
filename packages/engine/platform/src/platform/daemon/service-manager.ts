@@ -59,6 +59,11 @@ export interface ManagedServiceActionResult {
 
 interface ManagedServicePaths {
   readonly workingDirectory: string;
+  /**
+   * The login home the unit is registered under and the service keeps its pid
+   * file and log under (`resolveServiceUnitHome`). Every process that manages
+   * the service passes the same one, never a GOODVIBES_HOME tree.
+   */
   readonly homeDirectory: string;
 }
 

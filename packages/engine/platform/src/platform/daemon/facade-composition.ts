@@ -60,7 +60,7 @@ import { createRuntimeServices, type RuntimeServices } from '../runtime/services
 import { createAsyncDisposalScope, type AsyncDisposalScope } from '../runtime/async-disposal.js';
 import type { DaemonConfig, PendingSurfaceReply } from './types.js';
 import { PlatformServiceManager } from './service-manager.js';
-import { resolveDaemonServiceDefault } from './daemon-service-default.js';
+import { resolveDaemonServiceDefault, resolveServiceUnitHome } from './daemon-service-default.js';
 import type { ResolvedInboundTlsContext } from '../runtime/network/index.js';
 import { createBrokeredPermissionManager } from '../runtime/permissions/permission-composition.js';
 // Re-export type definitions from the dedicated types module.
@@ -478,11 +478,13 @@ export function resolveDaemonFacadeRuntime(
     channelPlugins: runtimeServices.channelPlugins,
     watcherRegistry: runtimeServices.watcherRegistry,
     triggerManager: runtimeServices.triggerManager,
+    // The login home, as the terminal apps use: the unit and the service's pid
+    // file live there, whatever GOODVIBES_HOME this daemon's tree is under.
     platformServiceManager: new PlatformServiceManager(resolvedConfigManager, {
       workingDirectory: runtimeServices.workingDirectory,
-      homeDirectory: runtimeServices.homeDirectory,
+      homeDirectory: resolveServiceUnitHome(),
       binaryBaseName: 'goodvibes',
-      defaultServiceName: resolveDaemonServiceDefault(runtimeServices.homeDirectory),
+      defaultServiceName: resolveDaemonServiceDefault(resolveServiceUnitHome()),
       defaultServiceDescription: 'goodvibes omnichannel daemon host',
       featureFlags: runtimeServices.featureFlags,
     }),

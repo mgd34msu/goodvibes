@@ -37,7 +37,7 @@
  * - Every failure is reported and none of them break boot. Discovery failing is
  *   a reason to say so, not a reason to refuse to start.
  */
-import { DAEMON_SERVICE_NAME, PlatformServiceManager, resolveDaemonServiceDefault, type ManagedServiceActionResult, type ManagedServiceStatus } from '../../daemon/index.js';
+import { DAEMON_SERVICE_NAME, PlatformServiceManager, resolveDaemonServiceDefault, resolveServiceUnitHome, type ManagedServiceActionResult, type ManagedServiceStatus } from '../../daemon/index.js';
 import { logger, summarizeError } from '../../utils/index.js';
 import type { ConfigManager } from '../../config/manager.js';
 
@@ -82,7 +82,12 @@ export interface DaemonServiceControl {
 export interface DaemonServiceControlOptions {
   readonly configManager: ConfigManager;
   readonly workingDirectory: string;
-  readonly homeDirectory: string;
+  /**
+   * The login home the service's unit and pid file live under. Defaults to
+   * {@link resolveServiceUnitHome}; never the GOODVIBES_HOME tree, which the
+   * service manager does not read. Pass it only to scope the control elsewhere.
+   */
+  readonly homeDirectory?: string | undefined;
   /** Injectable systemctl/launchctl/schtasks runner. */
   readonly actionRunner?: ((command: string, args: readonly string[]) => DaemonServiceActionResult) | undefined;
 }
@@ -96,10 +101,11 @@ export interface DaemonServiceControlOptions {
  * is still found.
  */
 export function createDaemonServiceControl(options: DaemonServiceControlOptions): DaemonServiceControl {
+  const unitHome = options.homeDirectory ?? resolveServiceUnitHome();
   const configuredName = String(options.configManager.get('service.serviceName') ?? '').trim();
   const candidateNames = configuredName
     ? [configuredName]
-    : [...new Set([resolveDaemonServiceDefault(options.homeDirectory), MANAGED_DAEMON_SERVICE_NAME, EARLIER_DAEMON_SERVICE_NAME, LEGACY_DAEMON_SERVICE_NAME])];
+    : [...new Set([resolveDaemonServiceDefault(unitHome), MANAGED_DAEMON_SERVICE_NAME, EARLIER_DAEMON_SERVICE_NAME, LEGACY_DAEMON_SERVICE_NAME])];
   // Pin each manager's view of `service.serviceName` to its candidate so the
   // manager's own resolution yields exactly that unit; the schema default would
   // otherwise shadow every `defaultServiceName`. Only `get` is consulted by the
@@ -111,7 +117,7 @@ export function createDaemonServiceControl(options: DaemonServiceControlOptions)
     resolvedName,
     manager: new PlatformServiceManager(pinnedConfigView(resolvedName), {
       workingDirectory: options.workingDirectory,
-      homeDirectory: options.homeDirectory,
+      homeDirectory: unitHome,
       defaultServiceName: resolvedName,
       ...(options.actionRunner ? { actionRunner: options.actionRunner } : {}),
     }),

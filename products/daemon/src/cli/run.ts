@@ -1,5 +1,4 @@
 /** CLI dispatch without import-time startup. Adapted from the upstream daemon/cli. */
-import { homedir } from 'node:os';
 import { writeSync } from 'node:fs';
 // Each command's module loads when that command is chosen, so `--version`,
 // `--help` and `status` never load serving, MCP, cluster or service code.
@@ -233,6 +232,7 @@ export async function runDaemonCli(argv: readonly string[], options: DaemonCliOp
       }
       default: {
         const { isDaemonServiceSubcommand, runDaemonServiceCli, resolveInstalledDaemonBinary } = await import('../daemon/service-commands.js');
+        const { resolveServiceUnitHome } = await import('@goodvibes-jev/engine/platform/platform/daemon/daemon-service-default');
         if (!isDaemonServiceSubcommand(cli.command)) return refuse('This command has no migrated dispatcher.');
         const servicePlatform = config.get('service.platform');
         if (configuration.isOverridden && ['install-service', 'start-service', 'restart-service'].includes(cli.command)
@@ -243,7 +243,7 @@ export async function runDaemonCli(argv: readonly string[], options: DaemonCliOp
         return result(await runDaemonServiceCli({ subcommand: cli.command,
           binaryPath: serviceExecutable?.binaryPath ?? options.serviceBinaryPath ?? resolveInstalledDaemonBinary({ moduleUrl: import.meta.url }),
           ...(serviceExecutable ? { assertCurrent: serviceExecutable.assertCurrent } : {}),
-          configManager: config, homeDir: homeDirectory, daemonHomeDirectory, unitHomeDir: env.HOME?.trim() || homedir(), workingDirectory,
+          configManager: config, homeDir: homeDirectory, daemonHomeDirectory, unitHomeDir: resolveServiceUnitHome(env), workingDirectory,
           requireInstalledDefinitionMatch: configuration.isOverridden || cli.flags.workingDir !== undefined
             || env.GOODVIBES_WORKING_DIR !== undefined, actionRunner: options.serviceActionRunner,
           json: cli.flags.json,

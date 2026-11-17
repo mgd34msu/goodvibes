@@ -144,12 +144,12 @@ export function createStandaloneDaemonHost(options: {
  */
 function defaultDaemonHost(config: DaemonRepairConfig): DaemonHost | null {
   if (!(config instanceof ConfigManager)) return null;
-  const homeDirectory = config.getHomeDirectory();
   const workingDirectory = config.getWorkingDirectory();
-  if (!homeDirectory || !workingDirectory) return null;
+  if (!workingDirectory) return null;
   return createStandaloneDaemonHost({
     config,
-    control: createDaemonServiceControl({ configManager: config, workingDirectory, homeDirectory }),
+    // The service's unit lives under the login home, not this config's tree home.
+    control: createDaemonServiceControl({ configManager: config, workingDirectory }),
   });
 }
 

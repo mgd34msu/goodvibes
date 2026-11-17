@@ -184,10 +184,11 @@ export function wireAgentExternalServices(options: {
   // boot never needs it.
   let serviceControl: DaemonServiceControl | null = null;
   const daemonServiceControl = (): DaemonServiceControl => {
+    // The service's unit and pid file live under the login home the control
+    // resolves, not this app's tree home.
     serviceControl ??= options.connectedHostAutostart?.control ?? createDaemonServiceControl({
       configManager: services.configManager,
       workingDirectory: services.workingDirectory,
-      homeDirectory: services.homeDirectory,
     });
     return serviceControl;
   };

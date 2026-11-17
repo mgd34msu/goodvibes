@@ -23,7 +23,7 @@ export type {
   HostedSessionCompositionInput,
 } from './hosted-sessions-composition.js';
 export { PlatformServiceManager, MANAGED_UNIT_RESTART_POLICY, managedUnitStartDeadlineMs, SERVICE_STATE_ROOT, serviceStateDirectory } from './service-manager.js';
-export { DAEMON_SERVICE_NAME, DARWIN_DAEMON_SERVICE_LABEL, resolveDaemonServiceDefault } from './daemon-service-default.js';
+export { DAEMON_SERVICE_NAME, DARWIN_DAEMON_SERVICE_LABEL, resolveDaemonServiceDefault, resolveServiceUnitHome } from './daemon-service-default.js';
 
 export type { ManagedServiceActionResult, ManagedServiceStatus } from './service-manager.js';
 export { isPortAvailable, requirePortAvailable } from './port-check.js';

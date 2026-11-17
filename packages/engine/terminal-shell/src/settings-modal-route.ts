@@ -82,14 +82,15 @@ export function createSettingsModalRoute<Context extends { readonly openSelectio
   readonly toggleFocusKey: 'toggleFocusRegion' | 'toggleFocusPane';
   readonly cancelInlineEditOnEscape: boolean;
   readonly toggleFlagCategory: boolean;
-  readonly openSettingsAction: (context: Context, action: Action, requestRender: () => void, changed: () => void, setExecutionMode: (value: string) => void) => void;
+  /** `close` shuts the settings modal, for an action that continues outside it (a command with its own prompts). */
+  readonly openSettingsAction: (context: Context, action: Action, requestRender: () => void, changed: () => void, setExecutionMode: (value: string) => void, close: () => void) => void;
 }) {
   function consumeSettingsPickerRequest(state: SettingsRouteState<Context, Target, Action>): void {
     const settingsAction = state.settingsModal.pendingSettingsPickerAction ?? null;
     if (settingsAction !== null) {
       state.settingsModal.pendingSettingsPickerAction = null;
       if (!state.commandContext) return;
-      policy.openSettingsAction(state.commandContext, settingsAction, state.requestRender, () => { state.settingsModal.refreshPickerValues?.(); state.requestRender(); }, value => state.settingsModal.setPickerExecutionMode?.(value));
+      policy.openSettingsAction(state.commandContext, settingsAction, state.requestRender, () => { state.settingsModal.refreshPickerValues?.(); state.requestRender(); }, value => state.settingsModal.setPickerExecutionMode?.(value), state.handleEscape);
       return;
     }
     const providerModelTarget = state.settingsModal.pendingProviderModelPickerTarget ?? null;

@@ -131,7 +131,7 @@ export class SettingsModal extends TerminalSettingsModalState<
   SettingsCategory,
   SettingEntry,
   ModelPickerTarget,
-  'tts-provider' | 'tts-voice' | 'theme' | SettingsChoiceAction
+  'tts-provider' | 'tts-voice' | 'theme' | SettingsChoiceAction | 'payments-cards'
 > {
   public searchFocused = false;
   /** Index into SETTINGS_CATEGORIES. */

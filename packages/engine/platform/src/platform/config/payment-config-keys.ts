@@ -1,10 +1,5 @@
-/** Canonical payment config references. Card bytes remain in the daemon secret store. */
+/** Canonical payment config references. Cards live in the daemon card store, never in settings. */
 import type { ConfigKey } from './schema.js';
-
-export const PAYMENTS_CARD_NUMBER_CONFIG_KEY = 'payments.cardNumber' as ConfigKey;
-export const PAYMENTS_CARD_EXPIRY_CONFIG_KEY = 'payments.cardExpiry' as ConfigKey;
-export const PAYMENTS_CARD_CVV_CONFIG_KEY = 'payments.cardCvv' as ConfigKey;
-export const PAYMENTS_CARD_CARDHOLDER_NAME_CONFIG_KEY = 'payments.cardholderName' as ConfigKey;
 
 /** The real platform schema key for the CVV-handling selector, not synthetic. */
 export const PAYMENTS_CVV_HANDLING_CONFIG_KEY: ConfigKey = 'payments.cvvHandling';
@@ -71,11 +66,19 @@ export function paymentsAddressConfigKeys(kind: PaymentsAddressKind): readonly C
   return PAYMENTS_ADDRESS_FIELD_SUFFIXES.map((field) => paymentsAddressConfigKey(kind, field));
 }
 
+/**
+ * Retired settings that once held a card's number, expiry, security code and
+ * cardholder name. No purchase ever read them: cards are added with
+ * `/payments card` (or the web UI) into the daemon card store. The names stay
+ * declared as card material so any write to them is refused, and the daemon
+ * deletes what an older build stored under them when it starts
+ * (daemon/facade-boot-guarantees.ts).
+ */
 export const PAYMENTS_SYNTHETIC_CONFIG_KEYS: readonly ConfigKey[] = [
-  PAYMENTS_CARD_NUMBER_CONFIG_KEY,
-  PAYMENTS_CARD_EXPIRY_CONFIG_KEY,
-  PAYMENTS_CARD_CVV_CONFIG_KEY,
-  PAYMENTS_CARD_CARDHOLDER_NAME_CONFIG_KEY,
+  'payments.cardNumber' as ConfigKey,
+  'payments.cardExpiry' as ConfigKey,
+  'payments.cardCvv' as ConfigKey,
+  'payments.cardholderName' as ConfigKey,
 ];
 
 export function isPaymentsSyntheticConfigKey(key: string): key is ConfigKey {

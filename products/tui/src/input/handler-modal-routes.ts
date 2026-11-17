@@ -6,16 +6,23 @@ import {
   createProfilePickerTokenRoute,
 } from '@goodvibes-jev/engine/terminal-shell/searchable-modal-route';
 import { createSettingsModalRoute } from '@goodvibes-jev/engine/terminal-shell/settings-modal-route';
+import { openPaymentsCardsFromSettings } from '@goodvibes-jev/engine/terminal-shell/payments-settings';
 export const { handleSettingsModalToken } = createSettingsModalRoute<
   CommandContext,
   import('./model-picker.ts').ModelPickerTarget,
-  'tts-provider' | 'tts-voice' | 'theme' | SettingsChoiceAction
+  'tts-provider' | 'tts-voice' | 'theme' | SettingsChoiceAction | 'payments-cards'
 >({
   focusKey: 'focusRegion',
   toggleFocusKey: 'toggleFocusRegion',
   cancelInlineEditOnEscape: true,
   toggleFlagCategory: false,
-  openSettingsAction(context, action, requestRender, changed, setExecutionMode) {
+  openSettingsAction(context, action, requestRender, changed, setExecutionMode, close) {
+    if (action === 'payments-cards') {
+      // The card entry prompts in the composer, so Settings closes first.
+      close();
+      void openPaymentsCardsFromSettings(context).finally(requestRender);
+      return;
+    }
     if (action === 'decision-router') { openDecisionRouterSettings(context, changed); return; }
     if (action === 'judgment-provider' || action === 'judgment-model' || action === 'judgment-fallbacks' || action === 'decision-policy' || action === 'permission-mode') {
       openSettingsChoice(context, action, changed, setExecutionMode);

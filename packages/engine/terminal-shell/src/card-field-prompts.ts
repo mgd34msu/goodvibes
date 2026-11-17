@@ -308,7 +308,7 @@ export function describeCard(card: CardSummary): string {
 
 /** Status lines for the cards the host holds: metadata only, nothing that could rebuild a card. */
 export function renderCardList(list: { readonly cards: readonly CardSummary[]; readonly defaultCardId: string }): string[] {
-  const lines = ['Payment cards on the selected daemon:'];
+  const lines = [`Payment cards on the selected daemon: ${list.cards.length}`];
   if (list.cards.length === 0) lines.push('  none. Run /payments card to add one.');
   for (const card of list.cards) lines.push(`  ${card.id === list.defaultCardId ? '*' : ' '} ${describeCard(card)} [id ${stripDangerousAnsi(card.id)}]`);
   lines.push('');

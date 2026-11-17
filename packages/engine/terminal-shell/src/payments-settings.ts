@@ -1,16 +1,10 @@
 /** Payment settings rows shared by both terminal apps. */
 import type { ConfigManager, ConfigKey, ConfigSetting } from '@goodvibes-jev/engine/platform/platform/config';
 export {
-  PAYMENTS_CARD_NUMBER_CONFIG_KEY,
-  PAYMENTS_CARD_EXPIRY_CONFIG_KEY,
-  PAYMENTS_CARD_CVV_CONFIG_KEY,
-  PAYMENTS_CARD_CARDHOLDER_NAME_CONFIG_KEY,
   PAYMENTS_CVV_HANDLING_CONFIG_KEY,
   PAYMENTS_ADDRESS_FIELD_SUFFIXES,
-  PAYMENTS_SYNTHETIC_CONFIG_KEYS,
   paymentsAddressConfigKey,
   paymentsAddressConfigKeys,
-  isPaymentsSyntheticConfigKey,
 } from '@goodvibes-jev/engine/platform/platform/config';
 export type { PaymentsAddressKind } from '@goodvibes-jev/engine/platform/platform/config';
 export type PaymentsConfigReader = Pick<ConfigManager, 'get'>;
@@ -33,11 +27,31 @@ export function buildPaymentsCardsRow(): PaymentsSettingEntry {
       key: PAYMENTS_CARDS_ROW_KEY,
       type: 'string',
       default: '',
-      description: 'Cards purchases can use. Add, list and remove them with /payments card (or Payments in the web UI); Settings never takes a card number.',
+      description: 'Cards purchases can use. Enter closes Settings, lists the cards on the daemon with their count, and starts /payments card to add one (Esc stops it); /payments card remove <id> deletes one. Settings never takes a card number.',
     },
-    currentValue: 'managed with /payments card',
+    currentValue: 'Enter: list cards and add one',
     isDefault: true,
     locked: true,
     lockReason: 'Cards are managed with /payments card or the web UI.',
   };
+}
+
+/** What the cards row needs from the command context: the command runner the composer uses. */
+export interface PaymentsCardsRowContext {
+  readonly print: (message: string) => void;
+  readonly executeCommand?: ((name: string, args: string[]) => Promise<boolean>) | undefined;
+}
+
+/**
+ * Enter on the cards row, after Settings has closed: list the cards the daemon
+ * holds (with their count, from `payments.cards.list`), then start the masked
+ * card entry, exactly as `/payments status` and `/payments card` do.
+ */
+export async function openPaymentsCardsFromSettings(context: PaymentsCardsRowContext): Promise<void> {
+  if (!context.executeCommand) {
+    context.print('Run /payments status to list your cards and /payments card to add one.');
+    return;
+  }
+  await context.executeCommand('payments', ['status']);
+  await context.executeCommand('payments', ['card']);
 }

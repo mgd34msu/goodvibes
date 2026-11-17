@@ -15,6 +15,7 @@ import { handleConfirmInput } from '../views/confirm-state.ts';
 import type { FlagEntry, McpEntry, SettingEntry, SubscriptionEntry } from './settings-modal-types.ts';
 import { buildMcpEntries, buildSubscriptionEntries } from './settings-modal-data.ts';
 import { modelPickerLaunchForKey } from '@goodvibes-jev/engine/terminal-shell/settings-behavior';
+import { PAYMENTS_CARDS_ROW_KEY } from '@goodvibes-jev/engine/terminal-shell/payments-settings';
 import { listSettingEditText } from './settings-modal-lists.ts';
 import type { ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
 import type { SubscriptionManager } from '@goodvibes-jev/engine/platform/platform/config';
@@ -37,7 +38,7 @@ export interface ActivateSelectedContext {
   setEditBuffer(value: string): void;
   setMcpAllowAllConfirmationTarget(value: string | null): void;
   setSubscriptionLogoutConfirmationTarget(value: string | null): void;
-  setPendingSettingsPickerAction(value: 'tts-provider' | 'tts-voice' | 'theme' | SettingsChoiceAction | null): void;
+  setPendingSettingsPickerAction(value: 'tts-provider' | 'tts-voice' | 'theme' | SettingsChoiceAction | 'payments-cards' | null): void;
   setPendingModelPickerTarget(value: ModelPickerTarget | null): void;
   setPendingProviderModelPickerTarget(value: ModelPickerTarget | null): void;
 }
@@ -75,6 +76,8 @@ export function activateSelected(ctx: ActivateSelectedContext): void {
 
   const choice = SETTINGS_CHOICE_ACTIONS[setting.key];
   if (choice) { ctx.setPendingSettingsPickerAction(choice); return; }
+  // The cards row lists the daemon's cards and starts /payments card.
+  if (setting.key === PAYMENTS_CARDS_ROW_KEY) { ctx.setPendingSettingsPickerAction('payments-cards'); return; }
 
   // Delegate provider/model picker settings to the model picker UI
   if (setting.key === 'tts.provider') {

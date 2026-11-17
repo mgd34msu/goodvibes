@@ -9,7 +9,7 @@ const fields: Readonly<Record<FieldKind, ReadonlySet<string>>> = {
   secret: new Set(['password', 'passwd', 'loginpassword', 'apikey', 'accesstoken', 'refreshtoken', 'idtoken', 'authorization',
     'proxyauthorization', 'cookie', 'setcookie', 'credential', 'credentials', 'credentialref', 'token', 'privatekey', 'signingkey',
     'secret', 'clientsecret', 'unlockpassphrase', 'privatesigningmaterial',
-    'pan', 'cvv', 'cvc', 'cardnumber', 'cardexpiry', 'ccnumber', 'cccsc', 'ccexp', 'ccexpmonth', 'ccexpyear']),
+    'pan', 'cvv', 'cvc', 'csc', 'securitycode', 'cardsecuritycode', 'cardnumber', 'cardexpiry', 'ccnumber', 'cccsc', 'ccexp', 'ccexpmonth', 'ccexpyear']),
   owner_profile: new Set(['shippingaddress', 'billingaddress', 'homeaddress', 'emailaddress', 'phonenumber', 'privateaddress', 'quiethours']),
   content: new Set(['message', 'body', 'text', 'content', 'prompt', 'response', 'stdout', 'stderr', 'output', 'error', 'stack',
     'summary', 'hint', 'name', 'note', 'description', 'reasoningcontent', 'reasoningsummary', 'instructions', 'document', 'transcript', 'title',

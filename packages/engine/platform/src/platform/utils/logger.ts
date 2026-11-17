@@ -1,6 +1,7 @@
 import { appendFileSync, mkdirSync, existsSync, statSync, renameSync } from 'fs';
 import { dirname, join } from 'path';
-import { redactDiagnosticValue } from './redaction.js';
+import { redactDiagnosticText, redactDiagnosticValue } from './redaction.js';
+import { redactCardShapes } from '../security/card-shapes.js';
 
 /** Maximum buffered entries before a flush is triggered. */
 const LOG_BUFFER_MAX = 10;
@@ -366,9 +367,12 @@ export class ActivityLogger {
     // a number nobody will ever read.
     if (this.degraded) return;
     const timestamp = new Date().toISOString();
-    let entry = `[${timestamp}] [${level}] ${message}\n`;
+    // The message is masked like the fields: a card number, a labelled code or
+    // expiry, or a credential in either never reaches the file. Paths stay, the
+    // log is the owner's own.
+    let entry = `[${timestamp}] [${level}] ${redactDiagnosticText(redactCardShapes(message), { anonymize: false })}\n`;
     if (data) {
-      entry += '```json\n' + JSON.stringify(redactDiagnosticValue(data), null, 2) + '\n```\n';
+      entry += '```json\n' + redactCardShapes(JSON.stringify(redactDiagnosticValue(data), null, 2)) + '\n```\n';
     }
     this.buffer.push(entry);
     this.enforceBufferCap();

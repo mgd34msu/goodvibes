@@ -1,10 +1,11 @@
 /**
  * Card material goes to the daemon's encrypted secret store and nowhere else:
  * not in plain text on disk, not into a settings key a surface can write, not
- * back out of a page the daemon typed it into, and not through a browser error
- * that quotes what it was asked to type.
+ * into the activity log, not back out of a page the daemon typed it into, and
+ * not through a browser error that quotes what it was asked to type.
  *
- * Real secret store, ownership rules, settings schema, card fill and redactor.
+ * Real secret store, ownership rules, settings schema, card fill, redactor and
+ * activity logger.
  * The checkout page is a stand-in for the merchant's browser page. The card
  * values are obvious fixtures.
  */
@@ -21,6 +22,7 @@ import { CardMaterialRedactor } from '../platform/src/platform/payments/card-red
 import { CheckoutRegistry, MemoryCheckoutJournal, type InFlightCheckout } from '../platform/src/platform/payments/checkout-registry.js';
 import type { CardMaterial, CardMaterialStore } from '../platform/src/platform/payments/card-material.js';
 import type { CheckoutPageDriver } from '../platform/src/platform/payments/checkout-page.js';
+import { ActivityLogger } from '../platform/src/platform/utils/logger.js';
 
 const PAN = '4242424242424242';
 const CVV_SENTINEL = 'CVV-SENTINEL-9f3a1c7d';
@@ -111,4 +113,20 @@ test('after a fill, the page cannot read the number or code back out, however it
   expect(read.replace(/\D/g, '')).not.toContain(PAN);
   expect(read).not.toMatch(/(?<!\d)737(?!\d)/);
   expect(read).toContain('$41.73');
+});
+
+test('card material written into an activity log entry, in its message or its fields, never reaches the file', () => {
+  const { home } = secrets();
+  const log = new ActivityLogger();
+  log.configure(join(home, 'logs'));
+  log.warn(`Driver error: fill #cc ${PAN}, then 4242 4242 4242 4242 with security code ${CVV}`, {
+    number: PAN, securityCode: CVV, csc: CVV, cvv: CVV, detail: `card ${PAN.replace(/(\d{4})(?=\d)/g, '$1-')}`, total: '$41.73',
+  });
+  log.flushSync();
+  const written = readFileSync(join(home, 'logs', 'activity.md'), 'utf8');
+  expect(written).toContain('Driver error');
+  expect(written).toContain('$41.73');
+  expect(written.replace(/\D/g, '')).not.toContain(PAN);
+  expect(written).not.toMatch(/(?<!\d)737(?!\d)/);
+  log.dispose();
 });

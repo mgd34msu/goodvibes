@@ -570,6 +570,8 @@ export class ArtifactStore {
   async #createFromStream(input: ArtifactStreamCreateInput, ownership: ArtifactWriteOwnership, retainLease?: (lease: ArtifactPublicationLease) => void): Promise<ArtifactDescriptor> {
     const check = () => { ownership.signal?.throwIfAborted(); assertArtifactWriteCurrent(ownership); this.storageOwner.assertCurrent(); };
     check();
+    // A store that is written to but never listed still drops expired files.
+    this.pruneExpired();
     const id = `artifact-${crypto.randomUUID()}`;
     const filename = sanitizeArtifactFilename(input.filename, 'artifact');
     const contentPath = assertWithinArtifactRoot(this.rootDir, join(this.rootDir, `${id}.data`), 'Artifact content path');
@@ -869,8 +871,9 @@ export class ArtifactStore {
 
   /**
    * Sweep the whole store at most once per {@link PRUNE_INTERVAL_MS}, from a
-   * listing. One `stat` per stored artifact is paid by a list now and then,
-   * never by a lookup; a lookup checks only its own record's expiry.
+   * listing or a write. One `stat` per stored artifact is paid by a list or a
+   * write now and then (otherwise one integer compare), never by a lookup; a
+   * lookup checks only its own record's expiry.
    */
   private pruneExpired(now = Date.now()): void {
     if (now - this.lastPrunedAt < PRUNE_INTERVAL_MS) return;

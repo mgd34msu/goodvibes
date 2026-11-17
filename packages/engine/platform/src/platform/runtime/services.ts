@@ -566,11 +566,12 @@ export function composeRuntimeServices<X extends object = Record<never, never>>(
     scope.dispose();
     throw error;
   }
-  if (!product.extras) return base as Omit<ComposedRuntimeServices, keyof X> & X;
   try {
     // Merged by descriptor, not by spread: a member a product chose to open on
-    // demand stays a getter instead of being opened by the merge.
-    const extras = product.extras(base, scope);
+    // demand stays a getter instead of being opened by the merge. A product
+    // with no extras goes through the same merge, so the one result type
+    // describes every graph this returns.
+    const extras = product.extras?.(base, scope) ?? {};
     return Object.defineProperties({}, {
       ...Object.getOwnPropertyDescriptors(base),
       ...Object.getOwnPropertyDescriptors(extras),

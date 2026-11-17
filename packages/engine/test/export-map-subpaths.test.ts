@@ -44,16 +44,24 @@ describe('engine exports map', () => {
     expect(wrong).toEqual([]);
   });
 
-  test('every code subpath resolves and loads through the package name', async () => {
-    const failed: string[] = [];
-    for (const [subpath, target] of modules) {
-      if (target.bun?.endsWith('.d.ts')) continue;
-      try {
-        await import(`${manifest.name}${subpath.slice(1)}`);
-      } catch (error) {
-        failed.push(`${subpath}: ${error instanceof Error ? error.message : String(error)}`);
+  // Loading every code subpath loads most of the engine. It is done in slices, one
+  // test each, so each test stays well inside the per-test limit on a loaded machine;
+  // a module one slice loaded is already in the cache for the slices after it.
+  const code = modules.filter(([, target]) => !target.bun?.endsWith('.d.ts')).map(([subpath]) => subpath);
+  const SLICES = 8;
+  const size = Math.ceil(code.length / SLICES);
+  for (let start = 0; start < code.length; start += size) {
+    const slice = code.slice(start, start + size);
+    test(`code subpaths ${start + 1} to ${start + slice.length} of ${code.length} resolve and load through the package name`, async () => {
+      const failed: string[] = [];
+      for (const subpath of slice) {
+        try {
+          await import(`${manifest.name}${subpath.slice(1)}`);
+        } catch (error) {
+          failed.push(`${subpath}: ${error instanceof Error ? error.message : String(error)}`);
+        }
       }
-    }
-    expect(failed).toEqual([]);
-  });
+      expect(failed).toEqual([]);
+    });
+  }
 });

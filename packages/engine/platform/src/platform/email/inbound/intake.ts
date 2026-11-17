@@ -935,9 +935,6 @@ export function createInboundMailIntake(deps: InboundMailIntakeDeps): InboundMai
           bodiesWithheld,
         );
 
-    // Notices are switched off: an earlier refusal no longer describes anything.
-    if (deps.noticeMode() === 'none') deps.noticeHealth?.clear('notices were switched off');
-
     // THE RECORD GOES IN FIRST, and this is the ordering the file header is
     // about. Everything that can fail happens with nothing announced, so a
     // failure here produces a redelivery that announces ONCE.

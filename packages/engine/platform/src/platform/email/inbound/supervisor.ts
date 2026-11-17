@@ -321,12 +321,8 @@ export class InboundMailSupervisor {
   }
 
   private noticeRefusal(): InboundNoticeRefusalState | null {
-    // An owner who switched notices off is not being refused anything, and a
-    // refusal latched before the switch would otherwise stay `degraded` until
-    // a notice was delivered, which with notices off is never. Reading status
-    // changes nothing: the intake drops the latch when the next message
-    // arrives with notices off.
-    if (this.deps.config.get('surfaces.email.inbound.notice.mode') === 'none') return null;
+    // Switching notices off drops the latch where the setting changes (the
+    // composition root subscribes to it), so a read here is only a read.
     return this.deps.noticeHealth?.get() ?? null;
   }
 

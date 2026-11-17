@@ -600,12 +600,19 @@ export function composeInboundMail(
     const unsubscribeCredentials = options.secretsManager.onDidInvalidateCredentials?.(() => {
       if (!options.secretsManager.getCredentialMutationState?.().pending) supervisor?.recheckNow();
     });
+    // Switching notices off ends any refusal: nothing is being refused any
+    // more, and switching them back on must not revive a refusal from before.
+    const clearRefusalWhenOff = (): void => {
+      if (readNoticeMode(configManager) === 'none') noticeHealth.clear('notices were switched off');
+    };
+    clearRefusalWhenOff();
+    const unsubscribeNoticeMode = configManager.subscribe('surfaces.email.inbound.notice.mode', clearRefusalWhenOff);
     housekeeper.start(6 * 60 * 60_000);
     expectations.startSweeping(expectationSweepMs);
     // Notices held when the route was down before a restart are still owed.
     void handle.sendHeldNotices();
     releaseBackground = () => {
-      unsubscribeConfig?.(); unsubscribeCredentials?.();
+      unsubscribeConfig?.(); unsubscribeCredentials?.(); unsubscribeNoticeMode();
       handle.stop();
       housekeeper.stop(); expectations.stopSweeping();
       releaseBackground = null;

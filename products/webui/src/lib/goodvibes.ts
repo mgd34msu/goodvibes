@@ -1182,6 +1182,9 @@ export const client = {
         status: () => invokeOperator('voice.local.status', {}),
         install: () => invokeOperator('voice.local.install', {}),
       },
+      // The one setup operation (voice.setup): the daemon plans from its own
+      // facts, does what needs no answer, and returns the plan to print as-is.
+      setup: (input: OperatorMethodInput<'voice.setup'>) => invokeOperator('voice.setup', input),
       // Wake-word detection in the browser tab (voice.wake.status /
       // voice.wake.provision / voice.wake.model.get).
       //
@@ -1780,6 +1783,9 @@ export const client = {
       // treating it as fatal, an older daemon's delete route still works exactly as it
       // always did (soft-close-only), which the reconcile step then honestly reports.
       close: (sessionId: string) => invokeOperator('companion.chat.sessions.close', { sessionId }),
+      // reopen: a closed chat accepts messages again; `reopened: false` when it was open.
+      reopen: (sessionId: string, signal?: AbortSignal) =>
+        invokeOperator('companion.chat.sessions.reopen', { sessionId }, signal),
     },
     messages: {
       create: (sessionId: string, input: Parameters<typeof scopedPlatform.chat.messages.create>[1]) =>

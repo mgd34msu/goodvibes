@@ -163,6 +163,20 @@ export const builtinGatewayControlCompanionMethodDescriptors: readonly GatewayMe
     }, ['sessionId', 'status']),
   }),
   methodDescriptor({
+    id: 'companion.chat.sessions.reopen',
+    title: 'Reopen Companion Chat Session',
+    description: 'Open a closed companion-chat session again so it accepts messages. The model history is rebuilt from the saved transcript on the next send. A chat that is already open answers `reopened: false` with its current status; an unknown id is a 404 SESSION_NOT_FOUND.',
+    category: 'companion',
+    scopes: ['write:sessions'],
+    http: { method: 'POST', path: '/api/companion/chat/sessions/{sessionId}/reopen' },
+    inputSchema: objectSchema({ sessionId: STRING_SCHEMA }, ['sessionId']),
+    outputSchema: objectSchema({
+      sessionId: STRING_SCHEMA,
+      status: STRING_SCHEMA,
+      reopened: BOOLEAN_SCHEMA,
+    }, ['sessionId', 'status', 'reopened']),
+  }),
+  methodDescriptor({
     id: 'companion.chat.sessions.delete',
     title: 'Delete Companion Chat Session',
     description: 'Permanently remove a companion-chat session: the on-disk record file is deleted and the session is dropped from the shared session store, this does NOT merely close it (use companion.chat.sessions.close for a soft close). Requires the session to already be closed: deleting a still-active session is rejected with 409 SESSION_ACTIVE (close it, then delete). An unknown or already-deleted id is a 404 SESSION_NOT_FOUND, never a 200-noop.',

@@ -155,7 +155,7 @@ async function withReopen<T>(sessionId: string, run: () => Promise<T>): Promise<
   } catch (error) {
     if (!isSessionClosedError(error)) throw error;
     try {
-      await platformClient.operator.invoke('companion.chat.sessions.reopen', { sessionId });
+      await platformClient.chat.sessions.reopen(sessionId);
     } catch {
       throw error;
     }

@@ -1,85 +1,104 @@
 /**
- * The tab's one event-stream owner: the connection budget it keeps and the revocation
- * it honours.
+ * The tab's one event-stream owner: the connection budget it keeps and the
+ * revocation it honours.
+ *
+ * The real client, transport and event-stream owner run against a daemon stand-in
+ * on loopback that records every event-stream connection it receives; the
+ * assertions are on what arrived at the wire.
  */
-import { afterEach, expect, mock, test } from 'bun:test';
-import type { ServerSentEventHandlers } from '@goodvibes-jev/engine/transport-http';
+import { afterAll, afterEach, beforeAll, expect, test } from 'bun:test';
+import { nativeRequestPrimitives } from '../test-setup';
 
-const open = new Map<string, { handlers: ServerSentEventHandlers; closed: boolean }>();
-let opens = 0;
+// The page environment's own fetch cannot read a stream; a browser's can, so the platform's is put back.
+Object.assign(globalThis, nativeRequestPrimitives);
 
-mock.module('./goodvibes', () => ({
-  DEFAULT_SSE_RECONNECT: { enabled: true, baseDelayMs: 1, maxDelayMs: 2, backoffFactor: 2, maxAttempts: 3 },
-  client: {
-    streams: {
-      open: (path: string, handlers: ServerSentEventHandlers) => {
-        opens += 1;
-        const entry = { handlers, closed: false };
-        open.set(path, entry);
-        return Promise.resolve(() => { entry.closed = true; });
-      },
-    },
+interface Connection {
+  readonly path: string;
+  readonly send: (event: string, payload: unknown) => void;
+  readonly closed: Promise<void>;
+  isClosed: boolean;
+}
+
+const connections: Connection[] = [];
+const arrivals: (() => void)[] = [];
+const encoder = new TextEncoder();
+const daemon = Bun.serve({
+  hostname: '127.0.0.1', port: 0, idleTimeout: 0,
+  fetch(request) {
+    const url = new URL(request.url);
+    if (url.pathname !== '/api/control-plane/events') return new Response('not found', { status: 404 });
+    let controller!: ReadableStreamDefaultController<Uint8Array>;
+    const closed = Promise.withResolvers<void>();
+    const body = new ReadableStream<Uint8Array>({
+      start(c) { controller = c; },
+      cancel() { closed.resolve(); },
+    });
+    const connection: Connection = {
+      path: `${url.pathname}${url.search}`,
+      send: (event, payload) => controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`)),
+      closed: closed.promise,
+      isClosed: false,
+    };
+    void closed.promise.then(() => { connection.isClosed = true; });
+    request.signal.addEventListener('abort', () => closed.resolve());
+    connections.push(connection);
+    connection.send('ready', {});
+    for (const arrived of arrivals.splice(0)) arrived();
+    return new Response(body, { headers: { 'content-type': 'text/event-stream' } });
   },
-}));
+});
 
+// The client reads its daemon address when it is first imported.
+process.env.VITE_GOODVIBES_BASE_URL = `http://127.0.0.1:${daemon.port}`;
 const { subscribeEvents, subscribeEventStreamState } = await import('./event-stream');
 const { invalidateClientLifetime } = await import('./client-lifetime');
 
-const unsubscribers: (() => void)[] = [];
-const settle = async () => { for (let index = 0; index < 4; index++) await Promise.resolve(); };
-const liveConnections = () => [...open.values()].filter((entry) => !entry.closed).length;
+/** Resolves once the daemon has received `count` event-stream connections in total. */
+async function connectionsArrived(count: number): Promise<void> {
+  while (connections.length < count) await new Promise<void>((resolve) => { arrivals.push(resolve); });
+}
 
+const unsubscribers: (() => void)[] = [];
+beforeAll(() => { connections.length = 0; });
 afterEach(async () => {
   for (const unsubscribe of unsubscribers.splice(0)) unsubscribe();
-  await settle();
-  open.clear();
-  opens = 0;
+  await Promise.all(connections.map((connection) => connection.closed));
+  connections.length = 0;
 });
+afterAll(() => daemon.stop(true));
 
 test('every subscriber of a signed-in tab with a session detail and a hosted session open shares two connections', async () => {
-  const noop = () => {};
+  const ready: Promise<void>[] = [];
+  const subscribe = (domains: string[], events: string[]) => {
+    const seen = Promise.withResolvers<void>();
+    ready.push(seen.promise);
+    unsubscribers.push(subscribeEvents({ domains: domains as never, events, onEvent: () => {}, onReady: () => seen.resolve() }));
+  };
   // App-wide invalidation, session lifecycle and approvals; then a session detail's
   // compaction receipts and an attached hosted session's output and lifecycle.
-  unsubscribers.push(
-    subscribeEvents({ domains: ['tasks', 'contracts', 'gate', 'providers', 'knowledge', 'control-plane', 'fleet', 'ops', 'session'], events: ['tasks'], onEvent: noop }),
-    subscribeEvents({ domains: ['compaction'], events: ['compaction'], onEvent: noop }),
-    subscribeEvents({ domains: ['turn', 'tools'], events: ['turn', 'tools'], onEvent: noop }),
-    subscribeEvents({ domains: ['session'], events: ['hosted-session-update'], onEvent: noop }),
-  );
-  await settle();
-  expect(opens).toBe(2);
-  expect(liveConnections()).toBe(2);
-  expect([...open.keys()].sort()).toEqual([
+  subscribe(['tasks', 'contracts', 'gate', 'providers', 'knowledge', 'control-plane', 'fleet', 'ops', 'session'], ['tasks']);
+  subscribe(['compaction'], ['compaction']);
+  subscribe(['turn', 'tools'], ['turn', 'tools']);
+  subscribe(['session'], ['hosted-session-update']);
+  await Promise.all(ready);
+  expect(connections.filter((connection) => !connection.isClosed).map((connection) => connection.path).sort()).toEqual([
     '/api/control-plane/events?domains=compaction,tools,turn',
     '/api/control-plane/events?domains=contracts,control-plane,fleet,gate,knowledge,ops,providers,session,tasks',
   ]);
 });
 
-test('frames reach only the subscribers that handle their name', async () => {
-  const seen: string[] = [];
-  unsubscribers.push(
-    subscribeEvents({ domains: ['gate'], events: ['approval-update'], onEvent: (name) => seen.push(`a:${name}`) }),
-    subscribeEvents({ domains: ['session'], events: ['session-update'], onEvent: (name) => seen.push(`b:${name}`) }),
-  );
-  await settle();
-  const stream = [...open.values()][0];
-  stream?.handlers.onEvent?.('approval-update', {});
-  stream?.handlers.onEvent?.('session-update', {});
-  stream?.handlers.onEvent?.('heartbeat', {});
-  expect(seen).toEqual(['a:approval-update', 'b:session-update']);
-});
-
-test('a revoked credential ends the lane with the daemon\'s next step and a new credential reopens it', async () => {
-  let changes = 0;
-  unsubscribers.push(subscribeEventStreamState(() => { changes += 1; }));
-  unsubscribers.push(subscribeEvents({ domains: ['tasks'], events: ['tasks'], onEvent: () => {} }));
-  await settle();
-  const first = [...open.values()][0];
-  first?.handlers.onEvent?.('closed', { reason: 'credential-revoked', next: 'Sign in again or pair this device again, then reconnect.' });
-  expect(first?.closed).toBe(true);
-  expect(changes).toBeGreaterThan(0);
-  expect(opens).toBe(1);
+test('a revoked credential closes the lane without reconnecting with it, and a new credential reopens it', async () => {
+  const ended = Promise.withResolvers<void>();
+  const ready = Promise.withResolvers<void>();
+  unsubscribers.push(subscribeEvents({ domains: ['tasks'], events: ['tasks'], onEvent: () => {}, onReady: () => ready.resolve() }));
+  await ready.promise;
+  expect(connections).toHaveLength(1);
+  unsubscribers.push(subscribeEventStreamState(() => ended.resolve()));
+  connections[0]!.send('closed', { reason: 'credential-revoked', next: 'Sign in again or pair this device again, then reconnect.' });
+  await ended.promise;
+  await connections[0]!.closed;
+  expect(connections).toHaveLength(1);
   invalidateClientLifetime();
-  await settle();
-  expect(opens).toBe(2);
+  await connectionsArrived(2);
+  expect(connections[1]!.path).toBe('/api/control-plane/events?domains=tasks');
 });

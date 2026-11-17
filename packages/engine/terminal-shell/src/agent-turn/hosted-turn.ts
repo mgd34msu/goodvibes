@@ -53,6 +53,8 @@ export interface AgentTurnToolDeps {
   readonly gatewayMethods?: GatewayMethodCatalog | undefined;
   /** The Agent process's connected-host route for those verbs; the daemon passes none. */
   readonly remote?: FamilyGatewayRemote | undefined;
+  /** The credential in-process verb calls are judged under: `agent` in a turn the daemon hosts. */
+  readonly inProcessCredentialKind?: 'agent' | undefined;
   /** The owner's message for the current turn; a person lookup is refused unless it names the person. */
   readonly currentOwnerMessage?: (() => string | null | undefined) | undefined;
   /** The turn's workspace and home: the Agent's project and user stores are resolved against it. */
@@ -80,6 +82,7 @@ export function registerAgentTurnTools(registry: ToolRegistry, deps: AgentTurnTo
   const family = {
     ...(deps.gatewayMethods ? { gatewayMethods: deps.gatewayMethods } : {}),
     ...(deps.remote ? { remote: deps.remote } : {}),
+    ...(deps.inProcessCredentialKind ? { credentialKind: deps.inProcessCredentialKind } : {}),
   };
   registerAgentProfileTool(registry, {
     invoke: createProfileGatewayInvoke(family),
@@ -187,6 +190,7 @@ export function createAgentHostedTurn(deps: AgentHostedTurnDeps): HostedSurfaceT
       }
       registerAgentTurnTools(registry, {
         ...(ownProject ? { workPlan: deps.workPlan } : {}),
+        inProcessCredentialKind: 'agent',
         gatewayMethods: deps.gatewayMethods,
         shellPaths: createShellPathService({ workingDirectory: workspaceRoot, homeDirectory: deps.homeDirectory }),
         artifactStore: deps.artifactStore,

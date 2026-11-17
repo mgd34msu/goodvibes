@@ -41,6 +41,13 @@ export type FamilyGatewayRemote = <TMethodId extends OperatorMethodId>(
 export interface FamilyGatewayOptions {
   readonly gatewayMethods?: GatewayMethodCatalog | undefined;
   readonly remote?: FamilyGatewayRemote | undefined;
+  /**
+   * The credential an in-process call is made under. `agent` in a turn the
+   * daemon hosts for the Agent: the handlers then judge it as the Agent's call,
+   * exactly as they judge the paired Agent's call over the wire. Omitted ⇒ none,
+   * the in-process call an Agent process carrying the handlers makes.
+   */
+  readonly credentialKind?: 'agent' | undefined;
 }
 
 /** The contract's route for a method, `GET /api/...`, for messages and help. */
@@ -76,7 +83,7 @@ export async function invokeFamilyGatewayMethod<TMethodId extends OperatorMethod
         body,
         signal: lifetime.signal,
         isAuthorized: () => { assertCurrent(); return true; },
-        context: { clientKind: 'goodvibes-agent', principalKind },
+        context: { clientKind: 'goodvibes-agent', principalKind, ...(options.credentialKind ? { credentialKind: options.credentialKind } : {}) },
       };
       bindProfileMutationOptionsToInvocation(lifetime, invocation);
       const data = await catalog.invoke(methodId, invocation);

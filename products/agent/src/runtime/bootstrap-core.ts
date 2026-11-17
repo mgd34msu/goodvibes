@@ -188,6 +188,15 @@ export async function initializeBootstrapCore(
   // unrelated later write behaves. Cleared by services.dispose().
   installAgentDaemonCredentialsClient(services.daemonCredentialsClient);
   installAgentDaemonConfigClient(services.daemonConfigClient);
+  // While the connected host is reachable it is the one writer of its own
+  // settings: a daemon-owned key set anywhere in this process goes to it.
+  const daemonConfigClient = services.daemonConfigClient;
+  configManager.attachDaemonRoute({
+    reachable: () => daemonConfigClient.reachable(),
+    write: (key, value) => daemonConfigClient.set(key, value),
+    ...(daemonConfigClient.reset ? { reset: (key: string) => daemonConfigClient.reset!(key) } : {}),
+    refused: (key, error) => logger.warn('The connected host refused a setting written from the Agent; the previous value is back', { key, error: summarizeError(error) }),
+  });
   const providerRegistry = services.providerRegistry;
   let keybindingNotices: readonly string[] = [];
   initializeTerminalCatalog(providerRegistry, services.benchmarkStore, () => { keybindingNotices = services.keybindingsManager.loadFromDisk(); });

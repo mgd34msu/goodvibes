@@ -194,7 +194,6 @@ export async function submitAgentWorkspaceEmailConnectWizardEditor(
     const cm = configManager as unknown as {
       get: (key: string) => unknown;
       setDynamic: (key: string, value: unknown) => void;
-      save: () => void;
     };
     if (keepStoredPassword && !readMailboxStatus((key) => cm.get(key)).passwordStored) {
       host.localEditor = { ...editor, message: 'Nothing was saved: a password is required because none is stored yet.' };
@@ -231,7 +230,7 @@ export async function submitAgentWorkspaceEmailConnectWizardEditor(
     // write most likely to refuse, and then nothing else has changed), then the
     // plain values. The mailbox is in use once the set is complete.
     if (!keepStoredPassword) {
-      const stored = await persistMailboxField(cm, secretsManager, 'password', password);
+      const stored = await persistMailboxField(cm, secretsManager, 'password', password, writeRouted);
       if (!stored.ok) throw new Error(stored.error ?? 'Could not store the password.');
       written.push(MAILBOX_FIELDS.password);
     }
@@ -239,7 +238,6 @@ export async function submitAgentWorkspaceEmailConnectWizardEditor(
       await writeRouted(key, value);
       written.push(key);
     }
-    cm.save();
 
     host.localEditor = null;
     host.runtimeSnapshot = buildAgentWorkspaceRuntimeSnapshot(context);

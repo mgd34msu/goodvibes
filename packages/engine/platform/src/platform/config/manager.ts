@@ -189,6 +189,27 @@ export type { ConfigKeyTier, ConfigKeySource } from './manager-key-source.js';
 
 export interface ConfigSetOptions {
   bypassManagedLock?: boolean | undefined;
+  /**
+   * The caller established that no daemon is running to apply a daemon-owned
+   * setting, so it is written to the daemon's settings file for the daemon to
+   * read when it starts. Only the routed write (daemon-config-route.ts and the
+   * settings screens' offline branch) states this.
+   */
+  daemonNotRunning?: boolean | undefined;
+}
+
+/**
+ * How a process that does not own the daemon's settings file writes a
+ * daemon-owned setting while the daemon is reachable: through the daemon
+ * (`config.set` / `config.reset`), never into the daemon's file.
+ */
+export interface DaemonWriteRoute {
+  /** Whether the daemon can take a write now; no request is made. */
+  reachable(): boolean;
+  write(key: string, value: unknown): Promise<void>;
+  reset?(key: string): Promise<void>;
+  /** The daemon refused a forwarded write; this process's view of the key was put back. */
+  refused?(key: string, error: unknown): void;
 }
 
 /** One setting in a {@link ConfigManager.setMany} update. */
@@ -311,6 +332,8 @@ export class ConfigManager {
   private readonly daemonTierPath: string | null;
   /** True only in the daemon composition, the runtime allowed to REWRITE that store. */
   private readonly daemonTierOwner: boolean;
+  /** Attached by a client's composition: while the daemon is reachable, its settings are written only through it. */
+  #daemonRoute: DaemonWriteRoute | null = null;
   /** Shared keys whose value the last load actually sourced from the shared tier file. */
   private readonly sharedKeysPresent = new Set<ConfigKey>();
   /** Daemon-owned keys the last load sourced from the daemon store. */
@@ -1136,6 +1159,77 @@ export class ConfigManager {
    * promise persistence; callers must still commit through setDynamic().
    * Policy reads are strict and never repair or quarantine a file.
    */
+  /**
+   * Attach the connected daemon. While it is reachable, a daemon-owned
+   * setting written in this process goes to the daemon (the one writer of its
+   * settings file) and this process's view takes the value at once; a refusal
+   * puts the previous value back and is reported through `route.refused`.
+   * With no daemon reachable, the daemon's settings file is written for it to
+   * read when it starts. Returns a detach function.
+   */
+  attachDaemonRoute(route: DaemonWriteRoute | null): () => void {
+    this.#daemonRoute = route;
+    return () => { if (this.#daemonRoute === route) this.#daemonRoute = null; };
+  }
+
+  /** The route a daemon-owned write takes from this process instead of the daemon's file, or null for a file write. */
+  #routedDaemonWrite(key: string, options: ConfigSetOptions): DaemonWriteRoute | null {
+    if (this.daemonTierPath === null || this.daemonTierOwner || options.daemonNotRunning === true || !isDaemonOwnedConfigKey(key)) return null;
+    const route = this.#daemonRoute;
+    return route !== null && route.reachable() ? route : null;
+  }
+
+  /**
+   * Take a daemon-owned value the daemon now holds into this process's view,
+   * without writing any file: for a caller that already wrote it through the
+   * daemon and awaited the answer.
+   */
+  adoptDaemonValue(key: ConfigKey, value: unknown): void {
+    if (!isDaemonOwnedConfigKey(key)) throw new ConfigError(`${key} is not a daemon setting.`);
+    this.#applyInView(key, value, 'daemon');
+  }
+
+  /** Set one key in the in-memory view only (no file), publish, and notify like a persisted change. */
+  #applyInView(key: ConfigKey, value: unknown, tier: 'daemon' | undefined): void {
+    const previousValue = readDotPath(this.#config, key).value;
+    const staged = this.runtimeState.fork();
+    const { parent, field } = this.#resolvePath(key, staged.nonRuntime);
+    parent[field] = structuredClone(value);
+    staged.retire(key);
+    staged.mark(key, tier);
+    this.publishState(staged, staged.compose());
+    this.notifyPersistedChange(key, previousValue);
+  }
+
+  /** Daemon writes sent from this process whose answer has not arrived; each settles to its refusal, if any. */
+  readonly #forwarding = new Set<Promise<{ readonly key: string; readonly error: unknown } | null>>();
+
+  /** Send one daemon-owned write through the daemon; on refusal put the previous value back if it is still the one sent. */
+  #forwardDaemonWrite(route: DaemonWriteRoute, key: ConfigKey, value: unknown, previous: unknown, reset: boolean): void {
+    this.#applyInView(key, value, reset ? undefined : 'daemon');
+    const sent = reset && route.reset ? route.reset(key) : route.write(key, value);
+    const outcome = sent.then(() => null, (error: unknown) => {
+      if (JSON.stringify(readDotPath(this.#config, key).value) === JSON.stringify(value)) {
+        try { this.#applyInView(key, previous, 'daemon'); } catch { /* the reload from the daemon's file reconciles */ }
+      }
+      try { route.refused?.(key, error); } catch { /* reporting cannot change the outcome */ }
+      return { key, error };
+    });
+    this.#forwarding.add(outcome);
+    void outcome.finally(() => { this.#forwarding.delete(outcome); });
+  }
+
+  /**
+   * Wait for the daemon's answer to every daemon-owned write this process has
+   * sent and not heard back on; returns the ones it refused (each already put
+   * back in this process's view). For a command that wrote through code which
+   * cannot await, so it can report what the daemon did.
+   */
+  async settleDaemonWrites(): Promise<readonly { readonly key: string; readonly error: unknown }[]> {
+    const results = await Promise.all([...this.#forwarding]);
+    return results.filter((result): result is { readonly key: string; readonly error: unknown } => result !== null);
+  }
+
   validateDynamic(key: ConfigKey, value: unknown, options: ConfigSetOptions = {}): void {
     this.requireWritable();
     this.validateSetValue(key, value, options, true);
@@ -1211,6 +1305,11 @@ export class ConfigManager {
       return;
     }
     value = this.validateSetValue(key, value, options, false) as ConfigValue<K>;
+    const route = this.#routedDaemonWrite(key, options);
+    if (route) {
+      this.#forwardDaemonWrite(route, key, value, readDotPath(this.#config, key).value, false);
+      return;
+    }
     const useDaemonTier = this.daemonTierPath !== null && isDaemonOwnedConfigKey(key);
     this.refuseBehindStricterProjectValue(key, value);
 
@@ -1360,14 +1459,24 @@ export class ConfigManager {
       }
     }
 
-    // A person at a command surface writes the daemon's file under the shared
-    // lock, as a single `set` does; any other writer goes through the daemon.
+    // While the daemon is reachable it is the one writer of its settings: its
+    // changes go through it. With none running, a person's write lands in its
+    // file for it to read at start; an agent's waits for the daemon.
     const daemonChange = admitted.find(change => change.tier === 'daemon');
-    if (daemonChange && !this.daemonTierOwner && by.kind !== 'owner') {
+    const route = daemonChange ? this.#routedDaemonWrite(daemonChange.key, options) : null;
+    if (daemonChange && !route && !this.daemonTierOwner && options.daemonNotRunning !== true && by.kind !== 'owner') {
       return refuse({ code: 'CONFIG_DAEMON_OWNED', reason: daemonOwnedRefusal(daemonChange.key).message,
         next: [`goodvibes-daemon config set ${daemonChange.key} <value>`], status: 409 });
     }
     this.invalidateLifetimes();
+    const forwarded: ConfigKey[] = [];
+    if (route) {
+      for (const change of admitted.filter(entry => entry.tier === 'daemon')) {
+        this.#forwardDaemonWrite(route, change.key, change.value, readDotPath(this.#config, change.key).value, false);
+        forwarded.push(change.key);
+      }
+      admitted.splice(0, admitted.length, ...admitted.filter(entry => entry.tier !== 'daemon'));
+    }
 
     const previousHost = admitted.some(change => this.hostSettings.has(change.key)) ? this.hostSettings.snapshot(this.#config) : null;
     const previous = new Map(admitted.map(change => [change.key, readDotPath(this.#config, change.key).value] as const));
@@ -1390,7 +1499,7 @@ export class ConfigManager {
       }
       this.publishState(staged, staged.compose());
     }
-    const saved = written.map(change => change.key);
+    const saved = [...forwarded, ...written.map(change => change.key)];
     let hostRefreshFailed = false;
     if (previousHost) {
       try { this.refreshHostSettings(previousHost, true); }
@@ -2075,8 +2184,16 @@ export class ConfigManager {
   }
 
   /** Remove explicit preferences; full reset retains this frontend's defaults. Cross-tier disk writes are not transactional. */
-  reset(key?: ConfigKey): void {
+  reset(key?: ConfigKey, options: ConfigSetOptions = {}): void {
     this.requireWritable();
+    const route = key !== undefined ? this.#routedDaemonWrite(key, options) : null;
+    if (key !== undefined && route) {
+      const lock = getManagedSettingLock(key, this.configDir);
+      if (lock) throw new ConfigError(`Setting ${key} is locked by ${lock.source}: ${lock.reason}`);
+      this.invalidateLifetimes();
+      this.#forwardDaemonWrite(route, key, structuredClone(readDotPath(DEFAULT_CONFIG_SNAPSHOT, key).value), readDotPath(this.#config, key).value, true);
+      return;
+    }
     // A managed-policy lock refuses a reset the same way it refuses a write.
     if (key !== undefined) {
       const lock = getManagedSettingLock(key, this.configDir);

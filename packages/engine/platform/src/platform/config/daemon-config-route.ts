@@ -467,7 +467,7 @@ export interface ConfigWriteOutcome {
 
 /** The narrow local writer this module needs, satisfied by ConfigManager. */
 export interface LocalConfigWriter {
-  setDynamic(key: string, value: unknown): void;
+  setDynamic(key: string, value: unknown, options?: { readonly daemonNotRunning?: boolean | undefined }): void;
   get(key: string): unknown;
   getConfigPath(): string;
   getDaemonTierPath?(): string | null;
@@ -510,7 +510,8 @@ function writeLocally(
   local: LocalConfigWriter,
   route: Extract<ConfigWriteRoute, { mode: 'local' }>,
 ): ConfigWriteOutcome {
-  local.setDynamic(key, value);
+  // A daemon-owned key reaches here only when no daemon answered: the file is what it reads at start.
+  local.setDynamic(key, value, route.scope === 'daemon' ? { daemonNotRunning: true } : undefined);
   const persistedTo = route.scope === 'daemon'
     ? (local.getDaemonTierPath?.() ?? local.getConfigPath())
     : local.getConfigPath();

@@ -65,6 +65,8 @@ export interface DaemonConfigClient {
   readonly preparedImport?: PreparedDaemonSettingsImportClient;
   /** True when this key's value lives in the daemon's own settings tier. */
   ownsKey(key: string): boolean;
+  /** Whether the daemon can take a write now (no request is made). */
+  reachable(): boolean;
   /**
    * Write a daemon-owned key. Rejects (never falls back to a local write) when
    * no daemon is reachable, a write that configures nothing must not report
@@ -138,6 +140,7 @@ export function createDaemonConfigClient(verbs: DaemonVerbCaller): DaemonConfigC
     ...(preparedImport ? { preparedImport } : {}),
     ...(preparedSettings ? { preparedSettings } : {}),
     ownsKey: (key) => isDaemonOwnedConfigKey(key),
+    reachable: () => verbs.probe().available,
 
     set: async (key, value) => {
       const probe = verbs.probe();

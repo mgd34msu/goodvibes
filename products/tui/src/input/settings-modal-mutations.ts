@@ -29,6 +29,12 @@ export interface ApplyValueResult {
   readonly changed: boolean;
   /** True when the write was refused or threw; the value is unchanged and effectMessage says why. */
   readonly failed?: boolean;
+  /**
+   * A daemon-owned write in flight: nothing is written here, the row keeps its
+   * value until the daemon answers. Resolves once the daemon applied it (the
+   * row then shows it); rejects with the daemon's refusal (nothing was written).
+   */
+  readonly settled?: Promise<void>;
 }
 
 export type SettingAppliedCallback = (change: {
@@ -46,16 +52,19 @@ export type SettingAppliedCallback = (change: {
  *
  * `surfaces.*`, `controlPlane.*`, `watchers.*`, `device.*`, `automation.*` and
  * the rest are executed by the daemon, unattended, with every surface closed.
- * Writing one into this surface's own settings file reports success and
- * configures nothing, the daemon reads a different file and never sees it.
- * So a daemon-owned write goes over `config.set`, and a write with no reachable
- * daemon FAILS rather than landing somewhere harmless-looking.
+ * The daemon is the one writer of its settings file: while it is reachable a
+ * daemon-owned row is sent over `config.set` and nothing is written here; the
+ * row shows "saving" until the daemon answers, and a refused value is written
+ * nowhere. With no daemon running, the daemon's settings file is written for it
+ * to read when it starts.
  */
 export interface DaemonOwnedConfigWriter {
   ownsKey(key: string): boolean;
   set(key: string, value: unknown): Promise<void>;
   /** Removes the daemon's explicit value so the key reads as its default; absent keeps a reset as a write of the default. */
   reset?(key: string): Promise<void>;
+  /** Whether the daemon can take a write now (no request); absent counts as reachable. */
+  reachable?(): boolean;
 }
 
 export function applySettingValue({
@@ -67,6 +76,7 @@ export function applySettingValue({
   refreshGroups,
   daemonConfig,
   onAsyncError,
+  onAsyncSaved,
   reset,
 }: {
   key: ConfigKey;
@@ -80,6 +90,8 @@ export function applySettingValue({
   daemonConfig?: DaemonOwnedConfigWriter | null | undefined;
   /** Renders a refused daemon write, so a failed save is never silent. */
   onAsyncError?: ((message: string) => void) | undefined;
+  /** Renders a daemon write that was applied (the row now shows it). */
+  onAsyncSaved?: ((message: string | null) => void) | undefined;
   /**
    * `value` is the key's schema default and the write is a reset: a schema key
    * is removed from the settings files (so it reads "default" again and follows
@@ -130,40 +142,38 @@ export function applySettingValue({
   const daemonOwned = daemonConfig?.ownsKey(key) === true;
   // permissions.mode keeps the write: setting it also clears the legacy auto-approve override, which reset() would leave on.
   const removable = reset === true && key !== 'permissions.mode' && configManager.getSchema().some((setting) => setting.key === key);
-  try {
-    if (daemonOwned && daemonConfig) {
-      // The daemon's store is the one that counts for this key. The local
-      // manager is still written so this session's own reads and the rows
-      // below reflect the edit immediately; the daemon's copy is what the
-      // daemon acts on. A refusal from it puts the previous local value back
-      // (unless the row was edited again meanwhile) so the row never shows a
-      // value the daemon does not have, and the failure is surfaced.
-      const removeOnDaemon = removable && daemonConfig.reset !== undefined;
-      void (removeOnDaemon ? daemonConfig.reset!(key) : daemonConfig.set(key, value)).catch((error) => {
-        logger.error('SettingsModal: the daemon refused a daemon-owned config write', { key, error: summarizeError(error) });
-        let restored = false;
-        if (previousValue !== undefined) {
-          try {
-            const live = configManager.getStored(key);
-            if (deepEqual(live, value)) {
-              configManager.setDynamic(key, previousValue);
-              syncEntries();
-              onSettingApplied?.({ key, previousValue: value, value: previousValue });
-              refreshGroups();
-              restored = true;
-            }
-          } catch (restoreError) {
-            logger.error('SettingsModal: could not restore the previous value after a refused daemon write', { key, error: summarizeError(restoreError) });
-          }
-        }
-        onAsyncError?.(`That setting is applied by the daemon and saving it there failed${restored ? ' (previous value restored)' : ''}: ${summarizeError(error)}`);
-      });
+  if (daemonOwned && daemonConfig && daemonConfig.reachable?.() !== false) {
+    // The daemon is the one writer: nothing is written here, and the row keeps
+    // its value until the daemon answers.
+    try {
+      if (!removable) configManager.validateDynamic(key, value);
+    } catch (e) {
+      return { restartDomain: null, effectMessage: `Save failed: ${summarizeError(e)}`, changed: false, failed: true };
     }
-    if (removable && (!daemonOwned || daemonConfig?.reset !== undefined)) {
+    const removeOnDaemon = removable && daemonConfig.reset !== undefined;
+    const applied = removable ? configManager.getSchema().find((setting) => setting.key === key)?.default : value;
+    const settled = (removeOnDaemon ? daemonConfig.reset!(key) : daemonConfig.set(key, applied)).then(() => {
+      configManager.adoptDaemonValue(key, applied);
+      syncEntries();
+      const effect = deepEqual(previousValue, applied) ? undefined : onSettingApplied?.({ key, previousValue, value: applied });
+      refreshGroups();
+      onAsyncSaved?.((effect ? effect.message : undefined) ?? 'Saved by the daemon.');
+    }, (error: unknown) => {
+      logger.error('SettingsModal: the daemon refused a daemon-owned config write', { key, error: summarizeError(error) });
+      onAsyncError?.(`Not saved: the daemon refused that setting, and nothing was written: ${summarizeError(error)}`);
+      throw error;
+    });
+    void settled.catch(() => {});
+    return { restartDomain: null, effectMessage: 'Saving to the daemon…', changed: false, settled };
+  }
+  // No daemon reachable: its settings file is what it reads when it starts.
+  const offline = daemonOwned ? { daemonNotRunning: true } : {};
+  try {
+    if (removable) {
       // reset() refuses a key locked by managed policy, exactly as a write is refused.
-      configManager.reset(key);
+      configManager.reset(key, offline);
     } else {
-      configManager.setDynamic(key, value);
+      configManager.setDynamic(key, value, offline);
     }
   } catch (e) {
     logger.error('SettingsModal: failed to set config value', { key, error: summarizeError(e) });

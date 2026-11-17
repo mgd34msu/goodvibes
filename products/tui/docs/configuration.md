@@ -48,6 +48,14 @@ TUI-extension namespaces documented further down this page. Edit them from the
 fullscreen `/config` workspace or `/settings`; the table below is listed here
 for reference.
 
+Settings the daemon acts on (`surfaces.*`, `controlPlane.*`, `watchers.*`,
+`automation.*`, `device.*` and the rest of its domains) have one writer, the
+daemon. While a daemon is reachable, changing one from the terminal sends it to
+the daemon: the settings row shows "Saving to the daemon…" until it answers, a
+value it refuses is written nowhere, and `/config set` waits for the answer.
+With no daemon running, the change is written to the daemon's settings file
+for it to read when it starts.
+
 | Key | Default | Description |
 |-----|---------|-------------|
 | `display.stream` | `true` | Stream responses token by token |

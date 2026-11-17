@@ -1,7 +1,7 @@
 import { retainCliConfig } from './cli-config-owner.js';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { ConfigKey, ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { isSecretBearingConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
+import { isDaemonOwnedConfigKey, isSecretBearingConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { captureJudgmentPort, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
@@ -95,6 +95,12 @@ export function createSupportBundleCommand<
     readonly authPosture: (runtime: Runtime) => unknown;
     readonly packageVersion: () => string;
     readonly onboardingMarkerPath: (paths: ShellPathService, scope: 'user' | 'project') => string;
+    /**
+     * The routed write for a daemon-owned setting: the daemon applies it when
+     * one answers, its settings file is written for it to read at start when
+     * none is running, and an unreachable configured host refuses.
+     */
+    readonly routeDaemonSetting: (runtime: Runtime, key: ConfigKey, value: unknown) => Promise<unknown>;
   },
   policy: {
     readonly site: string;
@@ -334,9 +340,20 @@ export function createSupportBundleCommand<
           exitCode: 2,
         };
       }
-      // One update: every value is admitted before anything is written, so a
-      // bad value leaves the configuration as it was.
-      const result = runtime.configManager.setMany(pending.map(({ key, value }) => ({ key, value })), { kind: 'owner', surface: `${policy.commandBase(runtime)} import` });
+      // A daemon-owned setting has one writer, the daemon: it goes through the
+      // routed write. Every value is checked before anything is written.
+      const daemonOwned = pending.filter((entry) => isDaemonOwnedConfigKey(entry.key));
+      const local = pending.filter((entry) => !isDaemonOwnedConfigKey(entry.key));
+      for (const entry of daemonOwned) {
+        try { runtime.configManager.validateDynamic(entry.key, entry.value); } catch (error) {
+          return { output: `Bundle not imported: ${entry.key}: ${summarizeError(error)}. Nothing was changed.`, exitCode: 1 };
+        }
+      }
+      // One update for this surface's settings: every value is admitted before
+      // anything is written, so a bad value leaves the configuration as it was.
+      const result = local.length > 0
+        ? runtime.configManager.setMany(local.map(({ key, value }) => ({ key, value })), { kind: 'owner', surface: `${policy.commandBase(runtime)} import` })
+        : { ok: true as const, saved: [] as readonly ConfigKey[] };
       if (!result.ok) {
         return {
           output: [
@@ -347,8 +364,20 @@ export function createSupportBundleCommand<
           exitCode: 1,
         };
       }
+      const refused: string[] = [];
+      for (const entry of daemonOwned) {
+        try { await bindings.routeDaemonSetting(runtime, entry.key, entry.value); } catch (error) {
+          refused.push(`  ${entry.key}: ${summarizeError(error)}`);
+        }
+      }
+      if (refused.length > 0) {
+        return {
+          output: [`Bundle partly imported: ${count - refused.length} of ${count} config values applied; these daemon settings were not:`, ...refused].join('\n'),
+          exitCode: 1,
+        };
+      }
       return {
-        output: `Bundle imported: ${count} config value${count === 1 ? '' : 's'} applied.${redactedNote}`,
+        output: `Bundle imported: ${count} config value${count === 1 ? '' : 's'} applied${daemonOwned.length > 0 ? ` (${daemonOwned.length} by the daemon)` : ''}.${redactedNote}`,
         exitCode: 0,
       };
     }

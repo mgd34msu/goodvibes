@@ -300,7 +300,7 @@ export async function applyRoutedConfigWrite(
 
   const deps = resolveRouterDeps(configManager, options);
   const outcome = await applyConfigWrite(key, value, {
-    setDynamic: (k, v) => { configManager.setDynamic(k as ConfigKey, v); },
+    setDynamic: (k, v, o) => { configManager.setDynamic(k as ConfigKey, v, o ?? {}); },
     get: (k) => configManager.get(k as ConfigKey),
     getConfigPath: () => configManager.getConfigPath(),
     getDaemonTierPath: () => configManager.getDaemonTierPath(),

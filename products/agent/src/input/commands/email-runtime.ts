@@ -30,7 +30,9 @@ import { readRefusal } from '@goodvibes-jev/engine/errors';
 import { commandRefusal, requireYesFlag, stripYesFlag } from './confirmation.ts';
 import { EmailService } from '@goodvibes-jev/engine/platform/platform/email';
 import { nodeEmailTransport } from '@goodvibes-jev/engine/platform/platform/email/node';
-import { requireSecretsManager } from './runtime-services.ts';
+import { requireSecretsManager, requireShellPaths } from './runtime-services.ts';
+import { openEffectiveConfigView, routeConfigWrite } from '../../config/daemon-config-routing.ts';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { LOCAL_WRITE_VERB, OUTWARD_VERB, READ_VERB, ownerOnlyVerb, withCommandVerbs, type CommandVerbs } from './command-verbs.ts';
 import {
   MAILBOX_CREDENTIAL_FIELDS,
@@ -57,13 +59,18 @@ function readLimitArg(arg: string | undefined, fallback: number): number {
   return isFinite(n) && n > 0 ? Math.min(n, 100) : fallback;
 }
 
-function getConfigManager(ctx: CommandContext): { get: (key: string) => unknown } {
-  return ctx.platform.configManager as unknown as { get: (key: string) => unknown };
+/**
+ * The mailbox settings as the connected host holds them (they are daemon-owned,
+ * so the form, `/email set` and the host's scheduled sends all see one value):
+ * one snapshot read from the host, this process's view without one.
+ */
+async function getConfigManager(ctx: CommandContext): Promise<{ get: (key: string) => unknown }> {
+  return await openEffectiveConfigView(ctx.platform.configManager, { homeDir: requireShellPaths(ctx).homeDirectory });
 }
 
-function buildEmailService(ctx: CommandContext): EmailService {
+async function buildEmailService(ctx: CommandContext): Promise<EmailService> {
   const secretsManager = requireSecretsManager(ctx);
-  const cm = getConfigManager(ctx);
+  const cm = await getConfigManager(ctx);
   const ledger = getSessionUntrustedContentLedger();
   return new EmailService(mailboxServiceDeps({
     getConfig: (key: string) => cm.get(key),
@@ -81,8 +88,8 @@ function buildEmailService(ctx: CommandContext): EmailService {
   }));
 }
 
-function formatStatus(ctx: CommandContext): void {
-  const cm = getConfigManager(ctx);
+async function formatStatus(ctx: CommandContext): Promise<void> {
+  const cm = await getConfigManager(ctx);
   const status = readMailboxStatus((key) => cm.get(key));
   const { settings } = status;
   const lines = [
@@ -159,7 +166,7 @@ async function handleCheck(
   ctx: CommandContext,
 ): Promise<void> {
   const limit = readLimitArg(args[0], 10);
-  const service = buildEmailService(ctx);
+  const service = await buildEmailService(ctx);
   const summaries = await service.checkInbox(limit);
 
   if (summaries.length === 0) {
@@ -199,8 +206,8 @@ function parseSendArgs(args: readonly string[]): { to: string; subject: string; 
   return { to, subject, body };
 }
 
-function formatConfig(ctx: CommandContext): void {
-  const cm = getConfigManager(ctx);
+async function formatConfig(ctx: CommandContext): Promise<void> {
+  const cm = await getConfigManager(ctx);
   const status = readMailboxStatus((key) => cm.get(key));
   const { settings } = status;
   const lines = [
@@ -254,8 +261,10 @@ async function handleSet(
   const cm = ctx.platform.configManager as unknown as {
     get: (key: string) => unknown;
     setDynamic: (key: string, value: unknown) => void;
-    save: () => void;
   };
+  // The mailbox keys are daemon-owned: one writer, the connected host, reached by the routed write.
+  const homeDir = requireShellPaths(ctx).homeDirectory;
+  const writeRouted = (key: string, value: unknown) => routeConfigWrite(ctx.platform.configManager, key, value, { homeDir });
 
   if (field === 'password') {
     // Secret path: --yes is required; raw value is routed through SecretsManager
@@ -278,12 +287,11 @@ async function handleSet(
 
     const secretsManager = requireSecretsManager(ctx);
     const storePassword = async (password: string): Promise<void> => {
-      const result = await persistMailboxField(cm, secretsManager, field, password);
+      const result = await persistMailboxField(cm, secretsManager, field, password, writeRouted);
       if (!result.ok) {
         ctx.print(result.error ?? `Could not store ${configKey}.`);
         return;
       }
-      cm.save();
       ctx.print(
         `Email config updated\n` +
         `  key:  ${configKey}\n` +
@@ -315,13 +323,16 @@ async function handleSet(
 
   // Non-secret path: coerce, validate, and persist through the shared field helper
   const secretsManager = requireSecretsManager(ctx);
-  const result = await persistMailboxField(cm, secretsManager, field, rawValue);
+  let result: Awaited<ReturnType<typeof persistMailboxField>>;
+  try {
+    result = await persistMailboxField(cm, secretsManager, field, rawValue, writeRouted);
+  } catch (error) {
+    throw commandRefusal(`${configKey} was not changed: ${summarizeError(error)}`);
+  }
   if (!result.ok) {
     ctx.print(result.error ?? `Could not update ${configKey}.`);
     return;
   }
-
-  cm.save();
   ctx.print(`Email config updated\n  key:   ${configKey}\n  value: ${String(cm.get(configKey))}`);
 }
 
@@ -352,7 +363,7 @@ async function handleSend(
     return;
   }
 
-  const service = buildEmailService(ctx);
+  const service = await buildEmailService(ctx);
   await service.sendMail({
     to,
     subject,
@@ -397,12 +408,12 @@ export function registerEmailRuntimeCommands(registry: CommandRegistry): void {
 
       try {
         if (sub === 'status') {
-          formatStatus(ctx);
+          await formatStatus(ctx);
           return;
         }
 
         if (sub === 'config') {
-          formatConfig(ctx);
+          await formatConfig(ctx);
           return;
         }
 

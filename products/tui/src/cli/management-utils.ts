@@ -47,7 +47,7 @@ import { createRuntimeStore } from '@goodvibes-jev/engine/platform/platform/runt
 import type { RuntimeServices } from '../runtime/services.ts';
 import type { ProviderCatalogOptions } from '@goodvibes-jev/engine/platform/platform/providers';
 import { RuntimeEventBus, createShellPathService, configureRuntimeEventBusDefaults, runtimeEventBusOptionsFrom } from '@/runtime/index.ts';
-import '@goodvibes-jev/engine/platform/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { resolveRuntimeEndpointBinding } from '@goodvibes-jev/engine/terminal-shell';
 import { applyRuntimeEndpointFlagOverrides } from '@goodvibes-jev/engine/terminal-shell';
 import type { RuntimeEndpointId } from '@goodvibes-jev/engine/terminal-shell';
@@ -169,7 +169,13 @@ export async function withRuntimeServices<T>(
       services.providerRegistry.initCatalog(options.catalog);
     }
     await services.providerRegistry.ready();
-    return await fn(services);
+    const result = await fn(services);
+    // A daemon setting the command changed went to the daemon; wait for its
+    // answer before this process exits, and say which ones it refused.
+    for (const refused of await runtime.configManager.settleDaemonWrites()) {
+      process.stderr.write(`The daemon refused ${refused.key}; it was not changed: ${summarizeError(refused.error)}\n`);
+    }
+    return result;
   } finally {
     services.providerRegistry.stopWatching();
     // A one-shot command still composes the whole graph, and that graph starts

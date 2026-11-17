@@ -10,6 +10,18 @@ import { CONFIG_SCHEMA } from '../config/index.ts';
 import { createRuntimeSecretsManager, resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/platform/platform/config';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import type { CliCommandRuntime } from './management.ts';
+import { routeConfigWrite } from '../config/daemon-config-routing.ts';
+
+/** The connected host's base URL when it is on another machine; undefined for this machine's daemon. */
+function remoteHostBaseUrl(runtime: CliCommandRuntime): string | undefined {
+  const baseUrl = resolveConnectedHostBaseUrl(runtime.configManager);
+  try {
+    const host = new URL(baseUrl).hostname.replace(/^\[|\]$/g, '');
+    return host === 'localhost' || host === '::1' || host.startsWith('127.') ? undefined : baseUrl;
+  } catch {
+    return undefined;
+  }
+}
 
 import { getPackageVersion } from './help.ts';
 import { classifyProviderSetup } from './provider-classification.ts';
@@ -55,6 +67,12 @@ export const handleBundleCommand = createSupportBundleCommand<
     authPosture: readAuthPosture,
     packageVersion: getPackageVersion,
     onboardingMarkerPath: getOnboardingCheckMarkerPath,
+    // The connected host applies its own settings: the same routed write the settings screens use.
+    routeDaemonSetting: (runtime, key, value) => routeConfigWrite(runtime.configManager, key, value, {
+      homeDir: runtime.homeDirectory,
+      // A host on another machine is named, so an unreachable one refuses instead of a local file being written.
+      ...(remoteHostBaseUrl(runtime) ? { baseUrl: remoteHostBaseUrl(runtime) } : {}),
+    }),
   },
   {
     site: 'agent.cli.bundle-export',

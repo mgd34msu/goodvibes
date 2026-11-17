@@ -17,7 +17,7 @@ import { formatProviderAuthRouteId } from '../provider-auth-route-display.ts';
 import { isDaemonOwnedConfigKey } from '../config/daemon-config-routing.ts';
 
 /** The one statement of who acts on a setting the connected host owns, shown on every such setting. */
-export const HOST_OWNED_SETTING_RULE = 'Owned by the connected host: the host acts on this setting, not the Agent. A change here is written to the host\'s settings and takes effect when the host applies them.';
+export const HOST_OWNED_SETTING_RULE = 'Owned by the connected host: the host acts on this setting and is the one writer of it. A change here is sent to the host and applied by it; if the host refuses or cannot be reached, nothing is changed. With no host set up, it is saved for the daemon to read when it starts.';
 
 export const CATEGORY_INFO: Record<SettingsCategory, string> = {
   display: SHARED_CATEGORY_INFO['display'],

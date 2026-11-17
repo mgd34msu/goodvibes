@@ -90,6 +90,12 @@ const configWorkspaceCommand = createConfigWorkspaceCommand<CommandContext>({
       }
       const before = ctx.platform.configManager.get(key as ConfigKey);
       ctx.platform.configManager.setDynamic(key as ConfigKey, parseConfigValueText(value));
+      // A daemon setting is written by the daemon: wait for its answer.
+      const refused = (await ctx.platform.configManager.settleDaemonWrites()).find((entry) => entry.key === key);
+      if (refused) {
+        ctx.print(`Not set: the daemon refused ${key}, and nothing was changed: ${refused.error instanceof Error ? refused.error.message : String(refused.error)}`);
+        return;
+      }
       const after = ctx.platform.configManager.get(key as ConfigKey);
       ctx.print(`Set ${key}: ${JSON.stringify(before)} → ${JSON.stringify(after)}`);
       // Forced theme modes apply immediately (matches the settings-modal

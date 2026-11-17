@@ -53,7 +53,7 @@ import {
 } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 import { ClientBuildGuard } from './client/build-floors.ts';
 import { createFleetUnionReadModel } from './client/fleet-union.ts';
-import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
+import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { VERSION } from '../version.ts';
 import { createSessionConversationRewindPort, hasSessionConversation } from './conversation-rewind-port.ts';
 import { createFleetReadModel } from '../views/fleet-read-model.ts';
@@ -275,6 +275,15 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
       scope.registry.add('notification flush', startNotificationFlush(notificationDispatcher));
       // Stores close only after a rewind in flight has finished with them.
       scope.registry.add('conversation rewind drain', () => conversationRewindClosing);
+      // While the daemon is reachable it is the one writer of its own settings:
+      // a daemon-owned key set anywhere in this process goes to it
+      // (ConfigManager.attachDaemonRoute). Detached when this graph closes.
+      scope.registry.add('daemon settings route', configManager.attachDaemonRoute({
+        reachable: () => daemonConfig.reachable(),
+        write: (key, value) => daemonConfig.set(key, value),
+        ...(daemonConfig.reset ? { reset: (key: string) => daemonConfig.reset!(key) } : {}),
+        refused: (key, error) => logger.warn('The daemon refused a setting written from the terminal; the previous value is back', { key, error: summarizeError(error) }),
+      }));
       const close = (): Promise<void> => { void requestConversationRewindStop().catch(() => {}); return base.close(); };
       return {
         panelManager: viewPanelAdapter,

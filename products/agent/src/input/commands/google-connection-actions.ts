@@ -76,6 +76,12 @@ import {
 // Ports built from the running shell
 // ---------------------------------------------------------------------------
 
+/**
+ * The Google settings are daemon-owned. A `set` here goes through the config
+ * manager, which sends it to the connected host (its one writer) and takes the
+ * value into this session's view at once; `/google` waits for the host's
+ * answers before it finishes and names any it refused (google-runtime.ts).
+ */
 export function googleConfigPort(ctx: CommandContext): GoogleConfigPort {
   const raw = requirePlatform(ctx).configManager;
   const manager = raw as {

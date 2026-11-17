@@ -17,7 +17,8 @@ import { moveSettingsSelection, selectSettingsTarget } from '@goodvibes-jev/engi
  *   - Feature-unit headers (each capability's real enablement row in its domain)
  *
  * Every save is a plain configManager.set(key, value) on a domain settings
- * key; the platform settings bridge keeps the runtime gate manager in sync, and
+ * key, except a daemon-owned key, which the daemon alone writes while it is
+ * reachable (settings-modal-mutations.ts); the platform settings bridge keeps the runtime gate manager in sync, and
  * this modal re-reads the manager after enablement writes so pending-restart
  * markers are shown honestly at the point of change.
  *
@@ -645,8 +646,8 @@ export class SettingsModal extends TerminalSettingsModalState<
       },
       setSecretConfigValue: async (key: ConfigKey, value: unknown) => {
         if (!configManager) throw new Error('Settings owner unavailable.');
-        if (daemonConfig?.ownsKey(key)) await daemonConfig.set(key, value);
         configManager.validateDynamic?.(key, value);
+        // A daemon-owned key is written by the daemon alone; this waits for its answer.
         const result = applySettingValue({
           key,
           value,
@@ -654,9 +655,11 @@ export class SettingsModal extends TerminalSettingsModalState<
           groups,
           onSettingApplied: onApplied,
           refreshGroups: () => refreshEntryValues(groups, configManager),
+          daemonConfig,
         });
         if (result.effectMessage?.startsWith('Save failed:')) throw new Error(result.effectMessage);
-        effectMessage = result.effectMessage;
+        if (result.settled) await result.settled;
+        effectMessage = result.settled ? null : result.effectMessage;
       },
       trackSecretWrite: (write: Promise<boolean>) => {
         if (session === this.secretWriteSession) this.lastSettingEffectMessage = 'Saving credential…';
@@ -852,6 +855,13 @@ export class SettingsModal extends TerminalSettingsModalState<
         if (this.groups !== groups) return;
         this.lastSettingEffectMessage = message;
         this.reportError?.(message);
+        this.requestRender?.();
+      },
+      onAsyncSaved: (message) => {
+        if (this.groups !== groups) return;
+        this.lastSettingEffectMessage = message;
+        this._syncFeatureHeadersForKey(key);
+        this.requestRender?.();
       },
       ...(reset ? { reset: true } : {}),
     });

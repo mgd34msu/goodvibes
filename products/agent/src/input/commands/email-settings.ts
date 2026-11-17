@@ -113,18 +113,18 @@ export interface PersistMailboxFieldResult {
 }
 
 /**
- * Persist one field. A non-secret value is validated and written (through
- * `writeValue` when the caller must reach a connected host's settings, the
- * mailbox keys being daemon-owned); the password (`rawValue` is the password
- * itself) goes to the secret store and only a reference reaches the settings
- * file. Never logs or returns the password.
+ * Persist one field. A non-secret value is validated and written through
+ * `writeValue`, the routed write (the mailbox keys are daemon-owned, so it
+ * reaches the connected host and fails when no host answers); the password
+ * (`rawValue` is the password itself) goes over `credentials.set` and only a
+ * reference reaches the settings. Never logs or returns the password.
  */
 export async function persistMailboxField(
   cm: MailboxConfigManagerLike,
   secretsManager: MailboxSecretsManagerLike,
   field: MailboxField,
   rawValue: string,
-  writeValue?: (key: string, value: unknown) => Promise<unknown> | unknown,
+  writeValue: (key: string, value: unknown) => Promise<unknown> | unknown,
 ): Promise<PersistMailboxFieldResult> {
   const configKey = MAILBOX_FIELDS[field];
   if (field === 'password') {
@@ -141,8 +141,7 @@ export async function persistMailboxField(
   }
   const validated = validateMailboxFieldValue(field, rawValue);
   if (!validated.ok) return { ok: false, error: validated.error, configKey };
-  if (writeValue) await writeValue(configKey, validated.value);
-  else cm.setDynamic(configKey, validated.value);
+  await writeValue(configKey, validated.value);
   return { ok: true, configKey };
 }
 

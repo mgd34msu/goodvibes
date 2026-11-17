@@ -27,7 +27,9 @@
 import type { FeedFetcher } from '@goodvibes-jev/engine/platform/platform/calendar';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { subscriptionRegistryForWrite } from './calendar-subscription-runtime.ts';
-import { requireSecretsManager } from './runtime-services.ts';
+import { requireSecretsManager, requireShellPaths } from './runtime-services.ts';
+import { routeConfigWrite } from '../../config/daemon-config-routing.ts';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { CREDENTIAL_VERB, READ_VERB, ownerOnlyVerb, withCommandVerbs, type CommandVerbs } from './command-verbs.ts';
 import { renderGoogleSetupReport } from '@goodvibes-jev/engine/platform/platform/google';
 import { renderGoogleSetupRunbook } from '@goodvibes-jev/engine/platform/platform/google';
@@ -135,9 +137,14 @@ async function setAccount(args: readonly string[], ctx: CommandContext): Promise
     ctx.print('Give the Gmail address to connect as: /google account <your-address@gmail.com>');
     return;
   }
-  const config = googleConfigPort(ctx);
-  config.set(GOOGLE_CONFIG_KEYS.emailUsername, address);
-  config.set(GOOGLE_CONFIG_KEYS.emailFromAddress, address);
+  const homeDir = requireShellPaths(ctx).homeDirectory;
+  try {
+    await routeConfigWrite(ctx.platform.configManager, GOOGLE_CONFIG_KEYS.emailUsername, address, { homeDir });
+    await routeConfigWrite(ctx.platform.configManager, GOOGLE_CONFIG_KEYS.emailFromAddress, address, { homeDir });
+  } catch (error) {
+    ctx.print(`Gmail address not set: ${summarizeError(error)}`);
+    return;
+  }
   ctx.print(`Gmail address set to ${address}. Continue with: /google connect`);
 }
 
@@ -374,6 +381,14 @@ export function registerGoogleRuntimeCommands(registry: CommandRegistry): void {
     description: 'Connect Gmail and Google Calendar: one command, one consent link, proven by use',
     usage: 'connect | status | reauthorize | forget [--yes] | adopt [--yes] | setup [--path app-password|oauth|existing-client] | client-file <path> | client <id> <secret> | account <address> | calendar-address <url> | runbook | approve [<n>] [--yes|--drop]',
     argsHint: 'connect|status|reauthorize|forget|adopt|setup|client-file|client|account|calendar-address|runbook|approve',
-    handler: (args, ctx) => runGoogleCommand(args, ctx),
+    handler: async (args, ctx) => {
+      await runGoogleCommand(args, ctx);
+      // Google settings are daemon-owned: the connected host is their one writer.
+      // Wait for its answer and say which ones it refused (they are put back here).
+      const refused = await ctx.platform.configManager.settleDaemonWrites();
+      if (refused.length > 0) {
+        ctx.print(`The connected host refused ${refused.map((entry) => entry.key).join(', ')}; ${refused.length === 1 ? 'it was' : 'they were'} not changed: ${summarizeError(refused[0]!.error)}`);
+      }
+    },
   }, GOOGLE_VERBS));
 }

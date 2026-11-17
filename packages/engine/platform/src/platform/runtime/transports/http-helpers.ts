@@ -228,6 +228,9 @@ export async function connectTelemetryStream(
           handlers.onReady?.(payload as HttpTransportTelemetryStreamReady);
         }
       : undefined,
+    ...(handlers.onError ? { onError: handlers.onError } : {}),
+    ...(handlers.onReconnect ? { onReconnect: handlers.onReconnect } : {}),
+    ...(handlers.onTerminate ? { onTerminate: handlers.onTerminate } : {}),
   }, {
     authToken: token,
   });

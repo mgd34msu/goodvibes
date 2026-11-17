@@ -1,5 +1,6 @@
 import { VERSION } from '../../version.js';
 import { platformTracer, telemetryBufferFill } from '../metrics.js';
+import { onSpanEnded } from './tracer.js';
 import { TelemetryTraceIdentities } from './trace-identities.js';
 import { normalizeError, type NormalizedError } from '../../utils/error-display.js';
 import type {
@@ -9,15 +10,7 @@ import type {
   RuntimeEventEnvelope,
 } from '../events/index.js';
 import type { RuntimeStore } from '../store/index.js';
-import type {
-  AttributeValue,
-  ReadableSpan,
-  SpanAttributes,
-  SpanEvent,
-  SpanKind,
-  SpanStatus,
-} from './types.js';
-import { SpanKind as SpanKinds, SpanStatusCode } from './types.js';
+import type { ReadableSpan } from './types.js';
 import {
   ALL_DOMAINS,
   appendBounded,
@@ -27,7 +20,6 @@ import {
   buildOtlpMetricDocumentFromState,
   buildOtlpTraceDocumentFromSpans,
   buildRecordId,
-  createSpanId,
   clampLimit,
   DEFAULT_ERROR_LIMIT,
   DEFAULT_EVENT_LIMIT,
@@ -37,10 +29,10 @@ import {
   inferErrorSource,
   inferSeverity,
   isErrorEventType,
+  isStreamChunkEventType,
   normalizePayload,
   SERVICE_NAME,
   summarizePayload,
-  toAttributeValue,
   toObjectMap,
 } from './api-helpers.js';
 import {
@@ -51,8 +43,8 @@ import {
 import { createTelemetryEventStream } from './api-stream.js';
 import {
   ingestExternalTelemetryLogs,
-  ingestExternalTelemetryMetrics,
   ingestExternalTelemetryTraces,
+  readExternalTelemetryMetrics,
 } from './api-ingest.js';
 
 export type TelemetrySeverity = 'debug' | 'info' | 'warn' | 'error';
@@ -131,12 +123,14 @@ export interface TraceExportState {
   readonly recording: boolean;
   /** The collectors recorded spans are sent to; empty when they stay in-process. */
   readonly endpoints: readonly string[];
+  /** Of those, the ones that are down now: their last batch failed after all retries and its spans were dropped. */
+  readonly unreachable: readonly string[];
 }
 
 /** The process tracer's state: what `telemetry.otelMode` installed. */
 export function readTraceExportState(): TraceExportState {
   const tracer = platformTracer();
-  return { recording: tracer.enabled, endpoints: tracer.exportEndpoints() };
+  return { recording: tracer.enabled, endpoints: tracer.exportEndpoints(), unreachable: tracer.unreachableEndpoints() };
 }
 
 export interface TelemetryAggregates {
@@ -205,18 +199,8 @@ export interface TelemetryListResponse<T> {
   readonly pageInfo: TelemetryPageInfo;
 }
 
-/** Most open start-without-end spans kept per kind. */
-const MAX_ACTIVE_SYNTHETIC_SPANS = 1000;
-
-interface ActiveSyntheticSpan {
-  readonly name: string;
-  readonly kind: SpanKind;
-  readonly traceId: string;
-  readonly spanId: string;
-  readonly parentSpanId?: string | undefined;
-  readonly startTimeMs: number;
-  readonly attributes: SpanAttributes;
-}
+/** Most externally posted metrics kept, by name; the oldest name is dropped first. */
+const MAX_INGESTED_METRICS = 256;
 
 interface TelemetryApiServiceOptions {
   readonly runtimeBus: RuntimeEventBus;
@@ -260,13 +244,8 @@ export class TelemetryApiService {
   private readonly errorCountsByCategory = new Map<string, number>();
   private readonly subscribers = new Set<(record: TelemetryRecord) => void>();
   private readonly unsubs: Array<() => void> = [];
-  private readonly activeTurnSpans = new Map<string, ActiveSyntheticSpan>();
-  private readonly activeTaskSpans = new Map<string, ActiveSyntheticSpan>();
-  private readonly activeAgentSpans = new Map<string, ActiveSyntheticSpan>();
-  private readonly activeToolSpans = new Map<string, ActiveSyntheticSpan>();
-  private readonly turnSpanIds = new Map<string, string>();
-  private readonly taskSpanIds = new Map<string, string>();
-  private readonly agentSpanIds = new Map<string, string>();
+  /** The latest metric posted to the OTLP metrics receiver, per metric name. */
+  private readonly ingestedMetrics = new Map<string, Record<string, unknown>>();
   // Lifetime counters. The record, error and span buffers are bounded rings, so
   // their lengths stop growing at the limit and cannot feed a cumulative metric.
   private eventsRecorded = 0;
@@ -283,19 +262,18 @@ export class TelemetryApiService {
     this.errorLimit = options.errorLimit ?? DEFAULT_ERROR_LIMIT;
     this.spanLimit = options.spanLimit ?? DEFAULT_SPAN_LIMIT;
     this.subscribeAllDomains();
+    // The spans telemetry.otelMode records (turns, tools, agents, tasks, model
+    // calls, ...) are the spans this service lists: the same ones a collector
+    // receives. With the mode off nothing is recorded and the list holds only
+    // spans posted to the OTLP traces receiver.
+    this.unsubs.push(onSpanEnded((span) => this.appendTracerSpan(span)));
   }
 
   dispose(): void {
     for (const unsub of this.unsubs) unsub();
     this.unsubs.length = 0;
     this.subscribers.clear();
-    for (const active of [this.activeTurnSpans, this.activeTaskSpans, this.activeAgentSpans, this.activeToolSpans]) {
-      for (const span of active.values()) this.traceIdentities.release(span.traceId);
-      active.clear();
-    }
-    this.turnSpanIds.clear();
-    this.taskSpanIds.clear();
-    this.agentSpanIds.clear();
+    this.ingestedMetrics.clear();
   }
 
   subscribe(listener: (record: TelemetryRecord) => void): () => void {
@@ -319,7 +297,7 @@ export class TelemetryApiService {
         events: true,
         errors: true,
         metrics: true,
-        traces: this.spans.length > 0,
+        traces: this.spans.length > 0 || platformTracer().enabled,
       },
       encodings: {
         json: true,
@@ -491,7 +469,12 @@ export class TelemetryApiService {
   }
 
   buildOtlpMetricDocument(): Record<string, unknown> {
-    return buildOtlpMetricDocumentFromState(this.runtimeStore.getState(), this.getAggregates(), this.getSessionMetrics());
+    return buildOtlpMetricDocumentFromState(
+      this.runtimeStore.getState(),
+      this.getAggregates(),
+      this.getSessionMetrics(),
+      [...this.ingestedMetrics.values()],
+    );
   }
 
   private subscribeAllDomains(): void {
@@ -526,33 +509,25 @@ export class TelemetryApiService {
     appendBounded(this.spans, span, this.spanLimit, evicted => this.traceIdentities.release(evicted.spanContext.traceId));
   }
 
-  private startSyntheticSpan(
-    active: Map<string, ActiveSyntheticSpan>,
-    key: string,
-    span: ActiveSyntheticSpan,
-    spanIds?: Map<string, string>,
-  ): void {
-    this.traceIdentities.retain(span.traceId);
-    const previous = active.get(key);
-    active.set(key, span);
-    spanIds?.set(key, span.spanId);
-    if (previous !== undefined) this.traceIdentities.release(previous.traceId);
-    // A start whose end event never arrives (a crash, a dropped event) would
-    // otherwise stay here for the life of the process. Drop the oldest; it is
-    // never exported, which is what a span that never ended amounts to.
-    while (active.size > MAX_ACTIVE_SYNTHETIC_SPANS) {
-      const oldestKey = active.keys().next().value as string;
-      const oldest = active.get(oldestKey);
-      active.delete(oldestKey);
-      spanIds?.delete(oldestKey);
-      if (oldest !== undefined) this.traceIdentities.release(oldest.traceId);
-    }
+  /** A span a tracer in this process ended, under the trace id its events' records carry here. */
+  private appendTracerSpan(span: ReadableSpan): void {
+    this.traceIdentities.capture(span.spanContext.traceId, (traceId) => {
+      this.appendSpan(traceId === span.spanContext.traceId
+        ? span
+        : { ...span, spanContext: { ...span.spanContext, traceId } });
+    });
   }
 
   private handleEnvelope(
     domain: RuntimeEventDomain,
     envelope: RuntimeEventEnvelope<AnyRuntimeEvent['type'], AnyRuntimeEvent>,
   ): void {
+    // A streamed chunk is counted, not kept: hundreds arrive per answer and
+    // would push everything else out of the history and the resume window.
+    if (isStreamChunkEventType(envelope.type)) {
+      this.countType(domain, envelope.type);
+      return;
+    }
     const payload = normalizePayload(envelope.payload);
     const errorCandidate = extractErrorCandidate(payload);
     const normalizedError = errorCandidate && isErrorEventType(envelope.type)
@@ -562,7 +537,7 @@ export class TelemetryApiService {
       })
       : undefined;
     this.traceIdentities.capture(envelope.traceId, traceId => {
-      const attributes = { ...buildAttributes(domain, envelope, payload), traceId };
+      const attributes = { ...buildAttributes(domain, envelope), traceId };
       const record: TelemetryRecord = {
         id: buildRecordId(domain, envelope, this.seq++),
         domain,
@@ -591,201 +566,8 @@ export class TelemetryApiService {
         this.errorCountsByCategory.set(errorCategory, (this.errorCountsByCategory.get(errorCategory) ?? 0) + 1);
       }
       telemetryBufferFill.set(this.eventLimit > 0 ? this.records.length / this.eventLimit : 0);
-      this.captureSyntheticSpan(record);
       this.notify(record);
     });
-  }
-
-  private captureSyntheticSpan(record: TelemetryRecord): void {
-    switch (record.type) {
-      case 'TURN_SUBMITTED':
-        if (record.turnId) {
-          const spanId = createSpanId();
-          this.startSyntheticSpan(this.activeTurnSpans, record.turnId, {
-            name: 'turn.lifecycle',
-            kind: SpanKinds.INTERNAL,
-            traceId: record.traceId,
-            spanId,
-            startTimeMs: record.timestamp,
-            attributes: this.buildSpanAttributes(record, { startEventType: record.type }),
-          }, this.turnSpanIds);
-        }
-        return;
-      case 'TASK_STARTED':
-        if (record.taskId) {
-          const spanId = createSpanId();
-          this.startSyntheticSpan(this.activeTaskSpans, record.taskId, {
-            name: 'task.lifecycle',
-            kind: SpanKinds.INTERNAL,
-            traceId: record.traceId,
-            spanId,
-            startTimeMs: record.timestamp,
-            attributes: this.buildSpanAttributes(record, { startEventType: record.type }),
-          }, this.taskSpanIds);
-        }
-        return;
-      case 'AGENT_SPAWNING':
-      case 'AGENT_RUNNING':
-        if (record.agentId && !this.activeAgentSpans.has(record.agentId)) {
-          const spanId = createSpanId();
-          const parentSpanId = record.taskId ? this.taskSpanIds.get(record.taskId) : undefined;
-          this.startSyntheticSpan(this.activeAgentSpans, record.agentId, {
-            name: 'agent.lifecycle',
-            kind: SpanKinds.INTERNAL,
-            traceId: record.traceId,
-            spanId,
-            ...(parentSpanId ? { parentSpanId } : {}),
-            startTimeMs: record.timestamp,
-            attributes: this.buildSpanAttributes(record, { startEventType: record.type }),
-          }, this.agentSpanIds);
-        }
-        return;
-      case 'TOOL_EXECUTING':
-        if (typeof record.attributes.callId === 'string') {
-          const callId = record.attributes.callId;
-          const spanId = createSpanId();
-          const parentSpanId = record.agentId
-            ? this.agentSpanIds.get(record.agentId)
-            : record.taskId
-              ? this.taskSpanIds.get(record.taskId)
-              : record.turnId
-                ? this.turnSpanIds.get(record.turnId)
-                : undefined;
-          this.startSyntheticSpan(this.activeToolSpans, callId, {
-            name: 'tool.execute',
-            kind: SpanKinds.INTERNAL,
-            traceId: record.traceId,
-            spanId,
-            ...(parentSpanId ? { parentSpanId } : {}),
-            startTimeMs: record.timestamp,
-            attributes: this.buildSpanAttributes(record, { startEventType: record.type }),
-          });
-        }
-        return;
-      case 'TURN_COMPLETED':
-      case 'TURN_ERROR':
-      case 'TURN_CANCEL':
-      case 'PREFLIGHT_FAIL':
-        this.completeSyntheticSpan(record.turnId, this.activeTurnSpans, record, 'turn.lifecycle', this.turnSpanIds);
-        return;
-      case 'TASK_COMPLETED':
-      case 'TASK_FAILED':
-      case 'TASK_CANCELLED':
-        this.completeSyntheticSpan(record.taskId, this.activeTaskSpans, record, 'task.lifecycle', this.taskSpanIds);
-        return;
-      case 'AGENT_COMPLETED':
-      case 'AGENT_FAILED':
-      case 'AGENT_CANCELLED':
-        this.completeSyntheticSpan(record.agentId, this.activeAgentSpans, record, 'agent.lifecycle', this.agentSpanIds);
-        return;
-      case 'TOOL_SUCCEEDED':
-      case 'TOOL_FAILED':
-      case 'TOOL_CANCELLED': {
-        const callId = typeof record.attributes.callId === 'string' ? record.attributes.callId : undefined;
-        this.completeSyntheticSpan(callId, this.activeToolSpans, record, 'tool.execute');
-        return;
-      }
-      default:
-        return;
-    }
-  }
-
-  private completeSyntheticSpan(
-    key: string | undefined,
-    activeMap: Map<string, ActiveSyntheticSpan>,
-    record: TelemetryRecord,
-    defaultName: string,
-    spanIds?: Map<string, string>,
-  ): void {
-    const active = key ? activeMap.get(key) : undefined;
-    const durationMs = typeof record.attributes.durationMs === 'number' ? Math.max(0, record.attributes.durationMs) : undefined;
-    const synthesized: ActiveSyntheticSpan = active ?? {
-      name: defaultName,
-      kind: SpanKinds.INTERNAL,
-      traceId: record.traceId,
-      spanId: createSpanId(),
-      startTimeMs: durationMs !== undefined ? Math.max(0, record.timestamp - durationMs) : record.timestamp,
-      attributes: this.buildSpanAttributes(record, { synthesized: true }),
-    };
-    if (key) {
-      activeMap.delete(key);
-      spanIds?.delete(key);
-    }
-
-    try {
-      const status: SpanStatus = record.error || record.severity === 'error'
-        ? { code: SpanStatusCode.ERROR, message: record.error?.summary ?? record.type }
-        : { code: SpanStatusCode.OK };
-      const events: SpanEvent[] = [
-        {
-          name: record.type,
-          timestamp: record.timestamp,
-          attributes: Object.fromEntries(
-            Object.entries(this.buildSpanAttributes(record, { endEventType: record.type }))
-              .map(([spanKey, value]) => [spanKey, toAttributeValue(value)])
-              .filter((entry): entry is [string, AttributeValue] => entry[1] !== undefined),
-          ),
-        },
-      ];
-
-      this.appendSpan(Object.freeze({
-        name: synthesized.name,
-        kind: synthesized.kind,
-        spanContext: {
-          traceId: synthesized.traceId,
-          spanId: synthesized.spanId,
-          isValid: true,
-        },
-        ...(synthesized.parentSpanId ? { parentSpanId: synthesized.parentSpanId } : {}),
-        startTimeMs: synthesized.startTimeMs,
-        endTimeMs: record.timestamp,
-        durationMs: Math.max(0, record.timestamp - synthesized.startTimeMs),
-        attributes: {
-          ...synthesized.attributes,
-          ...Object.fromEntries(
-            Object.entries(this.buildSpanAttributes(record, { endEventType: record.type }))
-              .map(([spanKey, value]) => [spanKey, toAttributeValue(value)])
-              .filter((entry): entry is [string, AttributeValue] => entry[1] !== undefined),
-          ),
-        },
-        events,
-        status,
-        instrumentationScope: `${SERVICE_NAME}/telemetry`,
-      }));
-    } finally {
-      if (active !== undefined) this.traceIdentities.release(active.traceId);
-    }
-  }
-
-  private buildSpanAttributes(record: TelemetryRecord, extra: Record<string, unknown> = {}): SpanAttributes {
-    const attributes: SpanAttributes = {};
-    // Event payload fields first: one named `severity` or `source` must not
-    // replace the envelope's value below.
-    for (const [key, value] of Object.entries(record.attributes)) {
-      const attributeValue = toAttributeValue(value);
-      if (attributeValue !== undefined) {
-        attributes[key] = attributeValue;
-      }
-    }
-    Object.assign(attributes, {
-      telemetryDomain: record.domain,
-      eventType: record.type,
-      source: record.source,
-      severity: record.severity,
-      ...(record.turnId ? { turnId: record.turnId } : {}),
-      ...(record.agentId ? { agentId: record.agentId } : {}),
-      ...(record.taskId ? { taskId: record.taskId } : {}),
-      ...extra,
-    });
-    if (record.error) {
-      attributes.errorCategory = record.error.category;
-      attributes.errorSource = record.error.source;
-      if (record.error.code) attributes.errorCode = record.error.code;
-      if (record.error.statusCode !== undefined) attributes.errorStatusCode = record.error.statusCode;
-      if (record.error.provider) attributes.errorProvider = record.error.provider;
-      if (record.error.operation) attributes.errorOperation = record.error.operation;
-    }
-    return attributes;
   }
 
   /**
@@ -812,10 +594,10 @@ export class TelemetryApiService {
 
   /**
    * Ingest an externally-received OTLP log payload into this service's event
-   * buffer. Each entry in `resourceLogs[].scopeLogs[].logRecords[]` is mapped
-   * to a TelemetryRecord and appended to `this.records` with domain 'telemetry'.
-   * Records are bounded by eventLimit (default 500). Subscribers are notified.
-   * Call is synchronous and never throws.
+   * buffer. Each entry in `resourceLogs[].scopeLogs[].logRecords[]` becomes a
+   * record with the log's severity, time and body; an error log is also in the
+   * errors list. Records are bounded by eventLimit (default 500). Subscribers
+   * are notified. Call is synchronous and never throws.
    */
   ingestExternalLogs(payload: Record<string, unknown>): void {
     ingestExternalTelemetryLogs({
@@ -836,39 +618,45 @@ export class TelemetryApiService {
     ingestExternalTelemetryTraces({
       payload,
       traceIdentities: this.traceIdentities,
-      appendRecord: record => this.appendRecord(record),
       appendSpan: span => this.appendSpan(span),
-      recordEvent: (type, record) => this.recordIngestedEvent(type, record),
-      nextSequence: () => this.seq++,
     });
   }
 
   /**
-   * Ingest an externally-received OTLP metrics payload. Creates a synthetic
-   * TelemetryRecord tagged 'OTLP_METRICS_INGEST' and appends it to the event
-   * buffer so it is visible on GET /api/v1/telemetry/events.
-   * Sentinel is only emitted when at least one metric datapoint is present.
+   * Ingest an externally-received OTLP metrics payload. The latest posting of
+   * each metric (by name) is kept and served by the metrics route, under the
+   * `otlp-ingest` scope, beside this service's own metrics.
    */
   ingestExternalMetrics(payload: Record<string, unknown>): void {
-    ingestExternalTelemetryMetrics({
-      payload,
-      traceIdentities: this.traceIdentities,
-      appendRecord: record => this.appendRecord(record),
-      recordEvent: (type, record) => this.recordIngestedEvent(type, record),
-      nextSequence: () => this.seq++,
-    });
+    for (const metric of readExternalTelemetryMetrics(payload)) {
+      const name = metric['name'] as string;
+      this.ingestedMetrics.delete(name);
+      this.ingestedMetrics.set(name, metric);
+      if (this.ingestedMetrics.size > MAX_INGESTED_METRICS) {
+        const oldest = this.ingestedMetrics.keys().next();
+        if (!oldest.done) this.ingestedMetrics.delete(oldest.value);
+      }
+    }
   }
 
   private recordIngestedEvent(_type: string, record: TelemetryRecord): void {
     this.countRecord(record);
+    if (record.severity === 'error') {
+      this.appendRecord(record, this.errors, this.errorLimit);
+      this.errorCountsByCategory.set('external', (this.errorCountsByCategory.get('external') ?? 0) + 1);
+    }
     this.notify(record);
   }
 
   private countRecord(record: TelemetryRecord): void {
-    this.eventsRecorded += 1;
     if (record.severity === 'warn') this.warningsRecorded += 1;
-    this.eventCountsByDomain.set(record.domain, (this.eventCountsByDomain.get(record.domain) ?? 0) + 1);
-    this.eventCountsByType.set(record.type, (this.eventCountsByType.get(record.type) ?? 0) + 1);
+    this.countType(record.domain, record.type);
+  }
+
+  private countType(domain: string, type: string): void {
+    this.eventsRecorded += 1;
+    this.eventCountsByDomain.set(domain, (this.eventCountsByDomain.get(domain) ?? 0) + 1);
+    this.eventCountsByType.set(type, (this.eventCountsByType.get(type) ?? 0) + 1);
   }
 
   private notify(record: TelemetryRecord): void {

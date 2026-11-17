@@ -173,7 +173,8 @@ const TELEMETRY_CAPABILITIES_SCHEMA = objectSchema({
 const TELEMETRY_TRACE_EXPORT_SCHEMA = objectSchema({
   recording: BOOLEAN_SCHEMA,
   endpoints: arraySchema(STRING_SCHEMA),
-}, ['recording', 'endpoints']);
+  unreachable: arraySchema(STRING_SCHEMA),
+}, ['recording', 'endpoints', 'unreachable']);
 
 const TELEMETRY_RUNTIME_SNAPSHOT_SCHEMA = objectSchema({
   sessionId: STRING_SCHEMA,
@@ -291,6 +292,8 @@ export const TELEMETRY_STREAM_READY_SCHEMA = objectSchema({
   view: TELEMETRY_VIEW_SCHEMA,
   rawAccessible: BOOLEAN_SCHEMA,
   resumedFrom: STRING_SCHEMA,
+  gap: BOOLEAN_SCHEMA,
+  truncated: BOOLEAN_SCHEMA,
 }, ['version', 'capabilities', 'view', 'rawAccessible']);
 
 export const TELEMETRY_SNAPSHOT_SCHEMA = objectSchema({

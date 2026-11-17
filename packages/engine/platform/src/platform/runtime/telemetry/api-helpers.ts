@@ -3,7 +3,7 @@ import { VERSION } from '../../version.js';
 import { getCorrelationContext } from '../correlation.js';
 import type { PlatformErrorSource } from '../../types/errors.js';
 import type { NormalizedError } from '../../utils/error-display.js';
-import { redactStructuredData } from '../../utils/redaction.js';
+import { projectSafeTelemetryValue, safeTelemetryText } from './event-content.js';
 import { RUNTIME_EVENT_DOMAINS } from '@goodvibes-jev/engine/contracts';
 import type {
   AnyRuntimeEvent,
@@ -30,6 +30,13 @@ import { EVENT_SEVERITY } from './event-severity.js';
 
 export const SERVICE_NAME = 'goodvibes-platform';
 export const DEFAULT_EVENT_LIMIT = 500;
+
+/** Event types sent once per streamed chunk: counted by the telemetry service, never kept or streamed. */
+const STREAM_CHUNK_EVENT_TYPES: ReadonlySet<string> = new Set<AnyRuntimeEvent['type']>(['STREAM_DELTA', 'AGENT_STREAM_DELTA']);
+
+export function isStreamChunkEventType(type: string): boolean {
+  return STREAM_CHUNK_EVENT_TYPES.has(type);
+}
 
 /**
  * Allowlist of metric label keys permitted in telemetry attributes.
@@ -229,18 +236,18 @@ export function filterMetricLabels(labels: Record<string, unknown>): Record<stri
   return out;
 }
 
+/**
+ * A record's attributes: the envelope's and the ambient correlation ids. The
+ * payload is the record's `payload` and is not repeated here.
+ */
 export function buildAttributes(
   domain: RuntimeEventDomain,
   envelope: RuntimeEventEnvelope<AnyRuntimeEvent['type'], AnyRuntimeEvent>,
-  payload: Record<string, unknown>,
 ): Record<string, unknown> {
   // Merge correlation context so every event emitted from within a
   // correlationCtx.run() scope carries the ambient IDs.
   const ctx = getCorrelationContext();
   return {
-    // The payload goes first so a payload field named like an envelope field
-    // (many carry `source` or `severity`) cannot replace the envelope's value.
-    ...payload,
     domain,
     eventType: envelope.type,
     source: envelope.source,
@@ -278,27 +285,23 @@ export function clampLimit(limit: number | undefined, fallback: number): number 
 }
 
 /**
- * The safe view carries no free text: a record's message, an error's message,
- * summary and hint, and span and event names may hold a prompt or a failure's
- * contents, so they are withheld; the raw view (an explicit opt-in) carries
- * them. Structural fields keep their values. Local and deterministic: no model
- * request, and the same record reads the same on every call.
+ * The safe view (see event-content.ts): content fields (prompts, chunks, tool
+ * arguments and output, bodies) are withheld; tool, provider, model, ids,
+ * statuses, counts and error text are shown with credential-shaped text
+ * masked. The raw view (an explicit opt-in) carries everything.
  */
-const withheldText = (value: string): string => value.length === 0 ? value : '[REDACTED_TEXT]';
-
 export function sanitizeRecord(record: TelemetryRecord, view: TelemetryViewMode): TelemetryRecord {
   if (view === 'raw') return structuredClone(record);
-  const safeText = withheldText;
   return {
     ...record,
-    message: safeText(record.message),
-    payload: redactStructuredData(record.payload),
-    attributes: redactStructuredData(record.attributes) as Record<string, unknown>,
+    message: safeTelemetryText(record.message),
+    payload: projectSafeTelemetryValue(record.payload),
+    attributes: projectSafeTelemetryValue(record.attributes) as Record<string, unknown>,
     ...(record.error ? { error: {
       ...record.error,
-      message: safeText(record.error.message),
-      summary: safeText(record.error.summary),
-      ...(record.error.hint !== undefined ? { hint: safeText(record.error.hint) } : {}),
+      message: safeTelemetryText(record.error.message),
+      summary: safeTelemetryText(record.error.summary),
+      ...(record.error.hint !== undefined ? { hint: safeTelemetryText(record.error.hint) } : {}),
     } } : {}),
   };
 }
@@ -307,18 +310,25 @@ export function sanitizeSpan(span: ReadableSpan, view: TelemetryViewMode): Reada
   if (view === 'raw') return structuredClone(span);
   return {
     ...span,
-    name: withheldText(span.name),
+    name: safeTelemetryText(span.name),
     status: {
       ...span.status,
-      ...(span.status.message !== undefined ? { message: withheldText(span.status.message) } : {}),
+      ...(span.status.message !== undefined ? { message: safeTelemetryText(span.status.message) } : {}),
     },
-    attributes: redactStructuredData(span.attributes) as SpanAttributes,
+    attributes: projectSafeTelemetryValue(span.attributes) as SpanAttributes,
     events: span.events.map((event) => ({
       ...event,
-      name: withheldText(event.name),
-      ...(event.attributes ? { attributes: redactStructuredData(event.attributes) as Record<string, AttributeValue> } : {}),
+      name: safeTelemetryText(event.name),
+      ...(event.attributes ? { attributes: projectSafeTelemetryValue(event.attributes) as Record<string, AttributeValue> } : {}),
     })),
   };
+}
+
+/** A payload's top-level text, number and boolean fields, for the attributes of an OTLP log record. */
+function scalarPayloadFields(payload: unknown): Record<string, unknown> {
+  if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) return {};
+  return Object.fromEntries(Object.entries(payload as Record<string, unknown>)
+    .filter(([, value]) => typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean'));
 }
 
 export function buildListResponse<T>(
@@ -414,6 +424,7 @@ export function buildOtlpLogDocumentFromRecords(records: readonly TelemetryRecor
               body: { stringValue: record.message },
               traceId: record.traceId,
               attributes: toOtlpAttributes({
+                ...scalarPayloadFields(record.payload),
                 ...record.attributes,
                 telemetryRecordId: record.id,
                 severity: record.severity,
@@ -441,6 +452,8 @@ export function buildOtlpMetricDocumentFromState(
   state: ReturnType<RuntimeStore['getState']>,
   aggregates: TelemetryAggregates,
   sessionMetrics: Pick<SessionMetrics, 'inputTokens' | 'outputTokens'>,
+  /** Metrics posted to the OTLP metrics receiver, latest per name, served as received. */
+  ingestedMetrics: readonly Record<string, unknown>[] = [],
 ): Record<string, unknown> {
   const now = Date.now();
   const nowUnixNano = String(now * NANOSECONDS_PER_MILLISECOND);
@@ -568,6 +581,7 @@ export function buildOtlpMetricDocumentFromState(
             scope: { name: `${SERVICE_NAME}/telemetry` },
             metrics,
           },
+          ...(ingestedMetrics.length > 0 ? [{ scope: { name: 'otlp-ingest' }, metrics: ingestedMetrics }] : []),
         ],
       },
     ],

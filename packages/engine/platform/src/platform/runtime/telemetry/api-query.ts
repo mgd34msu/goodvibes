@@ -19,25 +19,37 @@ export function compareTelemetryRecordsNewestFirst(left: TelemetryRecord, right:
   return extractRecordSequence(right) - extractRecordSequence(left);
 }
 
+/** What an SSE reconnect is sent before it goes live. */
+export interface TelemetryResume {
+  /** Records after the cursor, oldest first, at most the limit. */
+  readonly records: readonly TelemetryRecord[];
+  /** The cursor is no longer held, so records between it and the oldest one held may be missing. */
+  readonly gap: boolean;
+  /** More records than the limit were missed; the oldest of them are not sent. */
+  readonly truncated: boolean;
+}
+
 /**
- * Records that happened after `cursor`, oldest first, for an SSE reconnect.
- * A page cursor pages toward older records; a resume needs the opposite
- * direction, so it takes the records nearest the cursor, up to `limit`.
- * The cursor record itself is not repeated, and it need not match the filter.
+ * Records that happened after `cursor`, oldest first, for an SSE reconnect:
+ * the newest `limit` of them, so the stream continues without a hole before
+ * live records (`truncated` says older ones were skipped). The cursor record
+ * itself is not repeated, and it need not match the filter. A cursor the
+ * history no longer holds resumes from the records held, and says so (`gap`).
  */
 export function listTelemetryRecordsAfterCursor(
   records: readonly TelemetryRecord[],
   matches: (record: TelemetryRecord) => boolean,
   cursor: string,
   limit: number,
-): readonly TelemetryRecord[] {
+): TelemetryResume {
   const newestFirst = [...records].sort(compareTelemetryRecordsNewestFirst);
-  const cursorIndex = resolveTelemetryRecordCursor(newestFirst, cursor);
-  return newestFirst
-    .slice(0, cursorIndex)
-    .filter(matches)
-    .slice(-limit)
-    .reverse();
+  const found = newestFirst.findIndex((record) => record.id === cursor);
+  const missed = newestFirst.slice(0, found >= 0 ? found : newestFirst.length).filter(matches);
+  return {
+    records: missed.slice(0, limit).reverse(),
+    gap: found < 0,
+    truncated: missed.length > limit,
+  };
 }
 
 export function applyTelemetryRecordFilter(
@@ -73,12 +85,13 @@ export function applyTelemetrySpanFilter(
     if (filter.since !== undefined && span.startTimeMs < filter.since) return false;
     if (filter.until !== undefined && span.endTimeMs > filter.until) return false;
     if (filter.traceId && span.spanContext.traceId !== filter.traceId) return false;
-    if (filter.turnId !== undefined && span.attributes.turnId !== filter.turnId) return false;
-    if (filter.agentId !== undefined && span.attributes.agentId !== filter.agentId) return false;
-    if (filter.taskId !== undefined && span.attributes.taskId !== filter.taskId) return false;
+    if (filter.turnId !== undefined && spanAttribute(span, 'turn.id', 'turnId') !== filter.turnId) return false;
+    if (filter.agentId !== undefined && spanAttribute(span, 'agent.id', 'agentId') !== filter.agentId) return false;
+    if (filter.taskId !== undefined && spanAttribute(span, 'task.id', 'taskId') !== filter.taskId) return false;
+    // A span's type is its name (`turn.lifecycle`, `tool.execute`); an ingested span may name its start event.
     if (filter.eventTypes && filter.eventTypes.length > 0) {
-      const startEventType = typeof span.attributes.startEventType === 'string' ? span.attributes.startEventType : '';
-      if (!filter.eventTypes.includes(startEventType)) return false;
+      const startEventType = typeof span.attributes.startEventType === 'string' ? span.attributes.startEventType : undefined;
+      if (!filter.eventTypes.includes(span.name) && (startEventType === undefined || !filter.eventTypes.includes(startEventType))) return false;
     }
     return true;
   }).sort((left, right) => right.endTimeMs - left.endTimeMs);
@@ -96,6 +109,11 @@ export function applyTelemetrySpanFilter(
       ...(next ? { nextCursor: buildSpanCursor(page[page.length - 1]!) } : {}),
     },
   };
+}
+
+/** A span's id attribute under the tracer's dotted name, or the plain name an ingested span may use. */
+function spanAttribute(span: ReadableSpan, dotted: string, plain: string): unknown {
+  return span.attributes[dotted] ?? span.attributes[plain];
 }
 
 export function telemetryRecordMatches(record: TelemetryRecord, filter: TelemetryFilter): boolean {

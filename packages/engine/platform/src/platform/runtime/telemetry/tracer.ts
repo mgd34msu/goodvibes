@@ -32,6 +32,30 @@ function isNonZeroHex(hex: string): boolean {
   return /[1-9a-f]/.test(hex);
 }
 
+/** An event trace id in UUID form is the 32-hex trace id OTLP expects, written with dashes. */
+function otlpTraceId(traceId: string): string {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(traceId)
+    ? traceId.replace(/-/g, '').toLowerCase()
+    : traceId;
+}
+
+// ── In-process span readers ───────────────────────────────────────────────────
+
+const spanEndListeners = new Set<(span: ReadableSpan) => void>();
+
+/**
+ * Hear every span any tracer in this process ends, beside its exporters. This
+ * is how the telemetry API shows the spans `telemetry.otelMode` records: the
+ * same spans a collector receives, not a second copy built from events.
+ * Returns the function that stops listening.
+ */
+export function onSpanEnded(listener: (span: ReadableSpan) => void): () => void {
+  spanEndListeners.add(listener);
+  return () => {
+    spanEndListeners.delete(listener);
+  };
+}
+
 // ── SpanImpl ──────────────────────────────────────────────────────────────────────
 
 class SpanImpl implements Span {
@@ -171,6 +195,15 @@ export class RuntimeTracer {
     });
   }
 
+  /** The endpoints whose collector is down now (its last batch failed after all retries). */
+  unreachableEndpoints(): string[] {
+    if (!this.config.enabled) return [];
+    return this.config.exporters.flatMap((exporter) => {
+      const { endpoint, reachable } = exporter as { readonly endpoint?: unknown; readonly reachable?: unknown };
+      return typeof endpoint === 'string' && reachable === false ? [endpoint] : [];
+    });
+  }
+
   /**
    * Start a new span.
    *
@@ -197,7 +230,7 @@ export class RuntimeTracer {
     }
 
     // An empty id (an envelope with no trace) is absent, not a valid trace id.
-    const traceId = opts?.traceId || generateTraceId();
+    const traceId = opts?.traceId ? otlpTraceId(opts.traceId) : generateTraceId();
     const span = new SpanImpl({
       name,
       kind: opts?.kind ?? SpanKind.INTERNAL,
@@ -229,8 +262,17 @@ export class RuntimeTracer {
     await Promise.allSettled(this.config.exporters.map((e) => e.shutdown()));
   }
 
-  /** Fire-and-forget export to all registered exporters. */
+  /** Hand ended spans to the in-process readers, then fire-and-forget to every exporter. */
   private _export(spans: ReadableSpan[]): void {
+    for (const listener of spanEndListeners) {
+      for (const span of spans) {
+        try {
+          listener(span);
+        } catch {
+          // A reader must never break the span's owner.
+        }
+      }
+    }
     for (const exporter of this.config.exporters) {
       exporter.export(spans).catch((error: unknown) => {
         logger.warn('[telemetry] span exporter failed', {

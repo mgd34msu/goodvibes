@@ -63,8 +63,13 @@ export interface ExportResult {
   readonly code: ExportResultCode;
   /** Number of spans in the batch. */
   readonly spanCount: number;
-  /** Number of retry attempts made (0 = first attempt succeeded). */
+  /** Number of tries made (1 = the first try succeeded or failed; 0 = dropped unsent). */
   readonly attempts: number;
+  /**
+   * The endpoint after this result: `down` once a batch failed after all its
+   * retries, until a batch succeeds. While down, each batch is tried once.
+   */
+  readonly endpoint: 'up' | 'down';
   /** Error message if the export failed after all retries. */
   readonly error?: string | undefined;
   /** Epoch ms when the export completed. */
@@ -105,6 +110,8 @@ export interface OtlpConfig {
   readonly queue?: Partial<ExportQueueConfig> | undefined;
   /** Retry configuration. Overrides queue.retry when provided. */
   readonly retry?: Partial<RetryConfig> | undefined;
+  /** Hears each batch's outcome, including whether the collector is up or down. */
+  readonly onResult?: ExportResultCallback | undefined;
 }
 
 /** Default OTLP exporter configuration. */

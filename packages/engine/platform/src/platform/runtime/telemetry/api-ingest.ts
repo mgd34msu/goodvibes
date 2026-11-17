@@ -1,5 +1,5 @@
 import type { RuntimeEventDomain } from '../events/index.js';
-import type { TelemetryRecord } from './api.js';
+import type { TelemetryRecord, TelemetrySeverity } from './api.js';
 import type { AttributeValue, ReadableSpan, SpanAttributes, SpanEvent, SpanKind } from './types.js';
 import type { TelemetryTraceIdentities } from './trace-identities.js';
 import { SpanKind as SpanKinds, SpanStatusCode } from './types.js';
@@ -13,27 +13,72 @@ interface IngestTelemetryBaseInput {
   readonly nextSequence: () => number;
 }
 
+/**
+ * Each OTLP log record becomes one telemetry record that reads as the log did:
+ * its severity, time and body are the record's, so an ingested error log is in
+ * the errors list and the severity filter finds it.
+ */
 export function ingestExternalTelemetryLogs(input: IngestTelemetryBaseInput): void {
   const resourceLogs = Array.isArray(input.payload['resourceLogs']) ? input.payload['resourceLogs'] as unknown[] : [];
   for (const resource of resourceLogs) {
+    const serviceName = fromOtlpAttributes(objectRecord(objectRecord(resource)['resource'])['attributes'])['service.name'];
     const scopeLogs = listNestedArray(resource, 'scopeLogs');
     for (const scope of scopeLogs) {
       const logRecords = listNestedArray(scope, 'logRecords');
       for (const logRecord of logRecords) {
         const entry = objectRecord(logRecord);
-        publishIngestedRecord('OTLP_LOG_INGEST', entry, input);
+        const severity = severityFromOtlp(entry['severityNumber'], entry['severityText']);
+        const timestamp = parseUnixNanoToMs(entry['timeUnixNano']) ?? parseUnixNanoToMs(entry['observedTimeUnixNano']) ?? Date.now();
+        const body = fromOtlpBody(entry['body']);
+        const attributes: Record<string, unknown> = {
+          ...fromOtlpAttributes(entry['attributes']),
+          ...(typeof serviceName === 'string' ? { 'service.name': serviceName } : {}),
+        };
+        input.traceIdentities.capture(typeof entry['traceId'] === 'string' ? entry['traceId'] : undefined, traceId => {
+          const record: TelemetryRecord = {
+            ...buildIngestedTelemetryRecord('OTLP_LOG_INGEST', entry, input.nextSequence, traceId),
+            timestamp,
+            severity,
+            message: body.length > 0 ? body : `OTLP log${typeof serviceName === 'string' ? ` from ${serviceName}` : ''}`,
+            attributes,
+          };
+          input.appendRecord(record);
+          input.recordEvent('OTLP_LOG_INGEST', record);
+        });
       }
     }
   }
 }
 
+/** OTLP severity numbers: 1-8 trace and debug, 9-12 info, 13-16 warn, 17-24 error and fatal; else the text, else info. */
+function severityFromOtlp(severityNumber: unknown, severityText: unknown): TelemetrySeverity {
+  if (typeof severityNumber === 'number' && severityNumber >= 1) {
+    return severityNumber >= 17 ? 'error' : severityNumber >= 13 ? 'warn' : severityNumber >= 9 ? 'info' : 'debug';
+  }
+  const text = typeof severityText === 'string' ? severityText.toLowerCase() : '';
+  if (text.startsWith('err') || text.startsWith('fatal')) return 'error';
+  if (text.startsWith('warn')) return 'warn';
+  if (text.startsWith('debug') || text.startsWith('trace')) return 'debug';
+  return 'info';
+}
+
+/** A log body is an OTLP AnyValue; text is used as it is, anything else as JSON. */
+function fromOtlpBody(value: unknown): string {
+  const body = objectRecord(value);
+  if (typeof body['stringValue'] === 'string') return body['stringValue'];
+  const decoded = fromOtlpAnyValue(value);
+  if (decoded !== undefined) return String(decoded);
+  if (Object.keys(body).length === 0) return '';
+  try { return JSON.stringify(body); } catch { return ''; }
+}
+
+/** Each OTLP span becomes one span in the trace list; the request body is not kept a second time. */
 export function ingestExternalTelemetryTraces(
-  input: IngestTelemetryBaseInput & {
+  input: Pick<IngestTelemetryBaseInput, 'payload' | 'traceIdentities'> & {
     readonly appendSpan: (span: ReadableSpan) => void;
   },
 ): void {
   const resourceSpans = Array.isArray(input.payload['resourceSpans']) ? input.payload['resourceSpans'] as unknown[] : [];
-  let spansAppended = 0;
   for (const resource of resourceSpans) {
     const scopeSpans = listNestedArray(resource, 'scopeSpans');
     for (const scope of scopeSpans) {
@@ -70,42 +115,44 @@ export function ingestExternalTelemetryTraces(
           },
           instrumentationScope: 'otlp-ingest',
         }));
-        spansAppended += 1;
       }
     }
   }
-  if (spansAppended === 0) return;
-  publishIngestedRecord('OTLP_TRACE_INGEST', input.payload, input);
 }
 
-export function ingestExternalTelemetryMetrics(input: IngestTelemetryBaseInput): void {
-  const resourceMetrics = Array.isArray(input.payload['resourceMetrics']) ? input.payload['resourceMetrics'] as unknown[] : [];
-  let datapointsFound = 0;
+/**
+ * Each OTLP metric that carries data points, as received: its name, unit,
+ * description and the one signal (sum, gauge, histogram, ...) holding its
+ * points. The telemetry service keeps the latest per name and serves it from
+ * the metrics route beside its own.
+ */
+export function readExternalTelemetryMetrics(payload: Record<string, unknown>): Record<string, unknown>[] {
+  const resourceMetrics = Array.isArray(payload['resourceMetrics']) ? payload['resourceMetrics'] as unknown[] : [];
+  const found: Record<string, unknown>[] = [];
   for (const resource of resourceMetrics) {
     const scopeMetrics = listNestedArray(resource, 'scopeMetrics');
     for (const scope of scopeMetrics) {
       const metrics = listNestedArray(scope, 'metrics');
       for (const metric of metrics) {
         const metricRecord = objectRecord(metric);
+        if (typeof metricRecord['name'] !== 'string' || metricRecord['name'].length === 0) continue;
         for (const signalKey of ['sum', 'gauge', 'histogram', 'exponentialHistogram', 'summary']) {
-          const signal = metricRecord[signalKey]!;
+          const signal = metricRecord[signalKey];
           if (typeof signal !== 'object' || signal === null) continue;
           const dataPoints = (signal as Record<string, unknown>)['dataPoints'];
-          if (Array.isArray(dataPoints)) datapointsFound += dataPoints.length;
+          if (!Array.isArray(dataPoints) || dataPoints.length === 0) continue;
+          found.push({
+            name: metricRecord['name'],
+            ...(typeof metricRecord['description'] === 'string' ? { description: metricRecord['description'] } : {}),
+            ...(typeof metricRecord['unit'] === 'string' ? { unit: metricRecord['unit'] } : {}),
+            [signalKey]: signal,
+          });
+          break;
         }
       }
     }
   }
-  if (datapointsFound === 0) return;
-  publishIngestedRecord('OTLP_METRICS_INGEST', input.payload, input);
-}
-
-function publishIngestedRecord(type: string, payload: Record<string, unknown>, input: IngestTelemetryBaseInput): void {
-  input.traceIdentities.capture(typeof payload['traceId'] === 'string' ? payload['traceId'] : undefined, traceId => {
-    const record = buildIngestedTelemetryRecord(type, payload, input.nextSequence, traceId);
-    input.appendRecord(record);
-    input.recordEvent(type, record);
-  });
+  return found;
 }
 
 function buildIngestedTelemetryRecord(

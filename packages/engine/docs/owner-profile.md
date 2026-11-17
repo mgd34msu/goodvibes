@@ -1172,7 +1172,7 @@ same turn.**
   |---|---|---|
   | `platform/export/session-export.ts` | `redactSensitiveData` | markdown and JSON session exports |
   | `platform/runtime/at-rest-persistence.ts` | `redactSensitiveData` | what a turn writes to disk |
-  | `platform/runtime/telemetry/api-helpers.ts` | `redactStructuredData` | telemetry payloads, attributes, span attributes |
+  | `platform/runtime/telemetry/event-content.ts` | `redactSensitiveData` plus the field-role table | telemetry payloads, attributes, span attributes (profile-named fields withheld whole) |
   | `platform/utils/error-display.ts` | `redactSensitiveData` | `redactedErrorMessage`, so a thrown value carrying a profile string does not surface it |
   | `platform/utils/logger.ts` | `redactDiagnosticValue` | the activity log: profile values and profile-named fields are masked, everything else is kept |
 

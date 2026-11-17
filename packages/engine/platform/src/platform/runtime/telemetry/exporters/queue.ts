@@ -5,7 +5,11 @@
  * - Never blocks the caller, all export work is dequeued asynchronously.
  * - Never throws, all errors are caught and logged.
  * - Drops oldest entries when full (back-pressure relief).
- * - Shutdown drain waits up to the configured timeout before returning.
+ * - Shutdown drain waits up to the configured timeout before returning, and
+ *   cuts short any retry wait in progress.
+ * - Remembers the endpoint's state: once a batch fails after all its retries
+ *   the endpoint is down, the following batches are tried once each with no
+ *   retry, and the change is logged once each way (down, then recovered).
  */
 import { randomInt } from 'node:crypto';
 import type { ReadableSpan } from '../types.js';
@@ -76,6 +80,14 @@ export class ExportQueue {
   private _draining = false;
   /** True after shutdown() is called, no new enqueues accepted. */
   private _shutdown = false;
+  /** Aborted by shutdown() so a retry wait does not hold the exit. */
+  private readonly _stopRetries = new AbortController();
+  /** A batch failed after all its retries and none has succeeded since. */
+  private _endpointDown = false;
+  /** Batches lost (failed or dropped) since the endpoint went down. */
+  private _lostWhileDown = 0;
+  /** Overflow is logged once until the queue empties again. */
+  private _overflowLogged = false;
 
   /**
    * @param exportFn - The actual export implementation. Must not throw.
@@ -107,6 +119,11 @@ export class ExportQueue {
     return this._draining;
   }
 
+  /** Whether the endpoint is down: the last batch tried failed after its retries. */
+  get endpointDown(): boolean {
+    return this._endpointDown;
+  }
+
   /**
    * Enqueue a batch of spans for export.
    *
@@ -124,15 +141,19 @@ export class ExportQueue {
       this._head = (this._head + 1) % this._config.maxSize;
       this._size--;
       if (dropped) {
+        if (this._endpointDown) this._lostWhileDown++;
         this._emitResult({
           code: 'dropped',
           spanCount: dropped.batch.length,
           attempts: 0,
+          endpoint: this._endpointDown ? 'down' : 'up',
           completedAt: Date.now(),
         });
       }
-      // structured logger, not console
-      logger.warn('[ExportQueue] Queue overflow, dropped oldest batch', { maxSize: this._config.maxSize });
+      if (!this._overflowLogged) {
+        this._overflowLogged = true;
+        logger.warn('[ExportQueue] Queue full, dropping the oldest batches until it drains', { maxSize: this._config.maxSize });
+      }
     }
 
     this._ring[this._tail] = { batch, enqueuedAt: Date.now() };
@@ -169,6 +190,7 @@ export class ExportQueue {
    */
   async shutdown(): Promise<void> {
     this._shutdown = true;
+    this._stopRetries.abort();
     await this.drain();
   }
 
@@ -197,6 +219,7 @@ export class ExportQueue {
       }
     } finally {
       this._draining = false;
+      if (this._size === 0) this._overflowLogged = false;
       // If more entries arrived during the final iteration, restart
       if (this._size > 0) {
         this._startDrainLoop();
@@ -215,46 +238,57 @@ export class ExportQueue {
   }
 
   /**
-   * Attempts to export a single batch with retry/backoff.
-   * Never throws.
+   * Attempts to export a single batch, with retry/backoff while the endpoint
+   * is up and a single try while it is down. Never throws.
    */
   private async _processEntry(entry: QueueEntry): Promise<void> {
-    const { maxRetries } = this._config.retry;
+    const maxRetries = this._endpointDown ? 0 : this._config.retry.maxRetries;
     let lastError: string | undefined;
     let attempts = 0;
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      attempts++;
       try {
         await this._exportFn(entry.batch);
+        if (this._endpointDown) {
+          logger.info('[ExportQueue] Export endpoint reachable again', { batchesLost: this._lostWhileDown });
+          this._endpointDown = false;
+          this._lostWhileDown = 0;
+        }
         this._emitResult({
           code: 'success',
           spanCount: entry.batch.length,
           attempts,
+          endpoint: 'up',
           completedAt: Date.now(),
         });
         return;
       } catch (err) {
-        attempts++;
         lastError = summarizeError(err);
-        if (attempt < maxRetries) {
+        if (attempt < maxRetries && !this._stopRetries.signal.aborted) {
           const delay = computeDelay(attempt, this._config.retry);
-          // structured logger, not console
-          logger.warn('[ExportQueue] Export attempt failed, retrying', { attempt: attempt + 1, delayMs: delay, error: lastError });
-          await sleep(delay);
+          logger.debug('[ExportQueue] Export attempt failed, retrying', { attempt: attempts, delayMs: delay, error: lastError });
+          await sleep(delay, { signal: this._stopRetries.signal });
         }
+        // A shutdown during the wait ends this batch's retries: exit does not wait on a dead endpoint.
+        if (this._stopRetries.signal.aborted) break;
       }
     }
 
-    // All retries exhausted; use structured logging.
-    logger.error('[ExportQueue] Export failed after all retries, batch dropped', {
-      attempts,
-      spanCount: entry.batch.length,
-      error: lastError,
-    });
+    if (!this._endpointDown) {
+      this._endpointDown = true;
+      logger.warn('[ExportQueue] Export endpoint unreachable; spans are dropped and each later batch is tried once until one succeeds', {
+        attempts,
+        spanCount: entry.batch.length,
+        error: lastError,
+      });
+    }
+    this._lostWhileDown++;
     this._emitResult({
       code: 'failure',
       spanCount: entry.batch.length,
       attempts,
+      endpoint: 'down',
       error: lastError,
       completedAt: Date.now(),
     });

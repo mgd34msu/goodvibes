@@ -8,7 +8,7 @@
  * Compatible with the OTLP/HTTP JSON format for traces (v1/traces).
  */
 import type { ReadableSpan, SpanExporter } from '../types.js';
-import type { OtlpConfig, ExportResult } from './types.js';
+import type { OtlpConfig } from './types.js';
 import { DEFAULT_OTLP_CONFIG, DEFAULT_QUEUE_CONFIG } from './types.js';
 import { ExportQueue } from './queue.js';
 import { logger } from '../../../utils/logger.js';
@@ -43,7 +43,7 @@ const DEFAULT_FLUSH_INTERVAL_MS = 5000;
 export class OtlpExporter implements SpanExporter {
   readonly name = 'otlp';
 
-  private readonly _config: Required<Omit<OtlpConfig, 'queue' | 'retry' | 'headers'>> & {
+  private readonly _config: Required<Omit<OtlpConfig, 'queue' | 'retry' | 'headers' | 'onResult'>> & {
     readonly headers: Record<string, string>;
   };
   private readonly _queue: ExportQueue;
@@ -72,13 +72,18 @@ export class OtlpExporter implements SpanExporter {
     this._queue = new ExportQueue(
       (batch) => this._httpExport(batch),
       queueConfig,
-      (result) => this._onExportResult(result),
+      config.onResult,
     );
   }
 
   /** The collector this exporter sends to. */
   get endpoint(): string {
     return this._config.endpoint;
+  }
+
+  /** False while the collector is down (the last batch failed after its retries). */
+  get reachable(): boolean {
+    return !this._queue.endpointDown;
   }
 
   /**
@@ -192,25 +197,6 @@ export class OtlpExporter implements SpanExporter {
       }
     } finally {
       clearTimeout(timer);
-    }
-  }
-
-  /**
-   * Result callback, logs failures without throwing.
-   */
-  private _onExportResult(result: ExportResult): void {
-    if (result.code === 'failure') {
-      // use structured logger so OTLP exporter failures appear in activity log
-      logger.error('[OtlpExporter] Export failed permanently, spans lost', {
-        spanCount: result.spanCount,
-        attempts: result.attempts,
-        error: result.error,
-      });
-    } else if (result.code === 'dropped') {
-      // use structured logger
-      logger.warn('[OtlpExporter] Dropped spans due to queue overflow', {
-        spanCount: result.spanCount,
-      });
     }
   }
 }

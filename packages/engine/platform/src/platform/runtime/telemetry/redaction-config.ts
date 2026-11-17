@@ -10,10 +10,12 @@
  * - TelemetryApiService ring buffer stores raw payloads.
  *
  * - Egress boundary: `listEvents({view: 'safe'})` (the default) runs records
- *   through `sanitizeRecord` → `redactStructuredData` (see
- *   `utils/redaction.ts`). The canonical structured redactor masks content,
- *   secrets, and fields without a settled safe reading. Record messages,
- *   error display text, and span display text use the same redactor.
+ *   and spans through `sanitizeRecord` / `sanitizeSpan`, which apply the
+ *   field table in `event-content.ts`: content fields (prompts, streamed
+ *   chunks, tool arguments and output, bodies) are withheld, credential and
+ *   owner-profile fields are withheld whole, and everything else (tool,
+ *   provider, model, ids, statuses, counts, error text) is shown with
+ *   credential-shaped text masked.
  *
  * - Raw reads require the serving TelemetryApiService's live
  *   `telemetry.includeRawPrompts` opt-in. The HTTP boundary additionally

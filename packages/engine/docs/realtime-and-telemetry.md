@@ -74,6 +74,14 @@ The same filter shape works across the sibling list methods. `platformClient.ope
 
 Every telemetry read needs the `read:telemetry` scope (or an admin session). `view: 'raw'` additionally needs the `read:telemetry-sensitive` scope or an admin session, and the daemon setting `telemetry.includeRawPrompts` turned on; without them it answers `403`.
 
+The default `safe` view withholds content: prompts, streamed text, tool arguments and output, and message bodies read `[REDACTED_TEXT]`, and credential or owner-profile fields read `[REDACTED]` / `[REDACTED_PROFILE]`. Everything needed to see what happened and why stays readable: the tool, provider and model, ids, statuses, counts, durations, span names, and error text with credential-shaped parts masked. The `raw` view carries everything.
+
+Streamed chunks (`STREAM_DELTA`, `AGENT_STREAM_DELTA`) are counted in `aggregates.byEventType` but not kept in the event history or sent on the stream, so the history (500 records) covers what happened rather than the last answer's chunks.
+
+`traces` lists the spans this process records when `telemetry.otelMode` is `in-process` or `remote-export` (turns, tool calls, model requests, agents, tasks, plugins, MCP servers, permission checks, sessions, compaction): the same spans a collector receives. With `otelMode: off` no spans are recorded and the list holds only spans posted to the OTLP traces receiver. For `remote-export`, the collector's address comes from `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` (or `OTEL_EXPORTER_OTLP_ENDPOINT`) and its request headers from `OTEL_EXPORTER_OTLP_TRACES_HEADERS` (or `OTEL_EXPORTER_OTLP_HEADERS`, `key=value,key=value`).
+
+A stream reconnect sends `Last-Event-ID` and receives the records after it (up to `limit`, default 100) before going live. Its `ready` event says `resumedFrom` when the id was still held; `gap: true` when it was not (the stream resumes from the oldest record held, and some records may be missing); `truncated: true` when more than `limit` were missed. Stream handlers may also take `onError`, `onReconnect` and `onTerminate`; `onTerminate` means no more records will arrive.
+
 ## OTLP exports
 
 The operator platform exposes the OTLP-shaped daemon endpoints:
@@ -94,6 +102,7 @@ The same paths, `/api/v1/telemetry/otlp/v1/{traces,logs,metrics}`, also accept `
 - Scope: `ingest:telemetry` or `write:telemetry`, or an admin session.
 - Size: a body over 4 MiB answers `413`. A body that is not valid JSON or protobuf answers `400`.
 - Response: `200` with an OTLP `partialSuccess` object.
+- Traces become spans in the `traces` list. Each log record becomes an event record with the log's severity (from `severityNumber`, else `severityText`), time and body as its message; an error log is also in the `errors` list. Metrics: the latest posting of each metric (by name) is served by `GET /api/v1/telemetry/otlp/v1/metrics` under the `otlp-ingest` scope, beside the daemon's own.
 - When the daemon has no ingest sink wired, the request answers `503` `TELEMETRY_UNAVAILABLE` and nothing is accepted. Authentication is checked first, then availability, then the body.
 
 The operator client has no method for ingest; point the exporter at the daemon directly.

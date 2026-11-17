@@ -54,7 +54,7 @@ export type {
 export { SpanStatusCode as SpanStatusCodes, SpanKind as SpanKinds } from './types.js';
 
 // Re-export tracer and meter classes
-export { RuntimeTracer } from './tracer.js';
+export { RuntimeTracer, onSpanEnded } from './tracer.js';
 export { RuntimeMeter } from './meter.js';
 export type {
   TelemetrySeverity,
@@ -184,7 +184,29 @@ function otlpFromEnvironment(): OtlpConfig | undefined {
       ? `${general.replace(/\/+$/, '')}/v1/traces`
       : undefined;
   if (endpoint === undefined) return undefined;
-  return { endpoint, batchSize: 512, timeoutMs: 10_000 };
+  const headers = otlpHeadersFromEnvironment();
+  return { endpoint, batchSize: 512, timeoutMs: 10_000, ...(headers ? { headers } : {}) };
+}
+
+/**
+ * The collector's request headers (its credentials, usually) from
+ * `OTEL_EXPORTER_OTLP_TRACES_HEADERS`, else `OTEL_EXPORTER_OTLP_HEADERS`, in
+ * the specification's `key=value,key=value` form with URL-encoded values.
+ */
+function otlpHeadersFromEnvironment(): Record<string, string> | undefined {
+  const specific = process.env['OTEL_EXPORTER_OTLP_TRACES_HEADERS']?.trim();
+  const raw = specific && specific.length > 0 ? specific : process.env['OTEL_EXPORTER_OTLP_HEADERS']?.trim();
+  if (!raw) return undefined;
+  const headers: Record<string, string> = {};
+  for (const pair of raw.split(',')) {
+    const separator = pair.indexOf('=');
+    if (separator <= 0) continue;
+    const key = pair.slice(0, separator).trim();
+    let value = pair.slice(separator + 1).trim();
+    try { value = decodeURIComponent(value); } catch { /* a value that is not URL-encoded is used as written */ }
+    if (key.length > 0) headers[key] = value;
+  }
+  return Object.keys(headers).length > 0 ? headers : undefined;
 }
 
 /**

@@ -162,11 +162,21 @@ export interface HttpTransportTelemetryStreamReady {
   readonly view: TelemetryViewMode;
   readonly rawAccessible: boolean;
   readonly resumedFrom?: string | undefined;
+  /** The resume cursor was no longer held: records between it and the first one sent may be missing. */
+  readonly gap?: boolean | undefined;
+  /** More records were missed than one resume sends; the oldest of them were skipped. */
+  readonly truncated?: boolean | undefined;
 }
 
 export interface HttpTransportTelemetryStreamHandlers {
   readonly onRecord: (record: TelemetryRecord) => void;
   readonly onReady?: ((payload: HttpTransportTelemetryStreamReady) => void) | undefined;
+  /** A stream error; the client reconnects after it unless it was final. */
+  readonly onError?: ((error: unknown) => void) | undefined;
+  /** The stream reconnects after a drop. */
+  readonly onReconnect?: ((input: { readonly attempt: number; readonly delayMs: number }) => void) | undefined;
+  /** The stream ended for good: no more records will arrive. */
+  readonly onTerminate?: ((input: { readonly error: unknown; readonly reconnectAttempts: number; readonly final?: boolean | undefined }) => void) | undefined;
 }
 
 export interface HttpTransportTelemetryClient {

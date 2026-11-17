@@ -9,7 +9,7 @@ import {
   clampLimit,
   sanitizeRecord,
 } from './api-helpers.js';
-import { listTelemetryRecordsAfterCursor, resolveTelemetryRecordCursor } from './api-query.js';
+import { listTelemetryRecordsAfterCursor } from './api-query.js';
 
 export interface CreateTelemetryStreamInput {
   readonly request: Request;
@@ -33,9 +33,6 @@ export function createTelemetryEventStream(input: CreateTelemetryStreamInput): R
   const encoder = new TextEncoder();
   let unsub = (): void => {};
   const requestedCursor = input.request.headers.get('last-event-id')?.trim() || input.filter.cursor;
-  if (requestedCursor) {
-    resolveTelemetryRecordCursor(input.records, requestedCursor);
-  }
 
   let teardown = (): void => {};
 
@@ -58,14 +55,16 @@ export function createTelemetryEventStream(input: CreateTelemetryStreamInput): R
           return false;
         }
       };
-      if (requestedCursor) {
-        const missed = listTelemetryRecordsAfterCursor(
+      const resume = requestedCursor
+        ? listTelemetryRecordsAfterCursor(
           input.records,
           (record) => input.matchesRecord(record, input.filter),
           requestedCursor,
           clampLimit(input.filter.limit, 100),
-        );
-        for (const record of missed) {
+        )
+        : undefined;
+      if (resume) {
+        for (const record of resume.records) {
           if (!checkAccess()) return;
           const projected = sanitizeRecord(record, input.view);
           controller.enqueue(encoder.encode(`id: ${projected.id}\nevent: telemetry\ndata: ${JSON.stringify(projected)}\n\n`));
@@ -107,7 +106,11 @@ export function createTelemetryEventStream(input: CreateTelemetryStreamInput): R
         capabilities: input.getCapabilities(),
         view: input.view,
         rawAccessible: input.rawAccessible,
-        ...(requestedCursor ? { resumedFrom: requestedCursor } : {}),
+        // A cursor the history no longer holds is not refused: the stream
+        // resumes from the oldest record held and says records may be missing.
+        ...(requestedCursor && resume && !resume.gap ? { resumedFrom: requestedCursor } : {}),
+        ...(resume?.gap ? { gap: true } : {}),
+        ...(resume?.truncated ? { truncated: true } : {}),
       })}\n\n`));
     },
     cancel: () => {

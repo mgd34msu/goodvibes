@@ -255,7 +255,7 @@ interface RuntimeEventFeeds<TDomain, TEvent> {
 
 The telemetry snapshot (`telemetry.snapshot` and the metrics endpoint) computes `sessionMetrics` when it is asked for, from the owners that already count each figure: turns and token usage (`inputTokens`, `outputTokens`, `cacheReadTokens`) from the foreground conversation, tool calls, tool failures and agents spawned from the telemetry service's own event counts, permission answers and denials from the gate's decisions, and errors and warnings from the recorded events. Nothing is kept for it between snapshots, so a request costs nothing until a snapshot is read. The OTLP metric `goodvibes.session.tokens` carries the same token counts.
 
-`runtime.traceExport` says whether this process records spans (`telemetry.otelMode`) and which collectors it sends them to (`endpoints`, empty when spans stay in-process).
+`runtime.traceExport` says whether this process records spans (`telemetry.otelMode`), which collectors it sends them to (`endpoints`, empty when spans stay in-process), and which of those are down now (`unreachable`). A collector is down once a batch failed after all its retries; while it is down each later batch is tried once, the change is logged once each way, and shutting down does not wait out a retry.
 
 ### Tool call telemetry
 

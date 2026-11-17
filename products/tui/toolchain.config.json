@@ -81,6 +81,9 @@
       ".goodvibes/memory/",
       "vendor/"
     ],
-    "maxTarballBytes": 52428800
+    "maxTarballBytes": 52428800,
+    "bins": [
+      { "name": "goodvibes", "path": "bin/goodvibes", "shebang": "#!/usr/bin/env bun" }
+    ]
   }
 }

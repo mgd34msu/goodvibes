@@ -475,11 +475,12 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
     systemMessageRouter.low(`[Startup] ${announcement.text}`);
   }
   // Retention for worktrees earlier runs left (the daemon runs the same pass at its start). Everything it removed
-  // and every worktree it kept for the owner's decision is shown; only the disk-use line alone stays in the activity feed.
+  // and every worktree it kept for the owner's decision is shown on the main screen, whatever ui.systemMessages says
+  // (its default here keeps system lines in the Activity modal only); only the disk-use line alone stays in the activity feed.
   void services.worktreeRegistry.startupSweep().then((report) => {
     const text = report ? formatWorktreeStartupReport(report, workingDir) : null;
     if (!text || !report) return;
-    if (report.removed.length > 0 || report.attention.length > 0 || report.failed.length > 0) systemMessageRouter.high(`[Worktrees] ${text}`, report.attention.length > 0 || report.failed.length > 0 ? 'warning' : 'info');
+    if (report.removed.length > 0 || report.attention.length > 0 || report.failed.length > 0) systemMessageRouter.userAction(`[Worktrees] ${text}`, report.attention.length > 0 || report.failed.length > 0 ? 'warning' : 'info');
     else systemMessageRouter.low(`[Worktrees] ${text}`);
   });
   const commandRegistry = shell.commandRegistry;

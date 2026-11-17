@@ -3,18 +3,10 @@ import { inspectSandboxSessionArtifact, listSandboxProfiles, renderSandboxSessio
 import { requireShellPaths } from './runtime-services.ts';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 
-const SANDBOX_PROFILE_IDS = [
-  'eval-js',
-  'eval-ts',
-  'eval-py',
-  'eval-sql',
-  'eval-graphql',
-  'mcp-shared',
-  'mcp-per-server',
-] as const;
+const SANDBOX_PROFILE_IDS = ['command', 'mcp-server'] as const;
 
-function findSandboxProfile(configManager: CommandContext['platform']['configManager'], profileId: string) {
-  return listSandboxProfiles(configManager).find((entry) => entry.id === profileId);
+function findSandboxProfile(profileId: string) {
+  return listSandboxProfiles().find((entry) => entry.id === profileId);
 }
 
 export async function handleSandboxSessionCommand(args: string[], ctx: CommandContext): Promise<boolean> {
@@ -39,13 +31,13 @@ async function runSandboxSessionCommand(args: string[], ctx: CommandContext): Pr
   }
   if (mode === 'start') {
     const profileId = args[2];
-    const profile = profileId ? findSandboxProfile(ctx.platform.configManager, profileId) : undefined;
+    const profile = profileId ? findSandboxProfile(profileId) : undefined;
     if (!profile) {
       ctx.print(`Usage: /sandbox session start <${SANDBOX_PROFILE_IDS.join('|')}> [label...]`);
       return true;
     }
     const session = await sessions.start(profile.id, args.slice(3).join(' '), ctx.platform.configManager);
-    ctx.print(`Started sandbox session ${session.id} for ${session.profileId} (${session.shared ? 'shared' : 'dedicated'}, backend=${session.resolvedBackend ?? session.backend}, state=${session.state}, startup=${session.startupStatus ?? 'n/a'}).`);
+    ctx.print(`Started sandbox session ${session.id} for ${session.profileId} (backend=${session.backend}, state=${session.state}, startup=${session.startupStatus ?? 'n/a'}).`);
     if (session.startupDetail) ctx.print(`  ${session.startupDetail}`);
     return true;
   }
@@ -65,9 +57,7 @@ async function runSandboxSessionCommand(args: string[], ctx: CommandContext): Pr
       `  profile: ${session.profileId}`,
       `  kind: ${session.kind}`,
       `  state: ${session.state}`,
-      `  shared: ${session.shared ? 'yes' : 'no'}`,
       `  backend: ${session.backend}`,
-      `  resolved: ${session.resolvedBackend ?? session.backend}`,
       `  startup: ${session.startupStatus ?? 'n/a'}`,
       ...(session.startupDetail ? [`  detail: ${session.startupDetail}`] : []),
       ...(session.lastCommandSummary ? [`  last: ${session.lastCommandSummary}`] : []),

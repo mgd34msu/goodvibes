@@ -156,10 +156,7 @@ export interface GoodVibesConfig {
     judgment: 'off' | 'annotate' | 'auto-approve';
     egressAllowlist: string[];
     workspaceWritable: string[];
-    replIsolation: 'shared-vm' | 'per-runtime-vm';
-    mcpIsolation: 'disabled' | 'shared-vm' | 'hybrid' | 'per-server-vm';
-    windowsMode: 'native-basic' | 'require-wsl';
-    vmBackend: 'local';
+    mcpIsolation: 'disabled' | 'contained';
   };
   ui: {
     voiceEnabled: boolean;

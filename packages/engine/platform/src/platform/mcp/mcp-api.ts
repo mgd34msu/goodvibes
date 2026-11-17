@@ -52,7 +52,7 @@ export interface McpServerSecurityRecord {
 export interface McpSandboxBindingRecord {
   readonly name: string;
   readonly sessionId?: string | undefined;
-  readonly profileId?: 'mcp-shared' | 'mcp-per-server' | undefined;
+  readonly profileId?: 'mcp-server' | undefined;
   readonly state?: import('../runtime/sandbox/types.js').SandboxSessionState | undefined;
   readonly backend?: import('../runtime/sandbox/types.js').SandboxResolvedBackend | undefined;
   readonly startupStatus?: 'verified' | 'planned' | 'failed' | undefined;

@@ -1,43 +1,33 @@
-export type SandboxEvalIsolationMode = 'shared-vm' | 'per-runtime-vm';
-export type SandboxMcpIsolationMode = 'disabled' | 'shared-vm' | 'hybrid' | 'per-server-vm';
-export type SandboxWindowsMode = 'native-basic' | 'require-wsl';
-export type SandboxVmBackend = 'local';
-export type SandboxResolvedBackend = 'local';
+/** How stdio MCP servers start: as host processes, or each inside its own bubblewrap boundary. */
+export type SandboxMcpIsolationMode = 'disabled' | 'contained';
+/** What a sandbox session runs its processes through. */
+export type SandboxResolvedBackend = 'bubblewrap' | 'host';
 
 export interface SandboxConfigSnapshot {
-  readonly replIsolation: SandboxEvalIsolationMode;
   readonly mcpIsolation: SandboxMcpIsolationMode;
-  readonly windowsMode: SandboxWindowsMode;
-  readonly vmBackend: SandboxVmBackend;
 }
 
 export interface SandboxHostStatus {
   readonly platform: NodeJS.Platform;
   readonly runningInWsl: boolean;
   readonly windows: boolean;
+  /** Whether this host can run a process inside a boundary (bubblewrap works here). */
   readonly secureSandboxReady: boolean;
-  readonly recommendedBackend: SandboxVmBackend;
+  readonly recommendedBackend: SandboxResolvedBackend;
   readonly warnings: readonly string[];
 }
 
 export interface SandboxProfile {
-  readonly id:
-    | 'eval-js'
-    | 'eval-ts'
-    | 'eval-py'
-    | 'eval-sql'
-    | 'eval-graphql'
-    | 'mcp-shared'
-    | 'mcp-per-server';
+  readonly id: 'command' | 'mcp-server';
   readonly label: string;
-  readonly kind: 'eval' | 'mcp';
-  readonly isolation: 'shared' | 'dedicated';
-  readonly requiresVm: boolean;
+  readonly kind: SandboxSessionKind;
+  /** Whether processes in the boundary share the host network. */
+  readonly network: 'disabled' | 'enabled';
   readonly notes: readonly string[];
 }
 
 export interface SandboxPreset {
-  readonly id: 'secure-balanced' | 'secure-isolated' | 'shared-performance' | 'windows-basic';
+  readonly id: 'contained' | 'host-mcp';
   readonly label: string;
   readonly summary: string;
   readonly config: SandboxConfigSnapshot;
@@ -56,9 +46,7 @@ export interface SandboxProbe {
   readonly checkedAt: number;
   readonly host: string;
   readonly currentBackend: string;
-  readonly replIsolation: string;
   readonly mcpIsolation: string;
-  readonly windowsMode: string;
   readonly secureSandboxReady: boolean;
   readonly recommendedCommand: string;
 }
@@ -73,7 +61,7 @@ export interface SandboxBundle {
   };
 }
 
-export type SandboxSessionKind = 'eval' | 'mcp';
+export type SandboxSessionKind = 'command' | 'mcp';
 export type SandboxSessionState = 'running' | 'stopped' | 'planned' | 'failed';
 
 export interface SandboxBackendAvailability {
@@ -83,17 +71,23 @@ export interface SandboxBackendAvailability {
 }
 
 export interface SandboxBackendProbe {
-  readonly requestedBackend: SandboxVmBackend;
   readonly resolvedBackend: SandboxResolvedBackend;
   readonly backends: readonly SandboxBackendAvailability[];
   readonly warnings: readonly string[];
 }
 
+/**
+ * How a session's processes start. With `bubblewrap` each process runs in its
+ * own boundary: the workspace (and `writableExtras`) writable, system files
+ * read-only, $HOME and /tmp private, its own process namespace, and the host
+ * network only when `network` is `enabled`. `host` runs the process directly.
+ */
 export interface SandboxLaunchPlan {
   readonly backend: SandboxResolvedBackend;
-  readonly command: string;
-  readonly args: readonly string[];
+  readonly bwrapPath?: string | undefined;
   readonly workspaceRoot: string;
+  readonly writableExtras: readonly string[];
+  readonly network: 'disabled' | 'enabled';
   readonly summary: string;
 }
 
@@ -102,11 +96,9 @@ export interface SandboxSession {
   readonly profileId: SandboxProfile['id'];
   readonly kind: SandboxSessionKind;
   readonly label: string;
-  readonly shared: boolean;
   readonly startedAt: number;
   readonly state: SandboxSessionState;
-  readonly backend: SandboxVmBackend;
-  readonly resolvedBackend?: SandboxResolvedBackend | undefined;
+  readonly backend: SandboxResolvedBackend;
   readonly launchPlan?: SandboxLaunchPlan | undefined;
   readonly startupStatus?: 'verified' | 'planned' | 'failed' | undefined;
   readonly startupDetail?: string | undefined;

@@ -1,14 +1,13 @@
 import { readFileSync } from 'node:fs';
 import { writeJsonFileAtomic } from '../../utils/atomic-json-store.js';
 import { randomUUID } from 'node:crypto';
-import { buildSandboxLaunchPlan, executeSandboxCommand, resolveSandboxCommandPlan, type SandboxCommandResult } from './backend.js';
-import { getSandboxConfigSnapshot, listSandboxProfiles, renderSandboxReview, type ConfigManagerLike } from './manager.js';
+import { buildSandboxLaunchPlan, executeSandboxCommand, type SandboxCommandResult } from './backend.js';
+import { getSandboxWritableExtras, listSandboxProfiles, renderSandboxReview, type ConfigManagerLike } from './manager.js';
 import { defineLifecycle } from '../../utils/lifecycle-machine.js';
 import type {
   SandboxProfile,
   SandboxSession,
   SandboxSessionArtifact,
-  SandboxSessionKind,
   SandboxSessionState,
 } from './types.js';
 
@@ -30,18 +29,8 @@ function createSandboxSessionId(): string {
   return `sandbox_${Date.now().toString(36)}_${randomUUID().slice(0, 8)}`;
 }
 
-function inferShared(profile: SandboxProfile): boolean {
-  return profile.isolation === 'shared';
-}
-
-function inferKind(profile: SandboxProfile): SandboxSessionKind {
-  return profile.kind;
-}
-
 export class SandboxSessionRegistry {
   private readonly sessions = new Map<string, SandboxSession>();
-  /** How many starters hold each shared session; it stops only when the last one lets go. */
-  private readonly sharedHolders = new Map<string, number>();
   private readonly workspaceRoot: string;
 
   constructor(workspaceRoot: string) {
@@ -66,71 +55,46 @@ export class SandboxSessionRegistry {
   }
 
   public async start(profileId: SandboxProfile['id'], label: string | undefined, configManager: ConfigManagerLike): Promise<SandboxSession> {
-    const profile = listSandboxProfiles(configManager).find((entry) => entry.id === profileId);
+    const profile = listSandboxProfiles().find((entry) => entry.id === profileId);
     if (!profile) {
       throw new Error(`Unknown sandbox profile: ${profileId}`);
-    }
-    if (inferShared(profile)) {
-      // A shared session whose last command exited non-zero is still the shared
-      // session; only a stop ends it. Without this, one failing command would
-      // make the next start create a duplicate.
-      const existing = [...this.sessions.values()].find((session) => session.profileId === profileId
-        && (session.state === 'running' || session.state === 'failed'));
-      if (existing) {
-        this.sharedHolders.set(existing.id, (this.sharedHolders.get(existing.id) ?? 1) + 1);
-        return existing;
-      }
     }
     return this.startNew(profile, label, configManager);
   }
 
   /**
-   * Records the session and its launch plan; nothing is spawned here. The only
-   * backend runs commands on the host, so there is no boundary to verify at
-   * start and the session reports `planned`. Whether a process actually starts
-   * is reported by whoever spawns it (an MCP connect, or `execute`). A backend
-   * that isolates must throw from here when it cannot start, so no caller
-   * continues with a session it must not use.
+   * Records the session and its launch plan; nothing is spawned here, so the
+   * session reports `planned`. Every process the session runs starts inside the
+   * plan's boundary (bubblewrap) or, on a host without one, as a host process,
+   * which the plan's backend and summary say. Whether a process actually starts
+   * is reported by whoever spawns it (an MCP connect, or `execute`).
    */
   private startNew(profile: SandboxProfile, label: string | undefined, configManager: ConfigManagerLike): SandboxSession {
-    const config = getSandboxConfigSnapshot(configManager);
-    const launchPlan = buildSandboxLaunchPlan(profile, label?.trim() || profile.label, this.workspaceRoot);
+    const launchPlan = buildSandboxLaunchPlan(profile, this.workspaceRoot, getSandboxWritableExtras(configManager));
     const session: SandboxSession = Object.freeze({
       id: createSandboxSessionId(),
       profileId: profile.id,
-      kind: inferKind(profile),
+      kind: profile.kind,
       label: label?.trim() || profile.label,
-      shared: inferShared(profile),
       startedAt: Date.now(),
       state: 'running',
-      backend: config.vmBackend,
-      resolvedBackend: launchPlan.backend,
+      backend: launchPlan.backend,
       launchPlan,
       startupStatus: 'planned',
       startupDetail: launchPlan.summary,
       notes: profile.notes,
     });
     this.sessions.set(session.id, session);
-    if (session.shared) this.sharedHolders.set(session.id, 1);
     return session;
   }
 
   /**
-   * Stops a session. A shared session that several starters hold (for example
-   * two MCP servers using one profile) is released by one of them and keeps
-   * running until the last holder stops it. The last release removes the session
-   * from the registry and returns its final, stopped record; a later stop or
-   * command for that id finds nothing.
+   * Stops a session: it is removed from the registry and its final, stopped
+   * record returned; a later stop or command for that id finds nothing.
    */
   public stop(sessionId: string): SandboxSession | null {
     const existing = this.sessions.get(sessionId);
     if (!existing) return null;
-    const holders = this.sharedHolders.get(sessionId) ?? 1;
-    if (existing.state !== 'stopped' && holders > 1) {
-      this.sharedHolders.set(sessionId, holders - 1);
-      return existing;
-    }
-    this.sharedHolders.delete(sessionId);
     this.sessions.delete(sessionId);
     const stopped: SandboxSession = { ...existing, state: 'stopped' };
     return Object.freeze(stopped);
@@ -165,7 +129,6 @@ export class SandboxSessionRegistry {
       throw new Error(`Sandbox session ${sessionId} cannot run commands: ${refusal.ok ? 'session is stopped' : refusal.reason}`);
     }
 
-    const resolvedPlan = resolveSandboxCommandPlan(command, args);
     const result = await executeSandboxCommand(session.launchPlan, command, args, options);
     const stdoutPreview = (result.stdout || '').trim().slice(0, 200);
     const stderrPreview = (result.stderr || '').trim().slice(0, 200);
@@ -177,7 +140,7 @@ export class SandboxSessionRegistry {
       // A session stopped while the command ran stays stopped; a late exit cannot revive or fail it.
       state: current.state === exitState || sandboxSessionLifecycle.can(current.state, exitState) ? exitState : current.state,
       lastRunAt: Date.now(),
-      lastCommandSummary: resolvedPlan.summary,
+      lastCommandSummary: [command, ...args].join(' ').trim(),
       lastExitStatus: result.status,
       lastStdoutPreview: stdoutPreview || undefined,
       lastStderrPreview: stderrPreview || undefined,

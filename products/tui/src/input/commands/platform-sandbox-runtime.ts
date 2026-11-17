@@ -12,8 +12,8 @@ import {
 import { renderSandboxDoctor } from '../../runtime/sandbox-public-gaps.ts';
 import { handleSandboxSessionCommand } from './platform-sandbox-session.ts';
 
-const SANDBOX_USAGE = '[open|review|recommend|profiles|presets|preset <id>|apply-preset <id>|probe|doctor|session ...|set-mcp <mode>|set-windows <mode>]';
-const PRESET_IDS = 'secure-balanced|secure-isolated|shared-performance|windows-basic';
+const SANDBOX_USAGE = '[open|review|recommend|profiles|presets|preset <id>|apply-preset <id>|probe|doctor|session ...|set-mcp <disabled|contained>]';
+const PRESET_IDS = 'contained|host-mcp';
 
 function applySandboxPreset(
   configManager: CommandContext['platform']['configManager'],
@@ -22,7 +22,6 @@ function applySandboxPreset(
   const preset = getSandboxPreset(presetId);
   if (!preset) return false;
   configManager.setDynamic('sandbox.mcpIsolation', preset.config.mcpIsolation);
-  configManager.setDynamic('sandbox.windowsMode', preset.config.windowsMode);
   return true;
 }
 
@@ -34,8 +33,6 @@ function renderSandboxPresetDetail(presetId: string): string | null {
     `  label: ${preset.label}`,
     `  summary: ${preset.summary}`,
     `  mcp isolation: ${preset.config.mcpIsolation}`,
-    `  windows mode: ${preset.config.windowsMode}`,
-    '  execution: host-local processes; no VM guest',
     ...preset.notes.map((note) => `  note: ${note}`),
   ].join('\n');
 }
@@ -43,7 +40,7 @@ function renderSandboxPresetDetail(presetId: string): string | null {
 export function registerPlatformSandboxRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
     name: 'sandbox',
-    description: 'Review and configure local sandbox policy for MCP and evaluation runtimes',
+    description: 'Review the command and MCP server boundary, and choose whether MCP servers run contained',
     usage: SANDBOX_USAGE,
     async handler(args, ctx) {
       const sub = args[0] ?? 'open';
@@ -74,7 +71,7 @@ export function registerPlatformSandboxRuntimeCommands(registry: CommandRegistry
       }
       if (sub === 'apply-preset') {
         const ok = args[1] ? applySandboxPreset(ctx.platform.configManager, args[1]) : false;
-        ctx.print(ok ? `Applied sandbox preset ${args[1]}.` : `Usage: /sandbox apply-preset <${PRESET_IDS}>`);
+        ctx.print(ok ? `Applied sandbox preset ${args[1]}; MCP servers pick it up when they next connect (/mcp reload).` : `Usage: /sandbox apply-preset <${PRESET_IDS}>`);
         return;
       }
       if (sub === 'probe') {
@@ -83,17 +80,13 @@ export function registerPlatformSandboxRuntimeCommands(registry: CommandRegistry
           version: 1,
           checkedAt: Date.now(),
           host: review.host.platform,
-          currentBackend: review.backendProbe?.resolvedBackend ?? review.config.vmBackend,
-          replIsolation: review.config.replIsolation,
+          currentBackend: review.backendProbe?.resolvedBackend ?? 'host',
           mcpIsolation: review.config.mcpIsolation,
-          windowsMode: review.config.windowsMode,
           secureSandboxReady: review.host.secureSandboxReady,
           recommendedCommand: '/sandbox doctor',
         };
         ctx.print([
           inspectSandboxProbe(probe),
-          '  execution: host-local processes; no VM guest',
-          ...(review.backendProbe?.warnings ?? []).map((warning) => `  warning: ${warning}`),
           ...review.host.warnings.map((warning) => `  warning: ${warning}`),
         ].join('\n'));
         return;
@@ -105,7 +98,7 @@ export function registerPlatformSandboxRuntimeCommands(registry: CommandRegistry
       // Keep an explicit migration response for old command invocations. No
       // guest provisioning, wrapper execution or retired setting writes remain.
       if (sub === 'qemu' || sub.startsWith('set-qemu-') || ['init-qemu', 'scaffold-qemu-wrapper', 'wrapper-test', 'guest-test', 'guest-bundle'].includes(sub)) {
-        ctx.print('QEMU sandbox commands have been retired. This runtime supports the local backend only. Use /sandbox review or /sandbox session.');
+        ctx.print('QEMU sandbox commands have been retired: processes are contained with bubblewrap instead. Use /sandbox review or /sandbox session.');
         return;
       }
       if (sub === 'session') {
@@ -114,24 +107,17 @@ export function registerPlatformSandboxRuntimeCommands(registry: CommandRegistry
       }
       if (sub === 'set-mcp') {
         const mode = args[1];
-        if (!mode || !['disabled', 'shared-vm', 'hybrid', 'per-server-vm'].includes(mode)) {
-          ctx.print('Usage: /sandbox set-mcp <disabled|shared-vm|hybrid|per-server-vm>');
+        if (mode !== 'disabled' && mode !== 'contained') {
+          ctx.print('Usage: /sandbox set-mcp <disabled|contained>');
           return;
         }
         ctx.platform.configManager.setDynamic('sandbox.mcpIsolation', mode);
+        const ready = buildSandboxReview(ctx.platform.configManager).host.secureSandboxReady;
         ctx.print(mode === 'disabled'
-          ? 'Sandbox MCP isolation set to disabled.'
-          : `Sandbox MCP isolation recorded as ${mode}. This release has no VM guest: MCP servers still run as separate host processes, and nothing is refused because of this setting.`);
-        return;
-      }
-      if (sub === 'set-windows') {
-        const mode = args[1];
-        if (!mode || !['native-basic', 'require-wsl'].includes(mode)) {
-          ctx.print('Usage: /sandbox set-windows <native-basic|require-wsl>');
-          return;
-        }
-        ctx.platform.configManager.setDynamic('sandbox.windowsMode', mode);
-        ctx.print(`Sandbox Windows mode set to ${mode}.`);
+          ? 'MCP servers will run as host processes when they next connect (/mcp reload).'
+          : ready
+            ? 'MCP servers will each start inside their own bubblewrap boundary when they next connect (/mcp reload).'
+            : 'Saved, but this host has no bubblewrap: a stdio MCP server will not start until bubblewrap is installed or this is set back to disabled.');
         return;
       }
       ctx.print(`Usage: /sandbox ${SANDBOX_USAGE}\n  The sandbox review, recommendation and profiles for a support thread are in /setup support-bundle <dir> (platform-review.json).`);

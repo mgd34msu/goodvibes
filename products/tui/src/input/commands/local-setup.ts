@@ -95,7 +95,7 @@ export function registerLocalSetupCommands(registry: CommandRegistry): void {
           `  mcp quarantined: ${snapshot.quarantinedMcpCount}`,
           `  mcp elevated: ${snapshot.elevatedMcpCount}`,
           `  remote runners: ${snapshot.remoteRunnerCount}`,
-          `  sandbox backend: ${ctx.platform.configManager.get('sandbox.vmBackend')}`,
+          `  mcp server isolation: ${ctx.platform.configManager.get('sandbox.mcpIsolation')}`,
           '',
           `  service ids: ${snapshot.services.join(', ') || '(none)'}`,
           `  plugin dirs: ${snapshot.pluginDirectories.join(', ') || '(none)'}`,

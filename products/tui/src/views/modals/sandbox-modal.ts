@@ -77,27 +77,27 @@ class SandboxModalSurface implements ConfigModalSurface {
       const profiles = listSandboxProfiles(this.config);
       const sessions = this.sessions.list();
 
-      const resolved = review.backendProbe?.resolvedBackend ?? 'local';
+      const resolved = review.backendProbe?.resolvedBackend ?? 'host';
       const header = [
         postureLine([
           kv('platform', review.host.platform),
           kv('runs on', resolved),
-          ...(review.config.vmBackend !== resolved ? [kv('configured', review.config.vmBackend)] : []),
+          kv('mcp', review.config.mcpIsolation),
           kv('sessions', sessions.length),
         ]),
         postureLine([review.host.secureSandboxReady
-          ? 'isolated: commands run inside the sandbox backend'
-          : 'NO ISOLATION: commands run as host processes; profiles below describe what each asks for, not what it gets']),
+          ? 'contained: each process runs inside a bubblewrap boundary'
+          : 'NO BOUNDARY: this host has no bubblewrap, so session processes run on the host']),
       ];
 
       const profileRows: ConfigModalRow[] = profiles.map((profile) => ({
         id: `profile:${profile.id}`,
-        label: `${pad(profile.id, 14)} ${pad(profile.kind, 6)} asks for ${pad(profile.isolation, 10)}${profile.requiresVm ? ' in a VM' : ''}`,
+        label: `${pad(profile.id, 14)} ${pad(profile.kind, 8)} network ${profile.network === 'enabled' ? 'shared' : 'off'}  ${profile.label}`,
       }));
 
       const sessionRows: ConfigModalRow[] = sessions.map((session) => ({
         id: `session:${session.id}`,
-        label: `${statusGlyph(sessionTone(session.state))} ${pad(session.id, 20)} ${pad(session.state.toUpperCase(), 9)} backend=${pad(session.resolvedBackend ?? session.backend, 6)} runs=${session.executionCount ?? 0}`,
+        label: `${statusGlyph(sessionTone(session.state))} ${pad(session.id, 20)} ${pad(session.state.toUpperCase(), 9)} backend=${pad(session.backend, 10)} runs=${session.executionCount ?? 0}`,
         style: toneStyle(sessionTone(session.state)),
       }));
 
@@ -129,7 +129,7 @@ class SandboxModalSurface implements ConfigModalSurface {
         // start() either returns a usable session or rejects; there is no failed start to read from its state.
         void this.sessions.start(profileId, undefined, this.config)
           .then((session) => {
-            ctx.setStatus(`Started ${session.id} (${session.resolvedBackend ?? session.backend}).`);
+            ctx.setStatus(`Started ${session.id} (${session.backend}).`);
             ctx.jumpToRow?.('sessions', `session:${session.id}`);
           })
           .catch((error: unknown) => ctx.setStatus(`Start failed: ${summarizeError(error)}`))
@@ -140,9 +140,7 @@ class SandboxModalSurface implements ConfigModalSurface {
         const sessionId = sessionIdOf(ctx.row);
         if (!sessionId) return;
         const stopped = this.sessions.stop(sessionId);
-        ctx.setStatus(!stopped ? `Session ${sessionId} no longer exists; nothing to stop.`
-          : stopped.state === 'stopped' ? `Stopped ${sessionId}; it has left the list.`
-          : `Released one holder of ${sessionId}; it keeps running for the others.`);
+        ctx.setStatus(!stopped ? `Session ${sessionId} no longer exists; nothing to stop.` : `Stopped ${sessionId}; it has left the list.`);
         break;
       }
       case 'execute': {
@@ -150,8 +148,8 @@ class SandboxModalSurface implements ConfigModalSurface {
         if (!sessionId) return;
         // The probe runs in the background (up to its 5 s timeout) so the screen stays live; the result is shown when it ends.
         ctx.setStatus(`Running probe in ${sessionId}...`);
-        // The same shell probe the registry starts a session with; the app's own executable is not a script runner.
-        void this.sessions.execute(sessionId, 'bash', ['-lc', 'printf "sandbox probe ok"'], { timeoutMs: 5_000 })
+        // A plain shell probe, started through the session's boundary like any command it runs.
+        void this.sessions.execute(sessionId, 'sh', ['-c', 'printf "sandbox probe ok"'], { timeoutMs: 5_000 })
           .then((result) => {
             const detail = firstLine(result.stdout) || firstLine(result.stderr);
             ctx.setStatus(`Probe ${result.status === 0 ? 'succeeded' : `failed (exit ${result.status ?? 'none'})`}${detail ? `: ${detail}` : ''}`);

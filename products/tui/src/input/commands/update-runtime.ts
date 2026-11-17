@@ -263,7 +263,7 @@ function buildUpdateReview(ctx: CommandContext, latest: UpdateReview['latest']):
     channel: REPO_RELEASES_LATEST_URL,
     rollbackRetained: existsSync(`${process.execPath}${PREVIOUS_FILE_SUFFIX}`),
     subscriptionProviders: [...new Set([...builtinProviders, ...subscriptions.list().map((entry) => entry.provider)])],
-    sandboxProfile: [config.get('sandbox.replIsolation'), config.get('sandbox.mcpIsolation'), config.get('sandbox.vmBackend')].map(String).join('/'),
+    sandboxProfile: `commands ${config.get('sandbox.enabled') === false ? 'host' : 'contained'}/mcp ${String(config.get('sandbox.mcpIsolation'))}`,
   };
 }
 

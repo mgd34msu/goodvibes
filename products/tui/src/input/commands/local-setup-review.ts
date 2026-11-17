@@ -28,9 +28,9 @@ export function renderSetupSandboxReview(ctx: CommandContext): string {
   const review = buildSandboxReview(ctx.platform.configManager);
   return [
     'Setup Sandbox Review',
-    `  backend: ${review.backendProbe?.resolvedBackend ?? review.config.vmBackend}`,
-    // The isolation settings (repl, mcp) refuse nothing yet, so they are not listed as protection here.
-    '  isolation: MCP servers and evaluation runtimes run as separate host processes; no VM guest',
+    `  backend: ${review.backendProbe?.resolvedBackend ?? 'host'}`,
+    `  commands: ${review.host.secureSandboxReady && ctx.platform.configManager.get('sandbox.enabled') !== false ? 'contained (bubblewrap)' : 'host processes'}`,
+    `  mcp servers: ${review.config.mcpIsolation === 'contained' ? (review.host.secureSandboxReady ? 'each in its own boundary' : 'contained requested, not started on this host') : 'host processes'}`,
     ...review.host.warnings.map((warning) => `  warning: ${warning}`),
     '',
     '  next:',
@@ -101,7 +101,7 @@ export async function exportSetupSupportBundle(targetDirArg: string, snapshot: S
 
 const collectSetupReview = createSetupReviewCollector<
   CommandContext,
-  { sandboxReplIsolation: string; sandboxMcpIsolation: string; sandboxSecureModeReady: boolean }
+  { sandboxMcpIsolation: string; sandboxSecureModeReady: boolean }
 >(
   { requireShellPaths, requireServiceRegistry, requireProviderApi, requireReadModels, requireSubscriptionManager, discoverSkills },
   {
@@ -109,7 +109,6 @@ const collectSetupReview = createSetupReviewCollector<
     serviceNoun: 'service',
     emptyServices: 'no services configured',
     extraSnapshot: (context) => ({
-      sandboxReplIsolation: String(context.platform.configManager.get('sandbox.replIsolation')),
       sandboxMcpIsolation: String(context.platform.configManager.get('sandbox.mcpIsolation')),
       sandboxSecureModeReady: buildSandboxReview(context.platform.configManager).host.secureSandboxReady,
     }),
@@ -129,9 +128,11 @@ const collectSetupReview = createSetupReviewCollector<
             : 'no remote runner contracts registered',
       },
       {
-        severity: 'info',
+        severity: snapshot.sandboxSecureModeReady ? 'pass' : 'info',
         area: 'sandbox',
-        message: 'local backend: separate host processes; no VM guest',
+        message: snapshot.sandboxSecureModeReady
+          ? `bubblewrap boundary available; MCP servers: ${snapshot.sandboxMcpIsolation === 'contained' ? 'contained' : 'host processes'}`
+          : 'no process boundary on this host (bubblewrap missing or unusable); commands and MCP servers run as host processes',
       },
     ],
   },

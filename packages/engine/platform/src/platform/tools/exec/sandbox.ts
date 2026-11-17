@@ -169,6 +169,8 @@ export interface BwrapArgvInput {
   readonly networkEnabled: boolean;
   /** When set, the home directory is masked with a tmpfs (hidden, not just read-only). */
   readonly maskHomeDir?: string | undefined;
+  /** Extra absolute paths bound read-only, after the home mask (a program installed under $HOME). */
+  readonly readOnlyExtras?: readonly string[] | undefined;
   /** Resolved regular DNS configuration file when /etc/resolv.conf points into /run. */
   readonly resolverConfigPath?: string | undefined;
 }
@@ -199,6 +201,9 @@ export function buildBwrapArgv(input: BwrapArgvInput): string[] {
   if (input.maskHomeDir) {
     argv.push('--tmpfs', input.maskHomeDir);
   }
+  for (const extra of input.readOnlyExtras ?? []) {
+    argv.push('--ro-bind-try', extra, extra);
+  }
   // … then carve the writable workspace + extras back in (bound LAST so they win).
   argv.push('--bind', input.workspaceDir, input.workspaceDir);
   for (const extra of input.writableExtras) {
@@ -215,6 +220,19 @@ export function buildBwrapArgv(input: BwrapArgvInput): string[] {
   argv.push('--chdir', input.cwd);
   argv.push('--');
   return argv;
+}
+
+/**
+ * The DNS configuration file to bind into a boundary that keeps the network:
+ * /etc/resolv.conf often points into /run, which a boundary replaces with an
+ * empty tmpfs. Undefined when it does not.
+ */
+export function runResolverConfigPath(): string | undefined {
+  try {
+    const path = realpathSync('/etc/resolv.conf');
+    if (path.startsWith('/run/') && statSync(path).isFile()) return path;
+  } catch { /* Hosts without resolv.conf keep their existing resolver behavior. */ }
+  return undefined;
 }
 
 /** Where the boundary sits on network access for a given command. */
@@ -315,11 +333,7 @@ export function resolveExecSandboxPlan(input: ResolveSandboxPlanInput): ExecSand
       ? 'disabled'
       : 'unknown';
 
-  let resolverConfigPath: string | undefined;
-  try {
-    const path = realpathSync('/etc/resolv.conf');
-    if (path.startsWith('/run/') && statSync(path).isFile()) resolverConfigPath = path;
-  } catch { /* Hosts without resolv.conf keep their existing resolver behavior. */ }
+  const resolverConfigPath = runResolverConfigPath();
   const argvPrefix = buildBwrapArgv({
     bwrapPath: input.availability.bwrapPath,
     workspaceDir: input.workspaceDir,

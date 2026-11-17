@@ -473,10 +473,7 @@ export const FEATURE_FLAG_CONFIG: Readonly<Record<string, FeatureFlagConfigAssoc
     configCategories: ['sandbox'],
     configKeys: [
       'sandbox.enabled',
-      'sandbox.replIsolation',
       'sandbox.mcpIsolation',
-      'sandbox.windowsMode',
-      'sandbox.vmBackend',
     ],
   },
   'sandbox-model-judgment': {

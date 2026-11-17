@@ -25,7 +25,6 @@ export type {
   SandboxBackendProbe,
   SandboxBundle,
   SandboxConfigSnapshot,
-  SandboxEvalIsolationMode,
   SandboxHostStatus,
   SandboxLaunchPlan,
   SandboxMcpIsolationMode,
@@ -38,6 +37,4 @@ export type {
   SandboxSessionArtifact,
   SandboxSessionKind,
   SandboxSessionState,
-  SandboxVmBackend,
-  SandboxWindowsMode,
 } from './sandbox/types.js';

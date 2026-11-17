@@ -499,12 +499,17 @@ export function applySandboxQemuMigrationPass(
   if (!result.migrated) return parsed;
   if (!ownership.ownsFile || ownership.beforeWrite?.() === false) return result.config;
   if (!persistMigratedFile(sourcePath, result.config, 'QEMU sandbox settings removal')) return result.config;
-  const receiptText =
-    `Settings removed: the QEMU sandbox backend is gone, so its settings and the settings that chose a VM `
-    + `are gone from ${sourcePath} (${result.removedKeys.join(', ')} removed). `
-    + (result.removedQemuBackend ? 'You had chosen the QEMU backend; no VM backend replaces it. ' : '')
-    + 'Commands run as local host processes, and REPL evaluation runs only where a contained workspace is available. '
-    + 'Your other sandbox settings are unchanged.';
+  const removed = result.removedKeys.length > 0
+    ? `Settings removed: the QEMU sandbox backend is gone, so its settings and the settings that chose a VM `
+      + `are gone from ${sourcePath} (${result.removedKeys.join(', ')} removed). `
+      + (result.removedQemuBackend ? 'You had chosen the QEMU backend; no VM backend replaces it. ' : '')
+      + 'Commands and REPL evaluation run inside the bubblewrap boundary where sandbox.enabled is on and the host has bubblewrap. '
+    : '';
+  const mcp = result.mcpIsolationFrom !== undefined
+    ? `sandbox.mcpIsolation was '${result.mcpIsolationFrom}' and is now 'contained' in ${sourcePath}: each stdio MCP server now starts inside its own `
+      + 'bubblewrap boundary, and on a host without bubblewrap it is not started and says why; set it to disabled to run MCP servers as host processes. '
+    : '';
+  const receiptText = `${removed}${mcp}Your other sandbox settings are unchanged.`;
   logger.info(receiptText);
   try {
     receipt(`settings-migration-sandbox-qemu:${sourcePath}`, receiptText);

@@ -188,7 +188,7 @@ export const SETTING_LABELS: Partial<Record<string, string>> = {
   'storage.secretPolicy': SHARED_SETTING_LABELS['storage.secretPolicy'],
   'permissions.mode': 'Permission Mode',
   'diagnostics.postEdit': 'Post-Edit Diagnostics',
-  'sandbox.vmBackend': 'Sandbox Backend',
+  'sandbox.mcpIsolation': 'MCP Server Isolation',
   'tools.llmProvider': SHARED_SETTING_LABELS['tools.llmProvider'],
   'tools.llmModel': SHARED_SETTING_LABELS['tools.llmModel'],
   'tools.autoHeal': SHARED_SETTING_LABELS['tools.autoHeal'],

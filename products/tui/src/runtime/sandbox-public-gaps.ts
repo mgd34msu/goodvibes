@@ -9,8 +9,8 @@ export function renderSandboxDoctor(manager: ConfigManagerLike): string {
   const probe = review.backendProbe;
   return [
     'Sandbox doctor',
-    `  backend: ${probe?.resolvedBackend ?? review.config.vmBackend}`,
-    '  execution: host-local processes; no VM guest',
+    `  backend: ${probe?.resolvedBackend ?? 'host'}`,
+    `  mcp servers: ${review.config.mcpIsolation === 'contained' ? 'each in its own boundary' : 'host processes'} (sandbox.mcpIsolation)`,
     ...(probe?.backends ?? []).map((backend) => `  ${backend.id}: ${backend.available ? 'available' : 'missing'} (${backend.detail})`),
     ...(probe?.warnings ?? []).map((warning) => `  warning: ${warning}`),
     ...review.host.warnings.map((warning) => `  warning: ${warning}`),

@@ -12,6 +12,8 @@ export interface McpProcessSpec {
   cwd?: string | undefined;
   summary?: string | undefined;
   sandboxSessionId?: string | undefined;
+  /** argv the command is started through (the sandbox boundary); the command stays the server's identity. */
+  wrapper?: readonly string[] | undefined;
 }
 
 export interface McpToolInfo {

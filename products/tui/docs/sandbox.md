@@ -19,4 +19,12 @@ Review the current state with `/sandbox review` and the live session with `/sand
 
 ## REPL and MCP isolation
 
-MCP work runs as local host processes and is not isolated. `sandbox.mcpIsolation` and `sandbox.windowsMode` record the preferred posture for a virtualized backend, but no backend that provides isolation ships today. The QEMU backend was retired, and with it the settings that chose a VM: on load, `sandbox.qemu*`, `sandbox.vmBackend` and `sandbox.replIsolation` are removed from a settings file with one receipt, and the `/sandbox qemu` family answers that it has been retired.
+The `repl` tool is registered only where the exec sandbox is available, and each evaluation is one fresh `bun -e` command through the exec path, so it runs inside the same boundary as any command.
+
+`sandbox.mcpIsolation` decides how stdio MCP servers start. `disabled` (the default) runs each as a host process. `contained` runs each inside its own bubblewrap boundary: the workspace and `sandbox.workspaceWritable` paths writable, system files and the server's own install (the directory its executable lives in, and any absolute path in its arguments) read-only, `$HOME` and `/tmp` private, its own process namespace, and the host network shared, since most servers call out. On a host without bubblewrap a contained server is not started, and `/mcp` shows why. A change applies when a server next connects (`/mcp reload`). `/sandbox set-mcp <disabled|contained>` and `/sandbox apply-preset <contained|host-mcp>` set it.
+
+`/sandbox session start <command|mcp-server>` opens a session whose commands (`/sandbox session run`) start inside the same boundary, with the network off for `command`.
+
+On native Windows there is no boundary; run GoodVibes inside WSL 2 with bubblewrap installed to contain commands and MCP servers.
+
+The QEMU backend was retired, and with it the settings that chose a VM: on load, `sandbox.qemu*`, `sandbox.vmBackend`, `sandbox.replIsolation` and `sandbox.windowsMode` are removed from a settings file, and a VM `sandbox.mcpIsolation` mode (`shared-vm`, `hybrid`, `per-server-vm`) becomes `contained`, with one receipt. The `/sandbox qemu` family answers that it has been retired.

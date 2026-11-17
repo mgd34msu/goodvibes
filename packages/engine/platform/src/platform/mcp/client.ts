@@ -584,7 +584,7 @@ export class McpClient {
 
     try {
       this.options?.beforeProcessStart?.();
-      this.proc = Bun.spawn([cmd, ...args], {
+      this.proc = Bun.spawn([...(processSpec?.wrapper ?? []), cmd, ...args], {
         stdin: 'pipe',
         stdout: 'pipe',
         stderr: 'pipe',

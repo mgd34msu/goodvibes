@@ -82,10 +82,8 @@ export function createControlTool(options: ControlToolOptions = {}): Tool {
             presets: presets.map((preset) => ({
               id: preset.id,
               label: preset.label,
-              replIsolation: preset.config.replIsolation,
+              summary: preset.summary,
               mcpIsolation: preset.config.mcpIsolation,
-              windowsMode: preset.config.windowsMode,
-              vmBackend: preset.config.vmBackend,
             })),
           }),
         };

@@ -1032,7 +1032,7 @@ export class McpRegistry {
       assertHostCurrent(); assertExecutionCurrent();
     }
     if (this.sandboxConfigManager) {
-      let resolved: Awaited<ReturnType<McpRegistry['_resolveSandboxProcessSpec']>>;
+      let resolved: { sessionId: string; processSpec: McpProcessSpec } | null;
       try { resolved = await this._resolveSandboxProcessSpec(serverConfig, assertExecutionCurrent); }
       catch (error) {
         // A server that asked for a boundary this host cannot give is not started; say so where its status is read.

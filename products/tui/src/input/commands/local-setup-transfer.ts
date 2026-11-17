@@ -45,7 +45,6 @@ function holdsMaskedValue(value: unknown): boolean {
 
 /** The shared setup review plus the TUI's sandbox facts. */
 export type SetupReviewSnapshot = TerminalSetupReviewSnapshot & {
-  readonly sandboxReplIsolation: string;
   readonly sandboxMcpIsolation: string;
   readonly sandboxSecureModeReady: boolean;
 };

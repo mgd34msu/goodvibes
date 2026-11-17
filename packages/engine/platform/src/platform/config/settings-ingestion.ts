@@ -130,9 +130,7 @@ export const SAFETY_GATE_CONFIG_PREFIXES: readonly string[] = [
   'relay.requireStepUpForMutations',
   'fetch.blockedHosts',
   'conversationGate.mode',
-  'sandbox.replIsolation',
   'sandbox.mcpIsolation',
-  'sandbox.windowsMode',
   'storage.secretPolicy',
   // The tool budget: shipped off, with every limit at 0 (unlimited), so an
   // unreadable stored switch or limit falls back to no budget at all.

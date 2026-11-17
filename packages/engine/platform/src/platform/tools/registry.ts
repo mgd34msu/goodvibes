@@ -25,6 +25,7 @@ import { assertAutonomousConfigTransition, completeAutonomousConfigTransition, b
 import type { AutonomousChoiceProjection } from '../permissions/autonomous-input-projection.js';
 import { captureAutonomousSource } from '../permissions/autonomous.js';
 import { buildDenialErrorMessage, toolDecisionOf } from '../permissions/denial.js';
+import { withAdmittedToolDecision } from '../gate/admitted-decision.js';
 import type { PreparedConfigMutationReceipt } from '../config/manager.js';
 import type { PreparedSecretImportTransition } from '../config/secrets.js';
 import type { PreparedSubscriptionImportTransition } from '../config/subscriptions.js';
@@ -327,7 +328,9 @@ export async function runRegisteredTool(callId: string, name: string, args: Reco
     const source = { reasonCode: verdict.reasonCode, sourceLayer: verdict.sourceLayer, userReason: verdict.userReason, detail: verdict.detail, decision: verdict.decision };
     return { callId, success: false, error: buildDenialErrorMessage(name, source), decision: toolDecisionOf({ ...source, approved: false }, name) };
   }
-  return registry.execute(callId, name, verdict.modifiedArgs ?? args, signal ? { signal } : undefined);
+  const admitted = toolDecisionOf({ reasonCode: verdict.reasonCode, sourceLayer: verdict.sourceLayer, userReason: verdict.userReason,
+    detail: verdict.detail, decision: verdict.decision, approved: true }, name);
+  return withAdmittedToolDecision(admitted, () => registry.execute(callId, name, verdict.modifiedArgs ?? args, signal ? { signal } : undefined));
 }
 
 /** Consume the exact registered local effect. Neither options nor callbacks mint a grant. */

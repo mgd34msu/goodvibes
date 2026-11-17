@@ -1533,7 +1533,10 @@ export class ConfigManager {
    * Admission reads the key's facts (config-key-facts.ts): card material is
    * refused, a credential is accepted only as a `goodvibes://secrets/…`
    * reference, and a change that loosens security from an agent stands only
-   * when the owner, the owner's rule or the mode settled the call.
+   * when the owner, the owner's rule or the mode settled the call. An agent's
+   * settings tool writes here with that origin and the gate's decision on its
+   * call (gate/admitted-decision.ts, read by tools/goodvibes-runtime/config-routing.ts);
+   * a write routed to the daemon was admitted by this process's gate before it left.
    *
    * Changes landing in different files (daemon, shared, project, this
    * surface's) are written one file after another; if a later file cannot be

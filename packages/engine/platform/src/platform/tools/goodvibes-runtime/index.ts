@@ -1,3 +1,4 @@
+import { ConfigError } from '../../types/errors.js';
 import type { ConfigKey, ConfigSetting } from '../../config/schema.js';
 import { isValidConfigKey } from '../../config/schema.js';
 import { configKeyScope } from '../../config/config-ownership.js';
@@ -241,7 +242,7 @@ export function createGoodVibesSettingsTool(
 
 /** Keep an explanatory routing error intact; summarize anything unrecognized. */
 function describeSettingsFailure(error: unknown): string {
-  if (error instanceof DaemonConfigUnreachableError || error instanceof DaemonConfigRejectedError) return error.message;
+  if (error instanceof DaemonConfigUnreachableError || error instanceof DaemonConfigRejectedError || error instanceof ConfigError) return error.message;
   if (error instanceof Error && /\bNOT (applied|in )/.test(error.message)) return error.message;
   return summarizeError(error);
 }

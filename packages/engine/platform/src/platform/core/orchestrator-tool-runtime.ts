@@ -1,3 +1,4 @@
+import { withAdmittedToolDecision } from '../gate/admitted-decision.js';
 import { withExternalOperationSource } from '../permissions/external-operation-scope.js';
 import type { ConversationManager } from './conversation.js';
 import { assertDecisionAvailable } from '../routing/decision-availability.js';
@@ -652,7 +653,13 @@ async function executeToolCallsInMode(
         // Open a cost-attribution origin scope around the tool body: any LLM usage
         // a tool drives synchronously (e.g. an MCP tool's model call) is attributed
         // to this tool/MCP server rather than the agent's own reasoning.
-        result = await withExternalOperationSource(sourceOf && autonomous ? {
+        // The gate's decision rides with the call's body, so an owner that
+        // applies its own rule (a settings write) knows who settled the call.
+        const admittedDecision = toolDecisionOf({
+          reasonCode: checkResult.reasonCode, sourceLayer: checkResult.sourceLayer, userReason: checkResult.userReason,
+          detail: checkResult.detail, decision: checkResult.decision, approved: true,
+        }, call.name);
+        result = await withAdmittedToolDecision(admittedDecision, () => withExternalOperationSource(sourceOf && autonomous ? {
           sourceOf, signal: callSignal, assertCurrent: () => { assertTurnActive(); callSignal?.throwIfAborted(); },
           inputFacts: [prepared?.args ?? call.arguments],
         } : undefined, () => withCostOriginAsync(
@@ -672,7 +679,7 @@ async function executeToolCallsInMode(
               ? admission : admission.claim;
             return deps.toolRegistry.executePrepared(prepared, preparedAdmission, executeOptions);
           },
-        ));
+        )));
         if (checkResult.autonomousDecision) result = { ...result, autonomousDecision: checkResult.autonomousDecision };
         if (stoppedByBudget()) {
           // A call that ignored its time limit and finished its action succeeded; only a failed one was stopped.

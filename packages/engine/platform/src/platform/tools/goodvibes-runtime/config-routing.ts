@@ -40,6 +40,8 @@ import { isSharedConfigKey, persistSharedKey } from '../../config/shared-config-
 import { isValidConfigKey, type ConfigKey } from '../../config/schema.js';
 import { isSecretBearingConfigKey } from '../../config/secret-bearing-config-keys.js';
 import { agentSettingsWriteRefusal } from '../../gate/policy/agent-settings-refusals.js';
+import { currentAdmittedToolDecision } from '../../gate/admitted-decision.js';
+import { ConfigError } from '../../types/errors.js';
 
 /**
  * Why a model's settings write is refused before anything is written, with
@@ -319,8 +321,17 @@ export async function applyRoutedConfigWrite(
   }
 
   const deps = resolveRouterDeps(configManager, options);
+  // Inside an agent's admitted tool call the write carries the agent's origin
+  // and the gate's decision, so the settings owner applies its own rule: a
+  // change that loosens security stands only when the owner, the owner's rule
+  // or the mode settled the call. A person's command runs outside any call.
+  const decision = currentAdmittedToolDecision();
   const outcome = await applyConfigWrite(key, value, {
-    setDynamic: (k, v, o) => { configManager.setDynamic(k as ConfigKey, v, o ?? {}); },
+    setDynamic: (k, v, o) => {
+      if (!decision) { configManager.setDynamic(k as ConfigKey, v, o ?? {}); return; }
+      const result = configManager.setMany([{ key: k as ConfigKey, value: v }], { kind: 'agent', surface: options.clientOwnedStore?.surface ?? 'agent', decision }, o ?? {});
+      if (!result.ok) throw new ConfigError(result.refusal.reason);
+    },
     get: (k) => configManager.get(k as ConfigKey),
     getConfigPath: () => configManager.getConfigPath(),
     getDaemonTierPath: () => configManager.getDaemonTierPath(),

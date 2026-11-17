@@ -40,7 +40,7 @@ import { isDaemonOwnedConfigKey, listDaemonOwnedConfigPaths, type DaemonOwnedCon
 import { resolveOrCreateDaemonPath } from './daemon-tier-paths.js';
 import { daemonConfigPath, overlayDaemonTierFrom, readDaemonTierFile } from './daemon-config-tier.js';
 import { describeKeySource, type ConfigKeySource } from './manager-key-source.js';
-import { DEFAULT_CONFIG_SNAPSHOT, cloneDefaultConfig, coerceSchemaValue, ensureSharedConfig, requireAbsoluteOwnedPath, sanitizeConfigShape } from './manager-bootstrap.js';
+import { DEFAULT_CONFIG_SNAPSHOT, cloneDefaultConfig, ensureSharedConfig, requireAbsoluteOwnedPath, sanitizeConfigShape } from './manager-bootstrap.js';
 import { resolveWithProfileFallback, type ConfigProfileFallbackReader } from './profile-fallback.js';
 import { ingestManagerSettings, toConfigLoadFailure, UnknownSettingFormsQueue, type IngestionNoticeSink, type SettingsIngestionNotice } from './manager-ingestion.js';
 import { persistCategoryKeyRemoval, persistCategoryPatch, type CategoryIoDeps } from './manager-category-io.js';
@@ -53,7 +53,7 @@ import { ConfigRuntimeState, captureRuntimeValue } from './manager-runtime-state
 import { announceIngestionNotice } from './settings-ingestion.js';
 import { SETTINGS_FLOOR_MARKER_KEY } from './settings-reader-floor.js';
 import { isProjectRestrictedKey, restrictProjectLayer } from './project-layer-restrictions.js';
-import { credentialValueRefusal, memoryBudgetRefusal, memoryTierOrderRefusal, nonSchemaKeyRefusal, schemaTypeRefusal } from './write-admission.js';
+import { admitSettingValue, credentialValueRefusal, stricterProjectValueRefusal, type SettingAdmissionContext } from './write-admission.js';
 import { revisionSource, type RevisionSource } from '../utils/revision.js';
 import { freezePreparedData, normalizePreparedValue, preparedMutationLifecycle, preparedSchemaSignature, PreparedMutationRefusal, type PreparedMutationRecord,
   type PreparedConfigMutation, type PreparedConfigMutationTransition, type PreparedConfigMutationRequest,
@@ -742,17 +742,19 @@ export class ConfigManager {
     return this.prepareSettingMutationPlan([request]);
   }
 
-  private prepareSingleSettingMutation(request: PreparedConfigMutationRequest): PreparedConfigMutation {
+  private prepareSingleSettingMutation(request: PreparedConfigMutationRequest, projected?: Record<string, unknown>): PreparedConfigMutation {
     this.requireWritable();
     const incarnation = this.#permissionIncarnation;
     if (request.operation !== 'set' && request.operation !== 'reset') throw new ConfigError('Unsupported prepared operation.');
     const { schema, identity } = this.preparedSchema(request.key);
     const signature = preparedSchemaSignature(schema);
     const validator = schema.validate;
-    const requested = request.operation === 'set' ? request.value
-      : this.hostSettings.has(request.key) ? schema.default : readDotPath(DEFAULT_CONFIG_SNAPSHOT, request.key).value;
-    const value = normalizePreparedValue(request.key, schema, requested);
+    const requested = this.preparedRequestedValue(request);
     const destinations = this.preparedDestinations(request.operation, request.key);
+    // The same admission set() and setMany() apply: the rules across settings
+    // (against the whole plan) and, for a write to this surface's own file,
+    // the stricter project value that would undo it at the next start.
+    const value = normalizePreparedValue(request.key, schema, requested, this.preparedAdmissionContext(request.key, destinations, projected));
     const handle = Object.freeze({}) as PreparedConfigMutation;
     const record: PreparedMutationRecord = {
       facts: freezePreparedData({ operation: request.operation, key: request.key, value, destinations, incarnation }),
@@ -783,7 +785,8 @@ export class ConfigManager {
       throw new ConfigError('Invalid prepared settings plan.');
     }
     if (requests.length === 1) return this.prepareSingleSettingMutation(requests[0]!);
-    const steps = Object.freeze(requests.map(request => this.prepareSingleSettingMutation(request)));
+    const projected = this.preparedProjection(requests.map(request => ({ key: request.key, value: this.preparedRequestedValue(request) })));
+    const steps = Object.freeze(requests.map(request => this.prepareSingleSettingMutation(request, projected)));
     const first = this.preparedRecord(steps[0]!);
     const effects = steps.map(step => this.inspectPreparedMutation(step));
     const handle = Object.freeze({}) as PreparedConfigMutation;
@@ -824,9 +827,12 @@ export class ConfigManager {
     this.movePrepared(record, 'beginning');
     try {
       this.assertPreparedCurrent(record, record.facts.incarnation);
-      for (const current of record.steps ? record.steps.map(step => this.preparedRecord(step)) : [record]) {
+      const currents = record.steps ? record.steps.map(step => this.preparedRecord(step)) : [record];
+      const projected = this.preparedProjection(currents.map(current => ({ key: current.facts.key, value: current.facts.value })));
+      for (const current of currents) {
         const { schema } = this.preparedSchema(current.facts.key);
-        const next = normalizePreparedValue(current.facts.key, schema, current.facts.value);
+        const next = normalizePreparedValue(current.facts.key, schema, current.facts.value,
+          this.preparedAdmissionContext(current.facts.key, current.facts.destinations, projected));
         if (JSON.stringify(next) !== current.normalizedJson) throw new ConfigError('Prepared value changed.');
       }
       this.invalidateLifetimes();
@@ -1059,10 +1065,35 @@ export class ConfigManager {
     return { schema, identity: schema };
   }
 
+  /** The value a prepared request would write: its own for a set, the default for a reset. */
+  private preparedRequestedValue(request: PreparedConfigMutationRequest): unknown {
+    if (request.operation === 'set') return request.value;
+    return this.hostSettings.has(request.key) ? this.preparedSchema(request.key).schema.default : readDotPath(DEFAULT_CONFIG_SNAPSHOT, request.key).value;
+  }
+
+  /** The live config with every change of a plan in place, which the rules across settings read. */
+  private preparedProjection(changes: readonly { readonly key: string; readonly value: unknown }[]): Record<string, unknown> {
+    const projected = structuredClone(this.#config) as unknown as Record<string, unknown>;
+    for (const change of changes) writeRawDotPath(projected, change.key, structuredClone(change.value));
+    return projected;
+  }
+
+  /**
+   * The admission context of a prepared write. A non-schema key is checked
+   * against the live config (its path must exist there); the project hold
+   * applies only to a write that lands in this surface's own file.
+   */
+  private preparedAdmissionContext(key: string, destinations: readonly PreparedConfigMutationDestination[], projected?: Record<string, unknown>): SettingAdmissionContext {
+    const schemaKey = this.hostSettings.has(key) || SCHEMA_BY_KEY.has(key);
+    const config = schemaKey ? projected ?? this.#config : this.#config;
+    const ownFileOnly = destinations.length > 0 && destinations.every(destination => destination.tier === 'global' && destination.operation === 'set');
+    return { config, projectConfigPath: ownFileOnly ? this.#outrankingProjectPath() : null };
+  }
+
   private preparedDestinations(operation: 'set' | 'reset', key: ConfigKey): PreparedConfigMutationDestination[] {
     const destination = (path: string, tier: PreparedConfigMutationDestination['tier'], effect: 'set' | 'remove'): PreparedConfigMutationDestination => ({ path, tier, operation: effect });
     if (this.hostSettings.has(key)) {
-      const project = this.projectConfigPath !== null && readDotPath(readHostSettingsFile(this.projectConfigPath), key).present;
+      const project = this.hostSettingHasProjectValue(key);
       if (operation === 'set') return [destination(project ? this.projectConfigPath! : this.configPath, project ? 'project' : 'global', 'set')];
       return [...(project ? [destination(this.projectConfigPath!, 'project', 'set')] : []), destination(this.configPath, 'global', 'set')];
     }
@@ -1341,20 +1372,18 @@ export class ConfigManager {
     this.validateSetValue(key, value, options, true);
   }
 
+  /**
+   * The one admission of a value (write-admission.ts): its type, schema,
+   * credential form, and the rules across settings read against `config` with
+   * the value in place. A value is checked against what the loader insists on,
+   * so a write cannot be reported as saved and then skipped at the next start.
+   * The refusal never echoes the value.
+   */
   private validateSetValue(key: ConfigKey, value: unknown, options: ConfigSetOptions, purePolicyRead: boolean): unknown {
-    const schema = this.hostSettings.schema(key) ?? CONFIG_SCHEMA.find(s => s.key === key);
-    value = coerceSchemaValue(key, schema, value);
-    const credential = credentialValueRefusal(key, value);
-    if (credential) throw new ConfigError(`${credential.reason} ${credential.next}`);
-    if (schema?.validate && !schema.validate(value)) {
-      const hint = schema.validationHint ? ` (${schema.validationHint})` : '';
-      if (key === 'provider.decisionRouter' || key === 'judgment.fallbacks' || key === 'judgment.backend' || key === 'judgment.keyName') {
-        throw new ConfigError(`Invalid value for ${key}${hint}`);
-      }
-      throw new ConfigError(`Invalid value for ${key}: ${String(value)}${hint}`);
-    }
-    if (schema?.type === 'enum' && schema.enumValues && !schema.enumValues.includes(value as string)) {
-      throw new ConfigError(`Invalid value for ${key}: "${String(value)}". Allowed: ${schema.enumValues.join(', ')}`);
+    const schema = this.hostSettings.schema(key) ?? SCHEMA_BY_KEY.get(key);
+    const admission = admitSettingValue(key, schema, value, { config: this.#config });
+    if (!admission.ok) {
+      throw new ConfigError(credentialValueRefusal(key, value) ? admission.reason : `Invalid value for ${key} (${admission.reason})`);
     }
     if (!options.bypassManagedLock) {
       const lock = purePolicyRead ? readStrictManagedSettingLock(key, this.configDir) : getManagedSettingLock(key, this.configDir);
@@ -1362,38 +1391,24 @@ export class ConfigManager {
         throw new ConfigError(`Setting ${key} is locked by ${lock.source}: ${lock.reason}`);
       }
     }
-
     this.#resolvePath(key);
-    // A value is checked against the same type the loader will insist on, so a
-    // write cannot be reported as saved and then skipped at the next start.
-    const refusal = schema
-      ? (schema.type === 'enum' ? null : schemaTypeRefusal(schema, value)) ?? memoryTierOrderRefusal(key, value, this.#config) ?? memoryBudgetRefusal(key, value, this.#config)
-      : nonSchemaKeyRefusal(key, value, this.#config);
-    if (refusal) throw new ConfigError(`Invalid value for ${key}: ${String(value)} (${refusal})`);
-    return value;
+    return admission.value;
   }
 
   /**
-   * A project file may only tighten a restricted key, and its stricter value
-   * outranks the global file at every load. Writing a different global value
-   * would show as live now and be undone at the next start, so it is refused.
+   * The project file this surface's own file is outranked by, for the
+   * stricter-project-value hold (write-admission.ts), or null when there is
+   * none apart from the file being written.
    */
-  private refuseBehindStricterProjectValue(key: string, value: unknown): void {
-    if (!isProjectRestrictedKey(key) || !this.projectConfigPath || this.projectConfigPath === this.configPath) return;
-    if (!existsSync(this.projectConfigPath)) return;
-    let projectValue: { present: boolean; value: unknown };
-    try { projectValue = readDotPath(JSON.parse(readFileSync(this.projectConfigPath, 'utf-8')), key); }
-    catch { return; }
-    if (!projectValue.present || JSON.stringify(projectValue.value) === JSON.stringify(value)) return;
-    const baseline = structuredClone(this.#config) as unknown as Record<string, unknown>;
-    writeRawDotPath(baseline, key, structuredClone(value));
-    const layer: Record<string, unknown> = {};
-    writeRawDotPath(layer, key, structuredClone(projectValue.value));
-    if (restrictProjectLayer(layer, baseline, this.projectConfigPath).notices.length > 0) return;
-    throw new ConfigError(
-      `Setting ${key} is held at ${JSON.stringify(projectValue.value)} by the project settings file ${this.projectConfigPath}, `
-      + 'which may only make it stricter and would override the new value at the next start. '
-      + 'Remove the key from that file (or reset it) first, then set it again.');
+  #outrankingProjectPath(): string | null {
+    return this.projectConfigPath && this.projectConfigPath !== this.configPath ? this.projectConfigPath : null;
+  }
+
+  /** Refuses a write to this surface's own file that the project file's stricter value would undo at the next start. */
+  #refuseHeldByProject(key: string, value: unknown): void {
+    const projectPath = this.#outrankingProjectPath();
+    const held = projectPath ? stricterProjectValueRefusal(key, value, this.#config, projectPath) : null;
+    if (held) throw new ConfigError(`Setting ${key} is ${held}.`);
   }
 
   /** Set a config value by dot-path key and auto-save to disk. */
@@ -1418,7 +1433,7 @@ export class ConfigManager {
     }
     this.#refuseDaemonFileWrite(key, options);
     const useDaemonTier = this.daemonTierPath !== null && isDaemonOwnedConfigKey(key);
-    this.refuseBehindStricterProjectValue(key, value);
+    this.#refuseHeldByProject(key, value);
 
     if (key === 'permissions.mode' && this.get('behavior.autoApprove')) {
       this.set('behavior.autoApprove', false, options);
@@ -1514,20 +1529,15 @@ export class ConfigManager {
         return refuse({ code: card.code, reason: card.reason, next: [card.next], status: 400 });
       }
       const schema = this.hostSettings.schema(key) ?? SCHEMA_BY_KEY.get(key);
-      let value: unknown;
-      try {
-        const encoded = JSON.stringify(coerceSchemaValue(key, schema, change.value));
-        if (encoded === undefined) return invalid(key, 'needs a value');
-        value = JSON.parse(encoded);
-      } catch {
-        return invalid(key, 'not a value a settings file can hold');
+      // The one admission (write-admission.ts), per key here; a schema key's
+      // rules across settings run below against the whole update.
+      const admission = admitSettingValue(key, schema, change.value, schema ? {} : { config: this.#config });
+      if (!admission.ok) {
+        const credential = credentialValueRefusal(key, change.value);
+        if (credential) return refuse({ code: credential.code, reason: credential.reason, next: [credential.next], status: 400 });
+        return invalid(key, admission.reason);
       }
-      if (schema?.validate && !schema.validate(value)) return invalid(key, schema.validationHint ?? 'rejected by its schema');
-      if (schema?.type === 'enum' && schema.enumValues && !schema.enumValues.includes(value as string)) {
-        return invalid(key, `allowed: ${schema.enumValues.join(', ')}`);
-      }
-      const typeRefusal = schema && schema.type !== 'enum' ? schemaTypeRefusal(schema, value) : null;
-      if (typeRefusal) return invalid(key, typeRefusal);
+      const value = admission.value;
       if (!options.bypassManagedLock) {
         const lock = getManagedSettingLock(key, this.configDir);
         if (lock) {
@@ -1536,8 +1546,6 @@ export class ConfigManager {
       }
       try { this.#resolvePath(key); }
       catch { return invalid(key, 'no such setting; check the spelling against the settings list'); }
-      const credential = credentialValueRefusal(key, value);
-      if (credential) return refuse({ code: credential.code, reason: credential.reason, next: [credential.next], status: 400 });
       if (by.kind === 'agent' && facts.loosens?.(readDotPath(this.#config, key).value, value) && !ownerSettled(by.decision)) {
         return refuse({ code: 'OWNER_ONLY', reason: `Changing ${key} would ${facts.loosening ?? 'loosen security'}, which only the owner decides.`,
           next: ['Ask the owner to make this change, or to approve it when asked.'], status: 403 });
@@ -1550,16 +1558,15 @@ export class ConfigManager {
     // valid together is not refused one key at a time.
     for (const change of admitted) {
       const { key, value } = change;
-      const crossRefusal = SCHEMA_BY_KEY.has(key) || this.hostSettings.has(key)
-        ? memoryTierOrderRefusal(key, value, projected) ?? memoryBudgetRefusal(key, value, projected)
-        : nonSchemaKeyRefusal(key, value, this.#config);
-      if (crossRefusal) return invalid(key, crossRefusal);
+      const schema = this.hostSettings.schema(key) ?? SCHEMA_BY_KEY.get(key);
+      const across = schema ? admitSettingValue(key, schema, value, { config: projected }) : null;
+      if (across && !across.ok) return invalid(key, across.reason);
       try {
         if (this.hostSettings.has(key) && this.hostSettingHasProjectValue(key)) change.tier = 'project';
         else if (this.daemonTierPath !== null && isDaemonOwnedConfigKey(key)) change.tier = 'daemon';
         else if (this.sharedTierPath !== null && isSharedConfigKey(key)) change.tier = 'shared';
         else if (this.projectOverridesKey(key)) change.tier = 'project';
-        else this.refuseBehindStricterProjectValue(key, value);
+        else this.#refuseHeldByProject(key, value);
       } catch (error) {
         return refuse({ code: 'CONFIG_HELD', reason: error instanceof Error ? error.message : `${key} cannot be written now.`,
           next: ['Remove the key from the project settings file, then set it again.'], status: 409 });
@@ -2179,7 +2186,15 @@ export class ConfigManager {
     }
   }
 
+  /**
+   * Whether a write of host setting `key` belongs in the project file: only
+   * when the setting is declared project-settable (the load side reads the
+   * project file for nothing else) and that file names it. Otherwise the
+   * owner's value goes to their own file, where it takes effect, and never
+   * into repository content.
+   */
   private hostSettingHasProjectValue(key: string): boolean {
+    if (!this.hostSettings.projectSettable(key)) return false;
     try { return this.projectConfigPath !== null && readDotPath(readHostSettingsFile(this.projectConfigPath), key).present; }
     catch (error) {
       recoverHostSettingsWriteFailure(error, () => this.refreshHostSettings(this.hostSettings.snapshot(this.#config), true));
@@ -2224,6 +2239,11 @@ export class ConfigManager {
       const credential = credentialValueRefusal(path, value);
       if (credential) throw new ConfigError(`${credential.reason} ${credential.next}`);
     };
+    // The rules across settings read the config with the whole patch in place.
+    const projected = structuredClone(this.#config) as unknown as Record<string, unknown>;
+    for (const [field, value] of Object.entries(ownedPatch)) {
+      if (value !== undefined) writeRawDotPath(projected, `${String(category)}.${field}`, structuredClone(value));
+    }
     for (const [field, value] of Object.entries(ownedPatch)) {
       if (value === undefined) continue;
       const path = `${String(category)}.${field}`;
@@ -2231,11 +2251,10 @@ export class ConfigManager {
       // A category patch cannot be sent to the daemon key by key, so a daemon-owned
       // field is written here only where this process may write the daemon's file.
       this.#refuseDaemonFileWrite(path, {});
-      const schema = CONFIG_SCHEMA.find(setting => setting.key === path);
+      const schema = SCHEMA_BY_KEY.get(path);
       if (schema) {
-        const refusal = (schema.validate && !schema.validate(value) ? 'does not satisfy this setting\'s rules' : null)
-          ?? (schema.type === 'enum' ? (schema.enumValues?.includes(value as string) ? null : `allowed: ${schema.enumValues?.join(', ')}`) : schemaTypeRefusal(schema, value));
-        if (refusal) throw new ConfigError(`Invalid value for ${path} (${refusal})`);
+        const admission = admitSettingValue(path, schema, value, { config: projected });
+        if (!admission.ok) throw new ConfigError(`Invalid value for ${path} (${admission.reason})`);
       }
       const lock = getManagedSettingLock(path as ConfigKey, this.configDir);
       if (lock) throw new ConfigError(`Setting ${path} is locked by ${lock.source}: ${lock.reason}`);

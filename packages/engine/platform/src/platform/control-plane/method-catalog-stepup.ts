@@ -12,9 +12,10 @@
  *   - stepup.credentials.list / stepup.credentials.remove, show the registered
  *     passkeys (no key material) and remove one, for a lost device. Admin-gated;
  *     remove is a mutating call, so a relay call needs a step-up assertion.
- *   - stepup.challenge.mint, issue a short-lived, single-use challenge (carrying the
- *     caller-supplied session/rendezvous ids), which a surface feeds to
- *     `navigator.credentials.get` before making a mutating relay call.
+ *   - stepup.challenge.mint, issue a short-lived, single-use challenge bound to
+ *     the minting principal and the call's method and path (and, when given,
+ *     its session and rendezvous), which a surface feeds to
+ *     `navigator.credentials.get` before making a state-changing relay call.
  *
  * The assertion produced by the passkey is carried on the mutating call in the
  * `x-goodvibes-stepup-assertion` header and verified by the daemon's real
@@ -115,7 +116,7 @@ export const builtinGatewayStepUpMethodDescriptors: readonly GatewayMethodDescri
   methodDescriptor({
     id: 'stepup.challenge.mint',
     title: 'Mint Step-up Challenge',
-    description: 'Issue a short-lived, single-use WebAuthn challenge. The optional sessionId, rendezvousId, method and path bind it: a challenge minted with any of them is accepted only for a relay request that matches every one given (a different session, rendezvous, HTTP method or path is refused as challenge-unbound), while a challenge minted with none is accepted for any request. The values are recorded as the caller supplied them; they are not checked against the authenticated session. A surface passes it to navigator.credentials.get and returns the assertion on its next mutating relay call. The freshness window (ttlMs) is clamped to 5s–300s (default 120s).',
+    description: 'Issue a short-lived, single-use WebAuthn challenge for one relay call. Pass the method and path of the call it is for: a challenge minted without them authorises nothing. The challenge is bound to the principal that minted it, and to the sessionId and rendezvousId when given; a relay call by another principal, or with a different method, path, session or rendezvous, is refused as challenge-unbound. A surface passes it to navigator.credentials.get and returns the assertion on the call it was minted for. Whether a relay call needs an assertion is decided by its catalog method\'s scopes (any scope other than read:*), not by its HTTP verb. The freshness window (ttlMs) is clamped to 5s–300s (default 120s).',
     category: 'relay',
     scopes: ['read:relay'],
     access: 'authenticated',

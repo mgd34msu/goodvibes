@@ -71,7 +71,7 @@ import { readCompanionTokenValue, replaceCompanionToken } from '../pairing/compa
 import { createAsyncDisposalScope, type AsyncDisposalScope } from '../runtime/async-disposal.js';
 import type { McpServerConfig } from '../mcp/config.js';
 import { isSurfaceFeatureGateEnabled } from '../runtime/feature-flags/index.js';
-import { buildDaemonRelayReachability } from '../relay/daemon-wiring.js';
+import { buildDaemonRelayReachability, relayRequestFactsFrom } from '../relay/daemon-wiring.js';
 import type { RelayReachability } from '../relay/reachability.js';
 import {
   readAutomationReasoningEffort,
@@ -754,8 +754,18 @@ export class DaemonServer {
       this.transportEventsHelper.emitTransportConnected();
       // Outbound relay reachability (default OFF; gated by relay.enabled + the
       // relay-connect flag + a configured relay.url). Non-blocking so a relay
-      // hiccup never blocks daemon startup.
-      this.relayReachability = buildDaemonRelayReachability(this.configManager, this.runtimeServices.secretsManager, this.runtimeServices.featureFlags, (req) => this.handleRequest(req), logger, this.runtimeServices.stepUpService.createVerifier());
+      // hiccup never blocks daemon startup. The step-up gate judges a relayed
+      // call by its catalog method's scopes and binds the assertion to the
+      // principal that minted the challenge.
+      this.relayReachability = buildDaemonRelayReachability(
+        this.configManager,
+        this.runtimeServices.secretsManager,
+        this.runtimeServices.featureFlags,
+        (req) => this.handleRequest(req),
+        logger,
+        this.runtimeServices.stepUpService.createVerifier(),
+        relayRequestFactsFrom(this.gatewayMethods, (req) => this.controlPlaneHelper.authenticateRequest(req)),
+      );
       void this.relayReachability.start().catch((error: unknown) =>
         logger.warn('DaemonServer: relay reachability failed to start', { error: summarizeError(error) }),
       );

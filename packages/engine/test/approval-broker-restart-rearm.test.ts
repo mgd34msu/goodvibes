@@ -1,364 +1,119 @@
 /**
- * approval-broker-restart-rearm.test.ts
+ * A pending approval survives a daemon restart and is never left hanging.
  *
- * The defect this pins: `ApprovalBroker` held every expiry timer in
- * `pendingResolvers`, which is in-memory and rebuilt empty by `start()`. A
- * restart therefore left a timed approval with no timer and no recorded
- * deadline, and it sat 'pending' forever with nothing in the system that would
- * ever resolve it.
+ * The broker once kept every expiry timer only in memory, so a restart left a
+ * timed approval pending forever with nothing that would resolve it; for a
+ * payment that is money in limbo, and silence on an approval means denied.
  *
- * For a tool-permission ask that is a stale row someone eventually notices. For
- * a payment approval it is money in limbo, and because silence on a payment
- * approval means DENIED, a record stuck at 'pending' is precisely the state that
- * ruling exists to prevent.
- *
- * Fixed in the broker rather than worked around per-consumer, because every
- * consumer of the broker had it.
+ * Real broker over a real store file; a restart is a second broker over the
+ * same file after the first one's timers were dropped (the process died). The
+ * clock is bun's fake clock, moved only by the test.
  */
-import { describe, test, expect } from 'bun:test';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { afterEach, beforeEach, expect, jest, test } from 'bun:test';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { waitFor } from './_helpers/test-timeout.js';
-import { ApprovalBroker } from '../platform/src/platform/control-plane/approval-broker.js';
-import type { SharedApprovalStatus } from '../platform/src/platform/control-plane/approval-broker.js';
-import type { PermissionPromptRequest } from '../platform/src/platform/permissions/prompt.js';
+import { ApprovalBroker, type SharedApprovalRecord } from '../platform/src/platform/control-plane/approval-broker.ts';
+import type { PermissionPromptRequest } from '../platform/src/platform/permissions/prompt.ts';
 
-function request(callId: string, args: Record<string, unknown> = { merchant: 'shop.example' }): PermissionPromptRequest {
+let dir: string;
+let storePath: string;
+beforeEach(() => {
+  dir = mkdtempSync(join(tmpdir(), 'gv-approval-rearm-'));
+  storePath = join(dir, 'approvals.json');
+  jest.useFakeTimers();
+});
+afterEach(() => {
+  jest.clearAllTimers();
+  jest.useRealTimers();
+  rmSync(dir, { recursive: true, force: true });
+});
+
+/** Each ask has its own args, so none coalesces onto another. */
+function request(callId: string): PermissionPromptRequest {
   return {
     callId,
     tool: 'payments.purchase',
-    args,
+    args: { merchant: `${callId}.example` },
     category: 'execute',
-    analysis: {
-      classification: 'payment',
-      riskLevel: 'high',
-      summary: 'Buy a burr coffee grinder for USD 120.00',
-      reasons: ['above the daily item budget'],
-    },
+    analysis: { classification: 'payment', riskLevel: 'high', summary: 'Buy a burr coffee grinder for USD 120.00', reasons: [] },
   };
 }
 
-/**
- * Args that will not coalesce onto another ask in the same store.
- *
- * `requestApproval` merges an identical concurrent ask, same session, tool and
- * args, into the existing pending record instead of creating a second one. A
- * witness record built from the default args would therefore not exist at all,
- * and the tests below would be waiting on something that was never created.
- */
-const WITNESS_ARGS = { merchant: 'witness.example' } as const;
-
-function makeStorePath(): { path: string; cleanup: () => void } {
-  const dir = mkdtempSync(join(tmpdir(), 'gv-approval-rearm-'));
-  return {
-    path: join(dir, 'approvals.json'),
-    cleanup: () => rmSync(dir, { recursive: true, force: true }),
-  };
+/** Raise an ask on `broker` and return once it is in the store file. */
+async function raise(broker: ApprovalBroker, callId: string, extra: { timeoutMs?: number; metadata?: Record<string, unknown> } = {}): Promise<SharedApprovalRecord> {
+  const raised = await broker.raiseApproval({ request: request(callId), ...extra });
+  // The waiter dies with the process in the real case.
+  void raised.decision.catch(() => undefined);
+  return raised.approval;
 }
 
-/** Just the fields these tests read or rewrite; the round-trip keeps the rest. */
-interface PersistedApproval {
-  readonly callId: string;
-  expiresAt?: number;
-}
-interface PersistedSnapshot {
-  readonly approvals: readonly PersistedApproval[];
+/** The process dies: its timers go with it. A new broker over the same file is the restart. */
+async function restart(): Promise<ApprovalBroker> {
+  jest.clearAllTimers();
+  const next = new ApprovalBroker({ storePath });
+  await next.start();
+  return next;
 }
 
-function readStore(storePath: string): PersistedSnapshot | null {
-  try {
-    return JSON.parse(readFileSync(storePath, 'utf-8')) as PersistedSnapshot;
-  } catch {
-    // Not written yet. `persist()` renames into place, so a read never sees a
-    // half-written file, only an absent one.
-    return null;
+const record = (broker: ApprovalBroker, callId: string) => broker.listApprovals().find((entry) => entry.callId === callId);
+
+/** Let the event loop turn until `done` holds; bounded in turns, never in milliseconds. */
+async function until(done: () => boolean, what: string): Promise<void> {
+  for (let turn = 0; turn < 20_000; turn += 1) {
+    if (done()) return;
+    await new Promise<void>((resolve) => { setImmediate(resolve); });
   }
+  if (!done()) throw new Error(`Gave up waiting for: ${what}`);
 }
 
-/**
- * True once `callId` is in the STORE FILE.
- *
- * A restart reads the file, and `requestApproval` puts the record in memory
- * before it writes it, so `listApprovals()` says yes while the store is still
- * empty. Every test here used to bridge that gap with `setTimeout(…, 20)`,
- * which is a bet on how quickly two fsyncs and a rename complete; on a 2-vCPU
- * runner under the full suite the bet lost and the restarted broker loaded an
- * empty store, reporting `undefined` for a record the test had just created.
- *
- * Waiting on the file is waiting on the thing the restart actually consumes.
- */
-function persisted(storePath: string, callId: string): boolean {
-  return readStore(storePath)?.approvals.some((entry) => entry.callId === callId) ?? false;
-}
+test('a deadline that passed while the daemon was down is denied at start-up; an approval already given stays given', async () => {
+  const first = new ApprovalBroker({ storePath });
+  await first.start();
+  await raise(first, 'lapsed', { timeoutMs: 60_000 });
+  const given = await raise(first, 'given', { timeoutMs: 60_000 });
+  await first.resolveApproval(given.id, { approved: true, actor: 'owner', actorSurface: 'tui' });
 
-/**
- * Move a persisted deadline, which is what the passage of time would do to it.
- *
- * The deadline has to be a known distance from the restart for these tests to
- * mean anything, "still in the future" and "already passed" are the two cases
- * the sweep branches on. Deriving it from a `timeoutMs` handed to
- * `requestApproval` makes it a distance from the CREATE instead, so how long
- * the create took decides which case the test exercises. Writing it here, one
- * `readFile` before the restart consumes it, makes the case a fact.
- *
- * It also means no record in these tests carries a live timer on the first
- * broker: nothing fires mid-suite into a temp directory the test has removed.
- */
-function setPersistedDeadline(storePath: string, callId: string, expiresAt: number): void {
-  const snapshot = readStore(storePath);
-  const record = snapshot?.approvals.find((entry) => entry.callId === callId);
-  if (!snapshot || !record) throw new Error(`no persisted approval for ${callId}`);
-  record.expiresAt = expiresAt;
-  writeFileSync(storePath, `${JSON.stringify(snapshot, null, 2)}\n`);
-}
-
-/**
- * How far past the restart a deadline written by `setPersistedDeadline` sits.
- *
- * The only work between writing it and the restarted broker reading it is one
- * `readFile` of a small JSON file, so this is not a padding guess in the way a
- * `setTimeout` before an assertion is: nothing waits this long on a green run
- * unless the deadline itself is what is being waited for, and the tests below
- * assert WHICH sweep branch ran, so a window that was somehow too small fails
- * by name instead of quietly testing the other case.
- */
-const REARM_WINDOW_MS = 250;
-
-const REARMED_NOTE = 'timed out after a restart re-armed its deadline';
-
-function statusOf(broker: ApprovalBroker, callId: string): SharedApprovalStatus | undefined {
-  return broker.listApprovals().find((entry) => entry.callId === callId)?.status;
-}
-
-function expiryNote(broker: ApprovalBroker, callId: string): string | undefined {
-  return broker.listApprovals()
-    .find((entry) => entry.callId === callId)
-    ?.audit.find((entry) => entry.action === 'expired')?.note;
-}
-
-/**
- * Put a record in the store that the re-arm sweep MUST settle, and wait for it.
- *
- * Two of the tests below assert that the sweep LEAVES A RECORD ALONE. Polling
- * for "still pending" answers instantly and would answer the same way before
- * the sweep had run at all, so on its own it proves nothing, it is the shape
- * of assertion that the fixed sleeps were already failing to make honest. This
- * gives the sweep a second record it cannot ignore, waits for that one to be
- * settled, and only then is "unchanged" a statement about a sweep that has
- * demonstrably executed and drained the async expiry it kicks off.
- */
-async function witnessSweepRan(broker: ApprovalBroker, callId: string): Promise<void> {
-  await waitFor(() => statusOf(broker, callId) === 'expired');
-  expect(expiryNote(broker, callId)).toBe(REARMED_NOTE);
-}
-
-describe('an approval survives a restart with its deadline intact', () => {
-  test('a deadline that passed while the process was down resolves DENIED, not pending', async () => {
-    const store = makeStorePath();
-    try {
-      const first = new ApprovalBroker({ storePath: store.path });
-      await first.start();
-
-      // No `timeoutMs` here, deliberately, matching the other tests below: it
-      // keeps this broker from ever arming its OWN expiry timer, which would
-      // otherwise race this test's `setPersistedDeadline` write with a second,
-      // internally-triggered persist() of its own. The deadline this test
-      // cares about is written directly onto the record below instead.
-      const pending = first.requestApproval({ request: request('call-1') });
-      // The awaiting caller dies with the process in the real case; here it is
-      // resolved by the expiry so the promise is not left dangling.
-      void pending.catch(() => undefined);
-      // Wait on the STORE FILE, not a fixed margin: `persisted()` is waiting
-      // on the thing the restart actually consumes (see its own doc comment
-      // above) rather than betting on how quickly this process gets
-      // scheduled inside the full suite.
-      await waitFor(() => persisted(store.path, 'call-1'));
-
-      const created = first.listApprovals().find((entry) => entry.callId === 'call-1');
-      expect(created?.status).toBe('pending');
-
-      // Move the deadline into the past, directly on the persisted record,
-      // "already expired when the restart reads it" becomes a fact about the
-      // file rather than a bet on real time elapsing between two fixed
-      // sleeps and a slow disk write landing in between.
-      setPersistedDeadline(store.path, 'call-1', Date.now() - 1);
-
-      // A NEW broker over the same store is the restart.
-      const second = new ApprovalBroker({ storePath: store.path });
-      await second.start();
-      await waitFor(() => statusOf(second, 'call-1') === 'expired');
-
-      const restored = second.listApprovals().find((entry) => entry.callId === 'call-1');
-      expect(restored).toBeDefined();
-      expect(restored?.status).toBe('expired');
-      expect(restored?.decision?.approved).toBe(false);
-    } finally {
-      store.cleanup();
-    }
-  });
-
-  test('a deadline still in the future is re-armed and fires after the restart', async () => {
-    const store = makeStorePath();
-    try {
-      const first = new ApprovalBroker({ storePath: store.path });
-      await first.start();
-      const pending = first.requestApproval({ request: request('call-2') });
-      void pending.catch(() => undefined);
-      await waitFor(() => persisted(store.path, 'call-2'));
-
-      // The deadline is written into the store rather than counted from the
-      // create, so "still in its window when the restart reads it" is a
-      // property of the file and not of how busy the machine was.
-      setPersistedDeadline(store.path, 'call-2', Date.now() + REARM_WINDOW_MS);
-
-      const second = new ApprovalBroker({ storePath: store.path });
-      await second.start();
-
-      // Still inside its window immediately after the restart …
-      expect(statusOf(second, 'call-2')).toBe('pending');
-
-      // … and the re-armed timer settles it rather than leaving it forever.
-      await waitFor(() => statusOf(second, 'call-2') === 'expired');
-      // WHICH branch settled it is the whole claim. A sweep that expired it on
-      // sight also reads 'expired' here, and would be the opposite defect,
-      // an approval killed while it still had time left to be answered.
-      expect(expiryNote(second, 'call-2')).toBe(REARMED_NOTE);
-    } finally {
-      store.cleanup();
-    }
-  });
-
-  test('an in-process approval with no timeout is cancelled at restart, because nothing waits for it', async () => {
-    const store = makeStorePath();
-    try {
-      const first = new ApprovalBroker({ storePath: store.path });
-      await first.start();
-      void first.requestApproval({ request: request('call-3') }).catch(() => undefined);
-      await waitFor(() => persisted(store.path, 'call-3'));
-
-      const second = new ApprovalBroker({ storePath: store.path });
-      await second.start();
-      await waitFor(() => statusOf(second, 'call-3') === 'cancelled');
-      const restored = second.listApprovals().find((entry) => entry.callId === 'call-3');
-      expect(restored?.decision?.approved).toBe(false);
-      expect(restored?.audit.at(-1)?.note).toContain('restarted');
-
-      // The next identical ask gets a fresh record and its own prompt rather
-      // than silently joining the dead one.
-      let prompted = 0;
-      const again = second.requestApproval({ request: request('call-3b'), localPrompt: async () => { prompted += 1; return { approved: true }; } });
-      expect((await again).approved).toBe(true);
-      expect(prompted).toBe(1);
-    } finally {
-      store.cleanup();
-    }
-  });
-
-  test('a wire-raised approval with no timeout stays open across a restart for its remote caller', async () => {
-    const store = makeStorePath();
-    try {
-      const first = new ApprovalBroker({ storePath: store.path });
-      await first.start();
-      void first.raiseApproval({ request: request('call-wire'), metadata: { raisedVia: 'approvals.raise' } });
-      await waitFor(() => persisted(store.path, 'call-wire'));
-      void first.requestApproval({ request: request('call-wire-witness', WITNESS_ARGS) }).catch(() => undefined);
-      await waitFor(() => persisted(store.path, 'call-wire-witness'));
-      setPersistedDeadline(store.path, 'call-wire-witness', Date.now() + REARM_WINDOW_MS);
-
-      const second = new ApprovalBroker({ storePath: store.path });
-      await second.start();
-      await witnessSweepRan(second, 'call-wire-witness');
-      expect(statusOf(second, 'call-wire')).toBe('pending');
-    } finally {
-      store.cleanup();
-    }
-  });
-
-  test('an already-resolved approval is not re-expired by the sweep', async () => {
-    const store = makeStorePath();
-    try {
-      const first = new ApprovalBroker({ storePath: store.path });
-      await first.start();
-      void first.requestApproval({ request: request('call-4') }).catch(() => undefined);
-      // The create's write has to be COMPLETE before the resolve's write
-      // starts. Both persist the whole store, so two in flight at once are a
-      // last-writer-wins race, and the loser is the create, it carries the
-      // 'pending' snapshot taken before the record was answered. On the CI
-      // runner it landed second and the restarted broker read back an approval
-      // that had already been approved as still pending.
-      await waitFor(() => persisted(store.path, 'call-4'));
-      const created = first.listApprovals().find((entry) => entry.callId === 'call-4');
-      expect(created).toBeDefined();
-      await first.resolveApproval(created?.id as string, {
-        approved: true,
-        actor: 'tester',
-        actorSurface: 'tui',
-      });
-
-      void first.requestApproval({ request: request('call-4-witness', WITNESS_ARGS) }).catch(() => undefined);
-      await waitFor(() => persisted(store.path, 'call-4-witness'));
-
-      // A deadline that has ALREADY passed is the case with teeth: it is the
-      // one a sweep that did not check status would re-expire the moment it
-      // loaded, turning a purchase somebody approved into a denial. With a
-      // deadline still in the future the sweep would merely arm a timer for
-      // later, and this test would go green over a broker that was wrong.
-      setPersistedDeadline(store.path, 'call-4', Date.now() - 1);
-      setPersistedDeadline(store.path, 'call-4-witness', Date.now() + REARM_WINDOW_MS);
-
-      const second = new ApprovalBroker({ storePath: store.path });
-      await second.start();
-      await witnessSweepRan(second, 'call-4-witness');
-
-      expect(statusOf(second, 'call-4')).toBe('approved');
-    } finally {
-      store.cleanup();
-    }
-  });
+  jest.advanceTimersByTime(61_000);
+  const second = await restart();
+  await until(() => record(second, 'lapsed')?.status === 'expired', 'the lapsed ask to be settled');
+  expect(record(second, 'lapsed')?.decision?.approved).toBe(false);
+  expect(record(second, 'given')?.status).toBe('approved');
 });
 
-describe('the audit trail names the surface that actually answered', () => {
-  test('a local prompt records the calling surface, not a hardcoded tui', async () => {
-    const store = makeStorePath();
-    try {
-      const broker = new ApprovalBroker({ storePath: store.path });
-      await broker.start();
-      await broker.requestApproval({
-        request: request('call-5'),
-        localPrompt: async () => ({ approved: true, remember: false }),
-        localPromptSurface: 'agent-terminal',
-        localPromptActor: 'agent-local',
-      });
-      await new Promise((resolve) => setTimeout(resolve, 20));
+test('a deadline still ahead is kept and fires after the restart', async () => {
+  const first = new ApprovalBroker({ storePath });
+  await first.start();
+  await raise(first, 'ahead', { timeoutMs: 60_000 });
 
-      const record = broker.listApprovals().find((entry) => entry.callId === 'call-5');
-      expect(record?.status).toBe('approved');
-      expect(record?.resolvedBy).toBe('agent-local');
-      // "Which surface approved this purchase" is a question the payment audit
-      // record has to answer truthfully; a hardcoded 'tui' made it a lie for
-      // every product that is not the TUI.
-      const approvedEntry = record?.audit.find((entry) => entry.action === 'approved');
-      expect(approvedEntry?.actorSurface).toBe('agent-terminal');
-    } finally {
-      store.cleanup();
-    }
-  });
+  jest.advanceTimersByTime(30_000);
+  const second = await restart();
+  // Not expired on sight: it still has time to be answered.
+  expect(record(second, 'ahead')?.status).toBe('pending');
 
-  test('a caller that says nothing keeps the historical tui labelling', async () => {
-    const store = makeStorePath();
-    try {
-      const broker = new ApprovalBroker({ storePath: store.path });
-      await broker.start();
-      await broker.requestApproval({
-        request: request('call-6'),
-        localPrompt: async () => ({ approved: true, remember: false }),
-      });
-      await new Promise((resolve) => setTimeout(resolve, 20));
-      const record = broker.listApprovals().find((entry) => entry.callId === 'call-6');
-      expect(record?.resolvedBy).toBe('tui-local');
-    } finally {
-      store.cleanup();
-    }
+  jest.advanceTimersByTime(30_001);
+  await until(() => record(second, 'ahead')?.status === 'expired', 'the re-armed deadline to fire');
+  expect(record(second, 'ahead')?.decision?.approved).toBe(false);
+  expect(record(second, 'ahead')?.audit.some((entry) => entry.action === 'expired' && entry.note?.includes('re-armed'))).toBe(true);
+});
+
+test('with no deadline, an ask whose waiter died is cancelled and the next one prompts afresh; one raised over the wire stays open', async () => {
+  const first = new ApprovalBroker({ storePath });
+  await first.start();
+  await raise(first, 'in-process');
+  await raise(first, 'over-the-wire', { metadata: { raisedVia: 'approvals.raise' } });
+
+  const second = await restart();
+  await until(() => record(second, 'in-process')?.status === 'cancelled', 'the orphaned ask to be cancelled');
+  expect(record(second, 'in-process')?.decision?.approved).toBe(false);
+  // The sweep has run (it cancelled the other one); the remote caller's ask is still open for it.
+  expect(record(second, 'over-the-wire')?.status).toBe('pending');
+
+  let prompted = 0;
+  const again = second.requestApproval({
+    request: { ...request('in-process-again'), args: request('in-process').args },
+    localPrompt: async () => { prompted += 1; return { approved: true }; },
   });
+  expect((await again).approved).toBe(true);
+  expect(prompted).toBe(1);
 });

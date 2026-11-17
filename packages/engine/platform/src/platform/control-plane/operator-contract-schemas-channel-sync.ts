@@ -89,6 +89,8 @@ export const CHANNEL_INBOX_PROVIDER_STATUS_SCHEMA = objectSchema({
   }, ['uidValidity', 'kind', 'lowerBoundUid', 'skippedOlderMessages']),
   /** Pending eligible messages at lastSyncAt; absent after interruption/when unknown. */
   mailboxProgress: objectSchema({ uidValidity: NUMBER_SCHEMA, pendingMessages: NUMBER_SCHEMA }, ['uidValidity', 'pendingMessages']),
+  /** The account scope the live mailbox's rows are named under (`email:<scope>:<uidvalidity>:<uid>`). */
+  mailboxScope: STRING_SCHEMA,
   /** Messages the last sync passed without publishing because their content cannot be proven complete. */
   skippedMessages: arraySchema(objectSchema({ uid: NUMBER_SCHEMA, reason: STRING_SCHEMA }, ['uid', 'reason'])),
 }, ['provider', 'state', 'itemCount', 'storedCount']);

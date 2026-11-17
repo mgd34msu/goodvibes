@@ -36,6 +36,8 @@ export interface ProviderStatus {
   error?: string;
   lastPolledAt?: number;
   mailboxProgress?: { readonly uidValidity: number; readonly pendingMessages: number };
+  /** The account scope a pushed mail provider names its rows under. */
+  mailboxScope?: string;
   /** The mailbox reader's history window, for a pushed mail provider. */
   mailboxHistory?: {
     readonly kind: 'complete' | 'bounded-seed';

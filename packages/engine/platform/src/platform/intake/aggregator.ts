@@ -96,6 +96,11 @@ export interface ChannelInboxProviderStatus {
   };
   /** Eligible messages remaining at lastSyncAt, not a live provider total. Absent when unknown. */
   mailboxProgress?: { readonly uidValidity: number; readonly pendingMessages: number };
+  /**
+   * The account scope the live mailbox's rows are named under (`email:<scope>:...`).
+   * With the generation in mailboxProgress it says which mirror rows are this mailbox's.
+   */
+  mailboxScope?: string;
   /** Messages the last sync passed because their content cannot be proven complete, with the reason. */
   skippedMessages?: readonly { readonly uid: number; readonly reason: string }[];
 }
@@ -364,6 +369,7 @@ function describeProviders(input: {
     };
     // The mailbox reader's own position, reported by the provider it feeds.
     if (status.mailboxHistory) wire.mailboxHistory = { ...status.mailboxHistory };
+    if (status.mailboxScope !== undefined) wire.mailboxScope = status.mailboxScope;
     if (status.mailboxProgress && (!status.mailboxHistory || status.mailboxHistory.uidValidity === status.mailboxProgress.uidValidity)) {
       wire.mailboxProgress = { ...status.mailboxProgress };
     }

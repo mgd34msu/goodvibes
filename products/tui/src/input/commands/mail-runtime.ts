@@ -241,17 +241,35 @@ async function withStatusOnFailure(
 
 /**
  * Triage labels the daemon's inbox mirror holds for this mailbox, by UID. The
- * mirror names a mail row `email:<account>:<uidvalidity>:<uid>`. Best effort:
- * a mirror that cannot be read leaves the list unlabelled, never failed.
+ * mirror names a mail row `email:<account>:<uidvalidity>:<uid>`, and a UID means
+ * this message only within that account and mailbox generation, so a label counts
+ * only when both match what the email provider reports for the live mailbox;
+ * without that report nothing is labelled. Best effort: a mirror that cannot be
+ * read leaves the list unlabelled, never failed.
  */
 async function triageLabels(gateway: Gateway, shown: number): Promise<ReadonlyMap<number, TriageLabel>> {
   const labels = new Map<number, TriageLabel>();
   if (shown === 0) return labels;
   try {
     const mirror = await gateway.invoke('channels.inbox.list', { ...READ_INVOCATION_CONTEXT, body: { provider: 'email', limit: 500 } }) as {
-      items?: readonly { id?: unknown; triageLabel?: unknown }[] };
+      items?: readonly { id?: unknown; triageLabel?: unknown }[];
+      providers?: readonly {
+        provider?: unknown;
+        mailboxScope?: unknown;
+        mailboxProgress?: { uidValidity?: unknown };
+        mailboxHistory?: { uidValidity?: unknown };
+      }[];
+    };
+    const mailbox = (mirror.providers ?? []).find((entry) => entry.provider === 'email');
+    const scope = typeof mailbox?.mailboxScope === 'string' ? mailbox.mailboxScope : '';
+    const generation = mailbox?.mailboxProgress?.uidValidity ?? mailbox?.mailboxHistory?.uidValidity;
+    if (!scope || typeof generation !== 'number') return labels;
+    const prefix = `email:${scope}:`;
     for (const item of mirror.items ?? []) {
-      const uid = typeof item.id === 'string' ? Number(item.id.slice(item.id.lastIndexOf(':') + 1)) : Number.NaN;
+      if (typeof item.id !== 'string' || !item.id.startsWith(prefix)) continue;
+      const [validity, uidText, extra] = item.id.slice(prefix.length).split(':');
+      if (extra !== undefined || Number(validity) !== generation) continue;
+      const uid = Number(uidText);
       if (Number.isSafeInteger(uid) && (item.triageLabel === 'spam' || item.triageLabel === 'priority' || item.triageLabel === 'normal')) {
         labels.set(uid, item.triageLabel);
       }

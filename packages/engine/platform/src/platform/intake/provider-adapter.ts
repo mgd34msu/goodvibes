@@ -167,6 +167,8 @@ export interface PushedProviderStatus {
   readonly lastPolledAt?: number;
   readonly configured?: boolean;
   readonly mailboxProgress?: { readonly uidValidity: number; readonly pendingMessages: number };
+  /** The account scope this mailbox's rows are named under (`email:<scope>:<uidvalidity>:<uid>`). */
+  readonly mailboxScope?: string;
   readonly mailboxHistory?: {
     readonly kind: 'complete' | 'bounded-seed';
     readonly lowerBoundUid: number;

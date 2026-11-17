@@ -327,7 +327,7 @@ export function createEmailInboxOwner(options: EmailInboxOwnerOptions): EmailInb
     },
     status() {
       return {
-        state, itemCount, polled,
+        state, itemCount, polled, mailboxScope: scopeId,
         ...(error === undefined ? {} : { error }),
         ...(lastPolledAt === undefined ? {} : { lastPolledAt }),
         ...(configured === undefined ? {} : { configured }),

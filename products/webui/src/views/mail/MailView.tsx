@@ -90,14 +90,38 @@ function UnreadableNote({ items }: { items: readonly EmailUnreadableMessage[] })
   );
 }
 
-/** Spam and priority labels by UID from a `channels.inbox.list` answer; normal mail carries no mark. */
+interface MailMirrorAnswer {
+  readonly items?: readonly { readonly id?: unknown; readonly triageLabel?: unknown }[];
+  readonly providers?: readonly {
+    readonly provider?: unknown;
+    readonly mailboxScope?: unknown;
+    readonly mailboxProgress?: { readonly uidValidity?: unknown };
+    readonly mailboxHistory?: { readonly uidValidity?: unknown };
+  }[];
+}
+
+/**
+ * Spam and priority labels by UID from a `channels.inbox.list` answer; normal mail
+ * carries no mark. A mirror row is named `email:<account>:<uidvalidity>:<uid>`, and a
+ * UID means this message only within this account and mailbox generation, so a label
+ * counts only when both match what the email provider reports for the live mailbox.
+ * Without that report nothing is labelled rather than labelling the wrong message.
+ */
 function mailTriageLabels(answer: unknown): ReadonlyMap<number, 'spam' | 'priority'> {
   const labels = new Map<number, 'spam' | 'priority'>();
-  const items = answer && typeof answer === 'object' && Array.isArray((answer as { items?: unknown }).items)
-    ? (answer as { items: readonly { id?: unknown; triageLabel?: unknown }[] }).items : [];
+  if (!answer || typeof answer !== 'object') return labels;
+  const { items = [], providers = [] } = answer as MailMirrorAnswer;
+  const mailbox = providers.find((entry) => entry.provider === 'email');
+  const scope = typeof mailbox?.mailboxScope === 'string' ? mailbox.mailboxScope : '';
+  const generation = mailbox?.mailboxProgress?.uidValidity ?? mailbox?.mailboxHistory?.uidValidity;
+  if (!scope || typeof generation !== 'number') return labels;
+  const prefix = `email:${scope}:`;
   for (const item of items) {
-    if (typeof item.id !== 'string' || (item.triageLabel !== 'spam' && item.triageLabel !== 'priority')) continue;
-    const uid = Number(item.id.slice(item.id.lastIndexOf(':') + 1));
+    if (typeof item.id !== 'string' || !item.id.startsWith(prefix)) continue;
+    if (item.triageLabel !== 'spam' && item.triageLabel !== 'priority') continue;
+    const [validity, uidText, extra] = item.id.slice(prefix.length).split(':');
+    if (extra !== undefined || Number(validity) !== generation) continue;
+    const uid = Number(uidText);
     if (Number.isSafeInteger(uid) && uid > 0) labels.set(uid, item.triageLabel);
   }
   return labels;
@@ -214,8 +238,9 @@ export function MailView({ tabs }: MailViewProps = {}) {
     },
   });
   // Triage labels live in the daemon's inbox store, one row per message named
-  // `email:<account>:<uidvalidity>:<uid>`. Best effort: a daemon without that
-  // store, or one that refuses, leaves the list unlabelled, never failed.
+  // `email:<account>:<uidvalidity>:<uid>`, matched to this mailbox by account and
+  // generation (mailTriageLabels). Best effort: a daemon without that store, or one
+  // that refuses, leaves the list unlabelled, never failed.
   const triage = useQuery({
     queryKey: ['email', 'triage-labels'] as const,
     queryFn: () => invokeMethod('channels.inbox.list', { provider: 'email', limit: 500 }),

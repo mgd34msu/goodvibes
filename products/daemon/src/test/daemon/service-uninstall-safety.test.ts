@@ -25,18 +25,19 @@ function fixture(platform: 'systemd' | 'launchd' = 'systemd') {
   return { input, unit, settings };
 }
 
-test('a stopped launchd service is uninstalled with one unload, even though unloading it exits non-zero', async () => {
+test('a stopped launchd service is uninstalled with one bootout, even though booting it out exits non-zero', async () => {
   const { input, unit } = fixture('launchd');
   const actions: string[][] = [];
   const runner: ManagedServiceActionRunner = (command, args) => {
-    if (args[0] === 'list') return { status: 1, stdout: '' };
+    // launchctl print: 113 is launchd's "could not find service".
+    if (args[0] === 'print') return { status: 113, stderr: 'Could not find service' };
     actions.push([command, ...args]);
-    return { status: 1, stderr: 'Could not find specified service' };
+    return { status: 3, stderr: 'Boot-out failed: 3: No such process' };
   };
   const result = await runDaemonServiceCli({ ...input, actionRunner: runner });
   expect(result.exitCode).toBe(0);
   expect(existsSync(unit)).toBe(false);
-  expect(actions).toEqual([['launchctl', 'unload', unit]]);
+  expect(actions).toEqual([['launchctl', 'bootout', `gui/${process.getuid?.()}/owned-service`]]);
 });
 
 test('with nothing installed it exits 4 and runs no service action', async () => {

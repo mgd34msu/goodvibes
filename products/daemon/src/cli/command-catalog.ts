@@ -392,8 +392,9 @@ export const DAEMON_COMMANDS: readonly DaemonCommandSpec[] = [
     usage: 'goodvibes-daemon uninstall-service',
     detail: [
       'Stop and unregister the service (`systemctl --user disable --now`, `launchctl',
-      'unload`, or ending and deleting the Scheduled Task), then delete its definition',
-      'file. A service that is already stopped is uninstalled the same way.',
+      'bootout gui/<uid>/<label>`, or ending and deleting the Scheduled Task), then',
+      'delete its definition file. A service that is already stopped is uninstalled',
+      'the same way.',
       '',
       'Exit codes: 0 removed; 4 nothing was installed; 5 the definition there was',
       'not written by GoodVibes, so it was left in place; 1 removal failed or the',

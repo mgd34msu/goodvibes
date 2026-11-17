@@ -147,8 +147,8 @@ the current launch.
 goodvibes-daemon uninstall-service
 ```
 
-Stop and unregister the service (`systemctl --user disable --now`, `launchctl unload`,
-or ending and deleting the Scheduled Task), then delete its definition file. A service
+Stop and unregister the service (`systemctl --user disable --now`,
+`launchctl bootout gui/<uid>/<label>`, or ending and deleting the Scheduled Task), then delete its definition file. A service
 that is already stopped is uninstalled the same way. A definition GoodVibes did not write
 is left in place. Exits `0` when removed, `4` when nothing was installed, `5` when the
 definition there was not written by GoodVibes, and `1` when removal failed or the service

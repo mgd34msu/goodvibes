@@ -27,7 +27,7 @@
  * `install()` only WRITES the unit/plist/task; it does not enable or start it,
  * so `install-service` calls `install()` then `start()` and exits 3 (installed,
  * not running) when the start did not leave the daemon running. `uninstall()`
- * stops, unregisters (`systemctl --user disable --now`, `launchctl unload`,
+ * stops, unregisters (`systemctl --user disable --now`, `launchctl bootout`,
  * `schtasks /End` + `/Delete`), removes the file and reloads, so
  * `uninstall-service` calls it once.
  */

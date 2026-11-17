@@ -138,7 +138,7 @@ answer on the port without belonging to any managed unit.
 
 ```sh
 systemctl --user status goodvibes-jev.service
-launchctl list | grep goodvibes
+launchctl print gui/$(id -u)/sh.goodvibes.daemon
 ```
 
 Use the command matching your OS and configured service name. Do not kill an

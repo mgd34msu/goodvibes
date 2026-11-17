@@ -1812,17 +1812,24 @@ reload_launchd_agent() {
   fi
   say ""
   say "Reloading the running $_rl_label (launchd user agent) with its refreshed definition ..."
-  launchctl bootout "gui/$_rl_uid/$_rl_label" 2>/dev/null ||
-    launchctl unload "$_rl_path" 2>/dev/null || true
-  if launchctl bootstrap "gui/$_rl_uid" "$_rl_path" 2>/dev/null ||
-     launchctl load "$_rl_path" 2>/dev/null; then
+  # Only the gui/<uid> verbs: the legacy load/unload act on the caller's own
+  # domain (not this agent's from an SSH login) and exit 0 whatever happened,
+  # so as a fallback they turned a failed load into "reloaded". bootout can
+  # return before launchd lets go of the job; wait for that (up to 5 s) so the
+  # bootstrap does not fail on the old job and put the previous plist back.
+  launchctl bootout "gui/$_rl_uid/$_rl_label" 2>/dev/null || true
+  _rl_wait=0
+  while [ "$_rl_wait" -lt 20 ] && launchctl print "gui/$_rl_uid/$_rl_label" >/dev/null 2>&1; do
+    sleep 0.25
+    _rl_wait=$((_rl_wait + 1))
+  done
+  if launchctl bootstrap "gui/$_rl_uid" "$_rl_path" 2>/dev/null; then
     say "  reloaded   $_rl_label"
     return 0
   fi
   _rl_backup=$(newest_definition_backup "$_rl_path")
   if [ -n "$_rl_backup" ] && [ -f "$_rl_backup" ] && cp -p "$_rl_backup" "$_rl_path" 2>/dev/null; then
-    if launchctl bootstrap "gui/$_rl_uid" "$_rl_path" 2>/dev/null ||
-       launchctl load "$_rl_path" 2>/dev/null; then
+    if launchctl bootstrap "gui/$_rl_uid" "$_rl_path" 2>/dev/null; then
       say "  NOTE: the refreshed LaunchAgent could not be loaded, so the previous $_rl_path (kept at $_rl_backup)"
       say "  was put back and loaded; $_rl_label is running as before, without the new launch."
     else
@@ -3469,8 +3476,9 @@ uninstall_launchd_agent() {
   [ "$present" = "1" ] || return 0
 
   say "Stopping launchd user agent $label ..."
-  launchctl bootout "gui/$uid/$label" 2>/dev/null ||
-    launchctl unload "$plist_path" 2>/dev/null || true
+  # bootout names the agent's own domain; the legacy unload acts on the caller's
+  # domain and exits 0 whatever happened, so it was no fallback.
+  launchctl bootout "gui/$uid/$label" 2>/dev/null || true
 
   if [ "$managed" = "1" ]; then
     rm -f "$plist_path"

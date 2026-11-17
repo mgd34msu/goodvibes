@@ -95,9 +95,55 @@ function commandFailureText(result: ManagedServiceActionResult): string {
   return ((result.stderr ?? '') || (result.stdout ?? '') || `command exited with ${result.status}`).trim();
 }
 
-/** The launchd domain of this user's agents (`gui/<uid>`). */
-function launchdUid(): string {
-  return String(process.getuid?.() ?? '');
+/**
+ * The launchd domain of this user's agents (`gui/<uid>`), named on every
+ * launchctl command. The legacy `load`, `unload` and `list` act on whichever
+ * domain the CALLING process belongs to: the GUI domain from a Terminal window,
+ * but the user's background domain from an SSH login, so a job loaded over SSH
+ * was not where `kickstart`/`bootout gui/<uid>/...` (the restart, stop and
+ * uninstall asked of a running daemon, and the update handover) look. `load`
+ * and `unload` also exit 0 whatever happened, so a failed start read as
+ * success. `bootstrap`, `bootout`, `kickstart` and `print` take the domain
+ * explicitly and report failure in their exit status.
+ */
+function launchdDomain(): string {
+  return `gui/${process.getuid?.() ?? ''}`;
+}
+
+/** `launchctl`'s exit status for a service its domain does not hold. */
+const LAUNCHCTL_NOT_FOUND = 113;
+/** How long a restart waits for launchd to let go of a booted-out job: 20 looks, 250 ms apart. */
+const LAUNCHD_RELEASE_POLLS = 20;
+const LAUNCHD_RELEASE_POLL_MS = 250;
+const LAUNCHD_RELEASE_SECONDS = (LAUNCHD_RELEASE_POLLS * LAUNCHD_RELEASE_POLL_MS) / 1000;
+
+/** The failure when the user's GUI domain cannot be asked. */
+function launchdUnreachable(): string {
+  return `launchd could not be asked about the ${launchdDomain()} domain (launchctl did not answer, or no one is logged in at this Mac's screen; a LaunchAgent runs only in a logged-in session)`;
+}
+
+/** This service's launchd target, `gui/<uid>/<label>`. */
+function launchdTarget(serviceName: string): string {
+  return `${launchdDomain()}/${serviceName}`;
+}
+
+/**
+ * Whether the job is loaded in the user's GUI domain, and its pid while it
+ * runs, from `launchctl print gui/<uid>/<label>`. Only the `state` and `pid`
+ * lines are read; the rest (the job's environment among it) is not kept.
+ * Exit 113 is launchd's "could not find service": not loaded. Any other
+ * failure, or a launchctl that could not be run or did not answer, means the
+ * GUI domain could not be asked (no one is logged in at the Mac's screen).
+ */
+function readLaunchdJob(result: ManagedServiceActionResult): { readonly reachable: boolean; readonly loaded: boolean; readonly running: boolean; readonly pid?: number | undefined } {
+  if (result.status === LAUNCHCTL_NOT_FOUND) return { reachable: true, loaded: false, running: false };
+  if (result.status !== 0) return { reachable: false, loaded: false, running: false };
+  const text = result.stdout ?? '';
+  const state = /^\s*state = (.+?)\s*$/m.exec(text)?.[1];
+  const pidText = /^\s*pid = (\d+)\s*$/m.exec(text)?.[1];
+  const pid = pidText === undefined ? undefined : Number(pidText);
+  const running = state === 'running' && pid !== undefined && Number.isSafeInteger(pid) && pid > 0;
+  return { reachable: true, loaded: true, running, ...(running ? { pid } : {}) };
 }
 
 export interface ManagedServiceManagerOptions extends ManagedServicePaths {
@@ -431,9 +477,9 @@ function suggestedCommands(platform: ManagedServicePlatform, path: string, servi
       ];
     case 'launchd':
       return [
-        `launchctl unload ${path} || true`,
-        `launchctl load ${path}`,
-        `launchctl list | grep ${serviceName}`,
+        `launchctl bootout ${launchdTarget(serviceName)} || true`,
+        `launchctl bootstrap ${launchdDomain()} ${path}`,
+        `launchctl print ${launchdTarget(serviceName)}`,
       ];
     case 'windows':
       return [
@@ -764,7 +810,7 @@ export class PlatformServiceManager {
         // launchd ends this process the moment the job is booted out, so the file goes first.
         this.assertCurrent();
         rmSync(status.path, { force: true });
-        yield { detach: ['launchctl', 'bootout', `gui/${launchdUid()}/${status.serviceName}`] };
+        yield { detach: ['launchctl', 'bootout', launchdTarget(status.serviceName)] };
         accepted = 'The service was removed and launchd is unloading it: this daemon stops after this answer and will not start at login again.';
       } else {
         // Stop and unregister while the definition still names the service, so
@@ -774,7 +820,7 @@ export class PlatformServiceManager {
         const teardown: ReadonlyArray<{ readonly argv: readonly string[]; readonly bestEffort?: boolean }> = status.platform === 'systemd'
           ? [{ argv: ['systemctl', '--user', 'disable', '--now', `${status.serviceName}.service`] }]
           : status.platform === 'launchd'
-            ? [{ argv: ['launchctl', 'unload', status.path], bestEffort: true }]
+            ? [{ argv: ['launchctl', 'bootout', launchdTarget(status.serviceName)], bestEffort: true }]
             : status.platform === 'windows'
               ? [{ argv: ['schtasks', '/End', '/TN', status.serviceName], bestEffort: true }, { argv: ['schtasks', '/Delete', '/TN', status.serviceName, '/F'] }]
               : [];
@@ -783,6 +829,8 @@ export class PlatformServiceManager {
           if ((result.status ?? 1) !== 0 && !bestEffort && actionError === undefined) {
             actionError = `${argv.slice(0, 2).join(' ')} failed, so the service may still be running: ${commandFailureText(result)}`;
           }
+          // A job launchd booted out may still be held for a moment; the final status must not read it as running.
+          if (status.platform === 'launchd' && result.status === 0) yield* this.launchdReleaseFlow(launchdTarget(status.serviceName));
         }
         this.assertCurrent();
         rmSync(status.path, { force: true });
@@ -999,8 +1047,8 @@ export class PlatformServiceManager {
         } else {
           // launchd stops and starts the job itself, so nothing depends on this process outliving the stop.
           yield { detach: action === 'restart'
-            ? ['launchctl', 'kickstart', '-k', `gui/${launchdUid()}/${serviceName}`]
-            : ['launchctl', 'bootout', `gui/${launchdUid()}/${serviceName}`] };
+            ? ['launchctl', 'kickstart', '-k', launchdTarget(serviceName)]
+            : ['launchctl', 'bootout', launchdTarget(serviceName)] };
         }
         return {
           ...before,
@@ -1011,27 +1059,25 @@ export class PlatformServiceManager {
         };
       }
     }
-    // Each step is an argv plus a bestEffort flag. launchd has no native restart
-    // verb, so restart is an honest unload-then-load; the unload is best-effort
-    // (the agent may simply not be loaded yet), mirroring suggestedCommands()'
-    // human-facing `launchctl unload <path> || true`.
+    if (platform === 'launchd') {
+      const actionError = yield* this.launchdActionFlow(action, serviceName, path);
+      return {
+        ...(yield* this.statusFlow()),
+        lastAction: action,
+        ...(actionError === undefined ? {} : { actionError }),
+      };
+    }
+    // Each step is an argv plus a bestEffort flag.
     const steps: ReadonlyArray<{ readonly argv: readonly string[]; readonly bestEffort?: boolean }> = platform === 'systemd'
       ? [{ argv: ['systemctl', '--user', action === 'start' ? 'enable' : action, ...(action === 'start' ? ['--now'] : []), `${serviceName}.service`] }]
-      : platform === 'launchd'
+      : platform === 'windows'
         ? action === 'restart'
           ? [
-              { argv: ['launchctl', 'unload', path], bestEffort: true },
-              { argv: ['launchctl', 'load', path] },
+              { argv: ['schtasks', '/End', '/TN', serviceName], bestEffort: true },
+              { argv: ['schtasks', '/Run', '/TN', serviceName] },
             ]
-          : [{ argv: ['launchctl', action === 'stop' ? 'unload' : 'load', path] }]
-        : platform === 'windows'
-          ? action === 'restart'
-            ? [
-                { argv: ['schtasks', '/End', '/TN', serviceName], bestEffort: true },
-                { argv: ['schtasks', '/Run', '/TN', serviceName] },
-              ]
-            : [{ argv: ['schtasks', action === 'start' ? '/Run' : '/End', '/TN', serviceName] }]
-          : [];
+          : [{ argv: ['schtasks', action === 'start' ? '/Run' : '/End', '/TN', serviceName] }]
+        : [];
     if (steps.length === 0) {
       return {
         ...(yield* this.statusFlow()),
@@ -1052,6 +1098,54 @@ export class PlatformServiceManager {
       lastAction: action,
       ...(actionError === undefined ? {} : { actionError }),
     };
+  }
+
+  /**
+   * A start, stop or restart of the launchd agent in the user's GUI domain;
+   * returns the failure text, or undefined. What each does depends on whether
+   * the job is loaded there: a loaded job is started with `kickstart`; a stop
+   * boots it out, and has nothing to do when it is not loaded; a restart boots
+   * it out and bootstraps the definition again, so a rewritten plist takes
+   * effect. `bootout` can return before launchd has let go of the job, so the
+   * restart waits until `print` no longer finds it before the bootstrap.
+   */
+  private *launchdActionFlow(action: 'start' | 'stop' | 'restart', serviceName: string, path: string): ServiceFlow<string | undefined> {
+    const target = launchdTarget(serviceName);
+    const job = readLaunchdJob(yield { run: ['launchctl', 'print', target] });
+    if (!job.reachable) return launchdUnreachable();
+    if (action === 'start' && job.loaded) {
+      const kicked = yield { run: ['launchctl', 'kickstart', target] };
+      return (kicked.status ?? 1) === 0 ? undefined : commandFailureText(kicked);
+    }
+    if (action !== 'start' && job.loaded) {
+      const booted = yield { run: ['launchctl', 'bootout', target] };
+      if ((booted.status ?? 1) !== 0) return commandFailureText(booted);
+      const released = yield* this.launchdReleaseFlow(target);
+      if (released === 'unreachable') return launchdUnreachable();
+      if (!released) {
+        return action === 'stop'
+          ? `launchd still held ${target} ${LAUNCHD_RELEASE_SECONDS} seconds after it was booted out`
+          : `launchd still held ${target} ${LAUNCHD_RELEASE_SECONDS} seconds after it was booted out, so its definition was not loaded again; load it with: launchctl bootstrap ${launchdDomain()} ${path}`;
+      }
+    }
+    if (action === 'stop') return undefined;
+    const loaded = yield { run: ['launchctl', 'bootstrap', launchdDomain(), path] };
+    return (loaded.status ?? 1) === 0 ? undefined : commandFailureText(loaded);
+  }
+
+  /**
+   * After a `bootout`: whether launchd has let go of the job, looked for with
+   * `print` until it no longer finds it, at most {@link LAUNCHD_RELEASE_SECONDS}.
+   * `bootout` can return while the job is still being torn down.
+   */
+  private *launchdReleaseFlow(target: string): ServiceFlow<boolean | 'unreachable'> {
+    for (let attempt = 0; attempt < LAUNCHD_RELEASE_POLLS; attempt++) {
+      if (attempt > 0) yield { pause: LAUNCHD_RELEASE_POLL_MS };
+      const job = readLaunchdJob(yield { run: ['launchctl', 'print', target] });
+      if (!job.reachable) return 'unreachable';
+      if (!job.loaded) return true;
+    }
+    return false;
   }
 
   /**
@@ -1079,25 +1173,12 @@ export class PlatformServiceManager {
       return { running: result.status === 0 && state === 'active' };
     }
     if (platform === 'launchd') {
-      // launchd: no single-job query is used here, `launchctl list <label>` prints
-      // a plist dump on modern macOS, not a stable parseable field. Instead run the
-      // plain `launchctl list` (same command this module's suggestedCommands()
-      // already tells operators to run: `launchctl list | grep <name>`) and find the
-      // job's own tabular line: `<pid-or-dash>\t<last-exit-status>\t<label>`. No
-      // matching line = not loaded = not running; a `-` PID column = loaded but
-      // stopped; a numeric PID = running.
-      const result = yield { run: ['launchctl', 'list'] };
-      if (result.status === null) {
-        return { running: false, unreachable: 'launchctl could not be reached or did not answer in time' };
-      }
-      const match = (result.stdout ?? '')
-        .split('\n')
-        .map((line) => line.trim().split(/\s+/))
-        .find((fields) => fields[fields.length - 1] === serviceName);
-      if (!match) return { running: false };
-      const pidToken = match[0];
-      const pid = pidToken && /^\d+$/.test(pidToken) ? Number(pidToken) : undefined;
-      return pid !== undefined ? { running: true, pid } : { running: false };
+      // The job in the user's GUI domain, named explicitly: plain `launchctl
+      // list` lists the CALLER's domain, which from an SSH login is not the one
+      // the agent runs in, so a running daemon read as stopped there.
+      const job = readLaunchdJob(yield { run: ['launchctl', 'print', launchdTarget(serviceName)] });
+      if (!job.reachable) return { running: false, unreachable: launchdUnreachable() };
+      return job.running && job.pid !== undefined ? { running: true, pid: job.pid } : { running: false };
     }
     const pidPath = this.pidPath(platform);
     const record = existsSync(pidPath) ? this.readPidRecord(pidPath) : undefined;

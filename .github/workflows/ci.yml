@@ -267,11 +267,37 @@ jobs:
         if: matrix.platform == 'linux'
         run: node products/daemon/scripts/verify-binary.mjs --binary native/goodvibes-daemon-linux-arm64
       # verify-native-execution.mjs reads the record of the payload it runs.
-      - name: Run the daemon (boot and memory round trip)
+      # Then the launchd service: every service command names the gui/<uid>
+      # domain, the one the daemon's own restart, stop and update handover
+      # address. The job install-service starts must be there, service-status
+      # must read the pid launchd reports, a restart must be a new process,
+      # and stop and uninstall must leave nothing in that domain (exit 113).
+      - name: Run the daemon (boot, memory round trip, launchd service)
         if: matrix.platform == 'darwin'
+        env:
+          NATIVE_TARGET: ${{ matrix.target }}
         run: |
           node products/daemon/scripts/native-execution-artifact.mjs record "$GITHUB_SHA" "$GITHUB_SHA"
           node products/daemon/scripts/verify-native-execution.mjs "$GITHUB_SHA" "$GITHUB_SHA"
+          daemon="$PWD/products/daemon/native/goodvibes-daemon-$NATIVE_TARGET"
+          target="gui/$(id -u)/sh.goodvibes.daemon"
+          launchd_pid() { launchctl print "$target" | sed -n 's/^[[:space:]]*pid = \([0-9][0-9]*\)[[:space:]]*$/\1/p' | head -n 1; }
+          # launchd spawns a bootstrapped job at once; allow it 10 seconds to show a pid.
+          wait_pid() { i=0; while [ "$i" -lt 40 ]; do p=$(launchd_pid); if [ -n "$p" ]; then echo "$p"; return 0; fi; sleep 0.25; i=$((i + 1)); done; return 1; }
+          status_pid() { "$daemon" service-status --json | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const d=JSON.parse(s).data;console.log(d.running?d.pid:"stopped")})'; }
+          not_in_domain() { rc=0; launchctl print "$target" >/dev/null 2>&1 || rc=$?; test "$rc" = 113; }
+          "$daemon" config set update.auto false
+          "$daemon" config set update.autoUpdateAtLaunch false
+          "$daemon" install-service
+          first=$(wait_pid); test "$(status_pid)" = "$first"
+          "$daemon" restart-service
+          second=$(wait_pid); test "$second" != "$first"; test "$(status_pid)" = "$second"
+          "$daemon" stop-service
+          not_in_domain; test "$(status_pid)" = stopped
+          "$daemon" start-service
+          wait_pid
+          "$daemon" uninstall-service
+          not_in_domain; test ! -e "$HOME/Library/LaunchAgents/sh.goodvibes.daemon.plist"
       - name: Installer never overwrites a running program in place
         if: matrix.platform == 'darwin'
         run: bun run test:one scripts/installer-open-file-identity.test.ts

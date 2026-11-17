@@ -405,65 +405,27 @@ export function attemptGroupIds(nodes: readonly FleetProcessNode[]): ReadonlySet
   return ids;
 }
 
-// ─── Actions the browser can genuinely back over the wire ─────────────────────
+// ─── Actions the browser can take on a node ───────────────────────────────────
 //
-// fleet.snapshot's per-node `capabilities` (interruptible/killable/pausable/
-// resumable/steerable) describe what the underlying process CAN do, but the platform's own
-// fleet registry (packages/engine/platform/src/platform/runtime/fleet/registry.ts killNode/
-// interrupt/resume) performs those actions with DIRECT, same-process calls into
-// per-kind managers (agentManager.cancel, watcherRegistry.stopWatcher,
-// workflowManager.cancel, triggerManager.remove, automationManager.removeJob, ...),
-// none of that is exposed as an operator wire verb today except two cases:
-//   - steer: sessions.steer, for an 'agent' node with a live sessionRef.sessionId
-//     (verified: adaptAgent sets capabilities.steerable = active && messageBusPresent,
-//     and sessions.steer is a real, existing HTTP route this client already uses from
-//     SessionsView).
-//   - stop: watchers.stop, for a 'watcher' node only, WatcherRecord.id IS the node id
-//     (adaptWatcher: `id: record.id`, no namespacing), so `watchers.stop({ watcherId:
-//     node.id })` genuinely targets the right watcher. No other kind's node id maps to
-//     a verb-addressable entity this confidently (schedule/trigger nodes exist with NO
-//     control verb on the wire at all; wrfc-chain/workflow/background-process kills
-//     cascade over members the wire has no bulk-cancel for).
-// Every other killable/interruptible/pausable/resumable flag is real but UNBACKED,
-// `unbackedCapabilityNote` says so plainly instead of a button that would either
-// no-op or 404.
-export type FleetWireAction = 'steer' | 'detach' | 'stop';
+// fleet.snapshot's per-node `capabilities` are the one source for which controls
+// a client draws: the daemon's fleet.stop / fleet.interrupt / fleet.resume act
+// through the registry's own per-kind control and refuse a node that does not
+// offer the action (FLEET_ACTION_UNAVAILABLE), so the browser never keeps a
+// per-kind table of its own. Steer and detach are session-level: steer needs an
+// agent with a live session (sessions.steer), detach any node with a session.
+// An observed external agent reports every capability false and is steered only
+// over its own channel (fleet.observed.steer), never from here.
+export type FleetWireAction = 'steer' | 'detach' | 'stop' | 'interrupt' | 'resume';
 
 export function wireBackedActions(node: FleetProcessNode): ReadonlySet<FleetWireAction> {
   const actions = new Set<FleetWireAction>();
   const hasSession = Boolean(node.sessionRef?.sessionId);
-  if (node.kind === 'agent' && node.capabilities.steerable && hasSession) {
-    actions.add('steer');
-  }
-  if (hasSession) {
-    // detach is a session-level action (remove this browser's participant entry),
-    // independent of the node's own kind, any node with a live sessionRef qualifies.
-    actions.add('detach');
-  }
-  if (node.kind === 'watcher' && node.capabilities.killable) {
-    actions.add('stop');
-  }
+  if (node.kind === 'agent' && node.capabilities.steerable && hasSession) actions.add('steer');
+  if (hasSession) actions.add('detach');
+  if (node.capabilities.killable) actions.add('stop');
+  if (node.capabilities.interruptible) actions.add('interrupt');
+  if (node.capabilities.resumable) actions.add('resume');
   return actions;
-}
-
-/**
- * An honest note for a capability the daemon reports but the browser cannot act on,
- * null when every true capability flag on this node is already wire-backed (see
- * wireBackedActions above). Never silently drops the gap; never fabricates a button.
- */
-export function unbackedCapabilityNote(node: FleetProcessNode): string | null {
-  const backed = wireBackedActions(node);
-  const hasUnbackedStop = node.capabilities.killable && !(node.kind === 'watcher' && backed.has('stop'));
-  const hasUnbackedInterrupt = node.capabilities.interruptible;
-  const hasUnbackedPauseResume = node.capabilities.pausable || node.capabilities.resumable;
-  if (!hasUnbackedStop && !hasUnbackedInterrupt && !hasUnbackedPauseResume) return null;
-  const verbs = [
-    hasUnbackedStop && 'stop',
-    hasUnbackedInterrupt && 'interrupt',
-    hasUnbackedPauseResume && 'pause/resume',
-  ].filter((v): v is string => Boolean(v));
-  return `The daemon reports this ${kindLabel(node.kind)} process as ${verbs.join('/')}-able, `
-    + `but the browser has no control verb for '${node.kind}' processes yet: use the TUI.`;
 }
 
 /**

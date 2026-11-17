@@ -69,7 +69,7 @@ export const builtinGatewayFleetControlMethodDescriptors: readonly GatewayMethod
   }),
 ];
 
-type FleetControlRegistry = Pick<ProcessRegistry, 'getNode' | 'kill' | 'interrupt' | 'resume'>;
+export type FleetControlRegistry = Pick<ProcessRegistry, 'getNode' | 'kill' | 'interrupt' | 'resume'>;
 
 const CAPABILITY_FOR: Readonly<Record<FleetControlAction, keyof ProcessNode['capabilities']>> = {
   stop: 'killable',

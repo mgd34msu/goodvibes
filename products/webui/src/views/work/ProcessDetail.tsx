@@ -3,12 +3,12 @@
  * workstream (with its task graph), a watcher, a background process, or an
  * observed external agent. Merges the old Fleet and Workstream details.
  *
- * Actions stay wire-backed only (lib/fleet.ts wireBackedActions): steer and
- * detach for a node with a live session, stop for a watcher, archive for a
- * finished subtree, restore from the archive. Every other capability flag
- * gets an honest note instead of a button. An observed external agent is
- * visibility only; it can be steered over a real tmux channel and never
- * stopped from here.
+ * Actions follow the node's own capabilities (lib/fleet.ts wireBackedActions):
+ * stop, interrupt and resume through fleet.stop / fleet.interrupt /
+ * fleet.resume, steer and detach for a node with a live session, archive for a
+ * finished subtree, restore from the archive. A refusal shows the daemon's own
+ * reason. An observed external agent is visibility only; it can be steered
+ * over a real tmux channel and never stopped from here.
  *
  * A pending approval correlated to the node (the same correlation the daemon
  * uses to light up 'awaiting-approval') is shown as a row that opens that
@@ -16,7 +16,7 @@
  */
 import { useMemo, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { Archive, ArchiveRestore, OctagonX, SendHorizontal } from 'lucide-react';
+import { Archive, ArchiveRestore, OctagonX, Pause, Play, SendHorizontal } from 'lucide-react';
 import { client as platformClient } from '../../lib/goodvibes';
 import type { ApprovalRecord, FleetProcessNode } from '../../lib/goodvibes';
 import { queryKeys } from '../../lib/queries';
@@ -25,7 +25,7 @@ import {
   formatDurationMs,
   isObservedKind,
   isTerminalState,
-  unbackedCapabilityNote,
+  kindLabel,
   wireBackedActions,
 } from '../../lib/fleet';
 import { isTerminalApprovalStatus } from '../../lib/approvals';
@@ -123,7 +123,6 @@ export function ProcessDetail({ node, archived, approvals, onOpenItem, onClose, 
   const { toast } = useToast();
   const confirm = useConfirm();
   const backed = useMemo(() => wireBackedActions(node), [node]);
-  const unbackedNote = useMemo(() => unbackedCapabilityNote(node), [node]);
   const pendingApprovals = useMemo(
     () => approvalsForNode(node, approvals).filter((a) => !isTerminalApprovalStatus(a.status)),
     [node, approvals],
@@ -171,26 +170,33 @@ export function ProcessDetail({ node, archived, approvals, onOpenItem, onClose, 
     },
   });
 
-  const stopWatcher = useMutation({
-    mutationFn: (watcherId: string) => platformClient.operator.watchers.stop(watcherId),
-    onSuccess: async () => {
-      toast({ title: 'Stop requested', tone: 'info' });
+  const control = useMutation({
+    mutationFn: (action: 'stop' | 'interrupt' | 'resume') => {
+      const fleet = platformClient.operator.fleet;
+      if (action === 'stop') return fleet.stop(node.id, true);
+      return action === 'interrupt' ? fleet.interrupt(node.id) : fleet.resume(node.id);
+    },
+    onSuccess: async (result) => {
+      const verb = result.action === 'stop' ? 'Stopped' : result.action === 'interrupt' ? 'Interrupted' : 'Resumed';
+      const count = result.affected.length;
+      toast({ title: count > 1 ? `${verb} ${count} processes` : verb, tone: 'info' });
       await queryClient.invalidateQueries({ queryKey: queryKeys.fleet });
     },
-    onError: (error: unknown) => {
-      toast({ title: 'Stop failed', description: formatError(error), tone: 'danger' });
+    onError: (error: unknown, action) => {
+      const what = action === 'stop' ? 'Stop' : action === 'interrupt' ? 'Interrupt' : 'Resume';
+      toast({ title: `${what} refused`, description: formatError(error), tone: 'danger' });
     },
   });
 
   async function handleStop(): Promise<void> {
     const ok = await confirm.ask({
-      title: 'Stop this watcher?',
+      title: `Stop this ${kindLabel(node.kind)}?`,
       target: node.label || node.id,
-      description: 'It stops right away and reports nothing further.',
+      description: 'It and everything it started stop right away and report nothing further.',
       confirmLabel: 'Stop',
       tone: 'danger',
     });
-    if (ok) stopWatcher.mutate(node.id);
+    if (ok) control.mutate('stop');
   }
 
   const statusWord = node.needsAttention
@@ -209,9 +215,19 @@ export function ProcessDetail({ node, archived, approvals, onOpenItem, onClose, 
           {archiveNode.isPending ? 'Archiving…' : 'Archive'}
         </Button>
       )}
+      {backed.has('interrupt') && (
+        <Button size="sm" icon={<Pause aria-hidden="true" />} disabled={control.isPending} onClick={() => control.mutate('interrupt')}>
+          {control.isPending && control.variables === 'interrupt' ? 'Interrupting…' : 'Interrupt'}
+        </Button>
+      )}
+      {backed.has('resume') && (
+        <Button size="sm" icon={<Play aria-hidden="true" />} disabled={control.isPending} onClick={() => control.mutate('resume')}>
+          {control.isPending && control.variables === 'resume' ? 'Resuming…' : 'Resume'}
+        </Button>
+      )}
       {backed.has('stop') && (
-        <Button size="sm" variant="danger" icon={<OctagonX aria-hidden="true" />} disabled={stopWatcher.isPending} onClick={() => void handleStop()}>
-          {stopWatcher.isPending ? 'Stopping…' : 'Stop'}
+        <Button size="sm" variant="danger" icon={<OctagonX aria-hidden="true" />} disabled={control.isPending} onClick={() => void handleStop()}>
+          {control.isPending && control.variables === 'stop' ? 'Stopping…' : 'Stop'}
         </Button>
       )}
     </>
@@ -260,8 +276,6 @@ export function ProcessDetail({ node, archived, approvals, onOpenItem, onClose, 
           <FleetSessionActions sessionId={sessionId} steerable={backed.has('steer')} detachable={backed.has('detach')} />
         </DetailSection>
       )}
-
-      {unbackedNote && <p className="work-prose work-prose--quiet" role="note">{unbackedNote}</p>}
 
       <NodeReviewSummary node={node} />
 

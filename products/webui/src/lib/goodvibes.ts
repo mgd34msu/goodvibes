@@ -1482,6 +1482,11 @@ export const client = {
       unarchive: (id: string) => invokeGatewayMethod<'fleet.unarchive', FleetUnarchiveResult>('fleet.unarchive', { id }),
       archiveFinished: () => invokeGatewayMethod<'fleet.archiveFinished', FleetArchiveFinishedResult>('fleet.archiveFinished', {}),
       archivedList: () => invokeGatewayMethod<'fleet.archived.list', FleetArchivedListResult>('fleet.archived.list', {}),
+      // Act on what the node's capabilities offer; a node that does not offer the
+      // action is refused FLEET_ACTION_UNAVAILABLE, an unknown id FLEET_NODE_NOT_FOUND.
+      stop: (id: string, cascade = false) => invokeGatewayMethod('fleet.stop', cascade ? { id, cascade } : { id }),
+      interrupt: (id: string) => invokeGatewayMethod('fleet.interrupt', { id }),
+      resume: (id: string) => invokeGatewayMethod('fleet.resume', { id }),
       // Best-of-N attempt resolution. list is
       // read-only (held-merge candidate groups with per-candidate diffs + any prior judge
       // proposal); judge PROPOSES a winner with reasons, explicitly model judgment

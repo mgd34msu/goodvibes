@@ -15,6 +15,7 @@
  */
 import type { GatewayMethodCatalog } from '../method-catalog.js';
 import { registerFleetGatewayMethods, type FleetQueryOnlyRegistry, type FleetSteerApprovals, type FleetSteerCapableRegistry, type FleetAttemptsController } from './fleet.js';
+import { registerFleetControlGatewayMethods, type FleetControlRegistry } from './fleet-control.js';
 import { registerCheckpointGatewayMethods, type CheckpointsGatewayManager, type CheckpointsEventSink } from './checkpoints.js';
 import { registerSessionSearchGatewayMethod, type SessionSearchBroker } from './session-search.js';
 import { createEventEnvelope } from '../../runtime/events/index.js';
@@ -24,7 +25,7 @@ import type { ContractOperatorService } from '../../contract/operator-service.js
 import { registerContractGatewayMethods } from './contracts.js';
 
 export interface FleetCheckpointsSearchGatewayDeps {
-  readonly processRegistry: FleetQueryOnlyRegistry & FleetSteerCapableRegistry;
+  readonly processRegistry: FleetQueryOnlyRegistry & FleetSteerCapableRegistry & FleetControlRegistry;
   readonly workspaceCheckpointManager: CheckpointsGatewayManager;
   readonly sessionBroker: SessionSearchBroker;
   /**
@@ -55,6 +56,7 @@ export interface FleetCheckpointsSearchGatewayDeps {
 
 export function registerFleetCheckpointsSearchGatewayMethods(catalog: GatewayMethodCatalog, deps: FleetCheckpointsSearchGatewayDeps): void {
   registerFleetGatewayMethods(catalog, deps.processRegistry, deps.attemptsController, deps.approvalRaise);
+  registerFleetControlGatewayMethods(catalog, deps.processRegistry);
   if (deps.contractOperator) registerContractGatewayMethods(catalog, deps.contractOperator);
   const bus = deps.runtimeBus;
   const checkpointsEmit: CheckpointsEventSink | undefined = bus

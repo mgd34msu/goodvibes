@@ -1,5 +1,6 @@
 import { MODAL_TONES } from './modal-theme.ts';
 import { runModalCommand } from './modal-surface-helpers.ts';
+import { buildPermissionRuleSuggestions } from '@/runtime/index.ts';
 import type {
   DivergenceDashboardSnapshot,
   DivergenceStats,
@@ -167,6 +168,15 @@ class PolicyModalSurface implements ConfigModalSurface {
         const outcome = entry.approved === undefined ? 'pending' : entry.approved ? 'approved' : 'denied';
         push(`${entry.tool}  ${entry.riskLevel.toUpperCase()}  ${outcome}`, entry.approved === undefined ? WARN : entry.approved ? undefined : BAD);
         push(`  ${entry.summary}`, DIM);
+      }
+      // Two or more denials of the same tool and target point at a rule worth storing or reviewing.
+      const suggestions = buildPermissionRuleSuggestions(snapshot.recentPermissionAudit);
+      if (suggestions.length > 0) {
+        push('Suggested Rules');
+        for (const suggestion of suggestions.slice(0, MAX_ROWS)) {
+          push(suggestion.summary, WARN);
+          push(`  ${suggestion.reason} (${suggestion.command})`, DIM);
+        }
       }
     }
     if (snapshot.lintFindings.length > 0) {

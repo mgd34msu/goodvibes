@@ -408,10 +408,15 @@ export function createDaemonIntegrationRouteHandlers(
       if (body instanceof Response) return body;
       const input = integrationBodySchemas.panelOpen.parse(body);
       if (input instanceof Response) return input;
-      const ok = context.integrationHelpers?.openPanel(input.panelId, input.pane) ?? false;
-      return ok
+      const helpers = context.integrationHelpers;
+      const listed = helpers?.listPanels().some((panel) => (panel as { id?: unknown }).id === input.panelId) ?? false;
+      if (!listed) return jsonErrorResponse({ error: `Unknown panel: ${input.panelId}` }, { status: 404 });
+      // A listed view the terminal did not show is not reported as opened.
+      return helpers?.openPanel(input.panelId, input.pane)
         ? Response.json({ opened: true, id: input.panelId, pane: input.pane })
-        : jsonErrorResponse({ error: `Unknown panel: ${input.panelId}` }, { status: 404 });
+        : jsonErrorResponse({
+          error: `Panel '${input.panelId}' is listed but did not open: this process has no terminal screen showing views. Open it from a running terminal session, then check GET /api/panels.`,
+        }, { status: 409 });
     },
   };
 }

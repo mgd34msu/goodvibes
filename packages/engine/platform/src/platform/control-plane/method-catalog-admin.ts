@@ -133,7 +133,7 @@ export const builtinGatewayAdminMethodDescriptors: readonly GatewayMethodDescrip
   methodDescriptor({
     id: 'panels.open',
     title: 'Open Panel',
-    description: 'Request that a panel be opened in the current TUI session.',
+    description: 'Open a listed panel in the terminal session this process runs. Answers opened: true only when the view appeared; an id GET /api/panels does not list is refused with 404, and a listed panel this process has no terminal screen to show is refused with 409.',
     category: 'panels',
     access: 'admin',
     scopes: ['write:panels'],

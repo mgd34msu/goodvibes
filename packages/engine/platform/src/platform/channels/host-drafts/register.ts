@@ -22,7 +22,6 @@
  * to save are REJECTED, the agent must redact ('[redacted]') or pass a
  * goodvibes://secrets/ reference before transmission.
  */
-import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import type { DraftHostContext as HandlerContext } from './types.js';
 import { createAtRestCipher } from '../../config/daemon-credential-store.js';
 import { HandlerError } from '../../control-plane/host-handlers.js';
@@ -365,7 +364,7 @@ export function registerDraftMethods(
     // reads this value, so none has to check that the request is still the same.
     const parsed = parseSaveInput(body);
     const publicId = parsed.id;
-    const id = publicId === undefined ? (autonomous ? opaqueUuid() : undefined) : selectStoredId(publicId);
+    const id = publicId === undefined ? (autonomous ? crypto.randomUUID() : undefined) : selectStoredId(publicId);
     const input: DraftSaveInput = Object.freeze({ ...parsed, ...(id !== undefined ? { id } : {}), ...(parsed.tags ? { tags: Object.freeze([...parsed.tags]) as string[] } : {}) });
     // The row this save read. An autonomous write applies only to it.
     const selected = autonomous && id !== undefined ? store.selectRow(id) : undefined;

@@ -29,7 +29,6 @@
  * Persistence: JSON file at {agentRoot}/channels/drafts.json via ShellPathService.
  */
 
-import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import { channelDraftWireReference, createChannelDraftWireReference, historicalChannelDraftWireReference, isNativeDraftWireReference, matchesHistoricalDraftWireReference } from '@goodvibes-jev/engine/platform/platform/channels';
 import type { ShellPathService } from '@/runtime/index.ts';
 import {
@@ -337,7 +336,7 @@ function writeDrafts(from: ChannelDraftSnapshot, drafts: readonly ChannelDraft[]
 }
 
 function generateDraftId(): string {
-  return `draft-${opaqueUuid()}`;
+  return `draft-${crypto.randomUUID()}`;
 }
 
 // ---------------------------------------------------------------------------

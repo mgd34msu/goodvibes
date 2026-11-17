@@ -1,4 +1,4 @@
-import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
+import { randomUUID } from 'node:crypto';
 import { logger } from '../../utils/logger.js';
 import type { AtRestCipher } from '../../config/daemon-credential-store.js';
 import { HandlerSqliteStore } from '../../state/daemon-handler-sqlite-store.js';
@@ -117,7 +117,7 @@ export interface DraftSyncStoreOptions {
   cipher: AtRestCipher;
   /** Override the sqlite filename (tests). Defaults to 'drafts.sqlite'. */
   fileName?: string;
-  /** UUID generator injection point (tests). Defaults to opaqueUuid. */
+  /** UUID generator injection point (tests). Defaults to a plain UUID. */
   generateId?: () => string;
   /** Clock injection point (tests). Defaults to () => new Date().toISOString(). */
   now?: () => string;
@@ -215,7 +215,7 @@ export class DraftSyncStore {
       schema: SCHEMA,
     });
     this.cipher = options.cipher;
-    this.generateId = options.generateId ?? (() => opaqueUuid());
+    this.generateId = options.generateId ?? (() => randomUUID());
     this.now = options.now ?? (() => new Date().toISOString());
   }
 

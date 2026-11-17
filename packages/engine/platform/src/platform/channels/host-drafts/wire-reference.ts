@@ -1,17 +1,15 @@
 import { createHash } from 'node:crypto';
-import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import { JudgmentInputError, snapshotJudgmentInput } from '../../gate/judgment-input.js';
 
 const historicalReference = /^draft-reference-[a-p]{32}$/;
+/** Saved by earlier builds; still resolved, no longer minted. */
 const storedReference = /^draft-reference-v2-[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}$/;
 
-/** Allocate once, beside the native row. A reference grants no authority. */
+/** Allocate once, beside the native row. A reference grants no authority.
+ * A draft id is its own reference; only a caller-chosen id the screen reads as
+ * card material is shown under the deterministic `draft-reference-` digest. */
 export function createChannelDraftWireReference(id: string): string {
-  try { snapshotJudgmentInput({ draftId: id }); return id; }
-  catch (error) {
-    if (!(error instanceof JudgmentInputError) || error.problem !== 'card-material') throw error;
-    return `draft-reference-v2-${opaqueUuid()}`;
-  }
+  return historicalChannelDraftWireReference(id);
 }
 
 /** Read an actual stored reference; ordinary lookups never derive a private-ID digest. */

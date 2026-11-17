@@ -291,6 +291,7 @@ export function formatApplyResult(input: {
   readonly receipt?: SavedComparisonArtifact | null;
   readonly receiptError?: string | null;
   readonly usageError?: string | null;
+  readonly winnerUnchecked?: boolean;
 }): string {
   const lines = [
     `Applied blind model comparison winner ${input.judgment.judgmentId}`,
@@ -299,6 +300,7 @@ export function formatApplyResult(input: {
     `selected model ${input.result.selectedModel}`,
   ];
   if (input.result.previousModel) lines.push(`previous model ${input.result.previousModel}`);
+  if (input.winnerUnchecked) lines.push(`winner model taken from the judgment: comparison ${input.judgment.comparisonId} is not available, so it was not checked against the comparison`);
   if (input.receipt) lines.push(`route decision receipt ${input.receipt.artifactId}${input.receipt.filename ? ` ${input.receipt.filename}` : ''}`);
   if (input.receiptError) lines.push(`route decision receipt unavailable: ${input.receiptError}`);
   if (input.usageError) lines.push(`route applied; model usage was not recorded: ${input.usageError}`);

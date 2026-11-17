@@ -24,24 +24,24 @@ export type { AgentModelCompareCatalogModel, AgentModelCompareModelCatalog, Agen
  * The judgment with its winner model read from the comparison it names. The
  * comparison artifact holds every candidate's model, so a blind judgment is
  * enough to apply: nobody has to judge twice. The judgment file is plain data,
- * so a winner model it states itself must match the comparison.
+ * so a winner model it states itself must match the comparison. When the
+ * comparison was not saved, a revealed judgment still carries its own winner
+ * model; `checked` is false so the result says it was not checked.
  */
 async function resolveJudgmentWinner(
   judgment: LoadedComparisonJudgment,
   artifactStore: AgentModelCompareToolDeps['artifactStore'],
   comparisons: Map<string, StoredComparison>,
-): Promise<LoadedComparisonJudgment | string> {
+): Promise<{ readonly judgment: LoadedComparisonJudgment; readonly checked: boolean } | string> {
   const source = await resolveComparisonForRead({ artifactStore, comparisons, comparisonId: judgment.comparisonId, artifactId: judgment.sourceArtifactId ?? '' });
-  if (!source) {
-    return `The comparison ${judgment.comparisonId} this judgment names is not available (it was not saved, or it expired), so its winner model cannot be read and nothing was changed. Run the comparison again with saveArtifact:true, judge it, then use that judgment.`;
-  }
+  if (!source) return { judgment, checked: false };
   const winner = findCandidate(source, judgment.winnerBlindId);
-  if (!winner) return `The judgment names Candidate ${judgment.winnerBlindId}, which comparison ${judgment.comparisonId} does not have. Nothing was changed.`;
+  if (!winner) return `Nothing was changed: the judgment names Candidate ${judgment.winnerBlindId}, which comparison ${judgment.comparisonId} does not have. Judge that comparison again and use the new judgment.`;
   if (judgment.winnerModel?.registryKey && judgment.winnerModel.registryKey !== winner.model.registryKey) {
-    return 'The judgment names a winner model that does not match its comparison. Nothing was changed.';
+    return `Nothing was changed: the judgment names winner model ${judgment.winnerModel.registryKey}, but Candidate ${judgment.winnerBlindId} of comparison ${judgment.comparisonId} is ${winner.model.registryKey}. Judge that comparison again and use the new judgment.`;
   }
   const { registryKey, providerId, modelId, displayName } = winner.model;
-  return { ...judgment, winnerModel: { registryKey, providerId, modelId, displayName } };
+  return { judgment: { ...judgment, winnerModel: { registryKey, providerId, modelId, displayName } }, checked: true };
 }
 
 export function createAgentModelCompareTool(sourceDeps: AgentModelCompareToolDeps): Tool {
@@ -87,7 +87,7 @@ export function createAgentModelCompareTool(sourceDeps: AgentModelCompareToolDep
           },
           reveal: {
             type: 'boolean',
-            description: 'For run, review and side-by-side: include model identities with the outputs. For judge: also write the winner model into the judgment. apply and routeDecision read the winner model from the judged comparison either way, so a blind judgment can be applied.',
+            description: 'For run, review and side-by-side: include model identities with the outputs. For judge: also write the winner model into the judgment. apply and routeDecision read the winner model from the judged comparison either way, so a blind judgment can be applied; a judgment of a comparison that was not saved needs reveal:true to be applied.',
           },
           saveArtifact: {
             type: 'boolean',
@@ -363,8 +363,10 @@ export function createAgentModelCompareTool(sourceDeps: AgentModelCompareToolDep
           if (!loaded) return failure('Unknown judgment artifact. Pass a saved model comparison judgment artifactId.');
           const resolved = await resolveJudgmentWinner(loaded, deps.artifactStore, comparisons);
           if (typeof resolved === 'string') return failure(resolved);
-          const judgment = resolved;
-          if (!judgment.winnerModel) return failure('The judgment has no winner model. Nothing was changed.');
+          const { judgment, checked } = resolved;
+          if (!judgment.winnerModel) {
+            return failure(`Nothing was changed: comparison ${judgment.comparisonId} is not available (it was not saved, or it expired) and this blind judgment does not name its winner model. Run the comparison again with saveArtifact:true, judge it, then apply that judgment.`);
+          }
           if (!assertCurrentToolEffect(rawArgs, options, 'write')) {
             return failure([
               formatApplyPreview(judgment),
@@ -391,7 +393,7 @@ export function createAgentModelCompareTool(sourceDeps: AgentModelCompareToolDep
           } catch (error) {
             receiptError = error instanceof Error ? error.message : String(error);
           }
-          return output(`${formatApplyResult({ judgment, result, receipt, receiptError, usageError })}`);
+          return output(formatApplyResult({ judgment, result, receipt, receiptError, usageError, winnerUnchecked: !checked }));
         }
 
         if (mode === MODE_ROUTE_DECISION) {
@@ -409,7 +411,7 @@ export function createAgentModelCompareTool(sourceDeps: AgentModelCompareToolDep
           if (!loaded) return failure('Unknown judgment artifact. Pass a saved model comparison judgment artifactId.');
           const resolved = await resolveJudgmentWinner(loaded, deps.artifactStore, comparisons);
           if (typeof resolved === 'string') return failure(resolved);
-          const judgment = resolved;
+          const { judgment } = resolved;
           const currentModel = (await resolveCurrentModel(deps.modelCatalog))?.registryKey ?? null;
           if (!assertCurrentToolEffect(rawArgs, options, 'write')) {
             return failure([

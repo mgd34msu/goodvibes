@@ -14,9 +14,9 @@ import type {
 
 /**
  * The sandbox session lifecycle, from the moves this registry makes: a start
- * probe leaves a session running or failed; a command exit moves running <-> failed;
- * stop ends it from anywhere. `stopped` is final, so a stopped session refuses
- * commands and a late exit cannot revive or fail it. `planned` is declared in the
+ * leaves a session running; a command exit moves running <-> failed; stop ends
+ * it from anywhere. `stopped` is final, so a stopped session refuses commands
+ * and a late exit cannot revive or fail it. `planned` is declared in the
  * session type but never assigned by this registry.
  */
 export const sandboxSessionLifecycle = defineLifecycle<SandboxSessionState>('sandbox session', {
@@ -42,8 +42,6 @@ export class SandboxSessionRegistry {
   private readonly sessions = new Map<string, SandboxSession>();
   /** How many starters hold each shared session; it stops only when the last one lets go. */
   private readonly sharedHolders = new Map<string, number>();
-  /** Shared starts still probing their backend; a second starter joins this one instead of creating a duplicate. */
-  private readonly sharedStarting = new Map<SandboxProfile['id'], Promise<SandboxSession>>();
   private readonly workspaceRoot: string;
 
   constructor(workspaceRoot: string) {
@@ -74,48 +72,29 @@ export class SandboxSessionRegistry {
     }
     if (inferShared(profile)) {
       // A shared session whose last command exited non-zero is still the shared
-      // session (its backend verified at start); only a failed startup probe or
-      // a stop makes it unusable. Without this, one failing command would make
-      // the next start create a duplicate. A session whose startup probe failed
-      // is never handed out, whatever its state became after a later command.
+      // session; only a stop ends it. Without this, one failing command would
+      // make the next start create a duplicate.
       const existing = [...this.sessions.values()].find((session) => session.profileId === profileId
-        && session.startupStatus === 'verified'
         && (session.state === 'running' || session.state === 'failed'));
       if (existing) {
         this.sharedHolders.set(existing.id, (this.sharedHolders.get(existing.id) ?? 1) + 1);
         return existing;
       }
-      const starting = this.sharedStarting.get(profileId);
-      if (starting) {
-        const joined = await starting;
-        this.sharedHolders.set(joined.id, (this.sharedHolders.get(joined.id) ?? 1) + 1);
-        return joined;
-      }
-      const pending = this.startNew(profile, label, configManager);
-      this.sharedStarting.set(profileId, pending);
-      try {
-        return await pending;
-      } finally {
-        this.sharedStarting.delete(profileId);
-      }
     }
     return this.startNew(profile, label, configManager);
   }
 
-  private async startNew(profile: SandboxProfile, label: string | undefined, configManager: ConfigManagerLike): Promise<SandboxSession> {
+  /**
+   * Records the session and its launch plan; nothing is spawned here. The only
+   * backend runs commands on the host, so there is no boundary to verify at
+   * start and the session reports `planned`. Whether a process actually starts
+   * is reported by whoever spawns it (an MCP connect, or `execute`). A backend
+   * that isolates must throw from here when it cannot start, so no caller
+   * continues with a session it must not use.
+   */
+  private startNew(profile: SandboxProfile, label: string | undefined, configManager: ConfigManagerLike): SandboxSession {
     const config = getSandboxConfigSnapshot(configManager);
     const launchPlan = buildSandboxLaunchPlan(profile, label?.trim() || profile.label, this.workspaceRoot);
-    let state: SandboxSession['state'] = 'running';
-    let startupStatus: SandboxSession['startupStatus'] = 'verified';
-    let startupDetail = launchPlan.summary;
-    const startupProbe = await executeSandboxCommand(launchPlan, 'bash', ['-lc', 'printf sandbox-ready'], {
-      timeoutMs: 2000,
-    });
-    if (startupProbe.status !== 0 || !startupProbe.stdout.includes('sandbox-ready')) {
-      state = 'failed';
-      startupStatus = 'failed';
-      startupDetail = (startupProbe.stderr || startupProbe.stdout || 'Sandbox backend startup probe failed.').trim();
-    }
     const session: SandboxSession = Object.freeze({
       id: createSandboxSessionId(),
       profileId: profile.id,
@@ -123,12 +102,12 @@ export class SandboxSessionRegistry {
       label: label?.trim() || profile.label,
       shared: inferShared(profile),
       startedAt: Date.now(),
-      state,
+      state: 'running',
       backend: config.vmBackend,
       resolvedBackend: launchPlan.backend,
       launchPlan,
-      startupStatus,
-      startupDetail,
+      startupStatus: 'planned',
+      startupDetail: launchPlan.summary,
       notes: profile.notes,
     });
     this.sessions.set(session.id, session);
@@ -190,9 +169,7 @@ export class SandboxSessionRegistry {
     const result = await executeSandboxCommand(session.launchPlan, command, args, options);
     const stdoutPreview = (result.stdout || '').trim().slice(0, 200);
     const stderrPreview = (result.stderr || '').trim().slice(0, 200);
-    // A backend that never passed its startup probe stays failed: one command that
-    // happens to exit 0 does not verify it, and its startupDetail still explains why.
-    const exitState: SandboxSession['state'] = result.status === 0 && session.startupStatus !== 'failed' ? 'running' : 'failed';
+    const exitState: SandboxSession['state'] = result.status === 0 ? 'running' : 'failed';
 
     // A session stopped while the command ran is gone from the registry; its result is still returned.
     if (this.sessions.has(sessionId)) this.updateSession(sessionId, (current) => ({

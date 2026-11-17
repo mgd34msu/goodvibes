@@ -49,6 +49,7 @@ export function createAgentModelCompareTool(sourceDeps: AgentModelCompareToolDep
   return {
     definition: {
       name: 'agent_model_compare',
+      activity: { doing: 'Comparing', did: 'compared', object: 'models' },
       description: 'Blind-compare models on a prompt or artifact (run, reveal, review, sideBySide), save a judgment (judge), then apply the winner route or record a route decision (apply, routeDecision), and export, hand off, archive or diff reviews (export, handoff, handoffArchive, handoffDiff) or summarize saved judgments (analytics, synthesis).',
       parameters: {
         type: 'object',

@@ -88,6 +88,7 @@ export function createAgentAutonomyTool(deps: AgentAutonomyToolDeps): Tool {
   return createHarnessFacade<AgentAutonomyToolArgs>(deps, {
     definition: {
       name: 'autonomy',
+      activity: { doing: 'Checking', did: 'checked', object: 'background work' },
       description: 'Route ongoing work and inspect visible autonomy.',
       parameters: {
         type: 'object',

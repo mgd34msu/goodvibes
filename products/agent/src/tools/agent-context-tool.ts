@@ -65,6 +65,7 @@ export function createAgentContextTool(deps: AgentContextToolDeps): Tool {
   return createHarnessFacade<AgentContextToolArgs>(deps, {
     definition: {
       name: 'context',
+      activity: { doing: 'Reading', did: 'read', object: 'project context' },
       description: 'Inspect project instructions and prompt context.',
       parameters: {
         type: 'object',

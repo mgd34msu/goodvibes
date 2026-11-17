@@ -78,6 +78,7 @@ export function createAgentScheduleEditTool(
   return {
     definition: {
       name: 'agent_schedule_edit',
+      activity: { doing: 'Updating', did: 'updated', object: 'a schedule', objects: 'schedules' },
       description: 'Edit one connected GoodVibes schedule under recorded effect admission.',
       parameters: {
         type: 'object',

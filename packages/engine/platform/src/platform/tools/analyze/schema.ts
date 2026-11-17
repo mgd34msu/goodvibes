@@ -7,6 +7,7 @@ import type { ToolDefinition } from '../../types/tools.js';
  */
 export const analyzeSchema: ToolDefinition = {
   name: 'analyze',
+  activity: { doing: 'Analyzing', did: 'analyzed', object: 'the code' },
   description:
     'Multi-mode code analysis tool. Modes: impact (change blast radius), ' +
     'dependencies (import graph / circular detection), dead_code (unreferenced exports), ' +

@@ -67,6 +67,7 @@ export function createAgentHostTool(deps: AgentHostToolDeps): Tool {
   return createHarnessFacade<AgentHostToolArgs>(deps, {
     definition: {
       name: 'host',
+      activity: { doing: 'Checking', did: 'checked', object: 'the assistant service' },
       description: 'Inspect GoodVibes host status, services, and methods.',
       parameters: {
         type: 'object',

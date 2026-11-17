@@ -29,6 +29,7 @@ export function createAgentSettingsImportTool(commandContext: CommandContext): T
   return {
     definition: {
       name: 'import_goodvibes_settings',
+      activity: { doing: 'Importing', did: 'imported', object: 'settings' },
       description: 'Preview or apply shared GoodVibes settings import.',
       parameters: {
         type: 'object',

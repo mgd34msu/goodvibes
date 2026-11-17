@@ -257,6 +257,7 @@ export function createAgentOperatorBriefingTool(
   return {
     definition: {
       name: 'agent_operator_briefing',
+      activity: { doing: 'Preparing', did: 'prepared', object: 'a briefing', objects: 'briefings' },
       description: 'Read native work reported state and verification counts, historical legacy planning, approvals, automation, schedules, and capacity.',
       parameters: {
         type: 'object',

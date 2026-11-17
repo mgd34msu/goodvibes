@@ -79,6 +79,10 @@ export function createTaskTool(registry: CrossSessionTaskRegistry, options: Task
   return {
     definition: {
       name: 'task',
+      activity: {
+        doing: 'Updating', did: 'updated', object: 'the task list',
+        byAction: { read: { doing: 'Checking', did: 'checked', object: 'the task list' } },
+      },
       // Sent in full on every model request (see ToolDefinition.core).
       core: true,
       description: 'Manage durable cross-session task refs, dependencies, cancellations, and handoffs shared by every session of this project.'

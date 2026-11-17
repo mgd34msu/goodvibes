@@ -1220,6 +1220,7 @@ export function createExecTool(
   const tool: Tool = {
     definition: {
       name: 'exec',
+      activity: { doing: 'Running', did: 'ran', object: 'a command', objects: 'commands' },
       // Sent in full on every model request (see ToolDefinition.core).
       core: true,
       description:

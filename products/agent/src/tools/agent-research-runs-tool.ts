@@ -311,6 +311,7 @@ function createAgentResearchRunsTool(shellPaths?: Pick<ShellPathService, 'resolv
   return {
     definition: {
       name: 'agent_research_runs',
+      activity: { doing: 'Researching', did: 'researched' },
       description: 'Track visible local deep-research run state and checkpoints.',
       parameters: {
         type: 'object',

@@ -202,6 +202,7 @@ export function createAgentWorkPlanTool(store: WorkPlanStore): Tool {
   return {
     definition: {
       name: 'agent_work_plan',
+      activity: { doing: 'Organizing', did: 'organized', object: 'work' },
       description: 'The Agent\'s todo list for this project: track items and their status. It records work; it does not run it (the owner starts work with /work). clear_completed removes done and cancelled items; failed items stay.',
       parameters: {
         type: 'object',

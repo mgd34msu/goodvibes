@@ -220,6 +220,7 @@ export function createAgentBrowserTool(options: AgentBrowserToolOptions = {}): T
   return {
     definition: {
       name: 'browser',
+      activity: { doing: 'Using', did: 'used', object: 'the browser' },
       description: 'Drive a real browser: open, read, click, type, and sign in.',
       parameters: {
         type: 'object',

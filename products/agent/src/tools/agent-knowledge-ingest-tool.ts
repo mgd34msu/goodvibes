@@ -414,6 +414,7 @@ export function createAgentKnowledgeIngestTool(
   return {
     definition: {
       name: 'agent_knowledge_ingest',
+      activity: { doing: 'Saving to', did: 'saved to', object: 'knowledge' },
       description: 'Ingest one source into isolated Agent Knowledge after recorded effect admission. sourceKind defaults to url, which needs url; file, urls_file and bookmarks_file need a path inside the workspace; artifact needs artifactId; connector needs connectorId plus input, path or content.',
       parameters: {
         type: 'object',

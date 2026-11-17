@@ -175,6 +175,7 @@ export function createAgentExecutionTool(deps: AgentExecutionToolDeps): Tool {
   const tool: Tool = {
     definition: {
       name: 'execution',
+      activity: { doing: 'Managing', did: 'managed', object: 'background work' },
       description: 'Inspect local work routes, history, and recovery.',
       parameters: {
         type: 'object',

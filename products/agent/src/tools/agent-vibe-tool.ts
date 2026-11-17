@@ -129,6 +129,7 @@ export function createAgentVibeTool(commandContext: CommandContext): Tool {
   return {
     definition: {
       name: 'vibe',
+      activity: { doing: 'Reading', did: 'read', object: 'your VIBE profile' },
       description: 'Inspect and manage VIBE.md personality files.',
       parameters: {
         type: 'object',

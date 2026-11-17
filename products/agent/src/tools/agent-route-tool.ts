@@ -74,6 +74,7 @@ export function createAgentRouteTool(commandContext: CommandContext, sources: Ag
   const tool: Tool = {
     definition: {
       name: 'route',
+      activity: { doing: 'Choosing', did: 'chose', object: 'the best route' },
       description: 'Choose the best visible route for a user task.',
       parameters: {
         type: 'object',

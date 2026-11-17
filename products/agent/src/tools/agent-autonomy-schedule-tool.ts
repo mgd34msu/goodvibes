@@ -95,6 +95,7 @@ export function createAgentAutonomyScheduleTool(
   return {
     definition: {
       name: 'agent_autonomy_schedule',
+      activity: { doing: 'Scheduling', did: 'scheduled', object: 'background work' },
       description: 'Schedule one visible autonomous Agent task under recorded effect admission.',
       parameters: {
         type: 'object',

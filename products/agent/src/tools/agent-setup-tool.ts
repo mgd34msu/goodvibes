@@ -117,6 +117,7 @@ export function createAgentSetupTool(deps: AgentSetupToolDeps): Tool {
   return {
     definition: {
       name: 'setup',
+      activity: { doing: 'Checking', did: 'checked', object: 'setup' },
       description: 'Inspect and complete first-run Agent setup.',
       parameters: {
         type: 'object',

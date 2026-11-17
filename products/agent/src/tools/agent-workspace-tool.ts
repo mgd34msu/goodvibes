@@ -223,6 +223,7 @@ export function createAgentWorkspaceTool(deps: AgentWorkspaceToolDeps): Tool {
   const tool: Tool = {
     definition: {
       name: 'workspace',
+      activity: { doing: 'Driving', did: 'drove', object: 'the workspace' },
       description: 'Inspect/open workspace actions, UI, commands, and keys.',
       parameters: {
         type: 'object',

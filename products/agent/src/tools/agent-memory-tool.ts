@@ -148,6 +148,14 @@ export function createAgentMemoryTool(deps: AgentMemoryToolDeps): Tool {
   const tool: Tool = {
     definition: {
       name: 'memory',
+      activity: {
+        doing: 'Recalling', did: 'recalled', object: 'memory',
+        byAction: {
+          change: { doing: 'Saving to', did: 'saved to', object: 'memory' },
+          run: { doing: 'Refining', did: 'refined', object: 'memory' },
+          delete: { doing: 'Forgetting', did: 'forgot', object: 'a memory', objects: 'memories' },
+        },
+      },
       description: 'Inspect memory posture, providers, curator, and records.',
       parameters: {
         type: 'object',

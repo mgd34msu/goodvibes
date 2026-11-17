@@ -185,4 +185,7 @@ export * from './zod-schemas/index.js';
 
 export { WEBUI_CODE_LANGUAGES, type WebuiCodeLanguage } from './browser-code-languages.js';
 
+export { toolActionClass, toolActivityFallback, toolActivityPhrase, toolCallActivity } from './tool-activity.js';
+export type { ToolActionClass, ToolActivity, ToolActivityWords } from './tool-activity.js';
+
 export { CATALOG_PROVIDER_NAME_ALIASES, declaredProviderCatalogId } from './provider-catalog.js';

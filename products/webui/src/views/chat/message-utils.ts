@@ -1,3 +1,4 @@
+import { toolActivityFallback, toolActivityPhrase, type ToolActivityWords } from '@goodvibes-jev/engine/contracts';
 import { asRecord, bestId, compactJson, firstArray, firstString } from '../../lib/object';
 
 export function messageText(message: unknown): string {
@@ -322,6 +323,8 @@ export { bestId };
 export interface CompletedToolCall {
   readonly toolCallId: string;
   readonly toolName: string;
+  /** The words the tool's definition gives this call, as `turn.tool_call` carried them. */
+  readonly activity?: ToolActivityWords;
   readonly toolInput?: unknown;
   readonly result?: unknown;
   readonly isError: boolean;
@@ -331,27 +334,50 @@ export interface CompletedToolCall {
   readonly finishedAt?: number;
 }
 
-/**
- * The engine's tool names mapped to the short label the folded summary and the
- * working line use. Keyed on the names the tool registry registers; any other
- * tool (MCP servers, plugins) falls back to its own name.
- */
-const TOOL_FRIENDLY_LABELS: Readonly<Record<string, string>> = {
-  read: 'read',
-  write: 'write',
-  edit: 'edit',
-  exec: 'exec',
-  find: 'search',
-  web_search: 'web search',
-  fetch: 'web fetch',
-  agent: 'agent',
-  task: 'tasks',
-};
+/** A tool call as the working line and the fold name it: its tool, and the words `turn.tool_call` carried. */
+export interface ToolActivitySource {
+  readonly toolName: string;
+  readonly activity?: ToolActivityWords;
+}
 
-/** A short, human label for a tool name, falls back to the raw name when unrecognized. */
-export function toolFriendlyLabel(toolName: string): string {
-  const normalized = toolName.trim().toLowerCase();
-  return TOOL_FRIENDLY_LABELS[normalized] ?? (toolName.trim() || 'tool');
+/** The display words on a `turn.tool_call` payload, when it carries a well-formed set. */
+export function readToolActivityWords(value: unknown): ToolActivityWords | undefined {
+  const record = asRecord(value);
+  const { doing, did, object, objects } = record;
+  if (typeof doing !== 'string' || !doing || typeof did !== 'string' || !did) return undefined;
+  return {
+    doing,
+    did,
+    ...(typeof object === 'string' && object ? { object } : {}),
+    ...(typeof objects === 'string' && objects ? { objects } : {}),
+  };
+}
+
+/** The words a call is shown by: its tool's own, or "Using <name>" for a tool that declares none. */
+function toolWords(call: ToolActivitySource): ToolActivityWords {
+  return call.activity ?? toolActivityFallback(call.toolName.trim() || 'tool');
+}
+
+/** One finished call in words, capitalized: "Read files", "Fetched a web page". */
+export function toolCallLabel(call: ToolActivitySource): string {
+  return capitalize(toolActivityPhrase(toolWords(call), 1, 'done'));
+}
+
+function capitalize(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+/** Calls grouped by the words they are shown by, in first-seen order, with their counts. */
+function countByWords(calls: readonly ToolActivitySource[]): Array<[ToolActivityWords, number]> {
+  const groups = new Map<string, [ToolActivityWords, number]>();
+  for (const call of calls) {
+    const words = toolWords(call);
+    const key = [words.doing, words.did, words.object ?? '', words.objects ?? ''].join('\u0000');
+    const group = groups.get(key);
+    if (group) group[1] += 1;
+    else groups.set(key, [words, 1]);
+  }
+  return [...groups.values()];
 }
 
 /** Common argument keys, checked in order, used to surface a tool call's one key argument. */
@@ -374,23 +400,6 @@ export function toolResultText(result: unknown): string {
   return compactJson(result);
 }
 
-/**
- * Verb phrases for the one-line tool summary ("Read 2 files, searched the web").
- * Each entry turns a count into a phrase; tools not listed fall back to
- * "used <name>" with a count.
- */
-const TOOL_PHRASES: Readonly<Record<string, (count: number) => string>> = {
-  read: (n) => `read ${n} file${n === 1 ? '' : 's'}`,
-  write: (n) => `wrote ${n} file${n === 1 ? '' : 's'}`,
-  edit: (n) => `edited ${n} file${n === 1 ? '' : 's'}`,
-  exec: (n) => `ran ${n} command${n === 1 ? '' : 's'}`,
-  search: (n) => (n === 1 ? 'searched the files' : `searched the files ${n} times`),
-  'web search': (n) => (n === 1 ? 'searched the web' : `searched the web ${n} times`),
-  'web fetch': (n) => `read ${n} web page${n === 1 ? '' : 's'}`,
-  agent: (n) => `ran ${n} agent${n === 1 ? '' : 's'}`,
-  tasks: (n) => (n === 1 ? 'updated the task list' : `updated the task list ${n} times`),
-};
-
 /** Whole seconds between the first call starting and the last one finishing, or null. */
 export function toolActivityDurationMs(calls: readonly Pick<CompletedToolCall, 'startedAt' | 'finishedAt'>[]): number | null {
   const starts = calls.map((call) => call.startedAt).filter((v): v is number => typeof v === 'number' && Number.isFinite(v));
@@ -411,26 +420,16 @@ export function formatToolDuration(ms: number): string {
 }
 
 /**
- * The collapsed tool row's one line, e.g. "Read 2 files, searched the web · 4 s".
- * Real counts only; the duration appears only when this browser timed the calls,
- * and failures are counted rather than hidden.
+ * The collapsed tool row's one line, e.g. "Edited 2 files, searched the web · 4 s",
+ * in each tool's own words. Real counts only; the duration appears only when this
+ * browser timed the calls, and failures are counted rather than hidden.
  */
 export function describeToolActivity(calls: readonly CompletedToolCall[]): string {
   if (calls.length === 0) return '';
-  const counts = new Map<string, number>();
-  for (const call of calls) {
-    const label = toolFriendlyLabel(call.toolName);
-    counts.set(label, (counts.get(label) ?? 0) + 1);
-  }
-  const phrases = [...counts.entries()].map(([label, count]) => {
-    const phrase = TOOL_PHRASES[label];
-    if (phrase) return phrase(count);
-    return count > 1 ? `used ${label} ${count} times` : `used ${label}`;
-  });
+  const phrases = countByWords(calls).map(([words, count]) => toolActivityPhrase(words, count, 'done'));
   const failed = calls.filter((call) => call.isError).length;
   if (failed) phrases.push(`${failed} failed`);
-  const sentence = phrases.join(', ');
-  const line = sentence.charAt(0).toUpperCase() + sentence.slice(1);
+  const line = capitalize(phrases.join(', '));
   const duration = toolActivityDurationMs(calls);
   return duration === null ? line : `${line} · ${formatToolDuration(duration)}`;
 }
@@ -442,32 +441,14 @@ export function describeToolActivity(calls: readonly CompletedToolCall[]): strin
  */
 export function workingStatusLabel(
   turnState: TurnState,
-  activeToolNames: readonly string[],
+  activeTools: readonly ToolActivitySource[],
   hasLiveText: boolean,
   streamHealth: StreamHealth = 'live',
 ): string {
   if (turnState === 'stopping') return 'Stopping…';
   if (isActiveTurnState(turnState) && streamHealth === 'reconnecting') return 'Reconnecting to your daemon…';
-  if (activeToolNames.length > 0) {
-    const counts = new Map<string, number>();
-    for (const name of activeToolNames) {
-      const label = toolFriendlyLabel(name);
-      counts.set(label, (counts.get(label) ?? 0) + 1);
-    }
-    const running = [...counts.entries()].map(([label, count]) => {
-      switch (label) {
-        case 'read': return count > 1 ? `Reading ${count} files` : 'Reading a file';
-        case 'write': return count > 1 ? `Writing ${count} files` : 'Writing a file';
-        case 'edit': return count > 1 ? `Editing ${count} files` : 'Editing a file';
-        case 'exec': return count > 1 ? `Running ${count} commands` : 'Running a command';
-        case 'search': return 'Searching the files';
-        case 'web search': return 'Searching the web';
-        case 'web fetch': return 'Reading a web page';
-        case 'agent': return count > 1 ? `Running ${count} agents` : 'Running an agent';
-        case 'tasks': return 'Updating the task list';
-        default: return `Using ${label}`;
-      }
-    });
+  if (activeTools.length > 0) {
+    const running = countByWords(activeTools).map(([words, count]) => toolActivityPhrase(words, count, 'running'));
     const sentence = running.map((phrase, index) => (index === 0 ? phrase : phrase.charAt(0).toLowerCase() + phrase.slice(1)));
     return `${sentence.join(', ')}…`;
   }

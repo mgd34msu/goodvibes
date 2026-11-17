@@ -4,12 +4,14 @@ import { getClientLifetime, isClientLifetimeCurrent } from '../../lib/client-lif
 import { asRecord, firstString } from '../../lib/object';
 import { RELAY_OVERFLOW_EVENT, noteRelayOverflow, readDroppedCount } from '../../lib/relay-stream-overflow';
 import { isSessionNotFoundError, isAuthExpiredError, isMethodUnavailableError, isNoActiveTurnError } from '../../lib/errors';
+import type { ToolActivityWords } from '@goodvibes-jev/engine/contracts';
 import { LocalCompanionMessage } from '../../lib/companion-chat';
 import {
   ACTIVE_TURN_STATES,
   assistantContentFromCompletedTurn,
   companionEventType,
   nextTurnStatus,
+  readToolActivityWords,
   type CompletedToolCall,
   type StreamHealth,
   type TurnState,
@@ -76,6 +78,8 @@ export interface ActiveToolCall {
   readonly turnId: string;
   readonly toolCallId: string;
   readonly toolName: string;
+  /** The words the tool's definition gives this call, as `turn.tool_call` carried them. */
+  readonly activity?: ToolActivityWords;
   readonly cancelled: boolean;
 }
 
@@ -177,7 +181,7 @@ export function useChatStream({
   // toolCallId -> {toolName, toolInput} captured at turn.tool_call time, so the
   // matching turn.tool_result can build a full CompletedToolCall without the daemon
   // having to repeat the input back on the result event.
-  const pendingToolInputRef = useRef<Map<string, { toolName: string; toolInput: unknown; startedAt: number }>>(new Map());
+  const pendingToolInputRef = useRef<Map<string, { toolName: string; activity?: ToolActivityWords; toolInput: unknown; startedAt: number }>>(new Map());
 
   // Latest turn status this hook knows of (the prop each render, plus every plain
   // write made through syncedSetTurnState), so stop()'s late catch can tell a
@@ -379,15 +383,16 @@ export function useChatStream({
           const turnId = firstString(payload, ['turnId']);
           const toolCallId = firstString(payload, ['toolCallId']);
           const toolName = firstString(payload, ['toolName']);
+          const activity = readToolActivityWords(asRecord(payload).activity);
           if (toolCallId) {
             setActiveToolCalls((current) => (
               current.some((c) => c.toolCallId === toolCallId)
                 ? current
-                : [...current, { turnId, toolCallId, toolName, cancelled: false }]
+                : [...current, { turnId, toolCallId, toolName, ...(activity ? { activity } : {}), cancelled: false }]
             ));
             // Captured so the matching turn.tool_result (which does not repeat the
             // input back) can still build a full CompletedToolCall for the fold.
-            pendingToolInputRef.current.set(toolCallId, { toolName, toolInput: asRecord(payload).toolInput, startedAt: Date.now() });
+            pendingToolInputRef.current.set(toolCallId, { toolName, ...(activity ? { activity } : {}), toolInput: asRecord(payload).toolInput, startedAt: Date.now() });
           }
           syncedSetTurnState((current) => nextTurnStatus(current, 'tooling'));
           return;
@@ -408,6 +413,7 @@ export function useChatStream({
               {
                 toolCallId,
                 toolName: pending?.toolName ?? firstString(payload, ['toolName']),
+                ...(pending?.activity ? { activity: pending.activity } : {}),
                 toolInput: pending?.toolInput,
                 result: resultRecord.result,
                 isError: Boolean(resultRecord.isError),

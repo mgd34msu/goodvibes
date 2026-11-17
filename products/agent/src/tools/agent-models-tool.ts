@@ -158,6 +158,7 @@ export function createAgentModelsTool(deps: AgentModelsToolDeps): Tool {
   const tool: Tool = {
     definition: {
       name: 'models',
+      activity: { doing: 'Checking', did: 'checked', object: 'models' },
       description: 'Inspect model routes, providers, cookbook, and checks.',
       parameters: {
         type: 'object',

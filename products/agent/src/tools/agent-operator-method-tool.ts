@@ -521,6 +521,7 @@ export function createAgentOperatorMethodTool(
   return {
     definition: {
       name: 'agent_operator_method',
+      activity: { doing: 'Calling', did: 'called', object: 'the assistant service' },
       description: 'Invoke a GoodVibes daemon operator method under current recorded effect admission.',
       parameters: {
         type: 'object',

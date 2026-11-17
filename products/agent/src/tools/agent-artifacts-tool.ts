@@ -638,6 +638,7 @@ export function createAgentArtifactsTool(
   return {
     definition: {
       name: 'agent_artifacts',
+      activity: { doing: 'Managing', did: 'managed', object: 'saved files' },
       description: 'Browse, preview, export, package, and archive saved Agent artifacts.',
       parameters: {
         type: 'object',

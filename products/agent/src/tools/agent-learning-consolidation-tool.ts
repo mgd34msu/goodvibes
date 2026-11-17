@@ -767,6 +767,7 @@ export function createAgentLearningConsolidationTool(shellPaths: ShellPathServic
   const tool: Tool = {
     definition: {
       name: 'agent_learning_consolidation',
+      activity: { doing: 'Consolidating', did: 'consolidated', object: 'what I learned' },
       description: 'Manage admitted local duplicate learning phases.',
       parameters: {
         type: 'object',

@@ -240,6 +240,14 @@ export function createAgentScheduleTool(
   return {
     definition: {
       name: 'schedule',
+      activity: {
+        doing: 'Checking', did: 'checked', object: 'schedules',
+        byAction: {
+          change: { doing: 'Updating', did: 'updated', object: 'a schedule', objects: 'schedules' },
+          run: { doing: 'Running', did: 'ran', object: 'a scheduled job', objects: 'scheduled jobs' },
+          delete: { doing: 'Deleting', did: 'deleted', object: 'a schedule', objects: 'schedules' },
+        },
+      },
       description: 'List, create, edit, run, pause, resume schedules.',
       parameters: {
         type: 'object',

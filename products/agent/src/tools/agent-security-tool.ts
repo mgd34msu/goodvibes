@@ -82,6 +82,7 @@ export function createAgentSecurityTool(deps: AgentSecurityToolDeps): Tool {
   return createHarnessFacade<AgentSecurityToolArgs>(deps, {
     definition: {
       name: 'security',
+      activity: { doing: 'Reviewing', did: 'reviewed', object: 'safety' },
       description: 'Read security posture, findings, and policy explanations.',
       parameters: {
         type: 'object',

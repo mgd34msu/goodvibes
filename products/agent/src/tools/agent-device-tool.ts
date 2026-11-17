@@ -168,6 +168,7 @@ export function createAgentDeviceTool(deps: AgentDeviceToolDeps): Tool {
   return createHarnessFacade<AgentDeviceToolArgs>(deps, {
     definition: {
       name: 'device',
+      activity: { doing: 'Checking', did: 'checked', object: 'this device' },
       description: 'Inspect/open device, voice, and browser routes.',
       parameters: {
         type: 'object',

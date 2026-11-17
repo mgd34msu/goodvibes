@@ -54,6 +54,7 @@ export function createAgentChannelSendTool(
   return {
     definition: {
       name: 'agent_channel_send',
+      activity: { doing: 'Sending', did: 'sent', object: 'a message', objects: 'messages' },
       description: 'Preview or deliver one message through one configured Agent target. Exactly one of channel, route or webhook is required. Delivery requires current recorded effect admission.',
       parameters: {
         type: 'object',

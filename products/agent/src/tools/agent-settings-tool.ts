@@ -105,6 +105,10 @@ export function createAgentSettingsTool(deps: AgentSettingsToolDeps): Tool {
   return protectHarnessCatalogTool({
     definition: {
       name: 'settings',
+      activity: {
+        doing: 'Adjusting', did: 'adjusted', object: 'settings',
+        byAction: { read: { doing: 'Checking', did: 'checked', object: 'settings' } },
+      },
       description: 'List, inspect, change, reset, or import settings.',
       parameters: {
         type: 'object',

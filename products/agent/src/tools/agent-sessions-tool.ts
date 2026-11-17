@@ -71,6 +71,7 @@ export function createAgentSessionsTool(deps: AgentSessionsToolDeps): Tool {
   return createHarnessFacade<AgentSessionsToolArgs>(deps, {
     definition: {
       name: 'sessions',
+      activity: { doing: 'Looking at', did: 'looked at', object: 'past conversations' },
       description: 'Read saved sessions, bookmarks, and transcript continuity.',
       parameters: {
         type: 'object',

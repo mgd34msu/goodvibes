@@ -188,6 +188,7 @@ function buildAgentHarnessTool(deps: AgentHarnessToolDeps): Tool {
   const tool: Tool = {
     definition: captureAgentToolDefinition({
       name: 'agent_harness',
+      activity: { doing: 'Checking', did: 'checked', object: 'app internals' },
       description: 'Inspect or operate Agent harness surfaces; mode:"modes" lists all.',
       parameters: {
         type: 'object',

@@ -69,6 +69,7 @@ export function createAgentSupportTool(deps: AgentSupportToolDeps): Tool {
   return createHarnessFacade<AgentSupportToolArgs>(deps, {
     definition: {
       name: 'support',
+      activity: { doing: 'Preparing', did: 'prepared', object: 'a support bundle', objects: 'support bundles' },
       description: 'Read support-bundle routes and redacted bundle summaries.',
       parameters: {
         type: 'object',

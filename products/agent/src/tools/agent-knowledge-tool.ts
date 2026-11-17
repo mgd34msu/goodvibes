@@ -156,6 +156,7 @@ export function createAgentKnowledgeTool(
   return {
     definition: {
       name: 'agent_knowledge',
+      activity: { doing: 'Searching', did: 'searched', object: 'knowledge' },
       description: 'Read isolated Agent Knowledge: status, ask, search, sources, nodes, issues, item, map, connectors, connector, connector_doctor.',
       parameters: {
         type: 'object',

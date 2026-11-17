@@ -23,7 +23,7 @@ import type { ContractView, ContractUnitView } from '@goodvibes-jev/engine/platf
 import { contractIsActive, contractCommitNote, contractStatusSummary, projectContractTree } from './work-tree-contract.js';
 import type { ConversationMessageSnapshot } from '@goodvibes-jev/engine/platform/platform/core';
 import type { ToolCall } from '@goodvibes-jev/engine/platform/platform/types';
-import { beadArgument, beadBody, beadName, beadStatus, beadSummary, cellText, formatBeadTime, formatCost, inferResultToolName, isBackgroundCall, needsAttention, toolFamily, type BeadBody, type ToolLabel, type BeadStatus, type BeadSummary, } from './renderer/bead.js';
+import { beadArgument, beadBody, beadName, beadStatus, beadSummary, cellText, formatBeadTime, formatCost, inferResultToolName, isBackgroundCall, needsAttention, toolFamily, type BeadBody, type BeadStatus, type BeadSummary, } from './renderer/bead.js';
 import { SPINE, type LaneId } from './renderer/lane-graph-layout.js';
 import { userMessageFingerprint, type AgentLaneInfo, type TurnOutcome, type TurnTiming, type WorkTreeSources } from './work-tree-sources.js';
 type Message = ConversationMessageSnapshot;
@@ -309,7 +309,7 @@ function makeBead(ctx: BuildContext, lane: LaneId, scope: string, call: ToolCall
             scope,
             result: content,
             status,
-            name: beadName(call, ctx.presentation?.toolLabel),
+            name: beadName(call),
             arg: beadArgument(call),
             summary: cached ? cached.summary : beadSummary(call, status, content),
             time: time.text,
@@ -837,9 +837,8 @@ export function orphanResultBead(message: ToolMessage, index: number, collapse: 
     const { bead } = makeBead(ctx, SPINE, 'o', call, index, 0, { content: message.content, index, outcome: message.outcome }, false);
     return bead;
 }
-/** Product vocabulary and visibility only; status still comes from execution evidence. */
+/** Visibility only; status still comes from execution evidence, and a call's name from its tool's display words. */
 export interface WorkTreePresentation {
-    readonly toolLabel?: ToolLabel | undefined;
     readonly showUnverifiedOutput?: boolean | undefined;
 }
 export function createWorkTreeModelAdapter(presentation: WorkTreePresentation) {

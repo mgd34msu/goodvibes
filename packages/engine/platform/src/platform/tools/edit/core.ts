@@ -826,6 +826,7 @@ export function createEditTool(fileCache: FileStateCache, options?: EditToolOpti
   const cwd = resolveEditCwd(options);
   const definition: ToolDefinition = {
     name: 'edit',
+    activity: { doing: 'Editing', did: 'edited', object: 'a file', objects: 'files' },
     // Sent in full on every model request (see ToolDefinition.core).
     core: true,
     description:

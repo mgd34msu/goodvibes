@@ -32,6 +32,7 @@ import { assertRemoteSettingsImportPrecondition, applyRemoteSettingsImportPrecon
   assertCompletedRemoteSettingsImportPrecondition } from '../config/settings-import-precondition-client.js';
 import { firstJsonSchemaFailureAsync } from '@goodvibes-jev/engine/transport-http';
 import { PERMISSION_CATEGORIES, type Tool, type ToolDefinition, type ToolExecuteOptions, type ToolResult } from '../types/tools.js';
+import type { ToolActivity } from '@goodvibes-jev/engine/contracts';
 import { UnknownPreparedToolError } from './preparation-error.js';
 import { createToolSchemaTool, deferredToolRefusal, oneLineDefinition, TOOL_SCHEMA_TOOL_NAME } from './tool-schema.js';
 import { ToolError } from '../types/errors.js';
@@ -404,6 +405,18 @@ function assertRegistrableDefinition(definition: ToolDefinition): void {
   if (problems.length > 0) throw new Error(`Tool '${definition.name}' cannot be registered:\n  ${problems.join('\n  ')}`);
 }
 
+/**
+ * The display words of every tool registered in this process, by name. A tool
+ * name means the same tool in every registry of the process, so the terminal
+ * renderers, which draw calls without a registry at hand, read the words here.
+ */
+const toolActivityByName = new Map<string, ToolActivity>();
+
+/** The display words a registered tool declared, by its name; undefined for a tool that declared none. */
+export function toolActivityOf(name: string): ToolActivity | undefined {
+  return toolActivityByName.get(name);
+}
+
 export class ToolRegistry {
   private readonly prepared = new WeakMap<PreparedToolCall, PreparedExecution>();
   private tools = new Map<string, Tool>();
@@ -504,6 +517,7 @@ export class ToolRegistry {
     const captureNativeReferences = projector ? projectionFunction<NonNullable<ToolInputProjector['captureNativeReferences']>>(projectionProperty(projector, 'captureNativeReferences')) : undefined;
     const signal = projector ? projectionSignal(projectionProperty(projector, 'signal')) : undefined;
     this.tools.set(name, tool);
+    if (definition.activity) toolActivityByName.set(name, definition.activity);
     this.registrations.set(name, Object.freeze({ tool, projector, project, captureNativeReferences, assertCurrent, signal,
       revision: `tool-input-projection:${++this.registrationRevision}` }));
   }

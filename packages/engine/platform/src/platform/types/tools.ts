@@ -1,5 +1,6 @@
 import type { JevDecision } from '@goodvibes-jev/judgment/decisions';
 import type { DecisionModelPolicyState } from '@goodvibes-jev/engine/errors';
+import type { ToolActivity } from '@goodvibes-jev/engine/contracts';
 
 /** Represents a tool the LLM can invoke. Parameters follow JSON Schema. */
 export type ToolSideEffect =
@@ -89,6 +90,11 @@ export interface ToolDefinition {
   name: string;
   description: string;
   parameters: Record<string, unknown>;
+  /**
+   * The words every surface shows a call of this tool by ("Reading a file",
+   * "read 2 files"). Never sent to the model. Absent: "Using <name>".
+   */
+  activity?: ToolActivity | undefined;
   /**
    * Side effects the tool may perform when executed successfully. Absent means
    * undeclared (an MCP or plugin tool): the gate never decides such a call from

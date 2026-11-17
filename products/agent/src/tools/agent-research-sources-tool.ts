@@ -327,6 +327,7 @@ function createAgentResearchSourcesTool(shellPaths?: Pick<ShellPathService, 'res
   return {
     definition: {
       name: 'agent_research_sources',
+      activity: { doing: 'Reviewing', did: 'reviewed', object: 'sources' },
       description: 'Manage local research source review queue.',
       parameters: {
         type: 'object',

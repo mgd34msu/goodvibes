@@ -268,6 +268,7 @@ export function createAgentReviewPacketPresetsTool(
   return {
     definition: {
       name: 'agent_review_packet_presets',
+      activity: { doing: 'Preparing', did: 'prepared', object: 'a review packet', objects: 'review packets' },
       description: 'Save and refresh reusable Document Ops packet presets.',
       parameters: {
         type: 'object',

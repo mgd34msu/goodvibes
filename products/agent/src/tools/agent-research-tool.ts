@@ -412,6 +412,7 @@ export function createAgentResearchTool(deps: AgentResearchToolDeps): Tool {
   return {
     definition: {
       name: 'research',
+      activity: { doing: 'Researching', did: 'researched' },
       description: 'Plan, track, source, and save research.',
       parameters: {
         type: 'object',

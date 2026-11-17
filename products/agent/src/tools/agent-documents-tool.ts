@@ -455,6 +455,7 @@ export function createAgentDocumentsTool(
   return {
     definition: {
       name: 'agent_documents',
+      activity: { doing: 'Working on', did: 'worked on', object: 'a document', objects: 'documents' },
       description: 'Create drafts, review suggestions, attach artifacts, and export.',
       parameters: {
         type: 'object',

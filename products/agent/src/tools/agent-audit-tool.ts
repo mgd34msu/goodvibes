@@ -101,6 +101,7 @@ export function createAgentAuditTool(deps: AgentAuditToolDeps): Tool {
   return createHarnessFacade<AgentAuditToolArgs>(deps, {
     definition: {
       name: 'audit',
+      activity: { doing: 'Reviewing', did: 'reviewed', object: 'evidence' },
       description: 'Read release readiness and packaged release evidence.',
       parameters: {
         type: 'object',

@@ -149,6 +149,7 @@ export function createAgentPersonalOpsTool(deps: AgentPersonalOpsToolDeps): Tool
   const tool: Tool = {
     definition: {
       name: 'personal_ops',
+      activity: { doing: 'Checking', did: 'checked', object: 'your inbox & calendar' },
       description: 'Plan and run safe Personal Ops workflows.',
       parameters: {
         type: 'object',

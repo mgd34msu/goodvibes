@@ -11,6 +11,8 @@
  * Everything here is pure data (no Lines, no theme): paint.ts draws it.
  */
 import type { ToolCall } from '@goodvibes-jev/engine/platform/platform/types';
+import { toolActivityFallback, toolActivityPhrase, toolCallActivity } from '@goodvibes-jev/engine/contracts';
+import { toolActivityOf } from '@goodvibes-jev/engine/platform/platform/tools';
 import { stripDangerousAnsi } from '../ansi-sanitize.js';
 /** Text safe to put in a cell: no escape sequences at all, no control characters. */
 export function cellText(text: string): string {
@@ -166,11 +168,14 @@ function str(value: unknown): string | undefined {
 export function toolFamily(name: string): string {
     return (name.includes('__') ? name.split('__').pop()! : name).toLowerCase();
 }
-/** A product's phrase for a tool call: its name, and its arguments when the phrase depends on the action. */
-export type ToolLabel = (name: string, args?: Readonly<Record<string, unknown>> | undefined) => string;
-/** The name drawn on the bead row. */
-export function beadName(call: Pick<ToolCall, 'name'> & { readonly arguments?: Readonly<Record<string, unknown>> | undefined }, label?: ToolLabel | undefined): string {
-    return cellText(label ? label(call.name, call.arguments) : call.name.includes('__') ? call.name.split('__').pop()! : call.name);
+/**
+ * The name drawn on the bead row: the running phrase from the tool's own
+ * display words ("Reading files"), chosen by its action when the tool declares
+ * words per action; "Using <name>" for a tool that declares none.
+ */
+export function beadName(call: Pick<ToolCall, 'name'> & { readonly arguments?: Readonly<Record<string, unknown>> | undefined }): string {
+    const words = toolCallActivity(toolActivityOf(call.name), call.arguments) ?? toolActivityFallback(call.name);
+    return cellText(toolActivityPhrase(words, 1, 'running'));
 }
 /** The key argument drawn after the name (the path, the command, the pattern). */
 export function beadArgument(call: ToolCall): string {

@@ -538,6 +538,7 @@ export function createAgentResearchReportTool(
   return {
     definition: {
       name: 'agent_research_report',
+      activity: { doing: 'Writing', did: 'wrote', object: 'a research report', objects: 'research reports' },
       description: 'Save one sourced research report artifact under current recorded effect admission.',
       parameters: {
         type: 'object',

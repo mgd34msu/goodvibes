@@ -712,7 +712,7 @@ export function ChatView({
   const isNewChat = !activeSessionId && lineageNodes.length === 0 && !liveText && !isStreaming && !send.isPending;
   const workingLabel = workingStatusLabel(
     turnState,
-    activeToolCalls.filter((call) => !call.cancelled).map((call) => call.toolName),
+    activeToolCalls.filter((call) => !call.cancelled),
     Boolean(liveText),
     streamHealth,
   );

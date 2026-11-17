@@ -77,6 +77,7 @@ export function createAgentDelegationTool(deps: AgentDelegationToolDeps): Tool {
   return createHarnessFacade<AgentDelegationToolArgs>(deps, {
     definition: {
       name: 'delegation',
+      activity: { doing: 'Handing', did: 'handed', object: 'work off' },
       description: 'Inspect build delegation routes and policy.',
       parameters: {
         type: 'object',

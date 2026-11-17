@@ -58,6 +58,10 @@ export function createAgentChannelsTool(deps: AgentChannelsToolDeps): Tool {
   return createHarnessFacade<AgentChannelsToolArgs>(deps, {
     definition: {
       name: 'channels',
+      activity: {
+        doing: 'Checking', did: 'checked', object: 'message channels',
+        byAction: { change: { doing: 'Setting up', did: 'set up', object: 'a message channel', objects: 'message channels' } },
+      },
       description: 'Inspect channel readiness, setup, triage, and receipts.',
       parameters: {
         type: 'object',

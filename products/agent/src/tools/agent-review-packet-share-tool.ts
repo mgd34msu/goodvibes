@@ -187,6 +187,7 @@ export function createAgentReviewPacketShareTool(
   return {
     definition: {
       name: 'agent_review_packet_share',
+      activity: { doing: 'Sharing', did: 'shared', object: 'a review packet', objects: 'review packets' },
       description: 'Share one reviewer archive after recorded effect admission: attached where the surface carries files, otherwise named in the message.',
       parameters: {
         type: 'object',

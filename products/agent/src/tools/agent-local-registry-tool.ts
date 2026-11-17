@@ -549,6 +549,14 @@ export function createAgentLocalRegistryTool(shellPaths: ShellPathService, memor
   return {
     definition: {
       name: 'agent_local_registry',
+      activity: {
+        doing: 'Checking', did: 'checked', object: 'notes & routines',
+        byAction: {
+          change: { doing: 'Updating', did: 'updated', object: 'notes & routines' },
+          run: { doing: 'Using', did: 'used', object: 'notes & routines' },
+          delete: { doing: 'Deleting from', did: 'deleted from', object: 'notes & routines' },
+        },
+      },
       description: 'Inspect or update Agent-local records by domain. Actions per domain: memory, note: list, search, get, create, update, review, stale, delete. persona adds use and clear_active. skill and skill_bundle add enable and disable. routine adds enable, disable and start. Create needs: memory summary; note title and body; persona name, description and body; skill name, description and procedure; skill_bundle name, description and skillIds; routine name, description and steps. Writes need current recorded admission. Marking a persona, skill, skill bundle or routine reviewed, and enabling one nobody reviewed, are the owner\'s: refused here with the command the owner types.',
       parameters: {
         type: 'object',

@@ -21,6 +21,7 @@ export class InspectTool implements Tool {
 
   readonly definition: ToolDefinition = {
     name: 'inspect',
+    activity: { doing: 'Inspecting', did: 'inspected', object: 'the project' },
     description:
       'Inspect and analyze a project or file. Modes: project (structure), api (routes),'
       + ' api_spec (generate OpenAPI 3.0 spec), api_validate (compare spec to code),'

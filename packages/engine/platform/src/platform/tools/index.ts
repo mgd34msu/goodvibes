@@ -96,7 +96,7 @@ export type {
   UnavailableConfigRead,
 } from './goodvibes-runtime/config-routing.js';
 
-export { ToolRegistry, assertCurrentToolExecution, assertCurrentToolInvocation, assertCurrentToolEffect, currentToolAutonomySource, commitCurrentToolSettingsPlan, currentToolSettingsPresentation, claimCurrentToolSettingsDispatch } from './registry.js';
+export { ToolRegistry, assertCurrentToolExecution, assertCurrentToolInvocation, assertCurrentToolEffect, currentToolAutonomySource, commitCurrentToolSettingsPlan, currentToolSettingsPresentation, claimCurrentToolSettingsDispatch, toolActivityOf } from './registry.js';
 export { registrySelect } from './batteries/registry-select.js';
 export { registryCatalogGroupFit } from './batteries/registry-catalog-group.js';
 export type { ToolExecutionEffect, CurrentToolAutonomySource } from './registry.js';

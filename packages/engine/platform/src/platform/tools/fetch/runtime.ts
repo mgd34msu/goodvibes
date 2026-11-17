@@ -933,6 +933,7 @@ export function createFetchTool(
   return {
     definition: {
       name: 'fetch',
+      activity: { doing: 'Fetching', did: 'fetched', object: 'a web page', objects: 'web pages' },
       // Sent in full on every model request (see ToolDefinition.core).
       core: true,
       description:

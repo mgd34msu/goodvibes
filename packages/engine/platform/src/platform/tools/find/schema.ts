@@ -6,6 +6,7 @@ import type { ToolDefinition } from '../../types/tools.js';
  */
 export const findSchema: ToolDefinition = {
   name: 'find',
+  activity: { doing: 'Searching', did: 'searched', object: 'the files' },
   // Sent in full on every model request (see ToolDefinition.core).
   core: true,
   description:

@@ -24,6 +24,7 @@ export function createAgentOperatorActionTool(
   return {
     definition: {
       name: 'agent_operator_action',
+      activity: { doing: 'Running', did: 'ran', object: 'an approved action', objects: 'approved actions' },
       description: 'Run one allowlisted operator action under current recorded effect admission.',
       parameters: {
         type: 'object',

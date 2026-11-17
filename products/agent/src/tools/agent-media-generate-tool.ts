@@ -57,6 +57,7 @@ export function createAgentMediaGenerateTool(
   return {
     definition: {
       name: 'agent_media_generate',
+      activity: { doing: 'Generating', did: 'generated', object: 'media' },
       description: 'Preview or generate one image or video artifact through current recorded effect admission.',
       parameters: {
         type: 'object',

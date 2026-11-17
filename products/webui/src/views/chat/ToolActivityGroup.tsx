@@ -5,16 +5,17 @@
  * data comes from and why it is only ever present for a turn this browser tab
  * watched run live).
  *
- * Every turn, one call or many, collapses to ONE line ("Read 2 files, searched
- * the web · 4 s", design doc "Chat": the same rule as the TUI, collapsed output
- * is one compact line) that expands inline to the per-call detail: the tool,
- * its key argument, and its result. Counts are real; the duration is shown
- * only when this browser timed the calls.
+ * Every turn, one call or many, collapses to ONE line ("Edited 2 files,
+ * searched the web · 4 s", in each tool's own display words; design doc "Chat":
+ * the same rule as the TUI, collapsed output is one compact line) that expands
+ * inline to the per-call detail: what the call did, its key argument, and its
+ * result. Counts are real; the duration is shown only when this browser timed
+ * the calls.
  */
 import { ChevronRight } from 'lucide-react';
 import {
   describeToolActivity,
-  toolFriendlyLabel,
+  toolCallLabel,
   toolKeyArg,
   toolResultText,
   type CompletedToolCall,
@@ -24,7 +25,7 @@ import {
 const RESULT_PREVIEW_LIMIT = 240;
 
 function ToolActivityEntry({ call }: { call: CompletedToolCall }) {
-  const label = toolFriendlyLabel(call.toolName);
+  const label = toolCallLabel(call);
   const keyArg = toolKeyArg(call.toolInput);
   const resultText = toolResultText(call.result);
   const isTruncated = resultText.length > RESULT_PREVIEW_LIMIT;

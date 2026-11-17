@@ -9,6 +9,7 @@
 
 import type { ConversationMessageEnvelope } from '../control-plane/conversation-message.js';
 import type { ArtifactDescriptor } from '../artifacts/index.js';
+import type { ToolActivityWords } from '@goodvibes-jev/engine/contracts';
 
 /**
  * Re-export the shared envelope so chat-mode code can import from one place.
@@ -339,6 +340,8 @@ export interface CompanionChatTurnToolCallEvent {
   readonly toolCallId: string;
   readonly toolName: string;
   readonly toolInput: unknown;
+  /** The words this call is shown by, from the tool's definition; absent for a tool that declares none. */
+  readonly activity?: ToolActivityWords | undefined;
 }
 
 export interface CompanionChatTurnToolResultEvent {

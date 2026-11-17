@@ -89,6 +89,7 @@ export function createAgentReminderScheduleTool(
   return {
     definition: {
       name: 'agent_reminder_schedule',
+      activity: { doing: 'Setting', did: 'set', object: 'a reminder', objects: 'reminders' },
       description: 'Schedule one GoodVibes Agent reminder under recorded effect admission.',
       parameters: {
         type: 'object',

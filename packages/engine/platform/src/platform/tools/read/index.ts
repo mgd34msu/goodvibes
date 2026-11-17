@@ -35,6 +35,7 @@ const SLOW_READ_MS = 2_000;
 export class ReadTool implements Tool {
   readonly definition: ToolDefinition = {
     name: 'read',
+    activity: { doing: 'Reading', did: 'read', object: 'files' },
     // Sent in full on every model request (see ToolDefinition.core).
     core: true,
     description:

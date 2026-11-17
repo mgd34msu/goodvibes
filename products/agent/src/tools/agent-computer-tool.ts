@@ -111,6 +111,7 @@ export function createAgentComputerTool(deps: AgentComputerToolDeps): Tool {
   return createHarnessFacade<AgentComputerToolArgs>(deps, {
     definition: {
       name: 'computer',
+      activity: { doing: 'Checking', did: 'checked', object: 'browser and desktop setup' },
       description: 'Inspect/open browser, desktop, and computer-use routes.',
       parameters: {
         type: 'object',

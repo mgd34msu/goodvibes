@@ -8,6 +8,7 @@ export function createWebSearchTool(service: WebSearchService): Tool {
   return {
     definition: {
       name: 'web_search',
+      activity: { doing: 'Searching', did: 'searched', object: 'the web' },
       // Sent in full on every model request (see ToolDefinition.core).
       core: true,
       description:

@@ -11,9 +11,9 @@
  * keys (esc interrupt).
  *
  * What it names, first match wins:
- *   - a permission prompt waiting on you:  Waiting for your approval · bash · npm test · 12s
+ *   - a permission prompt waiting on you:  Waiting for your approval · Running a command · npm test · 12s
  *   - a compaction:                       Compacting the conversation · 4s
- *   - a running tool:                     Running bash · npm test · 3s
+ *   - a running tool (its display words): Running a command · npm test · 3s
  *   - the model (the honest waiting phrase from the platform): Thinking... · 12s · first token 1.2s · 40 tok/s
  *
  * Inside an agent or process view the row keeps main in sight the same way,
@@ -24,7 +24,7 @@ import type { ToolCall } from '@goodvibes-jev/engine/platform/platform/types';
 import type { ContractStatus } from '@goodvibes-jev/engine/platform/platform/contract';
 import { getDisplayWidth, interpolateColor, truncateDisplay } from '@goodvibes-jev/engine/platform/platform/utils';
 import { formatElapsed } from '../format.js';
-import { beadArgument, beadName, type ToolLabel } from './bead.js';
+import { beadArgument, beadName } from './bead.js';
 import { activeTokens } from './theme.js';
 /** Column of the spinner (the input area's first fill column). */
 const THROBBER_SPINNER_X = 3;
@@ -130,8 +130,8 @@ export interface ThrobberActivityInput {
     readonly tokenSpeed?: number | undefined;
     readonly now: number;
 }
-/** "bash", "npm test": a call's short name and key argument, the way its bead names it. */
-function describeToolCall(call: ThrobberToolCall, toolLabel: ToolLabel | undefined): {
+/** "Running a command", "npm test": a call's phrase and key argument, the way its bead names it. */
+function describeToolCall(call: ThrobberToolCall): {
     tool: string;
     argument: string;
 } {
@@ -143,19 +143,15 @@ function describeToolCall(call: ThrobberToolCall, toolLabel: ToolLabel | undefin
     catch {
         argument = '';
     }
-    return { tool: beadName(asCall, toolLabel), argument: truncateDisplay(argument, ARGUMENT_MAX) };
+    return { tool: beadName(asCall), argument: truncateDisplay(argument, ARGUMENT_MAX) };
 }
 /** What main is doing now, or null at rest (the throbber is not drawn). */
-/** Product vocabulary for the running call's name, the same option the work tree takes. */
-export interface ThrobberPresentation {
-    readonly toolLabel?: ToolLabel | undefined;
-}
-export function resolveThrobberActivity(input: ThrobberActivityInput, presentation: ThrobberPresentation = {}): ThrobberActivity | null {
+export function resolveThrobberActivity(input: ThrobberActivityInput): ThrobberActivity | null {
     const runningAgentCount = input.runningAgentCount ?? 0;
     const since = (start: number | undefined): number | undefined => (start !== undefined && start > 0 ? Math.max(0, input.now - start) : undefined);
     const turnElapsed = since(input.turnStartMs);
     if (input.turnActive && input.pendingApproval) {
-        return { kind: 'approval', ...describeToolCall(input.pendingApproval, presentation.toolLabel), elapsedMs: turnElapsed };
+        return { kind: 'approval', ...describeToolCall(input.pendingApproval), elapsedMs: turnElapsed };
     }
     if (input.compacting)
         return { kind: 'compacting', elapsedMs: since(input.compactingSinceMs) };
@@ -173,7 +169,7 @@ export function resolveThrobberActivity(input: ThrobberActivityInput, presentati
     if (!input.turnActive)
         return delegatedActivity();
     if (input.activeTool) {
-        return { kind: 'tool', ...describeToolCall(input.activeTool, presentation.toolLabel), elapsedMs: since(input.activeTool.startedAtMs) ?? turnElapsed };
+        return { kind: 'tool', ...describeToolCall(input.activeTool), elapsedMs: since(input.activeTool.startedAtMs) ?? turnElapsed };
     }
     if (input.completionActivity)
         return { kind: 'completion', phase: input.completionActivity.phase, elapsedMs: since(input.completionActivity.startedAtMs) };
@@ -195,7 +191,7 @@ interface ThrobberText {
     readonly subject: string;
     readonly tail: readonly string[];
 }
-function textOf(activity: ThrobberActivity, plainToolLabels: boolean): ThrobberText {
+function textOf(activity: ThrobberActivity): ThrobberText {
     const elapsed = 'elapsedMs' in activity && activity.elapsedMs !== undefined ? [formatElapsed(activity.elapsedMs)] : [];
     switch (activity.kind) {
         case 'completion':
@@ -205,11 +201,11 @@ function textOf(activity: ThrobberActivity, plainToolLabels: boolean): ThrobberT
         case 'agents':
             return { label: `Waiting for ${activity.count} ${activity.count === 1 ? 'agent' : 'agents'}...`, subject: '', tail: [] };
         case 'approval':
-            return { label: 'Waiting for your approval', subject: plainToolLabels ? activity.argument || activity.tool : [activity.tool, activity.argument].filter(Boolean).join(SEP), tail: elapsed };
+            return { label: 'Waiting for your approval', subject: [activity.tool, activity.argument].filter(Boolean).join(SEP), tail: elapsed };
         case 'compacting':
             return { label: 'Compacting the conversation', subject: '', tail: elapsed };
         case 'tool':
-            return { label: plainToolLabels ? activity.tool : `Running ${activity.tool}`, subject: activity.argument, tail: elapsed };
+            return { label: activity.tool, subject: activity.argument, tail: elapsed };
         case 'model': {
             const tail = [...elapsed];
             if (activity.ttftMs !== undefined)
@@ -239,7 +235,7 @@ function put(line: Line, x: number, endX: number, text: string, fg: string, bold
  * Draw the throbber row. The text ends at width-4 or earlier. When the row is
  * short the elapsed pieces go first, then the subject is cut, then the label.
  */
-export function renderThrobberLine(width: number, state: ThrobberState, plainToolLabels = false): Line {
+export function renderThrobberLine(width: number, state: ThrobberState): Line {
     const t = activeTokens();
     const line = createEmptyLine(width);
     for (const cell of line)
@@ -249,7 +245,7 @@ export function renderThrobberLine(width: number, state: ThrobberState, plainToo
         return line;
     const glyphFg = interpolateColor(t.brand, t.brandEnd, (Math.sin(state.frame / 6) + 1) / 2);
     put(line, THROBBER_SPINNER_X, endX, state.spinner, glyphFg, true);
-    const { label, subject, tail } = textOf(state.activity, plainToolLabels);
+    const { label, subject, tail } = textOf(state.activity);
     const room = endX - THROBBER_TEXT_X;
     const owner = state.owner ? `${state.owner}${SEP}` : '';
     const head = owner + label;

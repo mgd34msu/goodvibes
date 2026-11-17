@@ -924,7 +924,7 @@ export function createAgentTool(config: AgentToolConfig): Tool {
         const skippedTasks: string[] = [];
         let skipped = 0;
         if (outsideInputs.length > 0) {
-          const currentCount = manager.list().filter(a => a.status === 'pending' || a.status === 'running').length;
+          const currentCount = manager.fleetCount();
           const spawnDecision = evaluateOrchestrationSpawn({
             configManager: config.configManager,
             mode: 'manual-batch',

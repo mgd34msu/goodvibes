@@ -8,7 +8,7 @@
 import { existsSync, statSync } from 'node:fs';
 import type { GatewayMethodCatalog } from '../method-catalog.js';
 import type { GatewayMethodHandler, GatewayMethodInvocation } from '../method-catalog-shared.js';
-import type { AcpHostService, DiscoveredAcpAgent } from '../../acp/host.js';
+import { AcpFleetCapacityError, type AcpHostService, type DiscoveredAcpAgent } from '../../acp/host.js';
 import { GatewayVerbError } from './gateway-verb-error.js';
 import { readInvocationParams, requireStringValue } from './invocation-params.js';
 
@@ -49,6 +49,9 @@ function createSessionsCreateHandler(deps: AcpGatewayDeps): GatewayMethodHandler
       cwd,
       title: typeof params.title === 'string' && params.title.trim().length > 0 ? params.title : undefined,
       prompt: typeof params.prompt === 'string' && params.prompt.trim().length > 0 ? params.prompt : undefined,
+    }).catch((error: unknown) => {
+      if (error instanceof AcpFleetCapacityError) throw new GatewayVerbError(error.message, 'FLEET_CAPACITY', 409);
+      throw error;
     });
     // A handshake failure is an HONEST OUTCOME (structured error on the
     // record), not a transport throw, the surface renders which binary

@@ -209,10 +209,21 @@ export interface AcpHostServiceDeps {
   readonly spawn?: ((cmd: string[], opts: { cwd: string }) => ReturnType<typeof Bun.spawn>) | undefined;
   /** Handshake bound (spawn→initialize→session). Default 15s, a bad binary becomes a structured failure, never a hung row. */
   readonly handshakeTimeoutMs?: number | undefined;
+  /**
+   * The fleet ceiling (fleet.maxSize): returns why a new hosted session would
+   * exceed it, counting every agent this process owns, or undefined when it fits.
+   * Checked synchronously right before the session is recorded.
+   */
+  readonly admitSession?: (() => string | undefined) | undefined;
   readonly now?: (() => number) | undefined;
 }
 
 const PROGRESS_TAIL_CHARS = 400;
+
+/** A hosted session refused because the fleet ceiling (fleet.maxSize) is reached; nothing was started. */
+export class AcpFleetCapacityError extends Error {
+  override readonly name = 'AcpFleetCapacityError';
+}
 
 export class AcpHostService {
   private readonly records = new Map<string, HostedRecord>();
@@ -256,6 +267,8 @@ export class AcpHostService {
     try { assertWorkspaceCurrent = host ? await prepareExternalExecution(host, input.cwd, signal) : undefined; }
     catch (error) { unsubscribe(); throw error; }
     const assertSpawnCurrent = () => { signal.throwIfAborted(); assertWorkspaceCurrent?.(); };
+    const refusal = this.deps.admitSession?.();
+    if (refusal !== undefined) { unsubscribe(); throw new AcpFleetCapacityError(refusal); }
     const id = `acp-host-${randomUUID().slice(0, 10)}`;
     const sessionId = `acp-${id}`;
     const record: HostedRecord = {

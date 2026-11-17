@@ -91,11 +91,11 @@ export interface ContractRunnerCompositionOptions {
 
 /**
  * The fleet ceiling for a composition that hosts no third-party coding
- * agents (the client composition and the standalone agent graph): the fleet
- * counts native agents only.
+ * agents (the client composition and the standalone agent graph): the same
+ * count the manager's own spawn admission reads.
  */
-export function nativeAgentFleetCapacity(configManager: Pick<ConfigManager, 'get'>, agentManager: Pick<AgentManager, 'list'>): FleetCapacityFn {
-  return makeRuntimeFleetProbe({ readConfig: (key) => configManager.get(key as never), agentManager, acpHost: { list: () => [] } });
+export function nativeAgentFleetCapacity(configManager: Pick<ConfigManager, 'get'>, agentManager: Pick<AgentManager, 'fleetCount'>): FleetCapacityFn {
+  return makeRuntimeFleetProbe({ readConfig: (key) => configManager.get(key as never), fleet: agentManager });
 }
 
 /**

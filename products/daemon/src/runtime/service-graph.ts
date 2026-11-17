@@ -62,7 +62,7 @@ import { ProfileManager } from '@goodvibes-jev/engine/platform/platform/profiles
 import { CrossSessionTaskRegistry, SessionChangeTracker } from '@goodvibes-jev/engine/platform/platform/sessions';
 import { UserAuthManager } from '@goodvibes-jev/engine/platform/platform/security';
 import { bindPairingRotationLimit, createConfiguredTokenAuditor, startPairingTokenAudit } from '@goodvibes-jev/engine/platform/platform/runtime/security';
-import { NOTIFICATIONS_METADATA_ONLY_KEY, readNotificationsMetadataOnly } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { NOTIFICATIONS_METADATA_ONLY_KEY, fleetCeilingRefusal, readNotificationsMetadataOnly } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { WebhookNotifier } from '@goodvibes-jev/engine/platform/platform/integrations';
 import { BenchmarkStore, CacheHitTracker, FavoritesStore, ModelLimitsService, ProviderCapabilityRegistry, ProviderOptimizer, ProviderRegistry, ensureConfiguredModelIsRoutable } from '@goodvibes-jev/engine/platform/platform/providers';
 import { AdaptivePlanner, DeterministicReplayEngine, ExecutionPlanManager, SessionLineageTracker, SessionMemoryStore } from '@goodvibes-jev/engine/platform/platform/core';
@@ -574,6 +574,8 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
       registerSession: ({ id, title, agentTitle, cwd }) => void sessionBroker
         .register({ sessionId: id, kind: 'acp', title, project: cwd, participant: { surfaceKind: 'service', surfaceId: `acp-host:${agentTitle}`, lastSeenAt: Date.now() } })
         .catch(() => { /* best-effort; the fleet row is authoritative */ }),
+      // The same count spawning reads: native, native-work and hosted sessions.
+      admitSession: () => fleetCeilingRefusal((key) => configManager.get(key as never), agentManager),
     });
     let acpClosing: Promise<void> | undefined;
     const closeAcpAgents = (): Promise<void> => acpClosing ??= Promise.allSettled(acpHost.list().map(agent => acpHost.stop(agent.id))).then(results => {

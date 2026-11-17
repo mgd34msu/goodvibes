@@ -159,6 +159,7 @@ export class AgentManager {
   private executor: AgentExecutor | null;
   private readonly configManager: Pick<ConfigManager, 'get'> | null;
   private readonly additionalFleetOwnership: (() => readonly AgentFleetOwnership[]) | undefined;
+  private readonly fleetSources: (() => readonly AgentFleetOwnership[])[] = [];
   /**
    * Live snapshot accessors for RUNNING agents (conversation-snapshot bridge).
    * Registered by the executor (orchestrator-runner.ts) right after it
@@ -258,15 +259,24 @@ export class AgentManager {
     }));
   }
 
-  private activeFleetCount(): number {
-    // Preserve historical callers when no shared owner was composed.
-    if (!this.additionalFleetOwnership) {
-      // A queued wake still shows its previous outcome, yet it will occupy a slot as soon as it starts.
-      const counted = new Set(this.list().filter(agent => agent.status === 'pending' || agent.status === 'running').map(agent => agent.id));
-      for (const id of this.queuedWakes) counted.add(id);
-      return counted.size;
-    }
-    return new Set([...this.fleetOwnership(), ...this.additionalFleetOwnership()].filter(agent => agent.active).map(agent => agent.id)).size;
+  /**
+   * The one count fleet.maxSize is checked against, by every admission (spawn,
+   * batch spawn, wake, the elastic pool, a hosted ACP session): this manager's
+   * active agents, its queued wakes (they take a slot as soon as they start),
+   * sibling execution graphs, and the owned sources added with addFleetSource.
+   */
+  fleetCount(): number {
+    const active = new Set<string>();
+    for (const agent of this.fleetOwnership()) if (agent.active) active.add(agent.id);
+    for (const id of this.queuedWakes) active.add(id);
+    for (const agent of this.additionalFleetOwnership?.() ?? []) if (agent.active) active.add(agent.id);
+    for (const source of this.fleetSources) for (const agent of source()) if (agent.active) active.add(agent.id);
+    return active.size;
+  }
+
+  /** Count another owned source against the fleet ceiling, such as the ACP sessions a composition hosts. */
+  addFleetSource(source: () => readonly AgentFleetOwnership[]): void {
+    this.fleetSources.push(source);
   }
 
   private deriveEffectiveTools(
@@ -334,7 +344,7 @@ export class AgentManager {
         contractId: requester.contractId,
         agentId: requester.id,
         depth: requester.orchestrationDepth + 1,
-        activeAgents: this.list().filter((agent) => agent.status === 'pending' || agent.status === 'running').length,
+        activeAgents: this.fleetCount(),
         reason,
       });
     }
@@ -462,7 +472,7 @@ export class AgentManager {
       throw new Error(`Unknown parent agent: '${input.parentAgentId}'`);
     }
     const orchestrationDepth = parentRecord ? parentRecord.orchestrationDepth + 1 : 0;
-    const activeAgents = this.activeFleetCount();
+    const activeAgents = this.fleetCount();
     const isContractOwnerChild = Boolean(parentRecord?.contractRole === 'owner' && input.outsideContract);
     const spawnDecision = evaluateOrchestrationSpawn({
       configManager: this.configManager,
@@ -606,7 +616,7 @@ export class AgentManager {
         // manager. Recheck at the synchronous reservation boundary, with no
         // await or published callback between this check and pending insertion.
         const admission = evaluateOrchestrationSpawn({ configManager: this.configManager!, mode: 'manual-batch',
-          activeAgents: this.activeFleetCount(), requestedDepth: orchestrationDepth });
+          activeAgents: this.fleetCount(), requestedDepth: orchestrationDepth });
         if (!admission.allowed) {
           if (admission.boundCap?.key === 'fleet.maxSize') throw new AgentCapacityError(admission.reason ?? 'Shared fleet capacity reached');
           throw new Error(admission.reason ?? 'Shared fleet admission refused');
@@ -789,10 +799,9 @@ export class AgentManager {
     // outcome until the queued run starts (the reserved slot already counts as occupied).
     const admit = (): ReturnType<AgentManager['reserveExecution']> => {
       if (this.configManager) {
-        const alreadyOwned = this.additionalFleetOwnership !== undefined
-          && this.fleetOwnership().some(agent => agent.id === agentId && agent.active);
+        const alreadyOwned = this.fleetOwnership().some(agent => agent.id === agentId && agent.active);
         const admission = evaluateOrchestrationSpawn({ configManager: this.configManager, mode: 'manual-batch',
-          activeAgents: this.activeFleetCount() - (alreadyOwned ? 1 : 0), requestedDepth: record.orchestrationDepth });
+          activeAgents: this.fleetCount() - (alreadyOwned ? 1 : 0), requestedDepth: record.orchestrationDepth });
         if (!admission.allowed) throw new Error(admission.reason ?? 'Fleet capacity reached');
       }
       return this.reserveExecution(agentId);

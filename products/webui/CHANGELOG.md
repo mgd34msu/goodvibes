@@ -1,73 +1,8 @@
 # Changelog
 
-All notable changes to GoodVibes WebUI will be documented in this file.
+Changes to GoodVibes WebUI up to 2.0.0, when it had its own version.
 
-This project uses semantic versioning with `vMAJOR.MINOR.PATCH` git tags.
-
-## [Unreleased]
-
-### Fixed
-
-- Settings text, number and budget inputs now follow live config refreshes without
-  writing untouched stale values on blur. Dirty refresh conflicts retain the edit
-  and offer an explicit choice; Escape discards a draft. Pending/repeated saves
-  cannot duplicate writes or roll back newer config snapshots, and rejected
-  writes remain editable and retryable. Secret replacement cancellation clears
-  its write-only draft and error.
-
-- Await authenticated daemon error-reference readings at real chat/session callers. Unissued, uncertain or stale prose no longer becomes a guessed session or method classification.
-
-- Fleet actions for native-owned sessions now share the conversation composer's
-  source-bound continuation workflow. Only authoritative legacy classification
-  enables compact legacy steering. Exact originals, saved-input recovery and
-  honest native queue, cancellation and execution receipts use the existing owners.
-
-- Native requests now automatically hand admitted work to the existing paired
-  native execution owner. Exact targets are durably retained before dispatch;
-  status-only reopening, explicit interrupted recovery, cancellation and separate
-  execution/verification projections preserve the original attempt without a
-  human approval gate or legacy chat/contract fallback.
-
-- General settings now renders the engine-owned terminal palette as a 13-choice
-  selector, with `goodvibes` as the fresh default. Changes persist through the
-  connected host's client-local config store; browser appearance and other
-  terminal installations remain independent.
-
-- Session context shows the engine's known ceiling, source and accepted-input
-  lower bound without promoting fallback or consensus estimates into capacity.
-  Model changes supersede stale context reads; unsupported hosted scopes remain
-  unavailable instead of showing another runtime's usage.
-
-- Session follow-up and steer receipts now retain the returned input ID and exact
-  delivery state. Queued HTTP responses stay queued; session updates and a fallback
-  poll reconcile delivery, completion and failure without resending. Session,
-  account and relay changes retire local drafts and stale responses.
-
-- Session close, reopen and permanent delete retain the originating account and
-  selected-detail lifetime. Interrupted requests never continue under another
-  account or dismiss a newer selection. Unknown outcomes remain locked across
-  detail reopen until an explicit read-only refresh; mutations are never replayed
-  automatically. Deletion checks the target when the capped session list omits it.
-
-- Work can inspect real native, durable and captured-worktree contract responses.
-  Original native goals and ordered criteria, recorded semantic outcomes, separate
-  transport retry progress and durable/input provenance remain read-only.
-  Genuine engine-route fixtures guard strict wire validation and rendering.
-
-### Added
-
-- Work contract details can explicitly request cancellation with a partial-files
-  warning. Intents are single-flight and tied to the selected account and detail.
-  Ambiguous responses never replay a mutation; retry requires refreshed state and
-  a new confirmation. Acknowledgement does not claim child cleanup is complete,
-  and a retained contract without a live runner can report no cancellation.
-
-- Read-only contract inspection in Work: goals, original requests, criteria and
-  recorded readings, group/unit/attempt trees, check evidence, escalation history
-  and terminal results. Existing process controls remain reachable.
-- Contract caches follow authentication lifetime, cancel late responses and
-  refresh from the contracts event domain, including events during initial load.
-  Generated engine schemas reject malformed evidence before rendering.
+Changes from 3.0.0 on are recorded in the [suite changelog](../../packages/engine/CHANGELOG.md) and the [release notes](../../docs/releases/).
 
 ## [2.0.0] - 2026-10-01
 

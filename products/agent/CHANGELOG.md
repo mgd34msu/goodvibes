@@ -1,43 +1,8 @@
 # Changelog
 
-Product-facing release notes for GoodVibes Agent.
+Changes to GoodVibes Agent up to 2.1.0, when it had its own version.
 
-## Unreleased
-
-- Validate independent Personal Ops sources at publication instead of repeatedly joining earlier catalogs into every later reading. Preserve cancellation, current permissions, complete candidate discovery, and final source checks.
-
-- Require validated runtime evidence for advertised process capabilities; method names alone no longer establish PTY or stdin contracts.
-
-- Interpret ambiguous privilege-command text through the protected Jev reader, so printing a program name does not block an ordinary background command. Literal privileged programs and independent execution admission retain their existing restrictions.
-
-- Route remote owner conversation through durable original-source native intake
-  and identity-only hosted delivery. Preserve daemon-owned continuation context,
-  exact recovery and Stop targets, and fail closed on unknown outcomes without
-  body-only or local fallback. Show native diagnostics directly in the transcript.
-
-- Add explicit shared legacy import submission, Jev reconsideration and exact-request recovery. Durable command identity precedes dispatch; live paired authority and workspace generations fence native admission. Historical completion remains reported and unverified, with legacy source records retained.
-
-- Add owner-only interactive `/setup pair --apply` with shell-owned exact confirmation and cancellation across preview, migration and verification. Model and nested routes cannot apply; interrupted outcomes preserve existing recovery state without reminting.
-
-- Handle real-terminal Ctrl-C and EOF throughout setup pairing, report interrupted previews consistently, and qualify the compiled binary against an owned daemon for confirmation, cancellation, restart and unknown-outcome recovery without reminting.
-
-- Add preview-first Agent setup pairing with fresh terminal confirmation for persistent administrative access. Per-host credentials live in an Agent-owned private store; interrupted migration outcomes block silent retries, shared-token storage and environment overrides remain unchanged.
-
-- Require a fresh selected-host paired-owner check for native intake setup readiness. Token readability, old receipts and saved checkpoints no longer upgrade live host/auth readiness; synchronous workspace snapshots stay unverified, and disabled dialing makes no readiness probe.
-
-- Reuse the shared contract lifecycle bridge so explicitly enabled Slack/Discord notifications retain task names on passed, failed and cancelled work. Restricted notifications still omit content; local contract lines and follow-ups use the same canonical labels.
-
-- Added explicit complete-source JSON-file submission with durable principal-bound request identity, crash-safe original-ID lookup/replay, and separate execution controls.
-
-- Distinguish pending/refused admission and cancellation before admission from actual native execution receipts. Preserve explicit recovery and original requested revisions.
-
-- Added explicit native work start, status, cancellation and recovery controls through the authenticated daemon client. Native project discovery no longer depends on legacy planning.
-- Kept original criteria and verification separate from execution progress, and fenced pending requests on host, token, workspace and view replacement. Closing the view does not cancel server execution.
-- Keep one notification-history entry for each declared runtime occurrence
-  across live delivery and saved-session replay, without repeating restored
-  toasts. Distinct identical outcomes and legacy notices remain separate.
-  Large collapsed groups rotate within a bounded history, and folded failure
-  notices keep their complete diagnostic text.
+Changes from 3.0.0 on are recorded in the [suite changelog](../../packages/engine/CHANGELOG.md) and the [release notes](../../docs/releases/).
 
 ## 2.1.0 - 2026-09-30
 

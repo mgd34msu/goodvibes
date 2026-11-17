@@ -1,37 +1,10 @@
 # Changelog
 
-All notable changes to GoodVibes TUI.
+Changes to GoodVibes TUI up to 2.1.0, when it had its own version.
 
 ---
 
-## Unreleased
-
-- Add `goodvibes acp`, which runs GoodVibes as an Agent Client Protocol agent over stdio from the installed binary, and `goodvibes-daemon mcp serve`, which serves the operator surface of a running daemon to an MCP client over stdio. Both write only protocol frames to stdout and end when the client closes stdin.
-
-- Keep contract and agent activity visible while the main turn waits for delegated
-  work, instead of showing stale model latency and token-speed measurements.
-
-- Show Jev completion validation and reconnection as explicit activity above
-  the input, with their own elapsed time instead of a stalled model label.
-
-- Route owner-terminal `/workstream start` through native conversation intake and execution, preserving the exact request and source references before parsing. Keep historical contract controls separate; generic, model and nested command calls cannot mint owner input.
-
-- Add explicit shared legacy import submission, Jev reconsideration and exact-request recovery. Durable command identity precedes dispatch; live paired authority and workspace generations fence native admission. Historical completion remains reported and unverified, with legacy source records retained.
-
-- Bind native TUI credentials to exact daemon origins in a private, durable TUI store; remove implicit daemon-global and environment-token fallback from native consumers.
-- Add explicit owner-terminal `host pair --bootstrap-shared --apply` migration with fresh confirmation, state/authority revalidation and interruption-safe no-remint recovery.
-
-- Added explicit complete-source JSON-file submission with durable principal-bound request identity, crash-safe original-ID lookup/replay, and separate execution controls.
-
-- Distinguish pending/refused admission and cancellation before admission from actual native execution receipts. Preserve explicit recovery and original requested revisions.
-
-- Added explicit native work start, status, cancellation and recovery controls through the authenticated daemon client. Native project discovery no longer depends on legacy planning.
-- Kept original criteria and verification separate from execution progress, and fenced pending requests on host, token, workspace and view replacement. Closing the view does not cancel server execution.
-- Keep one notification-history entry for each declared runtime occurrence
-  across live delivery and saved-session replay, without repeating restored
-  toasts. Distinct identical outcomes and legacy notices remain separate.
-  Large collapsed groups rotate within a bounded history, and folded failure
-  notices keep their complete diagnostic text.
+Changes from 3.0.0 on are recorded in the [suite changelog](../../packages/engine/CHANGELOG.md) and the [release notes](../../docs/releases/).
 
 ## [2.1.0] - 2026-09-30
 

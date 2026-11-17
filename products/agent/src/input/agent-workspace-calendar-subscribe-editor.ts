@@ -46,6 +46,7 @@ export function createCalendarSubscribeWizardEditor(): AgentWorkspaceLocalEditor
     fields: [
       { id: 'url', label: 'Feed URL', value: '', required: true, multiline: false, hint: 'The .ics feed URL. Stored as a secret; masked here and never rendered in results.', redact: true },
       { id: 'name', label: 'Name', value: '', required: false, multiline: false, hint: 'Optional. Left blank, the calendar\'s own name is used.' },
+      { id: 'allowPrivateHost', label: 'Allow private host', value: 'no', required: false, multiline: false, hint: 'yes/no. Yes only for a calendar server on your own network (loopback or LAN address); https is still required. Defaults to no.' },
       { id: 'confirm', label: 'Confirm', value: '', required: true, multiline: false, hint: 'Type yes to validate the feed and subscribe.' },
     ],
   };
@@ -96,7 +97,8 @@ export async function submitAgentWorkspaceCalendarSubscribeWizardEditor(
       return;
     }
 
-    const result = await registry.subscribe(url, requestedName);
+    const allowPrivateHost = isAffirmative(readField('allowPrivateHost'));
+    const result = await registry.subscribe(url, requestedName, undefined, allowPrivateHost ? { allowPrivateHost } : {});
     if (!result.ok) {
       // Settings kept so the URL/name are not retyped; the stage is named honestly.
       host.localEditor = { ...editor, message: `Could not subscribe (${result.stage} stage): ${result.detail}` };

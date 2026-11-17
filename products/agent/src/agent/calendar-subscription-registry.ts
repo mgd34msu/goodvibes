@@ -286,8 +286,12 @@ export function createHttpFeedFetcher(options: HttpFeedFetcherOptions = {}): Fee
       if (body === null) return { kind: 'error', message: `Feed is larger than ${Math.floor(maxBytes / 1024 / 1024)} MiB` };
       return { kind: 'ok', body, ...(res.headers.get('etag') ? { etag: res.headers.get('etag')! } : {}), ...(res.headers.get('last-modified') ? { lastModified: res.headers.get('last-modified')! } : {}) };
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return { kind: 'error', message: message.replace(/^Webhook URL/, 'Feed URL') };
+      const message = (error instanceof Error ? error.message : String(error)).replace(/^Webhook URL/, 'Feed URL');
+      // The platform's refusal names the webhook setting; for a feed the owner's way past it is the per-feed opt-in.
+      const privateHost = !options.allowPrivateHosts && /host is not allowed|resolves to .*address/.test(message);
+      return { kind: 'error', message: privateHost
+        ? `${message}. If this calendar server is on your own network, subscribe again with --allow-private-host (in the subscribe form: Allow private host = yes)`
+        : message };
     }
   };
 }

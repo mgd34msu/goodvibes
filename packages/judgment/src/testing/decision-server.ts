@@ -6,7 +6,7 @@ import { choiceAnswer, noulAnswer, scoreAnswer } from './fake-port.ts';
  * One scripted answer for one question of a decision request, or undefined to
  * give it the neutral answer. `state` and `question` are as the caller asked
  * them; `sharedContext` is the request's shared evaluator rules, which the
- * wire carried once at the head of the state.
+ * wire carried once at the head of the state, when they apply to this question.
  */
 export type DecisionScript = (name: string, question: Question, state: unknown, sharedContext?: string) => unknown;
 
@@ -39,6 +39,8 @@ export interface ScriptedDecisionRequest {
   readonly state: unknown;
   /** The request's shared evaluator rules, sent once for the request. */
   readonly sharedContext?: string;
+  /** The questions asked without the shared context. */
+  readonly withoutSharedContext?: readonly string[];
 }
 
 export interface ScriptedDecisionServer {
@@ -92,8 +94,9 @@ export function startScriptedDecisionServer(options: { readonly script?: Decisio
     const decision = readRequest(body);
     if (!decision) { unreadable.push(body); return Response.json({ error: { message: 'Not a decision request' } }, { status: 400 }); }
     requests.push(decision);
+    const without = new Set(decision.withoutSharedContext ?? []);
     const answers = Object.fromEntries(Object.entries(decision.questions)
-      .map(([name, question]) => [name, script(name, question, decision.state, decision.sharedContext) ?? neutralDecisionAnswer(question)]));
+      .map(([name, question]) => [name, script(name, question, decision.state, without.has(name) ? undefined : decision.sharedContext) ?? neutralDecisionAnswer(question)]));
     return Response.json({ model, answers, usage: { input_tokens: 10, output_tokens: 3 } });
   } });
   return {

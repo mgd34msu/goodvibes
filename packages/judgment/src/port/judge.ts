@@ -1,4 +1,4 @@
-import { contextFor } from '../batteries/asking.ts';
+import { contextFor, sharedContextFor } from '../batteries/asking.ts';
 import { readItem, type Battery, type BatteryItems, type BatteryRun } from '../batteries/battery.ts';
 import { DEFAULT_DECISION_DEADLINE_MS } from './deadline.ts';
 import { JudgmentError } from './errors.ts';
@@ -220,7 +220,7 @@ export async function judge<const Items extends BatteryItems, R>(o: JudgeOptions
   try {
     result = await untilAborted(port.ask({
       state: o.state, questions, signal, deadlineMs, conclude,
-      ...(battery.context ? { sharedContext: battery.context } : {}),
+      ...sharedContextFor(battery, Object.keys(questions)),
       ...(battery.model === undefined ? {} : { model: battery.model }),
       context: contextFor(battery, 'battery', { site: o.site }),
     }), signal);

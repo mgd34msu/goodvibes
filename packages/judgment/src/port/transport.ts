@@ -122,10 +122,10 @@ export function createSystemOnePort(config: JudgmentConfig): JudgmentPort {
           deadlineTimer = setTimeout(() => controller.abort(missedDeadline), deadlineMs);
         }
         checkCancellation();
-        let input: Pick<JudgmentRequest<Q>, 'state' | 'questions' | 'sharedContext'>;
+        let input: Pick<JudgmentRequest<Q>, 'state' | 'questions' | 'sharedContext' | 'withoutSharedContext'>;
         try { input = captureJudgmentInput(request); }
         catch { throw new JudgmentError('invalid-request', 'judgment input must be JSON-serializable', { reason: 'not-serializable' }); }
-        const { state, questions, sharedContext } = input;
+        const { state, questions, sharedContext, withoutSharedContext } = input;
         validateQuestions(questions);
         // The shared context goes once per request, in the form each target's
         // wire takes. Each form is placed and serialized once; size checks and
@@ -135,7 +135,7 @@ export function createSystemOnePort(config: JudgmentConfig): JudgmentPort {
           const form = sharedContextForm(endpoint);
           let serialized = serializedForms.get(form);
           if (serialized === undefined) {
-            const wire = placeSharedContext(form, state, questions, sharedContext);
+            const wire = placeSharedContext(form, state, questions, sharedContext, withoutSharedContext);
             serialized = serializeInput(wire.state, wire.questions);
             checkInputBytes(serialized);
             serializedForms.set(form, serialized);

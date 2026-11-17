@@ -1,4 +1,4 @@
-import { toJson, type DecisionContext, type EntryType, type JudgmentPort, type JudgmentResult, type Questions } from '../port/types.ts';
+import { toJson, type DecisionContext, type EntryType, type JudgmentPort, type JudgmentRequest, type JudgmentResult, type Questions } from '../port/types.ts';
 import type { PatternHeader } from './decision.ts';
 
 export type { PatternHeader } from './decision.ts';
@@ -59,14 +59,35 @@ export function contextFor(header: PatternHeader, pattern: PatternName, options:
   };
 }
 
+/** A decision's shared evaluator rules and the questions they do not govern (a battery's `context` and `withoutContext`). */
+export interface SharedContextSource {
+  readonly context?: string | undefined;
+  readonly withoutContext?: readonly string[] | undefined;
+}
+
+/**
+ * The shared context a request asking `asked` of a decision carries: its
+ * rules once for the request, with the asked questions they do not govern
+ * named; nothing when it has no rules or they govern none of the asked
+ * questions.
+ */
+export function sharedContextFor(source: SharedContextSource, asked: readonly string[]): Pick<JudgmentRequest<Questions>, 'sharedContext' | 'withoutSharedContext'> {
+  if (!source.context) return {};
+  const exempt = new Set(source.withoutContext ?? []);
+  const without = asked.filter(name => exempt.has(name));
+  if (without.length === asked.length) return {};
+  return without.length === 0 ? { sharedContext: source.context } : { sharedContext: source.context, withoutSharedContext: without };
+}
+
 /**
  * Asks on behalf of a named decision, attributing the call in the decision
  * log. A decision with a `context` (a battery's shared evaluator rules) sends
- * it once, as the request's shared context.
+ * it once, as the request's shared context, naming the asked questions it
+ * does not govern.
  */
 export function askAs<const Q extends Questions>(
   port: JudgmentPort,
-  header: PatternHeader & { readonly context?: string | undefined },
+  header: PatternHeader & SharedContextSource,
   pattern: PatternName,
   state: EntryType,
   questions: Q,
@@ -75,7 +96,7 @@ export function askAs<const Q extends Questions>(
   return port.ask({
     state,
     questions,
-    ...(header.context ? { sharedContext: header.context } : {}),
+    ...sharedContextFor(header, Object.keys(questions)),
     ...(header.model === undefined ? {} : { model: header.model }),
     ...(options.signal === undefined ? {} : { signal: options.signal }),
     ...(options.beforeAttempt === undefined ? {} : { beforeAttempt: options.beforeAttempt }),

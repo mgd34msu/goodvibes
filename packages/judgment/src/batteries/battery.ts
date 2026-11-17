@@ -112,6 +112,12 @@ export interface BatteryDefinition<Items extends BatteryItems> {
    * the form its backend's wire takes (`placeSharedContext`).
    */
   readonly context?: string;
+  /**
+   * Items asked without `context`, because they judge something its rules do
+   * not govern. A request that asks one of them alongside the others states
+   * the rules once for the rest; a request that asks only these states none.
+   */
+  readonly withoutContext?: readonly (keyof Items & string)[];
   readonly items: Items;
   readonly fixtures: readonly Fixture<Items>[];
   /** Share of fixture expectations calibration must meet, in (0, 1]. */
@@ -218,10 +224,16 @@ function questionsFor<Items extends BatteryItems>(battery: string, items: Items,
 
 export function defineBattery<const Items extends BatteryItems>(definition: BatteryDefinition<Items>): Battery<Items> {
   // Every path that asks a battery (run, judge, fan-out, calibration) sends its
-  // `context` as the request's shared context, once per request; `items` stay as written.
-  const { name, items, fixtures } = definition;
+  // `context` as the request's shared context, once per request, naming the
+  // asked items in `withoutContext`; `items` stay as written.
+  const { name, items, fixtures, withoutContext } = definition;
   const header = decisionHeader(definition);
   if (Object.keys(items).length === 0) throw new RangeError(`battery ${name}: needs at least one question`);
+  if (withoutContext !== undefined) {
+    if (!definition.context) throw new RangeError(`battery ${name}: withoutContext needs a context to leave out`);
+    for (const itemName of withoutContext) if (!Object.hasOwn(items, itemName)) throw new RangeError(`battery ${name}: withoutContext names unknown question "${itemName}"`);
+    if (new Set(withoutContext).size !== withoutContext.length) throw new RangeError(`battery ${name}: withoutContext names a question twice`);
+  }
   for (const [itemName, item] of Object.entries(items)) assertItemBands(name, itemName, item);
   assertFixturesCover(name, items, fixtures);
 

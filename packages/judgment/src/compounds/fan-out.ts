@@ -52,24 +52,41 @@ function selectedItems(parts: Parts, only: Readonly<Record<string, readonly stri
   }));
 }
 
+/** Whether a part's evaluator rules govern one of its questions (it has rules, and the item is not in its `withoutContext`). */
+function governed(battery: Battery<BatteryItems>, item: string): boolean {
+  return !!battery.context && !(battery.withoutContext ?? []).includes(item);
+}
+
 /**
- * The one context every part shares, sent once as the request's shared
- * context; undefined when no part has one, or when the parts' contexts differ
- * (then each part's own context goes ahead of its own questions).
+ * The one set of rules every governed selected question shares, sent once as
+ * the request's shared context; undefined when no selected question is
+ * governed, or when the parts' rules differ (then each part's own rules go
+ * ahead of only its governed questions).
  */
-function commonContext(parts: Parts): string | undefined {
-  const contexts = new Set(Object.values(parts).map(battery => battery.context || undefined));
+function commonContext(parts: Parts, selected: Readonly<Record<string, BatteryItems>>): string | undefined {
+  const contexts = new Set(Object.entries(selected).flatMap(([part, items]) => {
+    const battery = parts[part]!;
+    return Object.keys(items).some(item => governed(battery, item)) ? [battery.context!] : [];
+  }));
   return contexts.size === 1 ? [...contexts][0] : undefined;
 }
 
-function mergedQuestions(parts: Parts, selected: Readonly<Record<string, BatteryItems>>, shared: string | undefined): Questions {
+/** The merged questions, and those the shared context does not govern (a part without rules, an item its battery leaves out). */
+function mergedQuestions(parts: Parts, selected: Readonly<Record<string, BatteryItems>>, shared: string | undefined): { readonly questions: Questions; readonly without: readonly string[] } {
   const questions: Record<string, Question> = {};
+  const without: string[] = [];
   for (const [part, items] of Object.entries(selected)) {
     if (part.includes(SEPARATOR)) throw new RangeError(`fan-out part "${part}" may not contain "${SEPARATOR}"`);
-    const own = shared === undefined ? parts[part]!.context || undefined : undefined;
-    for (const [item, spec] of Object.entries(items)) questions[questionKey(part, item)] = own === undefined ? spec.question : prefixInstructions(spec.question, own);
+    const battery = parts[part]!;
+    for (const [item, spec] of Object.entries(items)) {
+      const key = questionKey(part, item);
+      if (!governed(battery, item)) {
+        questions[key] = spec.question;
+        if (shared !== undefined) without.push(key);
+      } else questions[key] = shared === undefined ? prefixInstructions(spec.question, battery.context!) : spec.question;
+    }
   }
-  return questions;
+  return { questions, without };
 }
 
 function readParts(parts: Readonly<Record<string, BatteryItems>>, answers: WireAnswers): PartReadings {
@@ -100,15 +117,17 @@ export async function fanOut<const P extends Parts, const Only extends Selection
   const defaultModel = port.model;
   const model = sharedModel(defaultModel, parts);
   const selected = selectedItems(parts, options.only);
-  const shared = commonContext(parts);
+  const shared = commonContext(parts, selected);
+  const merged = mergedQuestions(parts, selected, shared);
   const batteries = Object.entries(parts).map(([part, battery]) => ({
     part, name: battery.name, version: battery.version, model: battery.model ?? defaultModel,
     questions: Object.keys(selected[part]!),
   }));
   const result = await port.ask({
     state,
-    questions: mergedQuestions(parts, selected, shared),
+    questions: merged.questions,
     ...(shared === undefined ? {} : { sharedContext: shared }),
+    ...(merged.without.length === 0 ? {} : { withoutSharedContext: merged.without }),
     ...(model === defaultModel ? {} : { model }),
     ...(options.signal === undefined ? {} : { signal: options.signal }),
     ...(options.beforeAttempt === undefined ? {} : { beforeAttempt: options.beforeAttempt }),

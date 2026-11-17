@@ -65,6 +65,12 @@ export interface JudgmentRequest<Q extends Questions> {
    */
   readonly sharedContext?: string;
   /**
+   * Questions of this request asked without the shared context, because they
+   * judge something its rules do not govern (a battery's `withoutContext`).
+   * Omitted: every question reads with it.
+   */
+  readonly withoutSharedContext?: readonly string[];
+  /**
    * Request a private-state commitment on a successfully recorded answer.
    * Use only when an independent saved-proof consumer must later match this
    * input after its original state is released. Ordinary audit and failed

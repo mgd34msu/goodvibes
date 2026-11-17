@@ -1,7 +1,10 @@
 import { DEFAULT_MODEL } from '../port/config.ts';
 import type { EntryType, JudgmentPort, JudgmentRequest, Question, Questions } from '../index.ts';
 
-/** Answers one question; `sharedContext` is the request's shared evaluator rules, stated once for the request. */
+/**
+ * Answers one question; `sharedContext` is the request's shared evaluator
+ * rules, stated once for the request, when they apply to this question.
+ */
 export type Answerer = (name: string, question: Question, state: EntryType, sharedContext?: string) => unknown;
 
 /** A port that answers each question through `answer` and remembers every request, its shared context included. */
@@ -11,8 +14,10 @@ export function fakePort(answer: Answerer) {
     model: DEFAULT_MODEL,
     async ask(request) {
       requests.push(request as JudgmentRequest<Questions>);
+      const without = new Set(request.withoutSharedContext ?? []);
       const answers = Object.fromEntries(
-        Object.entries(request.questions).map(([name, question]) => [name, answer(name, question, request.state, request.sharedContext || undefined)]),
+        Object.entries(request.questions).map(([name, question]) => [name,
+          answer(name, question, request.state, without.has(name) ? undefined : request.sharedContext || undefined)]),
       );
       return {
         answers: answers as never,

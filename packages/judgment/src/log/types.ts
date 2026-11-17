@@ -30,6 +30,8 @@ export interface CallRecord {
   readonly questions: JsonValue;
   /** The evaluator rules every question of the call shared, stated once for the call (a battery's context). */
   readonly sharedContext?: string;
+  /** The questions of the call asked without the shared context. */
+  readonly withoutSharedContext?: readonly string[];
   readonly latencyMs: number;
   readonly requestId: string | undefined;
   readonly lineage?: JudgmentLineage;

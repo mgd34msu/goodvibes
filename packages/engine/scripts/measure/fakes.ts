@@ -103,7 +103,7 @@ export function countingPort(inner: JudgmentPort): JudgmentPort {
       request.signal?.throwIfAborted();
       request.beforeAttempt?.();
       decisionCounts.requests++;
-      const wire = placeSharedContext('state-head', request.state, request.questions, request.sharedContext);
+      const wire = placeSharedContext('state-head', request.state, request.questions, request.sharedContext, request.withoutSharedContext);
       decisionCounts.bytes += sizeOf({ model: request.model, questions: wire.questions, state: wire.state, context: request.context });
       const site = request.context?.battery ?? request.context?.site ?? '(unnamed)';
       decisionCounts.bySite[site] = (decisionCounts.bySite[site] ?? 0) + 1;

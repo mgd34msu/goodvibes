@@ -62,6 +62,9 @@ const STEPS: readonly Step[] = [
   script('gates', 'architecture:check'),
   script('gates', 'platform-console:check'),
   script('gates', 'any:check'),
+  // The test runner's admission scan (header, risk table, refused forms) over
+  // the test files the runner does not start: the web UI's Playwright journeys.
+  { label: 'test:scan', job: 'gates', command: 'bun', args: ['packages/engine/scripts/test-scan.ts'] },
   // The committed contracts and everything generated from them, including the
   // reference documents (docs/reference-*.md).
   script('gates', 'contracts:check'),

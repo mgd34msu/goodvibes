@@ -17,7 +17,11 @@
  * src/test/e2e/), and 600 file-seconds for the default-suite files of one run.
  * Before any file starts, every selected file is scanned (test-scan.ts) and the
  * whole run is refused if one waits on a clock, uses a snapshot, replaces a
- * module, skips a test or raises a limit. A file that is killed at its limit,
+ * module, skips a test or raises a limit, lacks its `// Proves:` / `// Red when:`
+ * header, or disagrees with the risk table (packages/engine/docs/test-risks.md):
+ * a case with no row, a row naming a case the file does not have, a `Proves`
+ * line that is not the risk of its rows. A whole-suite run also refuses a row
+ * naming a file that does not exist. A file that is killed at its limit,
  * runs no test, skips a test, has a test over 5 seconds, tries the network, or
  * leaves a process running is a failure.
  */
@@ -28,7 +32,7 @@ import { fileURLToPath } from 'node:url';
 
 import { isolatedTestEnvironment } from '../toolchain/src/test-runner/test-isolation.ts';
 import { RUN_TMP_PREFIX, sweepStaleTmpDirs, TEST_TMP_ROOT_ENV } from '../toolchain/src/test-runner/temp.ts';
-import { scanBunfig, scanTestFiles, type ScanFinding } from './test-scan.ts';
+import { missingProofFiles, readRiskTable, scanBunfig, scanTestFiles, type ScanFinding } from './test-scan.ts';
 
 const ENGINE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const REPO_ROOT = resolve(ENGINE_ROOT, '../..');
@@ -138,14 +142,21 @@ export function selectTestFiles(all: readonly TestFile[], selection: Selection):
   return [...chosen.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
-/** The admission scan of the selected files and the bunfig.toml of each package they run in. */
-export function admissionFindings(files: readonly TestFile[]): ScanFinding[] {
+/**
+ * The admission scan of the selected files and the bunfig.toml of each package
+ * they run in, against the risk table read once. `wholeSuite` adds the table's
+ * own check that every row names a file that exists.
+ */
+export function admissionFindings(files: readonly TestFile[], wholeSuite = false): ScanFinding[] {
   const names = new Map(files.map((file) => [file.path, file.name]));
   const label = (path: string): string => names.get(path) ?? relative(REPO_ROOT, path).split(sep).join('/');
   const bunfigs = [...new Set(files.map((file) => join(file.cwd, 'bunfig.toml')))].filter((path) => existsSync(path));
+  const table = readRiskTable();
   return [
+    ...table.findings,
+    ...(wholeSuite ? missingProofFiles(table, REPO_ROOT) : []),
     ...bunfigs.flatMap((path) => scanBunfig(label(path), readFileSync(path, 'utf8'))),
-    ...scanTestFiles(files.map((file) => file.path), label),
+    ...scanTestFiles(files.map((file) => file.path), label, table),
   ].sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line);
 }
 
@@ -197,6 +208,8 @@ function strayProcesses(ownRoot: string, group: number): number[] {
 
 export interface RunOptions {
   readonly files: readonly TestFile[];
+  /** Every file of the selected kinds, not named ones: the risk table's rows are checked for missing files too. */
+  readonly wholeSuite?: boolean | undefined;
   readonly jobs: number;
   /** bun's `-t`: only tests whose name matches run; files with none matching fail. */
   readonly namePattern?: string | undefined;
@@ -320,10 +333,10 @@ const KIND_LABEL: Readonly<Record<TestKind, string>> = { default: 'Default suite
 export async function runTests(options: RunOptions): Promise<number> {
   const started = performance.now();
   const { files } = options;
-  const findings = admissionFindings(files);
+  const findings = admissionFindings(files, options.wholeSuite === true);
   if (findings.length > 0) {
     const refused = new Set(findings.map((finding) => finding.file));
-    console.log(`Refused: these forms are not allowed in a test (no sleeps or timer waits, snapshots, module mocks, skips, or raised limits):`);
+    console.log('Refused: no sleeps or timer waits, snapshots, module mocks, skips or raised limits; every file opens with its Proves and Red when header, and every case has its row in packages/engine/docs/test-risks.md:');
     for (const finding of findings) console.log(`  ${finding.file}:${finding.line}  ${finding.rule}`);
     console.log(`\nFiles: 0 run, 0 passed, 0 failed, ${refused.size} refused; nothing ran. ${((performance.now() - started) / 1000).toFixed(1)}s`);
     return 1;
@@ -450,5 +463,5 @@ if (import.meta.main) {
     console.error(`goodvibes: ${error instanceof Error ? error.message : String(error)}`);
     process.exit(2);
   }
-  process.exitCode = await runTests({ files, jobs: cli.jobs, namePattern: cli.namePattern });
+  process.exitCode = await runTests({ files, jobs: cli.jobs, namePattern: cli.namePattern, wholeSuite: cli.selection.paths.length === 0 });
 }

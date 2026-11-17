@@ -103,10 +103,12 @@ function readConversationMessageSnapshot(value: unknown): ConversationMessageSna
     const event = value.runtimeEvent;
     if (!isRecord(event) || typeof event.type !== 'string') return null;
     if (hasOwn(event, 'occurrenceId') && event.occurrenceId !== undefined && typeof event.occurrenceId !== 'string') return null;
+    if (hasOwn(event, 'variant') && event.variant !== undefined && typeof event.variant !== 'string') return null;
     return {
       role: 'system',
       content: value.content,
-      runtimeEvent: { type: event.type, ...(typeof event.occurrenceId === 'string' ? { occurrenceId: event.occurrenceId } : {}) },
+      runtimeEvent: { type: event.type, ...(typeof event.occurrenceId === 'string' ? { occurrenceId: event.occurrenceId } : {}),
+        ...(typeof event.variant === 'string' ? { variant: event.variant } : {}) },
       ...(notice ? { notice } : {}),
     };
   }

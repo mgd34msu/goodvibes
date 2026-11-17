@@ -1,6 +1,6 @@
 import { providerConversation, withHostMessage } from './conversation-provider-projection.js';
 import { HostInstructionChannel, type HostInstructions } from './host-instructions.js';
-import { declaredNoticePresentation } from '../runtime/runtime-event-notices.js';
+import { declaredNoticePresentation, storedRuntimeEvent } from '../runtime/runtime-event-notices.js';
 import type { SystemMessagePresentation } from '../runtime/system-message-presentation.js';
 import type { SystemMessageKind, SystemMessagePriorityLevel } from '../runtime/system-message-policy.js';
 import type { RuntimeEventProvenance } from '../../events/occurrence.js';
@@ -386,7 +386,7 @@ export class ConversationManager {
   public addSystemMessage(content: string, runtimeEvent?: RuntimeEventProvenance): void {
     const presentation = declaredNoticePresentation(content, runtimeEvent) ?? noticePresentation(INFO_NOTICE);
     this.messages.push({ role: 'system', content, presentation,
-      ...(runtimeEvent ? { runtimeEvent: { type: runtimeEvent.type, occurrenceId: runtimeEvent.occurrenceId } } : {}),
+      ...(runtimeEvent ? { runtimeEvent: storedRuntimeEvent(runtimeEvent) } : {}),
     });
     this._messagesRevision++;
     this._noticeRevisions++;

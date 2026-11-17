@@ -15,8 +15,6 @@ import type { RuntimeServices } from './services.ts';
 import { bindControlCommands } from './control-surfaces.ts';
 import { missingConversationalCaptureTools } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
-import { createOccasionsGatewayInvoke } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { createProfileGatewayInvoke } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { connectedHostFamilyRemote } from '../agent/operator-gateway-call.ts';
 import { registerAgentAuditTool } from '../tools/agent-audit-tool.ts';
 import { registerAgentAutonomyTool } from '../tools/agent-autonomy-tool.ts';
@@ -32,9 +30,8 @@ import { registerAgentHostTool } from '../tools/agent-host-tool.ts';
 import { installAgentMcpCallRoute } from '../tools/agent-mcp-call-route.ts';
 import { registerAgentMemoryTool } from '../tools/agent-memory-tool.ts';
 import { registerAgentModelsTool } from '../tools/agent-models-tool.ts';
-import { registerAgentOccasionsTool } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { registerAgentPersonalOpsTool } from '../tools/agent-personal-ops-tool.ts';
-import { registerAgentProfileTool } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { registerAgentTurnTools } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { registerAgentResearchTool } from '../tools/agent-research-tool.ts';
 import { registerAgentRouteTool } from '../tools/agent-route-tool.ts';
 import { registerAgentSecurityTool } from '../tools/agent-security-tool.ts';
@@ -109,31 +106,17 @@ export function registerAgentTools(deps: AgentToolRegistrationDeps): void {
   registerAgentHostTool(toolRegistry, commandRegistry, commandContext);
   registerAgentMemoryTool(toolRegistry, commandRegistry, commandContext);
   registerAgentModelsTool(toolRegistry, commandRegistry, commandContext);
-  // Occasions live as lines in the same profile file, and the daemon owns both
-  // that file and the machine-written acknowledgement store beside it, so this
-  // tool holds no state either. It calls the sixteen `occasions.*` verbs, over
-  // the same in-process-then-connected-host invoker the profile tool uses, and
-  // it decides nothing: no lead window, no cadence, no quiet hours, no kind.
-  // See docs/occasions.md §7 on why a surface that computed any of those would
-  // be a second implementation of a daemon rule.
-  registerAgentOccasionsTool(toolRegistry, {
-    invoke: createOccasionsGatewayInvoke({
-      gatewayMethods: services.gatewayMethods,
-      remote: connectedHostFamilyRemote({ configManager, homeDirectory: services.shellPaths.homeDirectory }),
-    }),
+  // The owner profile and occasions, the two halves of the capture contract:
+  // the same list a turn the daemon hosts for the Agent registers (agent-turn's
+  // registerAgentTurnTools). Both hold no state; they call the daemon's
+  // `profile.*` and `occasions.*` verbs, in-process when this process carries
+  // the handlers and over the connected host otherwise, and decide nothing the
+  // daemon decides (docs/occasions.md §7).
+  registerAgentTurnTools(toolRegistry, {
+    gatewayMethods: services.gatewayMethods,
+    remote: connectedHostFamilyRemote({ configManager, homeDirectory: services.shellPaths.homeDirectory }),
   });
   registerAgentPersonalOpsTool(toolRegistry, commandRegistry, commandContext);
-  // The owner profile lives in one file at daemon scope and the daemon is its
-  // only writer, so this tool holds no state of its own, it calls the nine
-  // `profile.*` verbs. The invoker prefers this process's own gateway catalog
-  // when it carries the handlers and falls back to the connected host
-  // otherwise, so the same tool works whether or not this build embeds them.
-  registerAgentProfileTool(toolRegistry, {
-    invoke: createProfileGatewayInvoke({
-      gatewayMethods: services.gatewayMethods,
-      remote: connectedHostFamilyRemote({ configManager, homeDirectory: services.shellPaths.homeDirectory }),
-    }),
-  });
   registerAgentResearchTool(toolRegistry, commandRegistry, commandContext);
   registerAgentRouteTool(toolRegistry, commandContext, { channelRegistry: services.channelPlugins });
   registerAgentSecurityTool(toolRegistry, commandRegistry, commandContext);

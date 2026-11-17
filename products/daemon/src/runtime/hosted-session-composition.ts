@@ -24,7 +24,9 @@ import { nativeHostedConversationOwner } from './native-hosted-conversation-comp
  *
  * Everything else in a floor comes from `createClientRuntimeServices`, the
  * same composition a terminal runs, so a hosted turn's tools, hooks, plugins
- * and model stack are the ones the platform already has, not a second set.
+ * and model stack are the ones the platform already has, not a second set. A
+ * session created for the Agent adds the Agent's own turn on top (its prompt
+ * and its terminal-free tools, `createAgentHostedTurn`).
  *
  * ── The exec posture a hosted turn runs under ──────────────────────────────
  *
@@ -73,6 +75,7 @@ import { GOODVIBES_DAEMON_SURFACE_ROOT } from '../config/surface.js';
 import type { RuntimeServices } from './runtime-services-types.js';
 import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import { createWorkspaceCheckpointing, daemonWorkspaceCheckpoints } from './workspace-checkpointing.js';
+import { createAgentHostedTurn } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 /** The operator policy a session hosted by THIS daemon runs under. */
 function hostedSystemPrompt(input: { readonly workspaceRoot: string }): string {
@@ -220,6 +223,17 @@ export function createHostedSessionOptions(services: RuntimeServices): DaemonHos
         catch (cleanupError) { throw new AggregateError([error, cleanupError], 'Daemon hosted workspace provider preload and cleanup failed'); }
         throw new Error('Daemon hosted workspace provider preload failed', { cause: error });
       }
+    },
+    // A session created for the Agent (its routed turns, its channel hand-offs,
+    // or `originSurface: 'agent'` from any client) answers as the Agent: its
+    // prompt, from the same stores the Agent process reads, and the Agent tools
+    // that need no terminal, with the rest refused here and named.
+    surfaceTurns: {
+      agent: createAgentHostedTurn({
+        homeDirectory: services.homeDirectory,
+        memoryRegistry: services.memoryRegistry,
+        gatewayMethods: services.gatewayMethods,
+      }),
     },
     // Called for every session the engine binds to a workspace (create and
     // rebuild), so the session's turns reach that workspace's checkpoints.

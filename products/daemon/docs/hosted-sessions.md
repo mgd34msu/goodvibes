@@ -66,7 +66,15 @@ Creation resolves a supplied `modelId` against the host's live model registry.
 Unknown or ambiguous models are refused. `clientId` attaches the creating client;
 `originSurface` preserves the originating product's settings identity across
 restarts and must be `agent`, `tui` or `webui`; any other value is refused
-before the session is created. Creation submits `initialPrompt` without waiting for its turn to finish.
+before the session is created. A session created for `agent` (the Agent's routed
+turns, its channel hand-offs, the web UI's GoodVibes Agent choice, or any client
+that names it) answers as the GoodVibes Agent: each model request gets the Agent's
+prompt (its operator policy and capture rules, VIBE, project context, persona,
+reviewed skills, routines and memory, read from the same `~/.goodvibes/agent`
+stores the Agent uses) and the session has the Agent's `profile` and `occasions`
+tools beside the platform tools. The Agent tools that run only in the Agent's own
+process are named in that prompt, and a call to one is refused with the reason
+and the next step: continue in the GoodVibes Agent itself. Creation submits `initialPrompt` without waiting for its turn to finish.
 A creation response therefore does not prove successful model execution.
 A `clientId` belongs to the principal that first attached it: another principal that attaches or detaches the same `clientId` is refused with 403 `HOSTED_CLIENT_FORBIDDEN`, so choose a `clientId` of your own.
 

@@ -46,3 +46,4 @@ export * from './occasions-outcome.js';
 export * from './occasions-reads.js';
 export * from './occasions-tool.js';
 export * from './local-state-admission.js';
+export * from './hosted-turn.js';

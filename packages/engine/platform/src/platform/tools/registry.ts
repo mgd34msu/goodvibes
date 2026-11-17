@@ -432,6 +432,8 @@ export class ToolRegistry {
   /** Tools sent one line at a time that `tool_schema` (or a refused call) has since loaded; they go in full from then on. */
   private readonly loadedTools = new Set<string>();
   private fullDefinitionOf: ((name: string) => ToolDefinition | undefined) | undefined;
+  /** Tools this registry does not hold because they run somewhere else, with why and where. */
+  private readonly elsewhere = new Map<string, { readonly reason: string; readonly next: string }>();
 
   /** Strict compositions bind their exact authority owner once; raw platform registries remain unbound. */
   constructor(expectedPermissionManager?: PermissionManager) {
@@ -483,11 +485,30 @@ export class ToolRegistry {
    * on. Undefined for any call that runs as usual. A lookup; no model request.
    */
   deferredCallRefusal(callId: string, name: string): ToolResult | undefined {
+    const away = this.tools.has(name) ? undefined : this.elsewhere.get(name);
+    if (away) {
+      return {
+        callId,
+        success: false,
+        error: `${away.reason} ${away.next}`,
+        decision: { state: 'refused', decidedBy: 'code', reason: away.reason, next: [away.next], standing: true },
+      };
+    }
     const definition = this.tools.get(name)?.definition;
     if (!definition || name === TOOL_SCHEMA_TOOL_NAME || this.sentInFull(definition)) return undefined;
     this.loadedTools.add(name);
     const full = this.fullDefinitionOf?.(name) ?? definition;
     return deferredToolRefusal(callId, full);
+  }
+
+  /**
+   * Names tools that run somewhere else (another process's turn) and so are not
+   * in this registry: a call to one is answered as refused, with `reason` and
+   * `next`, instead of as an unknown tool. Nothing lists them and no request
+   * carries them. A tool registered under the same name is unaffected.
+   */
+  declareElsewhere(names: readonly string[], refusal: { readonly reason: string; readonly next: string }): void {
+    for (const name of names) this.elsewhere.set(name, refusal);
   }
 
   /** Every registration and removal as a revision source. */

@@ -3,7 +3,9 @@
  * from here, each in a kit Dialog, named by what it gets done. Task
  * (tasks.create), session in a folder (sessions.hosted.create, offered only the
  * folders sessions.hosted.workspaces names; the detach policy defaults to the
- * daemon's own setting and is omitted from the call unless chosen), CI watch
+ * daemon's own setting and is omitted from the call unless chosen; the
+ * assistant is the daemon's own unless GoodVibes Agent is chosen, which sends
+ * `originSurface: 'agent'` so the session runs as an Agent turn), CI watch
  * (ci.watches.create), and a one-off CI status check (ci.status) that creates
  * nothing.
  */
@@ -90,6 +92,7 @@ function HostedForm({ onDone }: { onDone: (key?: string) => void }) {
   const offered = roots.data?.roots ?? [];
   const chosenRoot = workspaceRoot || offered[0] || '';
   const [detachPolicy, setDetachPolicy] = useState<'' | 'kill' | 'survive'>('');
+  const [assistant, setAssistant] = useState<'' | 'agent'>('');
   const create = useMutation({
     mutationFn: (input: SessionsHostedCreateInput) => platformClient.operator.sessions.hosted.create(input),
     onSuccess: (result) => {
@@ -113,6 +116,7 @@ function HostedForm({ onDone }: { onDone: (key?: string) => void }) {
       workspaceRoot: root,
       ...(title.trim() ? { title: title.trim() } : {}),
       ...(detachPolicy ? { detachPolicy } : {}),
+      ...(assistant ? { originSurface: assistant } : {}),
     });
   };
   return (
@@ -134,6 +138,18 @@ function HostedForm({ onDone }: { onDone: (key?: string) => void }) {
       )}
       <Field label="Title (optional)">
         <Input value={title} onChange={(e) => setTitle(e.target.value)} disabled={create.isPending} />
+      </Field>
+      <Field label="Assistant" help="GoodVibes Agent answers with the Agent's own policy, persona, skills, memory and the Agent tools that need no terminal; a tool that runs only in the Agent's terminal is refused there, with that said.">
+        <Select<'' | 'agent'>
+          aria-label="Assistant"
+          value={assistant}
+          onChange={setAssistant}
+          disabled={create.isPending}
+          options={[
+            { value: '', label: 'Daemon session' },
+            { value: 'agent', label: 'GoodVibes Agent' },
+          ]}
+        />
       </Field>
       <Field label="When the last client leaves">
         <Select<'' | 'kill' | 'survive'>

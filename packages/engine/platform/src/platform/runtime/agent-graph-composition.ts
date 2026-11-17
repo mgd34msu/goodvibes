@@ -56,6 +56,7 @@ export interface ContractedAgentGraphOptions extends AgentExecutionGraphOptions 
   readonly judgmentLog?: Pick<import('@goodvibes-jev/judgment').DecisionLog, 'get'> | undefined;
   readonly surfaceRoot?: string | undefined;
   readonly readAccessFilter?: import('../tools/shared/read-access.js').ReadAccessFilter | undefined;
+  readonly admitSetupCommand?: import('./worktree/setup.js').WorktreeSetupCommandAdmission | undefined;
   /** Live provider health for the route planner. */
   readonly runtimeStore?: Pick<RuntimeStore, 'getState'> | undefined;
 }
@@ -80,6 +81,7 @@ export function createContractedAgentGraph(options: ContractedAgentGraphOptions)
     judgmentLog: options.judgmentLog,
     surfaceRoot: options.surfaceRoot,
     readAccessFilter: options.readAccessFilter,
+    admitSetupCommand: options.admitSetupCommand,
     runtimeBus: options.runtimeBus,
     agentManager,
     agentMessageBus,

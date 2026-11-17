@@ -78,7 +78,8 @@ export interface WorktreeIsolationManagerDeps {
    */
   /** Optional exact-tree initializer; contract input must bypass checkout filters and hooks. */
   readonly initializeWorktree?: ((worktree: IsolatedWorktree) => Promise<void>) | undefined;
-  readonly runSetup?: ((worktreePath: string) => Promise<void> | void) | undefined;
+  /** Returns a sentence for the item's agent when the setup did not complete. */
+  readonly runSetup?: ((worktreePath: string) => Promise<string | void> | string | void) | undefined;
 }
 
 export interface ItemWorktreeHandle {
@@ -308,7 +309,11 @@ export function createWorktreeIsolationManager(deps: WorktreeIsolationManagerDep
       instances.set(item, instance);
       deps.emit({ type: 'item-worktree-created', workstreamId: workstream.id, itemId: item.id, path: instance.path, branch: instance.branch });
       if (deps.runSetup) {
-        try { await deps.runSetup(instance.path); resourceGuards.get(instance)?.(); }
+        try {
+          const note = await deps.runSetup(instance.path);
+          item.worktreeSetupNote = typeof note === 'string' && note.length > 0 ? note : undefined;
+          resourceGuards.get(instance)?.();
+        }
         catch (error) { logger.warn('worktree-isolation: cold-start setup hook threw (worktree kept; failure recorded by the setup wiring)', { itemId: item.id, path: instance.path, error: summarizeError(error) }); }
       }
     } else {

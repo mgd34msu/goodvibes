@@ -301,8 +301,10 @@ export interface WorkItem extends WorkItemContractFields {
   worktreePath?: string | undefined;
   /** The item's branch name inside its worktree (worktree mode only), `ws/...` for legacy engines or `ws-ns/<namespaceDigest>/...`. */
   worktreeBranch?: string | undefined;
-  /** False after Git allocation until initialization succeeds; incomplete trees require recovery. Undefined preserves legacy records. */
+  /** False after Git allocation until initialization succeeds; such a tree holds no work and is removed and created again at the next claim. Undefined preserves legacy records. */
   worktreeInitialized?: boolean | undefined;
+  /** Set when the item's worktree setup did not complete: told to the item's agent in its task. */
+  worktreeSetupNote?: string | undefined;
   /**
    * Integration state of the item branch relative to the base branch (worktree
    * mode). `'pending'` from the moment the passed item enters the integration

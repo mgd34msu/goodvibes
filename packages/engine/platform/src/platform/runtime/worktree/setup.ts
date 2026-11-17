@@ -100,7 +100,13 @@ export interface WorktreeCommandOutcome {
 }
 
 /** Runs a single shell command line in `cwd`, returning its exit code and captured combined output. */
-export type WorktreeCommandRunner = (commandLine: string, cwd: string) => Promise<WorktreeCommandOutcome>;
+export type WorktreeCommandRunner = (commandLine: string, cwd: string, signal?: AbortSignal) => Promise<WorktreeCommandOutcome>;
+
+/**
+ * Whether one setup command may run, decided the way an `exec` tool call of
+ * the same command is (the permission check). `reason` says why not.
+ */
+export type WorktreeSetupCommandAdmission = (commandLine: string, cwd: string) => Promise<{ readonly allowed: boolean; readonly reason?: string | undefined }>;
 
 /**
  * Lists the files (relative paths) in the source working tree that are not
@@ -117,6 +123,10 @@ export interface RunWorktreeSetupOptions {
   readonly now?: (() => number) | undefined;
   /** Time limit for each setup command when the default runner is used. Defaults to {@link DEFAULT_SETUP_COMMAND_TIMEOUT_MS}. */
   readonly commandTimeoutMs?: number | undefined;
+  /** Each command passes this check before it runs; a refused command fails the setup with the reason. */
+  readonly admitCommand?: WorktreeSetupCommandAdmission | undefined;
+  /** The run's cancellation: a command in progress is stopped and no later step starts. */
+  readonly signal?: AbortSignal | undefined;
 }
 
 /** Ten minutes: long enough for a cold install on a slow link, short enough that a stalled one is reported rather than waited on forever. */
@@ -137,7 +147,8 @@ function clampOutput(text: string): string {
  * keypress nobody will make.
  */
 export function createWorktreeCommandRunner(timeoutMs: number = DEFAULT_SETUP_COMMAND_TIMEOUT_MS): WorktreeCommandRunner {
-  return async (commandLine, cwd) => {
+  return async (commandLine, cwd, signal) => {
+    signal?.throwIfAborted();
     const proc = Bun.spawn(['sh', '-c', commandLine], {
       cwd,
       stdin: 'ignore',
@@ -147,10 +158,9 @@ export function createWorktreeCommandRunner(timeoutMs: number = DEFAULT_SETUP_CO
       detached: true,
     });
     let timedOut = false;
-    const timer = setTimeout(() => {
-      timedOut = true;
-      try { process.kill(-proc.pid, 'SIGKILL'); } catch { proc.kill('SIGKILL'); }
-    }, timeoutMs);
+    const stop = () => { try { process.kill(-proc.pid, 'SIGKILL'); } catch { proc.kill('SIGKILL'); } };
+    const timer = setTimeout(() => { timedOut = true; stop(); }, timeoutMs);
+    signal?.addEventListener('abort', stop, { once: true });
     try {
       const [stdout, stderr, exitCode] = await Promise.all([
         new Response(proc.stdout).text(),
@@ -160,6 +170,7 @@ export function createWorktreeCommandRunner(timeoutMs: number = DEFAULT_SETUP_CO
       return { exitCode, output: clampOutput([stdout, stderr].filter((s) => s.length > 0).join('\n')), ...(timedOut ? { timedOut } : {}) };
     } finally {
       clearTimeout(timer);
+      signal?.removeEventListener('abort', stop);
     }
   };
 }
@@ -222,9 +233,21 @@ export async function runWorktreeSetup(
   }
 
   for (const commandLine of config.commands) {
+    if (options.signal?.aborted) {
+      steps.push({ kind: 'command', label: commandLine, ok: false, output: 'not run: the work was cancelled' });
+      return { state: 'failed', startedAt, completedAt: now(), steps, error: `setup was cancelled before ${commandLine}` };
+    }
+    if (options.admitCommand) {
+      const admission = await options.admitCommand(commandLine, worktreePath);
+      if (!admission.allowed) {
+        const why = admission.reason ?? 'the permission check refused it';
+        steps.push({ kind: 'command', label: commandLine, ok: false, output: `not run: ${why}` });
+        return { state: 'failed', startedAt, completedAt: now(), steps, error: `setup command not allowed: ${commandLine} (${why})${config.derived?.commands ? derivedNote('worktree.setup.commands') : ''}` };
+      }
+    }
     let outcome: WorktreeCommandOutcome;
     try {
-      outcome = await runCommand(commandLine, worktreePath);
+      outcome = await runCommand(commandLine, worktreePath, options.signal);
     } catch (err) {
       const output = summarizeError(err);
       steps.push({ kind: 'command', label: commandLine, ok: false, output: clampOutput(output) });

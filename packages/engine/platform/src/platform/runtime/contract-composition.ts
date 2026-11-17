@@ -83,6 +83,8 @@ export interface ContractRunnerCompositionOptions {
   readonly runtimeStore?: Pick<RuntimeStore, 'getState'> | undefined;
   readonly workPlanService?: WorkPlanService | undefined;
   readonly readAccessFilter?: import('../tools/shared/read-access.js').ReadAccessFilter | undefined;
+  /** The `exec` permission check each worktree setup command passes before it runs (orchestration/engine.ts). */
+  readonly admitSetupCommand?: import('./worktree/setup.js').WorktreeSetupCommandAdmission | undefined;
   readonly planManager?: ExecutionPlans | undefined;
   /** Trusted paired native owners. Absent keeps historical composition; never sourced from config or wire input. */
   readonly nativeOwner?: NativeContractCompositionOwner | undefined;
@@ -327,6 +329,7 @@ export function composeContractRunner(options: ContractRunnerCompositionOptions)
       contractUnitSettlement: input.contractUnitSettlement,
       fleetCapacity: input.fleetCapacity,
       judgeAttempts: input.judgeAttempts,
+      admitSetupCommand: options.admitSetupCommand,
       priceUsage,
       priceProvenance,
     }),

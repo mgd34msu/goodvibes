@@ -62,7 +62,7 @@ import type { ConfigManager } from '../config/manager.js';
 import type { UnitRoute } from '../contract/types.js';
 import type { RuntimeEventBus } from '../runtime/events/index.js';
 import { WorktreeRegistry } from '../runtime/worktree/registry.js';
-import { runWorktreeSetup, resolveEffectiveWorktreeSetup } from '../runtime/worktree/setup.js';
+import { runWorktreeSetup, resolveEffectiveWorktreeSetup, type WorktreeSetupCommandAdmission } from '../runtime/worktree/setup.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 import { OwnedWork } from '../utils/owned-work.js';
@@ -103,7 +103,10 @@ export interface OrchestrationEngineDeps {
   readonly keptWorktreeCap?: number | undefined;
   /** Cold-start worktree setup hook (deps install, .env carry-over); wired by the composition root; a failing setup never fails creation. */
   readonly initializeWorktree?: import('./worktree-isolation.js').WorktreeIsolationManagerDeps['initializeWorktree'];
-  readonly runWorktreeSetup?: ((worktreePath: string) => Promise<void> | void) | undefined;
+  /** Returns a sentence for the item's agent when the setup did not complete, or nothing. */
+  readonly runWorktreeSetup?: ((worktreePath: string, signal?: AbortSignal) => Promise<string | void> | string | void) | undefined;
+  /** Each derived or configured setup command passes this check (the `exec` permission check) before it runs. */
+  readonly admitSetupCommand?: WorktreeSetupCommandAdmission | undefined;
   /** Optional best-of-N judge (PROPOSES a winner; never auto-picks unless the item opted in). Injectable, provider-agnostic. */
   readonly judgeAttempts?: AttemptJudge | undefined;
   /** Live probe of the fleet ceiling for every workstream; absent = ungated. */
@@ -299,14 +302,29 @@ export function createOrchestrationEngine(deps: OrchestrationEngineDeps): Orches
   // Worktree-isolation lane (worktree-mode workstreams only; no I/O until
   // used). Cold-start setup hook: injected override (tests) else the derived
   // per-project setup, outcome recorded onto the worktree registry.
+  // Stops a setup command still running when the engine is disposed.
+  const setupAbort = new AbortController();
+  // One permission check per distinct command for this engine's run, not one per worktree.
+  const setupAdmissions = new Map<string, ReturnType<WorktreeSetupCommandAdmission>>();
+  const admitSetupCommand: WorktreeSetupCommandAdmission | undefined = deps.admitSetupCommand === undefined ? undefined
+    : (command, cwd) => {
+      let admission = setupAdmissions.get(command);
+      if (admission === undefined) { admission = deps.admitSetupCommand!(command, cwd); setupAdmissions.set(command, admission); }
+      return admission;
+    };
   const runWorktreeSetupHook =
     deps.runWorktreeSetup ??
-    (async (worktreePath: string): Promise<void> => {
+    (async (worktreePath: string, signal?: AbortSignal): Promise<string | void> => {
       const registry = new WorktreeRegistry(deps.projectRoot);
       // Derived-by-default (lockfile → install, .env carry-over); user config overrides.
       const config = resolveEffectiveWorktreeSetup((key) => (deps.configManager.get as unknown as (k: string) => unknown)(key), deps.projectRoot);
-      const result = await runWorktreeSetup(worktreePath, deps.projectRoot, config);
+      const result = await runWorktreeSetup(worktreePath, deps.projectRoot, config, {
+        signal: signal ? AbortSignal.any([signal, setupAbort.signal]) : setupAbort.signal,
+        ...(admitSetupCommand === undefined ? {} : { admitCommand: admitSetupCommand }),
+      });
       registry.recordSetup(worktreePath, result);
+      // The agent starting in this worktree is told, so it does not find out from its first failing command.
+      if (result.state === 'failed') return `Worktree setup did not complete: ${result.error ?? 'a setup step failed'}. Dependencies or local files the project expects may be missing; install or copy what you need before relying on them.`;
     });
 
   const worktreeIsolation: WorktreeIsolationManager = createWorktreeIsolationManager({
@@ -976,6 +994,7 @@ export function createOrchestrationEngine(deps: OrchestrationEngineDeps): Orches
   function dispose(): void {
     if (disposed) return;
     disposed = true;
+    setupAbort.abort();
     if (capacityRetry !== undefined) clearTimeout(capacityRetry);
     unsubscribeWriter();
     listeners.clear();

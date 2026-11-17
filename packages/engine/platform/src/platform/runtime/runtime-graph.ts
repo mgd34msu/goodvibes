@@ -602,6 +602,10 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
     judgmentLog: judgment.decisionLog,
     surfaceRoot,
     readAccessFilter: async (path) => (await permissionManager.readAccess(path)) === 'allow',
+    admitSetupCommand: async (command, cwd) => {
+      const decision = await permissionManager.checkDetailed('exec', { commands: [{ cmd: command }], working_dir: cwd });
+      return decision.approved ? { allowed: true } : { allowed: false, reason: `the permission check refused it (${decision.reasonCode})` };
+    },
     runtimeBus,
     agentManager,
     agentMessageBus,

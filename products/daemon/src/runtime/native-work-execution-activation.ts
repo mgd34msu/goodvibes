@@ -58,7 +58,11 @@ export function createDaemonNativeWorkExecutionActivation(options: NativeWorkExe
         joinForeground: contractId => joinForeground(contractId),
         releaseForeground: contractId => releaseForeground(contractId),
         additionalFleetOwnership: () => [...(options.additionalFleetOwnership?.() ?? []), ...foregroundFleetOwnership()],
-        readAccessFilter: async path => (await options.permissionManager.readAccess(path)) === 'allow' });
+        readAccessFilter: async path => (await options.permissionManager.readAccess(path)) === 'allow',
+        admitSetupCommand: async (command, cwd) => {
+          const decision = await options.permissionManager.checkDetailed('exec', { commands: [{ cmd: command }], working_dir: cwd });
+          return decision.approved ? { allowed: true } : { allowed: false, reason: `the permission check refused it (${decision.reasonCode})` };
+        } });
       const toolDependencies = { ...options.toolDependencies, ...graph, processManager,
         // The ordinary remote runner registry owns the ordinary manager.
         remoteRunnerRegistry: undefined,

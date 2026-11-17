@@ -556,7 +556,7 @@ async function runPhaseWithSignal(
   try {
     record = deps.agentManager.spawn({
       mode: 'spawn',
-      task: unitSpawn ? item.task : buildPhaseTask(item, phase, priorReports),
+      task: `${unitSpawn ? item.task : buildPhaseTask(item, phase, priorReports)}${item.worktreeSetupNote ? `\n\n${item.worktreeSetupNote}` : ''}`,
       template: templateForPhase(phase),
       outsideContract: true,
       ...unitSpawn?.input,

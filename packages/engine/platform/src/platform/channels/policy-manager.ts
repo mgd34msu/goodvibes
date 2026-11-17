@@ -494,7 +494,8 @@ export class ChannelPolicyManager {
     // The surface has an owner now; the other senders' claims are moot.
     for (const other of this.ownerInbox?.listNow({ kinds: ['claim'], status: 'open' }) ?? []) {
       if (other.key?.startsWith(`${CLAIM_KEY_PREFIX}${policy.surface}:`)) {
-        void this.ownerInbox?.withdraw(other.id, `${policy.surface} now has an owner`).catch(() => { /* already closed */ });
+        // A claim closed in the meantime is refused, which leaves nothing to do.
+        this.ownerInbox?.withdraw(other.id, `${policy.surface} now has an owner`);
       }
     }
   }

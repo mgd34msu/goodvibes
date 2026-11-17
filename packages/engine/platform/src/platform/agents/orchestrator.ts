@@ -232,6 +232,14 @@ type AgentOrchestratorToolDeps = {
   readonly readAdmissionPolicy?: 'agent-main-conversation' | undefined;
   readonly settingsAdmissionPolicy?: 'agent-main-conversation' | undefined;
   /**
+   * The surface the agent being started was spawned for, when it is not this
+   * host's own: asked once per run, inside the spawning turn's execution
+   * context (the agent manager runs every agent, a woken one included, under
+   * the mode owner of the turn that spawned it). Undefined for a run, or
+   * absent: the host's own worker registry, as before.
+   */
+  readonly workerSurface?: (() => AgentWorkerSurface | undefined) | undefined;
+  /**
    * Broker an exec PTY terminal-prompt answer through the approval broker
    * while the command keeps running. Threaded to registerAllTools so the exec
    * tool can answer prompts (host-key confirmations, credential asks) instead
@@ -243,6 +251,34 @@ type AgentOrchestratorToolDeps = {
       ) => Promise<import('../tools/exec/interactive.js').ExecPromptAnswer>)
     | undefined;
 };
+
+/**
+ * How a worker is built for a session of another product than the host's
+ * (a session the daemon hosts for the GoodVibes Agent): the registry options
+ * and decoration that product's own process builds its workers with, so a
+ * worker such a session spawns is held to the same policy, tool set and
+ * admission as one that product spawns itself. Each field applies on top of
+ * the host's worker options; an absent field leaves the host's.
+ */
+export interface AgentWorkerSurface {
+  /** Names the surface. Worker registries are kept per working directory and surface. */
+  readonly id: string;
+  /** The surface's own state root (`.goodvibes/<surface>/`) for the worker's tools. */
+  readonly surfaceRoot?: string | undefined;
+  /** Where the worker's settings tools read and write (a client-owned key goes to the surface's own file). */
+  readonly configRouting?: import('../tools/goodvibes-runtime/config-routing.js').ConfigRoutingOptions | undefined;
+  /** The admission the surface builds its workers' `read` and `goodvibes_settings` with. */
+  readonly readAdmissionPolicy?: 'agent-main-conversation' | undefined;
+  readonly settingsAdmissionPolicy?: 'agent-main-conversation' | undefined;
+  /** The surface's own worker decoration, installed after the host's `decorateRegistry`. A throw fails the registry build. */
+  readonly decorateRegistry?: ((registry: ToolRegistry) => void) | undefined;
+}
+
+/** The cache key of a worker registry shared by runs: the working directory, and the surface when one applies. */
+function sharedRegistryKey(workingDirectory: string, surface: AgentWorkerSurface | undefined): string {
+  // A path holds no NUL, so the two parts cannot run together.
+  return surface ? `${workingDirectory}\u0000${surface.id}` : workingDirectory;
+}
 
 /**
  * AgentOrchestrator, runs AgentRecord tasks in-process.
@@ -288,7 +324,12 @@ export class AgentOrchestrator {
   private retiredRegistryDisposers: Array<() => Promise<void>> = [];
   /** Registries built for one captured run; the run deletes its own, a channel change must not. */
   private runKeyedRegistries = new Set<string>();
-  /** Runs currently using a non-default working directory's registry; the last one out releases it. */
+  /**
+   * Runs currently using a shared registry other than the default one (a
+   * non-default working directory's, or one built for a surface), by registry
+   * key; a channel change leaves a counted registry alone, and the last run
+   * out of a non-default working directory releases its registry.
+   */
   private cwdRunCounts = new Map<string, number>();
   private fullRegistryChannelVersion = -2;
   private toolDeps: AgentOrchestratorToolDeps | null = null;
@@ -508,6 +549,7 @@ export class AgentOrchestrator {
     nodeRuntimeAdmission?: import('../tools/exec/captured-exec.js').CapturedExecAuthority['nodeRuntimeAdmission'],
     bunRuntimeAdmission?: import('../tools/exec/captured-exec.js').CapturedExecAuthority['bunRuntimeAdmission'],
     capturedReplHistory?: CapturedReplHistory,
+    surface?: AgentWorkerSurface,
   ): ToolRegistry {
     const channelVersion = this.channelRegistry?.getVersion() ?? -1;
     if (this.fullRegistryChannelVersion !== channelVersion) {
@@ -535,7 +577,7 @@ export class AgentOrchestrator {
     const cwd = workingDirectory ?? defaultCwd;
     if (!authority && isCapturedInputPath(cwd))
       throw new Error('captured view has no construction-owned input authority');
-    const key = runKey ?? cwd;
+    const key = runKey ?? sharedRegistryKey(cwd, surface);
     let registry = this.fullRegistries.get(key);
     if (!registry) {
       if (!this.toolDeps?.configManager || !this.toolDeps?.providerRegistry || !this.toolDeps?.toolLLM) {
@@ -562,6 +604,11 @@ export class AgentOrchestrator {
         : ownerReadAccess;
       const registered = registerAllTools(registry, {
         ...this.toolDeps,
+        // A worker spawned for another surface gets that surface's state root, settings routing and admission.
+        ...(surface?.surfaceRoot !== undefined ? { surfaceRoot: surface.surfaceRoot } : {}),
+        ...(surface?.configRouting !== undefined ? { configRouting: surface.configRouting } : {}),
+        ...(surface?.readAdmissionPolicy !== undefined ? { readAdmissionPolicy: surface.readAdmissionPolicy } : {}),
+        ...(surface?.settingsAdmissionPolicy !== undefined ? { settingsAdmissionPolicy: surface.settingsAdmissionPolicy } : {}),
         ...(authority && capturedProcessManager ? { processManager: capturedProcessManager } : {}),
         contractRunner: this.toolDeps.contractRunner,
         projectRoot: defaultCwd,
@@ -596,6 +643,7 @@ export class AgentOrchestrator {
       if (runKey) this.runKeyedRegistries.add(key);
       registerChannelAgentTools(registry, this.toolDeps?.channelRegistry ?? this.channelRegistry);
       this.toolDeps.decorateRegistry?.(registry);
+      surface?.decorateRegistry?.(registry);
       if (authority) {
         const guarded = new ToolRegistry();
         for (const tool of registry.list())
@@ -823,6 +871,7 @@ export class AgentOrchestrator {
     needsCapturedRegistry = false,
     autonomousSource?: () => import('../permissions/autonomous.js').AutonomousToolSource,
     autonomousPort?: ContractActionPort,
+    surface?: AgentWorkerSurface,
   ): Promise<AgentOrchestratorRunContext> {
     const cwd = workingDirectory ?? this.toolDeps?.workingDirectory ?? '';
     const delivered = new Set<string>();
@@ -1005,6 +1054,7 @@ export class AgentOrchestrator {
             nodeRuntimeAdmission,
             bunRuntimeAdmission,
             capturedReplHistory,
+            surface,
           ),
         buildScopedRegistry: (allowedNames, fullRegistry, captureAuthority) =>
           this.buildScopedRegistry(allowedNames, fullRegistry, captureAuthority),
@@ -1037,9 +1087,14 @@ export class AgentOrchestrator {
     const signal = this.cancellationSource?.get(record.id);
     const runKey = authority ? `${cwd}:captured-run:${randomUUID()}` : undefined;
     if (authority) await assertContractInputAuthority(authority, cwd, signal);
-    // A registry for a dedicated worktree lives only while a run uses it; the default one is shared and stays.
-    const sharesCwdRegistry = runKey === undefined && cwd !== (this.toolDeps?.workingDirectory ?? '');
-    if (sharesCwdRegistry) this.cwdRunCounts.set(cwd, (this.cwdRunCounts.get(cwd) ?? 0) + 1);
+    // Asked here, under the spawning turn's execution context: the surface this worker is built for.
+    const surface = this.toolDeps?.workerSurface?.();
+    const defaultCwd = this.toolDeps?.workingDirectory ?? '';
+    // A registry for a dedicated worktree lives only while a run uses it; the default one is shared and stays,
+    // and so does the default directory's registry for a surface, which every worker that surface spawns there reuses.
+    const sharedKey = runKey === undefined ? sharedRegistryKey(cwd, surface) : undefined;
+    const countedKey = sharedKey !== defaultCwd ? sharedKey : undefined;
+    if (countedKey !== undefined) this.cwdRunCounts.set(countedKey, (this.cwdRunCounts.get(countedKey) ?? 0) + 1);
     let context: AgentOrchestratorRunContext | undefined;
     try {
       context = await this.createRunContext(
@@ -1051,6 +1106,7 @@ export class AgentOrchestrator {
         record.tools.includes('registry'),
         autonomousSource,
         getContractActionPort(record),
+        surface,
       );
       await runAgentTask(context, record);
     } finally {
@@ -1061,10 +1117,13 @@ export class AgentOrchestrator {
       }
       finally {
         if (runKey) await this.releaseRegistry(runKey);
-        else if (sharesCwdRegistry) {
-          const remaining = (this.cwdRunCounts.get(cwd) ?? 1) - 1;
-          if (remaining > 0) this.cwdRunCounts.set(cwd, remaining);
-          else { this.cwdRunCounts.delete(cwd); await this.releaseRegistry(cwd); }
+        else if (countedKey !== undefined) {
+          const remaining = (this.cwdRunCounts.get(countedKey) ?? 1) - 1;
+          if (remaining > 0) this.cwdRunCounts.set(countedKey, remaining);
+          else {
+            this.cwdRunCounts.delete(countedKey);
+            if (cwd !== defaultCwd) await this.releaseRegistry(countedKey);
+          }
         }
       }
     }

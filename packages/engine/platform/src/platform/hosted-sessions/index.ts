@@ -33,7 +33,7 @@ export type {
   HostedSessionSettings,
 } from './manager.js';
 
-export { createHostedSessionRuntime, hostedAgentAsker, newHostedSessionId } from './session-runtime.js';
+export { createHostedSessionRuntime, hostedAgentAsker, hostedWorkerSurface, newHostedSessionId } from './session-runtime.js';
 export type { HostedOwnerQuestions, HostedSessionContractSink, HostedSessionRuntime, HostedSessionRuntimeOptions } from './session-runtime.js';
 export type {
   HostedDaemonRequestPath,

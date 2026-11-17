@@ -69,7 +69,7 @@ import { registerAgentChannelSendTool } from './channel-send-tool.js';
 import { registerAgentBrowserTool, type AgentBrowserToolOptions, type BrowserToolBackend } from './browser-tool.js';
 import { wireAgentGoogleTool, type GoogleToolWiringDeps } from './google-wiring.js';
 import { connectedHostGoogleCalendar } from './google-tool.js';
-import { AGENT_PLATFORM_TOOL_ADMISSION, installAgentToolPolicy } from './read-modes.js';
+import { AGENT_PLATFORM_TOOL_ADMISSION, decorateAgentWorkerRegistry, installAgentToolPolicy } from './read-modes.js';
 import { connectedHostFamilyRemote } from './family-remote.js';
 import { registerAgentLocalRegistryTool } from './local-registry-tool.js';
 import { registerAgentLearningConsolidationTool } from './learning-consolidation-tool.js';
@@ -313,6 +313,11 @@ export function createAgentHostedTurn(deps: AgentHostedTurnDeps): HostedSurfaceT
   return {
     // read and goodvibes_settings are built with the Agent's admission, as in the Agent's own registries.
     platformToolAdmission: AGENT_PLATFORM_TOOL_ADMISSION,
+    // A worker this session spawns is decorated by the function the Agent's own
+    // process decorates its workers with, on a registry built with the same
+    // admission and the Agent's settings routing. This registry has no harness,
+    // so goodvibes_context stays the platform's, declared as a read, as here.
+    decorateWorkerRegistry: (registry) => decorateAgentWorkerRegistry(registry),
     registerTools({ registry, workspaceRoot, sessionId, floor, daemonRequests, providerRegistry }) {
       // The daemon keeps one project work plan, for its own project; a session in
       // another workspace has no plan of its own here and is told so on a call.

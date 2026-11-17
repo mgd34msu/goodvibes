@@ -101,3 +101,16 @@ export function installAgentToolPolicy(registry: ToolRegistry, wrapContext?: (to
     }
   }
 }
+
+/**
+ * The decoration every worker the Agent spawns gets, in the Agent's own
+ * process and in a session the daemon hosts for it: the Agent's tool policy
+ * on the worker's registry, which is built with `AGENT_PLATFORM_TOOL_ADMISSION`
+ * and the Agent's settings routing. A worker's tools are the platform tools,
+ * as the Agent process gives its workers; definition compaction only shapes
+ * what the main model sees, so it is left out. One pass over the registry
+ * when it is built; nothing per call.
+ */
+export function decorateAgentWorkerRegistry(registry: ToolRegistry, wrapContext?: (tool: Tool, registry: ToolRegistry) => void): void {
+  installAgentToolPolicy(registry, wrapContext);
+}

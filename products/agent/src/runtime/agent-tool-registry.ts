@@ -10,8 +10,10 @@ import {
   OUTWARD_APPROVAL_GESTURE,
   registerAgentTurnTools,
   AGENT_PLATFORM_TOOL_ADMISSION,
+  decorateAgentWorkerRegistry as decorateAgentTurnWorkerRegistry,
   type GoogleToolWiringDeps,
 } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { wrapAgentContextToolForAgentPolicy } from '../tools/agent-context-policy.ts';
 import { connectedHostFamilyRemote } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { compactRegisteredToolDefinitions } from '../tools/tool-definition-compaction.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
@@ -52,11 +54,13 @@ export interface AgentToolRegistry {
 /**
  * The policy a spawned or background worker's registry gets, so a worker's
  * calls are decided by the same read modes and admission readers as the main
- * conversation's. The main registry's extra layer is left out on purpose:
- * definition compaction only shapes what the main model sees.
+ * conversation's: agent-turn's one worker decoration, which a session the
+ * daemon hosts for the Agent gives its workers too, with this process's view
+ * of goodvibes_context. Definition compaction only shapes what the main model
+ * sees, so it is left out.
  */
 export function decorateAgentWorkerRegistry(registry: ToolRegistry): void {
-  installAgentToolPolicyGuard(registry);
+  decorateAgentTurnWorkerRegistry(registry, wrapAgentContextToolForAgentPolicy);
 }
 
 export function composeAgentToolRegistry(deps: AgentToolRegistryDeps): AgentToolRegistry {

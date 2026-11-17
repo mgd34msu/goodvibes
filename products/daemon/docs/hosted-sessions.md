@@ -95,8 +95,12 @@ a channel draft, a profile or occasion write) the Agent's delegated credential (
 the daemon judges that call as the Agent's. A purchase start or cancel therefore carries the owner's request
 as it does from the Agent itself. Its `accounts` tool keeps the Agent's register of the accounts
 it created, where a signup alias opens this daemon's own watch for the verification mail. Its `profile` and `occasions` tools reach the
-daemon the same way, so a profile or occasion write the Agent makes for the owner runs under the Agent's pairing,
-with its scopes and its native authority, as it does from the Agent itself. Its platform tools carry the
+daemon the same way, so a read presents the Agent's ordinary credential and a profile or occasion write the Agent
+makes for the owner runs under the Agent's pairing, with its scopes and its native authority, as it does from the
+Agent itself; `google` reaches this daemon's `calendar.events.*` the same way, with the Agent's ordinary credential.
+One rule decides which credential every one of these calls presents, in the Agent and in a hosted session alike. A
+worker agent such a session spawns is built as the Agent builds its workers: the platform tools with the Agent's
+read and settings admission, its settings routed to the Agent's own file, and the Agent's tool policy. Its platform tools carry the
 Agent's tool policy: the read-mode table, so a mode reads or changes exactly as it does in the Agent; `read`
 runs only under the admission recorded for its exact files; `goodvibes_settings` writes only what was
 prepared against the setting's owning store and judged (a client-owned key goes to the Agent's own settings

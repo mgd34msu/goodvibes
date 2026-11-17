@@ -68,6 +68,7 @@ import type {
 import {
   containmentFor,
   hostedAgentAsker,
+  hostedWorkerSurface,
 } from '@goodvibes-jev/engine/platform/platform/hosted-sessions';
 import { CONVERSATIONAL_DIAGNOSIS_SECTION, askingQuestions } from '@goodvibes-jev/engine/platform/platform/agents';
 import { createSessionSurface, createWorkspaceTrustDecisionAsk, trustGatedApprovalRaiser, WORKSPACE_TRUST_ASK_TIMEOUT_MS, type ApprovalRaise } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
@@ -187,6 +188,10 @@ export function createHostedSessionOptions(services: RuntimeServices): DaemonHos
         // Workers a hosted turn starts can leave the owner a question in the one inbox, like every spawned agent;
         // the agent takes the answer while it runs, otherwise the hosted session that started it does.
         ...(services.ownerInbox ? { ownerQuestions: askingQuestions(services.ownerInbox, hostedAgentAsker) } : {}),
+        // A worker a hosted session spawns is built for that session's surface: a
+        // session created for the Agent spawns workers with the Agent's tool
+        // policy, admission and settings routing, as the Agent's own process does.
+        workerSurface: hostedWorkerSurface,
       });
       try {
         // The floor's own tolerant custom load must settle before cached names

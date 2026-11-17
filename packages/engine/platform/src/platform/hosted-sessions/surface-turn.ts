@@ -87,6 +87,14 @@ export interface HostedSurfaceTurn {
   readonly platformToolAdmission?: HostedPlatformToolAdmission | undefined;
   /** Adds the surface's tools to one session's registry; returns what to release with the session, if anything. */
   registerTools(input: HostedSurfaceToolsInput): HostedSurfaceTools | undefined;
+  /**
+   * The decoration the surface's own process installs on every worker
+   * registry it spawns. A worker a session of this surface spawns is then
+   * built as that process builds its workers: this decoration, with the
+   * session's state root, settings routing and `platformToolAdmission`.
+   * Omitted: the session's workers are the host's own, as before.
+   */
+  readonly decorateWorkerRegistry?: ((registry: ToolRegistry) => void) | undefined;
   /** The system prompt for one model request of a session. */
   systemPrompt(input: HostedSurfacePromptInput): string | Promise<string>;
 }

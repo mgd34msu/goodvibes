@@ -32,6 +32,8 @@ import { createContractIntake } from '../contract/intake-route.js';
 import { observeSessionContracts } from './session-contracts.js';
 import type { HostedDaemonRequestPath, HostedSurfaceTools, HostedSurfaceTurn } from './surface-turn.js';
 import { askingQuestions, type QuestionAsker } from '../agents/agent-owner-questions.js';
+import type { AgentWorkerSurface } from '../agents/orchestrator.js';
+import type { ConfigRoutingOptions } from '../tools/goodvibes-runtime/config-routing.js';
 import { watchSessionAnswers, type SessionAnswerWatch } from '../agents/agent-inlets.js';
 import { callingAgentId } from '../agents/calling-agent.js';
 import type { OwnerInbox } from '../control-plane/owner-inbox.js';
@@ -200,6 +202,7 @@ export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions)
   };
   const originSurface = options.originSurface?.trim() || services.surfaceRoot;
   const clientOwnedStore = resolveClientOwnedStore(services, originSurface);
+  const configRouting: ConfigRoutingOptions = { hostsDaemon: true, ...(clientOwnedStore ? { clientOwnedStore } : {}) };
   const sessionId = options.sessionId;
   // This session's own untrusted-content window. Every turn runs inside it, so
   // what its tools read is recorded under it and its outward actions are judged
@@ -237,6 +240,18 @@ export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions)
   answers?.open(sessionId);
   // An agent one of this session's turns starts runs under this session's mode owner; its questions come back here once it stops.
   hostedTurnSessions.set(modeOwner, sessionId);
+  // A worker this session's turns spawn is built for this session's surface, as
+  // that surface's own process builds its workers, with this session's routing.
+  const decorateWorkerRegistry = options.surfaceTurn?.decorateWorkerRegistry;
+  if (decorateWorkerRegistry) {
+    hostedWorkerSurfaces.set(modeOwner, Object.freeze({
+      id: originSurface,
+      surfaceRoot: originSurface,
+      configRouting,
+      ...(options.surfaceTurn?.platformToolAdmission ?? {}),
+      decorateRegistry: decorateWorkerRegistry,
+    }));
+  }
   if (answers) hostedSessionWatches.set(sessionId, answers);
   const ownerQuestions = inbox && answers
     ? askingQuestions(inbox, () => ({ session: sessionId, host: 'hosted', sessionWatch: answers }))
@@ -279,10 +294,7 @@ export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions)
     // must NOT be local is a client-owned key belonging to another surface, and
     // that is what `clientOwnedStore` redirects: to the originating surface's
     // own settings file, which the live surface is already watching.
-    configRouting: {
-      hostsDaemon: true,
-      ...(clientOwnedStore ? { clientOwnedStore } : {}),
-    },
+    configRouting,
     // The surface's own admission for read and settings, as its own process builds them.
     ...(options.surfaceTurn?.platformToolAdmission ?? {}),
     archetypeLoader: services.archetypeLoader,
@@ -323,6 +335,7 @@ export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions)
     answers?.dispose();
     if (answers && hostedSessionWatches.get(sessionId) === answers) hostedSessionWatches.delete(sessionId);
     hostedTurnSessions.delete(modeOwner);
+    hostedWorkerSurfaces.delete(modeOwner);
     promptLifetime.abort();
     void registeredTools.dispose().catch((disposeError: unknown) => {
       logger.debug('[hosted-sessions] tool state disposal raised', { sessionId, error: summarizeError(disposeError) });
@@ -534,6 +547,24 @@ export type HostedOwnerQuestions = QuestionInbox & Pick<OwnerInbox, 'claim' | 's
 const hostedTurnSessions = new WeakMap<ExecutionModeOwner, string>();
 /** The answer watch of each hosted session whose loop is composed in this process. */
 const hostedSessionWatches = new Map<string, SessionAnswerWatch>();
+/**
+ * The worker surface of each hosted session whose surface states one, by the
+ * mode owner its turns run under. Kept for the owner's life, not the
+ * session's: an agent a turn spawned that is woken after the session closed
+ * is still built for that surface.
+ */
+const hostedWorkerSurfaces = new WeakMap<ExecutionModeOwner, AgentWorkerSurface>();
+
+/**
+ * The surface a worker being started on a hosted workspace floor was spawned
+ * for: that of the hosted session whose turn spawned it, read from the mode
+ * owner the agent runs under. Undefined for a worker of any other session, or
+ * outside one, which then gets the floor's own worker registry. One lookup.
+ */
+export function hostedWorkerSurface(): AgentWorkerSurface | undefined {
+  const owner = currentExecutionModeOwner();
+  return owner ? hostedWorkerSurfaces.get(owner) : undefined;
+}
 
 /**
  * The asker of a question an agent on a hosted workspace floor posts: that

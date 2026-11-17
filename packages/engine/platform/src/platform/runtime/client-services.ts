@@ -425,6 +425,14 @@ export interface ClientRuntimeServicesOptions {
    * in, as spawned agents elsewhere do. Absent: its agents have no `query`.
    */
   readonly ownerQuestions?: import('../tools/query/index.js').QuestionInbox | (() => import('../tools/query/index.js').QuestionInbox) | undefined;
+  /**
+   * The surface each agent this composition runs was spawned for, asked once
+   * per run under the spawning turn's context: a hosted composition passes
+   * `hostedWorkerSurface`, so a worker a hosted session spawns is built as its
+   * surface's own process builds workers. Absent: every worker is this
+   * composition's own.
+   */
+  readonly workerSurface?: (() => import('../agents/orchestrator.js').AgentWorkerSurface | undefined) | undefined;
 }
 
 /**
@@ -664,6 +672,7 @@ function composeClientRuntimeServices(
     sandboxSessionRegistry,
     workflowServices: workflow,
     ...(options.ownerQuestions !== undefined ? { ownerQuestions: options.ownerQuestions } : {}),
+    ...(options.workerSurface !== undefined ? { workerSurface: options.workerSurface } : {}),
   });
 
   // Poll-free runtime event for permission-mode changes so surfaces can render a live mode pill.

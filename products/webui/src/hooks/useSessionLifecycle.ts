@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { getClientLifetime, isClientLifetimeCurrent, subscribeClientLifetime, type ClientLifetime } from '../lib/client-lifetime';
 import { hasStoredTokenSync, client as platformClient } from '../lib/goodvibes';
-import { formatError, serializeError } from '../lib/errors';
+import { formatError, isDefiniteRefusal, serializeError } from '../lib/errors';
 import { asRecord } from '../lib/object';
 import { queryKeys } from '../lib/queries';
 
@@ -23,14 +23,6 @@ function isTargetMissing(error: unknown): boolean {
   const body = asRecord(value.body ?? transport.body);
   return (value.status ?? transport.status) === 404
     && (body.code === 'SESSION_NOT_FOUND' || body.error === 'Unknown shared session' || body.message === 'Unknown shared session');
-}
-
-/** An HTTP answer from the daemon (any status but a network failure, a timeout or a gateway error). */
-function answeredByDaemon(error: unknown): boolean {
-  const value = serializeError(error);
-  const transport = asRecord(value.transport);
-  const status = typeof value.status === 'number' ? value.status : typeof transport.status === 'number' ? transport.status : 0;
-  return status >= 400 && status < 500 && status !== 408 && status !== 429;
 }
 
 const RESPONSE_DEADLINE_MS = 30_000;
@@ -113,7 +105,7 @@ export function useSessionLifecycle(id: string, onClose: () => void) {
       }
       show('idle');
     } catch (error) {
-      if (!abort.signal.aborted && answeredByDaemon(error)) show('idle', `The daemon refused to ${VERB[chosen]} this session: ${formatError(error)}`);
+      if (!abort.signal.aborted && isDefiniteRefusal(error)) show('idle', `The daemon refused to ${VERB[chosen]} this session: ${formatError(error)}`);
       else show('no-answer', `No answer from the daemon (${abort.signal.aborted ? `nothing within ${RESPONSE_DEADLINE_MS / 1000}s` : formatError(error)}). Retry sends it again; a repeat is answered with the session's current state.`);
     } finally {
       clearTimeout(timer);

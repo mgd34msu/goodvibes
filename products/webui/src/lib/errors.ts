@@ -108,6 +108,18 @@ export function isNoActiveTurnError(error: unknown): boolean {
  *     partial merge of a best-of-N group).
  * Code-first, status-fallback, the same pattern as the other daemon-code checks above.
  */
+/**
+ * The daemon answered and refused (a 4xx other than a timeout, too-early or
+ * rate limit): sending the same request again gets the same answer. Anything
+ * else (no answer, a network failure, a 5xx) may be resent.
+ */
+export function isDefiniteRefusal(error: unknown): boolean {
+  const serialized = serializeError(error);
+  const transport = asRecord(serialized.transport);
+  const status = readNumber(serialized, 'status') ?? readNumber(transport, 'status') ?? 0;
+  return status >= 400 && status < 500 && status !== 408 && status !== 425 && status !== 429;
+}
+
 export function isConflictError(error: unknown): boolean {
   if (errorCode(error) === 'CONFLICT') return true;
   const serialized = serializeError(error);

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { isClientLifetimeCurrent, subscribeClientLifetime, type ClientLifetime } from '../lib/client-lifetime';
 import { hasStoredTokenSync, client as platformClient } from '../lib/goodvibes';
-import { formatError, serializeError } from '../lib/errors';
+import { formatError, isDefiniteRefusal, serializeError } from '../lib/errors';
 import { asRecord } from '../lib/object';
 import { queryKeys } from '../lib/queries';
 
@@ -25,14 +25,6 @@ function isNotRunning(error: unknown): boolean {
   const transport = asRecord(value.transport);
   const body = asRecord(value.body ?? transport.body);
   return (value.status ?? transport.status) === 409 && body.code === 'CONTRACT_NOT_RUNNING';
-}
-
-/** An HTTP answer from the daemon (any status but a network failure, a timeout or a gateway error). */
-function answeredByDaemon(error: unknown): boolean {
-  const value = serializeError(error);
-  const transport = asRecord(value.transport);
-  const status = typeof value.status === 'number' ? value.status : typeof transport.status === 'number' ? transport.status : 0;
-  return status >= 400 && status < 500 && status !== 408 && status !== 429;
 }
 
 const RESPONSE_DEADLINE_MS = 30_000;
@@ -74,7 +66,7 @@ export function useContractCancellation(lifetime: ClientLifetime, id: string) {
       show(result.cancelled ? 'acknowledged' : 'not-cancelled');
     } catch (error) {
       if (isNotRunning(error)) show('not-cancelled');
-      else if (!abort.signal.aborted && answeredByDaemon(error)) show('refused', `The daemon refused the cancel: ${formatError(error)}`);
+      else if (!abort.signal.aborted && isDefiniteRefusal(error)) show('refused', `The daemon refused the cancel: ${formatError(error)}`);
       else show('no-answer', `No answer from the daemon (${abort.signal.aborted ? `nothing within ${RESPONSE_DEADLINE_MS / 1000}s` : formatError(error)}). Retry sends the cancel again; a contract that already stopped is reported as such.`);
     } finally {
       clearTimeout(timer);

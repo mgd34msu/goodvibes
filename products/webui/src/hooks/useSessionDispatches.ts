@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { OperatorMethodOutput } from '@goodvibes-jev/engine/contracts';
 import { isClientLifetimeCurrent, subscribeClientLifetime, type ClientLifetime } from '../lib/client-lifetime';
 import { hasStoredTokenSync, client as platformClient } from '../lib/goodvibes';
-import { formatError, isSessionClosedError, serializeError } from '../lib/errors';
+import { formatError, isDefiniteRefusal, isSessionClosedError, serializeError } from '../lib/errors';
 import { asRecord } from '../lib/object';
 import { queryKeys } from '../lib/queries';
 
@@ -34,13 +34,6 @@ function newMessageId(): string {
   return `web-${Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')}`;
 }
 
-/** The daemon answered and refused (a 4xx other than a timeout or rate limit): sending again would get the same answer. */
-function refusedByDaemon(error: unknown): boolean {
-  const serialized = serializeError(error);
-  const transport = asRecord(serialized.transport);
-  const status = typeof serialized.status === 'number' ? serialized.status : typeof transport.status === 'number' ? transport.status : 0;
-  return status >= 400 && status < 500 && status !== 408 && status !== 425 && status !== 429;
-}
 const states = new Set<InputReceipt['state']>(['queued', 'delivered', 'spawned', 'completed', 'cancelled', 'failed', 'rejected']);
 
 function validReceipt(value: unknown, sessionId: string): value is InputReceipt {
@@ -191,7 +184,7 @@ export function useSessionDispatches(lifetime: ClientLifetime, sessionId: string
             void client.invalidateQueries({ queryKey: queryKeys.sessions });
             return;
           }
-          if (refusedByDaemon(error)) {
+          if (isDefiniteRefusal(error)) {
             settle({ state: 'failed', error: `Not sent: ${formatError(error)}` });
             return;
           }

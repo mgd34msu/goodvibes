@@ -170,7 +170,6 @@ export function evaluateContextualGuidance(
   const mode = (configManager.get('behavior.guidanceMode') as GuidanceMode | undefined) ?? 'minimal';
   if (mode === 'off') return [];
 
-  const dismissed = readDismissals(options)?.dismissed ?? {};
   const items: GuidanceItem[] = [];
   const session = snapshot.sessionId ?? 'session';
 
@@ -263,6 +262,10 @@ export function evaluateContextualGuidance(
     });
   }
 
+  // The dismissal store is read only when there is something it could hide,
+  // so the usual empty evaluation costs no file read.
+  if (items.length === 0) return items;
+  const dismissed = readDismissals(options)?.dismissed ?? {};
   return items.filter((item) => dismissed[item.id]?.occurrence !== item.occurrence);
 }
 

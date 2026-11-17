@@ -12,8 +12,12 @@ function guidanceOptionsFor(ctx: CommandContext): GuidancePersistenceOptions {
   return { homeDirectory: requireShellPaths(ctx).homeDirectory, surfaceRoot: 'tui' };
 }
 
-/** The guidance items active now, with the maintenance reading they were built from. */
-function currentGuidance(ctx: CommandContext, guidanceOptions: GuidancePersistenceOptions) {
+/**
+ * The guidance items active now, with the maintenance reading they were built
+ * from. `contextTokens` is a count the caller already holds (the last turn's
+ * input tokens); without one the conversation is estimated.
+ */
+function currentGuidance(ctx: CommandContext, guidanceOptions: GuidancePersistenceOptions, contextTokens?: number) {
   const llmMessages = ctx.session.conversationManager.getMessagesForLLM();
   const readModels = requireReadModels(ctx);
   const session = readModels.session.getSnapshot();
@@ -23,7 +27,7 @@ function currentGuidance(ctx: CommandContext, guidanceOptions: GuidancePersisten
   const marketplace = readModels.marketplace.getSnapshot();
   const maintenance = evaluateSessionMaintenance({
     configManager: ctx.platform.configManager,
-    currentTokens: estimateConversationTokens(llmMessages),
+    currentTokens: contextTokens ?? estimateConversationTokens(llmMessages),
     contextWindow: ctx.provider.providerRegistry.getKnownContextWindowForModel(ctx.provider.providerRegistry.getCurrentModel()) ?? 0,
     messageCount: llmMessages.length,
     sessionMemoryCount: requireSessionMemoryStore(ctx).list().length,
@@ -117,18 +121,22 @@ export interface GuidanceNoticeTurnEvents {
  * told without running /guidance. An occurrence already announced is not
  * announced again; one that clears and later comes back is. Dismissed items
  * and guidance mode `off` push nothing, because evaluateContextualGuidance
- * already leaves them out. Cost: one guidance evaluation per finished turn.
+ * already leaves them out. Cost per finished turn: five read-model snapshots
+ * and the session-memory count; the context reading is the turn's own input
+ * token count (`contextTokens`), not a new estimate of the conversation, and
+ * the dismissal file is read only when some item is active.
  */
 export function wireGuidanceNotices(
   ctx: CommandContext,
   turns: GuidanceNoticeTurnEvents,
   dispatch: (notification: Notification) => void,
+  contextTokens: () => number,
 ): () => void {
   const announced = new Set<string>();
   return turns.on('TURN_COMPLETED', () => {
     let items: ReturnType<typeof currentGuidance>['items'];
     try {
-      items = currentGuidance(ctx, guidanceOptionsFor(ctx)).items;
+      items = currentGuidance(ctx, guidanceOptionsFor(ctx), contextTokens()).items;
     } catch {
       // Guidance is advisory; a read that fails here is shown by /guidance itself.
       return;

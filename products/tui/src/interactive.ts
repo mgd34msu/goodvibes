@@ -1342,7 +1342,12 @@ async function main(prepared: PreparedShellCliRuntime) {
 
   unsubs.push(uiServices.events.turns.on('TURN_COMPLETED', (evt) => memoryProvenanceUi.onTurnCompleted(evt)));
   // A new guidance occurrence reaches the notification history without /guidance.
-  unsubs.push(wireGuidanceNotices(commandContext, uiServices.events.turns, (notification) => { ctx.services.notificationDispatcher.dispatch(notification); }));
+  unsubs.push(wireGuidanceNotices(
+    commandContext,
+    uiServices.events.turns,
+    (notification) => { ctx.services.notificationDispatcher.dispatch(notification); },
+    () => orchestrator.lastInputTokens,
+  ));
 
   /**
    * Send the failed turn's own prompt again. The orchestrator keeps that turn's

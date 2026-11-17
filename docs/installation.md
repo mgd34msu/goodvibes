@@ -91,6 +91,15 @@ an older installer created, `goodvibes-daemon.service`, is moved to the daemon's
 own service (written, started and verified before the old unit is retired; rolled
 back when it does not come up).
 
+The restart after an upgrade starts the daemon's worktree clean-up for its
+working directory, as every start of the daemon, `goodvibes` and
+`goodvibes-agent` does. A worktree under a project's `.goodvibes/.worktrees`
+with uncommitted or untracked changes is never removed; one an earlier version
+made is removed only when every commit on it is on a branch or in the base.
+The daemon writes what it removed and what it kept for your decision, with the
+commands to save, keep or discard each, to its log, prefixed
+`[goodvibes-daemon] worktrees:`.
+
 Saved data can require a newer reader than an earlier release provides. The
 installer checks an existing installation’s reader requirements with the staged,
 verified release before replacing programs. An incompatible or unreadable

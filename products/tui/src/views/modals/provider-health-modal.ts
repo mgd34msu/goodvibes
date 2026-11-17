@@ -21,8 +21,10 @@ export interface ProviderRuntimeInspect {
  * synchronously so live values update in place with a stable layout.
  *
  * The Domains tab reads eight subsystem snapshots (the security one runs a token
- * audit), so its rows are built once and kept until one of those read models
- * reports a change or `r` is pressed, not on every render.
+ * audit), so its rows are built only while that tab is shown, and then kept
+ * until one of those read models reports a change or `r` is pressed, not on
+ * every render. A provider change that arrives while an inspection is running
+ * is answered by one more inspection when that one ends.
  *
  * Auth-route descriptors and the eight repair domains are presented through
  * the engine-owned pure posture builders. Credential-backed account commands
@@ -39,8 +41,12 @@ class ProviderHealthModalSurface implements ConfigModalSurface {
   private inspectionGeneration = 0;
   private pendingInspection: number | null = null;
   private opened = false;
-  /** Domains tab rows as last built; null = build again on the next render. */
+  /** Domains tab rows as last built; null = build again when the tab is next shown. */
   private domainRows: ConfigModalRow[] | null = null;
+  /** The tab the last view was built for; undefined before the first one is shown. */
+  private shownTab: string | undefined;
+  /** A provider change arrived during the running inspection, so one more follows it. */
+  private inspectAgain = false;
 
   constructor(
     private readonly providerRuntime: ProviderRuntimeInspect,
@@ -65,9 +71,15 @@ class ProviderHealthModalSurface implements ConfigModalSurface {
     this.domainRows = null;
     void this.reinspect();
     if (this.unsubs.length === 0) {
-      // A provider change re-inspects; one already in flight answers it.
-      if (this.providersReadModel) this.unsubs.push(this.providersReadModel.subscribe(() => { if (this.pendingInspection === null) void this.reinspect(); }));
-      if (this.subscribeDomains) this.unsubs.push(this.subscribeDomains(() => { this.domainRows = null; this.requestRender(); }));
+      // A provider change re-inspects; one arriving mid-inspection is answered when that one ends.
+      if (this.providersReadModel) this.unsubs.push(this.providersReadModel.subscribe(() => {
+        if (this.pendingInspection === null) void this.reinspect();
+        else this.inspectAgain = true;
+      }));
+      if (this.subscribeDomains) this.unsubs.push(this.subscribeDomains(() => {
+        this.domainRows = null;
+        if (this.shownTab === 'domains') this.requestRender();
+      }));
     }
   }
 
@@ -75,7 +87,9 @@ class ProviderHealthModalSurface implements ConfigModalSurface {
     this.opened = false;
     this.inspectionGeneration++;
     this.pendingInspection = null;
+    this.inspectAgain = false;
     this.domainRows = null;
+    this.shownTab = undefined;
     for (const unsub of this.unsubs) unsub();
     this.unsubs = [];
   }
@@ -89,7 +103,8 @@ class ProviderHealthModalSurface implements ConfigModalSurface {
     return [...ids].sort((a, b) => a.localeCompare(b));
   }
 
-  buildView(): ConfigModalView {
+  buildView(activeTabId?: string): ConfigModalView {
+    this.shownTab = activeTabId;
     const ids = this.providerIds();
     const active = ids.filter((id) => this.cache.get(id)?.active).length;
     const header = [postureLine([
@@ -130,7 +145,10 @@ class ProviderHealthModalSurface implements ConfigModalSurface {
         ...posture.repairHints.map((hint, index): ConfigModalRow => ({ id: `auth:${id}:hint:${index}`, label: `  next: ${hint}`, selectable: false })),
       ];
     });
-    const domainRows = this.domainInputs ? (this.domainRows ??= this.buildDomainRows(this.domainInputs)) : [];
+    // Built only while the Domains tab is shown; another tab keeps the last rows (or none).
+    const domainRows = !this.domainInputs ? []
+      : activeTabId === 'domains' ? (this.domainRows ??= this.buildDomainRows(this.domainInputs))
+        : (this.domainRows ?? []);
     const emptyText = ids.length === 0
       ? (this.loaded ? 'No providers registered. Try /provider or /subscription.' : 'Inspecting providers…')
       : undefined;
@@ -182,6 +200,8 @@ class ProviderHealthModalSurface implements ConfigModalSurface {
     if (!this.opened) return;
     const generation = ++this.inspectionGeneration;
     this.pendingInspection = generation;
+    // This inspection starts after any change already seen, so it answers it.
+    this.inspectAgain = false;
     try {
       const snapshots = await this.providerRuntime.inspectAll();
       if (!this.opened || generation !== this.inspectionGeneration) return;
@@ -199,6 +219,10 @@ class ProviderHealthModalSurface implements ConfigModalSurface {
       this.pendingInspection = null;
       this.loaded = true;
       this.requestRender();
+      if (this.inspectAgain) {
+        this.inspectAgain = false;
+        void this.reinspect();
+      }
     }
   }
 }

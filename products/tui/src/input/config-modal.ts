@@ -161,6 +161,8 @@ export class ConfigModal {
     this.scrollOffset = 0;
     this.filterQuery = '';
     this.interactedSinceOpen = false;
+    // No tab is shown yet: the first view is built for none, then its first tab is shown.
+    this.activeTabId = '';
     const view = this._readView(surface)!;
     this.frozenView = view;
     this.activeTabId = view.tabs[0]?.id ?? '';
@@ -635,7 +637,7 @@ export class ConfigModal {
     if (!surface) return null;
     const shared = this.inPass && surface === this.surface;
     if (shared && this.passView !== undefined) return this.passView;
-    const view = this._expandView(surface.buildView());
+    const view = this._expandView(surface.buildView(surface === this.surface && this.activeTabId !== '' ? this.activeTabId : undefined));
     if (shared) this.passView = view;
     return view;
   }

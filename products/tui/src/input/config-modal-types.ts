@@ -182,9 +182,11 @@ export interface ConfigModalSurface {
   /**
    * Build the current view from live read-models. Called on open, on every
    * interaction boundary, AND on every render tick. MUST be pure and cheap,
-   * snapshot reads only, no async, no mutation.
+   * snapshot reads only, no async, no mutation. `activeTabId` is the tab on
+   * screen (absent before the first view), so a surface can build a costly
+   * tab's rows only while that tab is shown.
    */
-  buildView(): ConfigModalView;
+  buildView(activeTabId?: string): ConfigModalView;
   /** Declarative action table (optional, a read-only surface has none). */
   readonly actions?: readonly ConfigModalAction[];
   /** Handle an action fired by its key. */

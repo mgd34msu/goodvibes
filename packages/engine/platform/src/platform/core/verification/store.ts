@@ -6,7 +6,7 @@ import type { VerificationReceipt, VerificationSource, VerificationSourceInput }
 import { issueVerificationId, issueVerificationSource } from './source.js';
 import type { VerificationArchive } from './archive.js';
 import { VerificationHeldError } from './types.js';
-import { VerificationJournalSource, type VerificationJournalRecord } from './journal-source.js';
+import { journalRecordProblem, VerificationJournalSource, type VerificationJournalRecord } from './journal-source.js';
 import type { CompletionFinding } from '../response-completion-findings.js';
 import { logger } from '../../utils/logger.js';
 type SourceIndex = VerificationReceipt & { readonly representation: 'source-index' };
@@ -246,16 +246,23 @@ export class VerificationStore {
             if (entry.runtimeMessages !== undefined && (!Array.isArray(entry.runtimeMessages)
               || entry.runtimeMessages.some(pair => !Array.isArray(pair) || !Number.isSafeInteger(pair[0]) || pair[0] < 0 || typeof pair[1] !== 'string')))
               throw new VerificationHeldError('invalid runtime message provenance');
-            if (entry.messageRecords !== undefined && (!Array.isArray(entry.messageRecords)
-              || entry.messageRecords.some(record => !record || typeof record !== 'object' || Array.isArray(record)
-                || typeof record.id !== 'string' || !record.id || record.id.length > 256 || Object.keys(record).length !== 2
-                || ('message' in record ? !record.message || typeof record.message !== 'object' || Array.isArray(record.message)
-                  : !('contentCommitment' in record) || typeof record.contentCommitment !== 'string' || !/^[0-9a-p]{64}$/.test(record.contentCommitment)))
-              || new Set(entry.messageRecords.map(record => record.id)).size !== entry.messageRecords.length))
-              throw new VerificationHeldError('invalid archived message records');
+            if (entry.messageRecords !== undefined) {
+              if (!Array.isArray(entry.messageRecords)) throw new VerificationHeldError('invalid archived message records');
+              // The same reader the archive restores each record with, so a record is refused here, once, with its reason.
+              for (const record of entry.messageRecords) {
+                const problem = journalRecordProblem(record);
+                if (problem) throw new VerificationHeldError(`archived message record: ${problem}`);
+              }
+              if (new Set(entry.messageRecords.map(record => record.id)).size !== entry.messageRecords.length)
+                throw new VerificationHeldError('invalid archived message records');
+            }
             const recordedMessages = new Set(entry.messageRecords?.map(record => record.id));
-            if ([...entry.derived, ...(entry.runtimeMessages ?? [])].some(([, id]) => id.startsWith('message-') && !recordedMessages.has(id)))
-              throw new VerificationHeldError('missing archived message record');
+            for (const [, id] of [...entry.derived, ...(entry.runtimeMessages ?? [])]) {
+              if (recordedMessages.has(id)) continue;
+              // Every message this build archives is written as its own record; an earlier build named a message by its commitment.
+              throw new VerificationHeldError(id.startsWith('message-') ? 'missing archived message record'
+                : 'an archived message is named by its content commitment (a journal written by an earlier build, which this build does not read)');
+            }
             if (Array.isArray(entry.histories)) for (const history of entry.histories) if (history && Array.isArray(history.messages)) {
               const key = issueVerificationId('history');
               this.histories.set(key, history); this.historyKeys.set(history, key);

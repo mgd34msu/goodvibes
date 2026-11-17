@@ -47,13 +47,9 @@ function commit(entries: Archives, next: Archive): void {
 }
 function archive(owner: object): Archive { const entries = collection(owner); return entries.branches.get(entries.active)!; }
 function ownedMessage(entry: Archive, id: string): OwnedMessage {
-  let record = entry.messageRecords.get(id);
-  if (!record) {
-    // Earlier journals stored only this commitment. It remains a checked
-    // recovery input, never a newly issued message ID or live currentness key.
-    if (!/^[a-p]{64}$/.test(id)) throw new VerificationHeldError('missing archived message provenance');
-    record = VerificationJournalSource.restore({ id, contentCommitment: id }); entry.messageRecords.set(id, record);
-  }
+  // The store refuses, when the journal is opened, a position naming a message it holds no record of.
+  const record = entry.messageRecords.get(id);
+  if (!record) throw new VerificationHeldError('missing archived message provenance');
   return record;
 }
 function matchesMessage(entry: Archive, id: string | undefined, value: Record<string, unknown>): boolean {

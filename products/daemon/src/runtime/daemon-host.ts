@@ -12,7 +12,6 @@ import { createNativeDataWriteOwner, createInstalledReaderCohort } from '@goodvi
 import { drainOwned } from '@goodvibes-jev/judgment';
 import { defineLifecycle, logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import { RefusalError, refusal } from '@goodvibes-jev/engine/errors';
-import { WorkspaceSwapManager } from '@goodvibes-jev/engine/platform/platform/workspace';
 
 export interface DaemonHostBinding {
   readonly host?: string;
@@ -233,6 +232,7 @@ export function createDaemonHost(options: DaemonHostOptions, factories: DaemonHo
       if (typeof options.runtime.inboxFactory !== 'function') throw new Error('Explicit inbox factory required');
       services = await (factories.createRuntime ?? createRuntimeServices)({
         ...options.runtime, nativeDataWriter, createBootOperations: createDaemonBootOperations,
+        ...(options.workingDirectoryOverride !== undefined ? { workingDirectoryOverride: options.workingDirectoryOverride } : {}),
       });
       const runtime = services;
       let graphClosing: Promise<void> | undefined;
@@ -292,9 +292,7 @@ export function createDaemonHost(options: DaemonHostOptions, factories: DaemonHo
         configManager: runtime.configManager, userAuth: runtime.localUserAuthManager,
         runtimeBus: runtime.runtimeBus, runtimeServices: runtime,
         // A working-directory change (POST /config runtime.workingDir) is saved for the next start; this process stays on its root.
-        ...(options.runtime.daemonHomeDirectory === undefined ? {} : { swapManager: new WorkspaceSwapManager(runtime.workingDirectory, {
-          runtimeBus: runtime.runtimeBus, daemonHomeDir: options.runtime.daemonHomeDirectory, startOverride: options.workingDirectoryOverride,
-        }) }),
+        ...(runtime.workspaceSwap ? { swapManager: runtime.workspaceSwap } : {}),
         drainForNativeHandover,
         deferNativeActivationUntilHostReady: true,
         serveFactory: createSafeHostServeFactory('Configured daemon', binding?.serveFactory),

@@ -122,8 +122,12 @@ type AgentOrchestratorToolDeps = {
   readonly remoteRunnerRegistry?: import('../runtime/remote/index.js').RemoteRunnerRegistry | undefined;
   readonly knowledgeService?: import('../knowledge/index.js').KnowledgeService | undefined;
   readonly memoryRegistry?: import('../state/index.js').MemoryRegistry | undefined;
-  /** True while memory is served by a connected host; a worker's state tool then does not mirror into the local registry. */
+  /** The memory store a worker's `state mode=memory` uses (the host's memory spine); preferred over `memoryRegistry` (registerAllTools). */
+  readonly memoryAccess?: import('../tools/state/memory-mirror.js').StateMemoryStore | undefined;
+  /** True while memory is served by a connected host; without `memoryAccess` a worker's `state mode=memory` then fails instead of using a store the host does not serve. */
   readonly memoryRoutedOverWire?: (() => boolean) | undefined;
+  /** Saves a working-directory change for the next start; `state set runtime.workingDir` uses it (registerAllTools). */
+  readonly workspaceSwap?: import('../tools/state/index.js').StateSwapManager | undefined;
   /** Supplying it registers the `profile` capture tool. See registerAllTools. */
   readonly personalCapture?: import('../personal-capture/index.js').PersonalCaptureHolder | undefined;
   readonly codeIndex?: import('./turn-knowledge-injection.js').TurnCodeIndexSource | undefined;

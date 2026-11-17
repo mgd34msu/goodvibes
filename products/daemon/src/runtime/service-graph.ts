@@ -7,7 +7,7 @@ import { createNativeWorkSubmissionHost } from '@goodvibes-jev/engine/platform/p
 import { createNativeConversationIntakeHost, createNativeRequirementProposer, type NativeConversationContinuationOwner } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-intake';
 import { createLocalWorkLedgerReadBinding } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger';
 import { prepareGatewayScopePolicyOwner, registerNativeAutomationGatewayMethods, registerWorkLedgerGatewayMethods, registerWorkLedgerImportGatewayMethods, registerNativeWorkExecutionGatewayMethods, registerNativeWorkSubmissionGatewayMethods, registerNativeConversationIntakeGatewayMethods } from '@goodvibes-jev/engine/platform/platform/control-plane';
-import { openWorkspaceRegistrationStore, sharedWorkspaceRegisterPath, legacyWorkspaceRegisterPath } from '@goodvibes-jev/engine/platform/platform/workspace';
+import { openWorkspaceRegistrationStore, sharedWorkspaceRegisterPath, legacyWorkspaceRegisterPath, WorkspaceSwapManager } from '@goodvibes-jev/engine/platform/platform/workspace';
 import { join } from 'node:path';
 import { ServiceRegistry, SubscriptionManager, ToolLLM, resolveSecretInput, sharedSubscriptionsPath } from '@goodvibes-jev/engine/platform/platform/config';
 import { AutomationDeliveryManager, AutomationManager, automationActionBinding } from '@goodvibes-jev/engine/platform/platform/automation';
@@ -697,7 +697,12 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
     });
     disposalScope.registry.add('browser checkout seam holder', () => browserCheckoutSeam.clear()); // newer than 'browser sessions' above, so runs first
     disposalScope.registry.add('native automation updates', registerNativeAutomationGatewayMethods(gatewayMethods, { manager: automationManager, host: autonomousHost }));
+    // One owner of the saved working directory: POST /config runtime.workingDir and `state set runtime.workingDir` both save through it.
+    const workspaceSwap = options.daemonHomeDirectory === undefined ? null : new WorkspaceSwapManager(workingDirectory, {
+      runtimeBus: options.runtimeBus, daemonHomeDir: options.daemonHomeDirectory, startOverride: options.workingDirectoryOverride,
+    });
     const agentToolDependencies = {
+      ...(workspaceSwap ? { workspaceSwap } : {}),
       toolExecutionObserver: (tool: string, args: Record<string, unknown>, success: boolean) => ciAutoWatchObserver?.(tool, args, success),
       contractRunner, contractHooks: contractRunner.hooks(),
       agentManager,
@@ -881,6 +886,7 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
       hookWorkbench,
       pluginManager,
       workflow,
+      workspaceSwap,
       triggerManager,
       voiceProviders,
       voiceService,

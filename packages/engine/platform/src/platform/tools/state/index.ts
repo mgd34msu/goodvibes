@@ -1,22 +1,25 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { KVState } from '../../state/kv-state.js';
 import { ProjectIndex } from '../../state/project-index.js';
 import { ModeManager, type HITLMode } from '../../state/mode-manager.js';
-import type { MemoryRegistry } from '../../state/memory-registry.js';
 import { HookDispatcher } from '../../hooks/dispatcher.js';
 import { TelemetryDB } from '../../state/telemetry.js';
 import type { TelemetryFilter } from '../../state/telemetry.js';
 import { logger } from '../../utils/logger.js';
 import type { Tool, ToolDefinition, ToolExecuteOptions } from '../../types/tools.js';
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
-import type { JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
 import { isClassicOperation, withConfiguredDecisionModelPolicy } from '../../runtime/decision-policy.js';
 import { STATE_TOOL_SCHEMA } from './schema.js';
+import type { ContextAccountingSource } from '../context-accounting/index.js';
 import type { StateInput } from './schema.js';
 import { toRecord } from '../../utils/record-coerce.js';
 import { summarizeError } from '../../utils/error-display.js';
-import { mirrorMemoryRecord } from './memory-mirror.js';
+import {
+  importMemoryFiles,
+  listMemoryRecords,
+  memoryRecordsForKey,
+  memoryValueRefusal,
+  saveMemoryRecord,
+  type StateMemoryStore,
+} from './memory-mirror.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -68,7 +71,6 @@ export interface HookChangeRequest {
 export type HookChangeGate = (request: HookChangeRequest, execution: { readonly signal?: AbortSignal | undefined }) => Promise<{ readonly approved: boolean; readonly reason?: string | undefined }>;
 
 export interface StateToolOptions {
-  readonly memoryDir: string;
   readonly hookDispatcher?: HookDispatcher | undefined;
   /** Approval for hook changes (add/enable/disable/remove). Absent: `mode=hooks` can list but not change. */
   readonly hookGate?: HookChangeGate | undefined;
@@ -96,19 +98,24 @@ export interface StateToolOptions {
    */
   readonly swapManager?: StateSwapManager;
   /**
-   * Project memory registry. When provided, `mode=memory action=set` mirrors the written
-   * preference into a retrievable `memory_records` row (deduped per key) so passive per-turn
-   * knowledge injection can surface it, closing the gap where a distilled preference lived only
-   * as a flat `.goodvibes/memory/*.json` file that retrieval never read. Best-effort: a registry
-   * write that fails never fails the file write itself.
+   * The project memory store `mode=memory` reads and writes: the host's memory
+   * spine (which reaches a connected host when it serves memory), or a local
+   * registry behind `createLocalMemoryAccess`. A key is one row in it, the row
+   * prompt retrieval reads. Absent: `mode=memory` is not offered.
    */
-  readonly memoryRegistry?: MemoryRegistry | undefined;
+  readonly memory?: StateMemoryStore | undefined;
   /**
-   * True while this process's memory is served by a connected host over the wire. The local
-   * registry is then a stale image nothing writes, so the mirror is skipped and `set` says the
-   * value was saved to the memory file only.
+   * Where an earlier build kept memories as `<key>.json` files. On the first
+   * `mode=memory` call of this tool they are saved into the memory store and
+   * the files renamed; costs one directory read per process.
    */
-  readonly memoryRoutedOverWire?: (() => boolean) | undefined;
+  readonly memoryFilesDir?: string | undefined;
+  /**
+   * The live session's token and context state (the holder the
+   * context_accounting tool reads). `mode=budget` reports its token usage and
+   * turns, `mode=context` its context window; unbound, they say so.
+   */
+  readonly contextAccounting?: { getSource(): ContextAccountingSource | null } | undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -126,10 +133,19 @@ export function createStateTool(
   projectIndex: ProjectIndex,
   options: StateToolOptions,
 ): Tool {
-  if (!options.memoryDir || options.memoryDir.trim().length === 0) {
-    throw new Error('createStateTool requires an explicit memoryDir');
-  }
-  const memoryDir = options.memoryDir;
+  const memory = options.memory;
+  // Started by the first memory call; a failed attempt (the store was unreachable) is tried again by the next.
+  let memoryFilesImported: Promise<string[]> | undefined;
+  const importedMemoryFiles = (store: StateMemoryStore, signal: AbortSignal | undefined): Promise<string[]> => {
+    if (!options.memoryFilesDir) return Promise.resolve([]);
+    const dir = options.memoryFilesDir;
+    memoryFilesImported ??= importMemoryFiles(store, dir, signal).catch((error: unknown) => {
+      memoryFilesImported = undefined;
+      logger.debug('state tool: memory files from an earlier build not read yet', { error: summarizeError(error) });
+      return [];
+    });
+    return memoryFilesImported;
+  };
   const hookDispatcher = options.hookDispatcher;
   const hookGate = options.hookGate;
   const modeManager = options.modeManager;
@@ -138,7 +154,6 @@ export function createStateTool(
   const workingDir = (): string | undefined => typeof options.workingDir === 'function' ? options.workingDir() : options.workingDir;
   const daemonHomeDir = (): string | undefined => typeof options.daemonHomeDir === 'function' ? options.daemonHomeDir() : options.daemonHomeDir;
   const swapManager = options.swapManager;
-  const overWire = (): boolean => options.memoryRoutedOverWire?.() === true;
   // Session start time and telemetry are scoped per-instance so multiple
   // createStateTool() calls don't share state.
   const SESSION_START_MS = Date.now();
@@ -152,6 +167,7 @@ export function createStateTool(
   const unavailableModes = new Set<string>([
     ...(hookDispatcher ? [] : ['hooks']),
     ...(telemetryDB ? [] : ['analytics']),
+    ...(memory ? [] : ['memory']),
   ]);
   const definition: ToolDefinition = {
     name: 'state',
@@ -159,16 +175,18 @@ export function createStateTool(
     core: true,
     description:
       'Access and manipulate session state. Modes: get/set/list/clear operate on KVState;'
-      + ' budget and context report the files this product has read or written in this workspace (count and estimated tokens), not the size of the project and not conversation token usage:'
-      + ' for context-window and token state use the context_accounting tool;'
-      + ' memory reads/writes/deletes persistent .goodvibes/memory files; telemetry reports this tool\'s call counts and how many of them failed or were refused;'
+      + ' budget reports this session\'s measured token usage and turns, context its context window (last request size, window size, compaction), both with the files this product has read or written in this workspace;'
+      + (memory ? ' memory reads, writes, lists and deletes project memories by key; a memory is the record prompts retrieve, so what get shows is what the model is given;' : '')
+      + ' telemetry reports this tool\'s call counts and how many of them failed or were refused;'
       + (hookDispatcher ? ' hooks lists registered hooks and, with the same approval running their command would need, changes them (enable/disable/add/remove);' : '')
       + ' mode reads or sets how much the terminal app prints: quiet, balanced or operator (get/set/list).'
       + ' Discovery: use mode=list to see existing KV keys,'
       + (hookDispatcher ? ' mode=hooks hookAction=list to see registered hooks,' : '')
       + ' mode=mode modeAction=get to see the current print level.'
-      + ' Also: mode=memory memoryAction=list to list persistent memory keys'
-      + (telemetryDB ? ', mode=analytics analyticsAction=summary for the tool calls this process ran (name, status, duration, result size).' : '.'),
+      + [
+        ...(memory ? [' mode=memory memoryAction=list lists memory keys.'] : []),
+        ...(telemetryDB ? [' mode=analytics analyticsAction=summary shows the tool calls this process ran (name, status, duration, result size).'] : []),
+      ].join(''),
     parameters: narrowStateModes(toRecord(STATE_TOOL_SCHEMA), unavailableModes),
     sideEffects: ['state'],
     concurrency: 'serial',
@@ -193,13 +211,11 @@ export function createStateTool(
     executionOptions?: ToolExecuteOptions,
   ): Promise<{ success: boolean; output?: string; error?: string }> {
     try {
-      const signal = executionOptions?.signal, owner = executionOptions?.assertCurrent;
+      const signal = executionOptions?.signal;
+      // Still wanted: the call's signal and the registry's own check of this call.
       const current = () => {
         signal?.throwIfAborted();
-        if (executionOptions?.signal !== signal || executionOptions?.assertCurrent !== owner) throw new Error('State tool owner changed.');
-        const result: unknown = owner?.(args);
-        if (result !== undefined) { drainOwned(result); throw new Error('State tool owner must be synchronous.'); }
-        signal?.throwIfAborted();
+        executionOptions?.assertCurrent?.(args);
       };
       current();
       if (typeof args.mode !== 'string') {
@@ -213,9 +229,12 @@ export function createStateTool(
         case 'set':   return await runSet(input, kvState, swapManager);
         case 'list':  return await runList(input, kvState);
         case 'clear': return await runClear(input, kvState);
-        case 'budget': return await runBudget(kvState, projectIndex);
-        case 'context': return await runContext(kvState, projectIndex);
-        case 'memory': return await runMemory(input, memoryDir, overWire() ? undefined : options.memoryRegistry, { signal, assertCurrent: current }, overWire());
+        case 'budget': return runBudget(kvState, projectIndex, options.contextAccounting?.getSource() ?? null);
+        case 'context': return runContext(kvState, projectIndex, options.contextAccounting?.getSource() ?? null);
+        case 'memory':
+          if (!memory) return unavailableMode('memory', 'this session has no project memory store', availableModes);
+          await importedMemoryFiles(memory, signal);
+          return await runMemory(input, memory, { signal, assertCurrent: current });
         case 'telemetry': return await runTelemetry();
         case 'hooks':
           if (!hookDispatcher) return unavailableMode('hooks', 'hook registration belongs to the user\'s hook settings, not this tool', availableModes);
@@ -697,140 +716,130 @@ async function runClear(
   };
 }
 
-async function runBudget(
+/** What this product has read or written in the workspace: the project index's count and estimate. */
+function filesSeen(projectIndex: ProjectIndex): { count: number; estimated_tokens: number } {
+  return { count: projectIndex.getFiles().length, estimated_tokens: projectIndex.getTotalTokens() };
+}
+
+const FILES_SEEN_NOTE = 'files_seen counts the files this product has read or written in this workspace (kept across restarts), not every file in the project.';
+const UNBOUND_NOTE = 'No live session is bound to this tool here, so there is no token or context-window reading; the context_accounting tool says the same.';
+
+/** The session's measured token usage and turns, from the live session the context_accounting tool reads. */
+function runBudget(
   kvState: KVState,
   projectIndex: ProjectIndex,
-): Promise<{ success: boolean; output?: string; error?: string }> {
-  // Fetch session metrics stored in KVState if available.
-  const metricsKeys = ['tokens_used', 'files_modified', 'commands_run', 'agents_spawned'];
-  const metrics = await kvState.get(metricsKeys);
-
-  const totalProjectTokens = projectIndex.getTotalTokens();
-  const fileCount = projectIndex.getFiles().length;
-
+  source: ContextAccountingSource | null,
+): { success: boolean; output?: string; error?: string } {
+  const tokens = source?.getTokenState();
+  const turns = source?.getTurnState?.();
   return {
     success: true,
     output: JSON.stringify({
       mode: 'budget',
       session_id: kvState.getSessionId(),
-      files_seen: {
-        count: fileCount,
-        estimated_tokens: totalProjectTokens,
-      },
-      note: 'files_seen counts the files this product has read or written in this workspace (kept across restarts), not every file in the project. session_metrics are null unless a host records them; for conversation token and context-window usage call the context_accounting tool.',
-      session_metrics: {
-        tokens_used: (metrics.tokens_used as number | undefined) ?? null,
-        files_modified: (metrics.files_modified as number | undefined) ?? null,
-        commands_run: (metrics.commands_run as number | undefined) ?? null,
-        agents_spawned: (metrics.agents_spawned as number | undefined) ?? null,
-      },
+      ...(source && tokens
+        ? {
+          scope: source.scope,
+          tokens_used: {
+            input: tokens.measured.input,
+            output: tokens.measured.output,
+            cache_read: tokens.measured.cacheRead,
+            cache_write: tokens.measured.cacheWrite,
+            total: tokens.measured.input + tokens.measured.output,
+          },
+          ...(turns ? { turns: { used: turns.used, limit: turns.limit } } : {}),
+        }
+        : { tokens_used: null }),
+      files_seen: filesSeen(projectIndex),
+      note: source ? FILES_SEEN_NOTE : `${UNBOUND_NOTE} ${FILES_SEEN_NOTE}`,
     }),
   };
 }
 
-async function runContext(
+/** The session's context window: what the last request put in it, its size, and compaction. */
+function runContext(
   kvState: KVState,
   projectIndex: ProjectIndex,
-): Promise<{ success: boolean; output?: string; error?: string }> {
-  const fileCount = projectIndex.getFiles().length;
-  const totalTokens = projectIndex.getTotalTokens();
-
+  source: ContextAccountingSource | null,
+): { success: boolean; output?: string; error?: string } {
+  const tokens = source?.getTokenState();
+  const compaction = source?.getCompactionState();
+  const window = tokens?.contextWindow ?? null;
   return {
     success: true,
     output: JSON.stringify({
       mode: 'context',
       session_id: kvState.getSessionId(),
-      files_seen: {
-        count: fileCount,
-        estimated_tokens: totalTokens,
-      },
-      note: 'files_seen counts the files this product has read or written in this workspace, not every file in the project.',
+      ...(source && tokens
+        ? {
+          scope: source.scope,
+          context_window: window,
+          last_request_tokens: tokens.lastInputTokens,
+          used_fraction: window && window > 0 ? Math.round((tokens.lastInputTokens / window) * 1000) / 1000 : null,
+          ...(compaction ? { compacting: compaction.isCompacting, compactions: compaction.compactionCount ?? null } : {}),
+        }
+        : { context_window: null }),
+      files_seen: filesSeen(projectIndex),
+      note: source ? FILES_SEEN_NOTE : `${UNBOUND_NOTE} ${FILES_SEEN_NOTE}`,
     }),
   };
 }
 
 async function runMemory(
   input: StateInput,
-  memoryDir: string,
-  memoryRegistry?: MemoryRegistry | undefined,
-  options: JudgmentReadingOptions = {},
-  routedOverWire = false,
+  store: StateMemoryStore,
+  options: { readonly signal?: AbortSignal | undefined; readonly assertCurrent: () => void },
 ): Promise<{ success: boolean; output?: string; error?: string }> {
   const action = input.memoryAction ?? 'list';
   const view = action === 'get' ? (input.view ?? 'full') : (input.view ?? 'summary');
+  const signal = options.signal;
 
   if (action === 'list') {
     try {
-      if (!existsSync(memoryDir)) {
-        return {
-          success: true,
-          output: JSON.stringify({ mode: 'memory', action: 'list', view, keys: [] }),
-        };
-      }
-      // Only keys `get` and `set` accept are listed, and only regular files: anything else could not be read back.
-      const listed = readdirSync(memoryDir)
-        .filter(f => f.endsWith('.json'))
-        .map(f => f.slice(0, -5))
-        .filter((key) => sanitizeMemoryKey(key) !== null)
-        .flatMap((key) => {
-          // A dangling link, or a file removed since the directory was read, is not a key; it must not fail the whole list.
-          try {
-            const stat = statSync(join(memoryDir, `${key}.json`));
-            return stat.isFile() ? [{ key, size: stat.size }] : [];
-          } catch { return []; }
-        });
-      const keys = listed.map((entry) => entry.key);
+      const byKey = await listMemoryRecords(store, signal);
+      const entries = [...byKey].sort(([a], [b]) => a.localeCompare(b));
       return {
         success: true,
         output: JSON.stringify({
           mode: 'memory',
           action: 'list',
           view,
-          keys,
-          entries: view === 'full' ? listed.map(({ key, size }) => ({ key, bytes: size })) : undefined,
+          keys: entries.map(([key]) => key),
+          ...(view === 'full' ? { entries: entries.map(([key, record]) => ({ key, bytes: Buffer.byteLength(record.detail ?? ''), cls: record.cls, review: record.reviewState, updatedAt: record.updatedAt })) } : {}),
         }),
       };
     } catch (err) {
-      return {
-        success: false,
-        error: `Memory list failed: ${summarizeError(err)}`,
-      };
+      return { success: false, error: `Memory list failed: the memory store could not be read (${summarizeError(err)}). Try again; nothing was changed.` };
     }
   }
 
+  const key = input.memoryKey;
+  if (!key) {
+    return { success: false, error: `memory action "${String(action)}" requires "memoryKey"` };
+  }
+  const safeKey = sanitizeMemoryKey(key);
+  if (!safeKey) {
+    return { success: false, error: 'Invalid memoryKey: must be alphanumeric, hyphens, or underscores only' };
+  }
+
   if (action === 'get') {
-    const key = input.memoryKey;
-    if (!key) {
-      return { success: false, error: 'memory action "get" requires "memoryKey"' };
-    }
-    const safeKey = sanitizeMemoryKey(key);
-    if (!safeKey) {
-      return { success: false, error: 'Invalid memoryKey: must be alphanumeric, hyphens, or underscores only' };
-    }
-    const filePath = join(memoryDir, `${safeKey}.json`);
     try {
-      if (!existsSync(filePath)) {
-        return {
-          success: true,
-          output: JSON.stringify({ mode: 'memory', action: 'get', key: safeKey, value: null }),
-        };
+      const record = (await memoryRecordsForKey(store, safeKey, signal))[0];
+      if (!record) {
+        return { success: true, output: JSON.stringify({ mode: 'memory', action: 'get', key: safeKey, value: null }) };
       }
-      const raw = readFileSync(filePath, 'utf-8');
-      const records = memoryRegistry ? recordsForKey(memoryRegistry, safeKey) : undefined;
-      const retrievable = records?.length;
-      // The record is a copy made at write time; a correction made through recall changes it and not the file.
-      const differs = records !== undefined && records.length > 0 && !records.some((record) => record.detail === raw);
-      const retrieval = { ...retrievabilityOf(retrievable), ...(differs ? { retrieved_text_differs: true, note: 'The text retrieved in prompts for this key differs from this file (it was changed through recall). Use memoryAction=set to make the file the retrieved text, or memoryAction=delete to remove both.' } : {}) };
+      const raw = record.detail ?? record.summary;
       let value: unknown;
       try {
         value = JSON.parse(raw);
       } catch {
         value = raw;
       }
+      const facts = { cls: record.cls, review: record.reviewState, updatedAt: record.updatedAt };
       return {
         success: true,
         output: JSON.stringify(view === 'full'
-          ? { mode: 'memory', action: 'get', view, key: safeKey, value, ...retrieval }
+          ? { mode: 'memory', action: 'get', view, key: safeKey, value, ...facts }
           : {
             mode: 'memory',
             action: 'get',
@@ -838,86 +847,51 @@ async function runMemory(
             key: safeKey,
             type: Array.isArray(value) ? 'array' : value === null ? 'null' : typeof value,
             bytes: Buffer.byteLength(raw),
-            ...retrieval,
+            ...facts,
           }),
       };
     } catch (err) {
-      return {
-        success: false,
-        error: `Memory get failed: ${summarizeError(err)}`,
-      };
+      return { success: false, error: `Memory get failed: the memory store could not be read (${summarizeError(err)}). Try again.` };
     }
   }
 
   if (action === 'set') {
-    const key = input.memoryKey;
     const value = input.memoryValue;
-    if (!key) {
-      return { success: false, error: 'memory action "set" requires "memoryKey"' };
-    }
-    const safeKey = sanitizeMemoryKey(key);
-    if (!safeKey) {
-      return { success: false, error: 'Invalid memoryKey: must be alphanumeric, hyphens, or underscores only' };
-    }
     if (value === undefined || value === null) {
       return { success: false, error: 'memory action "set" requires "memoryValue"' };
     }
+    const refusal = memoryValueRefusal(safeKey, value);
+    if (refusal) return { success: false, error: `Memory ${safeKey} not saved: ${refusal}.` };
     try {
-      options.signal?.throwIfAborted(); options.assertCurrent?.();
-      mkdirSync(memoryDir, { recursive: true });
-      const filePath = join(memoryDir, `${safeKey}.json`);
-      // Write as-is; allow caller to pass JSON string or plain text. The file is the source of truth and is written first.
-      writeFileSync(filePath, value, 'utf-8');
-      // Mirror the write into the retrievable memory store so passive per-turn knowledge injection
-      // can surface it. Best-effort and deduped per key; its class is read after this call returns.
-      const mirror = await mirrorMemoryRecord(memoryRegistry, safeKey, value);
-      // When the new text was not indexed, an earlier record of this key (if any) keeps being retrieved.
-      const staleRecords = !mirror.indexed && memoryRegistry ? recordsForKey(memoryRegistry, safeKey)?.length ?? 0 : 0;
+      options.assertCurrent();
+      const saved = await saveMemoryRecord(store, safeKey, value, signal);
       return {
         success: true,
-        output: JSON.stringify({ mode: 'memory', action: 'set', key: safeKey, bytes_written: Buffer.byteLength(value), retrievable: mirror.indexed,
-          classification: mirror.classification, ...(isClassicOperation() ? { provenance: 'classic' } : {}),
-          ...(routedOverWire ? { note: 'Memory is served by the connected host, so this value was saved to the memory file only and is not retrievable in prompts from this process.' } : {}),
-          ...(staleRecords > 0 ? { note: 'The new value is saved in the memory file but was not indexed, so an earlier version of this key stays retrievable in prompts. Use memoryAction=delete to remove the key and its retrieval record.' } : {}) }),
+        output: JSON.stringify({ mode: 'memory', action: 'set', key: safeKey, bytes_written: Buffer.byteLength(value), retrievable: true,
+          classification: 'pending', id: saved.id, ...(isClassicOperation() ? { provenance: 'classic' } : {}) }),
       };
     } catch (err) {
-      return {
-        success: false,
-        error: `Memory set failed: ${summarizeError(err)}`,
-      };
+      return { success: false, error: `Memory ${safeKey} not saved: the memory store did not take the write (${summarizeError(err)}). Nothing was saved; try again.` };
     }
   }
 
   if (action === 'delete') {
-    const key = input.memoryKey;
-    if (!key) {
-      return { success: false, error: 'memory action "delete" requires "memoryKey"' };
-    }
-    const safeKey = sanitizeMemoryKey(key);
-    if (!safeKey) {
-      return { success: false, error: 'Invalid memoryKey: must be alphanumeric, hyphens, or underscores only' };
-    }
     try {
-      options.signal?.throwIfAborted(); options.assertCurrent?.();
-      const filePath = join(memoryDir, `${safeKey}.json`);
-      const fileExisted = existsSync(filePath);
-      // The retrieval record goes first: if it cannot be removed the file stays, so the key is never half-deleted unnoticed.
-      let recordsRemoved = 0;
-      if (memoryRegistry) {
-        const records = recordsForKey(memoryRegistry, safeKey);
-        if (records === undefined) return { success: false, error: `Memory delete failed: the memory registry cannot be read. Nothing was deleted.` };
-        for (const record of records) {
-          if (memoryRegistry.delete(record.id, { signal: options.signal, assertCurrent: options.assertCurrent })) recordsRemoved++;
-        }
-      }
-      if (fileExisted) unlinkSync(filePath);
-      if (!fileExisted && recordsRemoved === 0) {
+      options.assertCurrent();
+      const records = await memoryRecordsForKey(store, safeKey, signal);
+      if (records.length === 0) {
         return { success: false, error: `No memory named "${safeKey}" exists. Use memoryAction=list to see the keys.` };
       }
-      return { success: true, output: JSON.stringify({ mode: 'memory', action: 'delete', key: safeKey, file_deleted: fileExisted, records_deleted: recordsRemoved,
-        ...(routedOverWire ? { note: 'Memory is served by the connected host: only the memory file was deleted. The host\'s retrieval record of this key is not removed from this process and may still be retrieved in prompts.' } : {}) }) };
+      let removed = 0;
+      for (const record of records) {
+        if (await store.delete(record.id, signal ? { signal } : undefined)) removed++;
+      }
+      if (removed < records.length) {
+        return { success: false, error: `Memory ${safeKey} was only partly deleted (${removed} of ${records.length} records); the rest may still be retrieved. Run delete again.` };
+      }
+      return { success: true, output: JSON.stringify({ mode: 'memory', action: 'delete', key: safeKey, records_deleted: removed }) };
     } catch (err) {
-      return { success: false, error: `Memory delete failed: ${summarizeError(err)}` };
+      return { success: false, error: `Memory delete failed: the memory store did not take the change (${summarizeError(err)}). Try again.` };
     }
   }
 
@@ -925,18 +899,4 @@ async function runMemory(
     success: false,
     error: `Unknown memory action: ${String(action)}`,
   };
-}
-
-/** The retrieval records mirrored from a memory key, or undefined when the registry cannot be read. */
-function recordsForKey(registry: MemoryRegistry, safeKey: string): Array<{ id: string; detail?: string | undefined }> | undefined {
-  try {
-    return registry.getAll().filter((record) => record.tags.includes(`state-memory:${safeKey}`));
-  } catch (err) {
-    logger.warn('state tool: memory registry unreadable', { key: safeKey, error: summarizeError(err) });
-    return undefined;
-  }
-}
-
-function retrievabilityOf(recordCount: number | undefined): { retrievable?: boolean } {
-  return recordCount === undefined ? {} : { retrievable: recordCount > 0 };
 }

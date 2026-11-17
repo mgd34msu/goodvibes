@@ -8,9 +8,9 @@ export const STATE_TOOL_SCHEMA = {
       type: 'string',
       enum: ['get', 'set', 'list', 'clear', 'budget', 'context', 'memory', 'telemetry', 'hooks', 'mode', 'analytics'],
       description:
-        'Operation mode: get/set/list/clear manipulate KVState; budget returns token usage;'
-        + ' context returns conversation info; memory accesses persistent .goodvibes/memory files;'
-        + ' telemetry returns session telemetry summary;'
+        'Operation mode: get/set/list/clear manipulate KVState; budget reports the session\'s measured token usage and turns; context reports the context window (last request size, window size, compaction);'
+        + ' memory reads and writes project memories by key (the records prompts retrieve);'
+        + ' telemetry returns this tool\'s call counts;'
         + ' hooks manages registered hooks (list/enable/disable/add/remove);'
         + ' mode reads or sets how much the terminal app prints (quiet/balanced/operator; get/set/list);'
         + ' analytics reads the tool calls this process ran (query/summary/export/dashboard).',
@@ -42,15 +42,15 @@ export const STATE_TOOL_SCHEMA = {
     memoryAction: {
       type: 'string',
       enum: ['get', 'set', 'list', 'delete'],
-      description: '(mode: memory) Sub-action: get reads a key, set writes a key, list shows all keys, delete removes a key and its retrieval record.',
+      description: '(mode: memory) Sub-action: get reads a key, set saves a key (replacing its value), list shows all keys, delete removes a key.',
     },
     memoryKey: {
       type: 'string',
-      description: '(mode: memory, action: get/set/delete) The memory file key (filename without .json extension).',
+      description: '(mode: memory, action: get/set/delete) The memory key: letters, digits, hyphens and underscores.',
     },
     memoryValue: {
       type: 'string',
-      description: '(mode: memory, action: set) JSON string or plain text to write.',
+      description: '(mode: memory, action: set) JSON string or plain text to save. It is embedded for retrieval, so a value holding a credential is refused.',
     },
     hookAction: {
       type: 'string',

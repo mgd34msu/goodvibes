@@ -414,6 +414,8 @@ export function projectAgentToolDependencies<
     featureFlags: input.services.featureFlags,
     overflowHandler: input.services.overflowHandler,
     memoryRegistry: input.services.memoryRegistry,
+    // A worker's `state mode=memory` reads and writes the one memory store, through the connected host while it serves memory.
+    memoryAccess: input.services.memorySpineClient ?? input.services.memorySpine,
     memoryRoutedOverWire: () => (input.services.memorySpineClient ?? input.services.memorySpine)?.active === true,
     sandboxSessionRegistry: input.services.sandboxSessionRegistry,
     workflowServices: input.services.workflow,
@@ -446,6 +448,7 @@ export function projectAgentToolDependencies<
     featureFlags: Input['services']['featureFlags'];
     overflowHandler: Input['services']['overflowHandler'];
     memoryRegistry: Input['services']['memoryRegistry'];
+    memoryAccess: Input['services']['memorySpineClient'] | Input['services']['memorySpine'];
     memoryRoutedOverWire: () => boolean;
     sandboxSessionRegistry: Input['services']['sandboxSessionRegistry'];
     workflowServices: Input['services']['workflow'];

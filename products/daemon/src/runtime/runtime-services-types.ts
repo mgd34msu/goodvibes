@@ -66,6 +66,7 @@ import type { JudgmentServices } from '@goodvibes-jev/engine/platform/platform/r
 import type { SessionSnapshot } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import type { DaemonInboxFactory } from './daemon-handler-composition.js';
 import type { TriggerManager } from '@goodvibes-jev/engine/platform/platform/triggers';
+import type { WorkspaceSwapManager } from '@goodvibes-jev/engine/platform/platform/workspace';
 import type { DaemonBootController, DaemonBootOperations } from './boot-tasks.js';
 
 export interface RuntimeServicesOptions {
@@ -100,6 +101,12 @@ export interface RuntimeServicesOptions {
    * is the single reader that produces it.
    */
   readonly daemonHomeDirectory?: string | undefined;
+  /**
+   * The start option that chose the working directory ahead of the saved
+   * setting (`--working-dir`, `GOODVIBES_WORKING_DIR`), when there was one: a
+   * saved working-directory change then says that option must change first.
+   */
+  readonly workingDirectoryOverride?: string | undefined;
   /** Opt-in (daemon-side only): fold host-observed external coding-agent sessions
    * into the fleet as 'observed-external' rows. Interactive leaves it off and reads
    * the daemon snapshot. Mirrors the platform's own createRuntimeServices option. */
@@ -190,6 +197,8 @@ export interface RuntimeServices {
   readonly hookWorkbench: HookWorkbench;
   readonly pluginManager: PluginManager;
   readonly workflow: WorkflowServices;
+  /** Saves a working-directory change for the next start; null without a daemon home directory. */
+  readonly workspaceSwap: WorkspaceSwapManager | null;
   /** Stream watchers, on-exit process triggers and condition checks, supervised as one, see trigger-services.ts. */
   readonly triggerManager: TriggerManager;
   readonly voiceProviders: VoiceProviderRegistry;

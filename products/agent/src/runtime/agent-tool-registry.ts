@@ -149,6 +149,8 @@ export function composeAgentToolRegistry(deps: AgentToolRegistryDeps): AgentTool
     serviceRegistry: services.serviceRegistry,
     overflowHandler: services.overflowHandler,
     changeTracker: services.sessionChangeTracker,
+    // state mode=memory reads and writes the one memory store, through the connected host while it serves memory.
+    memoryAccess: services.memorySpineClient,
     // Same holder instance `services.contextAccountingHolder` exposes, the
     // context_accounting tool registered here and the bind call bootstrap.ts
     // makes after constructing the Orchestrator (see

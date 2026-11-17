@@ -47,6 +47,8 @@ import { InspectTool } from './inspect/index.js';
 import { createAgentTool } from './agent/index.js';
 import { createConfiguredFetchDeps, createFetchTool } from './fetch/index.js';
 import { createStateTool } from './state/index.js';
+import type { StateMemoryStore } from './state/memory-mirror.js';
+import { createLocalMemoryAccess } from '../runtime/memory-spine/client.js';
 import { createWorkflowServices, createWorkflowTool } from './workflow/index.js';
 import { createRegistryTool } from './registry-tool/index.js';
 import { createKeyedStateReclaimCheck, createSessionBoundKvState } from './session-kv-state.js';
@@ -243,10 +245,32 @@ export function registerToolWithContractGate(
 }
 
 /**
- * Register all built-in tools into the given registry.
- * Creates shared FileStateCache and ProjectIndex instances so read/write/edit
- * tools share cache state within a session.
+ * The state tool's memory store over a local registry. While a connected host
+ * serves memory this registry is not the store prompts read, and it cannot
+ * reach the host, so every operation fails and says so.
  */
+function localStateMemory(
+  registry: import('../state/index.js').MemoryRegistry,
+  routedOverWire: (() => boolean) | undefined,
+): StateMemoryStore {
+  const local = createLocalMemoryAccess(registry);
+  if (!routedOverWire) return local;
+  const reach = <A extends unknown[], T>(run: (...args: A) => Promise<T>) => async (...args: A): Promise<T> => {
+    if (routedOverWire()) {
+      throw new Error('memory is served by the connected host and this session has no route to it; hand the memory to the main session, which can save it');
+    }
+    return run(...args);
+  };
+  return {
+    add: reach(local.add),
+    list: reach(local.list),
+    update: reach(local.update),
+    updateReview: reach(local.updateReview),
+    delete: reach(local.delete),
+    get: reach(local.get),
+  };
+}
+
 /** The PTY backend of this host, probed once per process (a `command -v script` spawn), not once per registry. */
 let ptyAvailability: ReturnType<typeof detectPtyAvailability> | undefined;
 function hostPtyAvailability(): ReturnType<typeof detectPtyAvailability> {
@@ -254,6 +278,11 @@ function hostPtyAvailability(): ReturnType<typeof detectPtyAvailability> {
   return ptyAvailability;
 }
 
+/**
+ * Register all built-in tools into the given registry.
+ * Creates shared FileStateCache and ProjectIndex instances so read/write/edit
+ * tools share cache state within a session.
+ */
 export function registerAllTools(
   registry: ToolRegistry,
   deps?: {
@@ -316,10 +345,22 @@ export function registerAllTools(
     secretsManager?: Pick<SecretsManager, 'get' | 'set' | 'getGlobalHome'> | null | undefined;
     overflowHandler?: OverflowHandler | undefined;
     changeTracker?: SessionChangeTracker | undefined;
-    /** Project memory registry, when present, `state mode=memory set` mirrors writes into retrievable records. */
+    /**
+     * The project memory store `state mode=memory` reads and writes: the host's
+     * memory spine, which reaches a connected host while that host serves memory.
+     * Preferred over `memoryRegistry`.
+     */
+    memoryAccess?: import('./state/memory-mirror.js').StateMemoryStore | undefined;
+    /** Project memory registry: the store `state mode=memory` uses when no `memoryAccess` is given. */
     memoryRegistry?: import('../state/index.js').MemoryRegistry | undefined;
-    /** True while memory is served by a connected host; the state tool then does not mirror into the local registry. */
+    /**
+     * True while memory is served by a connected host. A registry given without
+     * `memoryAccess` cannot reach that host, so `state mode=memory` then fails
+     * instead of reading or writing a local store the host does not serve.
+     */
     memoryRoutedOverWire?: (() => boolean) | undefined;
+    /** Saves a new working directory for the next start (the daemon's workspace swap manager); `state set runtime.workingDir` uses it. */
+    workspaceSwap?: import('./state/index.js').StateSwapManager | undefined;
     /**
      * Where the owner profile store and occasions service arrive once the
      * gateway composition has built them. Supplying it registers the `profile`
@@ -624,7 +665,9 @@ export function registerAllTools(
       ...(deps.readAccessFilter ? { readAccessFilter: deps.readAccessFilter } : {}),
     }),
   );
-  registerTool(createContextAccountingTool(deps.contextAccountingHolder ?? new ContextAccountingHolder()));
+  // One holder answers context_accounting and the state tool's budget and context modes.
+  const contextAccountingHolder = deps.contextAccountingHolder ?? new ContextAccountingHolder();
+  registerTool(createContextAccountingTool(contextAccountingHolder));
   if (deps.contractRunner) registerTool(createContractSelfCheckTool(deps.contractRunner));
   // A command or file operation can change any project file, so each exec
   // call ends by marking cached project-file facts (the import graph) stale.
@@ -678,18 +721,20 @@ export function registerAllTools(
   // Only the host's real dispatcher is ever handed over (a private one would accept hooks nothing fires).
   // Without one the state tool does not offer mode=hooks. With one but no gate it lists hooks and refuses changes.
   const printLevelConfig = deps.configManager;
+  const stateMemory = deps.memoryAccess
+    ?? (deps.memoryRegistry ? localStateMemory(deps.memoryRegistry, deps.memoryRoutedOverWire) : undefined);
   registerTool(
     createStateTool(kvState, projectIndex, {
       ...(deps.hookDispatcher ? { hookDispatcher: deps.hookDispatcher } : {}),
       ...(deps.hookChangeGate ? { hookGate: deps.hookChangeGate } : {}),
-      memoryDir: join(workingDirectory, '.goodvibes', 'memory'),
       workingDir: workingDirectory,
       daemonHomeDir: deps.configManager.getHomeDirectory() ?? undefined,
       modeManager,
       setPrintLevel: (level) => printLevelConfig.setDynamic('behavior.hitlMode', level),
       ...(deps.runtimeBus ? { telemetryDB: toolCallTelemetryFor(deps.runtimeBus) } : {}),
-      ...(deps.memoryRegistry ? { memoryRegistry: deps.memoryRegistry } : {}),
-      ...(deps.memoryRoutedOverWire ? { memoryRoutedOverWire: deps.memoryRoutedOverWire } : {}),
+      ...(stateMemory ? { memory: stateMemory, memoryFilesDir: join(workingDirectory, '.goodvibes', 'memory') } : {}),
+      ...(deps.workspaceSwap ? { swapManager: deps.workspaceSwap } : {}),
+      contextAccounting: contextAccountingHolder,
     }),
   );
   registerTool(

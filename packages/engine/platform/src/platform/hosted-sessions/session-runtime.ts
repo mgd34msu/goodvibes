@@ -239,6 +239,8 @@ export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions)
     agentMessageBus: services.agentMessageBus,
     webSearchService: services.webSearchService,
     workflowServices: services.workflow,
+    // `state mode=memory` reads and writes the workspace's one memory store.
+    ...(services.memoryAccess ? { memoryAccess: services.memoryAccess } : {}),
     mcpRegistry: services.mcpRegistry,
     sessionOrchestration: services.sessionOrchestration,
     // Per SESSION: without it every task-tool ref lands in the unowned legacy

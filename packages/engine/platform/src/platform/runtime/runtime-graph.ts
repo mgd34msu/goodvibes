@@ -813,7 +813,7 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
   // Drain plugin work before releasing the graph it can call into.
   scope.registry.add('plugins', () => pluginManager.close());
   // Contracts left on disk resume once the services are up.
-  void resumeContracts(contractRunner, workingDirectory);
+  if ((product.contractRecovery ?? 'platform') === 'platform') void resumeContracts(contractRunner, workingDirectory);
 
   const close = (): Promise<void> => { stopAutonomousWork(); stopRequests.request(); return scope.close(); };
   return {
@@ -857,6 +857,7 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
     projectPlanningService,
     projectPlanningProjectId,
     workPlanStore,
+    knowledgeStore,
     memoryStore,
     memoryRegistry,
     memorySpine,

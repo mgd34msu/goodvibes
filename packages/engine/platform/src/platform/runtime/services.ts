@@ -11,7 +11,7 @@ import type { StepUpService } from '../relay/step-up-service.js';
 import type { WatcherRegistry } from '../watchers/index.js';
 import type { TriggerManager } from '../triggers/manager.js';
 import type { ArtifactStore } from '../artifacts/index.js';
-import type { HomeGraphService, KnowledgeService, ProjectPlanningService, ProjectWorkPlan } from '../knowledge/index.js';
+import type { HomeGraphService, KnowledgeService, KnowledgeStore, ProjectPlanningService, ProjectWorkPlan } from '../knowledge/index.js';
 import type { MediaProviderRegistry } from '../media/index.js';
 import type { MultimodalService } from '../multimodal/index.js';
 import type { AgentFleetOwnership, AgentManager } from '../tools/agent/index.js';
@@ -253,6 +253,8 @@ export interface ProductComposition<X extends object = Record<never, never>> {
   readonly profileCapture?: boolean | undefined;
   /** The surface a job created here is attributed to. Default: the surface root. */
   readonly automationSurfaceKind?: AutomationSurfaceKind | undefined;
+  /** `platform` resumes contracts left on disk once the graph is up; `product` resumes them itself, later in its boot. Default `platform`. */
+  readonly contractRecovery?: 'platform' | 'product' | undefined;
   extras?(base: ComposedRuntimeServices, scope: RuntimeAcquisitionScope): X;
 }
 
@@ -438,6 +440,10 @@ export {
  */
 export interface ComposedRuntimeServices extends RuntimeServices {
   readonly surface: SessionSurface;
+  /** The recorded autonomous host every protocol and native mutation ask in this graph goes through. */
+  readonly nativeMutationHost: import('../permissions/external-request.js').ExternalPermissionHost;
+  /** The project's wiki store: planning, the work ledger and native intake read and write it. */
+  readonly knowledgeStore: KnowledgeStore;
   readonly permissionManager: PermissionManager;
   /** The raiser every ask in this graph goes through, behind the trust gate when there is one. */
   readonly requestApproval: ApprovalRaiser;

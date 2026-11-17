@@ -109,7 +109,7 @@ const BYTES_PER_TOKEN = 4;
 
 /**
  * The one place a tool result's default size ceiling lives, in tokens (about four characters each).
- * Tools that page or cap their own output (read, find, analyze, inspect) take their default from here;
+ * Tools that page or cap their own output (read, find, analyze, inspect, and exec for each stream) take their default from here;
  * a call's explicit `max_tokens` still wins. `DEFAULT_POLICIES` below derives from the same numbers.
  */
 export const DEFAULT_CEILING_TOKENS = {
@@ -320,11 +320,9 @@ function parsesAsJson(trimmed: string): boolean {
  *
  * @param result - The raw tool result to enforce limits on.
  * @param policy - The policy to apply (obtain via `getPolicy`).
- * @param overflowHandler - Where a `file`-mode overflow is spilled. When absent the
- * output is cut inline instead, so the limit still holds.
- * @param call - The tool call that produced the result (name and arguments);
- * a spilled output shows the parts `engine.tools.output-keep` ranks highest
- * against it.
+ * @param overflowHandler - Where a `file`-mode overflow is spilled (it shows the
+ * start, the end and the error lines, decided in code). When absent the output
+ * is cut inline instead, so the limit still holds.
  * Summary mode reports local size facts and the string or parsed JSON format.
  *
  * @returns The mutated result with `_policyAudit` attached, plus a standalone
@@ -334,7 +332,6 @@ export async function applyOutputPolicy(
   result: ToolResult,
   policy: ToolOutputPolicy,
   overflowHandler: OverflowHandler | undefined,
-  call: string,
 ): Promise<{ result: ToolResultWithAudit; audit: OutputPolicyResult }> {
   const output = typeof result.output === 'string' ? result.output : '';
   const encoder = new TextEncoder();
@@ -373,7 +370,6 @@ export async function applyOutputPolicy(
         // tokens * 4 that capToolText uses).
         maxChars: policy.maxBytes,
         label: policy.toolClass,
-        call,
       });
       result.output = overflowResult.content;
       const actionTaken: OutputPolicyResult['actionTaken'] = overflowResult.overflowRef

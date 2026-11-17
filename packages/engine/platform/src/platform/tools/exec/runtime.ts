@@ -12,7 +12,8 @@ import { randomInt, randomUUID } from 'node:crypto';
 import type { Tool } from '../../types/tools.js';
 import { logger } from '../../utils/logger.js';
 import { EXEC_TOOL_SCHEMA } from './schema.js';
-import { DEFAULT_MAX_CHARS, OverflowHandler } from '../shared/overflow.js';
+import { OverflowHandler } from '../shared/overflow.js';
+import { DEFAULT_CEILING_TOKENS } from '../../runtime/tools/output-policy.js';
 import { execCommandText, type ExecInput, type ExecCommandInput, type ExecCommandResult, type ExecVerbosity } from './schema.js';
 import { ProcessManager } from '../shared/process-manager.js';
 import { guardExecCommand, formatDenialResponse } from './ast-guard.js';
@@ -116,14 +117,21 @@ function normalizeExecInput(input: ExecInput): ExecInput {
   return { ...input, working_dir: workingDir, commands };
 }
 
+/**
+ * Each stream's share of the execute result ceiling (the output policy's one
+ * owner of ceilings): stdout and stderr of one command together, with room for
+ * the result's own fields, stay under it, so a finished command's output is
+ * cut and saved once here and not cut again by the policy.
+ */
+const EXEC_STREAM_MAX_CHARS = Math.floor((DEFAULT_CEILING_TOKENS.execute * 4) * 0.45);
+
 async function truncate(
   overflowHandler: OverflowHandler,
   s: string,
   label: string,
-  call: string,
-  maxChars: number = DEFAULT_MAX_CHARS,
+  maxChars: number = EXEC_STREAM_MAX_CHARS,
 ): Promise<{ text: string; truncated: boolean }> {
-  const result = await overflowHandler.handle(s, { maxChars, label, call });
+  const result = await overflowHandler.handle(s, { maxChars, label });
   return { text: result.content, truncated: result.overflowRef !== undefined };
 }
 
@@ -420,8 +428,8 @@ async function runAdmittedCommand(
       ? await startCapturedBackground(processManager, policy.capturedInput, cmdStr, cmdInput, workingDirectory, cmdInput.timeout_ms ?? globalTimeout, signal, network, scrubbed.env, beforeSpawn, policy.assertWorkspaceCurrent)
       : await runCapturedCommand(policy.capturedInput, cmdStr, cmdInput, workingDirectory, cmdInput.timeout_ms ?? globalTimeout, signal, network, scrubbed.env, { beforeSpawn, beforePublish: policy.assertCurrent, ...(interactive && policy.interaction ? { interaction: policy.interaction } : {}) });
     if (!result.denied) {
-      const out = await truncate(overflowHandler, result.stdout, 'stdout', cmdStr);
-      const err = await truncate(overflowHandler, result.stderr, 'stderr', cmdStr);
+      const out = await truncate(overflowHandler, result.stdout, 'stdout');
+      const err = await truncate(overflowHandler, result.stderr, 'stderr');
       result.stdout = out.text; result.stderr = err.text;
       result.stdout_truncated = out.truncated; result.stderr_truncated = err.truncated;
     }
@@ -534,8 +542,8 @@ async function runAdmittedCommand(
       await drainAfterStop(procPromise, POST_STOP_DRAIN_GRACE_MS);
       // What the command printed before it was stopped is kept; it is often
       // the only clue to why it ran long.
-      const partialOut = await truncate(overflowHandler, stdoutSink.text, 'stdout', cmdStr);
-      const partialErr = await truncate(overflowHandler, stderrSink.text, 'stderr', cmdStr);
+      const partialOut = await truncate(overflowHandler, stdoutSink.text, 'stdout');
+      const partialErr = await truncate(overflowHandler, stderrSink.text, 'stderr');
       const stopped = timedOut
         ? buildTimedOutResult(cmdStr, cwd, Date.now() - startTime)
         : buildCancelledResult(cmdStr, cwd, Date.now() - startTime);
@@ -544,8 +552,8 @@ async function runAdmittedCommand(
     }
 
     const [stdoutRaw, stderrRaw, exitCode] = procResult!;
-    const stdoutResult = await truncate(overflowHandler, stdoutRaw, 'stdout', cmdStr);
-    const stderrResult = await truncate(overflowHandler, stderrRaw, 'stderr', cmdStr);
+    const stdoutResult = await truncate(overflowHandler, stdoutRaw, 'stdout');
+    const stderrResult = await truncate(overflowHandler, stderrRaw, 'stderr');
     const duration = Date.now() - startTime;
     const result: ExecCommandResult = {
       cmd: cmdStr,
@@ -678,8 +686,8 @@ async function runCommandWithProgress(
     await progressFile.finish(timedOut ? '# Timed out\n' : '# Cancelled\n', true);
     // The same overflow cut a finished run gets: a stopped noisy command is the
     // case where the output is largest.
-    const partialOut = await truncate(overflowHandler, stdoutSink.text, 'stdout', cmdStr);
-    const partialErr = await truncate(overflowHandler, stderrSink.text, 'stderr', cmdStr);
+    const partialOut = await truncate(overflowHandler, stdoutSink.text, 'stdout');
+    const partialErr = await truncate(overflowHandler, stderrSink.text, 'stderr');
     return {
       ...(timedOut
         ? buildTimedOutResult(cmdStr, cwd, Date.now() - startTime, progressFile.path)
@@ -700,8 +708,8 @@ async function runCommandWithProgress(
     return [undefined, undefined, undefined] as [void, void, number | undefined];
   });
   const actualExitCode = (ioResult[2] as number | undefined) ?? await proc.exited;
-  const stdoutResult = await truncate(overflowHandler, stdoutSink.text, 'stdout', cmdStr);
-  const stderrResult = await truncate(overflowHandler, stderrSink.text, 'stderr', cmdStr);
+  const stdoutResult = await truncate(overflowHandler, stdoutSink.text, 'stdout');
+  const stderrResult = await truncate(overflowHandler, stderrSink.text, 'stderr');
   const duration = Date.now() - startTime;
   await progressFile.finish(`# Completed: exit=${actualExitCode} duration=${duration}ms\n`, progressRequested);
 
@@ -788,8 +796,8 @@ async function runUntil(
     ]);
     const [, exitCode] = await Promise.all([streams, proc.exited]);
     current(); pattern.assertCurrent();
-    const stdoutResult = await truncate(overflowHandler, stdoutSink.text, 'stdout', cmdStr);
-    const stderrResult = await truncate(overflowHandler, stderrSink.text, 'stderr', cmdStr);
+    const stdoutResult = await truncate(overflowHandler, stdoutSink.text, 'stdout');
+    const stderrResult = await truncate(overflowHandler, stderrSink.text, 'stderr');
     current(); pattern.assertCurrent();
     return { cmd: cmdStr, exit_code: exitCode, stdout: stdoutResult.text, stderr: stderrResult.text,
       success: matched, duration_ms: Date.now() - startTime, cwd,
@@ -800,8 +808,8 @@ async function runUntil(
     // caller's own signal keeps propagating.
     if (!deadline.signal.aborted || signal?.aborted) throw error;
     stop();
-    const stdoutResult = await truncate(overflowHandler, stdoutSink.text, 'stdout', cmdStr);
-    const stderrResult = await truncate(overflowHandler, stderrSink.text, 'stderr', cmdStr);
+    const stdoutResult = await truncate(overflowHandler, stdoutSink.text, 'stdout');
+    const stderrResult = await truncate(overflowHandler, stderrSink.text, 'stderr');
     return { ...buildTimedOutResult(cmdStr, cwd, Date.now() - startTime),
       stdout: stdoutResult.text, stderr: stderrResult.text,
       ...((stdoutResult.truncated || stdoutSink.dropped) && { stdout_truncated: true }), ...((stderrResult.truncated || stderrSink.dropped) && { stderr_truncated: true }) };
@@ -1315,7 +1323,7 @@ export function createExecTool(
 
         const results = await executeResolvedCommands(
           processManager,
-          input.output_keep === 'ranked' ? overflowHandler.ranked() : overflowHandler,
+          overflowHandler,
           featureFlags,
           resolvedCmds,
           input.parallel === true,

@@ -77,7 +77,6 @@ import { pageContent } from '../tools/batteries/page-content.js';
 import { pageSummary } from '../tools/batteries/page-summary.js';
 import { credentialHeader } from '../tools/batteries/credential-header.js';
 import { apiRoutes } from '../tools/batteries/api-routes.js';
-import { outputKeep } from '../tools/batteries/output-keep.js';
 import { healAcceptance } from '../tools/batteries/heal-acceptance.js';
 
 registry.register(exportBreak);
@@ -92,7 +91,6 @@ registry.register(pageContent);
 registry.register(pageSummary);
 registry.register(credentialHeader);
 registry.register(apiRoutes);
-registry.register(outputKeep);
 registry.register(healAcceptance);
 
 import { inboxTriage } from '../intake/triage/battery.js';

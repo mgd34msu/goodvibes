@@ -162,14 +162,6 @@ export const EXEC_TOOL_SCHEMA = {
         + ' standard: full stdout/stderr + exit code (default);'
         + ' verbose: everything + timing, env, cwd.',
     },
-    output_keep: {
-      type: 'string',
-      enum: ['head_tail', 'ranked'],
-      description:
-        'What an output longer than the display limit shows (the full output is always saved and its path given).'
-        + ' head_tail (default): the start, the end and the lines that report an error.'
-        + ' ranked: the parts the decision model ranks most relevant to the command, one extra request per long output.',
-    },
     stop_on_error: {
       type: 'boolean',
       description:
@@ -305,7 +297,6 @@ export interface ExecInput {
   timeout_ms?: number | undefined;
   verbosity?: ExecVerbosity | undefined;
   /** What an overflowing output shows: head and tail by arithmetic (default) or ranked by the decision model. */
-  output_keep?: 'head_tail' | 'ranked' | undefined;
   file_ops?: ExecFileOp[] | undefined;
   /**
    * Stop sequential execution on first failed command; a parallel run starts

@@ -279,6 +279,10 @@ export const REMOTE_PEER_DISCONNECT_INPUT_SCHEMA = objectSchema({
   requeueClaimedWork: BOOLEAN_SCHEMA,
 }, ['peerId'], { additionalProperties: true });
 
+export const REMOTE_PEER_GET_INPUT_SCHEMA = objectSchema({
+  peerId: STRING_SCHEMA,
+}, ['peerId']);
+
 export const REMOTE_PEER_OUTPUT_SCHEMA = objectSchema({
   peer: DISTRIBUTED_PEER_SCHEMA,
 }, ['peer']);

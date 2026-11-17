@@ -257,6 +257,7 @@ export interface DaemonRemoteManagementRouteHandlers {
   approveRemotePairRequest(requestId: string, req: Request): MaybeResponse;
   rejectRemotePairRequest(requestId: string, req: Request): MaybeResponse;
   getRemotePeers(): MaybeResponse;
+  getRemotePeer(peerId: string): MaybeResponse;
   rotateRemotePeerToken(peerId: string, req: Request): MaybeResponse;
   revokeRemotePeerToken(peerId: string, req: Request): MaybeResponse;
   disconnectRemotePeer(peerId: string, req: Request): MaybeResponse;

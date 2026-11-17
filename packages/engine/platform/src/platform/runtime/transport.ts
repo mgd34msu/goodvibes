@@ -3,8 +3,8 @@ export { createRuntimeDirectTransport } from './transports/direct.js';
 export type { DirectTransport } from './transports/direct.js';
 export { createDirectClientTransport } from './transports/direct-client.js';
 export type { DirectClientTransport } from './transports/direct-client.js';
-export { createHttpTransport } from './transports/daemon-http-client.js';
-export type { HttpTransport, HttpTransportOptions, HttpTransportSnapshot } from './transports/http-types.js';
+export { createDaemonHttpTransport } from './transports/daemon-http-client.js';
+export type { HttpTransport, DaemonHttpTransportOptions, HttpTransportSnapshot } from './transports/http-types.js';
 export { createClientTransport } from './transports/client-transport.js';
 export type { ClientTransport } from './transports/client-transport.js';
 export { buildUrl, createTransportPaths, normalizeBaseUrl } from './transports/transport-paths.js';
@@ -39,8 +39,8 @@ export type {
   ContractRouteLike,
   ContractStreamOptions,
 } from './transports/contract-http-client.js';
-export { isAbortError, openServerSentEventStream } from './transports/sse-stream.js';
-export type { ServerSentEventHandlers, ServerSentEventOptions } from './transports/sse-stream.js';
+export { isAbortError, openRawServerSentEventStream } from './transports/sse-stream.js';
+export type { RawServerSentEventHandlers, RawServerSentEventOptions } from './transports/sse-stream.js';
 export { createOperatorRemoteClient } from './transports/operator-remote-client.js';
 export type {
   OperatorRemoteClient,

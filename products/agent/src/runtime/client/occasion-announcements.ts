@@ -13,7 +13,7 @@
  * next idle pass.
  */
 
-import { buildUrl, openServerSentEventStream } from '@/runtime/index.ts';
+import { buildUrl, openRawServerSentEventStream } from '@/runtime/index.ts';
 import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 
 export interface OccasionAnnouncementWatch {
@@ -48,7 +48,7 @@ export async function watchOccasionAnnouncements(options: WatchOccasionAnnouncem
   let closed = false;
   const ended = (): void => { if (!closed) { closed = true; options.onEnded(); } };
   try {
-    const close = await openServerSentEventStream(options.fetchImpl ?? globalThis.fetch, url.toString(), {
+    const close = await openRawServerSentEventStream(options.fetchImpl ?? globalThis.fetch, url.toString(), {
       onEvent: (domain: string, payload: unknown) => {
         if (domain === 'deliveries' && isOccasionWaitingFrame(payload)) options.onWaiting();
       },

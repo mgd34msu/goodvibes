@@ -137,7 +137,7 @@ export {
   createDirectTransportFromServices,
   createRuntimeDirectTransport,
   createDirectClientTransport,
-  createHttpTransport,
+  createDaemonHttpTransport,
   createClientTransport,
   buildUrl,
   createTransportPaths,
@@ -154,7 +154,7 @@ export {
   openContractRouteStream,
   requireContractRoute,
   isAbortError,
-  openServerSentEventStream,
+  openRawServerSentEventStream,
   createOperatorRemoteClient,
   createPeerRemoteClient,
   buildEventSourceUrl,
@@ -177,7 +177,7 @@ export { leaveHostedSessionOnExit } from './client/hosted-exit.ts';
 export type DirectTransport = Transport.DirectTransport;
 export type DirectClientTransport<TOperator = unknown, TPeer = unknown> = Transport.DirectClientTransport<TOperator, TPeer>;
 export type HttpTransport = Transport.HttpTransport;
-export type HttpTransportOptions = Transport.HttpTransportOptions;
+export type DaemonHttpTransportOptions = Transport.DaemonHttpTransportOptions;
 export type HttpTransportSnapshot = Transport.HttpTransportSnapshot;
 export type ClientTransport<TKind extends string = string, TOperator = unknown, TPeer = unknown> = Transport.ClientTransport<TKind, TOperator, TPeer>;
 export type TransportPaths = Transport.TransportPaths;
@@ -195,8 +195,8 @@ export type ContractInvokeOptions = Transport.ContractInvokeOptions;
 export type ContractRouteDefinition = Transport.ContractRouteDefinition;
 export type ContractRouteLike = Transport.ContractRouteLike;
 export type ContractStreamOptions = Transport.ContractStreamOptions;
-export type ServerSentEventHandlers = Transport.ServerSentEventHandlers;
-export type ServerSentEventOptions = Transport.ServerSentEventOptions;
+export type RawServerSentEventHandlers = Transport.RawServerSentEventHandlers;
+export type RawServerSentEventOptions = Transport.RawServerSentEventOptions;
 export type OperatorRemoteClient = Transport.OperatorRemoteClient;
 export type OperatorRemoteClientInvokeOptions = Transport.OperatorRemoteClientInvokeOptions;
 export type OperatorRemoteClientStreamOptions = Transport.OperatorRemoteClientStreamOptions;

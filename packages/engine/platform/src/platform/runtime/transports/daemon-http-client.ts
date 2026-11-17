@@ -71,7 +71,7 @@ import type {
   HttpTaskSubmitResponse,
   HttpTransport,
   HttpTransportOperatorClient,
-  HttpTransportOptions,
+  DaemonHttpTransportOptions,
   HttpTransportPeerClient,
   HttpTransportSnapshot,
   HttpTransportTelemetryMetricsSnapshot,
@@ -121,32 +121,6 @@ async function withNullOnNotFound<T>(run: () => Promise<T>): Promise<T | null> {
   } catch (error) {
     if (isNotFoundError(error)) return null;
     throw error;
-  }
-}
-
-/** The most records a by-id lookup will scan before it says it cannot tell. */
-const BY_ID_SCAN_CEILING = 12_800;
-
-/**
- * The operator contract has no by-id read for these records, only a list capped by `limit`.
- * Widen the list until the record appears or the list comes back shorter than asked (so
- * everything was seen). `null` therefore means "not there", never "beyond the first page";
- * a list still full at the ceiling is an error rather than a false "not found".
- */
-async function findInWidenedList<T>(
-  list: (limit: number) => Promise<readonly T[]>,
-  matches: (entry: T) => boolean,
-  firstLimit: number,
-  what: string,
-): Promise<T | null> {
-  for (let limit = firstLimit; ; limit *= 2) {
-    const entries = await list(limit);
-    const found = entries.find(matches);
-    if (found !== undefined) return found;
-    if (entries.length < limit) return null;
-    if (limit * 2 > BY_ID_SCAN_CEILING) {
-      throw new Error(`${what} was not among the ${entries.length} newest records, and the daemon offers no by-id lookup to search further.`);
-    }
   }
 }
 
@@ -272,9 +246,9 @@ function createOperatorClient(
         await operatorApi.invoke<HttpTaskRetryResponse>('tasks.retry', { taskId }),
     },
     approvals: {
-      // The daemon returns the newest 50 records and takes no page size, so a larger limit cannot widen the result.
-      list: async (limit = 100): Promise<readonly SharedApprovalRecord[]> =>
-        assertSharedApprovalArray((await operatorApi.approvals.list({})).approvals, 'approvals.list').slice(0, limit),
+      // The daemon answers with its newest records and takes no page size.
+      list: async (): Promise<readonly SharedApprovalRecord[]> =>
+        assertSharedApprovalArray((await operatorApi.approvals.list({})).approvals, 'approvals.list'),
       get: async (approvalId): Promise<SharedApprovalRecord | null> => {
         const records = assertSharedApprovalArray((await operatorApi.approvals.list({ approvalId })).approvals, 'approvals.list');
         return records.find((entry) => entry.id === approvalId) ?? null;
@@ -381,7 +355,7 @@ function createOperatorClient(
 
 function createPeerClient(
   transport: HttpJsonTransport,
-  retryOptions: Pick<HttpTransportOptions, 'retry' | 'onRetryScheduled' | 'onRetryExecuted'> = {},
+  retryOptions: Pick<DaemonHttpTransportOptions, 'retry' | 'onRetryScheduled' | 'onRetryExecuted'> = {},
 ): HttpTransportPeerClient {
   const operatorApi = createOperatorRemoteClient(transport, getOperatorContract());
   const peerApi = createPeerRemoteClient(transport, getPeerContract());
@@ -441,12 +415,7 @@ function createPeerClient(
           limit,
         })).peers ?? [],
       get: async (peerId): Promise<DistributedPeerRecord | null> =>
-        await findInWidenedList(
-          async (limit) => (await operatorApi.invoke<{ peers: readonly DistributedPeerRecord[] }>('remote.peers.list', { limit })).peers ?? [],
-          (peer) => peer.id === peerId,
-          500,
-          `Peer '${peerId}'`,
-        ),
+        (await withNullOnNotFound(() => operatorApi.invoke<{ peer: DistributedPeerRecord }>('remote.peers.get', { peerId })))?.peer ?? null,
       getSnapshot: async (peerId): Promise<HttpPeerRecordSnapshot | null> => {
         const [snapshot, contract, peers] = await Promise.all([
           readRemoteSnapshot(),
@@ -552,7 +521,7 @@ function createPeerClient(
   };
 }
 
-export function createHttpTransport(options: HttpTransportOptions): HttpTransport {
+export function createDaemonHttpTransport(options: DaemonHttpTransportOptions): HttpTransport {
   const httpClient = createHttpJsonTransport({
     baseUrl: options.baseUrl,
     authToken: options.authToken,
@@ -571,15 +540,14 @@ export function createHttpTransport(options: HttpTransportOptions): HttpTranspor
   return Object.freeze({
     ...transport,
     async snapshot(): Promise<HttpTransportSnapshot> {
-      const [currentSession, tasks, approvals, sessions, controlPlane, providers, remoteSnapshot, nodeHostContract, peerSnapshot] = await Promise.all([
+      // The peer snapshot already carries the remote snapshot and the node-host contract; each is read once.
+      const [currentSession, tasks, approvals, sessions, controlPlane, providers, peerSnapshot] = await Promise.all([
         operator.sessions.current(),
         operator.tasks.snapshot(),
         operator.approvals.list(),
         operator.sessions.list(),
         operator.controlPlane.snapshot(),
         operator.providers.snapshot(),
-        requestJsonRaw<Record<string, unknown>>(fetchImpl, paths.remoteUrl, createJsonRequestInit(options.authToken)),
-        peer.getNodeHostContract(),
         peer.getSnapshot(),
       ]);
       return {
@@ -593,11 +561,7 @@ export function createHttpTransport(options: HttpTransportOptions): HttpTranspor
           providers,
           shellPaths: paths,
         },
-        peer: {
-          ...peerSnapshot,
-          nodeHostContract,
-          remoteSnapshot,
-        },
+        peer: peerSnapshot,
       };
     },
   });

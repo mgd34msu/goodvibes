@@ -10,7 +10,7 @@ import type { UiControlPlaneSnapshot } from '../ui-read-models.js';
 import type { TransportPaths } from './transport-paths.js';
 import { buildUrl } from './transport-paths.js';
 import { createJsonInit, requestJsonRaw } from './http-json-transport.js';
-import { openServerSentEventStream } from './sse-stream.js';
+import { openRawServerSentEventStream } from './sse-stream.js';
 import type {
   HttpSessionEnsureInput,
   HttpSessionMessageInput,
@@ -217,7 +217,7 @@ export async function connectTelemetryStream(
   token: string | null | undefined,
   handlers: HttpTransportTelemetryStreamHandlers,
 ): Promise<() => void> {
-  return await openServerSentEventStream(fetchImpl, url, {
+  return await openRawServerSentEventStream(fetchImpl, url, {
     onEvent: (eventName, payload) => {
       if (eventName === 'telemetry' && payload && typeof payload === 'object') {
         handlers.onRecord(payload as TelemetryRecord);

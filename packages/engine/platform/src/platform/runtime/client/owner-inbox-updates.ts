@@ -33,7 +33,7 @@ import {
 } from '../../control-plane/owner-inbox.js';
 import type { HostInstructions } from '../../core/host-instructions.js';
 import type { QuestionInbox } from '../../tools/query/index.js';
-import { openServerSentEventStream } from '../transports/sse-stream.js';
+import { openRawServerSentEventStream } from '../transports/sse-stream.js';
 import { buildUrl } from '../transports/transport-paths.js';
 import { logger } from '../../utils/logger.js';
 import { summarizeError } from '../../utils/error-display.js';
@@ -72,7 +72,7 @@ export async function watchOwnerInboxUpdates(options: WatchOwnerInboxUpdatesOpti
   const url = new URL(buildUrl(options.baseUrl, '/api/control-plane/events'));
   url.searchParams.set('domains', OWNER_INBOX_UPDATE_DOMAIN);
   try {
-    const close = await openServerSentEventStream(
+    const close = await openRawServerSentEventStream(
       fetchImpl,
       url.toString(),
       {

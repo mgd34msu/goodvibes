@@ -1,14 +1,12 @@
 /**
  * Platform runtime UI surface barrel.
  *
- * Source file: `packages/platform/src/platform/runtime/ui.ts`
+ * Source file: `packages/engine/platform/src/platform/runtime/ui.ts`
  * Public path: `@goodvibes-jev/engine/platform/platform/runtime/ui`
  *
- * NOTE: This is NOT a re-export of the `runtime/ui/` subdirectory.
- * The `ui/` subdirectory contains model-picker and provider-health data
- * providers, several of which ARE re-exported here. This file is the
- * curated public surface that the `./platform/runtime/ui` export map path
- * resolves to.
+ * The `./platform/runtime/ui` export map path resolves here. It re-exports
+ * the `runtime/ui/` subdirectory (the provider-health status types) whole, plus
+ * the host UI, UI events and read models beside it.
  *
  * See `docs/public-surface.md` for the canonical surface table.
  */

@@ -24,7 +24,7 @@
  * resolves to null instead of throwing, and the caller says so honestly rather
  * than pretending the conversation ended.
  */
-import { openServerSentEventStream } from '@/runtime/index.ts';
+import { openRawServerSentEventStream } from '@/runtime/index.ts';
 import { buildUrl } from '@goodvibes-jev/engine/transport-http';
 import { createStreamTextAssembler } from '@goodvibes-jev/engine/transport-core';
 import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
@@ -158,7 +158,7 @@ export async function watchHostedSession(
   // passes this, whichever session it belongs to, so the text it hands out is whole.
   const streamText = createStreamTextAssembler();
   try {
-    const close = await openServerSentEventStream(
+    const close = await openRawServerSentEventStream(
       fetchImpl,
       hostedSessionStreamUrl(options.baseUrl),
       {

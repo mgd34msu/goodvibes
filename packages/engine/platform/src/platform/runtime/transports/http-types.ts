@@ -31,10 +31,11 @@ import type {
 } from '../remote/distributed-runtime-types.js';
 import type { UiControlPlaneSnapshot, UiLocalAuthSnapshot, UiSessionSnapshot, UiTasksSnapshot } from '../ui-read-models.js';
 import type { UiRuntimeEvents } from '../ui-events.js';
-import type { TransportPaths } from './shared.js';
+import type { TransportPaths } from './transport-paths.js';
 import type { HttpRetryPolicy } from './http-json-transport.js';
 
-export interface HttpTransportOptions {
+/** Options of the daemon client (createDaemonHttpTransport). */
+export interface DaemonHttpTransportOptions {
   readonly baseUrl: string;
   readonly authToken?: string | null | undefined;
   readonly fetchImpl?: FetchLike | undefined;
@@ -118,7 +119,8 @@ export interface HttpTransportTasksClient {
 }
 
 export interface HttpTransportApprovalsClient {
-  list(limit?: number): Promise<readonly SharedApprovalRecord[]>;
+  /** The daemon's newest approvals; it takes no page size. */
+  list(): Promise<readonly SharedApprovalRecord[]>;
   get(approvalId: string): Promise<SharedApprovalRecord | null>;
   claim(approvalId: string, actor: string, actorSurface?: string, note?: string): Promise<SharedApprovalRecord | null>;
   approve(approvalId: string, actor: string, actorSurface?: string, note?: string): Promise<SharedApprovalRecord | null>;

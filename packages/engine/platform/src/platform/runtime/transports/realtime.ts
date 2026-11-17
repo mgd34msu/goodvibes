@@ -1,10 +1,10 @@
-import { createHttpTransport } from './daemon-http-client.js';
+import { createDaemonHttpTransport } from './daemon-http-client.js';
 import { createClientTransport } from './client-transport.js';
-import type { HttpTransportOptions, HttpTransportPeerClient, HttpTransportOperatorClient, HttpTransportSnapshot } from './http-types.js';
+import type { DaemonHttpTransportOptions, HttpTransportPeerClient, HttpTransportOperatorClient, HttpTransportSnapshot } from './http-types.js';
 import { createWebSocketConnector } from './shared.js';
 import { createRemoteUiRuntimeEvents } from './ui-runtime-events.js';
 
-export interface RealtimeTransportOptions extends HttpTransportOptions {
+export interface RealtimeTransportOptions extends DaemonHttpTransportOptions {
   readonly webSocketImpl?: typeof WebSocket | undefined;
 }
 
@@ -22,11 +22,8 @@ export interface RealtimeTransport {
 }
 
 export function createRealtimeTransport(options: RealtimeTransportOptions): RealtimeTransport {
-  const baseTransport = createHttpTransport({
-    baseUrl: options.baseUrl,
-    authToken: options.authToken,
-    fetchImpl: options.fetchImpl,
-  });
+  const { webSocketImpl: _webSocketImpl, ...daemonOptions } = options;
+  const baseTransport = createDaemonHttpTransport(daemonOptions);
   const WebSocketImpl = options.webSocketImpl ?? WebSocket;
   const events = createRemoteUiRuntimeEvents(
     createWebSocketConnector(options.baseUrl, options.authToken, WebSocketImpl),

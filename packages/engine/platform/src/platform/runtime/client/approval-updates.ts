@@ -31,7 +31,7 @@
  * the decide verbs have always documented.
  */
 
-import { openServerSentEventStream } from '../transports/sse-stream.js';
+import { openRawServerSentEventStream } from '../transports/sse-stream.js';
 import { buildUrl } from '../transports/transport-paths.js';
 import { logger } from '../../utils/logger.js';
 import { summarizeError } from '../../utils/error-display.js';
@@ -130,7 +130,7 @@ export async function watchApprovalUpdates(
     return null;
   }
   try {
-    const close = await openServerSentEventStream(
+    const close = await openRawServerSentEventStream(
       fetchImpl,
       approvalUpdateStreamUrl(options.baseUrl),
       {

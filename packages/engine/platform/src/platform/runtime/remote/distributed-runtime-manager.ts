@@ -31,6 +31,7 @@ import {
   listDistributedRuntimePairRequests,
   listDistributedRuntimePeers,
   listDistributedRuntimeWork,
+  getDistributedRuntimePeer,
   startDistributedRuntime,
   persistDistributedRuntime,
 } from './distributed-runtime-store.js';
@@ -130,6 +131,10 @@ export class DistributedRuntimeManager implements DistributedRuntimeManagerState
 
   listPeers(kind?: DistributedPeerKind, limit = 200): DistributedPeerRecord[] {
     return listDistributedRuntimePeers(this, kind, limit);
+  }
+
+  getPeer(peerId: string): DistributedPeerRecord | null {
+    return getDistributedRuntimePeer(this, peerId);
   }
 
   /** Host-only generation; reading it never expires leases or mutates peer state. */

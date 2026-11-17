@@ -302,6 +302,12 @@ export function listDistributedRuntimePeers(
     .map((peer) => presentPeer(sanitizePeer(peer), now));
 }
 
+/** One peer as the list presents it, or null when no peer has that id. */
+export function getDistributedRuntimePeer(state: DistributedRuntimeManagerState, peerId: string): DistributedPeerRecord | null {
+  const peer = state.peers.get(peerId);
+  return peer ? presentPeer(sanitizePeer(peer), Date.now()) : null;
+}
+
 /**
  * `connected` is stored when a peer calls in and nothing stores its absence,
  * so a peer that silently went away would read as connected forever. Read it

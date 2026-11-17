@@ -7,7 +7,7 @@
  * The platform's `@goodvibes-jev/engine/platform/platform/runtime/client` now owns WHEN the
  * wire comes up and goes down: idempotent per base URL, torn down on a
  * change, the one-time legacy-store fold. This module owns WHAT the wire is,
- * this terminal's own `createHttpTransport` + `createSessionsClientSpineTransport` +
+ * this terminal's own `createDaemonHttpTransport` + `createSessionsClientSpineTransport` +
  * `createTuiMemorySpineTransport`, injected as the platform's `connect(baseUrl,
  * authToken)` callback, because building the actual HTTP client is the same
  * connection-resolution concern the verb caller already keeps product-side.
@@ -46,7 +46,7 @@
  * handler takes a narrower `{ mode, baseUrl }` signal instead, so the adapting
  * happens inside this module rather than at the call site.
  */
-import { createHttpTransport, type HostServiceStatus, type HttpTransportOptions } from '@/runtime/index.ts';
+import { createDaemonHttpTransport, type HostServiceStatus, type DaemonHttpTransportOptions } from '@/runtime/index.ts';
 import { createSpineAdoptionSync as createPlatformSpineAdoptionSync } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 import type { SpineAdoptionOptions as PlatformSpineAdoptionOptions } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 
@@ -56,7 +56,7 @@ import { createTuiMemorySpineTransport } from '../memory-spine-transport.ts';
 /** This module's own options: the platform's shape minus the two fields it builds itself. */
 export type SpineAdoptionOptions = Omit<PlatformSpineAdoptionOptions, 'connect' | 'activation'> & {
   /** Retry observers for the daemon wire, so its retries reach the runtime bus and the retry counter. */
-  readonly retryHooks?: Pick<HttpTransportOptions, 'onRetryScheduled' | 'onRetryExecuted'> | undefined;
+  readonly retryHooks?: Pick<DaemonHttpTransportOptions, 'onRetryScheduled' | 'onRetryExecuted'> | undefined;
 };
 
 /**
@@ -77,7 +77,7 @@ export function createSpineAdoptionSync(
     // moment it is handed a base URL.
     activation: 'adopt-on-status',
     connect: (baseUrl, authToken) => {
-      const httpTransport = createHttpTransport({ baseUrl, authToken, ...retryHooks });
+      const httpTransport = createDaemonHttpTransport({ baseUrl, authToken, ...retryHooks });
       const sessionsClient: SpineSessionsClient = {
         register: (input) => httpTransport.operator.sessions.register(input),
         close: (sessionId) => httpTransport.operator.sessions.close(sessionId),

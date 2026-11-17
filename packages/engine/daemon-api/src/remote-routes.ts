@@ -31,6 +31,7 @@ export interface DistributedRuntimeRouteService {
   approvePairRequest(requestId: string, input: Record<string, unknown>): Promise<unknown | null>;
   rejectPairRequest(requestId: string, input: Record<string, unknown>): Promise<unknown | null>;
   listPeers(): unknown;
+  getPeer(peerId: string): unknown | null;
   rotatePeerToken(peerId: string, input: Record<string, unknown>): Promise<unknown | null>;
   revokePeerToken(peerId: string, input: Record<string, unknown>): Promise<unknown | null>;
   disconnectPeer(peerId: string, input: Record<string, unknown>): Promise<unknown | null>;
@@ -235,6 +236,10 @@ export function createDaemonRemoteRouteHandlers(
     approveRemotePairRequest: async (requestId, request) => handleApproveRemotePairRequest(context, requestId, request),
     rejectRemotePairRequest: async (requestId, request) => handleRejectRemotePairRequest(context, requestId, request),
     getRemotePeers: () => Response.json({ peers: context.distributedRuntime.listPeers() }),
+    getRemotePeer: (peerId) => {
+      const peer = context.distributedRuntime.getPeer(peerId);
+      return peer ? Response.json({ peer }) : jsonErrorResponse({ error: 'Unknown distributed peer' }, { status: 404 });
+    },
     rotateRemotePeerToken: async (peerId, request) => handleRotateRemotePeerToken(context, peerId, request),
     revokeRemotePeerToken: async (peerId, request) => handleRevokeRemotePeerToken(context, peerId, request),
     disconnectRemotePeer: async (peerId, request) => handleDisconnectRemotePeer(context, peerId, request),

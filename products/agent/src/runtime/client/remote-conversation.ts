@@ -332,7 +332,7 @@ export function createRemoteConversationRouter(
     // Stream deltas arrive as increments between resync points. Every frame
     // passes this before any filtering, so the text it hands out is whole.
     const streamText = createStreamTextAssembler();
-    const close = await transport.openServerSentEventStream(options.fetchImpl ?? globalThis.fetch, streamUrl, {
+    const close = await transport.openRawServerSentEventStream(options.fetchImpl ?? globalThis.fetch, streamUrl, {
       // The platform parses id: before dispatching its event. After terminal release
       // or replacement, buffered frames no longer advance this watch's cursor.
       onEventId: (id: string) => { if (ownsWatch()) streamPositions.set(positionKey, id); },

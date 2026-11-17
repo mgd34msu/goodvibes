@@ -4,6 +4,7 @@ import type { ComposerStateInput, ComposerState } from './composer-state.js';
 import type { TranscriptEventKind } from '@goodvibes-jev/engine/platform/platform/core';
 import type { ConversationManager, TranscriptReadingOptions } from '@goodvibes-jev/engine/platform/platform/core';
 import type { TranscriptCommandContext } from './transcript-reading.js';
+import type { TerminalSlashCommand } from './command-registry.js';
 import type { UiSessionSnapshot } from '@goodvibes-jev/engine/platform/platform/runtime/ui';
 type RuntimeTranscriptConversation = Pick<ConversationManager, 'getMessageSnapshot' | 'getTranscriptEventIndex' | 'getMessageCount'> & {
   nextTranscriptEventLine(currentLine: number, kind?: TranscriptEventKind | 'all', options?: TranscriptReadingOptions): Promise<number>;
@@ -19,7 +20,7 @@ export function createConversationRuntimeCommand<Context extends ConversationRun
   readSession: (context: Context) => UiSessionSnapshot,
   deriveComposerState: (input: ComposerStateInput) => ComposerState,
   hidden = false,
-) {
+): TerminalSlashCommand<Context> {
 
 
 async function buildTranscriptLines(

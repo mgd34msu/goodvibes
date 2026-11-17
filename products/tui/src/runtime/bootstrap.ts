@@ -111,8 +111,6 @@ export type BootstrapContext = RuntimeContext & {
   lastGitInfoRef: { value: GitHeaderInfo | undefined };
   /** Unsubscribe functions owned by bootstrap (cleared on shutdown). */
   bootstrapUnsubs: Array<() => void | Promise<void>>;
-  /** Ref holding the periodic agent-status interval (use ref, not local var, to keep shutdown in sync). */
-  agentStatusIntervalRef: { value: ReturnType<typeof setInterval> | null };
   /** Mutable refs for viewport/scroll/render functions; main.ts patches these after constructing UI state. */
   orchestratorRefs: { getViewportHeight: () => number; scrollToEnd: (vHeight: number) => void; requestRender: () => void };
   /** Patch the bootstrap-owned render bridge after main.ts constructs the real render loop. */
@@ -194,7 +192,6 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
     runtime,
     bootstrapUnsubs,
     runtimeUnsubs,
-    agentStatusIntervalRef,
     permissionPromptRef,
     trustPromptRef,
     systemMessageRouterRef,
@@ -679,7 +676,6 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
     },
     stopExternalServices: () => externalServices.stop(),
     closeRuntimeGraph: () => services.close(),
-    agentStatusIntervalRef,
     scheduleManager: services.workflow.scheduleManager,
     hookDispatcher: services.hookDispatcher,
     providerRegistry: services.providerRegistry,
@@ -718,7 +714,6 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
     gitStatusProvider,
     lastGitInfoRef,
     bootstrapUnsubs,
-    agentStatusIntervalRef,
     orchestratorRefs,
     setRenderRequest,
     permissionPromptRef,

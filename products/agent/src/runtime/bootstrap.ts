@@ -94,8 +94,6 @@ export type BootstrapContext = RuntimeContext & {
   inputHistory: InputHistory;
   /** Unsubscribe functions owned by bootstrap (cleared on shutdown). */
   bootstrapUnsubs: Array<() => void | Promise<void>>;
-  /** Ref holding the periodic agent-status interval (use ref, not local var, to keep shutdown in sync). */
-  agentStatusIntervalRef: { value: ReturnType<typeof setInterval> | null };
   /** Mutable refs for viewport/scroll/render functions; main.ts patches these after constructing UI state. */
   orchestratorRefs: { getViewportHeight: () => number; scrollToEnd: (vHeight: number) => void; requestRender: () => void };
   /** Patch the bootstrap-owned render route after main.ts constructs the real render loop. */
@@ -172,7 +170,6 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
     runtime,
     bootstrapUnsubs,
     runtimeUnsubs,
-    agentStatusIntervalRef,
     permissionPromptRef,
     systemMessageRouterRef,
     startupNotices,
@@ -716,7 +713,6 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
     uiServices,
     inputHistory,
     bootstrapUnsubs,
-    agentStatusIntervalRef,
     orchestratorRefs,
     setRenderRequest,
     permissionPromptRef,
@@ -740,7 +736,6 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
       disposeRuntimeGraph: () => services.close(),
       deferredStartup,
       agentExternalServices,
-      agentStatusIntervalRef,
       scheduleManager: services.workflow.scheduleManager,
       hookDispatcher: services.hookDispatcher,
       providerRegistry: services.providerRegistry,

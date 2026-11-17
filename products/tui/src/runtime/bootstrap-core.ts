@@ -137,7 +137,6 @@ export interface BootstrapCoreState {
   readonly runtime: MutableRuntimeState;
   readonly bootstrapUnsubs: Array<() => void | Promise<void>>;
   readonly runtimeUnsubs: Array<() => void>;
-  readonly agentStatusIntervalRef: { value: ReturnType<typeof setInterval> | null };
   readonly permissionPromptRef: { requestPermission: PermissionRequestHandler };
   readonly trustPromptRef: { requestTrustDecision: () => Promise<WorkspaceTrustLevel> }; // trust-at-consequence-time bridge, patched with the real modal-driving impl once the UI layer exists
   readonly systemMessageRouterRef: { value: SystemMessageRouter | null };
@@ -404,7 +403,7 @@ export async function initializeBootstrapCore(
     return ref;
   })();
   const conversationFollowUpRef: { value: ((item: ConversationFollowUpItem) => void) | null } = { value: null };
-  const { unsubs: runtimeUnsubs, agentStatusIntervalRef } = registerBootstrapRuntimeEvents({
+  const { unsubs: runtimeUnsubs } = registerBootstrapRuntimeEvents({
     runtimeBus,
     domainDispatch,
     getSystemMessageRouter: () => systemMessageRouterRef.value,
@@ -599,7 +598,6 @@ export async function initializeBootstrapCore(
     runtime,
     bootstrapUnsubs,
     runtimeUnsubs,
-    agentStatusIntervalRef,
     permissionPromptRef,
     trustPromptRef,
     systemMessageRouterRef,

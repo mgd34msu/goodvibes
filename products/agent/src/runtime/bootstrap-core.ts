@@ -80,7 +80,6 @@ export interface BootstrapCoreState {
   readonly runtime: MutableRuntimeState;
   readonly bootstrapUnsubs: Array<() => void | Promise<void>>;
   readonly runtimeUnsubs: Array<() => void>;
-  readonly agentStatusIntervalRef: { value: ReturnType<typeof setInterval> | null };
   readonly permissionPromptRef: { requestPermission: PermissionRequestHandler };
   readonly systemMessageRouterRef: { value: SystemMessageRouter | null };
   readonly conversationFollowUpRef: { value: ((item: ConversationFollowUpItem) => void) | null };
@@ -325,7 +324,7 @@ export async function initializeBootstrapCore(
     () => sharedSessionBroker.start(),
   );
   const conversationFollowUpRef: { value: ((item: ConversationFollowUpItem) => void) | null } = { value: null };
-  const { unsubs: runtimeUnsubs, agentStatusIntervalRef } = registerAgentRuntimeEvents({
+  const { unsubs: runtimeUnsubs } = registerAgentRuntimeEvents({
     runtimeBus,
     domainDispatch,
     getSystemMessageRouter: () => systemMessageRouterRef.value,
@@ -518,7 +517,6 @@ export async function initializeBootstrapCore(
     runtime,
     bootstrapUnsubs,
     runtimeUnsubs,
-    agentStatusIntervalRef,
     permissionPromptRef,
     systemMessageRouterRef,
     startupNotices,

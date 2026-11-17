@@ -1,4 +1,4 @@
-import { createOrderedShutdown, drainShutdownRegistry, clearIntervalSlot } from '@goodvibes-jev/engine/terminal-shell/ordered-shutdown';
+import { createOrderedShutdown, drainShutdownRegistry } from '@goodvibes-jev/engine/terminal-shell/ordered-shutdown';
 /**
  * bootstrap-shutdown.ts, how a session lets go of everything it took.
  *
@@ -16,11 +16,6 @@ import { createOrderedShutdown, drainShutdownRegistry, clearIntervalSlot } from 
  */
 import { shutdownRuntime } from '@/runtime/index.ts';
 import { shutdownAgentBrowserSessions } from '../tools/agent-browser-tool.ts';
-
-/** A mutable slot holding an interval handle, or null when none is armed. */
-export interface IntervalRef {
-  value: ReturnType<typeof setInterval> | null;
-}
 
 export interface RuntimeShutdownDependencies {
   readonly sessionId: string;
@@ -44,7 +39,6 @@ export interface RuntimeShutdownDependencies {
   readonly disposeRuntimeGraph: () => void | Promise<void>;
   readonly deferredStartup: { drain(ms: number): Promise<unknown> };
   readonly agentExternalServices: { stop(): Promise<unknown> };
-  readonly agentStatusIntervalRef: IntervalRef;
   /**
    * The collaborators shutdownRuntime takes after the session's own identity.
    * Named individually rather than spread from a tuple so a change to that
@@ -71,8 +65,6 @@ export function createRuntimeShutdown(
       const timer = deps.takeMemorySpineTimer();
       if (timer !== null) clearInterval(timer);
     });
-    // The agent-status tick renders and posts through the router.
-    await attempt(() => clearIntervalSlot(deps.agentStatusIntervalRef));
     // Then the save: one local write that needs nothing the releases below free.
     // Those include daemon round trips, and a slow daemon must not delay the save.
     let title = '';

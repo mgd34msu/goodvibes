@@ -95,17 +95,9 @@ export class PhasedToolExecutor {
           idKey,
           priorStatus: check.record.status,
         });
-        // Return the cached result from the prior completed execution.
-        // If the prior run failed (status === 'failed'), the cached result will
-        // be undefined and we return a generic error to the LLM.
-        if (check.record.result !== undefined) {
-          return check.record.result as ToolResult;
-        }
-        return {
-          callId: call.id,
-          success: false,
-          error: 'Duplicate tool call: prior execution failed; retry is not permitted.',
-        };
+        // Only a completed call is a duplicate (a failed one is run again), and
+        // it was completed with its result, so that result is the answer.
+        return check.record.result as ToolResult;
       }
 
       if (check.status === 'in-flight') {

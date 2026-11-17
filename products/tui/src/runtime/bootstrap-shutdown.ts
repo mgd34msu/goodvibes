@@ -1,4 +1,4 @@
-import { createOrderedShutdown, drainShutdownRegistry, clearIntervalSlot } from '@goodvibes-jev/engine/terminal-shell/ordered-shutdown';
+import { createOrderedShutdown, drainShutdownRegistry } from '@goodvibes-jev/engine/terminal-shell/ordered-shutdown';
 /** Ordered teardown owned by bootstrap; the shell owns the exit deadline. */
 import { shutdownRuntime } from '@/runtime/index.ts';
 
@@ -20,7 +20,6 @@ export interface BootstrapShutdownDeps {
   readonly stopExternalServices: Cleanup;
   /** Final graph drain, after the save and every other release. */
   readonly closeRuntimeGraph: () => Promise<void>;
-  readonly agentStatusIntervalRef: { value: ReturnType<typeof setInterval> | null };
   readonly scheduleManager: Parameters<typeof shutdownRuntime>[5];
   readonly hookDispatcher: Parameters<typeof shutdownRuntime>[6];
   readonly providerRegistry: Parameters<typeof shutdownRuntime>[7];
@@ -98,7 +97,6 @@ export function createBootstrapShutdown(deps: BootstrapShutdownDeps): BootstrapS
     // the existing handle. The shell's deadline bounds a hang.
     await attempt(deps.settleExternalServices);
     await attempt(deps.stopExternalServices);
-    await attempt(() => clearIntervalSlot(deps.agentStatusIntervalRef));
     await attempt(deps.closeRuntimeGraph);
   }, 'TUI shutdown failed to release one or more owned resources', (errors, message) => {
     // A failed save stays the plain failure the shell treats as "not saved".

@@ -203,7 +203,6 @@ async function main() {
     gitStatusProvider,
     lastGitInfoRef,
     bootstrapUnsubs,
-    agentStatusIntervalRef,
     orchestratorRefs,
     setRenderRequest,
     permissionPromptRef,

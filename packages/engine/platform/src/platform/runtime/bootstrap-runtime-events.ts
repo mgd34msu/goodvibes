@@ -12,8 +12,6 @@ import type { ToolRegistry } from '../tools/registry.js';
 import { logger } from '../utils/logger.js';
 import { finishWorkstreamLabel, rememberWorkstreamLabel, workstreamLabel } from '../channels/workstream-labels.js';
 
-const AGENT_STATUS_INTERVAL_MS = 30_000;
-
 export interface HostRuntimeMessageRouter {
   low(message: string, runtimeEvent?: RuntimeEventProvenance): void;
   high(message: string, level?: NoticeLevel): void;
@@ -48,11 +46,10 @@ export interface HostRuntimeEventBridgeOptions {
 
 export type HostAgentLineVoice = 'agents' | 'delegated-task';
 
-/** The bridge's subscriptions and its status timer; `dispose` ends both. */
+/** The bridge's subscriptions; `dispose` ends them. Running agents are shown by the fleet view, not by a periodic line. */
 export interface HostRuntimeEventBridge {
   dispose(): void;
   readonly unsubs: Array<() => void>;
-  readonly agentStatusIntervalRef: { value: ReturnType<typeof setInterval> | null };
 }
 
 export { runtimeEventOfNotice, runtimeEventKey, type RuntimeEventNotice } from './runtime-event-notices.js';
@@ -96,9 +93,11 @@ function buildCohortFollowUp(agentManager: AgentManager, cohort: string): Conver
 
 /**
  * The last finished state reported for each cohort, so a late event for an agent that already
- * ended (the same terminal statuses) does not repeat the completion line.
+ * ended (the same terminal statuses) does not repeat the completion line. Only the most recent
+ * cohorts are kept: a late event arrives right after the end it follows.
  */
 const reportedCohortStates = new WeakMap<AgentManager, Map<string, string>>();
+const REPORTED_COHORTS_KEPT = 64;
 
 /** Report a cohort once every agent and contract in it has ended; hosts call it from their own agent-end handlers. */
 export function checkCohortCompletion(
@@ -114,18 +113,18 @@ export function checkCohortCompletion(
   if (!allAgentsDone) return;
 
   // A cohort is done only when every contract one of its agents worked a unit of has ended too.
+  // An ended contract is terminal by definition, so only the live ones are read (no ended record is loaded).
   const cohortAgentIds = new Set(cohortAgents.map((agent) => agent.id));
-  const cohortContracts = contractRunner.list({ includeTerminal: true }).filter((contract) =>
-    contract.units.some((unit) => unit.agentIds.some((agentId) => cohortAgentIds.has(agentId))),
-  );
-  const terminalStatuses = new Set(['passed', 'failed', 'cancelled']);
-  if (!cohortContracts.every((contract) => terminalStatuses.has(contract.status))) return;
+  const live = contractRunner.list({ includeInputSnapshot: false });
+  if (live.some((contract) => contract.units.some((unit) => unit.agentIds.some((agentId) => cohortAgentIds.has(agentId))))) return;
 
   const state = cohortAgents.map((agent) => `${agent.id}:${agent.status}`).sort().join('|');
   let reported = reportedCohortStates.get(agentManager);
   if (!reported) { reported = new Map(); reportedCohortStates.set(agentManager, reported); }
   if (reported.get(record.cohort) === state) return;
+  reported.delete(record.cohort);
   reported.set(record.cohort, state);
+  if (reported.size > REPORTED_COHORTS_KEPT) reported.delete(reported.keys().next().value!);
 
   withRouter(getSystemMessageRouter, (router) => {
     router.low(buildCohortReport(agentManager, record.cohort!));
@@ -419,24 +418,9 @@ export function registerHostRuntimeEvents(options: HostRuntimeEventBridgeOptions
     }));
   }
 
-  const agentStatusIntervalRef: { value: ReturnType<typeof setInterval> | null } = { value: null };
-  agentStatusIntervalRef.value = setInterval(() => {
-    const running = agentManager.list().filter((agent) => agent.status === 'running');
-    if (running.length === 0) return;
-    withRouter(getSystemMessageRouter, (router) => {
-      router.low(voice.runningLine(running.map((agent) => ({ id: agent.id.slice(-8), progress: agent.progress ?? agent.status }))));
-    });
-    requestRender();
-  }, AGENT_STATUS_INTERVAL_MS);
-  // Don't block clean process exit.
-  (agentStatusIntervalRef.value as unknown as { unref?: () => void }).unref?.();
-
   return {
     unsubs,
-    agentStatusIntervalRef,
     dispose: () => {
-      if (agentStatusIntervalRef.value) clearInterval(agentStatusIntervalRef.value);
-      agentStatusIntervalRef.value = null;
       for (const unsub of unsubs.splice(0)) unsub();
     },
   };
@@ -458,7 +442,6 @@ interface AgentLineWording {
   failedSummary(facts: AgentLineFacts, error: string): string;
   budgetLine(facts: AgentLineFacts, budget: { limit: number; source: string }): string;
   budgetSummary(facts: AgentLineFacts, budget: { limit: number; source: string }): string;
-  runningLine(running: ReadonlyArray<{ id: string; progress: string }>): string;
 }
 
 const AGENT_LINE_WORDING: Record<HostAgentLineVoice, AgentLineWording> = {
@@ -471,7 +454,6 @@ const AGENT_LINE_WORDING: Record<HostAgentLineVoice, AgentLineWording> = {
     // Kept in the failed-line shape the operator feed reads (runtime-event-notices.ts); the detail names the budget.
     budgetLine: (f, b) => `[Agents] \u2717 ${f.template} ${f.id}: "${f.task}" \u2014 failed in ${f.seconds}s: spent its ${b.limit}-turn budget (${b.source})`,
     budgetSummary: (f, b) => `${f.template} agent ${f.id} spent its ${b.limit}-turn budget (${b.source}) while working on "${f.task}".`,
-    runningLine: (running) => `[Agents] ${running.length} running:\n${running.map((agent) => `  ${agent.id}: ${agent.progress}`).join('\n')}`,
   },
   'delegated-task': {
     ellipsis: '...',
@@ -481,7 +463,6 @@ const AGENT_LINE_WORDING: Record<HostAgentLineVoice, AgentLineWording> = {
     failedSummary: (f, error) => `${f.template} delegated task ${f.id} failed while working on "${f.task}" ${error.slice(0, 120)}`,
     budgetLine: (f, b) => `[Delegated task] ${f.template} ${f.id} spent its turn budget in ${f.seconds}s, ${b.limit} turns (${b.source}) while working on "${f.task}"`,
     budgetSummary: (f, b) => `${f.template} delegated task ${f.id} spent its ${b.limit}-turn budget (${b.source}) while working on "${f.task}".`,
-    runningLine: (running) => `[Delegated task] ${running.length} running\n${running.map((agent) => `  ${agent.id} ${agent.progress}`).join('\n')}`,
   },
 };
 

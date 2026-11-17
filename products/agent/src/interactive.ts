@@ -168,7 +168,6 @@ async function main() {
     inputHistory,
     hookDispatcher,
     bootstrapUnsubs,
-    agentStatusIntervalRef,
     orchestratorRefs,
     setRenderRequest,
     permissionPromptRef,

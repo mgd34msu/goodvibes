@@ -2,11 +2,11 @@ import { snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/g
 import { prepareProtectedResearchReport, agentResearchReportSourceOwner, createAgentResearchReportProjector, inheritPreparedResearchReport, type PreparedResearchReport } from '@goodvibes-jev/engine/terminal-shell/agent-turn/protected-research-report';
 import type { ProtectedSourceOwner } from '@goodvibes-jev/engine/platform/platform/security';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
-import { assertCurrentToolInvocation, assertCurrentToolExecution, assertCurrentToolEffect, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import { assertCurrentToolInvocation, assertCurrentToolExecution, assertCurrentToolEffect, ToolInputProjectionError, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { CommandContext, CommandRegistry } from '../input/command-registry.ts';
 import { createAgentArtifactsTool } from '@goodvibes-jev/engine/terminal-shell/agent-turn/artifacts-tool';
 import { createAgentHarnessTool } from './agent-harness-tool.ts';
-import { createAgentResearchReportTool } from '@goodvibes-jev/engine/terminal-shell/agent-turn/research-report-tool';
+import { createAgentResearchReportTool, withRegistryReportSources } from '@goodvibes-jev/engine/terminal-shell/agent-turn/research-report-tool';
 import { createAgentResearchRunsTool } from '@goodvibes-jev/engine/terminal-shell/agent-turn/research-runs-tool';
 import { runAdmittedResearchRunner, runPublicSearch } from './agent-research-runner.ts';
 import { createAgentResearchSourcesTool } from '@goodvibes-jev/engine/terminal-shell/agent-turn/research-sources-tool';
@@ -366,6 +366,7 @@ function reportArgs(args: AgentResearchToolArgs): Record<string, unknown> {
     summary: args.summary,
     reportMarkdown: args.reportMarkdown,
     sources: args.sources,
+    sourceIds: args.sourceIds,
     findings: args.findings,
     gaps: args.gaps,
     recommendations: args.recommendations,
@@ -434,7 +435,7 @@ export function createAgentResearchTool(deps: AgentResearchToolDeps): Tool {
           goal: { type: 'string', description: 'Visible outcome for a new run.' },
           plan: { type: 'array', items: { type: 'string' }, description: 'Run plan steps.' },
           nextSteps: { type: 'array', items: { type: 'string' }, description: 'Next visible run steps.' },
-          sourceIds: { type: 'array', items: { type: 'string' }, description: 'Run source ids.' },
+          sourceIds: { type: 'array', items: { type: 'string' }, description: 'Run source ids. For report: the stored sources to cite; with runId and no sources, the run\'s reviewed sources are used.' },
           status: { type: 'string', enum: [...RUN_STATUS_WORDS], description: 'Run status for action:"checkpoint"; finish a run with complete, fail or cancel instead.' },
           phase: { type: 'string', enum: [...RUN_PHASE_WORDS], description: 'Research run phase.' },
           progress: { type: 'number', description: '0-100 run progress.' },
@@ -486,7 +487,8 @@ export function createAgentResearchTool(deps: AgentResearchToolDeps): Tool {
       try {
         action = readAction(args);
         if (action === 'report') {
-          prepared = await prepareProtectedResearchReport(sourceOwner, args, { signal: options?.signal });
+          // A report for a run takes the run's stored sources, as agent_research_report does.
+          prepared = await prepareProtectedResearchReport(sourceOwner, withRegistryReportSources(args as Record<string, unknown>, deps.toolRegistry), { signal: options?.signal });
           args = prepared.args;
           // A caller Proxy cannot switch its declared route during capture.
           if (readAction(args) !== 'report') throw new Error('Unsupported research input.');
@@ -496,6 +498,8 @@ export function createAgentResearchTool(deps: AgentResearchToolDeps): Tool {
         if (cause instanceof UnknownResearchActionError) {
           return error(`Unknown research action '${cause.word}'. Valid actions: ${RESEARCH_ACTIONS.join(', ')}. Nothing was dispatched.`);
         }
+        // Its fixed detail names the next step (a missing run, no reviewed sources) and no value.
+        if (cause instanceof ToolInputProjectionError) throw cause;
         return error('Research input was refused by the protected-input boundary before dispatch.');
       }
 
@@ -554,6 +558,7 @@ export function registerAgentResearchTool(
 ): void {
   if (!registry.has('research')) registry.register(createAgentResearchTool({ commandRegistry, commandContext, toolRegistry: registry }), {
     inputProjection: createAgentResearchReportProjector(agentResearchReportSourceOwner(registry), args => isReportAction(args)
-      || ['sources', 'reportMarkdown', 'findings', 'gaps', 'recommendations', 'methodology', 'requireCitationCoverage', 'visualReport'].some(key => Object.hasOwn(args, key))),
+      || ['sources', 'reportMarkdown', 'findings', 'gaps', 'recommendations', 'methodology', 'requireCitationCoverage', 'visualReport'].some(key => Object.hasOwn(args, key)),
+    args => isReportAction(args) ? withRegistryReportSources(args, registry) : args),
   });
 }

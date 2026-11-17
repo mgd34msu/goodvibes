@@ -514,6 +514,11 @@ export function withStoredReportSources(args: Record<string, unknown>, paths: Re
   return { ...args, sources: records.map(reportSource), sourceIds: records.map(record => record.id) };
 }
 
+/** {@link withStoredReportSources} over the run and source stores bound to `registry`, for a facade that forwards a report. */
+export function withRegistryReportSources(args: Record<string, unknown>, registry: ToolRegistry | undefined): Record<string, unknown> {
+  return withStoredReportSources(args, researchLedgers(registry));
+}
+
 /**
  * After the save: the named sources are marked used by this report and the run
  * is completed with it. Each outcome is reported by name; a refusal here never

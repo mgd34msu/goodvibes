@@ -348,6 +348,13 @@ function ownEnvValue(key: string): string | undefined {
   return Object.hasOwn(process.env, key) ? process.env[key] : undefined;
 }
 
+/**
+ * The longest a value resolved from a password-manager reference is served
+ * without asking the manager again: one command per credential per window,
+ * and a key rotated in the manager is in use within it.
+ */
+const RESOLVED_REFERENCE_MAX_AGE_MS = 10 * 60_000;
+
 export class SecretsManager {
   /** Restriction only, captured from this manager's actual native stores. */
   /**
@@ -875,9 +882,25 @@ export class SecretsManager {
   readonly #reportedUnconfirmed = new Set<string>();
   /**
    * Values of references that run a password-manager command, resolved once per
-   * credential revision. Any set, delete, import or store change clears them.
+   * credential revision. Any set, delete, import or store change clears them,
+   * a reader that saw the value refused clears them
+   * ({@link releaseResolvedReferences}), and each is held at most
+   * {@link RESOLVED_REFERENCE_MAX_AGE_MS}, so a key rotated in the password
+   * manager is picked up even by a reader that cannot tell a refusal apart.
    */
-  readonly #resolvedReferences = new Map<string, string>();
+  readonly #resolvedReferences = new Map<string, { readonly value: string; readonly at: number }>();
+
+  /**
+   * Drop the values held for password-manager references, so the next read of
+   * each runs the manager again: for a caller whose provider refused the value
+   * (a rotated or revoked key). `key` drops only that key's entries.
+   */
+  releaseResolvedReferences(key?: string): void {
+    if (key === undefined) { this.#resolvedReferences.clear(); return; }
+    for (const cacheKey of [...this.#resolvedReferences.keys()]) {
+      if (cacheKey.startsWith(`${key}\0`)) this.#resolvedReferences.delete(cacheKey);
+    }
+  }
 
   constructor(options: SecretsManagerOptions) {
     this.surfaceRoot = requireSurfaceRoot(options.surfaceRoot, 'SecretsManager surfaceRoot');
@@ -1173,7 +1196,7 @@ export class SecretsManager {
     const commandBacked = refSource !== null && COMMAND_BACKED_SOURCES.has(refSource);
     const cacheKey = `${key}\0${value}`;
     const cached = commandBacked ? this.#resolvedReferences.get(cacheKey) : undefined;
-    if (cached !== undefined) return cached;
+    if (cached !== undefined && Date.now() - cached.at < RESOLVED_REFERENCE_MAX_AGE_MS) return cached.value;
     const revision = this.#revisionSource.revision();
     try {
       const resolved = await resolveSecretRef(value, {
@@ -1190,7 +1213,7 @@ export class SecretsManager {
       logger.debug('SecretsManager: resolved secret reference', { key, refSource: resolved.source });
       if (commandBacked && resolved.value !== null && this.#revisionSource.revision() === revision) {
         if (this.#resolvedReferences.size >= 256) this.#resolvedReferences.clear();
-        this.#resolvedReferences.set(cacheKey, resolved.value);
+        this.#resolvedReferences.set(cacheKey, { value: resolved.value, at: Date.now() });
       }
       return resolved.value;
     } catch (error) {

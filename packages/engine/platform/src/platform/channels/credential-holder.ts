@@ -32,6 +32,8 @@ import { DeliveryError } from '../integrations/delivery.js';
 interface CredentialStoreEvents {
   onDidChange(listener: (key: string) => void): () => void;
   onDidInvalidateCredentials?(listener: () => void): () => void;
+  /** The store's own held password-manager values (SecretsManager), dropped with this holder's. */
+  releaseResolvedReferences?(): void;
 }
 
 function hasStoreEvents(value: unknown): value is CredentialStoreEvents {
@@ -50,6 +52,8 @@ const TOKEN_REFUSED_403 = /\b(?:invalid|expired|revoked|unknown|bad)[ _-]?(?:tok
 export class ChannelCredentialHolder {
   readonly #held = new Map<string, Promise<string | null>>();
   readonly #watched = new WeakSet<object>();
+  /** The stores this holder read through whose own held values a release also drops. */
+  readonly #stores = new Set<CredentialStoreEvents>();
   #generation = 0;
 
   /**
@@ -77,10 +81,16 @@ export class ChannelCredentialHolder {
     return pending;
   }
 
-  /** Drop every held value; the next request for each credential resolves it again. */
+  /**
+   * Drop every held value; the next request for each credential resolves it
+   * again, through the password manager, not the secret store's own copy.
+   */
   release(): void {
     this.#generation += 1;
     this.#held.clear();
+    for (const store of this.#stores) {
+      try { store.releaseResolvedReferences?.(); } catch { /* the holder's own values are already gone */ }
+    }
   }
 
   /** Release on a refused send: a revoked or rotated credential must not be served again. */
@@ -105,8 +115,11 @@ export class ChannelCredentialHolder {
   private watch(store: unknown): void {
     if (!hasStoreEvents(store) || this.#watched.has(store)) return;
     this.#watched.add(store);
-    store.onDidChange(() => this.release());
-    store.onDidInvalidateCredentials?.(() => this.release());
+    if (typeof store.releaseResolvedReferences === 'function') this.#stores.add(store);
+    // A store change already dropped the store's own values; only this holder's are left.
+    const releaseHeld = (): void => { this.#generation += 1; this.#held.clear(); };
+    store.onDidChange(releaseHeld);
+    store.onDidInvalidateCredentials?.(releaseHeld);
   }
 }
 

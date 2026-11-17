@@ -46,7 +46,6 @@ import { OrchestratorFollowUpRuntime } from './orchestrator-follow-up-runtime.js
 import { ToolCallAbortRegistry, listQueuedMessages, editQueuedMessage, deleteQueuedMessage } from './orchestrator-live-turn.js';
 import { AgentManager } from '../tools/agent/index.js';
 import type { ContractIntake, ContractRunner } from '../contract/index.js';
-import { openEscalation } from '../contract/intake-route.js';
 import { randomUUID } from 'node:crypto';
 import { TurnSubmissionOwner } from './turn-submission.js';
 import { CacheHitTracker } from '../providers/cache-strategy.js';
@@ -132,9 +131,10 @@ export interface OrchestratorUserInputOptions {
    */
   readonly awaitQueuedTurn?: boolean | undefined;
   /**
-   * The open contract question (its escalation id, from `pendingContractQuestion`)
-   * this message answers: the composer showed it and the person did not dismiss
-   * it. The message goes to the contract as the answer, with no model request.
+   * The open contract question (its escalation id) this message answers: the
+   * composer showed it and the person did not dismiss it
+   * (terminal-shell/contract-question-composer.ts), or a hosted operator message
+   * named it. The message goes to the contract as the answer, with no model request.
    */
   readonly answersContractQuestion?: string | undefined;
 }
@@ -573,12 +573,6 @@ export class Orchestrator {
 
   public setSystemMessageRouter(router: LowPrioritySystemMessageSink | null): void {
     this.systemMessageRouter = router;
-  }
-
-  /** This session's newest open contract question, for the composer to offer as the next message's subject; one lookup, no model. */
-  public pendingContractQuestion(): { readonly contractId: string; readonly escalationId: string; readonly question: string } | null {
-    const open = openEscalation(this.contractRunner.list({ sessionId: this.currentSessionId }));
-    return open ? { contractId: open.contract.id, escalationId: open.escalation.id, question: open.escalation.question } : null;
   }
 
   public enqueueConversationFollowUp(item: ConversationFollowUpItem): void {

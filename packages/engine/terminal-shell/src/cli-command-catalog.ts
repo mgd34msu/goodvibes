@@ -15,16 +15,15 @@
  *
  * GLOBAL_FLAGS is every flag this vocabulary recognizes. A command whose
  * handler reads options of its own (`auth add-user --role admin`, `secrets
- * set KEY --stdin`, `pair --name phone`) is listed in OWNS_OPTIONS: an
- * unknown option after its word reaches that handler in `commandArgs`. Every
- * other command takes only the global flags, so a mistyped option after its
- * word (`run --max-turn 3`) is refused instead of being dropped and its value
- * joined into the prompt.
+ * set KEY --stdin`, `pair --name phone`) declares them in COMMAND_OPTIONS and
+ * receives them in `commandArgs`. Every command refuses any other option after
+ * its word (`run --max-turn 3`, `secrets set K v --plaintxt`), so a mistyped
+ * option is never dropped while the command reports success.
  */
 // The credential catalog alone, not the providers module: argument parsing runs
 // on every invocation, `--version` included, and must not load the provider stack.
 import { BUILTIN_PROVIDER_ENV_KEYS } from '@goodvibes-jev/engine/platform/platform/config/provider-credential-catalog';
-import type { CliCatalog, CommandFlagSpec, CommandSpec, EngineParseResult } from './cli-catalog-types.js';
+import type { CliCatalog, CommandFlagSpec, CommandOptionSpec, CommandSpec, EngineParseResult } from './cli-catalog-types.js';
 import type { GoodVibesCliCommand, GoodVibesCliFlags, GoodVibesCliOutputFormat } from './cli-types.js';
 
 /** Every field a flag in this vocabulary can land on. */
@@ -241,14 +240,35 @@ const GLOBAL_FLAGS: readonly CommandFlagSpec<GoodVibesCliFlagField>[] = [
 ];
 
 /**
- * Commands whose handler parses its own subcommand options from `commandArgs`.
- * Only these let an option the catalog does not know through; their handlers
- * are where those options are read.
+ * The options each command's handler reads from `commandArgs` itself, beyond
+ * the global flags. A command word not listed takes only the global flags.
+ * Every command is strict: after its word an option it does not declare is
+ * refused, naming what it accepts, instead of reaching a handler that would
+ * ignore it.
  */
-const OWNS_OPTIONS: ReadonlySet<GoodVibesCliCommand> = new Set<GoodVibesCliCommand>([
-  'service', 'doctor', 'models', 'providers', 'auth', 'subscription', 'secrets', 'sessions', 'tasks',
-  'pair', 'surfaces', 'support-bundle', 'hooks', 'plugin',
-]);
+const COMMAND_OPTIONS: Partial<Record<GoodVibesCliCommand, readonly CommandOptionSpec[]>> = {
+  auth: [
+    { tokens: ['--password'], takesValue: true },
+    { tokens: ['--password-stdin'], takesValue: false },
+    { tokens: ['--role'], takesValue: true },
+  ],
+  subscription: [{ tokens: ['--open'], takesValue: false }],
+  secrets: [
+    { tokens: ['--user'], takesValue: false },
+    { tokens: ['--project'], takesValue: false },
+    { tokens: ['--secure'], takesValue: false },
+    { tokens: ['--plaintext'], takesValue: false },
+    { tokens: ['--stdin'], takesValue: false },
+  ],
+  pair: [{ tokens: ['--name'], takesValue: true }],
+  'support-bundle': [{ tokens: ['--include-security'], takesValue: false }],
+  plugin: [
+    { tokens: ['--ref'], takesValue: true },
+    { tokens: ['--sha'], takesValue: true },
+    // The old retyped answer to a failed signature check; the confirmation now asks instead.
+    { tokens: ['--override'], takesValue: false },
+  ],
+};
 
 /** Every command word this vocabulary accepts. */
 const COMMANDS: readonly CommandSpec<GoodVibesCliCommand, GoodVibesCliFlagField>[] = ([
@@ -288,7 +308,7 @@ const COMMANDS: readonly CommandSpec<GoodVibesCliCommand, GoodVibesCliFlagField>
   aliases,
   flags: [],
   passthrough: false,
-  lenientUnknownFlags: OWNS_OPTIONS.has(name),
+  options: COMMAND_OPTIONS[name] ?? [],
   subcommands: [],
 })) as readonly CommandSpec<GoodVibesCliCommand, GoodVibesCliFlagField>[];
 

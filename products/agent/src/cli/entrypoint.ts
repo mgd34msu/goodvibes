@@ -79,6 +79,8 @@ export async function prepareShellCliRuntime(
     process.exit(2);
   }
 
+  for (const warning of cli.warnings) console.warn(`[${binary}] warning: ${warning}`);
+
   const metadata = shellMetadataResult(cli, binary, {
     help: renderGoodVibesHelp,
     commandHelp: renderGoodVibesCommandHelp,

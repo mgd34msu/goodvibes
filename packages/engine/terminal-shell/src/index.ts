@@ -153,6 +153,7 @@ export {
   type CliFlagKind,
   type CliFlagValue,
   type CommandFlagSpec,
+  type CommandOptionSpec,
   type CommandSpec,
   type RejectedFlagSpec,
   type CliCatalog,
@@ -341,6 +342,7 @@ export {
 } from './conversation-tree.js';
 export {
   WORKSTREAM_SHARED_USAGE,
+  workstreamRawRest,
   renderContractStatus,
   renderWorkstreamDraft,
   resolveWorkstreamContract,

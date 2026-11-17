@@ -22,10 +22,12 @@
  *    missing value, each produces an error line, never an accept-and-ignore.
  *
  * A catalog that lets an unmatched first word through (a terminal app seeds
- * its first prompt from it) still refuses a lone word one or two edits away
- * from a command word: `goodvibes staus` is a typo, not a prompt, and opening
- * the full-screen app for it hides the mistake. `--` before the word keeps it
- * as a prompt.
+ * its first prompt from it) still refuses a lone word of five or more letters
+ * one edit away from a command word: `goodvibes staus` is a typo, not a
+ * prompt, and opening the full-screen app for it hides the mistake. `--`
+ * before the word keeps it as a prompt. A shorter word, or one two edits away
+ * (`hello`, `look`), may well be a prompt: it is kept and the near command is
+ * named in a warning.
  */
 import {
   catalogCommandSpec,
@@ -160,6 +162,14 @@ export function nearestCommandWord<TCommand extends string, TField extends strin
   catalog: Pick<CliCatalog<TCommand, TField, unknown>, 'commands'>,
   token: string,
 ): string | undefined {
+  return nearestCommandMatch(catalog, token)?.word;
+}
+
+/** {@link nearestCommandWord} with its edit distance. */
+function nearestCommandMatch<TCommand extends string, TField extends string>(
+  catalog: Pick<CliCatalog<TCommand, TField, unknown>, 'commands'>,
+  token: string,
+): { readonly word: string; readonly distance: number } | undefined {
   const word = token.toLowerCase();
   if (word.length < 3) return undefined;
   const limit = word.length <= 4 ? 1 : 2;
@@ -171,7 +181,7 @@ export function nearestCommandWord<TCommand extends string, TField extends strin
       if (distance <= limit && (best === undefined || distance < best.distance)) best = { word: candidate, distance };
     }
   }
-  return best?.word;
+  return best;
 }
 
 function parsePort(value: string, optionName: string, errors: string[]): number | undefined {
@@ -227,8 +237,8 @@ function unacceptedOptionError<TCommand extends string, TField extends string>(
   arity: ReadonlyMap<string, CliFlagKind>,
   name: string,
 ): string {
-  const accepted = catalogFlagsForCommand(catalog, spec.name)
-    .flatMap((flagSpec) => flagSpec.tokens)
+  const accepted = [...catalogFlagsForCommand(catalog, spec.name).flatMap((flagSpec) => flagSpec.tokens),
+    ...(spec.options ?? []).flatMap((option) => option.tokens)]
     .filter((token) => token.startsWith('--'))
     .join(', ');
   return arity.has(name)
@@ -278,7 +288,7 @@ export function parseWithCatalog<TCommand extends string, TField extends string,
   let command: TCommand = catalog.defaultCommand;
   let rawCommand: string | undefined;
   let sawCommand = false;
-  let nearMiss: { readonly token: string; readonly suggestion: string } | undefined;
+  let nearMiss: { readonly token: string; readonly suggestion: string; readonly typo: boolean } | undefined;
 
   if (found) {
     const resolved = resolveCatalogCommand(catalog, found.token);
@@ -300,8 +310,8 @@ export function parseWithCatalog<TCommand extends string, TField extends string,
       // command stays the catalog default and sawCommand stays false, so the
       // REST of argv is also parsed in the pre-command (strict) posture,
       // matching a single unmatched word never partially unlocking anything.
-      const suggestion = nearestCommandWord(catalog, found.token);
-      if (suggestion !== undefined) nearMiss = { token: found.token, suggestion };
+      const near = nearestCommandMatch(catalog, found.token);
+      if (near !== undefined) nearMiss = { token: found.token, suggestion: near.word, typo: near.distance <= 1 && found.token.length >= 5 };
     } else {
       command = resolved;
       rawCommand = found.token;
@@ -352,6 +362,20 @@ export function parseWithCatalog<TCommand extends string, TField extends string,
     }
 
     const { name, value: inlineValue } = splitOption(token);
+    // An option the command declares for its own handler is handed on with its
+    // value, ahead of a global flag of the same spelling (a handler that reads
+    // its own `--model` gets it). Typed before the command word it is not the
+    // command's, and is read like any other token.
+    const option = afterCommandWord ? spec.options?.find((candidate) => candidate.tokens.includes(name)) : undefined;
+    if (option) {
+      commandArgs.push(token);
+      if (option.takesValue && inlineValue === undefined) {
+        const next = argv[index + 1];
+        if (next === undefined || isOptionToken(next)) errors.push(`${name} requires a value.`);
+        else { commandArgs.push(next); index += 1; }
+      }
+      continue;
+    }
     const flagSpec = findFlagSpec(accepted, name);
 
     if (!flagSpec) {
@@ -454,7 +478,11 @@ export function parseWithCatalog<TCommand extends string, TField extends string,
 
   // A lone near-miss word is a mistyped command; a longer line is a prompt that happens to start with one.
   if (nearMiss !== undefined && positionals.length === 1) {
-    errors.push(`Unknown command: ${nearMiss.token}. Did you mean \`${binary} ${nearMiss.suggestion}\`? To start with "${nearMiss.token}" as the first prompt instead, run: ${binary} -- ${nearMiss.token}`);
+    if (nearMiss.typo) {
+      errors.push(`Unknown command: ${nearMiss.token}. Did you mean \`${binary} ${nearMiss.suggestion}\`? To start with "${nearMiss.token}" as the first prompt instead, run: ${binary} -- ${nearMiss.token}`);
+    } else {
+      warnings.push(`"${nearMiss.token}" is not a command, so it was taken as the first prompt. For the command, run: ${binary} ${nearMiss.suggestion}`);
+    }
   }
 
   const result: EngineParseResult<TCommand, TFlags> = {

@@ -54,6 +54,18 @@ export interface CommandFlagSpec<TField extends string> {
   readonly allowInlineValue?: boolean | undefined;
 }
 
+/**
+ * An option a command's own handler reads from `commandArgs` (`--name <n>`,
+ * `--password-stdin`). Declared in the catalog so one table owns the
+ * vocabulary: it is accepted after the command word and handed on, its value
+ * with it, and any option the command does not declare is refused.
+ */
+export interface CommandOptionSpec {
+  readonly tokens: readonly string[];
+  /** True when the option takes a value: `--name x` or `--name=x`. */
+  readonly takesValue: boolean;
+}
+
 export interface CommandSpec<TCommand extends string, TField extends string> {
   readonly name: TCommand;
   /** Extra spellings that resolve to this command. The name itself is always accepted. */
@@ -81,6 +93,8 @@ export interface CommandSpec<TCommand extends string, TField extends string> {
    * command accepts.
    */
   readonly lenientUnknownFlags?: boolean | undefined;
+  /** Options the command's handler reads itself, passed through in `commandArgs`; see {@link CommandOptionSpec}. */
+  readonly options?: readonly CommandOptionSpec[] | undefined;
   /** Positional words the command takes, for completion. Empty for most. */
   readonly subcommands: readonly string[];
 }

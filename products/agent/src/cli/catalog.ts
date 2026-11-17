@@ -1,5 +1,5 @@
 import { inferProviderFromModel } from '@goodvibes-jev/engine/terminal-shell/cli-command-catalog';
-import type { CliCatalog, CommandFlagSpec, CommandSpec } from '@goodvibes-jev/engine/terminal-shell';
+import type { CliCatalog, CommandFlagSpec, CommandOptionSpec, CommandSpec } from '@goodvibes-jev/engine/terminal-shell';
 import type { GoodVibesCliCommand, GoodVibesCliFlags } from './types.ts';
 export const COMMAND_ALIASES: Readonly<Record<string, GoodVibesCliCommand>> = {
   run: 'run',
@@ -290,15 +290,44 @@ const GLOBAL_FLAGS: readonly CommandFlagSpec<FlagField>[] = [
 ];
 const names = [...new Set<GoodVibesCliCommand>(['tui', ...Object.values(COMMAND_ALIASES)])];
 /**
- * Commands that take only the global flags. Every other command's handler (or
- * the slash command that reuses it) reads options of its own from
- * `commandArgs`, so an option the catalog does not know reaches it there; after
- * one of these words a mistyped option is refused instead of being dropped and
- * its value joined into the prompt.
+ * The options each command's handler (or the slash command that reuses it)
+ * reads from `commandArgs` itself, beyond the global flags. A command word not
+ * listed takes only the global flags. Every command is strict: after its word
+ * an option it does not declare is refused, naming what it accepts, instead of
+ * reaching a handler that would ignore it while the command reports success.
  */
-const GLOBAL_FLAGS_ONLY: ReadonlySet<GoodVibesCliCommand> = new Set<GoodVibesCliCommand>([
-  'tui', 'run', 'status', 'completion', 'help', 'version',
-]);
+const options = (...names: readonly string[]): readonly CommandOptionSpec[] =>
+  names.map((name) => ({ tokens: [`--${name}`], takesValue: false }));
+const KNOWLEDGE_OPTIONS = [
+  ...options('allow-private-hosts', 'connector', 'content', 'folder', 'home', 'input', 'kind', 'limit', 'mode', 'path', 'review', 'tags', 'title', 'wrfc', 'yes',
+    'browser', 'browsers', 'since-days', 'source-kind', 'source-kinds', 'sources'),
+  // Scope options the handler refuses with its own explanation (Agent Knowledge is isolated).
+  ...options('space', 'knowledge-space', 'knowledge-space-id', 'knowledgeSpaceId', 'include-all-spaces', 'includeAllSpaces', 'homegraph', 'home-graph'),
+];
+const COMMAND_OPTIONS: Partial<Record<GoodVibesCliCommand, readonly CommandOptionSpec[]>> = {
+  doctor: options('strict'),
+  onboarding: options('apply', 'name'),
+  profiles: options('description', 'include-vibe', 'name', 'persona', 'profile-name', 'replace', 'routines', 'skills', 'starter', 'starter-id', 'template', 'template-id', 'yes'),
+  personas: options('body', 'description', 'name', 'provenance', 'tags', 'triggers', 'use', 'yes'),
+  skills: options('description', 'enabled', 'name', 'procedure', 'provenance', 'requires-command', 'requires-commands', 'requires-env', 'skills', 'tags', 'triggers', 'yes'),
+  memory: options('by', 'cls', 'confidence', 'detail', 'file', 'label', 'limit', 'reason', 'review-state', 'scope', 'semantic', 'tags', 'task', 'turn', 'vector', 'yes'),
+  routines: options('description', 'enabled', 'name', 'requires-command', 'requires-commands', 'requires-env', 'steps', 'tags', 'triggers', 'yes'),
+  ci: options('delivery-channel', 'pr', 'ref', 'trigger-fix-session', 'yes'),
+  principals: options('channel', 'clear-identities', 'identity', 'kind', 'name', 'value', 'yes'),
+  'owner-profile': options('said', 'section', 'text', 'yes'),
+  'channel-profiles': options('channel-id', 'model', 'permission-mode', 'provider', 'yes'),
+  workspaces: options('label', 'yes'),
+  browser: [...options('arg', 'repair', 'visible'), { tokens: ['--help', '-h'], takesValue: false }],
+  fleet: options('workstream', 'yes'),
+  knowledge: KNOWLEDGE_OPTIONS,
+  compat: KNOWLEDGE_OPTIONS,
+  ask: KNOWLEDGE_OPTIONS,
+  search: KNOWLEDGE_OPTIONS,
+  delegate: KNOWLEDGE_OPTIONS,
+  secrets: options('user', 'project', 'secure', 'plaintext', 'stdin'),
+  pair: options('name'),
+  import: options('apply', 'apply-permissions'),
+};
 const COMMANDS: readonly CommandSpec<GoodVibesCliCommand, FlagField>[] = [
   {
     name: 'unknown',
@@ -315,7 +344,7 @@ const COMMANDS: readonly CommandSpec<GoodVibesCliCommand, FlagField>[] = [
       .map(([token]) => token),
     flags: [],
     passthrough: false,
-    lenientUnknownFlags: !GLOBAL_FLAGS_ONLY.has(name),
+    options: COMMAND_OPTIONS[name] ?? [],
     subcommands: [],
   })),
 ];

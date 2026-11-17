@@ -14,15 +14,14 @@ export type SessionAction = 'close' | 'reopen' | 'delete';
  */
 type Phase = 'idle' | 'confirming' | 'pending' | 'no-answer';
 
-// Target-route absence, not a generic router/auth 404. The native transport's
-// generic NOT_FOUND code can shadow the daemon body code. Current GET/close
-// responses use the exact uncoded message; DELETE also carries its typed code.
+// Target-route absence, not a generic router/auth 404: every session route
+// that cannot find the session answers with the code SESSION_NOT_FOUND. The
+// body is read because the transport's generic NOT_FOUND code can shadow it.
 function isTargetMissing(error: unknown): boolean {
   const value = serializeError(error);
   const transport = asRecord(value.transport);
   const body = asRecord(value.body ?? transport.body);
-  return (value.status ?? transport.status) === 404
-    && (body.code === 'SESSION_NOT_FOUND' || body.error === 'Unknown shared session' || body.message === 'Unknown shared session');
+  return (value.status ?? transport.status) === 404 && body.code === 'SESSION_NOT_FOUND';
 }
 
 const RESPONSE_DEADLINE_MS = 30_000;

@@ -23,6 +23,8 @@ export interface CommandVerbPolicy {
   readonly ownerOnly: boolean;
   /** Why it is the owner's to type, finishing "/<command> <verb> ..." (owner-only verbs). */
   readonly because?: string | undefined;
+  /** What the model can do itself instead, when a tool of its own does the job under its own authority. */
+  readonly instead?: string | undefined;
 }
 
 export interface CommandVerbs {
@@ -61,7 +63,7 @@ export function ownerOnlyVerbRefusal(commandName: string, resolved: ResolvedComm
     code: 'OWNER_ONLY_COMMAND',
     state: 'not run; nothing was changed',
     reason: `${typed} ${resolved.because ?? 'is the owner\'s decision'}, so it only counts when the owner types it. This call came from the model running a command, the route content it just read could steer`,
-    next: [`Ask the owner to type ${typed} in the Agent terminal`],
+    next: [`Ask the owner to type ${typed} in the Agent terminal`, ...(resolved.instead ? [resolved.instead] : [])],
     status: 403,
   }));
 }
@@ -120,8 +122,8 @@ export const LOCAL_WRITE_VERB: CommandVerbPolicy = Object.freeze({ effect: 'loca
 export const OUTWARD_VERB: CommandVerbPolicy = Object.freeze({ effect: 'outward', ownerOnly: false });
 export const CREDENTIAL_VERB: CommandVerbPolicy = Object.freeze({ effect: 'credential', ownerOnly: false });
 
-export function ownerOnlyVerb(effect: CommandVerbEffect, because: string): CommandVerbPolicy {
-  return Object.freeze({ effect, ownerOnly: true, because });
+export function ownerOnlyVerb(effect: CommandVerbEffect, because: string, instead?: string): CommandVerbPolicy {
+  return Object.freeze({ effect, ownerOnly: true, because, ...(instead === undefined ? {} : { instead }) });
 }
 
 /**

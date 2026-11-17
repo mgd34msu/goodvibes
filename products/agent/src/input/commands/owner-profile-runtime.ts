@@ -23,10 +23,36 @@ import type { CliCommandRuntime } from '../../cli/management.ts';
 import { handleOwnerProfileCommand } from '../../cli/owner-profile-command.ts';
 import { parseGoodVibesCli } from '../../cli/parser.ts';
 import type { CommandRegistry } from '../command-registry.ts';
+import { READ_VERB, ownerOnlyVerb, withCommandVerbs, type CommandVerbs } from './command-verbs.ts';
 import { requireShellPaths } from './runtime-services.ts';
 
+/**
+ * A write here presents the owner's own credential and is recorded as his own
+ * words (owner-direct), so it counts only when he types it. The model records
+ * a fact with its `profile` tool, under its delegated authority and with its
+ * own provenance, which the daemon checks on its own terms.
+ */
+const PROFILE_WRITE_VERB = ownerOnlyVerb(
+  'outward',
+  'writes your profile as your own words, with your own credential',
+  'Use the profile tool (action set, append, undo or forget): it writes under the Agent\'s delegated authority and records where the fact came from',
+);
+
+const OWNER_PROFILE_VERBS: CommandVerbs = {
+  defaultVerb: 'read',
+  verbs: {
+    read: READ_VERB, show: READ_VERB, list: READ_VERB,
+    get: READ_VERB, field: READ_VERB, person: READ_VERB,
+    provenance: READ_VERB, source: READ_VERB, where: READ_VERB, status: READ_VERB,
+    set: PROFILE_WRITE_VERB, note: PROFILE_WRITE_VERB, append: PROFILE_WRITE_VERB, undo: PROFILE_WRITE_VERB,
+    forget: PROFILE_WRITE_VERB, delete: PROFILE_WRITE_VERB, remove: PROFILE_WRITE_VERB,
+  },
+  // An unknown verb prints the usage and changes nothing.
+  otherwise: READ_VERB,
+};
+
 export function registerOwnerProfileRuntimeCommands(registry: CommandRegistry): void {
-  registry.register({
+  registry.register(withCommandVerbs({
     name: 'owner-profile',
     effect: 'mixed',
     aliases: ['about-me'],
@@ -53,5 +79,5 @@ export function registerOwnerProfileRuntimeCommands(registry: CommandRegistry): 
       const result = await handleOwnerProfileCommand(runtime, { outputEntersModelContext: ctx.invokedByModel === true });
       ctx.print(result.output);
     },
-  });
+  }, OWNER_PROFILE_VERBS));
 }

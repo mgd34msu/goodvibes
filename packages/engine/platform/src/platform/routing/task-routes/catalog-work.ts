@@ -244,7 +244,7 @@ const buildWork: TaskRouteEntry = {
       missingFields: delegated ? ['task scope', 'workspace or worktree target', 'success criteria', 'review expectation'] : undefined,
       supportingRoutes: delegated
         ? [
-          'agent_work_plan action:"dispatch_agents" confirm:true explicitUserRequest:"..."',
+          'agent mode:"batch-spawn" tasks:[...]',
           'delegation action:"route" target:"tui handoff"',
           'agent_harness mode:"agent_orchestration"',
         ]

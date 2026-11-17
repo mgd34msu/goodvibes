@@ -1,6 +1,7 @@
 import {
   collectRecommendationCandidates,
   rankRecommendationCandidates,
+  unrankedRecommendations,
   type EcosystemRecommendation,
   type RecommendationCandidates,
 } from './ecosystem/recommendations.js';
@@ -71,7 +72,9 @@ export function readIntelligenceSnapshot(readiness: CodeIntelligenceReadiness = 
  * Where the recommendations stand: `idle` until something asks for them,
  * `pending` while Jev ranks them, `ready` with the ranked list (which may be
  * empty), `failed` when the ranking could not be read (startupIssues says
- * why), `off` without a decision model mode, where nothing is ranked.
+ * why), `off` with no decision model in use: nothing is ranked, and once
+ * asked the list holds every live need's uninstalled entries in catalog order,
+ * each marked unranked.
  */
 export type UiMarketplaceRanking = 'idle' | 'pending' | 'ready' | 'failed' | 'off';
 
@@ -161,6 +164,8 @@ function createMarketplaceReadModel(runtimeServices: RuntimeServices): UiMarketp
   };
   const listeners = new Set<() => void>();
   let recommendations: readonly EcosystemRecommendation[] = [];
+  /** The list `recommend` built while no decision model was in use; never mixed with a ranked one. */
+  let unranked: readonly EcosystemRecommendation[] = [];
   let ranking: UiMarketplaceRanking = 'idle';
   let rankedKey: string | undefined;
   let failureMessage: string | undefined;
@@ -185,8 +190,8 @@ function createMarketplaceReadModel(runtimeServices: RuntimeServices): UiMarketp
       startupIssues.push(`${staleSchemas.length} MCP server schema${staleSchemas.length === 1 ? ' is' : 's are'} stale or quarantined.`);
     }
     if (isClassicOperation()) {
-      startupIssues.push('No decision model: semantic marketplace recommendations are not evaluated. Browse the catalog and choose entries explicitly.');
-      return { startupIssues, recommendations: [], ranking: 'off' };
+      startupIssues.push('No decision model is in use: recommendations are not ranked; each live need lists its uninstalled entries in catalog order.');
+      return { startupIssues, recommendations: unranked, ranking: 'off' };
     }
     if (ranking === 'failed' && failureMessage) {
       startupIssues.push(`Marketplace recommendations could not be ranked (${failureMessage}); /marketplace recommend tries again.`);
@@ -223,7 +228,12 @@ function createMarketplaceReadModel(runtimeServices: RuntimeServices): UiMarketp
   return {
     getSnapshot: snapshot,
     async recommend() {
-      if (isClassicOperation()) return snapshot();
+      if (isClassicOperation()) {
+        // Code only: the live needs and their uninstalled entries, one read of the catalogs, no model.
+        unranked = unrankedRecommendations(collectRecommendationCandidates(runtimeStore, catalogOptions));
+        notify();
+        return snapshot();
+      }
       const candidates = collectRecommendationCandidates(runtimeStore, catalogOptions);
       const key = candidatesKey(candidates);
       if (inFlight?.key === key) {

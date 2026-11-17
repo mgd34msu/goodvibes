@@ -39,6 +39,10 @@ import { requireActingReading } from '../../types/judgment-held.js';
  *   A compaction is only good when it both shrinks the conversation and keeps
  *   its substance; the geometric mean is 0 when either axis is 0, needs no
  *   chosen weight between them, and stays on the same 0 to 1 scale as each axis.
+ *
+ * With no decision model in use retention is not assessed and nothing is
+ * asked: the score is the compression axis alone, `retentionAssessed` is
+ * false, and the description says so. It never claims the substance was kept.
  */
 
 import { captureJudgmentPort } from '@goodvibes-jev/engine/errors';
@@ -48,7 +52,7 @@ import type { StrategyInput, StrategyOutput, CompactionStrategy } from './types.
 import { compactionViews } from './judged-views.js';
 import { compactionFidelity } from './batteries/compaction-fidelity.js';
 import { compactionRetention } from './batteries/compaction-retention.js';
-import { requireDecisionFeature } from '../decision-policy.js';
+import { isClassicOperation } from '../decision-policy.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -110,6 +114,11 @@ export interface CompactionQualityScore {
   grade: CompactionQualityGrade;
   /** The retention evidence. */
   signals: SemanticRetentionSignals;
+  /**
+   * False when no decision model is in use: retention was not read, so
+   * `retentionScore` is 0 and `score` and `grade` measure compression alone.
+   */
+  retentionAssessed: boolean;
   /** True when score < LOW_QUALITY_THRESHOLD and strategy escalation should occur. */
   isLowQuality: boolean;
   /** Human-readable description of the score for diagnostics. */
@@ -175,6 +184,15 @@ async function readRetention(
   };
 }
 
+/** The structural signals alone, for a compaction whose retention no decision model read. */
+function unreadRetentionSignals(input: StrategyInput, output: StrategyOutput): SemanticRetentionSignals {
+  return {
+    fidelity: 'none', contradictionProbability: 0, substance: 0,
+    messageCountSane: output.messages.length >= 1 && output.messages.length <= input.messages.length,
+    positiveTokenCount: output.tokensAfter > 0,
+  };
+}
+
 /**
  * Normalises a raw compression ratio to a 0–1 score.
  *
@@ -205,9 +223,9 @@ function gradeScore(score: number): CompactionQualityGrade {
  */
 export function describeScore(score: CompactionQualityScore): string {
   const parts: string[] = [
-    `score=${score.score.toFixed(2)} (${score.grade})`,
+    `score=${score.score.toFixed(2)} (${score.grade})${score.retentionAssessed ? '' : ' from compression only'}`,
     `compression=${(score.compressionRatio * 100).toFixed(1)}%`,
-    `retention=${(score.retentionScore * 100).toFixed(0)}%`,
+    score.retentionAssessed ? `retention=${(score.retentionScore * 100).toFixed(0)}%` : 'retention not assessed: no decision model is in use',
   ];
   if (score.isLowQuality) {
     parts.push('LOW_QUALITY, strategy switch triggered');
@@ -227,7 +245,6 @@ export async function computeQualityScore(
   output: StrategyOutput,
   options: QualityScoreOptions = {},
 ): Promise<CompactionQualityScore> {
-  requireDecisionFeature('semantic compaction retention and fidelity scoring; native compaction does not claim a quality grade');
   options.signal?.throwIfAborted();
   options.assertCurrent?.();
   // Compression ratio: fraction of tokens removed
@@ -237,10 +254,15 @@ export async function computeQualityScore(
       : 0;
   const compressionScore = scoreCompression(compressionRatio);
 
-  const { signals, retentionScore } = await readRetention(input, output, options);
+  const retentionAssessed = !isClassicOperation();
+  const { signals, retentionScore } = retentionAssessed
+    ? await readRetention(input, output, options)
+    : { signals: unreadRetentionSignals(input, output), retentionScore: 0 };
   options.signal?.throwIfAborted();
   options.assertCurrent?.();
-  const score = Math.sqrt(compressionScore * retentionScore);
+  // Unread retention still counts a structurally empty output as keeping nothing: that is code's to see.
+  const structural = signals.messageCountSane && signals.positiveTokenCount;
+  const score = retentionAssessed ? Math.sqrt(compressionScore * retentionScore) : structural ? compressionScore : 0;
 
   const full: CompactionQualityScore = {
     compressionRatio,
@@ -249,6 +271,7 @@ export async function computeQualityScore(
     score,
     grade: gradeScore(score),
     signals,
+    retentionAssessed,
     isLowQuality: score < LOW_QUALITY_THRESHOLD,
     description: '',
   };

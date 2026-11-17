@@ -119,18 +119,21 @@ export function registerMarketplaceRuntimeCommands(registry: CommandRegistry): v
       if (sub === 'recommend') {
         // Ranking is asked for here and awaited, so the answer is the ranked list, not the one before it.
         const snapshot = await requireReadModels(ctx).marketplace.recommend();
-        if (snapshot.ranking === 'off' || snapshot.ranking === 'failed') {
+        if (snapshot.ranking === 'failed') {
           ctx.print(['Marketplace Recommendations', ...snapshot.startupIssues.map((issue) => `  ${issue}`)].join('\n'));
           return;
         }
         const recommendations = snapshot.recommendations;
+        // Without a decision model the list is unranked; the snapshot's issues, its notice among them, go above it.
+        const notice = snapshot.ranking === 'off' ? snapshot.startupIssues.map((issue) => `  ${issue}`) : [];
         ctx.print(recommendations.length > 0
           ? [
             'Marketplace Recommendations',
+            ...notice,
             ...recommendations.map((recommendation) => `  ${recommendation.kind} ${recommendation.entry.id}  ${recommendation.title}`),
             ...recommendations.map((recommendation) => `    ${recommendation.reason}  next=${recommendation.command}`),
           ].join('\n')
-          : 'Marketplace Recommendations\n  No contextual recommendations right now.');
+          : ['Marketplace Recommendations', ...notice, '  No contextual recommendations right now.'].join('\n'));
         return;
       }
       if (sub === 'installed') {

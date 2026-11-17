@@ -5,10 +5,12 @@
  * need is read by Jev (`engine.ecosystem.recommendation-fit`), one yes/no per
  * (need, entry) pair. Only strong yes readings become recommendations,
  * ordered by the yes probability, deduplicated by entry and capped at
- * MAX_RECOMMENDATIONS.
+ * MAX_RECOMMENDATIONS. With no decision model in use nothing is read: every
+ * uninstalled entry of a live need's kind is listed in need and catalog order,
+ * marked `unranked`, under the same cap.
  */
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
-import { requireDecisionFeature } from '../decision-policy.js';
+import { isClassicOperation } from '../decision-policy.js';
 import { mapLimit } from '@goodvibes-jev/judgment';
 import type { RuntimeStore } from '../store/index.js';
 import {
@@ -32,6 +34,8 @@ export interface EcosystemRecommendation {
   readonly kind: EcosystemEntryKind;
   readonly entry: EcosystemCatalogEntry;
   readonly command: string;
+  /** No decision model read whether the entry answers the need; it is listed because it is of the need's kind. */
+  readonly unranked?: true | undefined;
 }
 
 /** Most recommendations one listing shows. */
@@ -114,7 +118,7 @@ export async function rankRecommendationCandidates(
   candidates: readonly RecommendationCandidates[],
   options: { readonly signal?: AbortSignal } = {},
 ): Promise<EcosystemRecommendation[]> {
-  requireDecisionFeature('semantic ecosystem recommendations; browse and explicitly choose catalog entries without a decision model');
+  if (isClassicOperation()) { options.signal?.throwIfAborted(); return unrankedRecommendations(candidates); }
   const pairs = candidates.flatMap((candidate) => candidate.entries.map((entry) => ({ candidate, entry })));
   if (pairs.length === 0) return [];
   const port = judgmentPort(RECOMMENDATION_SITE);
@@ -147,10 +151,37 @@ export async function rankRecommendationCandidates(
   return recommendations;
 }
 
+/**
+ * The recommendations without a decision model: each live need's uninstalled
+ * entries in catalog order, one per entry, at most MAX_RECOMMENDATIONS, each
+ * saying it was not read for fit.
+ */
+export function unrankedRecommendations(candidates: readonly RecommendationCandidates[]): EcosystemRecommendation[] {
+  const seen = new Set<string>();
+  const recommendations: EcosystemRecommendation[] = [];
+  for (const candidate of candidates) {
+    for (const entry of candidate.entries) {
+      const id = `${candidate.kind}:${entry.id}`;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      recommendations.push({
+        id,
+        title: candidate.title,
+        reason: `${candidate.reason} Not ranked: no decision model is in use, so this is an uninstalled ${candidate.kind} listed in catalog order, not read for fit.`,
+        kind: candidate.kind,
+        entry,
+        command: `/marketplace review ${candidate.kind} ${entry.id}`,
+        unranked: true,
+      });
+      if (recommendations.length === MAX_RECOMMENDATIONS) return recommendations;
+    }
+  }
+  return recommendations;
+}
+
 export async function buildEcosystemRecommendations(
   runtimeStore: RuntimeStore | undefined,
   options: EcosystemCatalogPathOptions,
 ): Promise<EcosystemRecommendation[]> {
-  requireDecisionFeature('semantic ecosystem recommendations; browse and explicitly choose catalog entries without a decision model');
   return rankRecommendationCandidates(collectRecommendationCandidates(runtimeStore, options));
 }

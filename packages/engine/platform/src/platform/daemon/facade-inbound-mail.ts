@@ -592,14 +592,21 @@ export function composeInboundMail(
     if (releaseBackground) return;
     // The existing supervisor rebuilds same-identity sources after source retirement.
     // A different account/mailbox still requires a fresh composition with new sinks.
-    const unsubscribeConfig = configManager.onDidChangeIncarnation?.(() => queueMicrotask(() => supervisor?.recheckNow()));
+    const unsubscribeConfig = configManager.onDidChangeIncarnation?.(() => queueMicrotask(() => {
+      supervisor?.recheckNow();
+      // A changed notice route may deliver what the old one could not.
+      if (handle.heldNotices() > 0) void handle.sendHeldNotices();
+    }));
     const unsubscribeCredentials = options.secretsManager.onDidInvalidateCredentials?.(() => {
       if (!options.secretsManager.getCredentialMutationState?.().pending) supervisor?.recheckNow();
     });
     housekeeper.start(6 * 60 * 60_000);
     expectations.startSweeping(expectationSweepMs);
+    // Notices held when the route was down before a restart are still owed.
+    void handle.sendHeldNotices();
     releaseBackground = () => {
       unsubscribeConfig?.(); unsubscribeCredentials?.();
+      handle.stop();
       housekeeper.stop(); expectations.stopSweeping();
       releaseBackground = null;
     };

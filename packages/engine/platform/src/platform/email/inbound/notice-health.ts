@@ -125,10 +125,9 @@ export interface InboundNoticeHealthOptions {
  * drift from the first.
  */
 export function describeNoticeRefusal(state: InboundNoticeRefusalState): string {
-  // A failed delivery is retried, so its count is attempts on the waiting
-  // message, not distinct messages recorded without a notice.
+  // A failed delivery holds the notice to send later; any other refusal is final.
   const tally = state.reason === 'delivery-failed'
-    ? `${String(state.unannounced)} delivery ${state.unannounced === 1 ? 'attempt has' : 'attempts have'} failed`
+    ? `${String(state.unannounced)} ${state.unannounced === 1 ? 'notice has' : 'notices have'} been held for the route to recover`
     : `${String(state.unannounced)} ${state.unannounced === 1 ? 'message has' : 'messages have'} been recorded without a notice`;
   return `Mail is arriving and is NOT being announced (${state.reason}): ${state.detail} ${state.fix} `
     + `${tally} since ${state.since}.`;

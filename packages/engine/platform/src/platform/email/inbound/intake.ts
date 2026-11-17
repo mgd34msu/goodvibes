@@ -134,9 +134,15 @@
  * therefore how a message gets another chance, and NOT throwing is how it is
  * declared done.
  *
- *   - `delivery-failed`, the transport itself failed. Transient, so it throws:
- *     the claim is released, the cursor stays put, and the next pass tries
- *     again. Silence is the failure mode this capability exists to eliminate.
+ *   - `delivery-failed`, the transport itself failed. Transient, and not the
+ *     message's fault, so it neither throws nor counts toward setting the
+ *     message aside: the record says `delivery-failed` and carries the notice's
+ *     outcome line, the cursor passes the message so later mail is read, and
+ *     the notice is HELD. A held notice is sent as soon as another notice gets
+ *     through, by a retry on a widening timer while any is held, and after a
+ *     restart from the records that still carry one. Silence is the failure
+ *     mode this capability exists to eliminate; a short outage of the notice
+ *     channel must not turn into it.
  *   - Every other refusal (`no-route-binding`, `surface-delivery-disabled`,
  *     `no-deliverable-target`, `unsupported-delivery-surface`, `empty-text`)
  *     is STRUCTURAL: the owner has no route, or delivery to it is switched
@@ -174,12 +180,15 @@
  *   reply queue in any signature in this file.
  */
 
-import { deliveredRecipientFromDeliveryHeaders } from '../../google/delivery-evidence.js';
+import {
+  deliveredRecipientFromAliasMailbox,
+  deliveredRecipientFromDeliveryHeaders,
+  type DeliveredRecipient,
+} from '../../google/delivery-evidence.js';
 import {
   receiptTimestamp,
   renderInboundMailNotice,
   stripControlAndLineBreaks,
-  type InboundOutcome,
   type StructuredNotice,
 } from '../inbound-notice.js';
 import { redactCardShapes } from '../../security/card-shapes.js';
@@ -192,8 +201,11 @@ import type { InboundMailboxMessage, InboundMailNote, InboundMailObserver } from
 import type {
   InboundMailMessageKey,
   InboundMailOutcome,
+  InboundMailRecord,
+  InboundMailRecordInput,
   InboundMailStore,
   InboundNoticeStatus,
+  OwedNoticeOutcome,
 } from './record-store.js';
 import type { SurfaceNoticeDelivery, SurfaceNoticeRefusal } from '../../daemon/types.js';
 import type { VerificationMatch } from '../../google/verification-expectations.js';
@@ -263,10 +275,12 @@ export interface InboundMailIntakeDeps {
   readonly expectations: ExpectationMatcher;
   /**
    * `record` and `findByMessage`, the intake writes one message's record and
-   * reads that same message's back. It does not sweep, list or delete: it has
-   * no business seeing any message but the one it was handed.
+   * reads that same message's back. It does not sweep or delete. The one wider
+   * read is `listHeldNotices`, the records whose notice is still owed, read
+   * once so notices held before a restart are still sent.
    */
-  readonly records: Pick<InboundMailStore, 'record' | 'findByMessage'>;
+  readonly records: Pick<InboundMailStore, 'record' | 'findByMessage'>
+    & Partial<Pick<InboundMailStore, 'listHeldNotices'>>;
   readonly notices: InboundMailNoticeRoute;
   readonly noticeMode: () => InboundNoticeMode;
   readonly now: () => Date;
@@ -281,7 +295,32 @@ export interface InboundMailIntakeDeps {
    */
   readonly noticeHealth?: InboundNoticeHealth | undefined;
   readonly observer?: InboundMailObserver | undefined;
+  /** First wait before held notices are retried without new mail; doubles to `heldNoticeRetryMaxMs`. */
+  readonly heldNoticeRetryMs?: number | undefined;
+  readonly heldNoticeRetryMaxMs?: number | undefined;
 }
+
+/** The handler the `DedupingInboundMailSink` wraps, plus what owns its held notices. */
+export interface InboundMailIntake {
+  (message: InboundMailboxMessage): Promise<void>;
+  /**
+   * Try every held notice now: the route may be back. The first call also
+   * picks up notices held before a restart. Never throws.
+   */
+  sendHeldNotices(): Promise<void>;
+  /** How many notices are held for a route that could not deliver them. */
+  heldNotices(): number;
+  /**
+   * The outcome a pass already settled for a message about to be set aside
+   * (an expectation it spent), forgotten as it is returned.
+   */
+  takeSpentOutcome(message: InboundMailboxMessage): InboundMailOutcome | undefined;
+  /** Stop the held-notice retry timer. */
+  stop(): void;
+}
+
+const DEFAULT_HELD_NOTICE_RETRY_MS = 30_000;
+const DEFAULT_HELD_NOTICE_RETRY_MAX_MS = 10 * 60_000;
 
 /**
  * What each structural refusal means, and what clears it.
@@ -352,7 +391,7 @@ function recordOutcome(match: VerificationMatch): InboundMailOutcome {
  * caller never builds a match on this path, so there is nothing here for a
  * later edit to accidentally start preferring.
  */
-function noticeOutcome(match: VerificationMatch, bodiesWithheld: boolean): InboundOutcome {
+function noticeOutcome(match: VerificationMatch, bodiesWithheld: boolean): OwedNoticeOutcome {
   if (bodiesWithheld) {
     return {
       kind: 'capability-degraded',
@@ -426,7 +465,11 @@ function shouldAnnounce(mode: InboundNoticeMode, match: VerificationMatch): bool
   return true;
 }
 
-/** A transport failure that another pass could clear. Everything else is structural. */
+/**
+ * A transport failure that another pass could clear, for a handler that
+ * retries by throwing. This intake does not throw it: it holds the notice and
+ * lets the cursor pass (see the file header).
+ */
 export class InboundNoticeTransportError extends Error {
   constructor(reason: string) {
     super(`The inbound-mail notice could not be delivered (${reason}). The message stays above `
@@ -496,16 +539,26 @@ function messageIdentity(message: InboundMailboxMessage): {
  * in which case the message stays where it is.
  */
 export function createInboundMailSetAside(deps: {
-  readonly records: Pick<InboundMailStore, 'record'>;
+  readonly records: Pick<InboundMailStore, 'record'> & Partial<Pick<InboundMailStore, 'findByMessage'>>;
   readonly now: () => Date;
   readonly noticeHealth?: Pick<InboundNoticeHealth, 'refused'> | undefined;
   readonly observer?: InboundMailObserver | undefined;
+  /** The intake's `takeSpentOutcome`: what a failed pass already settled about the message. */
+  readonly spentOutcome?: ((message: InboundMailboxMessage) => InboundMailOutcome | undefined) | undefined;
 }): (message: InboundMailboxMessage, error: unknown, attempts: number) => Promise<void> {
   return async (message, error, attempts): Promise<void> => {
     const receivedAt = receiptTimestamp(deps.now());
     const deliveredTo = deliveredRecipientFromDeliveryHeaders(message.deliveredTo);
     const fields = redactInboundFields(message, deliveredTo?.address ?? null);
-    const { identity } = messageIdentity(message);
+    const { identity, key } = messageIdentity(message);
+    // The outcome known so far: an expectation a failed pass spent, else what
+    // the message's own record already says (written before its notice), so a
+    // message that matched is not set aside as matching nothing.
+    const spent = deps.spentOutcome?.(message);
+    const prior = spent !== undefined || deps.records.findByMessage === undefined
+      ? null
+      : await deps.records.findByMessage(key).catch(() => null);
+    const outcome: InboundMailOutcome = spent ?? prior?.outcome ?? 'no-expectation';
     const transport = error instanceof InboundNoticeTransportError;
     const why = transport
       ? `the notice could not be delivered on ${String(attempts)} attempts in a row`
@@ -519,7 +572,7 @@ export function createInboundMailSetAside(deps: {
       deliveredToAddress: fields.deliveredToAddress,
       deliveryEvidenceSource: deliveredTo?.source ?? 'none',
       links: [],
-      outcome: 'no-expectation',
+      outcome,
       noticeStatus: 'delivery-failed',
       noticeFailureReason: `Set aside: ${why}.`,
       body: fields.body,
@@ -544,20 +597,217 @@ export function createInboundMailSetAside(deps: {
 /** Matches whose expectation a pass spent before its notice failed; bounds the in-memory map. */
 const MAX_CORRELATED_AWAITING_NOTICE = 256;
 
+/** The record key of a stored record, in the field order `messageIdentity` builds it. */
+function recordKey(record: InboundMailRecord): InboundMailMessageKey {
+  return record.source === 'gmail'
+    ? { source: 'gmail', account: record.account, mailbox: record.mailbox, resourceId: record.resourceId }
+    : { source: 'imap', account: record.account, mailbox: record.mailbox, uidValidity: record.uidValidity, uid: record.uid };
+}
+
+/** The stored delivery evidence, branded again for display in a held notice. */
+function storedDeliveredTo(record: InboundMailRecord): DeliveredRecipient | null {
+  if (record.deliveredToAddress === null || record.deliveryEvidenceSource === 'none') return null;
+  return record.deliveryEvidenceSource === 'alias-mailbox'
+    ? deliveredRecipientFromAliasMailbox(record.deliveredToAddress)
+    : deliveredRecipientFromDeliveryHeaders([record.deliveredToAddress], record.deliveryEvidenceSource);
+}
+
+/** A rewrite of a stored record with its notice settled; the held outcome line is left out. */
+function settledRecordInput(
+  record: InboundMailRecord,
+  status: InboundNoticeStatus,
+  failureReason: string | undefined,
+): InboundMailRecordInput {
+  const common = {
+    account: record.account,
+    mailbox: record.mailbox,
+    senderDisplay: record.senderDisplay,
+    subject: record.subject,
+    deliveredToAddress: record.deliveredToAddress,
+    deliveryEvidenceSource: record.deliveryEvidenceSource,
+    links: record.links,
+    outcome: record.outcome,
+    noticeStatus: status,
+    ...(failureReason === undefined ? {} : { noticeFailureReason: failureReason }),
+    body: record.bodyExcerpt,
+    receivedAt: record.receivedAt,
+  };
+  return record.source === 'gmail'
+    ? { source: 'gmail', resourceId: record.resourceId, historyId: record.historyId, ...common }
+    : { source: 'imap', uidValidity: record.uidValidity, uid: record.uid, ...common };
+}
+
+/** A notice the route could not deliver, held until it can. */
+interface HeldNotice {
+  readonly key: InboundMailMessageKey;
+  readonly account: string;
+  readonly mailbox: string;
+  readonly notice: StructuredNotice;
+  /** Rewrite the message's record with the notice's final status. */
+  readonly settle: (status: InboundNoticeStatus, failureReason: string | undefined) => Promise<void>;
+}
+
 /** Build the handler the `DedupingInboundMailSink` wraps. */
-export function createInboundMailIntake(
-  deps: InboundMailIntakeDeps,
-): (message: InboundMailboxMessage) => Promise<void> {
+export function createInboundMailIntake(deps: InboundMailIntakeDeps): InboundMailIntake {
   /**
    * Correlation does not wait for the announcement. A message that satisfies
    * an expectation spends it even when its notice cannot be delivered, so the
-   * workstream waiting for that mail gets it during a notice outage. The
-   * spent match is kept here by message, so the pass that retries the notice
-   * announces the same outcome instead of reading "no expectation" from the
-   * book it already spent. Removed when the message completes.
+   * workstream waiting for that mail gets it during a notice outage. The spent
+   * match is kept here by message only until the record that carries it is
+   * written, so a pass retried because that write failed announces the same
+   * outcome instead of reading "no expectation" from the book it already spent.
    */
   const correlated = new Map<string, VerificationMatch>();
-  return async (message: InboundMailboxMessage): Promise<void> => {
+  /** Notices the route could not deliver, by message, oldest first. */
+  const held = new Map<string, HeldNotice>();
+  /** Messages a pass or a held-notice send is working on right now. */
+  const inFlight = new Set<string>();
+  const firstRetryMs = deps.heldNoticeRetryMs ?? DEFAULT_HELD_NOTICE_RETRY_MS;
+  const maxRetryMs = deps.heldNoticeRetryMaxMs ?? DEFAULT_HELD_NOTICE_RETRY_MAX_MS;
+  let retryMs = firstRetryMs;
+  let retryTimer: ReturnType<typeof setTimeout> | null = null;
+  let stopped = false;
+  let flushing: Promise<void> | null = null;
+  // Notices held before a restart live only in the records; read them once.
+  let resumed = deps.records.listHeldNotices === undefined;
+
+  const noteFor = (entry: Pick<HeldNotice, 'account' | 'mailbox'>, kind: InboundMailNote['kind'], detail: string, at: string): void => {
+    try {
+      deps.observer?.note?.({ account: entry.account, mailbox: entry.mailbox, kind, detail, at });
+    } catch {
+      // See `note`.
+    }
+  };
+
+  const routeDown = (error: string | undefined, at: string): void => {
+    deps.noticeHealth?.refused({
+      reason: 'delivery-failed',
+      detail: `the notice for a new message could not be delivered (${error ?? 'no detail'}); `
+        + 'the message is recorded, later mail is still read, and its notice is held.',
+      fix: 'Check that the channel inbound-mail notices go to is reachable. Held notices are sent as soon as '
+        + 'a notice gets through, and retried every few minutes until then.',
+      at,
+    });
+  };
+
+  const scheduleRetry = (): void => {
+    if (held.size === 0 || stopped) {
+      if (retryTimer !== null) clearTimeout(retryTimer);
+      retryTimer = null;
+      retryMs = firstRetryMs;
+      return;
+    }
+    if (retryTimer !== null) return;
+    retryTimer = setTimeout(() => {
+      retryTimer = null;
+      void sendHeldNotices();
+    }, retryMs);
+    (retryTimer as { unref?: () => void }).unref?.();
+    retryMs = Math.min(retryMs * 2, maxRetryMs);
+  };
+
+  /** One held notice: sent, settled some other way, or put back because the route is still down. */
+  const sendHeld = async (heldKey: string, entry: HeldNotice): Promise<'sent' | 'settled' | 'route-down'> => {
+    held.delete(heldKey);
+    // A redelivered pass already holds the message; it releases it itself.
+    const owned = !inFlight.has(heldKey);
+    if (owned) inFlight.add(heldKey);
+    const at = receiptTimestamp(deps.now()).iso;
+    try {
+      // Announced or rewritten since it was held (a redelivered pass): nothing is owed.
+      // A read that fails is not a reason to stay silent, so it sends.
+      const current = await deps.records.findByMessage(entry.key).catch(() => undefined);
+      if (current === null || (current !== undefined && current.owedNoticeOutcome === undefined)) return 'settled';
+      if (deps.noticeMode() === 'none') {
+        await entry.settle('suppressed', undefined).catch((error: unknown) => {
+          noteFor(entry, 'post-notice-write-failed', `a held notice could not be marked suppressed (${summarizeError(error)}).`, at);
+        });
+        return 'settled';
+      }
+      let delivery: SurfaceNoticeDelivery;
+      try {
+        delivery = await deps.notices.send(entry.notice);
+      } catch (error) {
+        held.set(heldKey, entry);
+        if (deps.noticeHealth?.get() === null) routeDown(summarizeError(error), at);
+        return 'route-down';
+      }
+      if (delivery.delivered) {
+        retryMs = firstRetryMs;
+        deps.noticeHealth?.announced(at);
+        await entry.settle('delivered', undefined).catch((error: unknown) => {
+          noteFor(entry, 'post-notice-write-failed', `a held notice was sent but its record could not be updated (${summarizeError(error)}).`, at);
+        });
+        return 'sent';
+      }
+      if (delivery.reason === 'delivery-failed') {
+        held.set(heldKey, entry);
+        if (deps.noticeHealth?.get() === null) routeDown(delivery.error, at);
+        return 'route-down';
+      }
+      const refusal = { reason: delivery.reason, ...STRUCTURAL_REFUSALS[delivery.reason] };
+      deps.noticeHealth?.refused({ ...refusal, at });
+      noteFor(entry, 'notice-refused', `${refusal.reason}: ${refusal.detail} ${refusal.fix}`, at);
+      await entry.settle(delivery.reason, delivery.error).catch((error: unknown) => {
+        noteFor(entry, 'post-notice-write-failed', `a held notice's refusal could not be recorded (${summarizeError(error)}).`, at);
+      });
+      return 'settled';
+    } finally {
+      if (owned) inFlight.delete(heldKey);
+    }
+  };
+
+  /** Hold the notices a restart left owed in the records (once). */
+  const resumeHeld = async (): Promise<void> => {
+    const records = await deps.records.listHeldNotices?.() ?? [];
+    for (const record of records) {
+      const owedOutcome = record.owedNoticeOutcome;
+      if (owedOutcome === undefined) continue;
+      const key = recordKey(record);
+      const heldKey = JSON.stringify(key);
+      if (held.has(heldKey) || inFlight.has(heldKey)) continue;
+      held.set(heldKey, {
+        key,
+        account: record.account,
+        mailbox: record.mailbox,
+        notice: await renderInboundMailNotice({
+          senderDisplay: record.senderDisplay,
+          subject: record.subject,
+          deliveredTo: storedDeliveredTo(record),
+          outcome: owedOutcome,
+          links: [],
+          receivedAt: receiptTimestamp(new Date(record.receivedAt)),
+        }),
+        settle: async (status, failureReason) => {
+          await deps.records.record(settledRecordInput(record, status, failureReason));
+        },
+      });
+    }
+  };
+
+  const sendHeldNotices = (): Promise<void> => {
+    stopped = false;
+    if (flushing !== null) return flushing;
+    flushing = (async () => {
+      if (!resumed) {
+        resumed = true;
+        await resumeHeld();
+      }
+      for (const [heldKey, entry] of [...held]) {
+        if (stopped) return;
+        if (inFlight.has(heldKey) || held.get(heldKey) !== entry) continue;
+        if (await sendHeld(heldKey, entry) === 'route-down') return;
+      }
+    })().catch((error: unknown) => {
+      logger.warn('Held inbound-mail notices could not be sent', { surface: 'email-inbound', error: summarizeError(error) });
+    }).finally(() => {
+      flushing = null;
+      scheduleRetry();
+    });
+    return flushing;
+  };
+
+  const handleMessage = async (message: InboundMailboxMessage, heldKey: string): Promise<void> => {
     const now = deps.now();
     const receivedAt = receiptTimestamp(now);
     const deliveredTo = deliveredRecipientFromDeliveryHeaders(message.deliveredTo);
@@ -570,8 +820,8 @@ export function createInboundMailIntake(
 
     // `consume: false`, the grant is NOT spent here. See the ordering note in
     // the file header: it is spent at the very end, once this pass is known to
-    // be completing, or, when only the notice route failed, just before the
-    // pass is retried (see `correlated`).
+    // be completing, or, when only the notice route failed, as its notice is
+    // held (see `correlated`).
     //
     // On the body-less path the book is NOT ASKED AT ALL. `matchCandidate`
     // gates on the delivery-evidence address, which is a header and therefore
@@ -592,8 +842,40 @@ export function createInboundMailIntake(
     };
     // The identity is the message's own, not a shape assumed from one source.
     const { identity, key } = messageIdentity(message);
-    const correlationKey = JSON.stringify(key);
+    const correlationKey = heldKey;
     const spentEarlier = correlated.get(correlationKey);
+
+    // Whether the OWNER has already been told about this exact message, from
+    // the one place that survives a restart. A read that throws is a read that
+    // happens before anything is announced, so it is allowed to throw: the
+    // retry announces once rather than again.
+    const prior = await deps.records.findByMessage(key);
+    const alreadyAnnounced = prior !== null && prior.noticeStatus === 'delivered';
+
+    // Redelivered while its notice is held (a restart before the cursor
+    // moved): the earlier pass matched it and spent what it matched, so it is
+    // not matched again; the held notice is what is still owed.
+    if (prior !== null && prior.owedNoticeOutcome !== undefined && spentEarlier === undefined) {
+      const owedOutcome = prior.owedNoticeOutcome;
+      await sendHeld(correlationKey, {
+        key,
+        account: message.account,
+        mailbox: message.mailbox,
+        notice: await renderInboundMailNotice({
+          senderDisplay: shown.senderDisplay,
+          subject: shown.subject,
+          deliveredTo,
+          outcome: owedOutcome,
+          links: [],
+          receivedAt: receiptTimestamp(new Date(prior.receivedAt)),
+        }),
+        settle: async (status, failureReason) => {
+          await deps.records.record(settledRecordInput(prior, status, failureReason));
+        },
+      });
+      scheduleRetry();
+      return;
+    }
 
     const match: VerificationMatch = spentEarlier ?? (bodiesWithheld
       ? {
@@ -611,6 +893,7 @@ export function createInboundMailIntake(
     const write = async (
       status: InboundNoticeStatus,
       failureReason: string | undefined,
+      owedNoticeOutcome?: OwedNoticeOutcome,
     ): Promise<void> => {
       await deps.records.record({
         ...identity,
@@ -624,6 +907,7 @@ export function createInboundMailIntake(
         outcome: recordOutcome(match),
         noticeStatus: status,
         ...(failureReason === undefined ? {} : { noticeFailureReason: failureReason }),
+        ...(owedNoticeOutcome === undefined ? {} : { owedNoticeOutcome }),
         // Whatever the source actually has, redacted: Gmail's history delta
         // carries the body; IMAP's envelope pass does not, and an empty excerpt
         // is the truth there.
@@ -631,13 +915,6 @@ export function createInboundMailIntake(
         receivedAt: receivedAt.iso,
       });
     };
-
-    // Whether the OWNER has already been told about this exact message, from
-    // the one place that survives a restart. A read that throws is a read that
-    // happens before anything is announced, so it is allowed to throw: the
-    // retry announces once rather than again.
-    const prior = await deps.records.findByMessage(key);
-    const alreadyAnnounced = prior !== null && prior.noticeStatus === 'delivered';
 
     // Decide everything BEFORE anything irreversible happens.
     const plan: NoticePlan = alreadyAnnounced
@@ -686,25 +963,16 @@ export function createInboundMailIntake(
       if (delivery.delivered) {
         status = 'delivered';
       } else if (delivery.reason === 'delivery-failed') {
-        // Rethrown, not recorded: the sink releases its claim, the cursor
-        // stays below this message, and the next pass announces it. The record
-        // stays at `pending`, which is what it truthfully is, and the retry
-        // replaces it rather than writing a second row.
+        // The route is down, which is not this message's fault: the message is
+        // handled (recorded, correlated) and the cursor passes it so later mail
+        // is read, and its notice is HELD. The record says `delivery-failed`
+        // and carries the notice's outcome line, so the hold survives a
+        // restart; it is sent when a notice next gets through, or by the
+        // retry while any is held. Nothing was announced, so a failing record
+        // write below may still throw and have the pass retried.
         //
-        // Latched as well, because the retry is otherwise invisible: the
-        // watcher keeps saying healthy while this message, and every message
-        // behind it, waits for a route that is down. The next notice that
-        // gets through clears it.
-        deps.noticeHealth?.refused({
-          reason: 'delivery-failed',
-          detail: `the notice for a new message could not be delivered (${delivery.error ?? 'no detail'}); `
-            + 'the message is kept and retried with backoff, and after a few attempts it is set aside so later mail is read.',
-          fix: 'Check that the channel inbound-mail notices go to is reachable; the waiting notices are '
-            + 'sent as soon as delivery works again.',
-          at: receivedAt.iso,
-        });
-        // Correlation is done before the retry: the expectation is spent now,
-        // so the agent waiting on it is not held up by the notice route.
+        // Correlation is done now: the expectation is spent, so the agent
+        // waiting on it is not held up by the notice route.
         if (spentEarlier === undefined && match.kind === 'matched') {
           try {
             await deps.expectations.consumeMatch(match, candidate);
@@ -712,11 +980,28 @@ export function createInboundMailIntake(
             while (correlated.size > MAX_CORRELATED_AWAITING_NOTICE) correlated.delete(correlated.keys().next().value!);
           } catch (error) {
             note(deps.observer, message, 'post-notice-write-failed',
-              `the matched expectation could not be closed (${summarizeError(error)}); the next pass `
-              + 'matches the message again.', receivedAt.iso);
+              `the matched expectation could not be closed (${summarizeError(error)}); it stays open `
+              + 'until its own window elapses.', receivedAt.iso);
           }
         }
-        throw new InboundNoticeTransportError(delivery.error ?? 'delivery-failed');
+        await write('delivery-failed', delivery.error ?? 'delivery-failed', plan.outcome);
+        correlated.delete(correlationKey);
+        held.set(correlationKey, {
+          key,
+          account: message.account,
+          mailbox: message.mailbox,
+          notice: plan.notice,
+          settle: (settled, reason) => write(settled, reason),
+        });
+        // Latched, because a held notice is otherwise invisible: the watcher
+        // keeps saying healthy while nobody is told. The next notice that gets
+        // through clears it.
+        routeDown(delivery.error, receivedAt.iso);
+        note(deps.observer, message, 'notice-refused',
+          `delivery-failed: the notice is held until the notice route delivers again (${delivery.error ?? 'no detail'}).`,
+          receivedAt.iso);
+        scheduleRetry();
+        return;
       } else {
         status = delivery.reason;
         failureReason = delivery.error;
@@ -765,12 +1050,42 @@ export function createInboundMailIntake(
         + 'until its own window elapses, which is disclosed, rather than re-announcing this '
         + 'message to close it.', receivedAt.iso);
     }
+
+    // A notice got through, so the route works: send what it was holding.
+    if (status === 'delivered' && plan.kind === 'send' && held.size > 0) void sendHeldNotices();
   };
+
+  const intake = async (message: InboundMailboxMessage): Promise<void> => {
+    const heldKey = JSON.stringify(messageIdentity(message).key);
+    // This pass handles the message now; a held notice for it is its to send.
+    held.delete(heldKey);
+    inFlight.add(heldKey);
+    try {
+      await handleMessage(message, heldKey);
+    } finally {
+      inFlight.delete(heldKey);
+    }
+  };
+  return Object.assign(intake, {
+    sendHeldNotices,
+    heldNotices: () => held.size,
+    takeSpentOutcome: (message: InboundMailboxMessage): InboundMailOutcome | undefined => {
+      const heldKey = JSON.stringify(messageIdentity(message).key);
+      const spent = correlated.get(heldKey);
+      correlated.delete(heldKey);
+      return spent === undefined ? undefined : recordOutcome(spent);
+    },
+    stop: (): void => {
+      stopped = true;
+      if (retryTimer !== null) clearTimeout(retryTimer);
+      retryTimer = null;
+    },
+  });
 }
 
 /** What this pass intends to do about a notice, decided before anything irreversible runs. */
 type NoticePlan =
-  | { readonly kind: 'send'; readonly notice: StructuredNotice }
+  | { readonly kind: 'send'; readonly notice: StructuredNotice; readonly outcome: OwedNoticeOutcome }
   | {
     readonly kind: 'settled';
     readonly status: InboundNoticeStatus;
@@ -797,13 +1112,15 @@ async function planFor(
       refusal: { reason: route.reason, detail: route.detail, fix: route.fix },
     };
   }
+  const outcome = noticeOutcome(match, bodiesWithheld);
   return {
     kind: 'send',
+    outcome,
     notice: await renderInboundMailNotice({
       senderDisplay: message.senderDisplay,
       subject: message.subject,
       deliveredTo,
-      outcome: noticeOutcome(match, bodiesWithheld),
+      outcome,
       links: [],
       receivedAt,
     }),

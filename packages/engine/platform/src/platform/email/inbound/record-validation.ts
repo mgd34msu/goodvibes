@@ -34,6 +34,7 @@ import type {
   InboundMailRecord,
   InboundMailRecordCommon,
   InboundNoticeStatus,
+  OwedNoticeOutcome,
 } from './record-store.js';
 // Type-only, and erased at build time: this module names the refusal
 // vocabulary rather than owning it (§7.3).
@@ -146,6 +147,41 @@ export function clampLinkVerdicts(links: readonly InboundLinkVerdict[]): readonl
       ? link
       : { ...link, reason: link.reason.slice(0, MAX_LINK_REASON_CHARS) }
   ));
+}
+
+/** Bound on each text field of a held notice's outcome line. */
+export const MAX_OWED_OUTCOME_TEXT_CHARS = 512;
+
+/** Clamp a held notice's outcome line to what the loader accepts, at WRITE time. */
+export function clampOwedNoticeOutcome(outcome: OwedNoticeOutcome): OwedNoticeOutcome {
+  const cut = (text: string): string => text.slice(0, MAX_OWED_OUTCOME_TEXT_CHARS);
+  switch (outcome.kind) {
+    case 'matched-expectation':
+      return { kind: outcome.kind, purpose: cut(outcome.purpose), serviceDomain: cut(outcome.serviceDomain) };
+    case 'capability-degraded':
+      return { kind: outcome.kind, missingCapability: cut(outcome.missingCapability) };
+    default:
+      return { kind: outcome.kind };
+  }
+}
+
+function validateOwedNoticeOutcome(value: unknown): OwedNoticeOutcome | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const outcome = value as Record<string, unknown>;
+  const text = (field: unknown): field is string => typeof field === 'string' && field.length <= MAX_OWED_OUTCOME_TEXT_CHARS;
+  switch (outcome.kind) {
+    case 'matched-expectation':
+      return text(outcome.purpose) && text(outcome.serviceDomain)
+        ? { kind: 'matched-expectation', purpose: outcome.purpose, serviceDomain: outcome.serviceDomain }
+        : null;
+    case 'capability-degraded':
+      return text(outcome.missingCapability) ? { kind: 'capability-degraded', missingCapability: outcome.missingCapability } : null;
+    case 'expired-expectation':
+    case 'inert':
+      return { kind: outcome.kind };
+    default:
+      return null;
+  }
 }
 
 export const INBOUND_MAIL_OUTCOMES: readonly InboundMailOutcome[] = [
@@ -285,6 +321,11 @@ export function validateInboundMailRecord(value: unknown): InboundMailRecord | n
     && (typeof record.noticeFailureReason !== 'string'
       || record.noticeFailureReason.length > MAX_NOTICE_FAILURE_REASON_CHARS)) return null;
 
+  // A held notice's outcome that does not validate drops only the hold, never the record.
+  const owedNoticeOutcome = record.owedNoticeOutcome === undefined || record.noticeStatus !== 'delivery-failed'
+    ? null
+    : validateOwedNoticeOutcome(record.owedNoticeOutcome);
+
   if (typeof record.bodyExcerpt !== 'string' || record.bodyExcerpt.length > MAX_BODY_EXCERPT_CHARS) return null;
   if (!isParsableIsoDate(record.receivedAt)) return null;
 
@@ -300,6 +341,7 @@ export function validateInboundMailRecord(value: unknown): InboundMailRecord | n
     outcome: record.outcome as InboundMailOutcome,
     noticeStatus: record.noticeStatus as InboundNoticeStatus,
     ...(typeof record.noticeFailureReason === 'string' ? { noticeFailureReason: record.noticeFailureReason } : {}),
+    ...(owedNoticeOutcome === null ? {} : { owedNoticeOutcome }),
     bodyExcerpt: record.bodyExcerpt,
     receivedAt: record.receivedAt as string,
   };

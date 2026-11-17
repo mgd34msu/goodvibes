@@ -33,6 +33,7 @@ import { findCardNumberShapes } from '../../security/card-shapes.js';
 import {
   clampDeliveryAddress,
   clampLinkVerdicts,
+  clampOwedNoticeOutcome,
   clampRecordScope,
   MAX_NOTICE_FAILURE_REASON_CHARS,
   MAX_SENDER_DISPLAY_CHARS,
@@ -48,6 +49,7 @@ import {
 // Type-only, and erased at build time: this file names the refusal vocabulary
 // rather than owning it, which is the point (§7.3).
 import type { SurfaceNoticeRefusal } from '../../daemon/types.js';
+import type { InboundOutcome } from '../inbound-notice.js';
 
 // The validator, its field bounds and its write-time clamps live in
 // record-validation.ts and are re-exported here so this module stays the one
@@ -103,6 +105,9 @@ export type InboundMailOutcome =
  */
 export type InboundNoticeStatus = 'delivered' | 'suppressed' | 'pending' | SurfaceNoticeRefusal;
 
+/** The outcome lines an arriving-mail notice can carry, as a held notice stores them. */
+export type OwedNoticeOutcome = Exclude<InboundOutcome, { readonly kind: 'refused-link' }>;
+
 /** A link's registrable domain plus verdict only, never the raw URL the message assembled (§7). */
 export interface InboundLinkVerdict {
   readonly registrableDomain: string;
@@ -128,6 +133,13 @@ export interface InboundMailRecordCommon {
   readonly outcome: InboundMailOutcome;
   readonly noticeStatus: InboundNoticeStatus;
   readonly noticeFailureReason?: string | undefined;
+  /**
+   * Present only on a `delivery-failed` record whose notice is still owed: the
+   * outcome line that notice carries, so a notice route that recovers after a
+   * daemon restart still announces the message with what it matched. Dropped
+   * by the write that settles the notice.
+   */
+  readonly owedNoticeOutcome?: OwedNoticeOutcome | undefined;
   /** Bounded to MAX_BODY_EXCERPT_CHARS. Never rendered to the owner (§7), retained for the owner's own later inspection / debugging only. */
   readonly bodyExcerpt: string;
   readonly receivedAt: string;
@@ -678,6 +690,21 @@ export class InboundMailStore {
     return (input?.limit ? bounded.slice(0, input.limit) : bounded).map((indexed) => this.full(indexed));
   }
 
+  /**
+   * Records whose notice is still owed (held while the notice route could not
+   * deliver it), oldest first. Filtered on the in-memory index, so only the
+   * held records' lines are read.
+   */
+  async listHeldNotices(): Promise<readonly InboundMailRecord[]> {
+    await this.current(false);
+    const cutoff = this.now() - this.policy.retentionMs;
+    return [...this.index.values()]
+      .filter((r) => r.noticeStatus === 'delivery-failed' && r.owedNoticeOutcome !== undefined
+        && Date.parse(r.receivedAt) >= cutoff)
+      .sort((a, b) => Date.parse(a.receivedAt) - Date.parse(b.receivedAt))
+      .map((indexed) => this.full(indexed));
+  }
+
   async get(id: string): Promise<InboundMailRecord | null> {
     await this.current(false);
     const indexed = this.index.get(id);
@@ -779,6 +806,10 @@ export class InboundMailStore {
       // bounds it.
       ...(input.noticeFailureReason
         ? { noticeFailureReason: input.noticeFailureReason.slice(0, MAX_NOTICE_FAILURE_REASON_CHARS) }
+        : {}),
+      // Only while the notice is owed; the write that settles it leaves it out.
+      ...(input.owedNoticeOutcome !== undefined && input.noticeStatus === 'delivery-failed'
+        ? { owedNoticeOutcome: clampOwedNoticeOutcome(input.owedNoticeOutcome) }
         : {}),
       // The intake redacted the whole body before handing it here (one local
       // scan, see `redactInboundFields`). Card numbers are masked

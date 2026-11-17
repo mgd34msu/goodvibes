@@ -63,7 +63,7 @@ import type { InboundExpectationRegistry } from './expectation-registry.js';
 import type { PersistedExpectationStore } from './expectation-store.js';
 import type { InboundMailHousekeeper } from './housekeeping.js';
 import type { MailboxCursorStore } from './cursor-store.js';
-import type { InboundMailStore } from './record-store.js';
+import type { InboundMailOutcome, InboundMailStore } from './record-store.js';
 import type {
   InboundCapabilityTransition,
   InboundCapabilityVerdict,
@@ -168,7 +168,8 @@ export interface InboundMailSupervisorDeps {
    */
   readonly restoresStores?: boolean | undefined;
   /** What a found message goes through. Injected: the supervisor owns lifecycle, not intake. */
-  readonly handle: (message: InboundMailboxMessage) => Promise<void>;
+  readonly handle: ((message: InboundMailboxMessage) => Promise<void>)
+    & { readonly takeSpentOutcome?: ((message: InboundMailboxMessage) => InboundMailOutcome | undefined) | undefined };
   /**
    * Whether arriving mail is actually reaching the owner.
    *
@@ -495,6 +496,7 @@ export class InboundMailSupervisor {
         now: () => new Date(this.deps.now?.() ?? Date.now()),
         noticeHealth: noticeHealth?.refused === undefined ? undefined : { refused: (event) => noticeHealth.refused?.(event) },
         observer: this.observer(),
+        spentOutcome: (message) => this.deps.handle.takeSpentOutcome?.(message),
       }),
     });
     // Notices are one consumer of the mailbox, beside whatever else is

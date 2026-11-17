@@ -10,7 +10,7 @@ import {
   isExternalSurfaceSelectedByDefault,
   type ExternalSurfaceSpec,
 } from './onboarding-wizard-external-surfaces.ts';
-import { buildFeatureUnitSteps } from './onboarding-feature-units.ts';
+import { buildFeatureUnitSteps, onboardingConfigBaseline } from './onboarding-feature-units.ts';
 import { countSelected, modelSelectionLabel, normalizeText } from './onboarding-wizard-helpers.ts';
 import { deriveProviderKeyCaptureTargets } from '../../runtime/onboarding/provider-key-capture.ts';
 import { buildProviderKeyInventoryField, buildProviderKeyMaskedFields, buildSubscriptionPosture } from './onboarding-provider-key-fields.ts';
@@ -54,8 +54,8 @@ function buildApplyAndContinueAction(step: OnboardingWizardStepDefinition): Onbo
       id: `${step.id}.apply-and-continue`,
       action: 'apply-and-continue',
       label: 'Next section',
-      hint: 'Selections are kept in this wizard session and persisted on the final Review apply.',
-      defaultValue: 'Apply & next',
+      hint: 'Go to the next section. Selections are kept in this wizard session; nothing is saved until Apply on the Review step.',
+      defaultValue: 'Next',
       spacerBeforeRows: 2,
     };
   }
@@ -749,6 +749,30 @@ export function buildAccountsStep(controller: OnboardingWizardControllerLike): O
     };
   }
 
+const REVIEW_CHANGE_ROWS = 40;
+
+function reviewValueText(value: unknown): string {
+  const text = typeof value === 'string' ? (value.length === 0 ? '(empty)' : value) : JSON.stringify(value) ?? String(value);
+  return text.length > 48 ? `${text.slice(0, 47)}…` : text;
+}
+
+/** What Apply will change, one row per setting with its old and new value; credentials are named, never shown. */
+function describeApplyChanges(controller: OnboardingWizardControllerLike): Array<{ readonly label: string; readonly detail: string; readonly badge: string }> {
+  const changes: Array<{ readonly label: string; readonly detail: string; readonly badge: string }> = [];
+  const lastByKey = new Map<string, unknown>();
+  for (const operation of controller.buildApplyRequest().operations) {
+    if (operation.kind === 'set-config') lastByKey.set(operation.key, operation.value);
+    else if (operation.kind === 'set-secret') changes.push({ label: `credential ${operation.key}`, detail: 'Stored in the secret store; the value is not shown.', badge: 'Credential' });
+    else if (operation.kind === 'ensure-auth-user') changes.push({ label: `local admin ${operation.username}`, detail: 'Created, or its password rotated (existing sessions are signed out).', badge: 'Account' });
+  }
+  for (const [key, value] of lastByKey) {
+    const baseline = onboardingConfigBaseline(controller, key);
+    const before = baseline.known ? reviewValueText(baseline.value) : 'not read';
+    changes.push({ label: `${key}: ${before} -> ${reviewValueText(value)}`, detail: `${key} changes from ${before} to ${reviewValueText(value)}.`, badge: 'Change' });
+  }
+  return changes;
+}
+
 export function buildReviewStep(controller: OnboardingWizardControllerLike): OnboardingWizardStepDefinition {
     const feedback = controller.applyFeedback;
     const feedbackFields: OnboardingWizardFieldDefinition[] = feedback
@@ -772,6 +796,23 @@ export function buildReviewStep(controller: OnboardingWizardControllerLike): Onb
     const unsavedLabel = controller.dirtyStepCount === 1
       ? '1 screen has unapplied changes'
       : `${controller.dirtyStepCount} screens have unapplied changes`;
+    const changes = describeApplyChanges(controller);
+    const changeFields = changes.slice(0, REVIEW_CHANGE_ROWS).map((change, index): OnboardingWizardFieldDefinition => ({
+      kind: 'status',
+      id: `review.change.${index}`,
+      label: change.label,
+      hint: change.detail,
+      defaultValue: change.badge,
+    }));
+    if (changes.length > REVIEW_CHANGE_ROWS) {
+      changeFields.push({
+        kind: 'status',
+        id: 'review.change.more',
+        label: `and ${changes.length - REVIEW_CHANGE_ROWS} more`,
+        hint: 'Every change listed is applied together.',
+        defaultValue: 'More',
+      });
+    }
 
     return {
       id: 'review',
@@ -781,12 +822,13 @@ export function buildReviewStep(controller: OnboardingWizardControllerLike): Onb
       summaryTitle: 'Review posture',
       summaryLines: [
         unsavedLabel,
-        `${controller.buildApplyRequest().operations.length} settings change(s) ready to apply`,
+        changes.length === 0 ? 'Nothing differs from the saved settings' : `${changes.length} change(s) ready to apply, listed below`,
         feedback ? `Last apply: ${feedback.title}` : 'No apply errors reported',
         controller.isEditingTextField() ? `Editing: ${controller.editingFieldId}` : 'Ready to apply',
       ],
       fields: [
         ...feedbackFields,
+        ...changeFields,
         {
           kind: 'action',
           id: 'review.apply',

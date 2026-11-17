@@ -19,7 +19,7 @@ import {
   isExternalSurfaceSelectedByDefault,
 } from './onboarding-wizard-external-surfaces.ts';
 import { getDaemonSource } from './onboarding-wizard-network-adopt.ts';
-import { applyFeatureUnitOperations } from './onboarding-feature-units.ts';
+import { applyFeatureUnitOperations, dropUnchangedConfigOperations } from './onboarding-feature-units.ts';
 import { adoptedDaemonUrl, buildGoodVibesSecretKey, buildGoodVibesSecretRef, isSecretReferenceValue } from './onboarding-wizard-helpers.ts';
 import { deriveProviderKeyCaptureTargets, providerKeyFieldId } from '../../runtime/onboarding/provider-key-capture.ts';
 import type { OnboardingWizardControllerLike } from './onboarding-wizard-types.ts';
@@ -230,10 +230,12 @@ export function buildOnboardingApplyRequest(controller: OnboardingWizardControll
     acknowledge('subscriptions', 'accounts.subscriptions');
     acknowledge('auth', 'accounts.auth');
 
+    // Fields start from the saved settings; a write equal to what was read is
+    // not a change, so it is left out and a setting tuned elsewhere is kept.
     return {
       mode: controller.mode,
       source: 'wizard',
-      operations,
+      operations: dropUnchangedConfigOperations(controller, operations),
     };
   }
 

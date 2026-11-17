@@ -14,7 +14,9 @@
  * lockstep with the platform feature-flag set.
  */
 
+import { isDeepStrictEqual } from 'node:util';
 import type { ConfigKey, ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { OnboardingApplyOperation } from '../../runtime/onboarding/index.ts';
 import { getFeatureSetting, isFeatureConfigEnabled, isFeatureDefaultEnabled } from '@goodvibes-jev/engine/terminal-shell';
 import type {
   OnboardingWizardControllerLike,
@@ -442,12 +444,61 @@ export function isFeatureDefaultOn(flagId: string): boolean {
 // setting: starting from the platform default hides a feature the user enabled in
 // /settings, and an unchecked box would then write nothing and leave it on.
 const currentEnablement = new WeakMap<object, ReadonlyMap<string, boolean>>();
+// Every setting's value when the wizard read the configuration. Fields start from
+// it, and the apply request holds only the settings whose value differs from it,
+// so a setting tuned elsewhere survives a trip through the wizard untouched.
+const configBaseline = new WeakMap<object, ReadonlyMap<string, unknown>>();
 
-/** Record the live enablement of every guided feature for this wizard; call before its values are (re)built. */
-export function recordFeatureEnablement(controller: object, config: Pick<ConfigManager, 'get'>): void {
+/**
+ * Record what the configuration holds now for this wizard: every guided
+ * feature's enablement and every setting's value. Call before its values are
+ * (re)built; one read of each setting per wizard load.
+ */
+export function recordFeatureEnablement(controller: object, config: Pick<ConfigManager, 'get' | 'getSchema'>): void {
   const current = new Map<string, boolean>();
   for (const flagId of getFeatureOnboardingFlagIds()) current.set(flagId, isFeatureConfigEnabled(config, flagId));
   currentEnablement.set(controller, current);
+  const values = new Map<string, unknown>();
+  for (const setting of config.getSchema()) {
+    try {
+      values.set(setting.key, config.get(setting.key as ConfigKey));
+    } catch {
+      // A key this manager cannot read has no baseline; its write is kept.
+    }
+  }
+  configBaseline.set(controller, values);
+}
+
+/** A setting's value when the wizard read the configuration, when it was read. */
+export function onboardingConfigBaseline(controller: object, key: string): { readonly known: true; readonly value: unknown } | { readonly known: false } {
+  const values = configBaseline.get(controller);
+  return values?.has(key) ? { known: true, value: values.get(key) } : { known: false };
+}
+
+/**
+ * The request's operations with every `set-config` whose final value equals
+ * what the wizard read dropped, all writes of that key included. A key with
+ * no baseline (a wizard opened from a preloaded snapshot) keeps its writes.
+ */
+export function dropUnchangedConfigOperations(controller: object, operations: readonly OnboardingApplyOperation[]): OnboardingApplyOperation[] {
+  const finalValue = new Map<string, unknown>();
+  for (const operation of operations) if (operation.kind === 'set-config') finalValue.set(operation.key, operation.value);
+  const unchanged = new Set<string>();
+  for (const [key, value] of finalValue) {
+    const baseline = onboardingConfigBaseline(controller, key);
+    if (baseline.known && isDeepStrictEqual(baseline.value, value)) unchanged.add(key);
+  }
+  return operations.filter((operation) => operation.kind !== 'set-config' || !unchanged.has(operation.key));
+}
+
+/** A sub-option's starting field value: the setting as read, or the table default when it was not read. */
+function subOptionStartValue(controller: object, sub: FeatureSubOption): string {
+  const baseline = onboardingConfigBaseline(controller, sub.configKey);
+  if (!baseline.known) return sub.defaultValue;
+  const value = baseline.value;
+  if (sub.valueType === 'boolean') return typeof value === 'boolean' ? (value ? 'yes' : 'no') : sub.defaultValue;
+  if (sub.valueType === 'text') return typeof value === 'string' ? value : sub.defaultValue;
+  return typeof value === 'string' && (sub.options ?? []).includes(value) ? value : sub.defaultValue;
 }
 
 /** The feature's live setting when known, otherwise the platform default. */
@@ -497,6 +548,8 @@ export function buildFeatureUnitStep(
     }
 
     for (const sub of unit.subOptions ?? []) {
+      // Start from the saved setting, so an untouched field writes nothing.
+      const startValue = subOptionStartValue(controller, sub);
       if (sub.valueType === 'text') {
         fields.push({
           kind: 'text',
@@ -504,7 +557,7 @@ export function buildFeatureUnitStep(
           label: sub.label,
           hint: sub.hint,
           placeholder: sub.placeholder ?? '',
-          defaultValue: sub.defaultValue,
+          defaultValue: startValue,
         });
         continue;
       }
@@ -514,7 +567,7 @@ export function buildFeatureUnitStep(
         label: sub.label,
         hint: sub.hint,
         options: radioOptionsForSubOption(sub),
-        defaultValue: sub.defaultValue,
+        defaultValue: startValue,
       });
     }
   }
@@ -553,7 +606,9 @@ export function buildFeatureUnitSteps(
  * features, and chosen sub-options. Desired states are collected into
  * `overrides` (flushed by the caller as plain domain-settings writes on each
  * feature's enablement key, together with the surface capabilities); other
- * config writes go straight to setConfig.
+ * config writes go straight to setConfig. Sub-option fields start from the
+ * saved setting, and the caller drops every write equal to what was read
+ * (dropUnchangedConfigOperations), so only real changes are applied.
  */
 export function applyFeatureUnitOperations(
   controller: OnboardingWizardControllerLike,
@@ -575,7 +630,7 @@ export function applyFeatureUnitOperations(
 
       const enablementKey = getFeatureSetting(unit.flagId)?.enablement.key;
       for (const sub of unit.subOptions ?? []) {
-        const raw = controller.getStringFieldValue(featureSubOptionFieldId(unit.flagId, sub.key), sub.defaultValue);
+        const raw = controller.getStringFieldValue(featureSubOptionFieldId(unit.flagId, sub.key), subOptionStartValue(controller, sub));
         let wrote = true;
         if (sub.valueType === 'boolean') {
           setConfig(sub.configKey, raw === 'yes');

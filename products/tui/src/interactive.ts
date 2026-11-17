@@ -114,8 +114,9 @@ import { createCancelGeneration, runOwnedTurnRetry } from './core/turn-cancellat
 import { wireInteractionSeams, createMemoryProvenanceUi } from './runtime/interaction-seams.ts';
 import { createPowerChipSource } from './core/power-chip-source.ts';
 import { keepAwakeHolding } from './core/power-status.ts';
-import { createKeepAwakeForwarder, readServedKeepAwakeState, type PowerState } from '@goodvibes-jev/engine/platform/platform/power';
+import { createKeepAwakeForwarder, readServedKeepAwakeState, watchDaemonPowerEvents, type PowerState } from '@goodvibes-jev/engine/platform/platform/power';
 import { resolveOperatorRpc } from './input/commands/operator-rpc.ts';
+import { resolveDaemonEndpoint } from './runtime/client/operator-endpoint.ts';
 import { wireGuidanceNotices } from './input/commands/guidance-runtime.ts';
 import { proposesSpeechToText, runWakeSetupPlan, wakeSetupRunning } from './core/wake-setup-plan.ts';
 import { wrapRequestPermissionWithAlert } from './core/approval-alert.ts';
@@ -427,10 +428,16 @@ async function main(prepared: PreparedShellCliRuntime) {
     isExternalDaemon,
     onPowerEvent: (cb) => uiServices.events.ops.on('OPS_POWER_STATE_CHANGED', cb as never),
     fetchDaemonPowerState,
+    // The daemon says when sleep ownership changes; the chip polls only while this stream is not open.
+    watchDaemonPowerEvents: async (handlers) => {
+      const endpoint = resolveDaemonEndpoint({ configManager, homeDirectory });
+      return endpoint.available ? await watchDaemonPowerEvents({ baseUrl: endpoint.baseUrl, getAuthToken: () => endpoint.token, ...handlers }) : null;
+    },
   });
   const unsubscribeKeepAwakeForward = configManager.subscribe('power.keepAwake', (newValue) => {
-    if (isExternalDaemon()) void keepAwakeForwarder.set(newValue === true);
+    if (isExternalDaemon()) void keepAwakeForwarder.set(newValue === true).finally(() => powerChipSource.refresh());
   });
+  unsubs.push(uiServices.events.turns.on('TURN_COMPLETED', () => powerChipSource.refresh()));
   unsubs.push(powerChipSource.stop, unsubscribeKeepAwakeForward);
   // Turning wake detection on from anywhere (settings, /config, a model's settings
   // call) runs the same voice setup as /voice wake setup and shows its plan.

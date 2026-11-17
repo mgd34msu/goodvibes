@@ -1,12 +1,13 @@
-import type { PowerState } from '@goodvibes-jev/engine/platform/platform/power';
+import { createDaemonPowerStateSource, type DaemonPowerEventHandlers, type DaemonPowerEventWatch, type PowerState } from '@goodvibes-jev/engine/platform/platform/power';
 import { describePowerStatus } from '../renderer/power-status.ts';
 
 /**
  * The footer's power note, from the owner of keep-awake. With a daemon adopted
  * the daemon holds the host awake (its hold outlives this process), so the note
- * renders the daemon's `power.status.get`, read on an unref'd poll since the
- * adopted wire carries no power events. Without a daemon, or while the
- * daemon's answer is not in yet, the in-process manager is the truth.
+ * renders the daemon's state, kept by the engine's one daemon power source
+ * (platform/power/daemon-power-source.ts: the daemon's power events while its
+ * stream is open, a short poll only while it is not). Without a daemon, or
+ * while the daemon's answer is not in yet, the in-process manager is the truth.
  */
 export interface PowerNoteSourceDeps {
   /** The in-process manager's state. */
@@ -15,57 +16,42 @@ export interface PowerNoteSourceDeps {
   readonly isAdopted: () => boolean;
   /** The daemon's `power.status.get`; null when it cannot be read. */
   readonly fetchDaemon: () => Promise<PowerState | null>;
+  /** The daemon's power event stream; without it the note polls. */
+  readonly watchEvents?: ((handlers: DaemonPowerEventHandlers) => Promise<DaemonPowerEventWatch | null>) | undefined;
   /** Repaint when the note changes. */
   readonly render: () => void;
-  /** Poll cadence while adopted (default 5000 ms). */
-  readonly pollIntervalMs?: number | undefined;
 }
 
 export interface PowerNoteSource {
   /** The note to show, or null when nothing is held. */
   get(): string | null;
+  /** Read the daemon now (keep-awake changed here, a turn ended). */
+  refresh(): void;
   stop(): void;
 }
 
+function describe(state: PowerState): string | null | undefined {
+  try {
+    return describePowerStatus(state);
+  } catch {
+    return undefined; // an answer without the power fields says nothing about keep-awake
+  }
+}
+
 export function createPowerNoteSource(deps: PowerNoteSourceDeps): PowerNoteSource {
-  let daemonNote: string | null | undefined; // undefined: no daemon answer in hand
-  let polling = false;
-  const poll = async (): Promise<void> => {
-    if (!deps.isAdopted()) {
-      if (daemonNote !== undefined) {
-        daemonNote = undefined;
-        deps.render();
-      }
-      return;
-    }
-    if (polling) return;
-    polling = true;
-    try {
-      const state = await deps.fetchDaemon().catch(() => null);
-      let next: string | null | undefined;
-      try {
-        next = state ? describePowerStatus(state) : undefined;
-      } catch {
-        next = undefined; // an answer without the power fields says nothing about keep-awake
-      }
-      if (next !== daemonNote) {
-        daemonNote = next;
-        deps.render();
-      }
-    } finally {
-      polling = false;
-    }
-  };
-  const interval = setInterval(() => { void poll(); }, deps.pollIntervalMs ?? 5000);
-  (interval as { unref?: () => void }).unref?.();
-  void poll();
+  const daemon = createDaemonPowerStateSource({
+    isAdopted: deps.isAdopted,
+    fetchDaemon: deps.fetchDaemon,
+    ...(deps.watchEvents ? { watchEvents: deps.watchEvents } : {}),
+    onChange: deps.render,
+  });
   return {
     get(): string | null {
-      if (deps.isAdopted() && daemonNote !== undefined) return daemonNote;
-      return describePowerStatus(deps.local());
+      const state = daemon.current();
+      const note = state ? describe(state) : undefined;
+      return note !== undefined ? note : describePowerStatus(deps.local());
     },
-    stop(): void {
-      clearInterval(interval);
-    },
+    refresh: () => daemon.refresh(),
+    stop: () => daemon.stop(),
   };
 }

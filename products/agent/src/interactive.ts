@@ -65,7 +65,7 @@ import { buildShellSessionContinuityHints } from './shell/session-continuity-hin
 import { wireShellUiOpeners } from './shell/ui-openers.ts';
 import { deriveComposerState } from './core/composer-state.ts';
 import { createPowerNoteSource } from './runtime/power-note-source.ts';
-import type { PowerState } from '@goodvibes-jev/engine/platform/platform/power';
+import { watchDaemonPowerEvents, type PowerState } from '@goodvibes-jev/engine/platform/platform/power';
 import { buildPersistedSessionContextFromFacts, holdOfferedRecoverySnapshot } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { installFocusModeExitGuard, markFocusModeEnabled, wrapRequestPermissionWithApprovalAlert } from './shell/terminal-focus-mode.ts';
 import { createTerminalLifecycle, installTerminalExitGuards, makeFileEditorOpener } from '@goodvibes-jev/engine/terminal-shell';
@@ -366,14 +366,23 @@ async function main(prepared: PreparedShellCliRuntime) {
   unsubs.push(() => commandContext.nativeWorkLedger?.dispose());
   unsubs.push(() => shellPassthrough.cancelRunning());
   unsubs.push(() => input.settingsModal.close());
-  // The footer's power note: the adopted daemon's power.status.get (the daemon owns keep-awake), else this process's manager.
+  // The footer's power note: the adopted daemon's state (the daemon owns keep-awake), else this process's manager.
+  // Read when the daemon says sleep ownership changed, when keep-awake changes here and when a turn ends.
   const powerNote = createPowerNoteSource({
     local: () => ctx.services.powerManager.getState(),
     isAdopted: () => ctx.services.memorySpineClient.active,
     fetchDaemon: async () => await automationHost.invoke('power.status.get', {}) as unknown as PowerState,
+    watchEvents: async (handlers) => {
+      const host = ctx.services.resolveConnectedHost();
+      return 'reason' in host ? null : await watchDaemonPowerEvents({ baseUrl: host.baseUrl, getAuthToken: () => host.token, ...handlers });
+    },
     render: () => render(),
   });
-  unsubs.push(() => powerNote.stop());
+  unsubs.push(
+    () => powerNote.stop(),
+    configManager.subscribe('power.keepAwake', () => powerNote.refresh()),
+    uiServices.events.turns.on('TURN_COMPLETED', () => powerNote.refresh()),
+  );
   // The work tree's live facts: call/turn timings, agent lanes, the call a permission prompt holds, fold persistence (work-tree-wiring.ts).
   const workTreeWiring = wireWorkTree({
     conversation,

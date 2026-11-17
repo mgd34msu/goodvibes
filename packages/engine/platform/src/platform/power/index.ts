@@ -14,6 +14,21 @@ export type { RuntimePowerWiringInput } from './runtime-wiring.js';
 export type { PowerWorkSignalBus } from './work-signals.js';
 export { createUnavailablePowerSeam } from './types.js';
 export type { PowerPlatformSeam, PowerInhibitHandle, PowerInhibitClass } from './types.js';
+// The adopted daemon's power state for a surface's keep-awake chip, event-driven
+// with a poll only while no event stream is open: the one source both terminal products use.
+export {
+  createDaemonPowerStateSource,
+  watchDaemonPowerEvents,
+  POWER_EVENT_DOMAIN,
+  POWER_STATE_CHANGED_EVENT,
+} from './daemon-power-source.js';
+export type {
+  DaemonPowerStateSource,
+  DaemonPowerStateSourceDeps,
+  DaemonPowerEventWatch,
+  DaemonPowerEventHandlers,
+  WatchDaemonPowerEventsOptions,
+} from './daemon-power-source.js';
 // Forward the owner keep-awake toggle from a surface to an adopted daemon:
 // the one forwarder both terminal products use.
 export {

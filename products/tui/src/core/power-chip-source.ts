@@ -8,18 +8,19 @@
 // webui-originated toggle (which lands on the same in-process manager) lights
 // the chip without waiting for the next natural render.
 //
-// External/adopted topology: the local manager is NOT the daemon's, and the
-// adopted-daemon wire is plain HTTP (no realtime event bridge), so the chip
-// POLLS power.status.get on an unref'd interval and renders the DAEMON's
-// state, a webui-originated toggle on the daemon lights the TUI chip within
-// one poll, and a TUI toggle (forwarded over power.keepAwake.set by the
-// engine's one forwarder, platform/power/keep-awake-remote.ts, wired in
-// interactive.ts) lights the webui's the same way. While the
-// daemon's state is unknown (fetch pending/unreachable) the local projection
-// is served rather than a fabricated one.
+// External/adopted topology: the local manager is NOT the daemon's, so the
+// chip renders the DAEMON's state, kept by the engine's one daemon power source
+// (platform/power/daemon-power-source.ts): read on each OPS_POWER_STATE_CHANGED
+// the daemon publishes while its event stream is open, on a short poll only
+// while it is not. A webui-originated toggle on the daemon lights the TUI chip
+// as soon as the daemon publishes it, and a TUI toggle (forwarded over
+// power.keepAwake.set by the engine's one forwarder,
+// platform/power/keep-awake-remote.ts, wired in interactive.ts) refreshes it at
+// once. While the daemon's state is unknown (fetch pending/unreachable) the
+// local projection is served rather than a fabricated one.
 // ---------------------------------------------------------------------------
 
-import type { PowerState } from '@goodvibes-jev/engine/platform/platform/power';
+import { createDaemonPowerStateSource, type DaemonPowerEventHandlers, type DaemonPowerEventWatch, type PowerState } from '@goodvibes-jev/engine/platform/platform/power';
 import { IDLE_POWER_STATE, powerSurfaceFromEvent, powerSurfaceFromState, type PowerStateChangedPayload, type PowerSurfaceState } from './power-status.ts';
 
 export interface PowerChipSourceDeps {
@@ -31,9 +32,11 @@ export interface PowerChipSourceDeps {
   readonly isExternalDaemon: () => boolean;
   /** Fetch the DAEMON's power.status.get (null when unreachable). */
   readonly fetchDaemonPowerState: () => Promise<PowerState | null>;
+  /** The DAEMON's power event stream; without it the chip polls. */
+  readonly watchDaemonPowerEvents?: ((handlers: DaemonPowerEventHandlers) => Promise<DaemonPowerEventWatch | null>) | undefined;
   /** Repaint request when the chip's source state changes. */
   readonly render: () => void;
-  /** External-topology poll cadence (default 5000ms; unref'd). */
+  /** External-topology poll cadence while no event stream is open (default 5000ms; unref'd). */
   readonly pollIntervalMs?: number | undefined;
   readonly timers?: { setInterval: typeof setInterval; clearInterval: typeof clearInterval } | undefined;
 }
@@ -41,15 +44,14 @@ export interface PowerChipSourceDeps {
 export interface PowerChipSource {
   /** The current chip projection, daemon-synced in external topology, local otherwise. */
   get(): PowerSurfaceState;
-  /** Stop the poll + event subscription. */
+  /** Read the daemon now (keep-awake changed here, a turn ended). */
+  refresh(): void;
+  /** Stop the daemon source + event subscription. */
   stop(): void;
 }
 
 export function createPowerChipSource(deps: PowerChipSourceDeps): PowerChipSource {
-  const timers = deps.timers ?? { setInterval, clearInterval };
-  let daemonState: PowerSurfaceState | null = null;
   let lastLocal: PowerSurfaceState = IDLE_POWER_STATE;
-  let polling = false;
 
   // Local bus events: immediate repaint (embedded truth changes live).
   const unsubscribe = deps.onPowerEvent((payload) => {
@@ -57,36 +59,28 @@ export function createPowerChipSource(deps: PowerChipSourceDeps): PowerChipSourc
     deps.render();
   });
 
-  const poll = async (): Promise<void> => {
-    if (!deps.isExternalDaemon()) {
-      if (daemonState !== null) { daemonState = null; deps.render(); }
-      return;
-    }
-    if (polling) return;
-    polling = true;
-    try {
-      const state = await deps.fetchDaemonPowerState();
-      const next = state ? powerSurfaceFromState(state) : null;
-      const changed = JSON.stringify(next) !== JSON.stringify(daemonState);
-      daemonState = next;
-      if (changed) deps.render();
-    } finally {
-      polling = false;
-    }
-  };
-  const interval = timers.setInterval(() => { void poll(); }, deps.pollIntervalMs ?? 5000);
-  (interval as { unref?: () => void }).unref?.();
-  void poll(); // initial sync so an adopted daemon's held keep-awake shows immediately
+  const daemon = createDaemonPowerStateSource({
+    isAdopted: deps.isExternalDaemon,
+    fetchDaemon: deps.fetchDaemonPowerState,
+    ...(deps.watchDaemonPowerEvents ? { watchEvents: deps.watchDaemonPowerEvents } : {}),
+    onChange: deps.render,
+    ...(deps.pollIntervalMs !== undefined ? { pollIntervalMs: deps.pollIntervalMs } : {}),
+    ...(deps.timers ? { timers: deps.timers } : {}),
+  });
 
   return {
     get(): PowerSurfaceState {
-      if (deps.isExternalDaemon() && daemonState !== null) return daemonState;
-      // Local truth: prefer a live event projection when one arrived, else read the manager.
+      const state = daemon.current();
+      if (state) {
+        try { return powerSurfaceFromState(state); } catch { /* an answer without the power fields: local truth */ }
+      }
+      // Local truth: read the manager, else the last live event projection.
       try { return powerSurfaceFromState(deps.powerManager.getState()); } catch { return lastLocal; }
     },
+    refresh: () => daemon.refresh(),
     stop(): void {
       unsubscribe();
-      timers.clearInterval(interval);
+      daemon.stop();
     },
   };
 }

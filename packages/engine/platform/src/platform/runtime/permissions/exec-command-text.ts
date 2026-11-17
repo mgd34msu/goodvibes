@@ -58,10 +58,25 @@ export function execListedCommandTexts(args: Record<string, unknown>): string[] 
   return Array.isArray(commands) ? commands.flatMap(execEntryTexts) : [];
 }
 
-/** The shell commands a call carries: a `commands` list of `{ cmd | cmd_base64 }`, or a flat `command` / `cmd`. */
+/**
+ * The shell commands a call carries: a `commands` list of `{ cmd | cmd_base64 }`,
+ * a flat `command` / `cmd`, or a command the call installs to run later (a
+ * workflow schedule's `scheduleCommand`, a hook action's
+ * `hookActionDefinition.action`). An installed command is judged as a command
+ * when it is added, by the same gate questions an exec call gets, because
+ * nothing asks again when it runs.
+ */
 export function execShellCommands(args: Record<string, unknown>): string[] {
   const listed = execListedCommandTexts(args);
   if (listed.length > 0) return listed;
   for (const key of ['command', 'cmd']) if (typeof args[key] === 'string') return [args[key] as string];
-  return [];
+  return installedCommandTexts(args);
+}
+
+function installedCommandTexts(args: Record<string, unknown>): string[] {
+  const scheduled = args['scheduleCommand'];
+  if (typeof scheduled === 'string' && scheduled.trim().length > 0) return [scheduled];
+  const hookAction = args['hookActionDefinition'];
+  const action = hookAction && typeof hookAction === 'object' ? (hookAction as Record<string, unknown>)['action'] : undefined;
+  return typeof action === 'string' && action.trim().length > 0 ? [action] : [];
 }

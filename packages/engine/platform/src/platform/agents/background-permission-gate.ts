@@ -14,7 +14,7 @@ import type { AgentRecord } from '../tools/agent/index.js';
 /** The narrow slice of PermissionManager the background gate consults. */
 export type BackgroundPermissionManager = Pick<
   PermissionManager,
-  'checkDetailed' | 'check' | 'passesBoundary'
+  'checkDetailed' | 'check' | 'getBackgroundAgentsMode' | 'passesBoundary'
 > & Partial<Pick<PermissionManager, 'prepareAutonomousOwner' | 'admitAutonomous' | 'autonomousPreparation' | 'projectAutonomousChoices' | 'releaseAutonomousChoices' | 'retireAutonomousSource' | 'getMode' | 'captureExecutionMode'>>;
 
 const UNGATED_RESULT: PermissionCheckResult = {

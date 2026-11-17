@@ -204,7 +204,7 @@ Workflow state machines, hook actions, and scheduled commands. See [Automation a
 
 - Named workflow definitions: `contract` (starts a contract whose units are checked against acceptance criteria), `fix_loop`, `test_then_fix`, `review_only`
 - State machine with validated transitions: prevents invalid state changes
-- Hook actions (`mode: "hook-actions"`): run a command when a hook event fires, with an optional condition over `event.*` and `payload.*`; schedules (`mode: "schedule"`) run a command on an interval and can be paused and resumed. Both are checked once when added (a refusal says why), run in the project root with credential variables withheld, list their last run, exit code and error, and last until the app exits; `/schedule` routines survive restarts
+- Hook actions (`mode: "hook-actions"`): run a command when a hook event fires, with an optional condition over `event.*` and `payload.*`; schedules (`mode: "schedule"`) run a command on an interval and can be paused and resumed. Both are judged once when added, by the same permission questions an `exec` command gets (a refusal says why), run in the project root with credential variables withheld and inside the exec sandbox when it is on, list their last run, exit code and error, and last until the app exits; `/schedule` routines survive restarts
 - Scheduled jobs run by the automation manager: 5-field cron expressions read in an IANA timezone (a leap-day `0 0 29 2 *` is accepted; a day no named month has, such as `0 0 31 2 *`, is refused), fixed intervals and one-shot times, missed-run recording, per-job run history, and enable/disable control; persists to `.goodvibes/tui/automation-jobs.json`
 - Full lifecycle: start, transition, cancel, list active instances
 

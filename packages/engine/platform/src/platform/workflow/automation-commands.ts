@@ -7,14 +7,17 @@ import {
   type CredentialEnvScrubConfig,
   type ResolvedCredentialEnvScrub,
 } from '../tools/exec/credential-env.js';
+import { resolveRuntimeSandboxPlan, type ExecSandboxPlan, type ExecSandboxRuntime } from '../tools/exec/sandbox.js';
+import { SANDBOX_RUNTIME_BIN, withSandboxRuntimes } from '../tools/exec/sandbox-runtimes.js';
 
 // ---------------------------------------------------------------------------
 // AutomationCommands
 // ---------------------------------------------------------------------------
 // Starts the background commands of one runtime's workflow automation (hook
 // actions and scheduled commands) and owns everything about them: admission
-// (split and command guard, once, when the automation is added), the project
-// root they run in, the credential-env scrub they start with, the per-action
+// (split, command guard and the exec sandbox's boundary, once, when the
+// automation is added), the project root they run in, the credential-env
+// scrub they start with, the per-action
 // or per-schedule limit on runs in flight, the kill timer, how each run ended,
 // and the set of running processes that shutdown kills. One instance per
 // WorkflowServices, so disposing one runtime stops only that runtime's commands.
@@ -27,6 +30,8 @@ export interface AutomationCommandRequest {
   /** The hook action id or schedule name; the in-flight limit counts runs of this kind and key. */
   readonly key: string;
   readonly argv: readonly string[];
+  /** The argv starts with the exec sandbox's boundary (admitted that way); the sandbox's runtimes go first on PATH. */
+  readonly sandboxed?: boolean | undefined;
   /** Variables added to the scrubbed environment, such as GV_HOOK_ACTION_ID. */
   readonly env?: Readonly<Record<string, string>> | undefined;
   readonly maxInFlight: number;
@@ -54,9 +59,12 @@ export interface AutomationCommandExit {
   readonly at: number;
 }
 
-/** The outcome of admitting a command line: the argv every run uses, or why it can never run. */
+/**
+ * The outcome of admitting a command line: the argv every run uses (behind the
+ * exec sandbox's boundary when the sandbox contains it), or why it can never run.
+ */
 export type AutomationCommandAdmission =
-  | { readonly admitted: true; readonly argv: readonly string[] }
+  | { readonly admitted: true; readonly argv: readonly string[]; readonly sandboxed: boolean; readonly boundary?: string | undefined }
   | { readonly admitted: false; readonly reason: string };
 
 /** Returns a refusal reason when the command must not run (the exec path's command guard). */
@@ -82,6 +90,7 @@ export class AutomationCommands {
   #scrub: () => ResolvedCredentialEnvScrub = () => DEFAULT_SCRUB;
   #guard: AutomationCommandGuard | undefined;
   #cwd: string | undefined;
+  #sandbox: ExecSandboxRuntime | null = null;
 
   /** The command guard every added automation is admitted against (the hook dispatcher hands over the exec path's). */
   setCommandGuard(guard: AutomationCommandGuard | undefined): void {
@@ -94,10 +103,22 @@ export class AutomationCommands {
   }
 
   /**
+   * The exec tool's sandbox runtime. With one, an added command's boundary is
+   * resolved once, as the exec tool resolves it for one of its own commands,
+   * and every run of it starts inside that boundary.
+   */
+  setSandbox(sandbox: ExecSandboxRuntime | null): void {
+    this.#sandbox = sandbox;
+  }
+
+  /**
    * Decides once whether a command line can run: split it as the run will be
-   * (strict POSIX words, no shell), refuse an empty or mis-quoted one, and ask
-   * the command guard. The argv returned is what every later run starts, so
-   * nothing is split or guarded again per tick or per fire.
+   * (strict POSIX words, no shell), refuse an empty or mis-quoted one, ask the
+   * command guard, and put it behind the exec sandbox's boundary when the
+   * sandbox is on. The argv returned is what every later run starts, so
+   * nothing is split, guarded or planned again per tick or per fire. A boundary
+   * the plan opens to the network is never widened later by an escalation:
+   * nobody is there to answer one when the command runs.
    */
   async admit(command: string): Promise<AutomationCommandAdmission> {
     let argv: string[];
@@ -109,7 +130,17 @@ export class AutomationCommands {
     if (argv.length === 0) return { admitted: false, reason: 'The command is empty; give it a program to run.' };
     const refusal = this.#guard ? await this.#guard(command) : undefined;
     if (refusal !== undefined) return { admitted: false, reason: `The command was refused by the command policy: ${refusal}` };
-    return { admitted: true, argv };
+    const directory = this.#cwd ?? process.cwd();
+    let plan: ExecSandboxPlan | null;
+    try {
+      const resolved = await resolveRuntimeSandboxPlan(this.#sandbox, command, directory, directory);
+      plan = resolved ? withSandboxRuntimes(resolved, directory) : null;
+    } catch (err) {
+      return { admitted: false, reason: `The sandbox boundary for the command could not be decided: ${summarizeError(err)}. Add it again.` };
+    }
+    return plan?.sandboxed
+      ? { admitted: true, argv: [...plan.argvPrefix, ...argv], sandboxed: true, boundary: plan.boundary }
+      : { admitted: true, argv, sandboxed: false };
   }
 
   /**
@@ -150,8 +181,10 @@ export class AutomationCommands {
       // stop() ran while the scrub was being read: nothing may start that stop() cannot kill.
       if (run.stopped) return { started: false, reason: 'stopped', message: 'Automation was stopped before the command started.' };
       const spawn = request.spawn ?? Bun.spawn;
+      const runEnv: Record<string, string> = { ...env, ...request.env };
+      if (request.sandboxed && request.env?.PATH === undefined) runEnv.PATH = `${SANDBOX_RUNTIME_BIN}:${runEnv.PATH ?? '/usr/bin:/bin'}`;
       const proc = spawn([...request.argv], {
-        env: { ...env, ...request.env },
+        env: runEnv,
         ...(this.#cwd ? { cwd: this.#cwd } : {}),
         stdout: 'ignore',
         stderr: 'ignore',

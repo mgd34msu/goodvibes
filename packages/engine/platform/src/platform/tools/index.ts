@@ -605,6 +605,10 @@ export function registerAllTools(
           ...(deps.onSandboxedRun ? { onSandboxedRun: deps.onSandboxedRun } : {}),
         }
       : null;
+  // Hook actions and scheduled commands run inside the same boundary as exec.
+  // Only a registry that has the sandbox hands it over, so a registry built
+  // without one (a spawned agent's) cannot take it away from the shared services.
+  if (execSandbox) workflowServices.commands.setSandbox(execSandbox);
   // PTY prompt-answer path: only probe the host (a `command -v script` spawn)
   // when the composition root wired a prompt-answer handler, so the default
   // path stays zero-cost and byte-for-byte unchanged.

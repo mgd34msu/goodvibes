@@ -377,6 +377,7 @@ async function executeAction(
     kind: 'hook-action',
     key: trigger.id,
     argv: parts,
+    sandboxed: trigger.sandboxed,
     env: { GV_HOOK_ACTION_ID: trigger.id, GV_HOOK_EVENT: event.path, GV_HOOK_PHASE: event.phase },
     maxInFlight: options.maxInFlight ?? HOOK_ACTION_MAX_IN_FLIGHT,
     timeoutMs: options.timeoutMs ?? HOOK_ACTION_TIMEOUT_MS,

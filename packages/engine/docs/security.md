@@ -392,7 +392,7 @@ The mode cycle (Shift+Tab in the TUI) is `safe-owner`, `safe-jev`, `yolo`; `plan
 
 An allow reports `stakes_preset` / `preset_allow`, a plan refusal `runtime_mode` / `plan_mode`, and an ask goes to the owner's approval prompt (`user_prompt`), where the answer can be remembered at the tier the owner picks. `PRESET_CHANGED` on the `gate` domain announces a preset change.
 
-Background agents follow the same gate, under the mode of the session that started them.
+Background agents follow the same gate. The escape hatch `permissions.backgroundAgents: 'allow-all'` exempts them from presets and prompts, never from the boundary.
 
 ### Sandbox escalations
 

@@ -68,6 +68,7 @@ for reference.
 | `behavior.guidanceMode` | `minimal` | Operational guidance mode: `off`, `minimal`, `guided` |
 | `storage.secretPolicy` | `preferred_secure` | Secret storage policy: prefer secure backing store, fall back when allowed |
 | `permissions.mode` | `safe-owner` | Execution mode: `safe-owner`, `safe-jev`, `yolo`, or `plan` |
+| `permissions.backgroundAgents` | `inherit` | How background/subagent tool calls consult the permission layer: `inherit` or `allow-all` |
 | `ui.systemMessages` | `panel` | Routing target for general system messages (`panel`, `conversation`, or `both`); every value shows them inline in the transcript |
 | `ui.operationalMessages` | `panel` | Routing target for operational runtime notices (`panel`, `conversation`, or `both`); every value shows them inline in the transcript |
 | `ui.contractMessages` | `both` | Routing target for contract lifecycle updates: status, checks, corrections, owner questions and the outcome (`panel`, `conversation`, or `both`); every value shows them inline in the transcript |
@@ -119,10 +120,11 @@ returns to the mode you were in when you ran `/plan on` (it does nothing when pl
 mode is not on); `plan` is outside the cycle, and cycling from it, or leaving a plan mode that
 `/plan` did not enter, starts again at `safe-owner`.
 
-Background and subagent tool calls follow the mode of the session that
-started them, and their asks reach the owner through the same approval prompt
-with the subagent named. A saved `permissions.backgroundAgents` is removed from
-the settings file at load with a receipt.
+`permissions.backgroundAgents` decides how background and subagent tool calls
+consult that mode. `inherit` (the default) runs them through the same session
+mode as the foreground turn loop, brokering asks through the same
+blocked-on-user machinery with subagent attribution; `allow-all` exempts
+background agents entirely regardless of the session mode.
 
 Changing `service.autostart` or `service.enabled` from `/config` reconciles
 the OS service where supported. On Linux this installs/enables, disables, or

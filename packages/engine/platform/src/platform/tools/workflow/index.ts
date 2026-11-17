@@ -180,8 +180,11 @@ export interface HookActionDefinition {
   event: string;
   condition?: string | undefined;
   action: string;
-  /** The action as admitted at add time (split and guarded once); every fire starts exactly this. */
+  /** The action as admitted at add time (split and guarded once, behind the sandbox boundary when contained); every fire starts exactly this. */
   argv?: readonly string[] | undefined;
+  /** Every fire runs inside the exec sandbox's boundary, described by `boundary`. */
+  sandboxed?: boolean | undefined;
+  boundary?: string | undefined;
   enabled: boolean;
   /** Fires that started the action or failed to. */
   fireCount?: number | undefined;
@@ -200,6 +203,18 @@ export interface HookActionFire {
   readonly timedOut?: boolean | undefined;
 }
 
+/** How an admitted automation command is contained: inside the exec sandbox's boundary, or not. */
+interface AutomationContainment {
+  readonly sandboxed: boolean;
+  readonly boundary?: string | undefined;
+}
+
+/** An entry as the tool reports it: the command text and its boundary, not the argv the runner starts (the sandbox's own arguments included). */
+function withoutArgv<T extends { argv?: readonly string[] | undefined }>(entry: T): Omit<T, 'argv'> {
+  const { argv: _argv, ...shown } = entry;
+  return shown;
+}
+
 /** What `add` says about how long an automation lives. */
 export const WORKFLOW_AUTOMATION_LIFETIME = 'until this process exits; it is not saved and does not come back after a restart. For a routine that survives restarts use /schedule.';
 
@@ -214,7 +229,7 @@ export class HookActionManager {
    * action that cannot be split are refused here, before anything is stored;
    * the command guard is applied by {@link admit} before this is called.
    */
-  add(def: { event: string; condition?: string | undefined; action: string }, argv?: readonly string[]): HookActionDefinition {
+  add(def: { event: string; condition?: string | undefined; action: string }, argv?: readonly string[], containment?: AutomationContainment): HookActionDefinition {
     const event = def.event.trim();
     if (!event) throw new Error('Hook action event is empty: give a hook event path such as Post:tool:exec or Post:tool:*.');
     const condition = def.condition?.trim() || undefined;
@@ -236,6 +251,7 @@ export class HookActionManager {
       condition,
       action: def.action,
       argv: admitted,
+      ...(containment?.sandboxed ? { sandboxed: true, boundary: containment.boundary } : {}),
       enabled: true,
       fireCount: 0,
     };
@@ -247,7 +263,7 @@ export class HookActionManager {
   async admit(def: { event: string; condition?: string | undefined; action: string }): Promise<HookActionDefinition> {
     const admission = await this.commands.admit(def.action);
     if (!admission.admitted) throw new Error(`Hook action not added: ${admission.reason}`);
-    return this.add(def, admission.argv);
+    return this.add(def, admission.argv, admission);
   }
 
   remove(id: string): boolean {
@@ -307,8 +323,11 @@ export interface ScheduleEntry {
   name: string;
   interval: string;
   command: string;
-  /** The command as admitted at add time (split and guarded once); every run starts exactly this. */
+  /** The command as admitted at add time (split and guarded once, behind the sandbox boundary when contained); every run starts exactly this. */
   argv?: readonly string[] | undefined;
+  /** Every run is inside the exec sandbox's boundary, described by `boundary`. */
+  sandboxed?: boolean | undefined;
+  boundary?: string | undefined;
   /** When the current or most recent run started. */
   lastRun?: number | undefined;
   nextRun?: number | undefined;
@@ -386,7 +405,7 @@ export class ScheduleManager {
    * that could never run is refused before anything is stored; the command
    * guard is applied by {@link admit} before this is called.
    */
-  add(name: string, interval: string, command: string, argv?: readonly string[]): ScheduleEntry {
+  add(name: string, interval: string, command: string, argv?: readonly string[], containment?: AutomationContainment): ScheduleEntry {
     const intervalMs = checkInterval(interval);
     let admitted: readonly string[];
     try {
@@ -405,6 +424,7 @@ export class ScheduleManager {
       interval,
       command,
       argv: admitted,
+      ...(containment?.sandboxed ? { sandboxed: true, boundary: containment.boundary } : {}),
       enabled: true,
       nextRun: Date.now() + intervalMs,
       skippedTicks: 0,
@@ -419,7 +439,7 @@ export class ScheduleManager {
     checkInterval(interval);
     const admission = await this.commands.admit(command);
     if (!admission.admitted) throw new Error(`Schedule not added: ${admission.reason}`);
-    return this.add(name, interval, command, admission.argv);
+    return this.add(name, interval, command, admission.argv, admission);
   }
 
   /** Removes the schedule and stops its command if a run is executing. */
@@ -486,6 +506,7 @@ export class ScheduleManager {
       kind: 'schedule',
       key: name,
       argv,
+      sandboxed: entry.sandboxed,
       env: { GV_SCHEDULE_NAME: name },
       maxInFlight: 1,
       timeoutMs: scheduleRunTimeoutMs(intervalMs),
@@ -711,7 +732,7 @@ export function createWorkflowTool(services: WorkflowServices, contracts: Workfl
           const notFound = (id: string) => ({ success: false, error: `Hook action not found: ${id}. List them with hookAction "list".` });
           switch (action) {
             case 'list': {
-              const hookActions = tm.list();
+              const hookActions = tm.list().map(withoutArgv);
               return { success: true, output: JSON.stringify({ hookActions, count: hookActions.length, lifetime: WORKFLOW_AUTOMATION_LIFETIME }) };
             }
             case 'add': {
@@ -720,7 +741,7 @@ export function createWorkflowTool(services: WorkflowServices, contracts: Workfl
                 return { success: false, error: 'hook-actions/add requires "hookActionDefinition" with "event" and "action" strings.' };
               }
               const added = await tm.admit(def);
-              return { success: true, output: JSON.stringify({ ...added, lifetime: WORKFLOW_AUTOMATION_LIFETIME }) };
+              return { success: true, output: JSON.stringify({ ...withoutArgv(added), lifetime: WORKFLOW_AUTOMATION_LIFETIME }) };
             }
             case 'remove':
             case 'enable':
@@ -743,7 +764,7 @@ export function createWorkflowTool(services: WorkflowServices, contracts: Workfl
           const action = input.scheduleAction ?? 'list';
           switch (action) {
             case 'list': {
-              const schedules = sm.list();
+              const schedules = sm.list().map(withoutArgv);
               return { success: true, output: JSON.stringify({ schedules, count: schedules.length, lifetime: WORKFLOW_AUTOMATION_LIFETIME }) };
             }
             case 'add': {
@@ -757,7 +778,7 @@ export function createWorkflowTool(services: WorkflowServices, contracts: Workfl
                 return { success: false, error: 'schedule/add requires "scheduleCommand"' };
               }
               const entry = await sm.admit(input.scheduleName, input.scheduleInterval, input.scheduleCommand);
-              return { success: true, output: JSON.stringify({ ...entry, lifetime: WORKFLOW_AUTOMATION_LIFETIME }) };
+              return { success: true, output: JSON.stringify({ ...withoutArgv(entry), lifetime: WORKFLOW_AUTOMATION_LIFETIME }) };
             }
             case 'remove':
             case 'enable':

@@ -128,7 +128,7 @@ const PINNED_SAFETY_GATE: readonly string[] = SAFETY_GATE_CONFIG_PREFIXES.filter
 const PINNED_NETWORK: readonly string[] = [
   'network.remoteFetch.allowPrivateHosts', 'network.outboundTls.', 'fetch.trustedHosts', 'fetch.sanitizeMode',
   'controlPlane.host', 'controlPlane.hostMode', 'controlPlane.cors.allowedOrigins',
-  'httpListener.host', 'httpListener.hostMode', 'httpListener.trustProxy',
+  'httpListener.host', 'httpListener.hostMode', 'httpListener.trustProxy', 'permissions.backgroundAgents',
 ];
 
 const EXACT_LOOSENING = new Map<string, Loosening>();

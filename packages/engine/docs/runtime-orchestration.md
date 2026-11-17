@@ -622,9 +622,14 @@ command. Conditions use `event.*` and `payload.*` paths with `===`, `!==`,
 command is split into words with no shell (POSIX quoting and escapes).
 
 A hook action and a workflow schedule (`mode: "schedule"`) are admitted once,
-when added: a condition that cannot be parsed, a command that cannot be split
-and a command the exec command guard refuses are refused there with the
-reason. Each run starts the admitted words in the project root with
+when added. The permission gate reads the command as a shell command, with the
+same questions and rules an `exec` call gets (the catastrophic and obfuscation
+readings included), because nothing asks again when it runs. A condition that
+cannot be parsed, a command that cannot be split and a command the exec command
+guard refuses are refused there with the reason. When the exec sandbox is on,
+the command's boundary is planned once, as for an `exec` command, and every run
+starts inside it (no escalation is asked later; `list` shows the boundary).
+Each run starts the admitted words in the project root with
 credential-bearing environment variables withheld (`GV_HOOK_ACTION_ID`,
 `GV_HOOK_EVENT` and `GV_HOOK_PHASE`, or `GV_SCHEDULE_NAME`, are added). A hook
 action's command is killed after 60 seconds and at most four of one action run

@@ -265,6 +265,23 @@ function deliveryShape(delivery: unknown): string {
   return JSON.stringify([mode, targets]);
 }
 
+/** A stored or requested model or provider name as compared: trimmed, lower case, '' for none. */
+function comparableName(value: unknown): string {
+  return typeof value === 'string' ? value.trim().toLowerCase() : '';
+}
+
+/**
+ * Whether a stored job's model is the one a request named. The host stores a
+ * provider-qualified registry key; a request may name the key or the model id
+ * alone, which can itself hold a colon (`llama3:8b`), so the key matches the
+ * request whole or with its provider segment taken off. No model on either
+ * side matches only no model on the other.
+ */
+function sameModel(storedKey: string, requested: string): boolean {
+  if (!storedKey || !requested) return storedKey === requested;
+  return storedKey === requested || storedKey.slice(storedKey.indexOf(':') + 1) === requested;
+}
+
 /**
  * The listed job that is the schedule `payload` would create, or undefined.
  * The host takes no idempotency key on `automation.schedules.create`, so a
@@ -275,8 +292,9 @@ function deliveryShape(delivery: unknown): string {
  * keeps two different schedules that share a name (the first 48 characters of a
  * reminder) and a time from reading as one, and matching state and delivery
  * keeps a paused schedule, or one that delivers elsewhere, from being reported
- * as the one just asked for. `listed` is the `automation.schedules.list`
- * answer; any other shape matches nothing.
+ * as the one just asked for; matching the model and provider keeps a schedule
+ * re-created for another model from reading as the old one. `listed` is the
+ * `automation.schedules.list` answer; any other shape matches nothing.
  */
 export function findSameSchedule(listed: unknown, payload: ScheduleCreateInput): Record<string, unknown> | undefined {
   const jobs: readonly unknown[] = isScheduleRecord(listed) && Array.isArray(listed.jobs) ? listed.jobs : [];
@@ -287,10 +305,15 @@ export function findSameSchedule(listed: unknown, payload: ScheduleCreateInput):
   // The host creates a schedule switched on unless the request says otherwise.
   const enabled = payload.enabled ?? true;
   const delivery = deliveryShape(payload.delivery);
+  // The host stores the model as a provider-qualified key and the provider only when one was asked for.
+  const model = comparableName(payload.model);
+  const provider = comparableName(payload.provider);
   return jobs.find((job): job is Record<string, unknown> => {
     if (!isScheduleRecord(job) || job.name !== payload.name) return false;
     const execution = job.execution;
     if (isScheduleRecord(execution) && typeof execution.prompt === 'string' && execution.prompt !== payload.prompt) return false;
+    const stored = isScheduleRecord(execution) ? execution : {};
+    if (!sameModel(comparableName(stored.modelId), model) || comparableName(stored.modelProvider) !== provider) return false;
     if (job.enabled !== enabled) return false;
     if (deliveryShape(job.delivery) !== delivery) return false;
     const schedule = job.schedule;

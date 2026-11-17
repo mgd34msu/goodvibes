@@ -631,14 +631,19 @@ export class ProjectPlanningService {
     const workPlanId = normalizeWorkPlanId(input.workPlanId);
     const commit = await this.commitWorkPlan(space, workPlanId, (plan, at) => {
       const tasks = plan.tasks();
-      const known = new Set(tasks.map((task) => task.taskId));
-      const orderById = new Map(input.orderedTaskIds.map((taskId, index) => [taskId, index]));
-      for (const taskId of orderById.keys()) {
-        if (!known.has(taskId)) throw new Error(`Work plan task not found: ${taskId}`);
+      const byId = new Map(tasks.map((task) => [task.taskId, task]));
+      const named = [...new Set(input.orderedTaskIds)];
+      for (const taskId of named) {
+        if (!byId.has(taskId)) throw new Error(`Work plan task not found: ${taskId}`);
       }
+      // The named tasks first, in the given order, then every other task in its
+      // current relative order; positions are numbered from 0 and a task is
+      // written only when its number changes.
+      const namedIds = new Set(named);
+      const sequence = [...named.map((taskId) => byId.get(taskId)!),
+        ...sortWorkPlanTasks(tasks).filter((task) => !namedIds.has(task.taskId))];
       const moved: { readonly task: ProjectWorkPlanTask; readonly previousTask: ProjectWorkPlanTask }[] = [];
-      for (const task of tasks) {
-        const order = orderById.get(task.taskId) ?? task.order + input.orderedTaskIds.length;
+      for (const [order, task] of sequence.entries()) {
         // Only a task that actually moved gets a new update time.
         if (order !== task.order) moved.push({ task: { ...task, order, updatedAt: at }, previousTask: task });
       }

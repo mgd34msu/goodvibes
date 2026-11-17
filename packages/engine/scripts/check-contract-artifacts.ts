@@ -27,6 +27,10 @@ await import('./generate-openapi-contract.ts');
 // written by any gate.
 await import('./generate-agent-spec.ts');
 
+// docs/reference-*.md are rendered from the same committed contracts; in check
+// mode a stale reference document throws here instead of being written.
+await import('./generate-api-docs.ts');
+
 // The generated consumer transport layers (Stage C): the webui mechanical
 // facade (contracts/src/generated/webui-facade.ts) and the Home
 // Assistant Python client (contracts/artifacts/python/

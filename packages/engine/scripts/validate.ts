@@ -65,10 +65,8 @@ const STEPS: readonly Step[] = [
   script('pack:check'),
   script('publint:check'),
   script('install:smoke'),
+  // Also judges the reference documents generated from the contracts (docs/reference-*.md).
   script('contracts:check'),
-  // docs/reference-*.md are generated from the contract artifacts, so a contract
-  // change leaves them stale until `bun run docs:generate`. Reads artifacts only; no build.
-  { label: 'docs-generated:check', command: 'bun', args: ['packages/engine/scripts/generate-api-docs.ts', '--check'] },
   script('bundle:check'),
 ];
 

@@ -201,10 +201,17 @@ function withContractRetryKey(methodId: string, req: Request, body: unknown): un
 
 /** A gateway call's answer; a contracts.start that returned an earlier call's contract says so in a header. */
 function gatewayCallResponse(methodId: string, response: { readonly status: number; readonly body: unknown }): Response {
-  const replayed = methodId === 'contracts.start'
-    && response.body !== null && typeof response.body === 'object'
-    && (response.body as { readonly replayed?: unknown }).replayed === true;
-  return Response.json(response.body, { status: response.status, ...(replayed ? { headers: { 'Idempotent-Replayed': 'true' } } : {}) });
+  const record = response.body !== null && typeof response.body === 'object' ? response.body as { readonly replayed?: unknown; readonly retryAfterMs?: unknown } : undefined;
+  const replayed = methodId === 'contracts.start' && record?.replayed === true;
+  // A refusal that says when to come back (an in-flight call limit) says it in the header HTTP clients read too.
+  const statedRetry = record?.retryAfterMs;
+  const retryAfterMs = (response.status === 429 || response.status === 503) && typeof statedRetry === 'number' && Number.isFinite(statedRetry)
+    ? statedRetry : undefined;
+  const headers: Record<string, string> = {
+    ...(replayed ? { 'Idempotent-Replayed': 'true' } : {}),
+    ...(retryAfterMs !== undefined ? { 'Retry-After': String(Math.max(1, Math.ceil(retryAfterMs / 1000))) } : {}),
+  };
+  return Response.json(response.body, { status: response.status, headers });
 }
 
 export function createDaemonControlRouteHandlers(

@@ -1247,21 +1247,6 @@ export class DaemonServer {
     this.controlPlaneHelper.handleControlPlaneWebSocketClose(ws);
   }
 
-  private async invokeWebSocketControlPlaneCall(input: {
-    readonly authToken: string;
-    readonly method: string;
-    readonly path: string;
-    readonly query?: Record<string, unknown> | undefined;
-    readonly body?: unknown | undefined;
-    readonly context?: {
-      readonly principalKind?: 'user' | 'bot' | 'service' | 'token' | 'remote-peer' | undefined;
-      readonly admin?: boolean | undefined;
-      readonly scopes?: readonly string[] | undefined;
-    };
-  }): Promise<{ status: number; ok: boolean; body: unknown }> {
-    return await this.controlPlaneHelper.invokeWebSocketControlPlaneCall(input);
-  }
-
   private async invokeGatewayMethodCall(input: {
     readonly authToken: string;
     readonly methodId: string;

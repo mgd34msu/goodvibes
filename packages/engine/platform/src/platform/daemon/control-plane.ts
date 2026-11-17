@@ -119,15 +119,25 @@ interface UpgradeCapableServer {
 }
 
 /**
- * Max concurrently in-flight WS 'call' invocations, counted for the FULL
- * lifetime of each call, from Request synthesis through response-body
- * buffering. Each in-flight call retains a synthesized Request whose headers
- * carry the operator-token Authorization header (the exact object shape found
- * ~206k times in the 2026-07-14 OOM core), so an unbounded backlog is exactly
- * the retained-context growth this cap prevents. Beyond the cap a call is
- * refused with an honest structured 503, never retained.
+ * Gateway calls (WS call frames and the HTTP invoke routes) in flight, counted
+ * for the FULL lifetime of each call, from Request synthesis through
+ * response-body buffering. Each in-flight call retains its credential and
+ * frame body (the shape found ~206k times in the 2026-07-14 OOM core), so the
+ * backlog is bounded. One caller (a connection; over HTTP, a principal) may
+ * hold {@link CALLS_IN_FLIGHT_PER_CALLER}, so one client with many slow calls
+ * does not refuse everyone else's; the daemon-wide ceiling bounds memory
+ * across callers. Beyond either a call is refused with a 503 naming which
+ * limit and when to retry, never retained.
  */
-const WS_CALL_MAX_IN_FLIGHT = 256;
+const CALLS_IN_FLIGHT_PER_CALLER = 256;
+const CALLS_IN_FLIGHT_TOTAL = 1024;
+const CALLS_RETRY_AFTER_MS = 1_000;
+
+/** Who a gateway call's in-flight budget belongs to: the connection it arrived on, else its principal. */
+function callerKey(connectionId: string | undefined, principalId: string | undefined): string {
+  if (connectionId !== undefined) return `connection:${connectionId}`;
+  return principalId !== undefined ? `principal:${principalId}` : 'unauthenticated';
+}
 /** Largest response body a call frame reads back into a string. */
 export const RESPONSE_TEXT_MAX_BYTES = 128 * 1024 * 1024;
 
@@ -217,10 +227,11 @@ interface GatewayMethodCallInput {
 }
 
 export class DaemonControlPlaneHelper {
-  /** Live WS 'call' invocations (full lifetime incl. response buffering). */
-  private wsCallsInFlight = 0;
-  /** Calls refused at the in-flight cap (cumulative, for ops visibility). */
-  private wsCallsRefused = 0;
+  /** Live gateway calls (full lifetime incl. response buffering), in all and per caller. */
+  private callsInFlight = 0;
+  private readonly callsInFlightByCaller = new Map<string, number>();
+  /** Calls refused at an in-flight limit (cumulative, for ops visibility). */
+  private callsRefused = 0;
   /** Events dropped to stalled WS consumers (cumulative). */
   private wsEventsDropped = 0;
   private readonly socketLifetimes = new WeakMap<object, AbortController>();
@@ -249,9 +260,42 @@ export class DaemonControlPlaneHelper {
     this.settingsLifetime = context.settingsLifetime;
   }
 
-  /** Retained-context footprint of the WS call path, for tests and ops output. */
+  /** Retained-context footprint of the gateway call path, for tests and ops output. */
   wsCallStats(): { inFlight: number; refused: number; eventsDropped: number } {
-    return { inFlight: this.wsCallsInFlight, refused: this.wsCallsRefused, eventsDropped: this.wsEventsDropped };
+    return { inFlight: this.callsInFlight, refused: this.callsRefused, eventsDropped: this.wsEventsDropped };
+  }
+
+  /** Takes one in-flight slot for `caller`, or answers the refusal naming the limit it hit. Pair with {@link releaseCall}. */
+  private admitCall(caller: string): { status: number; ok: false; body: unknown } | null {
+    const held = this.callsInFlightByCaller.get(caller) ?? 0;
+    const callerFull = held >= CALLS_IN_FLIGHT_PER_CALLER;
+    if (!callerFull && this.callsInFlight < CALLS_IN_FLIGHT_TOTAL) {
+      this.callsInFlightByCaller.set(caller, held + 1);
+      this.callsInFlight += 1;
+      return null;
+    }
+    this.callsRefused += 1;
+    return {
+      status: 503,
+      ok: false,
+      body: buildErrorResponseBody({
+        error: callerFull
+          ? `This client already has ${CALLS_IN_FLIGHT_PER_CALLER} calls in flight`
+          : `The daemon already has ${CALLS_IN_FLIGHT_TOTAL} calls in flight`,
+        code: callerFull ? 'CALLER_CALLS_IN_FLIGHT_LIMIT' : 'DAEMON_CALLS_IN_FLIGHT_LIMIT',
+        status: 503,
+        state: callerFull ? 'this connection (or, over HTTP, this principal) is at its in-flight call limit' : 'the daemon is at its total in-flight call limit',
+        next: [callerFull ? 'Wait for an earlier call to finish, then retry' : 'Retry in a second'],
+        retryAfterMs: CALLS_RETRY_AFTER_MS,
+      }),
+    };
+  }
+
+  private releaseCall(caller: string): void {
+    const held = this.callsInFlightByCaller.get(caller) ?? 0;
+    if (held <= 1) this.callsInFlightByCaller.delete(caller);
+    else this.callsInFlightByCaller.set(caller, held - 1);
+    this.callsInFlight -= 1;
   }
 
   private trustProxyEnabled(): boolean {
@@ -946,6 +990,7 @@ export class DaemonControlPlaneHelper {
               admin: ws.data.admin,
               scopes: ws.data.scopes,
             },
+            caller: callerKey(ws.data.clientId, ws.data.principalId ?? undefined),
           });
       this.sendFrame(ws, JSON.stringify({
         type: 'response',
@@ -985,6 +1030,8 @@ export class DaemonControlPlaneHelper {
     };
     /** Synthesized dispatches behind this call. 0 = a real client. */
     readonly synthesizedDepth?: number | undefined;
+    /** Whose in-flight budget the call uses (see {@link callerKey}); a caller that names none shares one budget. */
+    readonly caller?: string | undefined;
   }): Promise<{ status: number; ok: boolean; body: unknown }> {
     // The router sees the normalised path, so the descriptor and its scope are looked up by that one,
     // never by the raw text a client typed (`/api/x/../admin`, `/api/x?y`).
@@ -1012,18 +1059,11 @@ export class DaemonControlPlaneHelper {
       if (value === undefined || value === null) continue;
       url.searchParams.set(key, String(value));
     }
-    // In-flight cap over the FULL call lifetime (dispatch + response buffering):
-    // beyond it, refuse with an honest 503 instead of retaining another
-    // operator-token Request context.
-    if (this.wsCallsInFlight >= WS_CALL_MAX_IN_FLIGHT) {
-      this.wsCallsRefused += 1;
-      return {
-        status: 503,
-        ok: false,
-        body: { error: 'ws-call-overloaded', message: `Daemon is at its concurrent WS-call cap (${WS_CALL_MAX_IN_FLIGHT}); retry shortly.` },
-      };
-    }
-    this.wsCallsInFlight += 1;
+    // In-flight limit over the FULL call lifetime (dispatch + response buffering):
+    // beyond it, refuse instead of retaining another operator-token Request context.
+    const caller = input.caller ?? callerKey(undefined, undefined);
+    const refused = this.admitCall(caller);
+    if (refused) return refused;
     // Abortable request: streaming endpoints (SSE event sources) tear down on
     // request.signal abort, without this, a stream reached as a plain call
     // would pin the Request + Response + a growing buffer forever.
@@ -1072,7 +1112,7 @@ export class DaemonControlPlaneHelper {
         body,
       };
     } finally {
-      this.wsCallsInFlight -= 1;
+      this.releaseCall(caller);
     }
   }
 
@@ -1185,24 +1225,16 @@ export class DaemonControlPlaneHelper {
     // principal is current and its scopes allow it, so a refused or malformed
     // frame cannot clear what strangers' content left behind. See security/turn-boundary.ts.
     startTurnForOwnerRequest(context?.explicitUserRequest);
+    const caller = callerKey(input.context?.connectionId, context?.principalId ?? authenticated?.principalId);
 
     if (this.context.gatewayMethods.hasHandler(input.methodId)) {
-      // ONE contract: no WS call arm is unbounded. The registered-handler branch
-      // shares the same in-flight counter as the direct http-dispatch path,
-      // each in-flight invocation retains its auth token + client-controlled
-      // frame body for the handler's full latency, so an uncapped pipeline of
-      // methodId frames was the same retained-context class the direct-path cap
-      // closed (probed: 5,000 concurrent handler invocations, invisible to
-      // wsCallStats, before this guard).
-      if (this.wsCallsInFlight >= WS_CALL_MAX_IN_FLIGHT) {
-        this.wsCallsRefused += 1;
-        return {
-          status: 503,
-          ok: false,
-          body: { error: 'ws-call-overloaded', message: `Daemon is at its concurrent WS-call cap (${WS_CALL_MAX_IN_FLIGHT}); retry shortly.` },
-        };
-      }
-      this.wsCallsInFlight += 1;
+      // ONE contract: no call arm is unbounded. The registered-handler branch
+      // shares the in-flight budget of the direct http-dispatch path: each
+      // in-flight invocation retains its auth token + client-controlled frame
+      // body for the handler's full latency (probed: 5,000 concurrent handler
+      // invocations, invisible to wsCallStats, before this guard).
+      const refused = this.admitCall(caller);
+      if (refused) return refused;
       try {
         const body = await this.context.gatewayMethods.invoke(input.methodId, {
           body: input.body,
@@ -1268,7 +1300,7 @@ export class DaemonControlPlaneHelper {
           body: buildErrorResponseBody(message, { status: 500 }),
         };
       } finally {
-        this.wsCallsInFlight -= 1;
+        this.releaseCall(caller);
       }
     }
     if (!descriptor.http) {
@@ -1305,6 +1337,7 @@ export class DaemonControlPlaneHelper {
       path: resolvedPath.path,
       query: input.query,
       synthesizedDepth: input.synthesizedDepth,
+      caller,
       body: descriptor.http.method === 'GET' || descriptor.http.method === 'DELETE' ? undefined : input.body,
       context: {
         principalKind: context?.principalKind,

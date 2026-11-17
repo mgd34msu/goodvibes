@@ -34,8 +34,35 @@ Execution permissions are in **Permissions → Execution permissions**, includin
 | No Decision Model | Make no decision-model requests. |
 
 **With no decision model set** (no `judgment.endpoint`, `judgment.model`,
-`judgment.fallbacks`, credential choice or `TYPESAFE_API_KEY`), every policy
-works without one: nothing is asked, nothing waits and nothing reports an error.
+`judgment.fallbacks`, credential choice, `TYPESAFE_API_KEY`, `TYPESAFE_BASE_URL`
+or `TYPESAFE_DEFAULT_MODEL`), every policy works without one: no decision model
+is asked, nothing waits and nothing reports an error.
+
+## How much you are asked
+
+The policy and the permission mode (`permissions.mode`, below) decide together
+how often a person is in the loop. In every combination, code settles what it
+already knows first: reads, edits inside the workspace, and calls a saved rule
+or your `permissions.tools.*` setting allows run at once, and a deny rule
+refuses. In every mode but `yolo`, the owner-only items (spending over your
+limit, a deletion nothing can bring back, a new recipient, granting access,
+loosening a security setting, changing a contract) always come to you: asked,
+or held for the end of the run in `just-vibes`. What is left is a judgment
+call, and the table says who answers it.
+
+| Policy | `ask-me` | `jev-decides` | `just-vibes` | `yolo` |
+| --- | --- | --- | --- | --- |
+| Hybrid (default) | Jev reads each judgment call's risk and you are asked only about high-stakes, irreversible or security-weakening ones; with no model set, or while it fails, you are asked about every judgment call your tool settings do not allow. | Jev decides every judgment call; with no model set, while it fails, or (while `jev-decides` is only the default, not your choice) on a model the shipped calibration did not measure, you are asked as in `ask-me`. | You are never interrupted: Jev decides judgment calls, and what Jev would not run (with no working model, every judgment call your tool settings do not allow) is held and listed at the end of the run. | You are asked nothing, and no decision model is consulted for permission. |
+| Decision Model Only | As Hybrid, except that while the set model fails, the call fails with the model's error instead of asking you. | As Hybrid, except that while the set model fails, the call fails with the model's error instead of asking you. | As Hybrid, except that while the set model fails, the call fails with the model's error instead of being held. | Same as Hybrid: you are asked nothing. |
+| No Decision Model | You are asked about every judgment call your tool settings do not allow. | You are asked about every judgment call your tool settings do not allow, exactly as in `ask-me`. | You are never interrupted: every judgment call your tool settings do not allow is held and listed at the end of the run. | You are asked nothing. |
+
+The shipped calibration record covers `jev-latest` (answered by `jev-1.14.0`),
+which is the model used when `judgment.model` and `TYPESAFE_DEFAULT_MODEL` are
+empty. Choosing `jev-decides` yourself lets Jev decide on any working decision
+model. `/held` lists, approves or sets aside what `just-vibes` held, and
+`/decisions` lists what Jev decided for you with undo, never, always and ask.
+`yolo` still keeps authentication, workspace containment, secret storage and
+spending limits.
 
 **You can always tell when no decision model is in use.** The conversation says
 so once (none set, or No Decision Model chosen), says once when a set model

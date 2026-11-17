@@ -427,7 +427,7 @@ The recovery offer, session picker, profile picker, and config rows are all pick
 
 In a searchable modal, `/` focuses the filter, and any keystroke that no row hotkey claims also arms the filter and starts the query with that character.
 
-The config modals (`/memory`, `/work-plan`, `/marketplace`, `/plugins`, `/services`, `/subscription` and the others built on the config-modal host) have an always-live search row: every typed character goes into the search and never fires an action. An action fires from `Enter`, from `Ctrl` plus its letter (the hint bar shows `^d delete`), or from `Ctrl+G` followed by its key (the hint bar shows `^G c` for the keys a terminal cannot send as a Ctrl chord: `c`, `h`, `i`, `j`, `m`, digits and capitals). An action that deletes, uninstalls or clears asks for the same keys a second time; `Esc` cancels it.
+The config modals (`/memory`, `/work-plan`, `/marketplace`, `/plugin`, `/services`, `/subscription` and the others built on the config-modal host) have an always-live search row: every typed character goes into the search and never fires an action. An action fires from `Enter`, from `Ctrl` plus its letter (the hint bar shows `^d delete`), or from `Ctrl+G` followed by its key (the hint bar shows `^G c` for the keys a terminal cannot send as a Ctrl chord: `c`, `h`, `i`, `j`, `m`, digits and capitals). An action that deletes, uninstalls or clears asks for the same keys a second time; `Esc` cancels it.
 
 ### System
 
@@ -764,7 +764,6 @@ GoodVibes includes a post-execution and operator-repair stack:
 - `/replay` loads and steps deterministic replay runs
 - `/incident` opens, exports, and captures forensics bundles
 - Health and diagnostics surfaces expose repair actions, transport issues, task failure state, and replay hooks
-- the state inspector subsystem tracks transitions, time-travel snapshots, and selector hotspots
 - telemetry exporters can write to local ledgers, console sinks, or OTLP bridges
 - retention and pruning policy keeps checkpoint/snapshot growth bounded
 - idempotency keys prevent duplicate tool execution across replay, reconnect, and retry scenarios

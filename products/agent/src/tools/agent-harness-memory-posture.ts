@@ -1,4 +1,4 @@
-import { isClassicOperation, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime';
+import { withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime';
 import {
   MemoryUsageStatsStore,
   type MemoryDoctorReport,
@@ -48,15 +48,6 @@ function memoryPostureSnapshot(context: CommandContext): MemoryPostureSnapshot {
     sessionMemoryCount: buildAgentWorkspaceSessionMemoryCount(context), embeddingProvider: readConfigString(context, 'provider.embeddingProvider', '(provider default)') };
 }
 
-/**
- * The facts a long reading must see unchanged. Prompt-active and temporal counts follow the wall
- * clock, so a memory crossing its validity boundary mid-reading would otherwise look like an edit.
- */
-function stableMemoryPostureFacts(snapshot: MemoryPostureSnapshot): Pick<MemoryPostureSnapshot, 'localMemoryCount' | 'localMemoryReviewQueueCount' | 'sessionMemoryCount' | 'embeddingProvider'> {
-  return { localMemoryCount: snapshot.localMemoryCount, localMemoryReviewQueueCount: snapshot.localMemoryReviewQueueCount,
-    sessionMemoryCount: snapshot.sessionMemoryCount, embeddingProvider: snapshot.embeddingProvider };
-}
-
 function memoryApi(context: CommandContext): {
   readonly vectorStats?: () => MemoryVectorStats;
   readonly doctor?: () => Promise<MemoryDoctorReport>;
@@ -66,31 +57,13 @@ function memoryApi(context: CommandContext): {
   return context.clients?.agentKnowledgeApi?.memory ?? null;
 }
 
-function memoryReadingOptions(context: CommandContext, args: unknown, originalOptions: CatalogRankingOptions): CatalogRankingOptions {
-  const options = retainMemoryReadingOptions(originalOptions);
-  const input = capturePersonalOpsSnapshot(args);
-  const paths = [['clients'], ['clients', 'agentKnowledgeApi'], ['clients', 'agentKnowledgeApi', 'memory'],
-    ['session'], ['session', 'runtime'], ['session', 'sessionMemoryStore'], ['platform'], ['platform', 'configManager']] as const;
-  const guards: (() => void)[] = [];
-  for (const path of paths) {
-    const receiver = path.length === 1 ? context : modelReadingServicePath(context, path.slice(0, -1));
-    if (receiver === undefined || receiver === null) continue;
-    if (typeof receiver !== 'object') throw new ToolInputProjectionError('held');
-    const key = path.at(-1); if (key === undefined) throw new ToolInputProjectionError('held');
-  }
-  const api = memoryApi(context);
-  for (const binding of [ { path: ['session', 'sessionMemoryStore'], keys: ['list'] }, { path: ['platform', 'configManager'], keys: ['get'] } ]) {
-    const service = modelReadingServicePath(context, binding.path);
-    if (service !== undefined && service !== null) { if (typeof service !== 'object') throw new ToolInputProjectionError('held'); }
-  }
-  const counts = capturePersonalOpsSnapshot(stableMemoryPostureFacts(memoryPostureSnapshot(context)));
-  const assertSources = () => { options.signal?.throwIfAborted(); for (const guard of guards) guard();
-    input.assertCurrent(args); if (memoryApi(context) !== api) throw new ToolInputProjectionError('held');
-    counts.assertCurrent(stableMemoryPostureFacts(memoryPostureSnapshot(context))); for (const guard of guards) guard();
-  };
-  options.retainCurrent?.(assertSources, 'agent.memory.posture-native');
-  const assertCurrent = () => { assertMemoryCurrent(options); assertSources(); };
-  assertCurrent(); return { ...options, assertCurrent };
+/**
+ * The call's own check (its signal and admission) is the only currentness
+ * test for a posture read: the memory counts are read once, and a count a
+ * moment old is corrected by the next read.
+ */
+function memoryReadingOptions(originalOptions: CatalogRankingOptions): CatalogRankingOptions {
+  return retainMemoryReadingOptions(originalOptions);
 }
 
 async function awaitMemoryRead<T>(work: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
@@ -393,48 +366,12 @@ function compactVector(vector: MemoryVectorStats | null): Record<string, unknown
   };
 }
 
-export async function memoryPostureCatalogStatus(context: CommandContext, reading: CatalogRankingOptions = {}): Promise<Record<string, unknown>> {
-  return withConfiguredDecisionModelPolicy(() => ownedMemoryPostureCatalogStatus(context, reading));
-}
-
-async function ownedMemoryPostureCatalogStatus(context: CommandContext, reading: CatalogRankingOptions): Promise<Record<string, unknown>> {
-  const options = memoryReadingOptions(context, undefined, reading);
-  const snapshot = memoryPostureSnapshot(context);
-  const readErrors: string[] = [];
-  const doctor = await readMemoryDoctor(context, options, readErrors);
-  const vector = await readVectorStats(context, doctor, options, readErrors);
-  const external = await externalMemoryProviders(context, options);
-  const status = memoryStatus(snapshot, Boolean(memoryApi(context)));
-  const vectorState = vectorStatus(vector);
-  const usageSummary = readMemoryUsageSummary(context).summary;
-  return {
-    modes: ['memory_posture', 'memory_provider'],
-    usageTracked: usageSummary?.everInjected ?? 0,
-    usageReferenced: usageSummary?.everReferenced ?? 0,
-    usageNeverReferenced: usageSummary?.neverReferenced ?? 0,
-    modelRoute: 'memory action:"status"',
-    status,
-    localMemories: snapshot.localMemoryCount,
-    reviewQueue: snapshot.localMemoryReviewQueueCount,
-    promptActive: snapshot.localMemoryPromptActiveCount,
-    // Visible expiry: still stored (counted in localMemories), never deleted,
-    // but outside their temporal validity window so not prompt-injected.
-    temporallyPending: snapshot.localMemoryTemporallyPendingCount,
-    temporallyExpired: snapshot.localMemoryTemporallyExpiredCount,
-    vector: vectorState,
-    embeddingProviders: doctor?.embeddings.providers.length ?? 0,
-    externalProviders: external.length,
-    externalProvidersAvailable: external.filter(provider => provider.status === 'available').length,
-    ...(readErrors.length > 0 ? { readErrors } : {}),
-  };
-}
-
 export async function memoryPostureSummary(context: CommandContext, args: AgentHarnessMemoryPostureArgs, reading: CatalogRankingOptions = {}): Promise<Record<string, unknown>> {
   return withConfiguredDecisionModelPolicy(() => ownedMemoryPostureSummary(context, args, reading));
 }
 
 async function ownedMemoryPostureSummary(context: CommandContext, args: AgentHarnessMemoryPostureArgs, reading: CatalogRankingOptions): Promise<Record<string, unknown>> {
-  const options = memoryReadingOptions(context, args, reading);
+  const options = memoryReadingOptions(reading);
   const includeParameters = args.includeParameters === true;
   const limit = readLimit(args.limit, 100);
   const query = readString(args.query);
@@ -502,7 +439,7 @@ export async function describeMemoryProvider(context: CommandContext, args: Agen
 }
 
 async function ownedDescribeMemoryProvider(context: CommandContext, args: AgentHarnessMemoryPostureArgs, reading: CatalogRankingOptions): Promise<MemoryProviderResolution> {
-  const options = memoryReadingOptions(context, args, reading);
+  const options = memoryReadingOptions(reading);
   const input = readString(args.providerId) || readString(args.target) || readString(args.query);
   if (!input) {
     return {

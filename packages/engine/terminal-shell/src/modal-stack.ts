@@ -1,118 +1,15 @@
-import { closeModalByName, getActiveModalName, isModalActive, isModalName, reopenModalByName, type ActiveModalState, type ModalName, } from './modal-state.js';
 import type { SelectionResult } from './selection-modal.js';
-export type ModalStackState = ActiveModalState & {
-    /**
-     * Holds {@link ModalName}s. Typed as string[] so a product's own handler
-     * contract that still says string[] keeps accepting it; every read here
-     * narrows with isModalName, and every write goes through modalOpened.
-     */
-    modalStack: string[];
-    modalReturnFocus?: ('prompt' | 'indicator') | undefined;
-    indicatorFocused: boolean;
-};
-/**
- * Record a modal as opened. A name that is not a {@link ModalName} is not
- * stacked: nothing could close or reopen it, so it would only be a dead entry.
- */
-export function modalOpened(state: ModalStackState, name: string): void {
-    if (!isModalName(name))
-        return;
-    pruneStaleModalStack(state);
-    if (state.modalStack[state.modalStack.length - 1] === name)
-        return;
-    if (state.modalStack.includes(name))
-        return;
-    if (state.modalStack.length === 0) {
-        state.modalReturnFocus = state.indicatorFocused ? 'indicator' : 'prompt';
-    }
-    state.modalStack.push(name);
+import type { SurfaceModalHost, TrackedModal } from './surface-modal-host.js';
+
+interface OwnModal {
+    readonly active: boolean;
+    close(): void;
 }
 /**
- * Forget stacked names when no modal is on screen. A modal that closed itself
- * by any path (a pick, a dismissing key, its own last entry going away) leaves
- * its name behind; with nothing shown the whole stack is stale, and the next
- * Esc must reach the prompt instead of popping a name that does nothing.
+ * What the modals both terminal apps share need of the input handler. Each
+ * modal reads the handler's live fields when it is asked, never a copy.
  */
-export function pruneStaleModalStack(state: ModalStackState): void {
-    if (state.modalStack.length > 0 && getActiveModalName(state) === null)
-        state.modalStack.length = 0;
-}
-/**
- * Record a modal that closed itself (a pick, an action, a key that dismisses
- * it). Without this its name stays stacked and the next Esc is spent popping a
- * modal that is no longer on screen instead of reaching the prompt.
- */
-export function modalClosed(state: { modalStack: string[] }, name: ModalName): void {
-    const index = state.modalStack.lastIndexOf(name);
-    if (index >= 0)
-        state.modalStack.splice(index, 1);
-}
-export function clearModalStack(modalStack: string[]): void {
-    modalStack.length = 0;
-}
-export type EscapeState = ModalStackState & {
-    prompt: string;
-    cursorPos: number;
-    helpScrollOffset: number;
-    shortcutsScrollOffset: number;
-    requestRender: () => void;
-    saveUndoState: () => void;
-    cancelGeneration: (() => void) | undefined;
-    selectionCallback: ((result: SelectionResult | null) => void) | null;
-    bookmarkModal: ModalStackState['bookmarkModal'] & {
-        open: () => void;
-    };
-    contextInspectorModal: ModalStackState['contextInspectorModal'] & {
-        open: () => void;
-    };
-    settingsModal: ModalStackState['settingsModal'] & {
-        editingMode: boolean;
-        cancelEdit: () => void;
-    };
-    mcpWorkspace?: ModalStackState['mcpWorkspace'] | undefined;
-    configModal?: (NonNullable<ModalStackState['configModal']> & {
-        reopen: () => void;
-    }) | undefined;
-    processModal?: (NonNullable<ModalStackState['processModal']> & {
-        open: () => void;
-    }) | undefined;
-    agentWorkspace?: ModalStackState['agentWorkspace'] | undefined;
-    selectionModal: ModalStackState['selectionModal'];
-    autocompleteReset: () => void;
-    autocompleteUpdate?: ((query: string) => void) | undefined;
-    /**
-     * An agent or process view (core/session-focus.ts). With no modal open and
-     * the composer empty, Esc there goes back up one level (closing the
-     * process view's search first) and never reaches cancelGeneration: leaving
-     * a view never stops the agent, the process or main.
-     */
-    sessionView?: {
-        readonly active: boolean;
-        escape(): void;
-    } | undefined;
-    /**
-     * The main transcript's scroll. While it is scrolled away from the live
-     * bottom (and no modal, composer text or view took the Esc first), Esc
-     * returns to the bottom and re-locks there; it never reaches
-     * cancelGeneration then. At the bottom the next Esc interrupts as before.
-     */
-    transcriptScroll?: TranscriptScrollControls | undefined;
-    /** Kit modals: the top one (or its own sub-level) is the first thing Esc pops. */
-    surfaceModals?: {
-        readonly active: boolean;
-        escape(): boolean;
-    } | undefined;
-    clearOnboardingModelPickerCancelState?: (() => void) | undefined;
-    restoreOnboardingModelPickerCancelState?: (() => void) | undefined;
-};
-/** What handleEscape needs of the main transcript's scroll. */
-export interface TranscriptScrollControls {
-    /** The main transcript is scrolled away from its live bottom. */
-    scrolledBack(): boolean;
-    /** Return to the live bottom and follow it again. */
-    toBottom(): void;
-}
-export function handleEscape(state: EscapeState, clearCommandText = false): {
+export interface HandlerModalOwner {
     prompt: string;
     cursorPos: number;
     commandMode: boolean;
@@ -121,283 +18,206 @@ export function handleEscape(state: EscapeState, clearCommandText = false): {
     shortcutsOverlayActive: boolean;
     shortcutsScrollOffset: number;
     selectionCallback: ((result: SelectionResult | null) => void) | null;
+    readonly autocomplete: {
+        reset(): void;
+        update(query: string): void;
+    } | null;
+    readonly settingsModal: OwnModal & {
+        readonly editingMode: boolean;
+        cancelEdit(): void;
+    };
+    readonly mcpWorkspace: OwnModal & {
+        reopen(): void;
+    };
+    readonly sessionPickerModal: OwnModal;
+    readonly profilePickerModal: OwnModal;
+    readonly bookmarkModal: OwnModal & {
+        open(): void;
+    };
+    readonly contextInspectorModal: OwnModal & {
+        open(): void;
+    };
+    readonly modelPicker: OwnModal;
+    readonly filePicker: OwnModal;
+    readonly blockActionsMenu: OwnModal;
+    readonly selectionModal: OwnModal;
+}
+/** A tracked modal over one of the handler's modal objects, closed the way that object closes itself. */
+export function ownModal(name: string, modal: () => OwnModal, reopen?: () => void): TrackedModal {
+    const tracked: TrackedModal = { ownsOpenFlag: true, name, isOpen: () => modal().active, close: () => modal().close() };
+    return reopen ? { ...tracked, reopen } : tracked;
+}
+/**
+ * The handler's own modals that both apps have, each as one object on the
+ * modal stack (surface-modal-host.ts). Register them with
+ * `surfaceModals.track(...)`; a product adds its own (the Agent's workspace,
+ * process monitor and live tail; the TUI's config surfaces and onboarding).
+ *
+ * Help, shortcuts, bookmarks, the context inspector, the MCP workspace and
+ * command mode come back when the modal stacked above them closes. The rest
+ * cannot: closing them discards what they showed (a selection's callback, a
+ * file picker's insert position, the block a menu acted on).
+ */
+export function createHandlerModals(owner: HandlerModalOwner, options: {
+    /** Esc on command mode also clears what was typed after the slash; otherwise only a bare '/' goes. */
+    readonly clearCommandText: boolean;
+    /** Runs after Esc closes the model picker (the TUI puts back the onboarding answers it opened over). */
+    readonly afterModelPickerClose?: (() => void) | undefined;
+}) {
+    return {
+        command: {
+            ownsOpenFlag: true,
+            name: 'command',
+            isOpen: () => owner.commandMode,
+            close: () => {
+                owner.commandMode = false;
+                owner.autocomplete?.reset();
+                // A bare '/' with nothing typed after it IS the palette, so Esc
+                // clears it along with the slash. Once a command name is typed
+                // past the slash, Esc only dismisses the suggestions; the typed
+                // text is composer content and stays.
+                if (options.clearCommandText || owner.prompt === '/') {
+                    owner.prompt = '';
+                    owner.cursorPos = 0;
+                }
+            },
+            reopen: () => {
+                owner.commandMode = true;
+                owner.prompt = '/';
+                owner.cursorPos = 1;
+                owner.autocomplete?.update('');
+            },
+        },
+        settings: {
+            ...ownModal('settings', () => owner.settingsModal),
+            // An edit in progress is the settings modal's own level: Esc cancels it first.
+            escape: () => {
+                if (!owner.settingsModal.editingMode)
+                    return false;
+                owner.settingsModal.cancelEdit();
+                return true;
+            },
+        },
+        mcpWorkspace: ownModal('mcpWorkspace', () => owner.mcpWorkspace, () => owner.mcpWorkspace.reopen()),
+        sessionPicker: ownModal('sessionPicker', () => owner.sessionPickerModal),
+        profilePicker: ownModal('profilePicker', () => owner.profilePickerModal),
+        bookmark: ownModal('bookmark', () => owner.bookmarkModal, () => owner.bookmarkModal.open()),
+        contextInspector: ownModal('contextInspector', () => owner.contextInspectorModal, () => owner.contextInspectorModal.open()),
+        help: {
+            ownsOpenFlag: true,
+            name: 'help',
+            isOpen: () => owner.helpOverlayActive,
+            close: () => {
+                owner.helpOverlayActive = false;
+                owner.helpScrollOffset = 0;
+            },
+            reopen: () => {
+                owner.helpOverlayActive = true;
+            },
+        },
+        shortcuts: {
+            ownsOpenFlag: true,
+            name: 'shortcuts',
+            isOpen: () => owner.shortcutsOverlayActive,
+            close: () => {
+                owner.shortcutsOverlayActive = false;
+                owner.shortcutsScrollOffset = 0;
+            },
+            reopen: () => {
+                owner.shortcutsOverlayActive = true;
+            },
+        },
+        modelPicker: {
+            ...ownModal('modelPicker', () => owner.modelPicker),
+            close: () => {
+                owner.modelPicker.close();
+                options.afterModelPickerClose?.();
+            },
+        },
+        filePicker: ownModal('filePicker', () => owner.filePicker),
+        blockActions: ownModal('blockActions', () => owner.blockActionsMenu),
+        selection: {
+            ownsOpenFlag: true,
+            name: 'selection',
+            isOpen: () => owner.selectionModal.active,
+            // Esc is a cancel: the waiting caller hears null.
+            close: () => {
+                const callback = owner.selectionCallback;
+                owner.selectionCallback = null;
+                owner.selectionModal.close();
+                callback?.(null);
+            },
+        },
+    } satisfies Record<string, TrackedModal>;
+}
+export type HandlerModals = ReturnType<typeof createHandlerModals>;
+/** What handleEscape needs of the main transcript's scroll. */
+export interface TranscriptScrollControls {
+    /** The main transcript is scrolled away from its live bottom. */
+    scrolledBack(): boolean;
+    /** Return to the live bottom and follow it again. */
+    toBottom(): void;
+}
+/** What Esc reads and changes on the input handler. */
+export interface EscapeHost {
+    prompt: string;
+    cursorPos: number;
     indicatorFocused: boolean;
-    modalReturnFocus: NonNullable<ModalStackState['modalReturnFocus']>;
-} {
-    let prompt = state.prompt;
-    let cursorPos = state.cursorPos;
-    let commandMode = state.commandMode;
-    let helpOverlayActive = state.helpOverlayActive;
-    let helpScrollOffset = state.helpScrollOffset;
-    let shortcutsOverlayActive = state.shortcutsOverlayActive;
-    let shortcutsScrollOffset = state.shortcutsScrollOffset;
-    let selectionCallback = state.selectionCallback;
-    let indicatorFocused = state.indicatorFocused;
-    let modalReturnFocus: NonNullable<ModalStackState['modalReturnFocus']> = state.modalReturnFocus ?? 'prompt';
-    const restoreFocus = (): void => {
-        if (state.modalStack.length > 0 || getActiveModalName({
-            ...state,
-            helpOverlayActive,
-            shortcutsOverlayActive,
-            commandMode,
-        }) !== null)
-            return;
-        indicatorFocused = modalReturnFocus === 'indicator';
-        modalReturnFocus = 'prompt';
-        state.modalReturnFocus = 'prompt';
-    };
-    // Kit modals are always on top: one Esc pops one of their levels and stops.
-    if (state.surfaceModals?.active) {
-        state.surfaceModals.escape();
-        state.requestRender();
-        return {
-            prompt,
-            cursorPos,
-            commandMode,
-            helpOverlayActive,
-            helpScrollOffset,
-            shortcutsOverlayActive,
-            shortcutsScrollOffset,
-            selectionCallback,
-            indicatorFocused,
-            modalReturnFocus,
-        };
-    }
-    if (state.settingsModal.active && state.settingsModal.editingMode) {
-        state.settingsModal.cancelEdit();
-        state.requestRender();
-        return {
-            prompt,
-            cursorPos,
-            commandMode,
-            helpOverlayActive,
-            helpScrollOffset,
-            shortcutsOverlayActive,
-            shortcutsScrollOffset,
-            selectionCallback,
-            indicatorFocused,
-            modalReturnFocus,
-        };
-    }
-    const closeModal = (name: ModalName): void => {
-        closeModalByName(name, {
-            resetHelp: () => {
-                helpOverlayActive = false;
-                helpScrollOffset = 0;
-            },
-            resetShortcuts: () => {
-                shortcutsOverlayActive = false;
-                shortcutsScrollOffset = 0;
-            },
-            closeBookmark: () => state.bookmarkModal.close(),
-            closeLiveTail: () => state.liveTailModal?.close(),
-            closeProcess: () => state.processModal?.close(),
-            closeAgentWorkspace: () => state.agentWorkspace?.close(),
-            closeSettings: () => state.settingsModal.close(),
-            closeMcpWorkspace: () => state.mcpWorkspace?.close(),
-            closeSessionPicker: () => state.sessionPickerModal.close(),
-            closeProfilePicker: () => state.profilePickerModal.close(),
-            closeConfigModal: () => state.configModal?.close(),
-            closeContextInspector: () => state.contextInspectorModal.close(),
-            closeModelPicker: () => {
-                state.modelPicker.close();
-                state.restoreOnboardingModelPickerCancelState?.();
-            },
-            closeFilePicker: () => state.filePicker.close(),
-            closeBlockActions: () => state.blockActionsMenu.close(),
-            closeSelection: () => {
-                const cb = selectionCallback;
-                selectionCallback = null;
-                state.selectionModal.close();
-                cb?.(null);
-            },
-            closeOnboarding: () => {
-                state.onboardingWizard?.close();
-                state.clearOnboardingModelPickerCancelState?.();
-            },
-            closeCommandMode: () => {
-                commandMode = false;
-                for (let i = state.modalStack.length - 1; i >= 0; i--) {
-                    if (state.modalStack[i] === 'command')
-                        state.modalStack.splice(i, 1);
-                }
-                state.autocompleteReset();
-                // Esc's palette-dismiss convention: a bare '/' with nothing typed
-                // after it IS the palette, so Esc clears it along with the slash
-                // (first Esc, one step, done, no lingering '/' to backspace out).
-                // Once the user has typed a command name (or anything else) past
-                // the slash, Esc's job is only to dismiss the ghost-suggestion
-                // overlay; the typed text is real composer content and stays put,
-                // just no longer treated as an in-progress command.
-                if (clearCommandText || prompt === '/') {
-                    prompt = '';
-                    cursorPos = 0;
-                }
-            },
-        });
-    };
-    // An absent optional modal has nothing to reopen: leave its op undefined so
-    // the pop is reported as not reopened rather than silently doing nothing.
-    const reopenModal = (name: ModalName): boolean => {
-        const { processModal, agentWorkspace, configModal, mcpWorkspace, onboardingWizard } = state;
-        return reopenModalByName(name, {
-            openHelp: () => { helpOverlayActive = true; },
-            openShortcuts: () => { shortcutsOverlayActive = true; },
-            openBookmark: () => state.bookmarkModal.open(),
-            openProcess: processModal ? () => processModal.open() : undefined,
-            openAgentWorkspace: agentWorkspace ? () => agentWorkspace.reopen() : undefined,
-            openContextInspector: () => state.contextInspectorModal.open(),
-            openConfigModal: configModal ? () => configModal.reopen() : undefined,
-            openMcpWorkspace: mcpWorkspace ? () => mcpWorkspace.reopen() : undefined,
-            openOnboarding: onboardingWizard ? () => onboardingWizard.reopen() : undefined,
-            openCommandMode: () => {
-                commandMode = true;
-                prompt = '/';
-                cursorPos = 1;
-                state.autocompleteUpdate?.('');
-            },
-        });
-    };
-    // Esc closes the modal on screen: names above the topmost modal still
-    // active closed themselves and are dropped first, so one Esc never pops a
-    // name that does nothing. Key routing skips the same names.
-    const live = { ...state, helpOverlayActive, shortcutsOverlayActive, commandMode };
-    for (;;) {
-        const top = state.modalStack[state.modalStack.length - 1];
-        if (top === undefined || (isModalName(top) && isModalActive(live, top)))
-            break;
-        state.modalStack.pop();
-    }
-    if (state.modalStack.length > 0) {
-        const current = state.modalStack.pop();
-        if (current === undefined)
-            throw new Error('Modal stack changed during Escape routing');
-        if (isModalName(current))
-            closeModal(current);
-        // Back to the entry below. One that cannot be reopened and is no longer
-        // on screen is dropped and the next one tried, so popping never ends
-        // with a stack entry that did nothing and focus left unrestored.
-        for (;;) {
-            const previous = state.modalStack[state.modalStack.length - 1];
-            if (previous === undefined) {
-                restoreFocus();
-                break;
-            }
-            if (!isModalName(previous)) {
-                state.modalStack.pop();
-                continue;
-            }
-            if (reopenModal(previous))
-                break;
-            if (isModalActive({
-                ...state,
-                helpOverlayActive,
-                shortcutsOverlayActive,
-                commandMode,
-            }, previous))
-                break;
-            state.modalStack.pop();
+    /** Where focus goes when the last modal closes (recorded when the first one opened). */
+    modalReturnFocus: 'prompt' | 'indicator';
+    readonly surfaceModals: Pick<SurfaceModalHost, 'escape' | 'active'>;
+    /**
+     * An agent or process view (core/session-focus.ts). With no modal open and
+     * the composer empty, Esc there goes back up one level (closing the
+     * process view's search first) and never reaches cancelGeneration: leaving
+     * a view never stops the agent, the process or main.
+     */
+    readonly sessionView?: {
+        readonly active: boolean;
+        escape(): void;
+    } | null | undefined;
+    /**
+     * The main transcript's scroll. While it is scrolled away from the live
+     * bottom (and no modal, composer text or view took the Esc first), Esc
+     * returns to the bottom and re-locks there; it never reaches
+     * cancelGeneration then. At the bottom the next Esc interrupts as before.
+     */
+    readonly transcriptScroll?: TranscriptScrollControls | null | undefined;
+    requestRender(): void;
+    saveUndoState(): void;
+}
+/**
+ * One Esc, one step: the top modal's own level or the top modal (the modal
+ * stack decides which, surface-modal-host.ts), else the composer's text, else
+ * the view, else the scroll position, else the running turn.
+ */
+export function handleEscape(host: EscapeHost, cancelGeneration?: (() => void) | undefined): void {
+    if (host.surfaceModals.escape()) {
+        if (!host.surfaceModals.active) {
+            host.indicatorFocused = host.modalReturnFocus === 'indicator';
+            host.modalReturnFocus = 'prompt';
         }
-        state.requestRender();
-        return {
-            prompt,
-            cursorPos,
-            commandMode,
-            helpOverlayActive,
-            helpScrollOffset,
-            shortcutsOverlayActive,
-            shortcutsScrollOffset,
-            selectionCallback,
-            indicatorFocused,
-            modalReturnFocus,
-        };
+        host.requestRender();
+        return;
     }
-    const active = getActiveModalName({
-        ...state,
-        helpOverlayActive,
-        shortcutsOverlayActive,
-        commandMode,
-    });
-    if (active) {
-        closeModal(active);
-        restoreFocus();
-        state.requestRender();
-        return {
-            prompt,
-            cursorPos,
-            commandMode,
-            helpOverlayActive,
-            helpScrollOffset,
-            shortcutsOverlayActive,
-            shortcutsScrollOffset,
-            selectionCallback,
-            indicatorFocused,
-            modalReturnFocus,
-        };
-    }
-    if (prompt.length > 0) {
-        state.saveUndoState();
-        prompt = '';
-        cursorPos = 0;
-        return {
-            prompt,
-            cursorPos,
-            commandMode,
-            helpOverlayActive,
-            helpScrollOffset,
-            shortcutsOverlayActive,
-            shortcutsScrollOffset,
-            selectionCallback,
-            indicatorFocused,
-            modalReturnFocus,
-        };
+    if (host.prompt.length > 0) {
+        host.saveUndoState();
+        host.prompt = '';
+        host.cursorPos = 0;
+        return;
     }
     // Inside an agent or process view Esc goes up one level and stops here:
     // interrupting belongs to main alone.
-    if (state.sessionView?.active) {
-        state.sessionView.escape();
-        state.requestRender();
-        return {
-            prompt,
-            cursorPos,
-            commandMode,
-            helpOverlayActive,
-            helpScrollOffset,
-            shortcutsOverlayActive,
-            shortcutsScrollOffset,
-            selectionCallback,
-            indicatorFocused,
-            modalReturnFocus,
-        };
+    if (host.sessionView?.active) {
+        host.sessionView.escape();
+        host.requestRender();
+        return;
     }
     // Scrolled back: Esc returns to the live output and never interrupts the turn.
-    if (state.transcriptScroll?.scrolledBack()) {
-        state.transcriptScroll.toBottom();
-        state.requestRender();
-        return {
-            prompt,
-            cursorPos,
-            commandMode,
-            helpOverlayActive,
-            helpScrollOffset,
-            shortcutsOverlayActive,
-            shortcutsScrollOffset,
-            selectionCallback,
-            indicatorFocused,
-            modalReturnFocus,
-        };
+    if (host.transcriptScroll?.scrolledBack()) {
+        host.transcriptScroll.toBottom();
+        host.requestRender();
+        return;
     }
-    state.cancelGeneration?.();
-    return {
-        prompt,
-        cursorPos,
-        commandMode,
-        helpOverlayActive,
-        helpScrollOffset,
-        shortcutsOverlayActive,
-        shortcutsScrollOffset,
-        selectionCallback,
-        indicatorFocused,
-        modalReturnFocus,
-    };
+    cancelGeneration?.();
 }

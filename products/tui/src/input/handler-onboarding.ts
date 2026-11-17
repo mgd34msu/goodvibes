@@ -392,10 +392,9 @@ export async function handleOnboardingActionForHandler(handler: InputHandler, ac
     handler.syncRuntimeFromOnboardingRequest(request);
     handler.onboardingWizard.markApplied();
     handler.onboardingWizard.close();
-    for (let index = handler.modalStack.length - 1; index >= 0; index -= 1) {
-      if (handler.modalStack[index] === 'onboarding') handler.modalStack.splice(index, 1);
-    }
-    if (handler.modalStack.length === 0) {
+    // Setup is finished: it does not come back when a modal stacked over it closes.
+    handler.surfaceModals.close(handler.modals.onboarding);
+    if (!handler.surfaceModals.active) {
       const returnFocus = handler.modalReturnFocus;
       handler.indicatorFocused = returnFocus === 'indicator';
       handler.modalReturnFocus = 'prompt';

@@ -78,10 +78,9 @@ import type { FocusTracker } from '@goodvibes-jev/engine/platform/platform/runti
  *     `contextInspectorModal`, `blockActionsMenu`, `searchManager`, `historySearch`,
  *     service objects constructed once
  *   - `keybindingsManager`, from uiServices, stable for app lifetime
- *   - `modalStack`, reference to the handler's shared array (mutated in place)
  *   - `getHistory`, `getViewportHeight`, `getScrollTop`, `scroll`, `exitApp`, stable
  *     callbacks bound in the InputHandler constructor
- *   - All method closures (`modalOpened`, `handleEscape`, etc.), bound once at init
+ *   - All method closures (`handleEscape`, etc.), bound once at init
  *
  * **Rationale:** per-feed mutation avoids per-keystroke allocation cost; stable
  * references are service handles whose identity never changes after construction.
@@ -124,11 +123,10 @@ export interface InputFeedContext {
   readonly contextInspectorModal: ContextInspectorModal;
   readonly overlayFilters: OverlayFilters;
   readonly blockActionsMenu: BlockActionsMenu;
-  /** Kit modals (command palette, confirm dialog, ...): they take every key while open. */
+  /** The modal stack: a kit modal on top (command palette, confirm dialog, ...) takes every key itself. */
   readonly surfaceModals?: SurfaceModalHost;
   readonly searchManager: SearchManager;
   readonly keybindingsManager: KeybindingsManager;
-  readonly modalStack: string[];
   inputHistory: InputHistory | null;
   conversationManager: ConversationManager | null;
   readonly killRing: KillRing;
@@ -139,7 +137,6 @@ export interface InputFeedContext {
   readonly getScrollTop: () => number;
   readonly scroll: (delta: number) => void;
   requestRender: () => void;
-  readonly modalOpened: (name: string) => void;
   /** The agent or process view controls (null before the shell wires them). */
   readonly getSessionView: () => import('./handler-session-view-route.ts').SessionViewControls | null;
   readonly handleEscape: () => void;
@@ -187,6 +184,7 @@ export const feedInputTokens = createFeedInputTokens<InputFeedContext>({
   modal: (context, token, { history }) => handleModalTokenRoutes(
     {
       ...captureModalFeedState(context, token, history),
+      surfaceModals: context.surfaceModals,
       configModal: context.configModal,
       onboardingWizard: context.onboardingWizard,
       onOnboardingAction: context.onOnboardingAction,

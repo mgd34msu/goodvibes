@@ -2162,11 +2162,6 @@
       "types": "./terminal-shell/dist/overlay-input-routes.d.ts",
       "import": "./terminal-shell/dist/overlay-input-routes.js"
     },
-    "./terminal-shell/modal-state": {
-      "bun": "./terminal-shell/src/modal-state.ts",
-      "types": "./terminal-shell/dist/modal-state.d.ts",
-      "import": "./terminal-shell/dist/modal-state.js"
-    },
     "./terminal-shell/modal-stack": {
       "bun": "./terminal-shell/src/modal-stack.ts",
       "types": "./terminal-shell/dist/modal-stack.d.ts",

@@ -1,4 +1,4 @@
-import { createHandlerContentBindings, applyEscapeResult } from '@goodvibes-jev/engine/terminal-shell/handler-content-bindings';
+import { createHandlerContentBindings } from '@goodvibes-jev/engine/terminal-shell/handler-content-bindings';
 import '@goodvibes-jev/engine/terminal-shell/input-content';
 import {
   expandPrompt,
@@ -8,7 +8,7 @@ import {
   handleBookmark,
   handleCopy,
 } from './handler-content-actions.ts';
-import { clearModalStack, handleEscape, modalOpened } from './handler-modal-stack.ts';
+import { handleEscape } from './handler-modal-stack.ts';
 
 import { missingClipboardReaderHint } from '../utils/clipboard.ts';
 import type { InputHandler } from './handler.ts';
@@ -93,59 +93,8 @@ export function executeBlockActionForHandler(handler: InputHandler, actionId: st
  * - If prompt has text: clear it
  * - If prompt is empty: cancel generation (double-tap not needed)
  */
-/**
- * Record that a modal has been opened and push it onto the navigation stack.
- * Call this EVERY time a modal opens (except inside openModal()).
- *
- * @param name - The modal identifier (e.g. 'settings', 'help', 'process').
- */
-export function modalOpenedForHandler(handler: InputHandler, name: string): void {
-  modalOpened(handler, name);
-}
-
-/**
- * Clear the modal navigation stack on non-modal user input (e.g. submit).
- */
-export function clearModalStackForHandler(handler: InputHandler): void {
-  clearModalStack(handler.modalStack);
-}
-
 export function handleEscapeForHandler(handler: InputHandler): void {
-  const result = handleEscape({
-    helpOverlayActive: handler.helpOverlayActive,
-    shortcutsOverlayActive: handler.shortcutsOverlayActive,
-    bookmarkModal: handler.bookmarkModal,
-    liveTailModal: handler.liveTailModal,
-    settingsModal: handler.settingsModal,
-    mcpWorkspace: handler.mcpWorkspace,
-    agentWorkspace: handler.agentWorkspace,
-    sessionPickerModal: handler.sessionPickerModal,
-    profilePickerModal: handler.profilePickerModal,
-    contextInspectorModal: handler.contextInspectorModal,
-    processModal: handler.processModal,
-    modelPicker: handler.modelPicker,
-    filePicker: handler.filePicker,
-    blockActionsMenu: handler.blockActionsMenu,
-    surfaceModals: handler.surfaceModals,
-    sessionView: handler.sessionView ?? undefined,
-    transcriptScroll: handler.transcriptScroll ?? undefined,
-    selectionModal: handler.selectionModal,
-    commandMode: handler.commandMode,
-    modalStack: handler.modalStack,
-    modalReturnFocus: handler.modalReturnFocus,
-    indicatorFocused: handler.indicatorFocused,
-    prompt: handler.prompt,
-    cursorPos: handler.cursorPos,
-    requestRender: handler.requestRender,
-    saveUndoState: () => handler.saveUndoState(),
-    cancelGeneration: handler.commandContext?.cancelGeneration,
-    selectionCallback: handler.selectionCallback,
-    autocompleteReset: () => handler.autocomplete?.reset(),
-    autocompleteUpdate: (query: string) => handler.autocomplete?.update(query),
-    helpScrollOffset: handler.helpScrollOffset,
-    shortcutsScrollOffset: handler.shortcutsScrollOffset,
-  });
-  applyEscapeResult(handler, result);
+  handleEscape(handler, handler.commandContext?.cancelGeneration);
 }
 
 export const {

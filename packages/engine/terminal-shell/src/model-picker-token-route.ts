@@ -24,7 +24,6 @@ export interface ModelPickerCommandContext {
 }
 export interface ModelPickerTokenState<Context, Picker extends ModelPickerModal> {
   modelPicker: Picker;
-  modalStack: string[];
   commandContext?: Context | undefined;
   getViewportHeight: () => number;
   requestRender: () => void;
@@ -42,10 +41,8 @@ export function closeModelPickerRoute(state: {
   readonly modelPicker: {
     close(): void;
   };
-  readonly modalStack: string[];
 }): void {
   state.modelPicker.close();
-  if (state.modalStack[state.modalStack.length - 1] === 'modelPicker') state.modalStack.pop();
 }
 export function createModelPickerTokenHandler<Context extends ModelPickerCommandContext, Picker extends ModelPickerModal>(policy: {
   readonly chromeLines: number;

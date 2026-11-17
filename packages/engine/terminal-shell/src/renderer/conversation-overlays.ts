@@ -2,18 +2,21 @@ import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
 import type { SurfaceLayer } from './surface-kit.js';
 import { renderToasts, type ToastSpec } from './surface-kit-parts.js';
 import { overlayViewportBottom } from './conversation-layout.js';
+import { isTrackedModal, type StackedModal } from '../surface-modal-host.js';
 export type ModalEntry = readonly [name: string, active: boolean, render: () => SurfaceLayer | null];
 type ActiveModal = { readonly active: boolean };
 type CommonConversationModals = Readonly<Record<'modelPicker' | 'settingsModal' | 'mcpWorkspace' | 'sessionPickerModal'
-  | 'profilePickerModal' | 'bookmarkModal' | 'blockActionsMenu' | 'selectionModal' | 'contextInspectorModal' | 'surfaceModals', ActiveModal>> & {
+  | 'profilePickerModal' | 'bookmarkModal' | 'blockActionsMenu' | 'selectionModal' | 'contextInspectorModal', ActiveModal>> & {
   readonly helpOverlayActive: boolean;
   readonly shortcutsOverlayActive: boolean;
+  readonly surfaceModals: { modals(): readonly StackedModal[] };
 };
 /** Product-only workspaces join this predicate at their composition boundary. */
 export function isCommonConversationModalOpen(input: CommonConversationModals): boolean {
   return input.modelPicker.active || input.settingsModal.active || input.mcpWorkspace.active || input.sessionPickerModal.active
     || input.profilePickerModal.active || input.bookmarkModal.active || input.blockActionsMenu.active || input.selectionModal.active
-    || input.contextInspectorModal.active || input.helpOverlayActive || input.shortcutsOverlayActive || input.surfaceModals.active;
+    || input.contextInspectorModal.active || input.helpOverlayActive || input.shortcutsOverlayActive
+    || input.surfaceModals.modals().some((modal) => !isTrackedModal(modal));
 }
 
 /** Popup lifetimes and anchoring are common; renderers retain each product's
@@ -44,30 +47,34 @@ export function applyConversationPopupRows<Input extends {
     autocomplete: input.commandMode && autocomplete?.isActive ? () => renderers.autocomplete(autocomplete, width, height) : undefined,
   });
 }
-/** Preserve modal-stack order, then the product's declared fallback order. */
+/**
+ * Draw the modal stack bottom to top: a kit modal draws itself, a tracked
+ * modal through the product's entry of the same name (an entry that is not
+ * visible, or a modal with no entry, such as a composer popup, draws nothing
+ * here). The permission dialog and toasts go above every modal.
+ */
 export function composeConversationLayers(options: {
   readonly entries: readonly ModalEntry[];
-  readonly modalStack: readonly string[];
+  readonly modals: readonly StackedModal[];
   readonly width: number;
   readonly height: number;
-  readonly renderSurfaceModals: () => SurfaceLayer[];
   readonly permission?: SurfaceLayer | null | undefined;
   readonly headerRows?: number | undefined;
   readonly footerRows?: number | undefined;
   readonly toasts: () => readonly ToastSpec[];
 }): SurfaceLayer[] {
-  const { entries, modalStack, width, height } = options;
-  const rank = (name: string): number => {
-    const index = modalStack.indexOf(name);
-    return index >= 0 ? index : modalStack.length + entries.findIndex(([candidate]) => candidate === name);
-  };
-  const active = entries.filter(([, isActive]) => isActive).sort((a, b) => rank(a[0]) - rank(b[0]));
+  const { entries, modals, width, height } = options;
   const layers: SurfaceLayer[] = [];
-  for (const [, , render] of active) {
-    const layer = render();
+  for (const modal of modals) {
+    if (!isTrackedModal(modal)) {
+      layers.push(modal.render(width, height));
+      continue;
+    }
+    const entry = entries.find(([name]) => name === modal.name);
+    if (!entry?.[1]) continue;
+    const layer = entry[2]();
     if (layer) layers.push(layer);
   }
-  layers.push(...options.renderSurfaceModals());
   if (options.permission) layers.push(options.permission);
   const toasts = renderToasts(width, height, options.toasts(), {
     top: options.headerRows ?? 1,

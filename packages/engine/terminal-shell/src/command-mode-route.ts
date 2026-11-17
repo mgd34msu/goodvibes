@@ -19,7 +19,6 @@ export interface CommandRouteState<Context extends CommandRouteContext> {
   commandMode: boolean;
   prompt: string;
   cursorPos: number;
-  modalStack: string[];
   autocomplete: {
     readonly isActive: boolean;
     reset(): void;
@@ -72,9 +71,6 @@ export function createCommandModeTokenHandler<Context extends CommandRouteContex
     if (!state.commandMode) return false;
     const closeCommandMode = (): void => {
       state.commandMode = false;
-      for (let i = state.modalStack.length - 1; i >= 0; i--) {
-        if (state.modalStack[i] === 'command') state.modalStack.splice(i, 1);
-      }
       state.autocomplete?.reset();
       state.prompt = '';
       state.cursorPos = 0;

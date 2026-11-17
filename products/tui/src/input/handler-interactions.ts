@@ -1,4 +1,4 @@
-import { createHandlerContentBindings, applyEscapeResult } from '@goodvibes-jev/engine/terminal-shell/handler-content-bindings';
+import { createHandlerContentBindings } from '@goodvibes-jev/engine/terminal-shell/handler-content-bindings';
 import { buildProviderAccountSnapshot } from '@/runtime/index.ts';
 import { enrichProviderAccountsSnapshot } from '../runtime/onboarding/provider-key-capture.ts';
 import type { OnboardingWizardMode } from './onboarding/onboarding-wizard.ts';
@@ -14,7 +14,7 @@ import {
   handleCopy,
   handleDiffApply,
 } from './handler-content-actions.ts';
-import { clearModalStack, handleEscape, modalOpened } from './handler-modal-stack.ts';
+import { handleEscape } from './handler-modal-stack.ts';
 import { recordFeatureEnablement } from './onboarding/onboarding-feature-units.ts';
 import { openOnboardingWizardState, type OpenOnboardingWizardOptions } from './handler-ui-state.ts';
 import type { InputHandlerLike as InputHandler } from './handler-types.ts';
@@ -61,7 +61,6 @@ export function openOnboardingWizardForHandler(
   modeOrOptions: OnboardingWizardMode | OpenOnboardingWizardOptions = 'new',
 ): void {
   const options = typeof modeOrOptions === 'string' ? { mode: modeOrOptions } : modeOrOptions;
-  if (!handler.modalStack.includes('onboarding')) handler.modalOpened('onboarding');
   handler.clearOnboardingModelPickerCancelState();
   openOnboardingWizardState(handler.onboardingWizard, options);
   const hydrationSerial = ++handler.onboardingHydrationSerial;
@@ -122,60 +121,8 @@ export function handleDiffApplyForHandler(handler: InputHandler): void {
   );
 }
 
-/**
- * Record that a modal has been opened and push it onto the navigation stack.
- * Call this EVERY time a modal opens (except inside openModal()).
- *
- * @param name - The modal identifier (e.g. 'settings', 'help', 'process').
- */
-export function modalOpenedForHandler(handler: InputHandler, name: string): void {
-  modalOpened(handler, name);
-}
-
-/**
- * Clear the modal navigation stack on non-modal user input (e.g. submit).
- */
-export function clearModalStackForHandler(handler: InputHandler): void {
-  clearModalStack(handler.modalStack);
-}
-
 export function handleEscapeForHandler(handler: InputHandler): void {
-  const result = handleEscape({
-    helpOverlayActive: handler.helpOverlayActive,
-    shortcutsOverlayActive: handler.shortcutsOverlayActive,
-    bookmarkModal: handler.bookmarkModal,
-    settingsModal: handler.settingsModal,
-    mcpWorkspace: handler.mcpWorkspace,
-    sessionPickerModal: handler.sessionPickerModal,
-    profilePickerModal: handler.profilePickerModal,
-    configModal: handler.configModal,
-    contextInspectorModal: handler.contextInspectorModal,
-    modelPicker: handler.modelPicker,
-    filePicker: handler.filePicker,
-    blockActionsMenu: handler.blockActionsMenu,
-    surfaceModals: handler.surfaceModals,
-    sessionView: handler.sessionView ?? undefined,
-    transcriptScroll: handler.transcriptScroll ?? undefined,
-    selectionModal: handler.selectionModal,
-    onboardingWizard: handler.onboardingWizard,
-    commandMode: handler.commandMode,
-    modalStack: handler.modalStack,
-    modalReturnFocus: handler.modalReturnFocus,
-    indicatorFocused: handler.indicatorFocused,
-    prompt: handler.prompt,
-    cursorPos: handler.cursorPos,
-    requestRender: handler.requestRender,
-    saveUndoState: () => handler.saveUndoState(),
-    cancelGeneration: handler.commandContext?.cancelGeneration,
-    selectionCallback: handler.selectionCallback,
-    autocompleteReset: () => handler.autocomplete?.reset(),
-    autocompleteUpdate: (query: string) => handler.autocomplete?.update(query),
-    helpScrollOffset: handler.helpScrollOffset,
-    shortcutsScrollOffset: handler.shortcutsScrollOffset,
-    clearOnboardingModelPickerCancelState: () => handler.clearOnboardingModelPickerCancelState(),
-    restoreOnboardingModelPickerCancelState: () => handler.restoreOnboardingModelPickerCancelState(),
-  });
-  applyEscapeResult(handler, result);
+  handleEscape(handler, handler.commandContext?.cancelGeneration);
 }
 
 export const {

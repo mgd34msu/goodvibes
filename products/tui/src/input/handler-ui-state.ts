@@ -1,4 +1,3 @@
-export { closeModalByName, getActiveModalName, reopenModalByName, type ActiveModalState, type ModalCloseOps, type ModalOpenOps } from '@goodvibes-jev/engine/terminal-shell/modal-state';
 export { handleOverlayToken, handleHistorySearchToken, handleSearchModeToken } from '@goodvibes-jev/engine/terminal-shell/overlay-input-routes';
 
 import type { OnboardingWizardController, OnboardingWizardMode, OnboardingWizardSnapshot } from './onboarding/onboarding-wizard.ts';

@@ -15,7 +15,6 @@ import { homedir } from 'node:os';
 import { SetupPairingController } from './shell/setup-pairing-controller.ts';
 import { parseSlashCommand } from './input/slash-command-parser.ts';
 import { runExitSequence } from './shell/exit-sequence.ts';
-import { pruneStaleModalStack } from './input/handler-modal-stack.ts';
 import { buildAgentHerdrSessionUpdate } from './shell/herdr-session.ts';
 import './renderer/compositor.ts';
 import { installStartupThemeProbe } from './renderer/startup-theme-probe.ts';
@@ -500,7 +499,7 @@ async function main() {
       services: ctx.services,
       exit: exitApp,
       // The person is in the middle of something this shell can see.
-      userIsMidGesture: () => input.prompt.length > 0 || input.modalStack.length > 0 || input.waitingForOwner
+      userIsMidGesture: () => input.prompt.length > 0 || input.surfaceModals.active || input.waitingForOwner
         || shellCommandsRunning > 0 || setupPairing?.ownsInput === true || pendingPermission !== null,
       workRunningHere: () => mainTurnBusy() || uiServices.readModels.agents.getSnapshot().active.length > 0
         || processManager.list().some((entry) => !entry.done),
@@ -597,7 +596,6 @@ async function main() {
     if (ctx.services.conversationRewindHost.resumeIfTakenOver()) {
       systemMessageRouter.high('[Rewind] Another surface had taken over this session; this one is offering its conversation for rewinds again.');
     }
-    input.clearModalStack();
     transcript.toBottom(); // Re-lock on user input
   };
 
@@ -822,7 +820,6 @@ async function main() {
       new ActivityModal({
         view: () => activityView(),
         openProcesses: () => {
-          input.modalOpened('process');
           input.processModal.open();
           render();
         },
@@ -921,9 +918,8 @@ async function main() {
         input.autocomplete?.reset();
         render();
       },
-      // A modal that closed itself leaves a stale stack name that would refuse pairing with nothing on screen.
+      // Nothing on the modal stack, command mode included.
       canPresent: () => {
-        pruneStaleModalStack(input);
         return !exiting &&
           pendingPermission === null &&
           recoveryPending === null &&
@@ -931,7 +927,6 @@ async function main() {
           !input.concealedInput &&
           !input.plainLineInput &&
           !input.surfaceModals.active &&
-          input.modalStack.length === 0 &&
           !input.searchManager.active &&
           !input.historySearch.active &&
           !sessionViews.active;

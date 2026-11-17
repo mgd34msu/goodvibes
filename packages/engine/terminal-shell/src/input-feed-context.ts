@@ -39,7 +39,6 @@ export type FeedContextStableKeys =
   | 'blockActionsMenu'
   | 'surfaceModals'
   | 'searchManager'
-  | 'modalStack'
   | 'inputHistory'
   | 'conversationManager'
   | 'keybindingsManager'
@@ -50,7 +49,6 @@ export type FeedContextStableKeys =
   | 'scroll'
   | 'exitApp';
 export type FeedContextClosureKeys =
-  | 'modalOpened'
   | 'getSessionView'
   | 'handleEscape'
   | 'submitConcealedInput'
@@ -161,7 +159,6 @@ const STABLE_HOST_KEYS = [
   'blockActionsMenu',
   'surfaceModals',
   'searchManager',
-  'modalStack',
   'inputHistory',
   'conversationManager',
   'getHistory',
@@ -190,7 +187,6 @@ export function projectFeedContextStable<
 }
 
 const FEED_FORWARD_KEYS = [
-  'modalOpened',
   'submitConcealedInput',
   'handleCopy',
   'handleBlockCopy',

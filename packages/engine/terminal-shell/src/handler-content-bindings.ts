@@ -14,7 +14,6 @@ import type { InfiniteBuffer } from './conversation-history.js';
 import type { SelectionManager } from './text-selection.js';
 import type { BookmarkManager } from '@goodvibes-jev/engine/platform/platform/bookmarks';
 import { activeTokens } from './renderer/theme.js';
-import type { handleEscape } from './modal-stack.js';
 export interface HandlerContentHost extends PasteRegistryState {
   prompt: string;
   cursorPos: number;
@@ -152,19 +151,4 @@ export function createHandlerContentBindings<Host extends HandlerContentHost>(po
     handleBlockToggleForHandler,
     handleCtrlCForHandler,
   };
-}
-
-type EscapeResult = ReturnType<typeof handleEscape>;
-/** Apply the shared modal result to the live host, preserving composer and focus state together. */
-export function applyEscapeResult(host: { [Key in keyof EscapeResult]?: EscapeResult[Key] | undefined }, result: EscapeResult): void {
-  host.prompt = result.prompt;
-  host.cursorPos = result.cursorPos;
-  host.commandMode = result.commandMode;
-  host.helpOverlayActive = result.helpOverlayActive;
-  host.helpScrollOffset = result.helpScrollOffset;
-  host.shortcutsOverlayActive = result.shortcutsOverlayActive;
-  host.shortcutsScrollOffset = result.shortcutsScrollOffset;
-  host.selectionCallback = result.selectionCallback;
-  host.indicatorFocused = result.indicatorFocused;
-  host.modalReturnFocus = result.modalReturnFocus;
 }

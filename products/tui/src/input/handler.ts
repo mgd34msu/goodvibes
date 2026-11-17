@@ -10,7 +10,6 @@ import { SurfacePointer } from './surface-pointer.ts';
 import { InputTokenizer, type InputToken } from '@goodvibes-jev/engine/platform/platform/core';
 import { createOAuthLocalListener } from '@goodvibes-jev/engine/platform/platform/config';
 import {
-  clearModalStackForHandler,
   cleanupMarkerRegistryForHandler,
   executeBlockActionForHandler,
   expandPromptForHandler,
@@ -26,7 +25,6 @@ import {
   handleEscapeForHandler,
   handlePasteForHandler,
   hydrateOnboardingWizardFromRuntimeForHandler,
-  modalOpenedForHandler,
   openOnboardingWizardForHandler,
   registerPasteForHandler,
 } from './handler-interactions.ts';
@@ -78,7 +76,7 @@ import { pasteFromClipboard, pasteImageFromClipboard } from '../utils/clipboard.
 import { saveUndoState, shouldCoalesceUndo } from './handler-prompt-buffer.ts';
 import { KillRing } from './kill-ring.ts';
 import { beginConcealedInputFor, submitConcealedInputFor, cancelConcealedInputFor, type ConcealedInputRequest } from './concealed-input.ts';
-import { clearModalStack, handleEscape, modalOpened } from './handler-modal-stack.ts';
+import { createHandlerModals, ownModal } from './handler-modal-stack.ts';
 import { SelectionModalQueue, attachSelectionModalQueue } from './selection-modal-queue.ts';
 import { type OnboardingWizardSnapshot, type OpenOnboardingWizardOptions } from './handler-ui-state.ts';
 import { feedInputTokens } from './handler-feed.ts';
@@ -86,7 +84,7 @@ import type { InputHandlerLike } from './handler-types.ts';
 import { buildInitialFeedContext } from './feed-context-factory.ts';
 import type { UiRuntimeServices } from '../runtime/ui-services.ts';
 import type { ModelPickerTarget } from './model-picker.ts';
-import { SurfaceModalHost } from '@goodvibes-jev/engine/terminal-shell/surface-modal-host';
+import { SurfaceModalHost, isTrackedModal } from '@goodvibes-jev/engine/terminal-shell/surface-modal-host';
 
 type SelectionModalCallback = (result: SelectionResult | null) => void;
 
@@ -127,7 +125,10 @@ export class InputHandler extends TerminalInputHandlerState implements InputHand
   public readonly overlayFilters = new OverlayFilters();
   public bookmarkModal: BookmarkModal;
   public blockActionsMenu = new BlockActionsMenu();
+  /** The one stack of open modals: kit modals and the handler's own (surface-modal-host.ts). */
   public surfaceModals = new SurfaceModalHost();
+  /** The handler's own modals as objects on that stack. */
+  public readonly modals: InputHandlerLike['modals'];
   /** Agent and process views (shell/session-views.ts); null until the shell wires them. */
   public sessionView: import('./handler-session-view-route.ts').SessionViewControls | null = null;
   /** The main transcript's scroll, for Esc while scrolled back (handler-modal-stack.ts); null until the shell wires it. */
@@ -214,6 +215,42 @@ export class InputHandler extends TerminalInputHandlerState implements InputHand
     ); // third source: the daemon-hosted roster
     this.profilePickerModal = new ProfilePickerModal(uiServices.shell.profileManager);
     this.selectionQueue = attachSelectionModalQueue(this); // wires exitApp teardown too, see selection-modal-queue.ts
+    this.modals = {
+      ...createHandlerModals(this, {
+        clearCommandText: false,
+        afterModelPickerClose: () => this.restoreOnboardingModelPickerCancelState(),
+      }),
+      config: ownModal('config', () => this.configModal, () => this.configModal.reopen()),
+      onboarding: {
+        ...ownModal('onboarding', () => this.onboardingWizard, () => this.onboardingWizard.reopen()),
+        close: () => {
+          this.onboardingWizard.close();
+          this.clearOnboardingModelPickerCancelState();
+        },
+      },
+    };
+    const modals = this.modals;
+    this.surfaceModals.track(
+      modals.command,
+      modals.onboarding,
+      modals.settings,
+      modals.config,
+      modals.mcpWorkspace,
+      modals.sessionPicker,
+      modals.profilePicker,
+      modals.bookmark,
+      modals.contextInspector,
+      modals.help,
+      modals.shortcuts,
+      modals.modelPicker,
+      modals.filePicker,
+      modals.blockActions,
+      modals.selection,
+    );
+    this.surfaceModals.onOpen = (modal, fromEmpty) => {
+      if (fromEmpty) this.modalReturnFocus = this.indicatorFocused ? 'indicator' : 'prompt';
+      if (isTrackedModal(modal)) this.hostPairing?.cancelForTakeover();
+    };
     this.initFeedContext();
   }
 
@@ -354,13 +391,6 @@ export class InputHandler extends TerminalInputHandlerState implements InputHand
   }
   public handleCtrlC(): void {
     handleCtrlCForHandler(this);
-  }
-  public modalOpened(name: string): void {
-    this.hostPairing?.cancelForTakeover();
-    modalOpenedForHandler(this, name);
-  }
-  public clearModalStack(): void {
-    clearModalStackForHandler(this);
   }
   public handleEscape(): void {
     handleEscapeForHandler(this);

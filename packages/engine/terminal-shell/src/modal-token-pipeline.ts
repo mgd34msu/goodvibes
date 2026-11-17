@@ -1,6 +1,6 @@
 import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
 import { withModalState as withState, type ModalTokenSnapshot } from './modal-input-routes.js';
-import { MODAL_NAMES, isModalName, type ModalName } from './modal-state.js';
+import { isTrackedModal, type StackedModal } from './surface-modal-host.js';
 type ModalRoute =
   | 'handleSelectionModalToken'
   | 'handleBookmarkModalToken'
@@ -18,8 +18,8 @@ type ModalRoute =
   | 'agent-workspace'
   | 'live-tail'
   | 'process';
-/** The key route of each modal. Command mode is routed by the composer, not here. */
-const MODAL_ROUTES: Readonly<Record<ModalName, ModalRoute | null>> = {
+/** The key route of each tracked modal, by its name. Command mode has none: the composer routes it. */
+const MODAL_ROUTES: Readonly<Partial<Record<string, ModalRoute>>> = {
   help: 'handleOverlayToken',
   shortcuts: 'handleOverlayToken',
   bookmark: 'handleBookmarkModalToken',
@@ -37,18 +37,7 @@ const MODAL_ROUTES: Readonly<Record<ModalName, ModalRoute | null>> = {
   blockActions: 'handleBlockActionsToken',
   selection: 'handleSelectionModalToken',
   onboarding: 'onboarding',
-  command: null,
 };
-/**
- * Keys go to the modal Escape would close: the topmost stacked modal still on
- * screen, else the first active modal in {@link MODAL_NAMES}. Transcript search comes
- * before any modal and composer history search after them, in both apps.
- */
-const ROUTE_ORDER: readonly (ModalRoute | 'handleSearchModeToken' | 'handleHistorySearchToken')[] = [
-  'handleSearchModeToken',
-  ...new Set(MODAL_NAMES.map((name) => MODAL_ROUTES[name]).filter((route): route is ModalRoute => route !== null)),
-  'handleHistorySearchToken',
-];
 export type ModalTokenResult = ReturnType<typeof withState>;
 export type CommonModalRoutingState = ModalTokenSnapshot &
   Readonly<
@@ -64,7 +53,6 @@ export type CommonModalRoutingState = ModalTokenSnapshot &
         | 'selectionModal'
         | 'getSelectionCallback'
         | 'setSelectionCallback'
-        | 'modalStack'
         | 'bookmarkModal'
         | 'commandContext'
         | 'settingsModal'
@@ -92,6 +80,8 @@ export type CommonModalRoutingState = ModalTokenSnapshot &
   > & {
     readonly requestRender: () => void;
     readonly handleEscape: () => void;
+    /** The modal stack: the top modal takes the key. */
+    readonly surfaceModals?: { top(): StackedModal | undefined } | undefined;
     readonly contextInspectorModal: {
       readonly active: boolean;
       scrollBy(delta: number): void;
@@ -118,7 +108,6 @@ export function createModalTokenPipeline<State extends CommonModalRoutingState>(
         selectionCallback: State['selectionCallback'];
         getSelectionCallback: State['getSelectionCallback'];
         setSelectionCallback: State['setSelectionCallback'];
-        modalStack: State['modalStack'];
         requestRender: State['requestRender'];
         handleEscape: State['handleEscape'];
       },
@@ -192,7 +181,6 @@ export function createModalTokenPipeline<State extends CommonModalRoutingState>(
     handleModelPickerToken: (
       value: {
         modelPicker: State['modelPicker'];
-        modalStack: State['modalStack'];
         commandContext: State['commandContext'];
         getViewportHeight: State['getViewportHeight'];
         requestRender: State['requestRender'];
@@ -215,7 +203,6 @@ export function createModalTokenPipeline<State extends CommonModalRoutingState>(
         filePicker: State['filePicker'];
         prompt: State['prompt'];
         cursorPos: State['cursorPos'];
-        modalStack: State['modalStack'];
         imageRegistry: State['imageRegistry'];
         nextImageId: State['nextImageId'];
         requestRender: State['requestRender'];
@@ -232,7 +219,6 @@ export function createModalTokenPipeline<State extends CommonModalRoutingState>(
       value: {
         blockActionsMenu: State['blockActionsMenu'];
         executeBlockAction: State['executeBlockAction'];
-        modalStack: State['modalStack'];
         requestRender: State['requestRender'];
         handleEscape: State['handleEscape'];
       },
@@ -274,7 +260,6 @@ export function createModalTokenPipeline<State extends CommonModalRoutingState>(
       selectionCallback: state.selectionCallback,
       getSelectionCallback: state.getSelectionCallback,
       setSelectionCallback: state.setSelectionCallback,
-      modalStack: state.modalStack,
       requestRender: state.requestRender,
       handleEscape: state.handleEscape,
     };
@@ -382,7 +367,6 @@ export function createModalTokenPipeline<State extends CommonModalRoutingState>(
       bindings.handleModelPickerToken(
         {
           modelPicker: state.modelPicker,
-          modalStack: state.modalStack,
           commandContext: state.commandContext,
           getViewportHeight: state.getViewportHeight,
           requestRender: state.requestRender,
@@ -415,7 +399,6 @@ export function createModalTokenPipeline<State extends CommonModalRoutingState>(
       filePicker: state.filePicker,
       prompt: state.prompt,
       cursorPos: state.cursorPos,
-      modalStack: state.modalStack,
       imageRegistry: state.imageRegistry,
       nextImageId: state.nextImageId,
       requestRender: state.requestRender,
@@ -440,7 +423,6 @@ export function createModalTokenPipeline<State extends CommonModalRoutingState>(
         {
           blockActionsMenu: state.blockActionsMenu,
           executeBlockAction: state.executeBlockAction,
-          modalStack: state.modalStack,
           requestRender: state.requestRender,
           handleEscape: state.handleEscape,
         },
@@ -451,7 +433,6 @@ export function createModalTokenPipeline<State extends CommonModalRoutingState>(
     }
   }
   const routes = {
-    handleSearchModeToken,
     handleSelectionModalToken,
     handleBookmarkModalToken,
     handleSettingsModalToken,
@@ -459,35 +440,28 @@ export function createModalTokenPipeline<State extends CommonModalRoutingState>(
     handleSessionPickerToken,
     handleProfilePickerToken,
     handleOverlayToken,
-    handleHistorySearchToken,
     handleModelPickerToken,
     handleEscapeOnlyModalToken,
     handleFilePickerToken,
     handleBlockActionsToken,
   };
-  const run = (name: (typeof ROUTE_ORDER)[number], state: State, token: InputToken): ModalTokenResult | undefined => {
+  const run = (name: ModalRoute, state: State, token: InputToken): ModalTokenResult | undefined => {
     if (name in routes) return routes[name as keyof typeof routes](state, token);
     const extra = options.additional?.[name as keyof NonNullable<typeof options.additional>];
     return extra?.(state, token) ? withState(state, true) : undefined;
   };
+  /**
+   * Transcript search first, then the modal on top of the stack (the one Esc
+   * would close), then composer history search, in both apps. A kit modal on
+   * top took the key before this pipeline (input-feed-pipeline.ts).
+   */
   return function handleModalTokenRoutes(state: State, token: InputToken): ModalTokenResult {
-    // Topmost stacked modal still on screen first; an entry whose modal closed
-    // itself declines the key, which is the same entry Escape skips.
-    const stack = (state.modalStack as readonly string[] | undefined) ?? [];
-    const tried = new Set<ModalRoute>();
-    for (let i = stack.length - 1; i >= 0; i--) {
-      const name = stack[i];
-      const route = name !== undefined && isModalName(name) ? MODAL_ROUTES[name] : null;
-      if (!route || tried.has(route)) continue;
-      tried.add(route);
-      const result = run(route, state, token);
-      if (result) return result;
-    }
-    for (const name of ROUTE_ORDER) {
-      if (tried.has(name as ModalRoute)) continue;
-      const result = run(name, state, token);
-      if (result) return result;
-    }
-    return withState(state, false);
+    const searched = handleSearchModeToken(state, token);
+    if (searched) return searched;
+    const top = state.surfaceModals?.top();
+    const route = top && isTrackedModal(top) ? MODAL_ROUTES[top.name] : undefined;
+    const routed = route ? run(route, state, token) : undefined;
+    if (routed) return routed;
+    return handleHistorySearchToken(state, token) ?? withState(state, false);
   };
 }

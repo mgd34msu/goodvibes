@@ -532,7 +532,6 @@ async function main() {
   const submitInput = (text: string, content?: ContentPart[], options: ProductInputContext = {}) => {
     commandReadings.cancelAll();
     hostPairing?.cancelForTakeover();
-    input.clearModalStack();
     // Acting here after another surface took the session over is what moves the conversation back for rewinds.
     if (ctx.services.conversationRewindHost.resumeIfTakenOver()) {
       systemMessageRouter.high('[Rewind] Another surface had taken over this session; this one is offering its conversation for rewinds again.');

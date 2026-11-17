@@ -97,8 +97,8 @@ export interface ConversationLayerContext {
  * over the dimmed screen (surface-compose.ts). Normally one modal is open;
  * when one opens another (settings opening the model picker or a theme
  * picker), both are drawn in the order they were opened (the input layer's
- * modal stack), the newer on top, each dimming what is under it. Kit-host
- * modals (command palette, confirm dialog), the permission dialog and toasts
+ * modal stack, kit modals such as the command palette included), the newer
+ * on top, each dimming what is under it. The permission dialog and toasts
  * sit above all of them.
  */
 export function buildConversationLayers(context: ConversationLayerContext): SurfaceLayer[] {
@@ -141,10 +141,9 @@ export function buildConversationLayers(context: ConversationLayerContext): Surf
   ];
   return composeConversationLayers({
     entries,
-    modalStack: input.modalStack,
+    modals: input.surfaceModals.modals(),
     width: w,
     height: h,
-    renderSurfaceModals: () => input.surfaceModals.render(w, h),
     permission: context.permission,
     headerRows: context.headerRows,
     footerRows: context.footerRows,

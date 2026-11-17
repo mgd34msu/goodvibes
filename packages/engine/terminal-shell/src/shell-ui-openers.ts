@@ -5,7 +5,6 @@ interface CommonModal {
 }
 interface CommonUiInput<Context> {
   openSelection: OpenSelection;
-  modalOpened(name: 'contextInspector' | 'bookmark' | 'shortcuts' | 'help' | 'profilePicker' | 'sessionPicker'): unknown;
   readonly contextInspectorModal: CommonModal;
   readonly bookmarkModal: CommonModal;
   readonly profilePickerModal: CommonModal;
@@ -27,28 +26,25 @@ export function createCommonShellUiOpeners<Context>(options: {
   readonly renderHelpToggle?: boolean;
 }) {
   const { input, render, commandContext } = options;
-  const open = (name: 'contextInspector' | 'bookmark' | 'profilePicker' | 'sessionPicker', modal: CommonModal) => {
-    input.modalOpened(name);
+  const open = (modal: CommonModal) => {
     modal.open();
     render();
   };
   return {
     openSelection: ((title, items, opts, callback) => input.openSelection(title, items, opts, callback)) as OpenSelection,
-    openContextInspector: () => open('contextInspector', input.contextInspectorModal),
-    openBookmarkModal: () => open('bookmark', input.bookmarkModal),
-    openProfilePicker: () => open('profilePicker', input.profilePickerModal),
-    openSessionPicker: () => open('sessionPicker', input.sessionPickerModal),
+    openContextInspector: () => open(input.contextInspectorModal),
+    openBookmarkModal: () => open(input.bookmarkModal),
+    openProfilePicker: () => open(input.profilePickerModal),
+    openSessionPicker: () => open(input.sessionPickerModal),
     // Open, never toggle: asked twice, the overlay is open. Esc (and the
     // overlay's own key routes) close it.
     openHelpOverlay: () => {
-      if (!input.helpOverlayActive) input.modalOpened('help');
       input.helpOverlayActive = true;
       input.helpScrollOffset = 0;
       input.overlayFilters.help.clear();
       render();
     },
     openShortcutsOverlay: () => {
-      if (!input.shortcutsOverlayActive) input.modalOpened('shortcuts');
       input.shortcutsOverlayActive = true;
       input.shortcutsScrollOffset = 0;
       input.overlayFilters.shortcuts.clear();
@@ -72,13 +68,11 @@ export function createCommonShellUiOpeners<Context>(options: {
  * not say what its selection did).
  */
 export function createSettingsWorkspaceOpener(options: {
-  readonly activate: () => void;
   readonly configure: () => void;
   readonly selectTarget: (target?: string) => SettingsTargetOutcome | void;
   readonly render: () => void;
 }): (target?: string) => SettingsTargetOutcome | 'unreported' {
   return (target) => {
-    options.activate();
     options.configure();
     const outcome = options.selectTarget(target);
     options.render();

@@ -16,6 +16,7 @@ import type { OverlayFilters } from './overlay-filter.ts';
 import type { FilePickerModal } from './file-picker.ts';
 import type { BlockActionsMenu, BlockActionId } from '../renderer/block-actions.ts';
 import type { SearchManager } from './search.ts';
+import type { SurfaceModalHost } from '@goodvibes-jev/engine/terminal-shell/surface-modal-host';
 import type { OnboardingWizardAction, OnboardingWizardController } from './onboarding/onboarding-wizard.ts';
 import { handleHistorySearchToken, handleOverlayToken, handleSearchModeToken } from './handler-ui-state.ts';
 import { handleOnboardingWizardToken } from './onboarding/handler-onboarding-routes.ts';
@@ -59,14 +60,14 @@ export type ModalTokenRouteState = {
   prompt: string;
   cursorPos: number;
   modelPicker: ModelPickerModal;
-  modalStack: string[];
+  /** The modal stack: its top modal takes the key. */
+  surfaceModals?: SurfaceModalHost;
   commandContext?: CommandContext;
   getViewportHeight: () => number;
   requestRender: () => void;
   handleEscape: () => void;
   contextInspectorModal: ContextInspectorModal;
   overlayFilters?: OverlayFilters;
-  modalOpened: (name: string) => void;
   filePicker: FilePickerModal;
   imageRegistry: Map<string, { data: string; mediaType: string }>;
   nextImageId: number;

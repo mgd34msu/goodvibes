@@ -96,7 +96,6 @@ export interface InputHandlerLike {
 
   // ── Modal state ───────────────────────────────────────────────────────────
   commandMode: boolean;
-  modalStack: string[];
   modalReturnFocus: 'prompt' | 'indicator';
   indicatorFocused: boolean;
   helpOverlayActive: boolean;
@@ -118,6 +117,11 @@ export interface InputHandlerLike {
   filePicker: FilePickerModal;
   blockActionsMenu: BlockActionsMenu;
   surfaceModals: import('@goodvibes-jev/engine/terminal-shell/surface-modal-host').SurfaceModalHost;
+  /** The handler's own modals as objects on the modal stack: the shared ones, the config surfaces and onboarding. */
+  readonly modals: import('@goodvibes-jev/engine/terminal-shell/modal-stack').HandlerModals & {
+    readonly config: import('@goodvibes-jev/engine/terminal-shell/surface-modal-host').TrackedModal;
+    readonly onboarding: import('@goodvibes-jev/engine/terminal-shell/surface-modal-host').TrackedModal;
+  };
   sessionView: import('./handler-session-view-route.ts').SessionViewControls | null;
   transcriptScroll: import('./handler-modal-stack.ts').TranscriptScrollControls | null;
   selectionModal: SelectionModal;
@@ -130,7 +134,6 @@ export interface InputHandlerLike {
   onboardingOpenAiListenerSerial: number;
 
   // ── Methods: modal lifecycle ──────────────────────────────────────────────
-  modalOpened(name: string): void;
   saveUndoState(): void;
   ensureInputCursorVisible(contentWidth?: number): void;
 

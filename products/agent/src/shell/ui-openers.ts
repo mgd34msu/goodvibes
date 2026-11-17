@@ -127,7 +127,6 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
       refreshLiveModels: async () => (await providerRegistry.refreshLiveModelDiscovery?.()) ?? [],
     }),
     picker: input.modelPicker,
-    modalOpened: () => input.modalOpened('modelPicker'),
     render,
     listModels: pickerModels,
     listProviders: () => [...new Set(providerRegistry.listModels().map((model) => model.provider))],
@@ -205,7 +204,6 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
   Object.assign(commandContext, createCommonShellUiOpeners({ input, commandContext, render, renderHelpToggle: false }));
 
   commandContext.openProcessModal = () => {
-    input.modalOpened('process');
     input.processModal.open();
     render();
   };
@@ -229,7 +227,7 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
       return { opened: false, reason: 'not_found' };
     }
 
-    input.modalOpened('liveTail');
+    // An open monitor comes back when Esc closes the live tail (one stack level).
     input.processModal.close();
     input.liveTailModal.open(entry);
     render();
@@ -260,7 +258,6 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
       return false;
     }
 
-    input.modalOpened('command');
     input.commandMode = true;
     if (input.prompt.length === 0 || !input.prompt.startsWith('/') || normalizedQuery.length > 0) {
       input.saveUndoState();
@@ -286,7 +283,6 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
     input.saveUndoState();
     input.prompt = input.prompt.slice(0, insertPos) + marker + input.prompt.slice(insertPos);
     input.cursorPos = insertPos + marker.length;
-    input.modalOpened('filePicker');
     input.filePicker.open(insertPos, injectMode);
     if (query.length > 0) input.filePicker.setQuery(query);
     input.ensureInputCursorVisible();
@@ -303,14 +299,12 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
     if (!nearest) {
       return false;
     }
-    input.modalOpened('blockActions');
     input.blockActionsMenu.open(nearest);
     render();
     return true;
   };
 
   commandContext.openSettingsModal = createSettingsWorkspaceOpener({
-    activate: () => input.modalOpened('settings'),
     configure: () => {
       input.settingsModal.open(configManager, featureFlags, subscriptionManager, serviceRegistry, mcpRegistry, secretsManager, {
         requestRender: render,

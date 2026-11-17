@@ -55,7 +55,6 @@ type ProcessRouteState = {
   liveTailModal: {
     open: (entry: ProcessEntry) => void;
   };
-  modalOpened: (name: string) => void;
   requestRender: () => void;
   handleEscape: () => void;
   /** Open a process's output full screen (shell/session-views.ts); false when it cannot be opened here. */
@@ -84,7 +83,7 @@ export function handleProcessModalToken(state: ProcessRouteState, token: InputTo
       // The process opens full screen; the monitor closes behind it the way Esc closes it (one stack level).
       if (entry && state.openProcessView?.(entry.id)) state.handleEscape();
       else if (entry) {
-        state.modalOpened('liveTail');
+        // The monitor comes back when Esc closes the live tail (one stack level).
         modal.close();
         state.liveTailModal.open(entry);
       }

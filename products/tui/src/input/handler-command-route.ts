@@ -11,7 +11,6 @@ export type CommandModeRouteState = {
   prompt: string;
   cursorPos: number;
   autocomplete: AutocompleteEngine | null;
-  modalStack: string[];
   commandRegistry: CommandRegistry | null;
   commandContext?: CommandContext;
   conversationManager: ConversationManager | null;

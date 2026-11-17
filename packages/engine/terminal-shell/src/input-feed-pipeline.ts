@@ -10,7 +10,7 @@ type MouseToken = InputToken & { type: 'mouse' };
 export interface FeedPipelineContext extends FeedContextMutableInit {
   readonly focusTracker: { setFocused(focused: boolean): void };
   readonly keybindingsManager: { matches(action: 'clear-cancel', token: KeyToken): boolean };
-  readonly surfaceModals?: Pick<SurfaceModalHost, 'active' | 'handleToken'> | undefined;
+  readonly surfaceModals?: Pick<SurfaceModalHost, 'kitModalOnTop' | 'handleToken'> | undefined;
   readonly getSessionView: () => SessionViewControls | null;
   /** True while the composer collects a concealed value; command dispatch must not see that text. */
   readonly isConcealedInput?: (() => boolean) | undefined;
@@ -115,7 +115,9 @@ export function createFeedInputTokens<Context extends FeedPipelineContext>(ports
         context.handleCtrlC();
         return;
       }
-      if (context.surfaceModals?.active && (ports.surfaceModalTokens === 'all' || token.type === 'key' || token.type === 'text')) {
+      // A kit modal on top of the modal stack takes the token itself; a tracked
+      // modal on top takes it through its route in ports.modal.
+      if (context.surfaceModals?.kitModalOnTop && (ports.surfaceModalTokens === 'all' || token.type === 'key' || token.type === 'text')) {
         if (token.type === 'key' && token.logicalName === 'escape') context.handleEscape();
         else context.surfaceModals.handleToken(token);
         context.requestRender();

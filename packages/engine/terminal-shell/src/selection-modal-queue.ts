@@ -33,8 +33,6 @@ export interface SelectionQueueHost {
   setSelectionCallback(callback: SelectionModalCallback | null): void;
   /** Mirrors the callback into the in-flight feed context, when a feed() call is in progress (no-op otherwise). */
   syncFeedSelectionCallback(callback: SelectionModalCallback | null): void;
-  modalOpened(name: string): void;
-  modalClosed?(name: string): void;
   requestRender(): void;
 }
 
@@ -85,7 +83,6 @@ export class SelectionModalQueue {
         this.host.setSelectionCallback(null);
         this.host.syncFeedSelectionCallback(null);
         this.host.selectionModal.close();
-        this.host.modalClosed?.('selection');
       }
       try { request.callback(null); }
       finally { queueMicrotask(() => this.drain()); this.host.requestRender(); }
@@ -125,7 +122,6 @@ export class SelectionModalQueue {
       () => this.host.setSelectionCallback(null),
       () => this.host.syncFeedSelectionCallback(null),
       () => this.host.selectionModal.close(),
-      () => this.host.modalClosed?.('selection'),
       () => active?.callback(null),
       () => this.clear(),
     ]) {
@@ -148,8 +144,6 @@ export class SelectionModalQueue {
         if (terminal && !this.host.selectionModal.active) queueMicrotask(() => this.drain());
       }
     };
-    this.host.modalOpened('selection');
-    if (this.active !== request) return;
     this.host.selectionModal.open(request.title, request.items, request.opts);
     if (this.active !== request) return;
     this.host.setSelectionCallback(wrapped);
@@ -172,10 +166,8 @@ export class SelectionModalQueue {
 /** InputHandler's actual field/method shape, satisfies this structurally, no import needed. */
 export interface SelectionQueueOwner {
   readonly selectionModal: Pick<SelectionModal, 'active' | 'open' | 'close'>;
-  readonly modalStack?: string[];
   selectionCallback: SelectionModalCallback | null;
   syncFeedSelectionCallback: ((callback: SelectionModalCallback | null) => void) | null;
-  modalOpened(name: string): void;
   requestRender(): void;
   exitApp: () => void;
 }
@@ -192,11 +184,6 @@ export function attachSelectionModalQueue(owner: SelectionQueueOwner): Selection
     selectionModal: owner.selectionModal,
     setSelectionCallback: (callback) => { owner.selectionCallback = callback; },
     syncFeedSelectionCallback: (callback) => { owner.syncFeedSelectionCallback?.(callback); },
-    modalOpened: (name) => owner.modalOpened(name),
-    modalClosed: (name) => {
-      const index = owner.modalStack?.lastIndexOf(name) ?? -1;
-      if (index >= 0) owner.modalStack?.splice(index, 1);
-    },
     requestRender: () => owner.requestRender(),
   });
   const suppliedExitApp = owner.exitApp;

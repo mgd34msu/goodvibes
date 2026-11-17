@@ -87,10 +87,9 @@ import type { FocusTracker } from '@/runtime/index.ts';
  *     `contextInspectorModal`, `blockActionsMenu`, `searchManager`, `historySearch`,
  *     service objects constructed once
  *   - `keybindingsManager`, from uiServices, stable for app lifetime
- *   - `modalStack`, reference to the handler's shared array (mutated in place)
  *   - `getHistory`, `getViewportHeight`, `getScrollTop`, `scroll`, `exitApp`, stable
  *     callbacks bound in the InputHandler constructor
- *   - All method closures (`modalOpened`, `handleEscape`, etc.), bound once at init
+ *   - All method closures (`handleEscape`, etc.), bound once at init
  *
  * **Rationale:** per-feed mutation avoids per-keystroke allocation cost; stable
  * references are service handles whose identity never changes after construction.
@@ -139,12 +138,11 @@ export interface InputFeedContext {
   readonly liveTailModal: LiveTailModal;
   readonly contextInspectorModal: ContextInspectorModal;
   readonly overlayFilters: OverlayFilters;
-  /** Kit modals (the activity modal, ...): they take every key while open. */
+  /** The modal stack: a kit modal on top (the activity modal, ...) takes every key itself. */
   readonly surfaceModals?: SurfaceModalHost;
   readonly blockActionsMenu: BlockActionsMenu;
   readonly searchManager: SearchManager;
   readonly keybindingsManager: KeybindingsManager;
-  readonly modalStack: string[];
   inputHistory: InputHistory | null;
   conversationManager: ConversationManager | null;
   readonly getHistory: () => InfiniteBuffer;
@@ -152,7 +150,6 @@ export interface InputFeedContext {
   readonly getScrollTop: () => number;
   readonly scroll: (delta: number) => void;
   requestRender: () => void;
-  readonly modalOpened: (name: string) => void;
   /** The agent or process view controls (null before the shell wires them). */
   readonly getSessionView: () => import('./handler-session-view-route.ts').SessionViewControls | null;
   readonly handleEscape: () => void;
@@ -203,6 +200,7 @@ export const feedInputTokens = createFeedInputTokens<InputFeedContext>({
   modal: (context, token, { history }) => handleModalTokenRoutes(
     {
       ...captureModalFeedState(context, token, history),
+      surfaceModals: context.surfaceModals,
       agentWorkspace: context.agentWorkspace,
       liveTailModal: context.liveTailModal,
       processModal: context.processModal,
@@ -214,6 +212,7 @@ export const feedInputTokens = createFeedInputTokens<InputFeedContext>({
     {
       ...captureIndicatorFeedState(context),
       processModal: context.processModal,
+      syncModals: () => context.surfaceModals?.sync(),
     },
     token,
   ),
@@ -223,6 +222,7 @@ export const feedInputTokens = createFeedInputTokens<InputFeedContext>({
       ...capturePromptKeyState(context),
       commandRegistry: context.commandRegistry,
       processModal: context.processModal,
+      syncModals: () => context.surfaceModals?.sync(),
     },
     token,
   ),

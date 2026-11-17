@@ -222,7 +222,6 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
       refreshLiveModels: async () => (await providerRegistry.refreshLiveModelDiscovery?.()) ?? [],
     }),
     picker: input.modelPicker,
-    modalOpened: () => input.modalOpened('modelPicker'),
     render,
     listModels: () => providerRegistry.getSelectableModels().filter((m) => providerRegistry.has(m.provider)),
     listProviders: () => [...new Set(providerRegistry.listModels().map((m) => m.provider))].filter((id) => providerRegistry.has(id)),
@@ -258,8 +257,7 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
   };
 
   // Mirrors the Ctrl+F chord's own toggle exactly (handler-shortcuts.ts's
-  // 'search' case), the transcript search overlay isn't tracked on the
-  // modal stack, so this doesn't call modalOpened either.
+  // 'search' case); the transcript search bar is not a modal on the stack.
   commandContext.openTranscriptSearch = () => {
     if (input.searchManager.active) input.searchManager.close(input.conversationManager);
     else input.searchManager.open();
@@ -267,7 +265,6 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
   };
 
   commandContext.openSettingsModal = createSettingsWorkspaceOpener({
-    activate: () => input.modalOpened('settings'),
     configure: () => {
       input.settingsModal.open(configManager, featureFlags, subscriptionManager, serviceRegistry, mcpRegistry, secretsManager, {
         // The Connections category probes through this app's catalog, which is
@@ -333,9 +330,8 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
   // one, e.g. 'accounts' opens 'providers-modal'). Surfaces are registered in
   // builtin-modals.ts; a name with no registered surface degrades honestly to
   // a print rather than a blank modal.
-  // The stack name is the stable 'config' slot (one config modal at a time,
-  // opening another swaps the surface), so Esc close/return and the modal-stack
-  // machinery need only the single 'config' case (handler-ui-state.ts).
+  // There is one config modal at a time (opening another swaps the surface),
+  // so it is one object on the modal stack, 'config' (input/handler.ts).
   // Some legacy view-name redirects (and migrated front-doors) resolve to a NATIVE
   // modal that is not a ConfigModalSurface, e.g. `sessions` -> `sessionPicker`,
   // where 'sessionPicker' is the real session-picker modal opened by
@@ -364,7 +360,6 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
       render();
       return;
     }
-    input.modalOpened('config');
     input.configModal.open(surface, render);
     render();
   };

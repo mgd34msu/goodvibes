@@ -41,7 +41,6 @@ export interface FeedCommandContext {
 }
 export type IndicatorFocusRouteState = {
   indicatorFocused: boolean;
-  modalOpened: (name: string) => void;
   /** The footer process indicator's [Enter] opens the Agents modal (F2 also opens it). */
   requestRender: () => void;
 };
@@ -66,7 +65,6 @@ export type TextRouteState<Context extends FeedCommandContext> = {
   filePicker: {
     open: (insertPos: number, injectMode?: boolean | undefined) => void;
   };
-  modalOpened: (name: string) => void;
   saveUndoState: () => void;
   /** Coalescing undo snapshot for plain text insertions. */
   saveUndoStateForText?: (() => void) | undefined;
@@ -118,8 +116,6 @@ export type KeyRouteState<Context extends FeedCommandContext> = {
    *  Anchors Enter-on-empty-composer's block-actions menu to that block
    *  instead of an arbitrary fixed line. */
   getBlockAnchorLine?: (() => number) | undefined;
-  /** F2 opens the Agents modal. */
-  modalOpened: (name: string) => void;
   saveUndoState: () => void;
   /** Break the undo coalescing group (call on cursor moves). */
   breakUndoCoalesce?: (() => void) | undefined;
@@ -243,10 +239,8 @@ export function createFeedTokenRoutes<
     if (!concealed && token.value === '@' && !commandMode) {
       const charBefore = cursorPos >= 2 ? prompt[cursorPos - 2] : undefined;
       if (charBefore === '!') {
-        state.modalOpened('filePicker');
         state.filePicker.open(cursorPos - 2, true);
       } else if (charBefore === undefined || charBefore === ' ' || charBefore === '\n') {
-        state.modalOpened('filePicker');
         state.filePicker.open(cursorPos - 1);
       }
     }
@@ -262,7 +256,6 @@ export function createFeedTokenRoutes<
       // (handleCommandModeToken, and the enter-key fallback below) still checks
       // commandRegistry itself before actually running anything.
       commandMode = true;
-      state.modalOpened('command');
       state.autocomplete?.update('');
     } else if (commandMode && state.commandRegistry) {
       const query = prompt.startsWith('/') ? prompt.slice(1) : '';
@@ -344,7 +337,6 @@ export function createFeedTokenRoutes<
         const lineIndex = state.getBlockAnchorLine?.() ?? 0;
         const nearest = state.conversationManager?.findNearestBlock(lineIndex);
         if (nearest) {
-          state.modalOpened('blockActions');
           state.blockActionsMenu.open(nearest);
           state.requestRender();
           return { handled: true, prompt, cursorPos, inputScrollTop, commandMode, indicatorFocused };

@@ -1,7 +1,6 @@
 import { TerminalComposerController } from './composer-controller.js';
 import type { ConcealedInputRequest } from './concealed-input.js';
 import { InputHistory, HistorySearch } from './input-history.js';
-import type { ModalName } from './modal-state.js';
 /** Per-handler state: each terminal instance keeps its own registries, draft navigation and undo history. */
 export abstract class TerminalInputHandlerState extends TerminalComposerController {
   public cursorPos = 0;
@@ -15,7 +14,6 @@ export abstract class TerminalInputHandlerState extends TerminalComposerControll
   public nextPasteId = 1;
   public lastCtrlCTime = 0;
   public bodyTopRow = 2;
-  public modalStack: ModalName[] = [];
   public modalReturnFocus: 'prompt' | 'indicator' = 'prompt';
   public helpOverlayActive = false;
   public helpScrollOffset = 0;
@@ -40,14 +38,12 @@ export abstract class TerminalInputHandlerState extends TerminalComposerControll
 export function openHandlerMcpWorkspace<Context>(
   host: {
     indicatorFocused: boolean;
-    modalOpened(name: 'mcpWorkspace'): void;
     readonly mcpWorkspace: { open(context: Context): void };
     requestRender(): void;
   },
   context: Context,
 ): void {
   host.indicatorFocused = false;
-  host.modalOpened('mcpWorkspace');
   host.mcpWorkspace.open(context);
   host.requestRender();
 }

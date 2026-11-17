@@ -18,6 +18,7 @@ import type { OverlayFilters } from './overlay-filter.ts';
 import type { FilePickerModal } from './file-picker.ts';
 import type { BlockActionsMenu, BlockActionId } from '../renderer/block-actions.ts';
 import type { SearchManager } from './search.ts';
+import type { SurfaceModalHost } from '@goodvibes-jev/engine/terminal-shell/surface-modal-host';
 import { handleHistorySearchToken, handleOverlayToken, handleSearchModeToken } from './handler-ui-state.ts';
 import {
   handleBookmarkModalToken,
@@ -56,7 +57,8 @@ export type ModalTokenRouteState = {
   prompt: string;
   cursorPos: number;
   modelPicker: ModelPickerModal;
-  modalStack: string[];
+  /** The modal stack: its top modal takes the key. */
+  surfaceModals?: SurfaceModalHost;
   commandContext?: CommandContext;
   getViewportHeight: () => number;
   requestRender: () => void;
@@ -65,7 +67,6 @@ export type ModalTokenRouteState = {
   processModal: ProcessModal;
   contextInspectorModal: ContextInspectorModal;
   overlayFilters?: OverlayFilters;
-  modalOpened: (name: string) => void;
   filePicker: FilePickerModal;
   imageRegistry: Map<string, { data: string; mediaType: string }>;
   nextImageId: number;
@@ -123,7 +124,6 @@ export const handleModalTokenRoutes = createModalTokenPipeline<ModalTokenRouteSt
           {
             processModal: state.processModal,
             liveTailModal: state.liveTailModal,
-            modalOpened: state.modalOpened,
             requestRender: state.requestRender,
             handleEscape: state.handleEscape,
             openProcessView: (id) => state.commandContext?.openSessionView?.({ kind: 'process', id }) ?? false,

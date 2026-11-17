@@ -2,8 +2,6 @@ import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/conf
 import type { InputHandler } from '../input/handler.ts';
 import type { CommandContext, CommandRegistry } from '../input/command-registry.ts';
 import type { ConversationManager } from '../core/conversation.ts';
-import { pruneStaleModalStack } from '@goodvibes-jev/engine/terminal-shell/modal-stack';
-import { getActiveModalName } from '../input/handler-ui-state.ts';
 import { HostPairingController } from './host-pairing-controller.ts';
 
 /** Composition only: the callback is inaccessible to model/tool approval, and
@@ -31,13 +29,9 @@ export function wireHostPairingShell(options: {
       input.ensureInputCursorVisible();
       input.autocomplete?.reset(); input.syncFeedContextMutableFields(); render();
     },
-    canPresent: () => {
-      // A modal that closed itself leaves a stale stack name that would refuse pairing with nothing on screen.
-      pruneStaleModalStack(input);
-      return options.canPresent() && !input.concealedInput
-      && !input.surfaceModals.active && input.modalStack.length === 0
-      && [null, 'command'].includes(getActiveModalName(input)) && !input.searchManager.active && !input.historySearch.active;
-    },
+    // Nothing on the modal stack (command mode included: pairing would replace a half-typed command).
+    canPresent: () => options.canPresent() && !input.concealedInput
+      && !input.surfaceModals.active && !input.searchManager.active && !input.historySearch.active,
     executeOwnerCommand: line => {
       const [name, ...args] = line.slice(1).trim().split(/\s+/);
       void commandRegistry.executeFromOwner(name!, args, commandContext, line)

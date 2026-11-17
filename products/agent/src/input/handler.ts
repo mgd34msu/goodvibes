@@ -10,7 +10,6 @@ import 'node:fs';
 import 'node:path';
 import { InputTokenizer, type InputToken } from '@goodvibes-jev/engine/platform/platform/core';
 import {
-  clearModalStackForHandler,
   cleanupMarkerRegistryForHandler,
   executeBlockActionForHandler,
   expandPromptForHandler,
@@ -24,7 +23,6 @@ import {
   handleCtrlCForHandler,
   handleEscapeForHandler,
   handlePasteForHandler,
-  modalOpenedForHandler,
   registerPasteForHandler,
 } from './handler-interactions.ts';
 import { SelectionManager } from '@goodvibes-jev/engine/terminal-shell';
@@ -44,7 +42,7 @@ import { LiveTailModal } from '../renderer/live-tail-modal.ts';
 import { BlockActionsMenu } from '../renderer/block-actions.ts';
 import { ContextInspectorModal } from '../renderer/context-inspector.ts';
 import { OverlayFilters } from './overlay-filter.ts';
-import { SurfaceModalHost } from './surface-modal-host.ts';
+import { SurfaceModalHost, isTrackedModal, type TrackedModal } from './surface-modal-host.ts';
 import { BookmarkModal } from './bookmark-modal.ts';
 import { SettingsModal } from './settings-modal.ts';
 import { McpWorkspace } from './mcp-workspace.ts';
@@ -69,7 +67,7 @@ import {
 } from './handler-content-actions.ts';
 import './handler-feed-routes.ts';
 import { saveUndoState } from './handler-prompt-buffer.ts';
-import { clearModalStack, handleEscape, modalOpened } from './handler-modal-stack.ts';
+import { createHandlerModals, ownModal, type HandlerModals } from './handler-modal-stack.ts';
 import { type ConcealedInputRequest } from './concealed-input.ts';
 import type { PlainLineInputRequest } from './plain-line-input.ts';
 import {
@@ -143,8 +141,14 @@ export class InputHandler extends TerminalInputHandlerState {
   public liveTailModal: LiveTailModal;
   public contextInspectorModal = new ContextInspectorModal();
   public readonly overlayFilters = new OverlayFilters();
-  /** Kit modals: a one-level-Esc stack drawn over everything else (surface-modal-host.ts). */
+  /** The one stack of open modals: kit modals and the handler's own, one Esc level at a time (surface-modal-host.ts). */
   public surfaceModals = new SurfaceModalHost();
+  /** The handler's own modals as objects on that stack: the shared ones, the workspace, the process monitor and its live tail. */
+  public readonly modals: HandlerModals & {
+    readonly agentWorkspace: TrackedModal;
+    readonly process: TrackedModal;
+    readonly liveTail: TrackedModal;
+  };
   /** Agent and process views (shell/session-views.ts); null until the shell wires them. */
   public sessionView: import('./handler-session-view-route.ts').SessionViewControls | null = null;
   /** The main transcript's scroll, for Esc while scrolled back (handler-modal-stack.ts); null until the shell wires it. */
@@ -156,11 +160,6 @@ export class InputHandler extends TerminalInputHandlerState {
   public settingsModal = new SettingsModal();
   public mcpWorkspace = new McpWorkspace();
   public agentWorkspace = new AgentWorkspace();
-
-  /**
-   * Modal navigation stack. Each element is the name of an open modal.
-   * Used to support back-navigation via Escape.
-   */
 
   public sessionPickerModal: SessionPickerModal;
   public profilePickerModal: ProfilePickerModal;
@@ -228,6 +227,39 @@ export class InputHandler extends TerminalInputHandlerState {
     this.sessionPickerModal = new SessionPickerModal(uiServices.sessions.sessionManager);
     this.profilePickerModal = new ProfilePickerModal(uiServices.shell.profileManager);
     this.selectionQueue = attachSelectionModalQueue(this);
+    this.modals = {
+      ...createHandlerModals(this, { clearCommandText: true }),
+      agentWorkspace: ownModal('agentWorkspace', () => this.agentWorkspace, () => this.agentWorkspace.reopen()),
+      process: ownModal('process', () => this.processModal, () => this.processModal.open()),
+      liveTail: ownModal('liveTail', () => this.liveTailModal),
+    };
+    const modals = this.modals;
+    this.surfaceModals.track(
+      modals.command,
+      modals.agentWorkspace,
+      modals.settings,
+      modals.mcpWorkspace,
+      modals.process,
+      modals.liveTail,
+      modals.sessionPicker,
+      modals.profilePicker,
+      modals.bookmark,
+      modals.contextInspector,
+      modals.help,
+      modals.shortcuts,
+      modals.modelPicker,
+      modals.filePicker,
+      modals.blockActions,
+      modals.selection,
+    );
+    this.surfaceModals.onOpen = (modal, fromEmpty) => {
+      if (fromEmpty) this.modalReturnFocus = this.indicatorFocused ? 'indicator' : 'prompt';
+      if (!isTrackedModal(modal)) return;
+      this.setupPairing?.cancelForTakeover();
+      // The workspace stays under the model picker and settings it opens; any other modal replaces it.
+      const keepsWorkspaceUnder = modal === modals.modelPicker || modal === modals.settings;
+      if (modal !== modals.agentWorkspace && !keepsWorkspaceUnder && this.agentWorkspace.active) this.closeAgentWorkspaceModal();
+    };
     this.initFeedContext();
   }
 
@@ -346,17 +378,6 @@ export class InputHandler extends TerminalInputHandlerState {
   public handleCtrlC(): void {
     handleCtrlCForHandler(this);
   }
-  public modalOpened(name: string): void {
-    this.setupPairing?.cancelForTakeover();
-    const keepAgentWorkspaceUnderlay = name === 'modelPicker' || name === 'settings';
-    if (name !== 'agentWorkspace' && !keepAgentWorkspaceUnderlay && this.agentWorkspace.active) {
-      this.closeAgentWorkspaceModal();
-    }
-    modalOpenedForHandler(this, name);
-  }
-  public clearModalStack(): void {
-    clearModalStackForHandler(this);
-  }
   public handleEscape(): void {
     handleEscapeForHandler(this);
   }
@@ -404,7 +425,6 @@ export class InputHandler extends TerminalInputHandlerState {
   }
   public openAgentWorkspace(context: CommandContext, categoryId?: string, onlyGroup?: string): void {
     this.indicatorFocused = false;
-    this.modalOpened('agentWorkspace');
     this.agentWorkspace.open(
       context,
       (command, behavior, displayCommand) => this.dispatchAgentWorkspaceCommand(command, context, behavior, displayCommand),
@@ -416,11 +436,9 @@ export class InputHandler extends TerminalInputHandlerState {
     this.requestRender();
   }
 
+  /** Close the workspace for good: it does not come back when a modal stacked over it closes. */
   private closeAgentWorkspaceModal(): void {
-    this.agentWorkspace.close();
-    for (let index = this.modalStack.length - 1; index >= 0; index -= 1) {
-      if (this.modalStack[index] === 'agentWorkspace') this.modalStack.splice(index, 1);
-    }
+    this.surfaceModals.close(this.modals.agentWorkspace);
   }
 
   public dismissAgentWorkspace(): boolean {
@@ -635,7 +653,6 @@ export class InputHandler extends TerminalInputHandlerState {
     if (!this.agentWorkspace.active) {
       if (!context) return;
       this.indicatorFocused = false;
-      this.modalOpened('agentWorkspace');
       this.agentWorkspace.open(
         context,
         (command, behavior, displayCommand) => this.dispatchAgentWorkspaceCommand(command, context, behavior, displayCommand),

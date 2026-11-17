@@ -18,7 +18,6 @@ const COMMAND_FIELDS = [
   'prompt',
   'cursorPos',
   'autocomplete',
-  'modalStack',
   'commandRegistry',
   'commandContext',
   'conversationManager',
@@ -87,10 +86,10 @@ export function createWorkTreeFeedRoute<Source extends WorkTreeFeedSource>(
 }
 
 const TEXT_FIELDS = ['prompt', 'cursorPos', 'commandMode', 'nextPasteId', 'nextImageId', 'pasteRegistry', 'imageRegistry',
-  'inputHistory', 'commandRegistry', 'commandContext', 'autocomplete', 'filePicker', 'modalOpened', 'saveUndoState',
+  'inputHistory', 'commandRegistry', 'commandContext', 'autocomplete', 'filePicker', 'saveUndoState',
   'registerPaste', 'requestRender'] as const;
 const KEY_FIELDS = ['prompt', 'cursorPos', 'inputScrollTop', 'commandMode', 'contentWidth', 'inputHistory', 'pasteRegistry', 'indicatorFocused',
-  'conversationManager', 'commandContext', 'submitConcealedInput', 'autocomplete', 'modalOpened', 'saveUndoState',
+  'conversationManager', 'commandContext', 'submitConcealedInput', 'autocomplete', 'saveUndoState',
   'ensureInputCursorVisible', 'getWrappedPromptInfo', 'moveCursorVertical', 'handlePathCompletion', 'handleBlockToggle',
   'findMarkerAtPos', 'cleanupMarkerRegistry', 'expandPrompt', 'scroll', 'exitApp', 'requestRender'] as const;
 const MOUSE_FIELDS = ['conversationManager', 'selection', 'mouseDownRow', 'mouseDownCol', 'scroll', 'requestRender',
@@ -101,8 +100,8 @@ const SHORTCUT_FIELDS = ['prompt', 'cursorPos', 'commandMode', 'autocomplete', '
   'handleUndo', 'handleRedo', 'handlePaste', 'handleEscape', 'keybindingsManager'] as const;
 const MODAL_FIELDS = ['conversationManager', 'selectionModal', 'bookmarkModal', 'settingsModal', 'mcpWorkspace',
   'sessionPickerModal', 'profilePickerModal', 'helpOverlayActive', 'helpScrollOffset', 'shortcutsOverlayActive',
-  'shortcutsScrollOffset', 'historySearch', 'prompt', 'cursorPos', 'modelPicker', 'modalStack', 'commandContext',
-  'getViewportHeight', 'requestRender', 'handleEscape', 'contextInspectorModal', 'overlayFilters', 'modalOpened',
+  'shortcutsScrollOffset', 'historySearch', 'prompt', 'cursorPos', 'modelPicker', 'commandContext',
+  'getViewportHeight', 'requestRender', 'handleEscape', 'contextInspectorModal', 'overlayFilters',
   'filePicker', 'imageRegistry', 'nextImageId', 'saveUndoState', 'blockActionsMenu', 'executeBlockAction', 'searchManager',
   'scroll', 'getScrollTop', 'openModelPickerWithTarget', 'openProviderModelPickerWithTarget', 'onModelPickerCommit'] as const;
 type SourceFields<Fields extends readonly string[]> = Readonly<Record<Fields[number], unknown>>;
@@ -129,8 +128,8 @@ export function captureMouseFeedState<Source extends SourceFields<typeof MOUSE_F
 export function captureShortcutFeedState<Source extends SourceFields<typeof SHORTCUT_FIELDS> & CursorOwner>(source: Source) {
   return captureFields(source, SHORTCUT_FIELDS, { ensureInputCursorVisible: () => source.ensureInputCursorVisible() });
 }
-export function captureIndicatorFeedState<Source extends { indicatorFocused: boolean; modalOpened(name: string): void; requestRender(): void }>(source: Source) {
-  return { indicatorFocused: source.indicatorFocused, modalOpened: source.modalOpened, requestRender: source.requestRender };
+export function captureIndicatorFeedState<Source extends { indicatorFocused: boolean; requestRender(): void }>(source: Source) {
+  return { indicatorFocused: source.indicatorFocused, requestRender: source.requestRender };
 }
 export function captureModalFeedState<Source extends SourceFields<typeof MODAL_FIELDS> & CursorOwner & {
   selectionCallback: ((result: SelectionResult | null) => void) | null;

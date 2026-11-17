@@ -13,8 +13,6 @@ export interface ModelPickerOpenDeps<Info> {
     isCatalogLoadCurrent(ticket: number): boolean;
     fillCatalog(ticket: number, fill: ModelPickerCatalogFill<Info>, done?: boolean | undefined): boolean;
   };
-  /** Register the picker as the open modal (input focus, modal stack). */
-  readonly modalOpened: () => void;
   readonly render: () => void;
   /** The selectable models from the cached catalog (synchronous). */
   readonly listModels: () => ModelDefinition[];
@@ -53,7 +51,6 @@ export function openModelPickerNow<Info>(deps: ModelPickerOpenDeps<Info>, mode: 
   const providers = mode === 'providers' ? deps.listProviders() : [...new Set(models.map((m) => m.provider))];
   picker.configuredProviders = configured;
   picker.configuredViaMap = deps.buildConfiguredVia(providers, configured, new Set());
-  deps.modalOpened();
   picker.setTargetInfos(deps.buildTargets(picker.embeddingProviders ?? []));
   if (mode === 'providers') picker.openProviders(providers, deps.currentProviderId());
   else picker.openAllModels(models, deps.currentModelId());

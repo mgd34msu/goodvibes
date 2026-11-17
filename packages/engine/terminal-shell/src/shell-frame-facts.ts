@@ -1,8 +1,8 @@
 import type { ContentPart } from '@goodvibes-jev/engine/platform/platform/providers';
 import { emitUiPanelClose, emitUiPanelFocus, emitUiPanelOpen, emitUiViewChanged } from '@goodvibes-jev/engine/platform/platform/runtime/emitters';
 import { captureNativeConversationInput, type ProductInputContext } from './native/native-conversation-input.js';
-import { MODAL_NAMES, isModalActive, type ActiveModalState } from './modal-state.js';
 import type { SessionTarget } from './session-focus.js';
+import { isTrackedModal, type StackedModal } from './surface-modal-host.js';
 /** Per-frame observations shared by terminal renderers; presentation remains in each shell. */
 export function readShellFrameFacts<PromptInfo>(
   processManager: { runningCount(): number },
@@ -37,20 +37,17 @@ export interface UiFrame {
 }
 
 /**
- * The panels on screen and the view, from the input handler's modal state and
- * the session focus. Of the handler's modals the one that takes the screen
- * (first active in MODAL_NAMES) is the top; kit modals always sit above them.
+ * The panels on screen and the view, from the input handler's modal stack
+ * (bottom to top, the last one is the one taking keys) and the session focus.
  */
 export function readUiFrame(
-  input: ActiveModalState & { readonly surfaceModals?: { modals(): readonly { readonly name: string }[] } | undefined },
+  input: { readonly surfaceModals: { modals(): readonly StackedModal[] } },
   view: SessionTarget | null | undefined,
 ): UiFrame {
   const panels: string[] = [];
-  for (let index = MODAL_NAMES.length - 1; index >= 0; index--) {
-    const name = MODAL_NAMES[index]!;
-    if (isModalActive(input, name)) panels.push(name);
-  }
-  for (const modal of input.surfaceModals?.modals() ?? []) {
+  for (const modal of input.surfaceModals.modals()) {
+    // A modal waiting under the top one to come back is not on screen.
+    if (isTrackedModal(modal) && !modal.isOpen()) continue;
     if (!panels.includes(modal.name)) panels.push(modal.name);
   }
   return { panels, view: !view || view.kind === 'main' ? 'main' : `${view.kind}:${view.id}` };

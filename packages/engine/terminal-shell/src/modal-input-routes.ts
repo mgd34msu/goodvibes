@@ -3,7 +3,6 @@ import { readFileSync, statSync } from 'node:fs';
 import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
 import type { SelectionResult, SelectionAction } from './selection-modal.js';
 import { isTextBackspace } from './delete-key-policy.js';
-import { modalClosed } from './modal-stack.js';
 import { resolveAndValidatePath, logger } from '@goodvibes-jev/engine/platform/platform/utils';
 /** Largest image either attach path (the file picker or /image) will read into memory. */
 export const MAX_IMAGE_ATTACH_BYTES = 20 * 1024 * 1024;
@@ -38,7 +37,6 @@ type SelectionRouteState = {
     selectionCallback: ((result: SelectionResult | null) => void) | null;
     getSelectionCallback?: (() => ((result: SelectionResult | null) => void) | null) | undefined;
     setSelectionCallback?: ((callback: ((result: SelectionResult | null) => void) | null) => void) | undefined;
-    modalStack: string[];
     requestRender: () => void;
     handleEscape: () => void;
 };
@@ -71,9 +69,6 @@ export function handleSelectionModalToken(state: SelectionRouteState, token: Inp
         state.selectionCallback = null;
         state.setSelectionCallback?.(null);
         state.selectionModal.close();
-        if (state.modalStack.length > 0 && state.modalStack[state.modalStack.length - 1] === 'selection') {
-            state.modalStack.pop();
-        }
         cb?.({ item: selected, action, ...(step === undefined ? {} : { step }) });
         state.selectionCallback = state.getSelectionCallback?.() ?? state.selectionCallback;
     };
@@ -248,8 +243,6 @@ type FilePickerRouteState = {
     };
     prompt: string;
     cursorPos: number;
-    /** When given, a self-close (pick, Space, Backspace past the query) leaves no stale stack entry. */
-    modalStack?: string[] | undefined;
     commandContext?: PickerCommandContext | undefined;
     imageRegistry: Map<string, {
         data: string;
@@ -353,8 +346,6 @@ export function handleFilePickerToken(state: FilePickerRouteState, token: InputT
             }
         }
     }
-    if (!state.filePicker.active && state.modalStack)
-        modalClosed({ modalStack: state.modalStack }, 'filePicker');
     state.requestRender();
     return true;
 }
@@ -372,8 +363,6 @@ type BlockActionsRouteState<Action extends string> = {
         } | null;
     };
     executeBlockAction: (id: Action) => void;
-    /** When given, closing on an action key leaves no stale stack entry. */
-    modalStack?: string[] | undefined;
     requestRender: () => void;
     handleEscape: () => void;
 };
@@ -408,8 +397,6 @@ export function handleBlockActionsToken<Action extends string>(state: BlockActio
         if (action)
             state.executeBlockAction(action.id);
     }
-    if (!state.blockActionsMenu.active && state.modalStack)
-        modalClosed({ modalStack: state.modalStack }, 'blockActions');
     state.requestRender();
     return true;
 }

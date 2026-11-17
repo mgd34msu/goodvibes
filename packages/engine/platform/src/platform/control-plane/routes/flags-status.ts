@@ -4,7 +4,8 @@
  * Handler for flags.status. The feature gate manager already records, per
  * restart-gated feature, the saved setting the running process has not applied
  * (FeatureFlagManager.listPendingRestarts); this sends that record as is. The
- * daemon composition registers it, because the manager is the daemon's own.
+ * runtime graph registers it beside the gate manager it composes, so every host
+ * that advertises the verb also serves it.
  */
 import type { GatewayMethodCatalog } from '../method-catalog.js';
 import type { GatewayMethodHandler } from '../method-catalog-shared.js';

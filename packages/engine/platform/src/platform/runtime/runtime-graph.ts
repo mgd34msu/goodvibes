@@ -21,6 +21,7 @@ import {
   GatewayMethodCatalog,
   SharedSessionBroker,
   controlPlaneStorePath,
+  registerFlagsStatusGatewayMethods,
   registerGatewayVerbGroups,
   registerNativeAutomationGatewayMethods,
 } from '../control-plane/index.js';
@@ -851,6 +852,9 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
   };
   agentOrchestrator.setDependencies(agentToolDependencies);
 
+  // flags.status is in every host's catalog and the gate manager is this graph's,
+  // so every host serves it, whichever verb groups the product registers.
+  registerFlagsStatusGatewayMethods(gatewayMethods, featureFlags);
   if ((product.gatewayVerbs ?? 'platform') === 'platform') {
     registerGatewayVerbGroups(gatewayMethods, {
       triggerSupervisor: triggerManager, homeDirectory, processRegistry, workspaceCheckpointManager, sessionBroker, secretsManager,

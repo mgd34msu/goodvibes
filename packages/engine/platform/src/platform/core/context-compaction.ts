@@ -28,6 +28,7 @@ import { OwnedJudgmentWork } from '../runtime/owned-judgment-work.js';
 import type { ProviderMessage, ContentPart, LLMProvider } from '../providers/interface.js';
 import type { ProviderRegistry } from '../providers/registry.js';
 import { logger } from '../utils/logger.js';
+import type { ConfigManager } from '../config/manager.js';
 import type {
   CompactionSection,
   CompactionContext,
@@ -172,6 +173,17 @@ function normalizeThresholdPercent(value: number | undefined): number {
   if (value === undefined) return DEFAULT_AUTO_COMPACT_THRESHOLD_PERCENT;
   if (!Number.isFinite(value)) return DEFAULT_AUTO_COMPACT_THRESHOLD_PERCENT;
   return Math.max(0, Math.min(100, value));
+}
+
+/**
+ * The configured auto-compact threshold percent, 0 when auto-compaction is
+ * off: `behavior.compactionStrategy` 'off' turns session compaction off
+ * entirely, so the trigger reports a disabled threshold.
+ */
+export function readAutoCompactThreshold(configManager: Pick<ConfigManager, 'get'>): number {
+  if (configManager.get('behavior.compactionStrategy') === 'off') return 0;
+  const raw = Number(configManager.get('behavior.autoCompactThreshold') ?? 0);
+  return Number.isFinite(raw) ? raw : 0;
 }
 
 export function getAutoCompactDecision(opts: AutoCompactOptions): AutoCompactDecision {

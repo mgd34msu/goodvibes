@@ -4,7 +4,7 @@ import type { ConversationManager } from './conversation.js';
 import type { ConfigManager } from '../config/manager.js';
 import type { ModelDefinition, ProviderRegistry } from '../providers/registry.js';
 import { logger } from '../utils/logger.js';
-import { estimateConversationTokens, COMPACTION_BUFFER_TOKENS, SMALL_WINDOW_THRESHOLD, SMALL_WINDOW_KEEP_RECENT, compactSmallWindow, getAutoCompactDecision } from './context-compaction.js';
+import { estimateConversationTokens, COMPACTION_BUFFER_TOKENS, SMALL_WINDOW_THRESHOLD, SMALL_WINDOW_KEEP_RECENT, compactSmallWindow, getAutoCompactDecision, readAutoCompactThreshold } from './context-compaction.js';
 import type { CompactionContext } from './context-compaction.js';
 import type { SessionMemoryStore } from './session-memory.js';
 import type { SessionLineageTracker } from './session-lineage.js';
@@ -77,14 +77,6 @@ function findLargerContextModels(
     .sort((a, b) => b.context - a.context)
     .slice(0, limit)
     .map(({ id, displayName, context }) => ({ id, displayName, context }));
-}
-
-function readAutoCompactThreshold(configManager: Pick<ConfigManager, 'get'>): number {
-  // behavior.compactionStrategy 'off' turns session compaction off entirely,
-  // the auto trigger honors it by reporting a disabled (0) threshold.
-  if (configManager.get('behavior.compactionStrategy') === 'off') return 0;
-  const raw = Number(configManager.get('behavior.autoCompactThreshold') ?? 0);
-  return Number.isFinite(raw) ? raw : 0;
 }
 
 function formatAutoCompactTrigger(decision: ReturnType<typeof getAutoCompactDecision>): string {

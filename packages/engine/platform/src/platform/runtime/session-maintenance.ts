@@ -1,4 +1,5 @@
 import { deriveContextUsage } from './context-usage.js';
+import { getAutoCompactDecision, readAutoCompactThreshold } from '../core/context-compaction.js';
 import type { ConfigManager } from '../config/manager.js';
 import type { SessionDomainState } from './store/domains/session.js';
 
@@ -49,6 +50,9 @@ function compactStateIsActive(state: SessionDomainState['compactionState'] | und
     || state === 'boundary_commit';
 }
 
+/** Below this usage, a long conversation is not a reason to watch context growth. */
+const MESSAGE_GROWTH_USAGE_FLOOR_PCT = 50;
+
 function formatAge(ts: number | undefined): string {
   if (!ts) return 'never';
   const ageMs = Date.now() - ts;
@@ -62,10 +66,8 @@ function formatAge(ts: number | undefined): string {
 
 export function evaluateSessionMaintenance(input: SessionMaintenanceInput): SessionMaintenanceStatus {
   const guidanceMode = getGuidanceMode(input.configManager);
-  const compactionOff = input.configManager.get('behavior.compactionStrategy') === 'off';
-  const thresholdPct = compactionOff
-    ? 0
-    : Math.max(0, Number(input.configManager.get('behavior.autoCompactThreshold') ?? 0));
+  // The same threshold the orchestrator compacts at (0 when auto-compaction is off).
+  const thresholdPct = Math.max(0, readAutoCompactThreshold(input.configManager));
   const autoCompactEnabled = thresholdPct > 0;
   const currentTokens = Math.max(0, input.currentTokens);
   const { contextUsagePct: usagePct, contextRemainingTokens: remainingTokens } = deriveContextUsage(currentTokens, input.contextWindow);
@@ -74,12 +76,9 @@ export function evaluateSessionMaintenance(input: SessionMaintenanceInput): Sess
   const lastCompactedAt = input.session?.lastCompactedAt;
   const messageCount = Math.max(0, input.messageCount ?? 0);
   const warningsEnabled = Boolean(input.configManager.get('behavior.staleContextWarnings'));
-  const staleByMessageGrowth =
-    (input.session?.compactionMessageCount ?? 0) > 0
-      ? messageCount - (input.session?.compactionMessageCount ?? 0) >= 12
-      : messageCount >= 24;
 
-  if (usagePct === null || remainingTokens === null) {
+  // Nothing counted yet: there is no pressure to report, whatever the window says.
+  if (usagePct === null || remainingTokens === null || currentTokens === 0) {
     return {
       level: 'unknown',
       guidanceMode,
@@ -91,11 +90,25 @@ export function evaluateSessionMaintenance(input: SessionMaintenanceInput): Sess
       sessionMemoryCount,
       compactionCount,
       lastCompactedAt,
-      summary: 'Context window unavailable.',
-      reasons: ['Current model does not expose a known context limit yet.'],
+      summary: usagePct === null ? 'Context window unavailable.' : 'No context counted yet.',
+      reasons: [usagePct === null ? 'Current model does not expose a known context limit yet.' : 'Context usage is known after the first model response.'],
       nextSteps: guidanceMode === 'off' ? [] : ['/provider', '/context'],
     };
   }
+
+  // The engine's own rule (core/context-compaction.ts), with the inputs the orchestrator gives it.
+  const decision = getAutoCompactDecision({ currentTokens, contextWindow: input.contextWindow ?? 0, isCompacting: false, thresholdPercent: thresholdPct });
+  // With auto-compaction off nothing compacts on its own: recommend /compact past the configured
+  // threshold (kept even while compaction is off) or inside the engine's safety buffer.
+  const configuredThreshold = Math.max(0, Number(input.configManager.get('behavior.autoCompactThreshold') ?? 0));
+  const compactNeeded = autoCompactEnabled
+    ? decision.shouldCompact
+    : decision.reason === 'safety-buffer' || (configuredThreshold > 0 && usagePct >= configuredThreshold);
+  // Message growth alone says nothing while the window is mostly empty.
+  const staleByMessageGrowth = usagePct >= MESSAGE_GROWTH_USAGE_FLOOR_PCT && (
+    (input.session?.compactionMessageCount ?? 0) > 0
+      ? messageCount - (input.session?.compactionMessageCount ?? 0) >= 12
+      : messageCount >= 24);
 
   const reasons: string[] = [];
   const nextSteps: string[] = [];
@@ -108,12 +121,13 @@ export function evaluateSessionMaintenance(input: SessionMaintenanceInput): Sess
   } else if (compactStateIsActive(input.session?.compactionState)) {
     level = 'compacting';
     reasons.push('Compaction is currently running.');
-  } else if ((autoCompactEnabled && usagePct >= thresholdPct) || usagePct >= 80 || remainingTokens <= 15_000) {
+  } else if (compactNeeded) {
     level = 'suggest-compact';
     reasons.push(`Context pressure is high at ${usagePct}% usage.`);
-    if (remainingTokens <= 15_000) {
-      reasons.push(`Only ${remainingTokens.toLocaleString()} tokens remain before the safety buffer is exhausted.`);
+    if (decision.reason === 'safety-buffer') {
+      reasons.push(`Only ${remainingTokens.toLocaleString()} tokens remain before the window edge.`);
     }
+    if (autoCompactEnabled) reasons.push('Auto-compact runs before the next turn.');
     nextSteps.push('/compact', '/panel tokens');
   } else if ((warningsEnabled && usagePct >= Math.max(70, autoCompactEnabled ? thresholdPct - 10 : 70)) || staleByMessageGrowth) {
     level = 'watch';
@@ -144,7 +158,9 @@ export function evaluateSessionMaintenance(input: SessionMaintenanceInput): Sess
       : level === 'compacting'
         ? 'Compaction in progress.'
         : level === 'suggest-compact'
-          ? `Compact now to recover context headroom (${usagePct}% used).`
+          ? (autoCompactEnabled
+            ? `Context high (${usagePct}% used): auto-compact runs before the next turn.`
+            : `Compact now to recover context headroom (${usagePct}% used).`)
           : level === 'watch'
             ? `Watch context growth (${usagePct}% used, threshold ${thresholdPct}%).`
             : 'Session maintenance is stable.';

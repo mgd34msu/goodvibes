@@ -711,7 +711,7 @@ export const builtinGatewayChannelMethodDescriptors: readonly GatewayMethodDescr
   methodDescriptor({
     id: 'channels.routing.assign',
     title: 'Assign Channel Routing Rule',
-    description: 'Create or update a channel-to-profile routing rule in the daemon-persisted routing table. The daemon applies it to inbox items from slack, discord and email (surfaceKind any reaches the same three); any other surface is refused with 400 ROUTING_SURFACE_NOT_ROUTED, because nothing there reads the rule. Requires explicit confirmation; a call made with the Agent\'s credential (the Agent acting on the owner\'s behalf) instead takes fresh recorded native admission.',
+    description: 'Create or update a channel-to-profile routing rule in the daemon-persisted routing table. The daemon applies it on every channel surface (slack, discord, telegram, msteams and the rest) and to slack, discord and email inbox items: an agent started for a message from the channel takes the profile\'s model and reasoning effort when neither the request nor the channel profile chose a model. routeId is the conversation (a chat, channel or room id); without it the rule covers the whole surface, and surfaceKind any covers every channel. tui, web and service are refused with 400 ROUTING_SURFACE_NOT_ROUTED, because their model is chosen in the surface itself. Requires explicit confirmation; a call made with the Agent\'s credential (the Agent acting on the owner\'s behalf) instead takes fresh recorded native admission.',
     category: 'channels',
     scopes: ['write:channels'],
     access: 'admin',

@@ -3,6 +3,7 @@ import { completeGatewayScopePolicyBootstrap } from '../control-plane/scope-poli
 import { markUnservedGatewayMethods } from '../control-plane/method-catalog-route-reconcile.js';
 import { channelProfileForSession, withChannelExecutionMode } from '../channel-profiles/install-inbound-intake.js';
 import { applyChannelProfileToSpawn } from '../channel-profiles/intake.js';
+import { applyAssignedChannelProfile, assignedChannelProfile, spawnModelOpen } from './channel-profile-assignment.js';
 import { isChannelSurfaceKind } from '../../events/surfaces.js';
 import { withTurnSurfaceId } from '../security/turn-boundary.js';
 import { releaseDaemonActivityLog, runDaemonBootGuarantees } from './facade-boot-guarantees.js';
@@ -1482,10 +1483,17 @@ export class DaemonServer {
       // Work started for a third-party channel message runs under that channel's surface authority; local sessions keep the owner's.
       const session = sessionId === undefined ? null : this.sessionBroker.getSession(sessionId);
       const triggerSurface = session?.surfaceKinds.find(isChannelSurfaceKind);
-      // The channel's bound model fills the gap when the caller chose none.
-      const profiled = triggerSurface && session
+      // The channel's bound model fills the gap when the caller chose none, then the profile
+      // channels.routing.assign gave the channel fills what is still open.
+      const channelProfiled = triggerSurface && session
         ? applyChannelProfileToSpawn(copied, channelProfileForSession(this.sessionBroker, session))
         : copied;
+      const profiled = triggerSurface && session && spawnModelOpen(channelProfiled)
+        ? applyAssignedChannelProfile(channelProfiled, assignedChannelProfile({
+          resolveProfileId: this.config.resolveChannelProfileId,
+          profiles: this.runtimeServices.profileManager,
+        }, session))
+        : channelProfiled;
       // An agent started for a session belongs to it: that session's listings and reports carry it.
       const spawnInput = sessionId !== undefined && profiled.sessionId === undefined ? { ...profiled, sessionId } : profiled;
       const record = withTurnSurfaceId(triggerSurface, () => withChannelExecutionMode(this.sessionBroker, sessionId, () => this.agentManager.spawn(spawnInput)));

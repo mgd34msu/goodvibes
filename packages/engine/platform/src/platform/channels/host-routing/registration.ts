@@ -37,6 +37,7 @@ import {
 } from './route-store.js';
 import { createRoutingResolver, WILDCARD_SURFACE, type RoutingResolver } from './routing-resolver.js';
 import { ROUTE_SURFACE_KINDS } from '../../../events/routes.js';
+import { CHANNEL_SURFACE_KINDS } from '../../../events/surfaces.js';
 
 export { createInboxRouteResolver, type RouteResolver, type RouteResolverInput } from './inbox-bridge.js';
 export {
@@ -113,13 +114,15 @@ function optionalString(value: unknown): string | undefined {
 const KNOWN_SURFACE_KINDS: readonly string[] = [...ROUTE_SURFACE_KINDS, 'email', WILDCARD_SURFACE];
 
 /**
- * The surfaces whose inbound items this daemon resolves a profile for: the
- * Slack, Discord and email inboxes stamp each item with the assigned profile
- * (inbox-bridge.ts). The wildcard reaches those same consumers. An assignment
- * on any other surface would be stored, listed and never read, so it is
- * refused with the list of surfaces it can apply to.
+ * The surfaces whose messages this daemon answers under an assigned profile:
+ * every third-party channel, whose agents take the profile's model when they
+ * start (daemon/channel-profile-assignment.ts), and the Slack, Discord and
+ * email inboxes, which stamp each item with it (inbox-bridge.ts). The wildcard
+ * reaches all of them. A terminal app, the web UI and services are the owner's
+ * own surfaces, where the model is chosen in the surface itself, so an
+ * assignment there would never apply and is refused.
  */
-const PROFILE_ROUTED_SURFACE_KINDS: readonly string[] = ['slack', 'discord', 'email', WILDCARD_SURFACE];
+const PROFILE_ROUTED_SURFACE_KINDS: readonly string[] = [...CHANNEL_SURFACE_KINDS, 'email', WILDCARD_SURFACE];
 
 /**
  * An assignment that can never match an inbound route is refused when it is
@@ -139,8 +142,8 @@ function assertAssignableChannel(channelId: string, surfaceKind: string | undefi
   }
   if (!PROFILE_ROUTED_SURFACE_KINDS.includes(parsed.surfaceKind)) {
     throw new HandlerError(
-      `Not assigned: messages on ${parsed.surfaceKind} are not answered by an assigned profile, so this assignment would never apply. `
-        + `Profile assignments apply to the inbox items of: ${PROFILE_ROUTED_SURFACE_KINDS.join(', ')}.`,
+      `Not assigned: ${parsed.surfaceKind} is the owner's own surface, where the model is chosen in the surface itself, so this assignment would never apply. `
+        + `Profile assignments apply to: ${PROFILE_ROUTED_SURFACE_KINDS.join(', ')}.`,
       'ROUTING_SURFACE_NOT_ROUTED',
       400,
     );

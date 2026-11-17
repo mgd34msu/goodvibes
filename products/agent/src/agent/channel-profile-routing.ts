@@ -5,9 +5,13 @@
  *
  * An assignment binds a channel (surface kind, optional route id) to a
  * GoodVibes profile. The daemon owns the routing table the platform routes
- * against, `channels.routing.assign` writes it, and every surface reads the
- * same one, so an assignment made here is offered to the daemon first and
- * kept here as well.
+ * against and `channels.routing.assign` writes it. The daemon applies it on
+ * every channel surface (an agent started for a channel message takes the
+ * profile's model) and to Slack, Discord and email inbox items; it refuses an
+ * assignment for a terminal app, the web UI or a service, which choose their
+ * model themselves, and that refusal is kept here as `pending` with its
+ * reason. An assignment made here is offered to the daemon first and kept
+ * here as well.
  *
  * The local file is a MIRROR, not a second opinion. It exists because the
  * daemon is a peer this process does not control: a laptop off the LAN, a

@@ -40,6 +40,14 @@ export interface DaemonConfig {
    */
   paymentReplies?: import('../payments/reply-inbox.js').PaymentReplyInbox | undefined;
   /**
+   * The channel routing table (`channels.routing.assign`), borrowed from the
+   * host that registered it: which profile a channel's messages are answered
+   * as. An agent started for a channel message takes that profile's model when
+   * neither the caller nor the channel profile chose one. Omitted, assignments
+   * are not applied to spawns.
+   */
+  resolveChannelProfileId?: import('./channel-profile-assignment.js').ChannelProfileIdResolver | undefined;
+  /**
    * Override companion-chat rate-limiter thresholds from daemon config.
    * Takes precedence over GOODVIBES_CHAT_LIMITER_THRESHOLD env var.
    */

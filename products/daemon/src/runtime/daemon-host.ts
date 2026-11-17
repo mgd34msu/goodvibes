@@ -298,6 +298,8 @@ export function createDaemonHost(options: DaemonHostOptions, factories: DaemonHo
         serveFactory: createSafeHostServeFactory('Configured daemon', binding?.serveFactory),
         clusterCoordinator: runtime.clusterCoordinator, clusterGroupVerbs: runtime.clusterGroup.verbs,
         paymentReplies: runtime.daemonHandlers.paymentReplies,
+        // Channel profile assignments apply to the agents started for channel messages.
+        resolveChannelProfileId: (surfaceKind, routeId) => runtime.daemonHandlers.routing.resolveProfileId(surfaceKind, routeId),
         hostedSessions: createHostedSessionOptions(runtime),
         ...(updateArtifact ? { updateArtifact } : {}),
         ...(hasOverriddenHome === undefined ? {} : { hasOverriddenHome }),

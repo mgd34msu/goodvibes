@@ -428,11 +428,22 @@ function createMayHaveReachedProvider(error: unknown): boolean {
 
 type JobPatch = Partial<Omit<DaemonBatchJob, 'id' | 'status' | 'updatedAt'>>;
 
+/** The Cloudflare queue message a job request came from, when it came from one. */
+function queueMessageIdOf(input: CreateDaemonBatchJobInput): string | undefined {
+  return input.source?.kind === 'cloudflare-queue' ? input.source.id : undefined;
+}
+
 export class DaemonBatchManager {
   private readonly files: BatchJobFiles;
   private jobs: Record<string, DaemonBatchJob> | null = null;
   /** Jobs whose latest state is not on disk yet; written again at the end of each pass. */
   private readonly unsaved = new Set<string>();
+  /**
+   * Live fallback requests still waiting on the provider, by queue message id:
+   * a redelivery of that message while its first request runs gets the same
+   * job instead of a second paid request.
+   */
+  private readonly liveInFlight = new Map<string, Promise<DaemonBatchJob>>();
   private interval: ReturnType<typeof setInterval> | null = null;
   private ticking: Promise<DaemonBatchTickResult> | null = null;
 
@@ -553,10 +564,6 @@ export class DaemonBatchManager {
       if (this.getFallback() !== 'live') throw error;
       runLive = true;
     }
-    if (runLive) {
-      const redelivered = this.findQueueRedelivery(input);
-      return redelivered ?? this.runLiveJob(input, provider, model, providerInstance, options.signal);
-    }
     const payloadBytes = estimateJsonBytes(input);
     if (payloadBytes > MAX_BATCH_REQUEST_BYTES) {
       throw new DaemonBatchError(
@@ -576,6 +583,19 @@ export class DaemonBatchManager {
           413,
         );
       }
+    }
+    if (runLive) {
+      const redelivered = this.findQueueRedelivery(input);
+      if (redelivered) return redelivered;
+      const queueMessageId = queueMessageIdOf(input);
+      if (!queueMessageId) return this.runLiveJob(input, provider, model, providerInstance, options.signal);
+      const running = this.liveInFlight.get(queueMessageId);
+      if (running) return running;
+      // The job is stored before this promise settles, so the entry is gone only once the job can be found.
+      const started = this.runLiveJob(input, provider, model, providerInstance, options.signal)
+        .finally(() => { this.liveInFlight.delete(queueMessageId); });
+      this.liveInFlight.set(queueMessageId, started);
+      return started;
     }
 
     const jobs = this.load();
@@ -609,7 +629,7 @@ export class DaemonBatchManager {
 
   /** A queue redelivers a message whose first attempt may have committed before the reply was lost: the same queue message is the same job. */
   private findQueueRedelivery(input: CreateDaemonBatchJobInput): DaemonBatchJob | undefined {
-    const queueMessageId = input.source?.kind === 'cloudflare-queue' ? input.source.id : undefined;
+    const queueMessageId = queueMessageIdOf(input);
     if (!queueMessageId) return undefined;
     return Object.values(this.load()).find((job) => job.source?.kind === 'cloudflare-queue' && job.source.id === queueMessageId);
   }

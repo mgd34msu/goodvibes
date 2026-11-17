@@ -1010,7 +1010,12 @@ open the same store file (for example the terminal and the daemon, which share
 `~/.goodvibes/tui/`), only one of them runs scheduled jobs: it holds a
 `<store file>.schedule-owner` lock file for its lifetime, and another process
 takes over once that process has exited. A schedule runs once per due time and
-stays armed for its next occurrence even when a run fails.
+stays armed for its next occurrence even when a run fails. While the store has
+no sources and no nodes, a due schedule starts nothing and writes nothing; it
+runs at its first occurrence after the first ingest. A scheduled
+self-improvement run that found nothing to change is not kept in the run
+history. The store keeps the newest 500 settled runs and the newest 100
+consolidation reports.
 
 ## Consolidation and reviewed memory
 

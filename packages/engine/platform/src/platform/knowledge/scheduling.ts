@@ -368,6 +368,12 @@ export class KnowledgeScheduleService {
     return run;
   }
 
+  /** Two map sizes; no I/O. */
+  private storeHasContent(): boolean {
+    const status = this.context.store.status();
+    return status.sourceCount > 0 || status.nodeCount > 0;
+  }
+
   private hasActiveRun(jobId: string): boolean {
     for (const entry of this.activeRuns.values()) if (entry.jobId === jobId) return true;
     return false;
@@ -629,6 +635,15 @@ export class KnowledgeScheduleService {
       return;
     }
     if (this.runningSchedules.has(schedule.id)) return;
+    if (!this.storeHasContent()) {
+      // Every scheduled job works on sources and nodes; an empty store has
+      // nothing for it. Nothing is written: no run, no schedule update. The
+      // timer stays armed in memory, so the first ingest is picked up at the
+      // next occurrence.
+      const following = getNextAutomationOccurrence(schedule.schedule, now);
+      if (following !== undefined) this.armScheduleTimer(schedule, following);
+      return;
+    }
     this.runningSchedules.add(schedule.id);
     let recorded = false;
     try {
@@ -646,7 +661,13 @@ export class KnowledgeScheduleService {
         // cut short by shutdown leaves the schedule due for the next process.
         await this.runSettled.get(run.id);
         if (this.disposed) return;
-        completed = this.context.store.getJobRun(run.id)?.status === 'completed';
+        const settled = this.context.store.getJobRun(run.id);
+        completed = settled?.status === 'completed';
+        // A timer-started run that found nothing to change is not kept: the
+        // history an agent reads lists runs that did something or failed.
+        if (completed && settled && job && scheduledRunDidNothing(job.kind, settled.result)) {
+          await this.context.store.deleteJobRun(run.id);
+        }
       }
       const settledAt = Date.now();
       const following = getNextAutomationOccurrence(schedule.schedule, settledAt);
@@ -774,6 +795,24 @@ export class KnowledgeScheduleService {
       return run;
     }
   }
+}
+
+function countOf(result: Record<string, unknown>, key: string): number {
+  const value = result[key];
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+}
+
+/**
+ * Whether a completed run changed nothing, from its own result. Only the
+ * hourly self-improvement job can say so; a consolidation run always writes
+ * a report and is kept.
+ */
+function scheduledRunDidNothing(kind: KnowledgeJobRecord['kind'], result: Record<string, unknown>): boolean {
+  if (kind !== 'semantic-self-improvement') return false;
+  const errors = result.errors;
+  if (Array.isArray(errors) && errors.length > 0) return false;
+  return ['processedGaps', 'createdGaps', 'closedGaps', 'queuedTasks', 'linkedRepairs', 'ingestedSources', 'promotedFactCount']
+    .every((key) => countOf(result, key) === 0);
 }
 
 function abortReason(signal: AbortSignal): string {

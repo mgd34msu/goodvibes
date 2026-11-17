@@ -193,6 +193,13 @@ export const MAX_RETAINED_JOB_RUNS = 500;
 const MAX_RETAINED_USAGE_RECORDS = 10_000;
 const USAGE_RETENTION_SLACK = MAX_RETAINED_USAGE_RECORDS / 10;
 
+/**
+ * Retained consolidation-report cap. A daily light and a weekly deep run each
+ * add one report; 100 keeps about three months of both and nothing else reads
+ * older ones.
+ */
+export const MAX_RETAINED_CONSOLIDATION_REPORTS = 100;
+
 function assertKnowledgeWriteCurrent(assertCurrent: (() => void) | undefined): void {
   assertSynchronousJudgmentGuard(assertCurrent, () => new KnowledgeNodeActivationHeldError('stale'));
 }
@@ -1772,6 +1779,17 @@ export class KnowledgeStore {
     return toDrop.length;
   }
 
+  /** Drops one settled run; an active run is kept. Returns whether a row was removed. */
+  async deleteJobRun(id: string): Promise<boolean> {
+    await this.init();
+    const run = this.jobRuns.get(id);
+    if (!run || run.status === 'queued' || run.status === 'running') return false;
+    this.jobRuns.delete(id);
+    this.sqlite.run('DELETE FROM knowledge_job_runs WHERE id = ?', [id]);
+    await this.save();
+    return true;
+  }
+
   async upsertRefinementTask(input: KnowledgeRefinementTaskUpsertInput): Promise<KnowledgeRefinementTaskRecord> {
     await this.init();
     return upsertKnowledgeRefinementTask(this.sqlite, this.refinementTasks, input, () => `kref-${crypto.randomUUID()}`);
@@ -1928,8 +1946,23 @@ export class KnowledgeStore {
       record.updatedAt,
     ]);
     this.consolidationReports.set(record.id, record);
+    this.pruneConsolidationReports(MAX_RETAINED_CONSOLIDATION_REPORTS);
     await this.save();
     return record;
+  }
+
+  /** Drop the oldest consolidation reports beyond `keep`, from the in-memory mirror and the sqlite table. */
+  pruneConsolidationReports(keep: number): number {
+    const cap = Math.max(0, Math.trunc(keep));
+    if (this.consolidationReports.size <= cap) return 0;
+    const oldest = [...this.consolidationReports.values()]
+      .sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id))
+      .slice(0, this.consolidationReports.size - cap);
+    for (const record of oldest) {
+      this.sqlite.run('DELETE FROM knowledge_consolidation_reports WHERE id = ?', [record.id]);
+      this.consolidationReports.delete(record.id);
+    }
+    return oldest.length;
   }
 
   async upsertSchedule(input: KnowledgeScheduleUpsertInput): Promise<KnowledgeScheduleRecord> {
@@ -2047,7 +2080,7 @@ export class KnowledgeStore {
       // another writer's current image during a guarded source action. Publish
       // it through the same baseline check before admitting caller mutations.
       validateNativeWorkRows(this.sqlite);
-      const pruned = this.pruneJobRuns(MAX_RETAINED_JOB_RUNS) + trimKnowledgeEdgeChanges(this.sqlite) + pruneOrphanScopeVerdicts(this.sqlite, this.scopeVerdicts)
+      const pruned = this.pruneJobRuns(MAX_RETAINED_JOB_RUNS) + this.pruneConsolidationReports(MAX_RETAINED_CONSOLIDATION_REPORTS) + trimKnowledgeEdgeChanges(this.sqlite) + pruneOrphanScopeVerdicts(this.sqlite, this.scopeVerdicts)
         + pruneSettledNativeWork(this.sqlite);
       if (pruned > 0 || verdictTableCreated) await this.sqlite.save();
       this.ready = true;

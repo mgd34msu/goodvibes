@@ -7,6 +7,11 @@ const UNSUPPORTED_PASSAGE_OPTIONS = Object.freeze(Object.fromEntries([
   ...Array.from({ length: MAX_ANSWER_PASSAGES }, (_, index) => [`p${index + 1}`, `passages[${index}] makes an unsupported execution claim.`]),
 ])) as Readonly<Record<'none' | `p${number}`, string>>;
 
+/** One observed step of a fixture transcript, written as the JSON a fixture state is. */
+type PassageTranscriptEntry =
+  | { role: 'assistant'; content: string; toolCalls: { id: string; name: string; arguments: { path: string } }[] }
+  | { role: 'tool'; callId: string; content: string; outcome: 'ok' };
+
 /**
  * A fixture whose answer reads source modules (each read observed) and then,
  * at sentence `position`, claims a test run nothing observed: the located
@@ -15,7 +20,7 @@ const UNSUPPORTED_PASSAGE_OPTIONS = Object.freeze(Object.fromEntries([
  */
 function locatedPassageFixture(position: number) {
   const reads = Array.from({ length: position - 1 }, (_, index) => `src/module-${index + 1}.ts`);
-  const transcript = reads.flatMap((path, index) => [
+  const transcript = reads.flatMap((path, index): PassageTranscriptEntry[] => [
     { role: 'assistant', content: '', toolCalls: [{ id: `r${index + 1}`, name: 'read', arguments: { path } }] },
     { role: 'tool', callId: `r${index + 1}`, content: `export const module${index + 1} = ${index + 1};`, outcome: 'ok' },
   ]);

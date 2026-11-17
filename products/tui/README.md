@@ -173,9 +173,9 @@ After that, reads, searches, edits inside the workspace and commands a saved rul
 
 The other modes:
 
-- `ask-me`: Jev reads each judgment call's risk; low-stakes calls run and high-stakes ones ask you
+- `ask-me`: Jev reads each judgment call's risk; calls it reads as critical, irreversible or security-weakening ask you, and the rest run
 - `just-vibes`: nothing interrupts you; anything that needs you is held and listed at the end of the run, and `/held` approves or sets it aside
-- `yolo` runs every action without approval prompts (authentication, containment, secret storage and payment limits still apply)
+- `yolo` runs every action without approval prompts, except a change asked for from a channel (authentication, containment, secret storage and payment limits still apply, and an act only you perform is refused to the model)
 - `plan` allows read-only tools and refuses every mutating or exec call
 
 `/decisions` lists what Jev decided for you, with undo, never, always and ask. An explicit `permissions.tools.<name>` set to `deny` blocks that tool. Older saved values still load: `safe-owner`, `prompt`, `normal`, `accept-edits` and `custom` as `ask-me`, `safe-jev` and `auto` as `jev-decides`, `allow-all` as `yolo`. How the mode combines with the decision model setting is in [decision-model policies](../../docs/decision-model-policy.md#how-much-you-are-asked).

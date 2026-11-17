@@ -18,10 +18,10 @@ model, with a deadline and a fallback so nothing hangs.
 
 | Mode | Behavior |
 | --- | --- |
-| `ask-me` | Jev reads each judgment call's risk; low-stakes calls run, and high-stakes calls and owner-only items ask you. |
+| `ask-me` | Jev reads each judgment call's risk. Calls it reads as critical, irreversible or security-weakening ask you, with owner-only items; the rest run. |
 | `jev-decides` (default) | Jev decides judgment calls; owner-only items ask you. With no working decision model it behaves as `ask-me`. |
 | `just-vibes` | Nothing interrupts you: Jev decides what it can, and anything that needs you is held and listed at the end of the run (`/held`). |
-| `yolo` | No approval prompts. Authentication, workspace containment, secret storage and spending limits still apply. |
+| `yolo` | No approval prompts from the permission gate, except for a change asked for from a channel. Authentication, workspace containment, secret storage and spending limits still apply, and an act only you perform is refused to the model. |
 
 `plan` is a separate read-only posture. `Shift+Tab` changes the mode of the
 current session only; `--just-vibes` and `--yolo` pick one for a single launch.
@@ -50,9 +50,9 @@ items always come to you:
 
 | Policy | `ask-me` | `jev-decides` | `just-vibes` | `yolo` |
 | --- | --- | --- | --- | --- |
-| Hybrid (default) | Jev reads each judgment call and you are asked only about high-stakes, irreversible or security-weakening ones; with no model set or while it fails, you are asked about every judgment call your tool settings do not allow. | Jev decides every judgment call; with no model set, while it fails, or (as the unchosen default) on a model the shipped calibration did not measure, you are asked as in `ask-me`. | You are never interrupted: what Jev would not run, or with no working model every judgment call your tool settings do not allow, is held and listed at the end of the run. | You are asked nothing, and no decision model is consulted for permission. |
-| Decision Model Only | As Hybrid, except that while the set model fails, the call fails with the model's error instead of asking you. | As Hybrid, except that while the set model fails, the call fails with the model's error instead of asking you. | As Hybrid, except that while the set model fails, the call fails with the model's error instead of being held. | Same as Hybrid: you are asked nothing. |
-| No Decision Model | You are asked about every judgment call your tool settings do not allow. | You are asked about every judgment call your tool settings do not allow, exactly as in `ask-me`. | You are never interrupted: every judgment call your tool settings do not allow is held and listed at the end of the run. | You are asked nothing. |
+| Hybrid (default) | Jev reads each judgment call and you are asked only about the ones it reads as critical, irreversible or security-weakening; with no model set or while it fails, you are asked about every judgment call your tool settings do not allow. | Jev decides every judgment call; with no model set, while it fails, or (as the unchosen default) on a model the shipped calibration did not measure, you are asked as in `ask-me`. | You are never interrupted: what Jev would not run, or with no working model every judgment call your tool settings do not allow, is held and listed at the end of the run. | The permission gate asks you nothing except about a change asked for from a channel; purchases outside your limits still come to you, and an act only you perform (answering an approval, granting access) is refused to the model. No decision model is consulted for permission. |
+| Decision Model Only | As Hybrid, except that while the set model fails, the call fails with the model's error instead of asking you. | As Hybrid, except that while the set model fails, the call fails with the model's error instead of asking you. | As Hybrid, except that while the set model fails, the call fails with the model's error instead of being held. | Same as Hybrid. |
+| No Decision Model | You are asked about every judgment call your tool settings do not allow. | You are asked about every judgment call your tool settings do not allow, exactly as in `ask-me`. | You are never interrupted: every judgment call your tool settings do not allow is held and listed at the end of the run. | Same as Hybrid. |
 
 The shipped calibration record covers `jev-latest`, the model used when
 `judgment.model` is empty. Details, the decision deadline, fallback chains and

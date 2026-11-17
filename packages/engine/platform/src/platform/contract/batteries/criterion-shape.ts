@@ -29,16 +29,16 @@ const SOLO_ASK = "Do this yourself in this session, without delegating to sub-ag
 
 export const criterionShape = defineBattery({
   name: 'contract.criterion-shape',
-  version: 3,
+  version: 4,
   description: 'Whether a contract criterion can be confirmed or refuted from the finished work, whether it can only be met by an arrangement of agents rather than by the work, and whether that arrangement is one agent working alone.',
   accuracyFloor: 0.9,
   items: {
     checkable: yesNo(
-      'Can `criterion` be confirmed or refuted from the finished work OR its captured execution evidence, including source-read receipts, the actual plan and agent arrangement, tool outcomes and native Jev decision records? Process requirements can be checkable from those records even when the final artifact alone cannot establish them. This asks whether a check is possible, not whether the criterion has already passed. Do not invent a need for an extra reviewer or prior approval of this same native check.',
+      'Can `criterion` be confirmed or refuted from the finished work OR its captured execution evidence, including source-read receipts, the actual plan and agent arrangement, tool outcomes and native Jev decision records? The finished work includes running it: a behaviour observable by running the program, calling the endpoint, running a test or reading what it writes is checkable. Process requirements can be checkable from those records even when the final artifact alone cannot establish them. This asks whether a check is possible, not whether the criterion has already passed. Do not invent a need for an extra reviewer or prior approval of this same native check.',
       MEDIUM,
     ),
     topology_only: yesNo(
-      'Can `criterion` only be satisfied by a particular arrangement of agents rather than by the work itself?',
+      'Can `criterion` only be satisfied by a particular arrangement of agents rather than by the work itself? A feature the work builds that controls or reports on agents (a flag, a setting, an endpoint, an export) is the work, not an arrangement of the agents doing it.',
       MEDIUM,
       {
         true: 'The criterion is about how agents are arranged: how many run, whether in parallel, one per item, or that the work is done without delegating to any other agent',

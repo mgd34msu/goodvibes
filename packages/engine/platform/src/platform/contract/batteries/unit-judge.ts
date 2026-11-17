@@ -47,7 +47,10 @@ function withReport(summary: string, report: Record<string, unknown>): string {
 }
 
 const RETRY_GOAL = 'fetchWithRetry retries a failed request before giving up';
-const RETRY_CRITERIA = ['fetchWithRetry retries a failed request up to 3 times', 'The project typechecks'] as const;
+// Three retries after the first attempt: four requests in all. Said only as
+// "retries up to 3 times", the count was read as three requests in all.
+const RETRY_COUNT = 'fetchWithRetry retries a failed request up to 3 times after the first attempt (at most 4 requests in all)';
+const RETRY_CRITERIA = [RETRY_COUNT, 'The project typechecks'] as const;
 
 const FIXTURES: readonly JudgeFixture[] = [
   {
@@ -194,7 +197,7 @@ const FIXTURES: readonly JudgeFixture[] = [
   {
     name: 'an assigned final-answer draft precedes its host publication',
     goal: 'Provide the entire corrected user-facing answer in the completion report finalAnswer field, preserving completed work and accurately attributing verification.',
-    criteria: ['finalAnswer contains the complete delivery with the existing report link and an honest validation limit'],
+    criteria: ['finalAnswer contains the complete delivery: it points to the existing report review.md and states honestly what was not validated'],
     output: withReport('The complete proposed answer is returned for checking.', {
       finalAnswer: 'The completed static source review is in review.md. It identifies one confirmed missing ownership check, with source citations and a recommendation. No application tests were run.',
     }),
@@ -278,7 +281,7 @@ const FIXTURES: readonly JudgeFixture[] = [
   {
     name: 'a test file claimed in the report but missing on disk',
     goal: RETRY_GOAL,
-    criteria: ['fetchWithRetry retries a failed request up to 3 times', 'test/retry.test.ts tests the retry count'],
+    criteria: [RETRY_COUNT, 'test/retry.test.ts tests the retry count'],
     output: withReport('Added fetchWithRetry and a test for it in test/retry.test.ts.', {
       summary: 'Added fetchWithRetry and its test.',
       appliedChanges: ['fetchWithRetry retries up to 3 times', 'test/retry.test.ts checks the retry count'],

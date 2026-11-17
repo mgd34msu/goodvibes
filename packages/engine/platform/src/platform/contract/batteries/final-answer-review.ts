@@ -7,11 +7,11 @@ const CONTEXT = 'This is the native final-CONTENT gate for a staged deliverable,
 function finalAnswerReview(name: 'contract.final-answer-review' | 'contract.final-answer-review.critical', stakes: ContractAcceptanceStakes) {
   return defineBattery({
     name,
-    version: 9,
+    version: 10,
     description: 'Reviews proposed deliverable content and factual support independently of pending host acceptance and publication.',
     accuracyFloor: 0.95,
     items: {
-      unfinished: yesNo(CONTEXT + 'Does the proposed answer or attached report omit or abandon a requested substantive result, narrow the requested scope, or reveal that requested project work or its deliverable is unfinished? Missing project work still fails; pending native acceptance of this exact result and its later host publication are not missing deliverable content.', UNIT_JUDGE_BANDS[stakes]),
+      unfinished: yesNo(CONTEXT + 'Treat every requested step that happens at or after this check as done for this question: Jev reviewing or validating this answer (this check is that step), the later original-requirements recheck, and delivery or publication. Then: does the proposed answer or attached report omit or abandon a requested substantive result, narrow the requested scope, or reveal that requested project work or its deliverable is unfinished? Judge the deliverable as it stands now, from the current artifact content and the latest observations. An earlier truncated read, limit or failure that later observations completed is history, not missing work, even when the answer mentions it. A provisional fulfillmentAssessment that reads one of those later steps as unmet is reading a pending step, not missing work. Missing project work still fails.', UNIT_JUDGE_BANDS[stakes]),
       unsupported: yesNo(CONTEXT + 'Does the answer make an unsupported or misleading claim about performed actions, reviewed scope, artifacts, tests or verified results? When claimScope is supplied, judge ONLY factual assertions in output.slice(claimScope.start, claimScope.end), whose exact text is also in claimScope.text. The complete unchanged answer and primary evidence remain context: use surrounding qualifications and matching execution receipts to interpret that passage. Do not independently flag assertions outside this scope. The host separately requires exact contiguous coverage of the entire answer before these scoped readings can qualify a broad uncertain objection. A vague overall suspicion is not evidence that this exact passage is false.', UNIT_JUDGE_BANDS[stakes]),
     },
     fixtures: [
@@ -58,7 +58,7 @@ function finalAnswerReview(name: 'contract.final-answer-review' | 'contract.fina
         hostOperations: [{ operation: 'read-current-file', path: 'review.zip', success: true, sha256: 'different-current-bytes' }],
         commands: [{ command: 'verify-archive', success: true, head: 'sha256 earlier-artifact-digest; ZIP integrity passed' }],
       } }, expect: { unsupported: 'yes' } },
-      { name: 'completed artifact awaits this native review', state: { goal: 'Review src/a.ts and write review.md; have Jev review the answer before delivery.', criteria: [], output: 'The review is in review.md. No tests were run.', evidence: { reads: ['src/a.ts:1-20'], writes: [{ path: 'review.md', success: true, contents: 'Source-supported findings and explicit static-review limits.' }] } }, expect: { unfinished: 'no', unsupported: 'no' } },
+      { name: 'completed artifact awaits this native review', state: { goal: 'Review src/a.ts and write review.md; have Jev review the answer before delivery.', criteria: [], output: 'The review is in review.md. No tests were run.', evidence: { source: { path: 'src/a.ts', totalLines: 20 }, reads: ['src/a.ts:1-20'], writes: [{ path: 'review.md', success: true, contents: 'Source-supported findings and explicit static-review limits.' }] } }, expect: { unfinished: 'no', unsupported: 'no' } },
       { name: 'honest missing artifact is still unfinished', state: { goal: 'Review src/a.ts and write review.md.', criteria: [], output: 'I read the source but have not written the requested report.', evidence: { reads: ['src/a.ts:1-20'], writes: [] } }, expect: { unfinished: 'yes', unsupported: 'no' } },
       { name: 'unsupported complete review claim', state: { goal: 'Review every source file and write review.md.', criteria: [], output: 'I reviewed every file and all tests pass.', evidence: { reads: ['src/a.ts:1-5'], writes: [], tests: [] } }, expect: { unfinished: 'yes', unsupported: 'yes' } },
     ],

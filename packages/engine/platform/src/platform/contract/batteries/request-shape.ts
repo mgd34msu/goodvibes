@@ -33,11 +33,11 @@ const PERMISSION_BAND: YesNoBand = { yes: STAKES_BANDS.medium.confidence, no: ST
 
 export const requestShape = defineBattery({
   name: 'contract.request-shape',
-  version: 4,
+  version: 5,
   description: 'How the person asked for the work to be done: whether they forbid delegating it, ask for parallel agents, forbid changing files, or ask for several attempts to pick from.',
   accuracyFloor: 0.9,
   items: {
-    project_review: yesNo('Does the request require reviewing or auditing existing project files or code, whether the entire codebase or a specified part? A request only to implement new functionality, run tests, or discuss an idea is not a project review.', STAKES_BANDS.low.yesNo),
+    project_review: yesNo('Does the request require reviewing or auditing existing project files or code, whether the entire codebase or a specified part? A request only to implement new functionality, fix or change named code, run tests, or discuss an idea is not a project review: reading code in order to change it is not reviewing it.', STAKES_BANDS.low.yesNo),
     forbids_delegation: yesNo(
       'Does the user forbid handing this work to other agents or sub-agents, or ask that it be done without delegating?',
       PERMISSION_BAND,
@@ -47,7 +47,7 @@ export const requestShape = defineBattery({
       STAKES_BANDS.low.yesNo,
     ),
     forbids_writing: yesNo(
-      'Does the user require all work to stay read-only, including its deliverables, or explicitly forbid changing any files? A review, investigation, design or plan without requested file output is read-only. But a requested artifact, saved report or other file deliverable authorizes writing that deliverable: answer NO even when production source must remain unchanged. Authorization to write a review artifact does not authorize implementing fixes. Distinguish a restriction on production edits from a prohibition on every file write.',
+      'Must the work stay read-only? Answer YES when the user forbids changing files (no edits, do not touch anything, leave the files alone), or asks only for a review, investigation, design or plan delivered in the reply, with no file output. Answer NO when the user asks for changes, or asks for a file deliverable (a saved report, review.md, an artifact): that request authorizes writing the deliverable even when production source must remain unchanged, though it does not authorize implementing fixes. Distinguish a restriction on production edits from a prohibition on every file write.',
       PERMISSION_BAND,
     ),
     asks_for_attempts: yesNo(

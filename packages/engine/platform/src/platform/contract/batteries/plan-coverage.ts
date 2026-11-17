@@ -50,12 +50,12 @@ import {
 /** The band on every part: yes side medium (a false gap costs a repair), no side high (a missed requirement is never judged). */
 export const COVERAGE_BAND: YesNoBand = { yes: STAKES_BANDS.medium.confidence, no: STAKES_BANDS.high.confidence };
 
-const UNQUOTED_QUESTION = 'Do `words`, read in `request`, state an active requirement, limit or preference that NONE of allCriteria requires? Judge semantic coverage across the entire plan. A repeated obligation may already be covered by a criterion quoting a different phrase; its wording does not need a duplicate criterion or quote.';
+const UNQUOTED_QUESTION = 'Do `words`, read in `request`, state an active requirement, limit or preference that NONE of allCriteria requires? Judge semantic coverage across the entire plan. A repeated obligation may already be covered by a criterion quoting a different phrase; its wording does not need a duplicate criterion or quote. Each entry of allCriteria requires only what its `text` says; its `quote` shows which words of the request it was written from and requires nothing by itself, so a criterion whose text says less than its quote leaves the rest of the quote uncovered.';
 const UNQUOTED_CRITERIA = {
   true: 'The words state an active requirement, limit or preference that the supplied criteria leave out',
   false: 'The words add no requirement, or their requirement is already covered by the supplied criteria, including equivalent wording quoted elsewhere',
 } as const;
-const FALLS_SHORT_QUESTION = 'Does `words` ask for something that NONE of allCriteria requires, or set a higher standard than they do? Consider the complete plan criteria together, including requirements quoted elsewhere. The local overlapping criteria identify provenance; they are not the only criteria allowed to cover these words.';
+const FALLS_SHORT_QUESTION = 'Does `words` ask for something that NONE of allCriteria requires, or set a higher standard than they do? Consider the complete plan criteria together, including requirements quoted elsewhere. The local overlapping criteria identify provenance; they are not the only criteria allowed to cover these words. Each entry of allCriteria requires only what its `text` says; its `quote` shows which words of the request it was written from and requires nothing by itself, so a criterion whose text says less than its quote leaves the rest of the quote uncovered.';
 const FALLS_SHORT_CRITERIA = {
   true: 'Part of what the words ask for is required by none of the criteria, or is held to a lower standard',
   false: 'The criteria together require everything the words ask for, at the standard they set, possibly in other words or with more detail',
@@ -394,7 +394,7 @@ const FIXTURES: readonly CoverageFixture[] = [
 
 const HEADER = {
   name: 'contract.plan-coverage',
-  version: 3,
+  version: 4,
   description: "Whether the user's request states a requirement, limit or preference the plan's contract criteria leave out: each run of the request no criterion quotes, and each quoted region against the criteria quoting it.",
   accuracyFloor: 0.9,
 } as const;

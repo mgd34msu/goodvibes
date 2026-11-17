@@ -15,10 +15,10 @@ export const UNMET_GAPS = ['not_attempted', 'not_demonstrated', 'partial', 'cont
 export type UnmetGap = (typeof UNMET_GAPS)[number];
 
 const GAP_OPTIONS = {
-  not_attempted: 'Neither `output` nor `evidence` shows any work toward `criterion`',
-  not_demonstrated: 'The work toward `criterion` may exist, but nothing in `evidence` shows that it holds: no changed file, command output or lines read that prove it',
-  partial: '`output` or `evidence` shows some of what `criterion` requires, and part of it is missing',
-  contradicted: '`output` or `evidence` shows something that conflicts with `criterion`',
+  not_attempted: 'Nothing in `output` or `evidence` is work toward `criterion`: the report does not claim it, and no change or command addresses it (changes made for other things do not count)',
+  not_demonstrated: 'The report claims `criterion` is done, or a change addresses it, but no command output, test run or lines read show that the required behaviour holds',
+  partial: '`output` or `evidence` shows that part of what `criterion` requires holds and the rest is missing, for example only some of the required cases, items or rows',
+  contradicted: '`output` or `evidence` shows a result opposite to what `criterion` asks: a failure, an error exit or a wrong value. A count short of what is required is partial, not contradicted',
 } as const satisfies Readonly<Record<UnmetGap, string>>;
 
 /** The one sentence a nudge prints for each gap, in the worker's terms. */
@@ -33,7 +33,7 @@ const PARSER_GOAL = 'The CSV parser handles quoted fields';
 
 export const unmetGap = defineBattery({
   name: 'contract.unmet-gap',
-  version: 1,
+  version: 2,
   description: 'What evidence is missing for one acceptance criterion the work does not yet show met: no attempt, nothing demonstrating it, only part of it, or something that conflicts with it.',
   accuracyFloor: 0.8,
   items: {
@@ -51,7 +51,7 @@ export const unmetGap = defineBattery({
     },
     {
       name: 'no work toward a stated flag',
-      state: { goal: 'The export command writes orders to orders.csv', criterion: 'export --since <date> writes only newer orders', output: 'The export command now writes all orders to orders.csv.', evidence: { changedFiles: ['src/export.ts'], commands: ['bun test export (passed)'] } },
+      state: { goal: 'The export command writes orders to orders.csv', criterion: 'export --since <date> writes only newer orders', output: 'The export command now writes a header row to orders.csv.', evidence: { changedFiles: ['src/export.ts'], commands: ['bun test export (passed)'] } },
       expect: { gap: 'not_attempted' },
     },
     {

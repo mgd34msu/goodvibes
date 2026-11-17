@@ -1,4 +1,4 @@
-import type { GatewayMethodDescriptor } from './method-catalog-shared.js';
+import type { GatewayMethodDescriptor, GatewayMethodEffect } from './method-catalog-shared.js';
 import {
   BOOLEAN_SCHEMA,
   NUMBER_SCHEMA,
@@ -41,6 +41,8 @@ import {
 
 function homeGraphDescriptor(input: {
   readonly id: string;
+  /** Set where a method reaches outside the machine; otherwise read or write follows its scope. */
+  readonly effect?: GatewayMethodEffect | undefined;
   readonly title: string;
   readonly description: string;
   readonly method: 'GET' | 'POST';
@@ -58,6 +60,7 @@ function homeGraphDescriptor(input: {
     category: 'knowledge',
     scopes: [input.write ? 'write:knowledge' : 'read:knowledge'],
     ...(input.write ? { access: 'admin' as const } : {}),
+    ...(input.effect ? { effect: input.effect } : {}),
     http: { method: input.method, path: input.path },
     inputSchema: input.inputSchema,
     outputSchema: input.outputSchema,

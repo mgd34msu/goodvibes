@@ -9,9 +9,8 @@ models, and everything keeps working with none configured.
 Code settles what the program already knows: a read, a search, an edit inside
 the workspace and a command an existing rule covers start at once, with no
 model request and no question. You are asked only what is yours to decide
-(spending over your limit, a deletion nothing can bring back, a new recipient,
-granting access, loosening a security setting, changing a contract), once, and
-the answer is remembered. The rest are judgment calls for Jev, the decision
+(granting access, loosening a security, judgment or payment setting, a call your own "always ask me" rule covers, a change asked for from a channel, a deletion nothing keeps a copy of, sending to a new recipient, sending content derived from untrusted text, and changing what a contract requires), and the answer can be remembered. Spending over your limits is put
+to you by the payment windows. The rest are judgment calls for Jev, the decision
 model, with a deadline and a fallback so nothing hangs.
 
 `permissions.mode` chooses how much you are asked:
@@ -54,8 +53,11 @@ items always come to you:
 | Decision Model Only | As Hybrid, except that while the set model fails, the call fails with the model's error instead of asking you. | As Hybrid, except that while the set model fails, the call fails with the model's error instead of asking you. | As Hybrid, except that while the set model fails, the call fails with the model's error instead of being held. | Same as Hybrid. |
 | No Decision Model | You are asked about every judgment call your tool settings do not allow. | You are asked about every judgment call your tool settings do not allow, exactly as in `ask-me`. | You are never interrupted: every judgment call your tool settings do not allow is held and listed at the end of the run. | Same as Hybrid. |
 
-The shipped calibration record covers `jev-latest`, the model used when
-`judgment.model` is empty. Details, the decision deadline, fallback chains and
+The shipped calibration record covers the hosted endpoint and `jev-latest`.
+While `jev-decides` is only the default, Jev decides only when the endpoint,
+the model and every fallback target match that record; choosing the mode
+yourself (in Settings, `/permissions`, with Shift+Tab, for a hosted session or
+in a channel profile) lets Jev decide on any working decision model. Details, the decision deadline, fallback chains and
 the features that need a decision model are in the
 [decision model policy guide](docs/decision-model-policy.md). The
 [payment contract](packages/engine/docs/payments.md) keeps its spending limits,

@@ -790,7 +790,8 @@ export class ProcessManager {
 
   /** Authority-scoped bg_* access. Another captured caller cannot inspect/stop it. */
   async handleOwnedBoundaryCommand(cmd: string, owner: object): Promise<BgCommandResult | null> {
-    const match = cmd.match(/^bg_(status|output|stop)\s+(\S+)$/);
+    // `bg_output <id> [from=<byte> | tail=<bytes>]`, as for any background process; status and stop take the id alone.
+    const match = cmd.match(/^bg_(status|output|stop)\s+(\S+)((?:\s+\S+)*)\s*$/);
     if (cmd.trim() === 'bg_list') {
       const ids = new Set([...this._boundaryExecutions].filter(([, item]) => item.owner === owner).map(([id]) => id));
       for (const id of ids) await this._boundaryExecutions.get(id)?.readOutput();
@@ -801,13 +802,22 @@ export class ProcessManager {
     const execution = this._boundaryExecutions.get(id);
     if (!execution || execution.owner !== owner || !this._processes.has(id))
       return { cmd, exit_code: 1, stdout: '', stderr: 'Unknown process in this execution authority', success: false };
+    const extra = (match[3] ?? '').trim();
+    if (extra.length > 0 && match[1] !== 'output')
+      return { cmd, exit_code: 1, stdout: '', stderr: `bg_${match[1]} takes only the process id, not "${extra}".`, success: false };
+    const range = parseOutputRange(extra);
+    if (typeof range === 'string') return { cmd, exit_code: 1, stdout: '', stderr: range, success: false };
     if (match[1] === 'stop') {
       await execution.stop();
       this._processes.delete(id); this._boundaryExecutions.delete(id);
       return { cmd, exit_code: 0, stdout: `Stopped ${id}`, stderr: '', success: true };
     }
     const output = await execution.readOutput();
-    if (match[1] === 'output') return { ...output, cmd };
+    if (match[1] === 'output') {
+      if (range.from === undefined && range.tail === undefined) return { ...output, cmd };
+      // A captured run keeps its output in memory (no spill file), so the range is read from what it kept.
+      return { ...output, cmd, stdout: readOutputRange([output.stdout], undefined, range), stderr: readOutputRange([output.stderr], undefined, range) };
+    }
     const entry = this._processes.get(id);
     if (!entry) return { cmd, exit_code: 1, stdout: '', stderr: 'Unknown process in this execution authority', success: false };
     return { cmd, exit_code: 0, stdout: JSON.stringify({ id, pid: entry.pid, cmd: entry.cmd,

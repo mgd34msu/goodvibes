@@ -26,8 +26,8 @@
  * window stops matching in the others without a restart.
  */
 
-import { readFileSync, statSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { readFileSync, statSync, watch, type FSWatcher } from 'node:fs';
+import { basename, dirname, resolve } from 'node:path';
 import type { PolicyRule } from '../runtime/permissions/types.js';
 import { PersistentStore } from '../state/persistent-store.js';
 import { StoreWriteQueue } from '../state/store-write-queue.js';
@@ -139,6 +139,17 @@ export class UserPermissionRuleStore {
    * the publication revision it also covers remembered rules.
    */
   #changeRevision = 0;
+  /**
+   * The evaluation lists per project, built from the record arrays they were
+   * made from. Every change replaces `records` or `remembered` (never edits
+   * them in place), so an identity compare says whether a list is current and
+   * a check does not filter and convert every rule again.
+   */
+  #compiled: {
+    readonly records: readonly StoredUserPermissionRule[];
+    readonly remembered: readonly StoredUserPermissionRule[];
+    readonly byProject: Map<string, { readonly committed: readonly PolicyRule[]; readonly remembered: readonly PolicyRule[] }>;
+  } | null = null;
   readonly #revisionSource = revisionSource('permission rules', () => { this.refreshFromDisk(); return this.#changeRevision; });
   /** Whole mutations run one at a time, in call order. See StoreWriteQueue. */
   private readonly writes = new StoreWriteQueue();
@@ -219,6 +230,10 @@ export class UserPermissionRuleStore {
    */
   private refreshFromDisk(): void {
     if (this.diskSignature === null) return;
+    this.#watchDisk();
+    // While the directory is watched, nothing to take in until it reports a change.
+    if (this.#diskWatcher && !this.#diskDirty) return;
+    this.#diskDirty = false;
     const signature = this.signatureOfFile();
     if (signature === this.diskSignature) return;
     this.diskSignature = signature;
@@ -229,6 +244,33 @@ export class UserPermissionRuleStore {
     } catch (error) {
       logger.warn('user permission rule store changed on disk but could not be read; keeping the rules already loaded', { error: summarizeError(error) });
     }
+  }
+
+  /**
+   * Another process's write is noticed by a watch on the rules file's
+   * directory, so a permission check does not `stat` the file each time.
+   * Where the directory cannot be watched every read stats the file instead.
+   * The watch never keeps the process alive.
+   */
+  #diskWatcher: FSWatcher | null | undefined;
+  #diskDirty = true;
+  #watchDisk(): void {
+    if (this.#diskWatcher !== undefined) return;
+    this.#diskWatcher = null;
+    if (this.store.lockPath === null) return;
+    const name = basename(this.filePath);
+    try {
+      const watcher = watch(dirname(this.filePath), { persistent: false }, (_event, changed) => {
+        if (!changed || String(changed) === name) this.#diskDirty = true;
+      });
+      watcher.on('error', () => {
+        try { watcher.close(); } catch { /* already closed */ }
+        if (this.#diskWatcher === watcher) this.#diskWatcher = null;
+        this.#diskDirty = true;
+      });
+      (watcher as FSWatcher & { unref?: () => void }).unref?.();
+      this.#diskWatcher = watcher;
+    } catch { /* not watchable: every read stats the file */ }
   }
 
   /** Monotonic committed-publication identity, including same-value replacements. */
@@ -259,13 +301,42 @@ export class UserPermissionRuleStore {
    */
   rules(project?: string | null): readonly PolicyRule[] {
     this.refreshFromDisk();
-    return this.records.filter((record) => project === undefined || appliesIn(record, project)).map(ruleForEvaluation);
+    return this.compiledFor(project).committed;
   }
 
   /** Rules remembered from an owner's answer during this process, matched after rules(). */
   rememberedRules(project?: string | null): readonly PolicyRule[] {
     this.refreshFromDisk();
-    return this.remembered.filter((record) => project === undefined || appliesIn(record, project)).map(ruleForEvaluation);
+    return this.compiledFor(project).remembered;
+  }
+
+  /**
+   * rules() and rememberedRules() for one check, after taking in another
+   * process's write once (one `stat`), with the publication revision they
+   * stand under. Both lists are frozen and shared until a rule changes.
+   */
+  evaluationRules(project?: string | null): { readonly committed: readonly PolicyRule[]; readonly remembered: readonly PolicyRule[]; readonly revision: number } {
+    this.refreshFromDisk();
+    return { ...this.compiledFor(project), revision: this.publicationRevision };
+  }
+
+  private compiledFor(project: string | null | undefined): { readonly committed: readonly PolicyRule[]; readonly remembered: readonly PolicyRule[] } {
+    let compiled = this.#compiled;
+    if (!compiled || compiled.records !== this.records || compiled.remembered !== this.remembered) {
+      compiled = { records: this.records, remembered: this.remembered, byProject: new Map() };
+      this.#compiled = compiled;
+    }
+    const key = project === undefined ? '\0every' : project === null ? '\0none' : project;
+    let lists = compiled.byProject.get(key);
+    if (!lists) {
+      const applies = (record: StoredUserPermissionRule) => project === undefined || appliesIn(record, project);
+      lists = Object.freeze({
+        committed: Object.freeze(this.records.filter(applies).map(ruleForEvaluation)),
+        remembered: Object.freeze(this.remembered.filter(applies).map(ruleForEvaluation)),
+      });
+      compiled.byProject.set(key, lists);
+    }
+    return lists;
   }
 
   /** Publish a rule only after persistence succeeds; reject without changing state on failure. */

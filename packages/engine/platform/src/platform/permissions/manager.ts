@@ -515,7 +515,7 @@ export function consumeAutonomousAdmission(admission: AutonomousPermissionAdmiss
 
 /** What the manager needs from the durable rule store; older embeddings may omit the optional members. */
 type PermissionRuleStoreAccess = Pick<UserPermissionRuleStore, 'rules' | 'add'>
-  & Partial<Pick<UserPermissionRuleStore, 'init' | 'awaitReady' | 'getPublicationRevision' | 'committedRevision' | 'remember' | 'rememberedRules'>>;
+  & Partial<Pick<UserPermissionRuleStore, 'init' | 'awaitReady' | 'getPublicationRevision' | 'committedRevision' | 'remember' | 'rememberedRules' | 'evaluationRules'>>;
 
 /** Owner-edited revisions waiting for re-admission; the oldest is dropped (and would be asked again) past this. */
 /** The hosted session whose call is being decided, so a session-tier answer stays with it. */
@@ -890,8 +890,11 @@ export class PermissionManager {
     });
     if (result.approved) {
       let acceptedIncarnation = (rawAuthority as Readonly<Record<string, unknown>>)['incarnation'];
-      // The settings as stored (the admitted mode may come from the execution owner instead).
-      let acceptedPermissions = JSON.stringify(this.configReader.getAutonomousSnapshot?.()?.permissions);
+      // The settings as stored (the admitted mode may come from the execution owner
+      // instead). The snapshot is kept by reference and serialised only when the
+      // call starts a settings change; most calls never do.
+      const admittedPermissions = this.configReader.getAutonomousSnapshot?.()?.permissions;
+      let acceptedPermissions: string | undefined;
       let settingsCurrent = revisions.assertSettings;
       const currentIncarnation = () => (this.configReader.getAutonomousSnapshot?.() as Readonly<Record<string, unknown>> | undefined)?.['incarnation'];
       let activeTransition: { readonly binding: ToolPreparedSettingsMutation; readonly transition: PreparedConfigMutationTransition } | undefined;
@@ -948,6 +951,7 @@ export class PermissionManager {
             throw new Error('Autonomous settings transition changed');
           }
           for (const parent of parents) parent.assertConfigTransition?.(actual, transition);
+          acceptedPermissions ??= JSON.stringify(admittedPermissions);
           activeTransition = { binding: actual, transition };
           assertAuthority();
         },
@@ -1383,7 +1387,8 @@ export class PermissionManager {
     ownerOnly?: OwnerOnlyKind,
     subjects?: CallSubjects,
   ): Promise<RememberedDecision | null> {
-    const unchanged = owner ? undefined : this.ruleRevisions();
+    const view = this.ruleView();
+    const unchanged = owner ? undefined : this.ruleRevisions(view.revision);
     const current = () => {
       options.signal?.throwIfAborted();
       if (owner) { owner.assertCurrent(); return; }
@@ -1400,8 +1405,7 @@ export class PermissionManager {
     }
     // Rules remembered from an answer this process are matched live, after the
     // committed rules, until the store loads them as committed on restart.
-    const remembered = this.userRuleStore?.rememberedRules?.(this.configReader.getWorkingDirectory()) ?? [];
-    const rules = owner ? [...owner.frame.rules, ...remembered] : this.userRuleStore ? [...this.userRuleStore.rules(this.configReader.getWorkingDirectory()), ...remembered] : undefined;
+    const rules = owner ? [...owner.frame.rules, ...view.remembered] : this.userRuleStore ? [...view.committed, ...view.remembered] : undefined;
     const projectRoot = owner ? owner.frame.directory : rules ? this.configReader.getWorkingDirectory() : undefined;
     const durable = rules
       ? await matchDurableRulesAsync(rules, toolName, args, { signal: options.signal, assertCurrent: current, projectRoot: projectRoot ?? undefined, subjects })
@@ -1655,7 +1659,8 @@ export class PermissionManager {
     owner?: AutonomousPermissionReading,
     subjects?: CallSubjects,
   ): Promise<LayeredPermissionDecision> {
-    const unchanged = owner ? undefined : this.ruleRevisions();
+    const view = this.ruleView();
+    const unchanged = owner ? undefined : this.ruleRevisions(view.revision);
     const current = () => {
       options.signal?.throwIfAborted();
       if (owner) { owner.assertCurrent(); return; }
@@ -1665,10 +1670,9 @@ export class PermissionManager {
     current();
     // User-origin rules are evaluated before managed (registry) rules by the
     // evaluator, so a user allow-rule wins over a managed one.
-    const remembered = this.userRuleStore?.rememberedRules?.(this.configReader.getWorkingDirectory()) ?? [];
-    const rules = owner ? [...owner.frame.rules, ...remembered, ...owner.frame.policyRules] : [
-      ...(this.userRuleStore?.rules(this.configReader.getWorkingDirectory()) ?? []),
-      ...remembered,
+    const rules = owner ? [...owner.frame.rules, ...view.remembered, ...owner.frame.policyRules] : [
+      ...view.committed,
+      ...view.remembered,
       ...(this.policyRuntimeState.getRegistry().getCurrent()?.rules ?? []),
     ];
     const evaluator = new LayeredPolicyEvaluator({
@@ -1686,15 +1690,32 @@ export class PermissionManager {
   }
 
   /**
-   * The integers the rule list a non-autonomous check reads is current by:
-   * the rule store (taking in another process's write), the managed policy
-   * bundle, and this manager's session answers.
+   * The rule lists one check matches against, read once: another process's
+   * write is taken in here (one `stat`), and the lists are the store's frozen
+   * copies, rebuilt only when a rule changed.
    */
-  private ruleRevisions(): () => boolean {
-    const read = () => [this.userRuleStore?.committedRevision?.() ?? this.userRuleStore?.getPublicationRevision?.() ?? 0,
+  private ruleView(): { readonly committed: readonly PolicyRule[]; readonly remembered: readonly PolicyRule[]; readonly revision: number } {
+    const store = this.userRuleStore;
+    const project = this.configReader.getWorkingDirectory();
+    if (!store) return { committed: [], remembered: [], revision: 0 };
+    if (store.evaluationRules) return store.evaluationRules(project);
+    return { committed: store.rules(project), remembered: store.rememberedRules?.(project) ?? [],
+      revision: store.committedRevision?.() ?? store.getPublicationRevision?.() ?? 0 };
+  }
+
+  /**
+   * The integers the rule list a non-autonomous check reads is current by:
+   * the rule store's publication revision as the check read it, the managed
+   * policy bundle, and this manager's session answers. Compares are in memory;
+   * another process's write was taken in when the rules were read, and the
+   * claim before the call runs compares the store's committed revision again.
+   */
+  private ruleRevisions(rulesRevision: number): () => boolean {
+    const store = this.userRuleStore;
+    const read = () => [store?.getPublicationRevision?.() ?? rulesRevision,
       this.policyRuntimeState.getRegistry().getPublicationRevision?.() ?? 0, this.sessionApprovalRevision] as const;
-    const before = read();
-    return () => { const now = read(); return now[0] === before[0] && now[1] === before[1] && now[2] === before[2]; };
+    const policy = read()[1], session = this.sessionApprovalRevision;
+    return () => { const now = read(); return now[0] === rulesRevision && now[1] === policy && now[2] === session; };
   }
 
   /**

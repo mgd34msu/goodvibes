@@ -11,10 +11,10 @@
  *
  * `list` (the agenda) and `get` are exposed: knowing what is next without
  * leaving the terminal is the whole value of a calendar on this surface.
- * `create` asks once before it runs (the command registry's one confirmation,
- * showing the event with its times in this machine's zone), because this
- * surface has no way to delete an event, and the daemon gates the call on both
- * `body.confirm` and an explicit user request.
+ * `create`, `update` and `delete` each ask once before they run (the command
+ * registry's one confirmation, showing the event or the change with its times
+ * in this machine's zone), because each reaches the calendar's guests, and the
+ * daemon gates the call on both `body.confirm` and an explicit user request.
  *
  * `calendar.ics.import` and `calendar.ics.export` are deliberately NOT given a
  * command. They are bulk file-level transfers of a whole calendar, an
@@ -107,7 +107,7 @@ export function renderAgenda(events: readonly CalendarEvent[]): string {
     const where = event.location ? `  @ ${truncate(event.location, 24)}` : '';
     lines.push(`  ${formatWhen(event.start)}  ${truncate(event.title, 44).padEnd(44)}${where}`);
   }
-  lines.push('', '  /calendar get <id>: open one event');
+  lines.push('', '  /calendar get <id>: open one event   /calendar update <id> …   /calendar delete <id>');
   return lines.join('\n');
 }
 
@@ -142,6 +142,25 @@ export function parseEventArgs(raw: string): { title: string; start: string; end
   return { title, start, end };
 }
 
+/**
+ * Read the fields of `/calendar update <id> <title | start | end>`. Any field
+ * may be left empty to keep it; the start and end are the last two fields and
+ * the title is everything before them. Null when the line is not three fields
+ * or changes nothing.
+ */
+export function parseEventUpdateArgs(raw: string): { title?: string; start?: string; end?: string } | null {
+  const last = raw.lastIndexOf('|');
+  const middle = last < 0 ? -1 : raw.lastIndexOf('|', last - 1);
+  if (middle < 0) return null;
+  const title = raw.slice(0, middle).trim();
+  const start = raw.slice(middle + 1, last).trim();
+  const end = raw.slice(last + 1).trim();
+  if (!title && !start && !end) return null;
+  return { ...(title ? { title } : {}), ...(start ? { start } : {}), ...(end ? { end } : {}) };
+}
+
+const BARE_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
 /** `--again` creates an event identical to one already created; `--confirm` was the old second step and has no effect. */
 const CREATE_FLAGS: ReadonlySet<string> = new Set(['--again', '--confirm']);
 
@@ -151,6 +170,8 @@ function parseLimit(raw: string | undefined): number {
   return Math.min(MAX_LIST_LIMIT, Math.floor(parsed));
 }
 
+const createRawRest = rawRestAfterLeadingFlags(['create'], new Set(['--yes', ...CREATE_FLAGS]));
+
 const USAGE = [
   'Usage:',
   '  /calendar                   connection status and the agenda ahead',
@@ -158,8 +179,11 @@ const USAGE = [
   '  /calendar list [n]          the next n events (default 20)',
   '  /calendar get <id>          open one event',
   '  /calendar create [--yes] [--again] <title | start | end>   shows the event and asks once, then creates it',
+  '  /calendar update [--yes] <id> <title | start | end>       shows the change and asks once; leave a field empty to keep it',
+  '  /calendar delete [--yes] <id>                             asks once, then removes the event',
   '',
-  '  --yes and --again go before the title; the same words inside the title are text.',
+  '  --yes and --again go before the title or id; the same words inside the title are text.',
+  '  Guests are told of a change or a removal by the calendar.',
   '  Times are ISO-8601, e.g. 2026-08-01T14:00:00Z or 2026-08-01T09:00:00-05:00;',
   '  a time without a zone is read in this machine\'s zone, which the question names.',
 ].join('\n');
@@ -168,16 +192,43 @@ export function registerCalendarRuntimeCommands(registry: CommandRegistry): void
   registry.register({
     name: 'calendar',
     aliases: ['cal'],
-    description: 'Calendar over the daemon: connection status, agenda, event detail, create',
-    usage: '[status|list|get|create] …',
-    argsHint: '[status|list <n>|get <id>|create]',
-    subcommands: { status: '', list: '[n]', get: '<id>', create: '[--yes] [--again] <title | start | end>' },
+    description: 'Calendar over the daemon: connection status, agenda, event detail, create, update, delete',
+    usage: '[status|list|get|create|update|delete] …',
+    argsHint: '[status|list <n>|get <id>|create|update <id>|delete <id>]',
+    subcommands: {
+      status: '', list: '[n]', get: '<id>', create: '[--yes] [--again] <title | start | end>',
+      update: '[--yes] <id> <title | start | end>', delete: '[--yes] <id>',
+    },
     // --yes counts only before the title: the same word inside the title is text.
     leadingFlagsOnly: true,
     // From the title on the line is taken as typed: the title keeps its spacing and quotes.
-    rawRest: rawRestAfterLeadingFlags(['create'], new Set(['--yes', ...CREATE_FLAGS])),
+    rawRest: (args, upcoming) => {
+      if ((args[0] ?? '').toLowerCase() !== 'update') return createRawRest(args, upcoming);
+      // `update [--yes] <id>`, then the fields are taken as typed.
+      const words = args.slice(1);
+      const id = words.findIndex((word) => word !== '--yes');
+      return id >= 0 && id === words.length - 1 ? args.length : undefined;
+    },
     confirm(args) {
-      if ((args[0] ?? '').toLowerCase() !== 'create') return undefined;
+      const verb = (args[0] ?? '').toLowerCase();
+      if (verb === 'update') {
+        const plan = planEventUpdate(args.slice(1));
+        if (!plan.ok) return undefined;
+        return { title: `Change calendar event ${plan.eventId}?`, detail: plan.lines.join('\n'), confirmLabel: 'Change' };
+      }
+      if (verb === 'delete') {
+        const eventId = args[1];
+        if (!eventId) return undefined;
+        return {
+          title: `Delete calendar event ${eventId}?`,
+          detail: [
+            `Event id: ${eventId} (open it first with /calendar get ${eventId} to see which event this is).`,
+            'It is removed from the calendar and its guests are told; this app cannot restore it.',
+          ].join('\n'),
+          confirmLabel: 'Delete',
+        };
+      }
+      if (verb !== 'create') return undefined;
       const plan = planEventCreate(args.slice(1));
       if (!plan.ok) return undefined; // The handler prints the usage or the refusal; nothing is created.
       return {
@@ -210,6 +261,14 @@ export function registerCalendarRuntimeCommands(registry: CommandRegistry): void
       }
       if (sub === 'create') {
         await createEvent(ctx, gateway, args.slice(1));
+        return;
+      }
+      if (sub === 'update') {
+        await updateEvent(ctx, gateway, args.slice(1));
+        return;
+      }
+      if (sub === 'delete') {
+        await deleteEvent(ctx, gateway, args[1]);
         return;
       }
       ctx.print(USAGE);
@@ -296,7 +355,7 @@ function planEventCreate(rest: readonly string[]): EventCreatePlan {
     ...(start.zoneStated || end.zoneStated
       ? [`A time typed without a zone is read in this machine's zone, UTC${offsetLabel(new Date(start.instant).getTimezoneOffset())}.`]
       : []),
-    'This app cannot delete the event afterwards.',
+    'Change it later with /calendar update <id>, or remove it with /calendar delete <id>.',
   ];
   return { ok: true, title: parsed.title, start: start.instant, end: end.instant, again: line.flags.has('--again'), lines };
 }
@@ -319,5 +378,83 @@ async function createEvent(ctx: CommandContext, gateway: Gateway, rest: readonly
       body: { title: plan.title, start: plan.start, end: plan.end, confirm: true },
     }) as { readonly eventId: string; readonly createdAt: string };
     ctx.print(`Created "${plan.title}", ${formatWhen(plan.start)} to ${formatWhen(plan.end)} (event id ${result.eventId}).`);
+  });
+}
+
+/** A `/calendar update` line read into the change it makes, or why it makes none. */
+type EventUpdatePlan =
+  | { readonly ok: true; readonly eventId: string; readonly fields: { readonly title?: string; readonly start?: string; readonly end?: string }; readonly lines: readonly string[] }
+  | { readonly ok: false; readonly problem: string };
+
+function planEventUpdate(rest: readonly string[]): EventUpdatePlan {
+  const usage = [
+    'Usage: /calendar update <id> <title | start | end>',
+    '  Leave a field empty to keep it. For example, to move an event and keep its title:',
+    '  /calendar update <id> | 2026-08-01T15:00:00Z | 2026-08-01T16:00:00Z',
+  ].join('\n');
+  const eventId = rest[0];
+  const parsed = parseEventUpdateArgs(rest.slice(1).join(' '));
+  if (!eventId || parsed === null) return { ok: false, problem: usage };
+  // A bare date on both ends keeps or makes the event all-day; any other time is read as an instant.
+  const allDay = (parsed.start === undefined || BARE_DATE.test(parsed.start)) && (parsed.end === undefined || BARE_DATE.test(parsed.end))
+    && (parsed.start !== undefined || parsed.end !== undefined);
+  const timeOf = (raw: string | undefined): { readonly instant: string; readonly zoneStated: boolean } | null | undefined => {
+    if (raw === undefined) return undefined;
+    if (allDay) return { instant: raw, zoneStated: false };
+    return normaliseEventTime(raw);
+  };
+  const start = timeOf(parsed.start);
+  const end = timeOf(parsed.end);
+  if (start === null || end === null) {
+    return { ok: false, problem: `Not changed: ${start === null ? `start "${parsed.start ?? ''}"` : `end "${parsed.end ?? ''}"`} is not a time. Use ISO-8601, for example 2026-08-01T14:00:00Z, or a date for an all-day event.` };
+  }
+  const shown = (time: { readonly instant: string }): string => (allDay ? `${time.instant} (all day)` : formatWhen(time.instant));
+  const fields = {
+    ...(parsed.title === undefined ? {} : { title: parsed.title }),
+    ...(start === undefined ? {} : { start: start.instant }),
+    ...(end === undefined ? {} : { end: end.instant }),
+  };
+  const lines = [
+    `Event id: ${eventId}`,
+    ...(parsed.title === undefined ? [] : [`Title: ${parsed.title}`]),
+    ...(start === undefined ? [] : [`Start: ${shown(start)}`]),
+    ...(end === undefined ? [] : [`End:   ${shown(end)}`]),
+    'Fields left empty keep their value. Guests are told of the change.',
+    ...(start?.zoneStated || end?.zoneStated
+      ? [`A time typed without a zone is read in this machine's zone, UTC${offsetLabel(new Date().getTimezoneOffset())}.`]
+      : []),
+  ];
+  return { ok: true, eventId, fields, lines };
+}
+
+async function updateEvent(ctx: CommandContext, gateway: Gateway, rest: readonly string[]): Promise<void> {
+  const plan = planEventUpdate(rest);
+  if (!plan.ok) {
+    ctx.print(plan.problem);
+    return;
+  }
+  // The registry has asked the owner by now (or the owner typed --yes), so this is the user's own explicit request.
+  await withStatusOnFailure(ctx, gateway, 'update', async () => {
+    const result = await gateway.invoke('calendar.events.update', {
+      ...EXPLICIT_WRITE_INVOCATION_CONTEXT,
+      body: { eventId: plan.eventId, ...plan.fields, confirm: true },
+    }) as { readonly eventId: string; readonly updatedAt: string };
+    ctx.print(`Changed event ${result.eventId}. /calendar get ${result.eventId} shows it now.`);
+  });
+}
+
+async function deleteEvent(ctx: CommandContext, gateway: Gateway, eventId: string | undefined): Promise<void> {
+  if (!eventId) {
+    ctx.print('Usage: /calendar delete <id>; the id from /calendar list.');
+    return;
+  }
+  await withStatusOnFailure(ctx, gateway, 'delete', async () => {
+    const result = await gateway.invoke('calendar.events.delete', {
+      ...EXPLICIT_WRITE_INVOCATION_CONTEXT,
+      body: { eventId, confirm: true },
+    }) as { readonly eventId: string; readonly deleted: boolean };
+    ctx.print(result.deleted
+      ? `Deleted event ${result.eventId}.`
+      : `Event ${result.eventId} was not on the calendar any more, so nothing was deleted.`);
   });
 }

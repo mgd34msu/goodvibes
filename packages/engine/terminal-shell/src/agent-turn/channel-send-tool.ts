@@ -221,6 +221,7 @@ export function createAgentChannelSendTool(
               result,
             });
             lines.push(`  receipt ${receipt.id}`);
+            if (receipt.storeNote) lines.push(`  ${receipt.storeNote}`);
           } catch (receiptError) {
             lines.push(`  receipt unavailable ${receiptError instanceof Error ? receiptError.message : String(receiptError)}`);
           }

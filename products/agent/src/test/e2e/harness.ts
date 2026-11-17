@@ -119,25 +119,6 @@ export async function freePort(): Promise<number> {
   });
 }
 
-export async function waitFor<T>(
-  what: string,
-  probe: () => T | undefined | null | false | Promise<T | undefined | null | false>,
-  timeoutMs = 30_000,
-  intervalMs = 150,
-): Promise<T> {
-  const deadline = Date.now() + timeoutMs;
-  let last: unknown;
-  while (Date.now() < deadline) {
-    try {
-      const value = await probe();
-      if (value) return value;
-    } catch (error) {
-      last = error;
-    }
-    await Bun.sleep(intervalMs);
-  }
-  throw new Error(`E2E: timed out after ${timeoutMs}ms waiting for ${what}${last ? ` (last error: ${String(last)})` : ''}`);
-}
 
 // ── the scripted model ──────────────────────────────────────────────────────
 
@@ -368,7 +349,12 @@ export interface AgentSession {
   stderr(): string;
   type(text: string): void;
   key(name: string): void;
-  waitForScreen(what: string, predicate: (screen: string) => boolean, timeoutMs?: number): Promise<string>;
+  /**
+   * Resolves with the screen once `predicate` holds after a write; rejects if the
+   * binary exits first. `poke` runs before each wait, for a probe resent until seen.
+   * The file's own limit bounds it.
+   */
+  waitForScreen(what: string, predicate: (screen: string) => boolean, poke?: () => void): Promise<string>;
   /** Resize the real PTY and the current-screen projection together. */
   resize(cols: number, rows: number): void;
   /** True while the owned binary is still running. */
@@ -385,6 +371,9 @@ export function launchAgent(e2eHome: E2EHome, options: { cols?: number; rows?: n
   const decoder = new TextDecoder();
   let output = '';
   let stopped: Promise<void> | undefined;
+  // Every write the program makes wakes the waiters, so a wait checks the screen
+  // exactly when it can have changed and never on a timer.
+  let changed = Promise.withResolvers<void>();
   // The shell immediately execs the actual artifact. Redirect stderr separately
   // so the existing stderr assertions retain their meaning with a PTY.
   const child = Bun.spawn(['/bin/sh', '-c', 'exec "$1" 2>"$2"', 'agent-e2e', binary, stderrPath], {
@@ -395,9 +384,12 @@ export function launchAgent(e2eHome: E2EHome, options: { cols?: number; rows?: n
         const chunk = decoder.decode(bytes, { stream: true });
         output += chunk;
         frame.write(chunk, reply => terminal.write(reply));
+        const wake = changed; changed = Promise.withResolvers<void>(); wake.resolve();
       },
     },
   });
+  const exited = child.exited.then((code) => { throw new Error(`E2E: the binary exited (${code}) before the screen showed what was awaited`); });
+  void exited.catch(() => {});
   const readStderr = (): string => (existsSync(stderrPath) ? readFileSync(stderrPath, 'utf8') : '');
   const keys: Record<string, string> = { Enter: '\r', Up: '\x1b[A', Down: '\x1b[B', Escape: '\x1b', 'C-u': '\x15', 'C-c': '\x03' };
   const session: AgentSession = {
@@ -411,20 +403,22 @@ export function launchAgent(e2eHome: E2EHome, options: { cols?: number; rows?: n
       child.terminal!.write(bytes);
     },
     resize: (cols, rows) => { frame.resize(cols, rows); child.terminal!.resize(cols, rows); },
-    waitForScreen: async (what, predicate, timeoutMs = 30_000) => {
+    waitForScreen: async (what, predicate, poke) => {
       try {
-        return await waitFor(what, () => {
-          const screen = session.screen();
-          return predicate(screen) ? screen : false;
-        }, timeoutMs, 30);
+        while (!predicate(session.screen())) {
+          const next = changed.promise;
+          poke?.();
+          await Promise.race([next, exited]);
+        }
+        return session.screen();
       } catch (error) {
-        throw new Error(`${String(error)}\n--- screen ---\n${session.screen()}\n--- stderr ---\n${readStderr().slice(-2000)}`);
+        throw new Error(`waiting for ${what}: ${String(error)}\n--- screen ---\n${session.screen()}\n--- stderr ---\n${readStderr().slice(-2000)}`);
       }
     },
     alive: () => child.exitCode === null && child.signalCode === null,
     stop: () => stopped ??= (async () => {
       try {
-        if (session.alive()) child.kill('SIGKILL');
+        if (session.alive()) child.kill('SIGTERM');
         await child.exited;
       } finally { child.terminal?.close(); }
     })(),
@@ -451,19 +445,15 @@ export async function answerWorkspaceQuestion(session: AgentSession, answer: 'de
     // screen could land on a modal that has not yet taken its selection.
     const text = screenText(s);
     return text.includes(WORKSPACE_QUESTION) && text.includes('Not here');
-  }, 30_000);
+  });
   if (answer === 'register') session.key('Up');
   session.key('Enter');
-  await session.waitForScreen('the question answered', (s) => !screenText(s).includes(WORKSPACE_QUESTION) && inputAreaVisible(s), 15_000);
+  await session.waitForScreen('the question answered', (s) => !screenText(s).includes(WORKSPACE_QUESTION) && inputAreaVisible(s));
   // First paint can precede stdin subscription. Prove the real composer echoes
   // unsent input before giving it the owner's first prompt, then clear it.
-  await session.waitForScreen('live composer input', s => {
-    if (s.includes(COMPOSER_ECHO)) return true;
-    session.key('C-u'); session.type('x');
-    return false;
-  }, 10_000);
+  await session.waitForScreen('live composer input', s => s.includes(COMPOSER_ECHO), () => { session.key('C-u'); session.type('x'); });
   session.key('C-u');
-  await session.waitForScreen('empty live composer', s => inputAreaVisible(s) && !s.includes(COMPOSER_ECHO) && !s.includes(WORKSPACE_QUESTION), 10_000);
+  await session.waitForScreen('empty live composer', s => inputAreaVisible(s) && !s.includes(COMPOSER_ECHO) && !s.includes(WORKSPACE_QUESTION));
   return asked;
 }
 

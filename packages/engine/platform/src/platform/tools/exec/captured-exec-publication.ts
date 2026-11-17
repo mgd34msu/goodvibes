@@ -3,10 +3,11 @@ import { executePolicyCheck } from '../../gate/execute-policy-check.js';
 /** Compare and publish a completed projection under the captured mutation lock. */
 import type { Stats } from 'node:fs';
 import { chmodSync, lstatSync, mkdirSync, readdirSync, realpathSync, rmdirSync, unlinkSync } from 'node:fs';
-import { join, sep } from 'node:path';
+import { join, relative, sep } from 'node:path';
 import { assertContractInputAuthority, authorizeContractInputPath, contractInputAuthorityMutable } from '../../contract/input-authority.js';
 import { withCapturedPublication, publishWithinCapturedLease, type CapturedPublicationLease } from '../shared/captured-publication.js';
 import type { CapturedExecAuthority } from './captured-exec.js';
+import { CapturedBoundaryRefusal } from './captured-exec-refusal.js';
 export interface CapturedFileBytes { readonly bytes: RetainedFileSlice; readonly mode: number }
 interface CapturedFileChange extends CapturedFileBytes { readonly path: string }
 
@@ -28,7 +29,7 @@ export async function publishCapturedProjection(
   beforePublish?: () => void,
 ): Promise<void> {
   const publish = async (assertLeaseCurrent?: () => void): Promise<void> => {
-    if (!contractInputAuthorityMutable(binding.authority)) throw new Error('immutable captured input cannot be published');
+    if (!contractInputAuthorityMutable(binding.authority)) throw new CapturedBoundaryRefusal('authority', binding.root, 'this run has read-only access to the project, so its file changes cannot be published');
     const removedFiles = [...originals.keys()].filter((path) => !present.has(path));
     const removedDirectories = [...originalDirectories.keys()].filter((path) => !directories.has(path)).sort((a, b) => b.length - a.length);
     const changedDirectories = [...directories].filter(([path, mode]) => originalDirectories.get(path) !== mode).sort(([a], [b]) => a.length - b.length);
@@ -42,7 +43,7 @@ export async function publishCapturedProjection(
     signal?.throwIfAborted();
     // No awaited callbacks between final comparison and publication. The shared
     // lock covers write/edit tools and other completed retained projections.
-    if (realpathSync(binding.root) !== binding.root) throw new Error('captured publication root redirected');
+    if (realpathSync(binding.root) !== binding.root) throw new CapturedBoundaryRefusal('authority', binding.root, 'the project directory was redirected during the run');
     const physical = (path: string): Stats | undefined => {
       let current = binding.root;
       for (const part of path.split(sep)) {
@@ -50,9 +51,9 @@ export async function publishCapturedProjection(
         try {
           const stat = lstatSync(current);
           if (stat.isSymbolicLink() || (!stat.isDirectory() && (!stat.isFile() || stat.nlink !== 1)))
-            throw new Error('captured publication path is an alias or special file');
+            throw new CapturedBoundaryRefusal('alias', relative(binding.root, current), `${relative(binding.root, current)} in the project is a link or special file`);
           if (current === join(binding.root, path)) return stat;
-          if (!stat.isDirectory()) throw new Error('captured publication parent changed');
+          if (!stat.isDirectory()) throw new CapturedBoundaryRefusal('conflict', relative(binding.root, current), `${relative(binding.root, current)} was replaced by a file in the project during this run, so ${path} cannot be written`);
         } catch (error) {
           if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
           throw error;
@@ -64,31 +65,31 @@ export async function publishCapturedProjection(
       const current = physical(path);
       const original = originals.get(path);
       if (original ? !current?.isFile() || !bytes.originals.matchesFileSync(original.bytes, join(binding.root, path)) || (current.mode & 0o777) !== original.mode : current !== undefined)
-        throw new Error('captured output conflicts with a newer member edit');
+        throw new CapturedBoundaryRefusal('conflict', path, `${path} was changed in the project by another member during this run`);
     }
     for (const [path] of changedDirectories) {
       const current = physical(path);
       const original = originalDirectories.get(path);
       if (original === undefined ? current !== undefined : !current?.isDirectory() || (current.mode & 0o777) !== original)
-        throw new Error('captured directory conflicts with a newer member edit');
+        throw new CapturedBoundaryRefusal('conflict', path, `the directory ${path} was changed in the project by another member during this run`);
     }
     const assertCompleteRemoval = (path: string): void => {
       const current = physical(path);
-      if (!current?.isDirectory() || !originalDirectories.has(path)) throw new Error('captured directory changed before removal');
+      if (!current?.isDirectory() || !originalDirectories.has(path)) throw new CapturedBoundaryRefusal('conflict', path, `the directory ${path} the command removed was changed in the project during this run`);
       for (const name of readdirSync(join(binding.root, path))) {
         const child = join(path, name);
         const stat = physical(child);
         if (stat?.isDirectory()) assertCompleteRemoval(child);
         else if (!stat?.isFile() || !originals.has(child) || present.has(child))
-          throw new Error('captured directory contains unadmitted or newer data');
+          throw new CapturedBoundaryRefusal('conflict', child, `the command removed the directory ${path}, but ${child} in it is new or was changed in the project during this run`);
       }
     };
     for (const path of removedDirectories) assertCompleteRemoval(path);
     // Validate every staged output before the first host mutation. Writes below
     // use the independent retained bytes, so projection races cannot substitute
     // a different payload after this final comparison.
-    for (const change of changes.values()) {
-      if (!bytes.changes.matchesFileSync(change.bytes, change.path)) throw new Error('captured output changed before publication');
+    for (const [path, change] of changes) {
+      if (!bytes.changes.matchesFileSync(change.bytes, change.path)) throw new CapturedBoundaryRefusal('authority', path, `the command's output for ${path} changed after the run ended`);
     }
     // Each applied step registers its inverse, so an I/O failure part-way
     // restores the previous state instead of leaving half a publication.

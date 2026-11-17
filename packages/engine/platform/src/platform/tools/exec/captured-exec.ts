@@ -12,6 +12,7 @@ import { executePolicyCheck } from '../../gate/execute-policy-check.js';
 import { discardCapturedProjection } from './captured-exec-cleanup.js';
 import { PartialCapturedPublication, publishCapturedProjection } from './captured-exec-publication.js';
 import { executeCapturedFileOperations } from './captured-exec-file-ops.js';
+import { CapturedBoundaryRefusal, capturedRefusalText } from './captured-exec-refusal.js';
 import { createSafeRegex } from '../../utils/safe-regex.js';
 import { runInteractiveCommand, type ExecInteractionRuntime } from './interactive.js';
 import { projectCapturedExecDependencies, type CapturedExecDependencyInput } from './captured-exec-dependencies.js';
@@ -56,16 +57,11 @@ export interface CapturedExecAuthority {
 export type CapturedExecAvailability =
   | { readonly available: true; readonly backend: 'linux-bwrap-projection' }
   | { readonly available: false; readonly reason: 'unsupported-platform' | 'unsupported-architecture' | 'missing-bwrap' | 'unusable-boundary'; readonly message: string };
-const HELD = 'Captured exec held: original-owner/view authority is unavailable, changed or restricted. Output withheld; no file changes were applied. Re-read the files you rely on, then rerun if still needed.';
+const held = (reason: string): string => `Captured exec held: ${reason}. Output withheld; no file changes were applied. Re-read the files you rely on, then rerun if still needed.`;
 const CANCELLED = 'Captured exec cancelled. Output withheld; no file changes were applied.';
 const HELD_AFTER_PUBLISH = 'Captured exec held after its file changes were applied: the changes are in the project; only output is withheld. Do not rerun to repeat them; read the changed files instead.';
 const timedOutNote = (timeoutMs: number): string => `Captured exec timed out after ${timeoutMs}ms. Output withheld; no file changes were applied.`;
 
-class ReservedCapturedOutput extends Error {
-  constructor(directory: (typeof CONTRACT_INPUT_EXCLUSIONS)[number]) {
-    super(`Captured exec cannot publish writes to reserved directory ${directory}. Remove those writes and rerun using permitted project or artifact paths. Output withheld.`);
-  }
-}
 
 /** These are not exec schema inputs; never pretend that supplied stdin ran. */
 export function capturedExecUnsupportedOptions(input: Record<string, unknown>): string[] {
@@ -293,6 +289,9 @@ export async function runCapturedCommand(
   // A timed-out PTY run reports the prompt it was waiting on, but only after
   // authority is proven again before the stopped run's operations are released.
   let promptDiagnostics: Pick<ExecCommandResult, 'pending_prompt' | 'prompt_declined'> = {};
+  // What the command printed, once authority was proven after it ended; a
+  // refusal of its file changes alone still returns this.
+  let ran: Pick<ExecCommandResult, 'exit_code' | 'stdout' | 'stderr' | 'stdout_truncated' | 'stderr_truncated'> | undefined;
   try {
     if (!within(root, resolve(workingDirectory)) || !within(root, cwd)) throw new Error('outside captured working directory');
     if (['/usr', '/bin', '/lib', '/lib64', '/proc', '/dev'].some((path) => within(path, root) || within(root, path)))
@@ -388,7 +387,7 @@ export async function runCapturedCommand(
     if (observer.fileOps?.some((operation) => operation.op !== 'delete' || !operation.dry_run) && !contractInputAuthorityMutable(binding.authority))
       throw new Error('immutable captured input cannot apply file operations');
     const fileOperations = await executeCapturedFileOperations(root, projection, observer.fileOps,
-      authorize);
+      authorize, new Set([...paths, ...[...originalDirectories.keys()].map((rel) => join(root, rel))]));
     observer.onFileOperations?.(fileOperations);
     const dependencies = await projectCapturedExecDependencies(binding, temporary, operationSignal, projection);
     const nodeRuntime = await projectCapturedExecNodeRuntime(binding, temporary, operationSignal);
@@ -517,9 +516,10 @@ export async function runCapturedCommand(
     }
     await validation;
     await check();
-    if (invalid) throw new Error('authority changed');
+    if (invalid) throw new CapturedBoundaryRefusal('authority', root, "the owner's read authority over the project changed during the run");
     if (killed) return { cmd: command, cwd, exit_code: null, stdout: '', stderr: timedOut ? timedOutNote(timeoutMs) : CANCELLED, success: false, timed_out: timedOut,
       ...(timedOut ? promptDiagnostics : { cancelled: true }), duration_ms: Date.now() - start };
+    ran = { exit_code: exitCode, stdout, stderr, ...(stdoutDropped ? { stdout_truncated: true } : {}), ...(stderrDropped ? { stderr_truncated: true } : {}) };
     if (script) await rm(join(projection, script.name), { force: true });
     const changes = new Map<string, { path: string; bytes: RetainedFileSlice; mode: number }>();
     const present = new Set<string>();
@@ -532,7 +532,7 @@ export async function runCapturedCommand(
         const target = join(root, rel);
         if (dependencies.mounts.some((mount) => mount.target === target)) return;
         const reserved = CONTRACT_INPUT_EXCLUSIONS.find(name => name === entry.name);
-        if (reserved !== undefined) throw new ReservedCapturedOutput(reserved);
+        if (reserved !== undefined) throw new CapturedBoundaryRefusal('reserved', rel, `the command wrote ${rel} inside the reserved directory ${reserved}`);
         await authorize(target, current);
         paths.add(target);
         const stat = await lstat(join(projection, rel));
@@ -543,7 +543,7 @@ export async function runCapturedCommand(
           retained = true;
         }
         else if (stat.isFile() && !stat.isSymbolicLink()) {
-          if (candidateRelative === rel && stat.nlink !== 1) throw new Error('repair candidate is a hardlink');
+          if (candidateRelative === rel && stat.nlink !== 1) throw new CapturedBoundaryRefusal('alias', rel, `the command left ${rel} as a hard link`);
           const path = join(projection, rel);
           present.add(rel);
           retained = true;
@@ -554,7 +554,7 @@ export async function runCapturedCommand(
               changes.set(rel, { path, bytes, mode: stat.mode & 0o777 });
             }
           }
-        } else throw new Error('captured output contains an alias or special file');
+        } else throw new CapturedBoundaryRefusal('alias', rel, `the command left a symlink or special file at ${rel}`);
       };
       for (const entry of entries.filter(entry => entry.isDirectory())) await visit(entry);
       await checkCapturedInputsInBatches(entries.filter(entry => !entry.isDirectory()), visit, operationSignal);
@@ -603,13 +603,25 @@ export async function runCapturedCommand(
     if (error instanceof PartialCapturedPublication) published = true;
     if (timedOut && !published) return { cmd: command, cwd, exit_code: null, stdout: '', stderr: timedOutNote(timeoutMs), success: false, timed_out: true,
       ...promptDiagnostics, duration_ms: Date.now() - start };
-    // Output stays withheld on every path here; what differs is whether the
-    // command's file changes already landed, which decides if a rerun is safe.
-    const diagnosis = published ? HELD_AFTER_PUBLISH
-      : error instanceof ReservedCapturedOutput && !combined?.aborted ? error.message
-        : combined?.aborted ? CANCELLED : HELD;
-    return { cmd: command, cwd, exit_code: null, stdout: '', stderr: diagnosis, success: false, denied: true,
-      ...(combined?.aborted ? { cancelled: true } : {}), ...(published ? { captured_changes_published: true } : {}), duration_ms: Date.now() - start };
+    const aborted = combined?.aborted === true;
+    const reason = error instanceof Error ? error.message : String(error);
+    if (!aborted) logger.warn('captured exec: file changes not applied', {
+      ...(error instanceof CapturedBoundaryRefusal ? { kind: error.kind, path: error.path } : {}), error: reason,
+    });
+    const refusal = !aborted && error instanceof CapturedBoundaryRefusal ? error : undefined;
+    // A refusal of the file changes alone (a conflict, a link, a reserved
+    // path) found after authority was proven keeps the command's output; an
+    // authority problem, a cancel or an unexpected failure withholds it. What
+    // else differs is whether the changes already landed, which decides if a
+    // rerun is safe.
+    const keepsOutput = refusal !== undefined && refusal.kind !== 'authority' && ran !== undefined;
+    const diagnosis = published && !refusal ? HELD_AFTER_PUBLISH
+      : refusal ? capturedRefusalText(refusal, published, keepsOutput)
+        : aborted ? CANCELLED : held(`the run could not be confirmed against the owner's current files (${reason})`);
+    return { cmd: command, cwd, exit_code: null, stdout: '', ...(keepsOutput ? ran : {}),
+      stderr: keepsOutput && ran!.stderr ? `${diagnosis}\n${ran!.stderr}` : diagnosis, success: false, denied: true,
+      ...(refusal ? { captured_refusal: { kind: refusal.kind, path: refusal.path, reason: diagnosis } } : {}),
+      ...(aborted ? { cancelled: true } : {}), ...(published ? { captured_changes_published: true } : {}), duration_ms: Date.now() - start };
   } finally {
     clearTimeout(timer); clearInterval(monitor);
     try {

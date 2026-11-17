@@ -315,6 +315,11 @@ export interface ExecCommandResult {
   captured_exec_availability?: CapturedExecAvailability | undefined;
   /** Captured exec only: the command's file changes were applied before its output was withheld. */
   captured_changes_published?: boolean | undefined;
+  /**
+   * Captured exec only: why the run's file changes were not applied (`conflict`, `alias`,
+   * `reserved` or `authority`), the project path involved, and the full sentence with the next step.
+   */
+  captured_refusal?: { readonly kind: 'conflict' | 'alias' | 'reserved' | 'authority'; readonly path: string; readonly reason: string } | undefined;
   cmd: string;
   exit_code: number | null;
   stdout: string;

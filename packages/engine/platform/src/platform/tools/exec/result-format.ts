@@ -145,13 +145,16 @@ export function formatResult(result: ExecCommandResult, verbosity: ExecVerbosity
       denied: true,
       ...(result.captured_exec_unsupported_options && { captured_exec_unsupported_options: result.captured_exec_unsupported_options }),
       ...(result.captured_changes_published && { captured_changes_published: true }),
+      ...(result.captured_refusal && { captured_refusal: { kind: result.captured_refusal.kind, path: result.captured_refusal.path } }),
       ...(result.cancelled && { cancelled: true }),
       ...sandboxFields(result),
       // `stderr` stays populated so existing consumers keep reading the reason
       // where they always have; `denial_reason` adds the same text under a name
       // that says what it is, alongside the structured segment breakdown.
       stderr: result.stderr,
-      denial_reason: result.stderr || 'Command denied by policy',
+      // A captured run whose file changes alone were refused still ran: its output is kept.
+      ...(result.stdout && { stdout: result.stdout }),
+      denial_reason: result.captured_refusal?.reason ?? (result.stderr || 'Command denied by policy'),
       ...(detail?.segments ? { segments: detail.segments } : {}),
       ...(detail?.ast_mode !== undefined ? { ast_mode: detail.ast_mode } : {}),
     };

@@ -71,9 +71,25 @@ this one-time command; the old updater cannot discover the renamed repository.
 
 The release installer retains the original installer’s command paths and
 `~/.goodvibes` data. It handles upgrades, running daemon/agent restarts, systemd
-user services and launchd agents. Existing custom services are distinguished from
-installer-managed services; migration preserves settings and has rollback handling.
-PATH setup and checks for older commands remain part of installation.
+user services and launchd agents. PATH setup and checks for older commands remain
+part of installation.
+
+The daemon's service (a systemd user unit on Linux, a launchd agent on macOS) is
+written by the daemon itself, never by the installer. On a first install the
+installer runs `goodvibes-daemon install-service`, which writes the service, starts
+it and enables login lingering when it can (its lines say whether the daemon starts
+at boot or at login). On every upgrade it runs `goodvibes-daemon refresh-service`,
+which rewrites a service definition GoodVibes wrote earlier to the current launch
+(an older release's pinned `--hostname`/`--port`, an explicit `--daemon-home` or a
+moved program are all replaced), keeps a copy at `<definition>.bak.<timestamp>`
+and keeps the working directory it named; the restart that follows applies it. A
+definition GoodVibes did not write is never written over or removed; the installer
+names it and the command that hands it back to the daemon. The service's name and
+whether GoodVibes wrote it come from `goodvibes-daemon service-status --json`
+(`serviceName`, `path`, `definitionOwner`). A daemon still running under the unit
+an older installer created, `goodvibes-daemon.service`, is moved to the daemon's
+own service (written, started and verified before the old unit is retired; rolled
+back when it does not come up).
 
 Saved data can require a newer reader than an earlier release provides. The
 installer checks an existing installation’s reader requirements with the staged,
@@ -229,9 +245,10 @@ curl -fsSL https://goodvibes.sh/install.sh | GOODVIBES_UNINSTALL=1 sh
 ```
 
 This removes installer-managed programs, runtime companions, known native library
-files and managed service files (including a unit the daemon's own `install-service`
-wrote, which carries the product's description rather than the installer's marker),
-keeping `~/.goodvibes` settings, sessions and memory.
+files and the daemon's service when `goodvibes-daemon service-status` reports that
+GoodVibes wrote its definition (a definition it did not write is stopped, disabled
+when it starts the program being removed, and kept, with the command that removes
+it), keeping `~/.goodvibes` settings, sessions and memory.
 Browser-driver, WebUI and retained directory backups are listed and preserved;
 they may contain local additions or serve another deployment. Review those paths
 before removing their contents. An update that is still running must finish

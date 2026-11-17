@@ -418,9 +418,11 @@ export async function runDaemonServiceCli(input: DaemonServiceCliInput): Promise
       // A failed start does not undo the write. The unit is installed, but a
       // script must not treat a daemon that is down as installed and started:
       // exit 3 is the same "installed, not running" answer service-status gives.
+      // Whether lingering was enabled decides "starts at boot" versus "at login"; the install says which.
+      const linger = installed.lingerNote === undefined ? [] : [installed.lingerNote];
       const result = started.actionError
-        ? ok('install', { ...started, running: false }, [`could not start it automatically: ${started.actionError}`])
-        : ok('install', started);
+        ? ok('install', { ...started, running: false }, [`could not start it automatically: ${started.actionError}`, ...linger])
+        : ok('install', started, linger);
       return result.status.running ? result : { ...result, ok: false, exitCode: SERVICE_STATUS_EXIT_INSTALLED_NOT_RUNNING };
     }
     case 'refresh-service':

@@ -25,8 +25,8 @@ import { createHash } from 'node:crypto';
 import { assertPermissionActive, awaitPermission } from './cancellation.js';
 import { analyzePermissionRequest, withReading } from './analysis.js';
 
-import { decisionModelReady, effectivePermissionMode, presetForMode, type GatePreset, type GatePresetName } from '../gate/presets.js';
-import { gateDecisionsCalibrated } from '../gate/calibration.js';
+import { effectivePermissionMode, presetForMode, type GatePreset, type GatePresetName } from '../gate/presets.js';
+import { permissionDecisionModelReady } from './decision-model-readiness.js';
 import { judgmentInputBoundary, runBoundary } from '../gate/boundary.js';
 import { readToolCall, shellCommandsIn } from '../gate/reading.js';
 import { currentExecutionMode, currentExecutionModeForReadDecision, currentExecutionModeOwner, isInvocationAdmitted, withExecutionMode, type ExecutionModeOwner } from '../gate/execution-context.js';
@@ -413,16 +413,7 @@ export function createPermissionConfigReader(
     ...(flushPendingChanges ? { flushPendingChanges } : {}),
     ...(permissionSnapshot ? { getAutonomousSnapshot: permissionSnapshot } : {}),
     isAutoApproveEnabled: () => isAutoApproveEnabled(configManager),
-    isDecisionModelReady: () => {
-      const model = configManager.get('judgment.model');
-      if (!decisionModelReady({
-        policy: configManager.get('judgment.policy'), endpoint: configManager.get('judgment.endpoint'), model,
-        keySource: configManager.get('judgment.keySource'), keyName: configManager.get('judgment.keyName'),
-      })) return false;
-      // The owner's own choice of mode stands on a working model; the shipped
-      // default hands decisions to Jev only once they were measured on it.
-      return configManager.isExplicitlySet?.('permissions.mode') !== false || gateDecisionsCalibrated(String(model ?? ''));
-    },
+    isDecisionModelReady: () => permissionDecisionModelReady(configManager),
     getSnapshot: permissionSnapshot
       ? () => ({ permissions: permissionSnapshot().permissions })
       : () => getConfigSnapshot(configManager),

@@ -1,4 +1,8 @@
-/** Publishes effective execution-mode changes, including legacy auto-approve transitions. */
+/**
+ * Publishes changes of the execution mode in force, the same one the gate
+ * enforces: legacy auto-approve transitions and a decision model turning ready
+ * or not ready under jev-decides included.
+ */
 
 import { randomUUID } from 'node:crypto';
 import type { ConfigManager } from '../config/manager.js';
@@ -6,8 +10,9 @@ import type { RuntimeEventBus } from '../runtime/events/index.js';
 import type { EmitterContext } from '../runtime/emitters/index.js';
 import { emitPresetChanged } from '../runtime/emitters/gate.js';
 import { effectivePermissionMode } from '../gate/presets.js';
+import { DECISION_MODEL_READINESS_KEYS, permissionDecisionModelReady } from './decision-model-readiness.js';
 
-type ModeSource = Pick<ConfigManager, 'get' | 'subscribe'>;
+type ModeSource = Pick<ConfigManager, 'get' | 'subscribe'> & Partial<Pick<ConfigManager, 'isExplicitlySet'>>;
 
 interface Binding { holders: number; readonly release: () => void }
 
@@ -20,7 +25,13 @@ interface Binding { holders: number; readonly release: () => void }
 const bindings = new WeakMap<ModeSource, WeakMap<RuntimeEventBus, Map<string, Binding>>>();
 
 function subscribe(configManager: ModeSource, runtimeBus: RuntimeEventBus, sessionId: string): () => void {
-  const current = () => effectivePermissionMode(configManager.get('permissions.mode'), configManager.get('behavior.autoApprove'));
+  // The mode the gate enforces: jev-decides without a ready decision model is
+  // ask-me, so a decision model turning ready or not is a mode change too.
+  const current = () => effectivePermissionMode(
+    configManager.get('permissions.mode'),
+    configManager.get('behavior.autoApprove'),
+    permissionDecisionModelReady(configManager),
+  );
   let previous = current();
   const publish = () => {
     const mode = current();
@@ -39,9 +50,12 @@ function subscribe(configManager: ModeSource, runtimeBus: RuntimeEventBus, sessi
       previousPreset: previousMode,
     });
   };
-  const unsubMode = configManager.subscribe('permissions.mode', publish);
-  const unsubAutoApprove = configManager.subscribe('behavior.autoApprove', publish);
-  return () => { unsubMode(); unsubAutoApprove(); };
+  const unsubscribers = [
+    configManager.subscribe('permissions.mode', publish),
+    configManager.subscribe('behavior.autoApprove', publish),
+    ...DECISION_MODEL_READINESS_KEYS.map((key) => configManager.subscribe(key, publish)),
+  ];
+  return () => { for (const unsubscribe of unsubscribers) unsubscribe(); };
 }
 
 /**

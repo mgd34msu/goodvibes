@@ -1,6 +1,6 @@
 import { isTerminalContractStatus, type ContractRunner, type ContractStatus } from '@goodvibes-jev/engine/platform/platform/contract';
 import type { ConversationMessageSnapshot, Orchestrator } from '@goodvibes-jev/engine/platform/platform/core';
-import type { PermissionRequestHandler } from '@goodvibes-jev/engine/platform/platform/permissions';
+import type { PermissionManager, PermissionRequestHandler } from '@goodvibes-jev/engine/platform/platform/permissions';
 import { buildPersistedSessionContextFromFacts } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import type { RuntimeEventBus } from '@goodvibes-jev/engine/platform/platform/runtime/state';
 import type { AgentManager } from '@goodvibes-jev/engine/platform/platform/tools';
@@ -19,6 +19,8 @@ export interface HeadlessTurnContext {
   readonly orchestrator: Pick<Orchestrator, 'abort' | 'handleUserInput' | 'bindNativeConversationProject'>;
   readonly runtime: { readonly sessionId: string; readonly model: string; readonly provider: string };
   readonly permissionPromptRef: { requestPermission: PermissionRequestHandler };
+  /** The gate: calls just-vibes held during this run are reported on the result. */
+  readonly permissions?: Pick<PermissionManager, 'listHeldForOwner'> | undefined;
   readonly uiServices: {
     readonly agents: {
       readonly contractRunner: Pick<ContractRunner, 'list' | 'cancel' | 'get' | 'on' | 'join'>;
@@ -54,6 +56,7 @@ export async function executeHeadlessTurn(
 ): Promise<NativeHeadlessTurnResult> {
   const runner = ctx.uiServices.agents.contractRunner;
   const agents = ctx.uiServices.agents.agentManager;
+  const startedAt = Date.now();
   const existingAgents = new Set(agents.list().map((agent) => agent.id));
   const ownedAgents = () => agents.list().filter((agent) => !existingAgents.has(agent.id));
   // Only ids and statuses are read from these lists: the captured input manifest is left out.
@@ -137,7 +140,11 @@ export async function executeHeadlessTurn(
       state.response = answers.join('\n\n');
       if (state.exitCode === 0) state.stopReason = 'completed';
     }
-    return observer.result(signal, ctx.runtime);
+    const result = observer.result(signal, ctx.runtime);
+    // A just-vibes run ends with what it held for the owner; nothing was run for them.
+    const held = (ctx.permissions?.listHeldForOwner() ?? []).filter((call) => call.heldAt >= startedAt)
+      .map((call) => ({ id: call.id, tool: call.toolName, summary: call.summary, reason: call.reason }));
+    return held.length > 0 ? { ...result, heldForOwner: held } : result;
   } finally {
     signal.removeEventListener('abort', abort);
     permissionAnswers?.dispose();

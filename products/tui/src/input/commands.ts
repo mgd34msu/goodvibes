@@ -78,6 +78,7 @@ import { registerCloudflareRuntimeCommands } from './commands/cloudflare-runtime
 import { registerWorkPlanRuntimeCommands } from './commands/work-plan-runtime.ts';
 import { registerCostRuntimeCommands } from './commands/cost-runtime.ts';
 import { registerOwnerInboxCommands } from './commands/owner-inbox-runtime.ts';
+import { registerHeldCallsCommands } from './commands/held-calls-runtime.ts';
 import { registerWebSearchRuntimeCommands } from './commands/websearch-runtime.ts';
 import { registerImageRuntimeCommands } from './commands/image-runtime.ts';
 import { registerPermissionsRuntimeCommands } from './commands/permissions-runtime.ts';
@@ -185,6 +186,7 @@ export const BUILTIN_COMMAND_GROUPS: readonly BuiltinCommandGroup[] = [
   { category: 'Image', register: registerImageRuntimeCommands },
   { category: 'Permissions', register: registerPermissionsRuntimeCommands },
   { category: 'Permissions', register: registerOwnerInboxCommands },
+  { category: 'Permissions', register: registerHeldCallsCommands },
   { category: 'Diff & Review', register: registerReviewRuntimeCommands },
   { category: 'CI', register: registerCiRuntimeCommands },
   { category: 'Check-in', register: registerCheckinRuntimeCommands },

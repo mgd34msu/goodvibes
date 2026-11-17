@@ -97,9 +97,9 @@ for it to read when it starts.
 | `cache.enabled` | `true` | Enable provider-aware prompt caching |
 | `cache.stableTtl` | `1h` | TTL for stable content (system prompt + tools) |
 | `cache.monitorHitRate` | `true` | Track and warn on low cache hit rates |
-| `helper.enabled` | `false` | Route grunt work to a cheaper helper model |
-| `helper.globalProvider` | `` | Helper model provider (e.g., `ollama`) |
-| `helper.globalModel` | `` | Helper model ID (e.g., `llama3.2:3b`) |
+| `helper.enabled` | `false` | Send supporting work (compaction summaries, session titles, resume summaries) to a cheaper helper model; off, that work runs on the main model |
+| `helper.globalProvider` | `` | Helper model provider (e.g., `ollama`); empty means the main model does the supporting work |
+| `helper.globalModel` | `` | Helper model ID (e.g., `llama3.2:3b`); empty means the main model does the supporting work |
 
 ## Permission modes
 
@@ -109,7 +109,7 @@ for it to read when it starts.
 | --- | --- |
 | `ask-me` | Ordinary work (reads, writes, edits, ordinary commands) runs without asking; dangerous actions and owner-only decisions wait for your reply, bound to the exact action |
 | `jev-decides` (default) | Jev, the decision model, decides judgment calls: it permits ordinary work and justified risk and refuses genuinely harmful actions; owner-only decisions (spending over a limit, unrecoverable deletion, a new recipient, granting access, loosening security, changing a contract) still ask you. With no working decision model (`judgment.endpoint` and `judgment.model` set, decision models not off, the key present) it behaves as `ask-me` |
-| `just-vibes` | Does as much as it can without interrupting you: Jev decides judgment calls when a decision model works; an owner-only decision, or a judgment with no decision model, is not run and is held, and the agent lists what was held at the end of the run for you to approve |
+| `just-vibes` | Does as much as it can without interrupting you: Jev decides judgment calls when a decision model works; an owner-only decision, or a judgment with no decision model, is not run and is held, and the end of each run lists what was held (a headless run reports it as `heldForOwner`); `/held approve <id>` approves one for the session and the work carries on with it when you ask |
 | `yolo` | Runs authorized actions without general safety decisions or prompts; host containment, secret storage and payment rules still apply |
 | `plan` | Allows read-only tools and refuses every mutating or exec tool with a structured plan-mode denial |
 
@@ -239,7 +239,7 @@ Listed in Settings under Behavior.
 
 | Key | Type | Default | Meaning |
 | --- | --- | --- | --- |
-| `session.autoTitle` | boolean | `false` | Auto-title an untitled session using the configured tool/helper (weak/fast) model after the first turn completes. Off by default because it spends a small model call. Only ever sets a system title (a title you set yourself is never overwritten), and it runs at most once per session. Requires the tool LLM to be configured (`/config` → tools). |
+| `session.autoTitle` | boolean | `false` | Auto-title an untitled session using the helper model (`helper.*`; with none set, the tool LLM when it is enabled, else the main model) after the first turn completes. Off by default because it spends a small model call. Only ever sets a system title (a title you set yourself is never overwritten), and it runs at most once per session. |
 
 ```json
 {

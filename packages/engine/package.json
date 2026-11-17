@@ -1732,6 +1732,11 @@
       "types": "./terminal-shell/dist/owner-inbox-command.d.ts",
       "import": "./terminal-shell/dist/owner-inbox-command.js"
     },
+    "./terminal-shell/held-calls-command": {
+      "bun": "./terminal-shell/src/held-calls-command.ts",
+      "types": "./terminal-shell/dist/held-calls-command.d.ts",
+      "import": "./terminal-shell/dist/held-calls-command.js"
+    },
     "./terminal-shell/transcript-reading": {
       "bun": "./terminal-shell/src/transcript-reading.ts",
       "types": "./terminal-shell/dist/transcript-reading.d.ts",

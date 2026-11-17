@@ -32,6 +32,12 @@ export interface NativeHeadlessTurnResult {
     readonly recovery?: HeadlessSessionRecovery | undefined;
     /** Set when the run was refused before it started: what is true, why, and what to do. */
     readonly refusal?: { readonly code: string; readonly state: string; readonly reason: string; readonly next: readonly string[] } | undefined;
+    /**
+     * Calls permissions.mode just-vibes held for the owner during the run: not run, and the rest
+     * of the work went on without them. Run again in ask-me (or answer them with --answer-permissions)
+     * to decide each one.
+     */
+    readonly heldForOwner?: readonly { readonly id: string; readonly tool: string; readonly summary: string; readonly reason: string }[] | undefined;
 }
 /** What a resumed headless run restored from its session's crash snapshot, as the final frame and the `SESSION_RECOVERED` frame carry it. */
 export interface HeadlessSessionRecovery {
@@ -312,7 +318,10 @@ export function writeNativeHeadlessResult(result: NativeHeadlessResult, format: 
     // A failure that never reached a model turn is diagnostic text; a turn's answer stays on stdout.
     const diagnostic = exitCode !== 0 && turn.sessionId === undefined;
     const out = (diagnostic ? [] : [response, execution?.message]).filter(Boolean);
-    const err = (diagnostic ? [response, error, execution?.message] : [error]).filter(Boolean);
+    const held = turn.heldForOwner?.length
+        ? [`Held for you (not run): ${turn.heldForOwner.map((call) => `${call.id} ${call.tool}: ${headlessRecoveryText(call.reason)}`).join('; ')}`]
+        : [];
+    const err = (diagnostic ? [response, error, execution?.message] : [error, ...held]).filter(Boolean);
     if (out.length)
         stdout(out.join('\n'));
     if (err.length)

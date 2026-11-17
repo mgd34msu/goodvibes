@@ -35,6 +35,7 @@ import { extractPathArgs } from '../runtime/permissions/rules/path-scope.js';
 import { buildDurableRuleForDecision, buildRememberOptions, matchDurableRulesAsync, sessionApprovalKey } from './approval-rules.js';
 import { changesMcpTrust, classifyCall, classifyPaths, declaredRecoverable, declaredValues, ownerOnlyReason, recognizeOwnerOnly, type CallClass, type CallFacts, type CallRuleFact, type OwnerOnlyKind } from '../gate/classify.js';
 import { toolDecisionOf } from './denial.js';
+import { processHeldForOwner, type HeldForOwnerCall, type HeldForOwnerLedger } from './held-for-owner.js';
 import { readModeCategory, toolCategoryOf, type ToolDefinition } from '../types/tools.js';
 import { projectIdentity, type UserPermissionRuleStore } from './user-rule-store.js';
 import type { PolicyRuntimeState } from '../runtime/permissions/policy-runtime.js';
@@ -336,6 +337,8 @@ export interface GateOptions {
   readonly surfaceOf?: (() => string | undefined) | undefined;
   /** The untrusted-content ledger; the process ledger when absent. */
   readonly ledger?: UntrustedContentLedger | undefined;
+  /** Where just-vibes holds calls for the owner; the process's ledger when absent. */
+  readonly heldForOwner?: HeldForOwnerLedger | undefined;
 }
 
 /** A host-bound decision for the selected execution mode and exact current action. */
@@ -1096,7 +1099,7 @@ export class PermissionManager {
         { detail: 'The owner approved these exact revised arguments.' }) };
     }
     if (decided.kind === 'owner-only') {
-      if (input.mode === 'just-vibes') return this.queuedForOwner(input.policyResult.analysis, `held for you: ${ownerOnlyReason(decided.item)}`);
+      if (input.mode === 'just-vibes') return this.queuedForOwner(input, input.policyResult.analysis, `held for you: ${ownerOnlyReason(decided.item)}`, decided.item);
       return this.askOwner(input, input.policyResult.analysis, {
         reasons: [`Only you decide this: ${ownerOnlyReason(decided.item)}.`], ownerOnly: decided.item,
         revisedDetail: 'Prepare the exact action revised and approved by the owner.',
@@ -1106,7 +1109,7 @@ export class PermissionManager {
     if (input.mode === 'plan') return { result: input.policyResult };
     // just-vibes with no working decision model: nobody can decide now without interrupting the owner.
     if (input.mode === 'just-vibes' && !this.decisionModelWorks()) {
-      return this.queuedForOwner(input.policyResult.analysis, 'held for you: this needs a decision and no decision model is set up');
+      return this.queuedForOwner(input, input.policyResult.analysis, 'held for you: this needs a decision and no decision model is set up');
     }
     const privacy = judgmentInputBoundary(input.toolName, input.args, input.workingDirectory);
     let analysis = input.policyResult.analysis;
@@ -1187,6 +1190,10 @@ export class PermissionManager {
     });
     input.assertCurrent();
     const receipt = decision.decision;
+    // just-vibes does not refuse what Jev would not run: the owner decides it at the end of the run.
+    if (input.mode === 'just-vibes' && receipt.outcome !== 'act') {
+      return { ...this.queuedForOwner(input, analysis, `held for you: ${receipt.summary}`), recordClaim: () => decision.recordClaim() };
+    }
     return {
       result: this.result(receipt.outcome === 'act', false, 'jev_decision', `jev_${receipt.outcome}`, analysis,
         { boundary: boundaryResult, autonomousDecision: receipt, detail: receipt.summary,
@@ -1682,13 +1689,30 @@ export class PermissionManager {
    * A call held for the owner in just-vibes: not run, the work carries on, and
    * the agent lists it for the owner at the end of the run.
    */
-  private queuedForOwner(analysis: PermissionRequestAnalysis, reason: string): SafetyOutcome {
+  private queuedForOwner(input: Pick<SafetyInput, 'toolName' | 'args'>, analysis: PermissionRequestAnalysis, reason: string, ownerOnly?: OwnerOnlyKind): SafetyOutcome {
+    const key = this.getApprovalKey(input.toolName, input.args);
+    const approvalKey = ownerOnly === undefined ? key : ownerOnlySessionKey(ownerOnly, key);
+    // Approving it later is the owner's session answer for this exact call, as if he had been asked now.
+    const held = this.heldForOwner().hold({ key: approvalKey, toolName: input.toolName, summary: analysis.summary, reason }, () => {
+      this.sessionApprovals.set(approvalKey, true);
+      this.sessionApprovalRevision++;
+    });
     return { result: this.result(false, false, 'runtime_mode', 'mode_queued_for_owner', analysis, {
       detail: reason,
-      decision: { state: 'queued-for-owner', decidedBy: 'mode', reason,
+      decision: { state: 'queued-for-owner', decidedBy: 'mode', reason, heldId: held.id,
         next: ['carry on with the work that does not need this call',
-          'at the end of the run, list the calls held for the owner and ask them to approve or change them'] },
+          `the owner is shown it at the end of the run and can approve it with /held approve ${held.id}; after that the same call runs`] },
     }) };
+  }
+
+  /** The ledger this gate holds just-vibes calls in: the process's, unless the embedder gave one. */
+  private heldForOwner(): HeldForOwnerLedger {
+    return this.gate.heldForOwner ?? processHeldForOwner();
+  }
+
+  /** The calls just-vibes holds for the owner, oldest first. */
+  listHeldForOwner(): readonly HeldForOwnerCall[] {
+    return this.heldForOwner().list();
   }
 
   private result(

@@ -2,6 +2,7 @@ export * from './analysis.js';
 export * from './approval-rules.js';
 export * from './credential-read-defaults.js';
 export * from './denial.js';
+export * from './held-for-owner.js';
 export * from './manager.js';
 export * from './prompt.js';
 export * from './types.js';

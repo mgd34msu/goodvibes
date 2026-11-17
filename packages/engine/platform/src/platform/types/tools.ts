@@ -169,6 +169,8 @@ export interface ToolDecision {
   readonly standing?: boolean | undefined;
   /** The decision log row, when Jev decided. */
   readonly decisionId?: string | undefined;
+  /** On `queued-for-owner`: the id the owner approves the held call by (`/held approve <id>`). */
+  readonly heldId?: string | undefined;
 }
 
 /** A tool invocation requested by the LLM. */

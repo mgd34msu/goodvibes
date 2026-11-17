@@ -254,6 +254,14 @@ export interface OrchestratorTurnLoopContext {
  * told what is wrong and how to fix it.
  */
 /** Opens the session's verification journal, or an in-memory store with a notice when it cannot be used. */
+/** The end-of-turn list of calls just-vibes held for the owner, with how to approve them. */
+function describeHeldForOwner(held: ReadonlyMap<string, { readonly tool: string; readonly reason: string }>): string {
+  const lines = [...held].map(([id, call]) => `  ${id}  ${call.tool}: ${call.reason}`);
+  return [`Held for you: ${held.size === 1 ? 'this call was' : `these ${String(held.size)} calls were`} not run, and the rest of the work went on without ${held.size === 1 ? 'it' : 'them'}.`,
+    ...lines,
+    'Approve with /held approve <id> (or /held approve all) and ask me to carry on; the approved call then runs. /held dismiss <id> sets one aside.'].join('\n');
+}
+
 export function openVerificationStore(workingDirectory: string | undefined, sessionId: string, onNotice: (notice: string) => void): VerificationStore {
   try {
     const store = new VerificationStore(workingDirectory, sessionId);
@@ -876,6 +884,8 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
     };
   };
 
+  // Calls just-vibes held for the owner this turn, listed for him when the turn ends.
+  const heldThisTurn = new Map<string, { readonly tool: string; readonly reason: string }>();
   const outcome = await runTurn({
     signal: signal ?? new AbortController().signal,
     request: async (request): Promise<TurnModelResponse> => {
@@ -932,6 +942,11 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
       // so a crash later in the turn loses at most the batch in flight.
       if (context.runtimeBus) emitToolsDone(context.runtimeBus, context.emitterContext(context.turnId), { turnId: context.turnId });
       completionGuard.noteToolResults(round.results);
+      for (const result of round.results) {
+        const held = result.decision;
+        if (held?.state !== 'queued-for-owner' || !held.heldId) continue;
+        heldThisTurn.set(held.heldId, { tool: response.toolCalls.find((call) => call.id === result.callId)?.name ?? 'a tool', reason: held.reason });
+      }
       return round.results;
     },
     checkProgress: (text, progressSignal) => completionGuard.checkProgress({ request: context.text, response: text,
@@ -1048,6 +1063,10 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
     // The orchestrator's cancellation path settles the turn (unfinished calls, rollback, TURN_CANCEL).
     signal?.throwIfAborted();
     throw new DOMException('The turn was cancelled', 'AbortError');
+  }
+  if (heldThisTurn.size > 0) {
+    context.conversation.addNotice(describeHeldForOwner(heldThisTurn), { level: 'warning', kind: 'system' });
+    context.requestRender();
   }
   if (outcome.status === 'stopped' || outcome.status === 'budget') {
     const reason = `Stopped: ${outcome.note ?? 'a turn limit was reached'}. The request is not complete.`;

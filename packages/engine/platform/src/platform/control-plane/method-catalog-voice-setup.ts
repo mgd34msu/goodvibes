@@ -272,8 +272,9 @@ export const builtinGatewayVoiceSetupMethodDescriptors: readonly GatewayMethodDe
       + 'boot attempt and a user asking, join one download instead of racing for the same files.',
     category: 'health',
     scopes: ['write:config'],
-    // Downloads and installs executables and rewrites voice.* config: admin, like config.set.
-    access: 'admin',
+    // Not admin: it fetches only checksum-pinned model files that install and
+    // boot already fetch, runs nothing and changes no setting, so any caller
+    // holding write:config may recover them.
     http: { method: 'POST', path: '/api/voice/wake/provision' },
     inputSchema: objectSchema({}, []),
     outputSchema: WAKE_PROVISION_RESULT_SCHEMA,

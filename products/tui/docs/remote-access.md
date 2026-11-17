@@ -24,8 +24,9 @@ computes, so it is stated where you pair a device and never repeated as a nag.
   full cockpit over `http://<server>:3423` for browsing sessions, watching
   agents, and steering them. The transport does not refuse private-network
   origins. A `100.64-127.x` address is accepted over http only as a Tailscale
-  address (carrier-grade NAT uses the same range): the daemon and `goodvibes
-  pair` record the addresses Tailscale reports; elsewhere list them in
+  address (carrier-grade NAT uses the same range): the daemon, `goodvibes` and
+  `goodvibes-agent` accept the addresses a running Tailscale lists for this
+  machine and its peers; without Tailscale on the machine list them in
   `GOODVIBES_TAILNET_ADDRESSES`, or use the Tailscale name, which a browser
   needs. Over a Tailscale name or address the connection is already
   encrypted by Tailscale, and the pairing surfaces say so instead of the LAN

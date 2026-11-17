@@ -16,11 +16,16 @@
  * A 100.64/10 address is private only when it is stated to be a Tailscale
  * address. That range is RFC 6598 shared address space: Tailscale uses it, and
  * so does carrier-grade NAT, where a plain-http origin crosses the ISP's
- * network unencrypted. It is stated by Tailscale itself (the processes that
- * probe `tailscale status` record this machine's and its peers' addresses with
- * {@link stateTailnetAddresses}) or by the owner, in
- * `GOODVIBES_TAILNET_ADDRESSES` (comma-separated addresses, or `100.64.0.0/10`
- * for the whole range when no carrier-grade NAT is in the path).
+ * network unencrypted. It is stated by Tailscale itself (a process that can run
+ * programs asks a running `tailscale status` for this machine's and its peers'
+ * addresses, only when such an address comes up and at most once a minute), by
+ * the owner in `GOODVIBES_TAILNET_ADDRESSES` (comma-separated addresses, or
+ * `100.64.0.0/10` for the whole range when no carrier-grade NAT is in the
+ * path), or by a caller with {@link stateTailnetAddresses}. A browser has no
+ * way to ask, so it reaches a Tailscale machine by its `*.ts.net` name.
+ *
+ * Imports nothing: the Tailscale question goes through the runtime's own
+ * `process.getBuiltinModule`, which a browser does not have.
  *
  * Accepts the hostname as URL.hostname yields it (IPv6 still in brackets).
  */
@@ -82,9 +87,8 @@ function settingTailnetAddresses(): ReadonlySet<string> {
 }
 
 /**
- * Record addresses this process knows are Tailscale addresses (from Tailscale
- * itself). Only 100.64/10 literals are kept; anything else is already decided
- * by the rules above.
+ * Record addresses the caller knows are Tailscale addresses. Only 100.64/10
+ * literals are kept; anything else is already decided by the rules above.
  */
 export function stateTailnetAddresses(addresses: Iterable<string>): void {
   for (const address of addresses) {
@@ -93,12 +97,70 @@ export function stateTailnetAddresses(addresses: Iterable<string>): void {
   }
 }
 
+/** How long one `tailscale status` answer is trusted; Tailscale can stop, and then the range is the ISP's again. */
+const TAILSCALE_ANSWER_TTL_MS = 60_000;
+const TAILSCALE_PROBE_TIMEOUT_MS = 1_500;
+let tailscaleAnswer: { readonly at: number; readonly addresses: ReadonlySet<string> } | undefined;
+
+type ExecFileSync = (file: string, args: readonly string[], options: {
+  readonly encoding: 'utf8';
+  readonly timeout: number;
+  readonly stdio: readonly ['ignore', 'pipe', 'ignore'];
+  readonly windowsHide: boolean;
+}) => string;
+
+/** The `TailscaleIPs` of this machine and its peers from a running Tailscale's `status --json`. */
+function runningTailscaleAddresses(json: string): Set<string> {
+  const out = new Set<string>();
+  const add = (node: unknown): void => {
+    const ips = node !== null && typeof node === 'object' ? (node as { readonly TailscaleIPs?: unknown }).TailscaleIPs : undefined;
+    if (!Array.isArray(ips)) return;
+    for (const ip of ips) if (typeof ip === 'string' && isSharedAddressSpace(bareHost(ip))) out.add(bareHost(ip));
+  };
+  try {
+    const parsed = JSON.parse(json) as { readonly BackendState?: unknown; readonly Self?: unknown; readonly Peer?: unknown };
+    if (parsed.BackendState !== 'Running') return out;
+    add(parsed.Self);
+    if (parsed.Peer !== null && typeof parsed.Peer === 'object') for (const peer of Object.values(parsed.Peer as Record<string, unknown>)) add(peer);
+  } catch {
+    // Not Tailscale's JSON: nothing is stated.
+  }
+  return out;
+}
+
+/**
+ * Whether a running Tailscale on this machine lists the address as its own or a
+ * peer's. Asked only for a 100.64/10 address nothing else stated, in a process
+ * that can run programs (never in a browser), and at most once a minute: the
+ * answer (about 10 ms) is reused until it is a minute old.
+ */
+function tailscaleReports(ipv4: string): boolean {
+  const now = Date.now();
+  if (!tailscaleAnswer || now - tailscaleAnswer.at >= TAILSCALE_ANSWER_TTL_MS) {
+    let addresses: ReadonlySet<string> = new Set();
+    try {
+      const runtimeProcess = (globalThis as { readonly process?: { readonly getBuiltinModule?: (id: string) => unknown } }).process;
+      const childProcess = runtimeProcess?.getBuiltinModule?.('node:child_process') as { readonly execFileSync?: ExecFileSync } | undefined;
+      if (childProcess?.execFileSync) {
+        addresses = runningTailscaleAddresses(childProcess.execFileSync('tailscale', ['status', '--json'], {
+          encoding: 'utf8', timeout: TAILSCALE_PROBE_TIMEOUT_MS, stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true,
+        }));
+      }
+    } catch {
+      // No Tailscale here, or it did not answer: it states nothing.
+    }
+    tailscaleAnswer = { at: now, addresses };
+  }
+  return tailscaleAnswer.addresses.has(ipv4);
+}
+
 function isStatedTailnetAddress(host: string): boolean {
   const ipv4 = mappedIpv4(host.replace(/%.*$/, '')) ?? host;
   if (!isSharedAddressSpace(ipv4)) return false;
   if (statedTailnetAddresses.has(ipv4)) return true;
   const setting = settingTailnetAddresses();
-  return setting.has(ipv4) || setting.has(WHOLE_SHARED_RANGE);
+  if (setting.has(ipv4) || setting.has(WHOLE_SHARED_RANGE)) return true;
+  return tailscaleReports(ipv4);
 }
 
 function isPrivateIpv6(host: string): boolean {

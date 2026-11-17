@@ -458,15 +458,17 @@ The transport does not refuse private-network origins; the one rule is
 imports. Over a Tailscale name or address the connection is already encrypted
 by Tailscale, and the posture notice says so instead of the LAN line.
 
-A `100.64-127.x` address is accepted over http only as a stated Tailscale
-address, because carrier-grade NAT uses the same range and an http request to
-it would cross the ISP's network unencrypted with the bearer token. A process
-that probes Tailscale (the daemon, `goodvibes pair`) records the addresses
-`tailscale status` reports for this machine and its peers; anywhere else, list
-them in `GOODVIBES_TAILNET_ADDRESSES` (comma-separated, or `100.64.0.0/10` for
-the whole range when no carrier-grade NAT is in the path) or use the
-Tailscale name. A browser cannot be told, so the web UI is opened by the
-Tailscale name.
+A `100.64-127.x` address is accepted over http only as a Tailscale address,
+because carrier-grade NAT uses the same range and an http request to it would
+cross the ISP's network unencrypted with the bearer token. The daemon, the
+terminal app and the Agent ask a running Tailscale (`tailscale status`) the
+first time such an address comes up and accept exactly the addresses it lists
+for this machine and its peers; the answer is reused for a minute, so a
+stopped Tailscale stops vouching for them. Without Tailscale on the machine,
+list the addresses in `GOODVIBES_TAILNET_ADDRESSES` (comma-separated, or
+`100.64.0.0/10` for the whole range when no carrier-grade NAT is in the path)
+or use the Tailscale name. A browser cannot ask, so the web UI is opened by
+the Tailscale name.
 
 The host in a pairing link, a QR or `web.publicBaseUrl` for a wildcard bind
 comes from one rule (`stableUrlHostForBindHost`): the Tailscale MagicDNS name

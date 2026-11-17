@@ -59,9 +59,3 @@ export function shouldFireAlert(
   return focusTracker.shouldAlertWhenUnfocused();
 }
 
-/**
- * A duration above both notifyCompletion thresholds, for callers that still
- * pass a duration for a point-in-time alert. New code calls notifyNow
- * (platform/utils), which needs no duration.
- */
-export const FORCE_NOTIFY_DURATION_MS = 30_001;

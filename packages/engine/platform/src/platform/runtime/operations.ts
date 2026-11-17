@@ -136,7 +136,6 @@ export type {
 
 export { FocusTracker } from './focus-tracker.js';
 export {
-  FORCE_NOTIFY_DURATION_MS,
   readBooleanConfig,
   readNotifyOnlyWhenUnfocused,
   shouldFireAlert,

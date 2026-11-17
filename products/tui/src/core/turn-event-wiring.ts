@@ -13,12 +13,11 @@ import type { ConversationManager } from './conversation.ts';
 import type { SessionSurface } from '@/runtime/index.ts';
 import { openSessionHere, writeCrashSnapshotAtTurnMoments } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import type { WebhookNotifier } from '@goodvibes-jev/engine/platform/platform/integrations';
-import { notifyCompletion } from '@goodvibes-jev/engine/platform/platform/utils';
+import { notifyNow } from '@goodvibes-jev/engine/platform/platform/utils';
 import { maybeNotifyLongTask, readNotifyAfterSeconds } from './long-task-notifier.ts';
 import type { FocusTracker } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import {
   shouldFireAlert,
-  FORCE_NOTIFY_DURATION_MS,
   NOTIFICATION_TEXT_LIMITS,
   TurnActivityTally,
   buildTurnNotificationLine,
@@ -121,9 +120,10 @@ export interface WireTurnEventHandlersOptions {
   readonly terminalNotifier?: import('./terminal-notifier.ts').TerminalNotifier | null;
   /**
    * Desktop delivery for the turn, budget, agent and workstream notices wired
-   * here; defaults to the platform notifyCompletion. Tests pass a spy to read the text.
+   * here, once each caller has decided the notice is due; defaults to the
+   * platform notifyNow. Tests pass a spy to read the text.
    */
-  readonly notifyDesktop?: typeof notifyCompletion;
+  readonly notifyDesktop?: typeof notifyNow;
   /**
    * The terminal bell for a turn over 5s that did not reach the desktop popup
    * (the popup rings it itself); defaults to writing BEL to stdout, which is
@@ -210,7 +210,7 @@ export function wireTurnEventHandlers(options: WireTurnEventHandlersOptions): Wi
     terminalNotifier,
     runtimeBus,
     systemMessageRouter,
-    notifyDesktop = notifyCompletion,
+    notifyDesktop = notifyNow,
     ringBell = () => {
       process.stdout.write('\x07');
     },
@@ -543,7 +543,6 @@ export function wireTurnEventHandlers(options: WireTurnEventHandlersOptions): Wi
           notifyDesktop(
             name ? `Agent failed: ${name}` : 'GoodVibes: agent failed',
             metadataOnly ? 'An agent failed' : trimAtWordBoundary(`Agent failed: ${payload.error}`, NOTIFICATION_TEXT_LIMITS.desktopBody),
-            FORCE_NOTIFY_DURATION_MS,
           );
         } catch (err) {
           logger.debug('turn-event-wiring: agent-failure notify error', { error: String(err) });
@@ -563,7 +562,7 @@ export function wireTurnEventHandlers(options: WireTurnEventHandlersOptions): Wi
           },
           metadataOnly: readNotificationsMetadataOnly(configGet),
         });
-        notifyDesktop(notice.title, notice.body, FORCE_NOTIFY_DURATION_MS);
+        notifyDesktop(notice.title, notice.body);
       } catch (err) {
         logger.debug('turn-event-wiring: contract notification error', { error: String(err) });
       }

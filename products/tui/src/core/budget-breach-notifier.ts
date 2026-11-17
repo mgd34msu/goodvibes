@@ -11,7 +11,7 @@ import { isConversationUsageAvailable } from './conversation-usage.ts';
  * against the new value).
  *
  * Delivery mirrors long-task-notifier.ts: desktop notification
- * (notifyCompletion) + outbound webhook (WebhookNotifier), both gated by
+ * (notifyNow) + outbound webhook (WebhookNotifier), both gated by
  * the shared focus/config gating in alert-gating.ts. Skips evaluation
  * entirely when the session model is unpriced, a $0 placeholder cost must
  * never be reported as a real breach (mirrors the usage modal's "unpriced"
@@ -23,14 +23,13 @@ import { isConversationUsageAvailable } from './conversation-usage.ts';
  * behavior.notificationsMetadataOnly is not explicitly false the desktop and
  * webhook text carries the numbers only.
  */
-import { notifyCompletion } from '@goodvibes-jev/engine/platform/platform/utils';
+import { notifyNow } from '@goodvibes-jev/engine/platform/platform/utils';
 import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { WebhookNotifier } from '@goodvibes-jev/engine/platform/platform/integrations';
 import { calcSessionCost, computeBudgetBreach, isModelPriced } from '@goodvibes-jev/engine/platform/platform/providers';
 import type { FocusTracker } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import {
   shouldFireAlert,
-  FORCE_NOTIFY_DURATION_MS,
   buildBudgetNotification,
   readNotificationsMetadataOnly,
   type ConfigGet,
@@ -55,8 +54,8 @@ export interface BudgetBreachNotifierDeps {
   readonly getSessionId?: (() => string) | undefined;
   /** The name of the turn that just ended (the one during which the budget tripped). */
   readonly getTurnName?: (() => string | null) | undefined;
-  /** Desktop delivery; defaults to the platform notifyCompletion. Tests pass a spy to read the text. */
-  readonly notifyDesktop?: typeof notifyCompletion | undefined;
+  /** Desktop delivery; defaults to the platform notifyNow. Tests pass a spy to read the text. */
+  readonly notifyDesktop?: typeof notifyNow | undefined;
 }
 
 /** Stateful edge-trigger checker, construct once per session, call on every TURN_COMPLETED. */
@@ -121,7 +120,7 @@ function fireBudgetBreachAlert(deps: BudgetBreachNotifierDeps, sessionCost: numb
   const notice = buildBudgetNotification(facts, { metadataOnly });
 
   try {
-    (deps.notifyDesktop ?? notifyCompletion)(notice.title, notice.body, FORCE_NOTIFY_DURATION_MS);
+    (deps.notifyDesktop ?? notifyNow)(notice.title, notice.body);
   } catch (err) {
     logger.debug('budget-breach-notifier: desktop notify error', { error: String(err) });
   }

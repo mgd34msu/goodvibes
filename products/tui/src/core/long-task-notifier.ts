@@ -19,7 +19,7 @@
  *
  * Delivery targets (in preference order):
  *   1. Desktop notification (linux notify-send / mac osascript) via platform
- *      notifyCompletion, detected and dispatched by the platform; silently
+ *      notifyNow, detected and dispatched by the platform; silently
  *      no-ops when the platform does not support it.
  *   2. Configured outbound webhook channel (ntfy topic / webhook URL) via
  *      WebhookNotifier.sendNotification(), only fires when the user has URLs configured.
@@ -37,12 +37,11 @@
  * unaffected.
  */
 
-import { notifyCompletion } from '@goodvibes-jev/engine/platform/platform/utils';
+import { notifyNow } from '@goodvibes-jev/engine/platform/platform/utils';
 import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { WebhookNotifier } from '@goodvibes-jev/engine/platform/platform/integrations';
 import type { FocusTracker } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import {
-  FORCE_NOTIFY_DURATION_MS,
   buildTurnNotification,
   readNotificationsMetadataOnly,
   shouldFireAlert,
@@ -110,8 +109,8 @@ export interface MaybeNotifyLongTaskOptions {
    */
   readonly metadataOnly?: boolean | undefined;
 
-  /** Desktop delivery; defaults to the platform notifyCompletion. Tests pass a spy to read the text. */
-  readonly notifyDesktop?: typeof notifyCompletion | undefined;
+  /** Desktop delivery; defaults to the platform notifyNow. Tests pass a spy to read the text. */
+  readonly notifyDesktop?: typeof notifyNow | undefined;
 
   /**
    * False skips the desktop popup (behavior.notifyOnComplete off for a turn);
@@ -167,7 +166,7 @@ export interface MaybeNotifyLongTaskOptions {
  */
 export function maybeNotifyLongTask(opts: MaybeNotifyLongTaskOptions): boolean {
   const { elapsedMs, status, kind, sessionId, thresholdSeconds, webhookNotifier, focusTracker, configGet } = opts;
-  const notifyDesktop = opts.notifyDesktop ?? notifyCompletion;
+  const notifyDesktop = opts.notifyDesktop ?? notifyNow;
 
   // The threshold gates both deliveries (0 is off); a desktop floor
   // (desktopAfterMs) can make the popup alone due before it.
@@ -205,16 +204,15 @@ export function maybeNotifyLongTask(opts: MaybeNotifyLongTaskOptions): boolean {
   };
 
   // Delivery 1: desktop notification (notify-send on linux, osascript on mac).
-  // notifyCompletion is non-throwing; platform handles platform absence silently.
-  // Its own duration heuristic only pops a desktop notification above 30s;
-  // the threshold above is the user's (behavior.notifyAfterSeconds), so a
-  // threshold under 30s must still reach the desktop.
+  // notifyNow is non-throwing; platform handles platform absence silently.
+  // Whether it is due was decided above from the user's threshold
+  // (behavior.notifyAfterSeconds), so it is delivered as it is.
   let delivered = false;
   if (desktopDue) {
     delivered = true;
     try {
       const notice = buildTurnNotification(facts, { metadataOnly });
-      notifyDesktop(notice.title, notice.body, Math.max(elapsedMs, FORCE_NOTIFY_DURATION_MS));
+      notifyDesktop(notice.title, notice.body);
     } catch (err) {
       logger.debug('long-task-notifier: desktop notify error', { error: String(err) });
     }

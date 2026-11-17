@@ -115,8 +115,13 @@ installer again also retries the restore from that record. An installer that is
 killed outright (SIGKILL, power loss, out of memory) cannot recover or print
 anything, so the next installation or uninstall does it: when the process that
 holds a `*.update-transaction` claim is no longer running, it puts the previous
-files back from that record, releases the claims and continues. A claim held by
-a running process is refused with that process's id; wait for it to finish.
+files back from that record, releases the claims and continues. `goodvibes
+update`, the daemon's automatic update, the daemon's start and the terminal
+apps release such a claim the same way when an update left it and no partial
+file (`.update-download`, `.update-previous`, `.rollback-exchange`) remains
+beside any program it names; anything else they report with the file and the
+next step. A claim held by a running process is refused with that process's
+id; wait for it to finish.
 Every refusal ends with a stable id such as `(INSTALL_E036)`.
 
 Other failure behavior:

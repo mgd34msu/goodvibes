@@ -8,7 +8,7 @@ import { readFileObservation } from '../utils/file-observation.js';
 import { assertClientReaderPayload, clientReaderMemberPath, parseClientReaderArtifact, type ClientReaderPackage, type ClientReaderTarget } from './client-reader-artifact.js';
 import { inspectDaemonNativeInstallation, resolveDaemonNativeTargets } from './daemon-native-cohort.js';
 import { NativeDataCompatibilityError, nativeReaderCapabilities, type NativeDataFormat } from './native-reader-compatibility.js';
-import { captureUpdateFileIo, realUpdateFileIo, type UpdateFileIo } from './update-file-io.js';
+import { captureUpdateFileIo, realUpdateFileIo, releaseAbandonedUpdateClaim, UPDATE_CLAIM_SUFFIX, type UpdateFileIo } from './update-file-io.js';
 
 interface PeerEvidence { readonly target: ClientReaderTarget; readonly version: string; readonly formats: readonly string[]; readonly assertCurrent: () => void }
 const peerEvidence = new Map<string, PeerEvidence>();
@@ -73,7 +73,7 @@ export function createInstalledReaderCohort(input: { readonly execPath: string; 
     const requiredFormats = Object.freeze([...inputFormats]);
     const target = `${platform}-${arch}`;
     if (target !== 'linux-x64' && target !== 'linux-arm64' && target !== 'darwin-x64' && target !== 'darwin-arm64') throw new NativeDataCompatibilityError('unconfirmed-reader');
-    const assertIdle = () => { for (const program of PROGRAMS) if (io.exists(join(root, program) + '.update-transaction')) throw new NativeDataCompatibilityError('busy'); };
+    const assertIdle = () => { for (const program of PROGRAMS) { const claim = join(root, program) + UPDATE_CLAIM_SUFFIX; if (io.exists(claim) && !releaseAbandonedUpdateClaim(claim, io)) throw new NativeDataCompatibilityError('busy'); } };
     assertIdle();
     const programs = PROGRAMS.map(program => ({ program, path: join(root, program) }));
     const assertSlots = retainFiles(programs.map(program => program.path), io);

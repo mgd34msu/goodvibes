@@ -61,6 +61,56 @@ export const realUpdateFileIo: UpdateFileIo = {
   },
 };
 
+/** The slots an update keeps beside a target while it runs. */
+export const UPDATE_TRANSIENT_SLOT_SUFFIXES = ['.update-download', '.update-previous', '.rollback-exchange'] as const;
+/** The claim an update or install holds beside each target while it runs. */
+export const UPDATE_CLAIM_SUFFIX = '.update-transaction';
+const TRANSIENT_SLOT_SUFFIXES = UPDATE_TRANSIENT_SLOT_SUFFIXES;
+const CLAIM_SUFFIX = UPDATE_CLAIM_SUFFIX;
+
+/** The files an update or install keeps beside a target while it runs: its claim and its transient slots. */
+export const UPDATE_TRANSACTION_SUFFIXES: readonly string[] = Object.freeze([CLAIM_SUFFIX, ...TRANSIENT_SLOT_SUFFIXES]);
+
+/**
+ * Release the claims of an update whose process is gone when nothing partial
+ * remains. An update renames only after staging every target, and keeps a
+ * download or saved-previous slot beside a target until the whole cohort is in
+ * place, so with no slot beside any target it named it either renamed nothing
+ * or finished every rename: the installed files are whole. That is the rule
+ * the installer applies to an abandoned claim too. A rollback (no slot between
+ * targets), a recovery fence (written by a transaction that already failed),
+ * a live or unknown holder, or a claim this module did not write is left for
+ * inspection. Returns true when the claim at `claimPath` was released.
+ */
+export function releaseAbandonedUpdateClaim(claimPath: string, io: UpdateFileIo = realUpdateFileIo): boolean {
+  if (!claimPath.endsWith(CLAIM_SUFFIX) || !io.readFile || !io.remove) return false;
+  let claim: { readonly pid: number; readonly startedAt: number; readonly targets: readonly string[] };
+  try {
+    const raw = io.readFile(claimPath);
+    if (raw.byteLength > 64 * 1024) return false;
+    const parsed = JSON.parse(raw.toString('utf8')) as { operation?: unknown; pid?: unknown; startedAt?: unknown; fenced?: unknown; targets?: unknown };
+    if (parsed.operation !== 'update' || parsed.fenced === true) return false;
+    if (typeof parsed.pid !== 'number' || !Number.isSafeInteger(parsed.pid) || parsed.pid <= 0 || parsed.pid === process.pid) return false;
+    if (typeof parsed.startedAt !== 'number') return false;
+    const named = Array.isArray(parsed.targets) ? parsed.targets.map((entry) => (entry as { target?: unknown } | null)?.target) : [];
+    const ownTarget = claimPath.slice(0, -CLAIM_SUFFIX.length);
+    const targets = [...new Set([ownTarget, ...named.filter((target): target is string => typeof target === 'string' && isAbsolute(target))])];
+    claim = { pid: parsed.pid, startedAt: parsed.startedAt, targets };
+  } catch { return false; }
+  try { process.kill(claim.pid, 0); return false; }
+  catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') return false; }
+  for (const target of claim.targets) for (const suffix of TRANSIENT_SLOT_SUFFIXES) if (io.exists(target + suffix)) return false;
+  for (const target of claim.targets) {
+    const sibling = target + CLAIM_SUFFIX;
+    try {
+      const raw = io.readFile(sibling);
+      const parsed = JSON.parse(raw.toString('utf8')) as { pid?: unknown; startedAt?: unknown; fenced?: unknown };
+      if (parsed.pid === claim.pid && parsed.startedAt === claim.startedAt && parsed.fenced !== true) io.remove(sibling);
+    } catch { /* Absent, foreign or unreadable: not this transaction's claim. */ }
+  }
+  return !io.exists(claimPath);
+}
+
 /**
  * Whether an adapter reads bytes and observes file identities, so native
  * update paths hold files to their file-system identity (the rule

@@ -10,7 +10,7 @@ import type { DaemonUpdateArtifact } from '@goodvibes-jev/engine/platform/platfo
 import { captureUpdateFileIo, isCompiledBunModuleUrl, DAEMON_NATIVE_TARGETS, inspectDaemonNativeInstallation, nativeReaderCapabilities, realUpdateFileIo,
   createNativeDataWriteOwner, createInstalledReaderCohort, type NativeDataWriteOwner, type DarwinDaemonInstallation,
   inspectDarwinDaemonInstallation,
-  resolveDaemonNativePayloads, resolveDaemonNativeTargets, retainDaemonNativeFiles } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
+  releaseAbandonedUpdateClaim, resolveDaemonNativePayloads, resolveDaemonNativeTargets, retainDaemonNativeFiles, UPDATE_TRANSACTION_SUFFIXES } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
 import { detectInstallKind } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { COMPILED_VERSION, VERSION } from '../version.js';
 import { installationRefused } from './installation-refusal.js';
@@ -76,8 +76,10 @@ export function resolveInstalledDaemonUpdateArtifact(
     const original = () => { signal?.throwIfAborted(); selected.assertCurrent(); installation.assertCurrent(); };
     const assertCurrent = () => {
       original();
-      for (const member of proof.targets) for (const suffix of ['.update-transaction', '.update-download', '.update-previous', '.rollback-exchange']) {
-        if (proof.io.exists(member.path + suffix)) throw installationRefused('INSTALLATION_UNSETTLED', 'Darwin daemon installation has an unfinished transaction');
+      for (const member of proof.targets) for (const suffix of UPDATE_TRANSACTION_SUFFIXES) {
+        if (proof.io.exists(member.path + suffix) && !releaseAbandonedUpdateClaim(member.path + suffix, proof.io)) {
+          throw installationRefused('INSTALLATION_UNSETTLED', `Darwin daemon installation has an unfinished update (${member.path + suffix}); wait for it to finish, or re-run the installer to complete or recover it`);
+        }
       }
       original();
     };
@@ -97,8 +99,11 @@ export function resolveInstalledDaemonUpdateArtifact(
   const paths = [...targets.map(target => target.path), ...DAEMON_NATIVE_TARGETS.flatMap(target =>
     (resolveDaemonNativePayloads('linux', target.slice('linux-'.length)) ?? []).map(payload => join(dirname(execPath), payload.relativePath)))];
   const assertIdle = () => {
-    for (const path of paths) for (const suffix of ['.update-transaction', '.update-download', '.update-previous', '.rollback-exchange']) {
-      if (io.exists(path + suffix)) throw installationRefused('INSTALLATION_UNSETTLED', 'Native daemon installation has an unfinished transaction');
+    for (const path of paths) for (const suffix of UPDATE_TRANSACTION_SUFFIXES) {
+      // A claim left by an update whose process is gone, with nothing partial beside it, is released here.
+      if (io.exists(path + suffix) && !releaseAbandonedUpdateClaim(path + suffix, io)) {
+        throw installationRefused('INSTALLATION_UNSETTLED', `Native daemon installation has an unfinished update (${path + suffix}); wait for it to finish, or re-run the installer to complete or recover it`);
+      }
     }
   };
   assertIdle();

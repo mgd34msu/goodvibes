@@ -22,12 +22,14 @@ import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decision
  * Individual same-filesystem renames are atomic; the cohort and the brief gap
  * between parking and replacing a live file are NOT filesystem-wide atomic.
  * Failed commits restore their prior state or retain an explicit recovery fence.
- * Process crashes require inspection of the retained transaction files; this is
- * not a power-loss durable journal or a guarantee against unrelated writers.
+ * A crashed update whose claims are the only thing left is released by the next
+ * update (releaseAbandonedUpdateClaim); anything partial is retained for
+ * inspection. This is not a power-loss durable journal or a guarantee against
+ * unrelated writers.
  */
 import { createHash, randomUUID } from 'node:crypto';
-import { captureUpdateFileIo, createOwnedNativeUpdateFile, retainNativeUpdateDirectory, observesUpdateFiles, realUpdateFileIo, type OwnedNativeUpdateFile, type NativeUpdateDirectoryOwner, type UpdateFileIo } from './update-file-io.js';
-export { captureUpdateFileIo, realUpdateFileIo, retainNativeUpdateDirectory, type NativeUpdateDirectoryOwner, type UpdateFileIo } from './update-file-io.js';
+import { captureUpdateFileIo, createOwnedNativeUpdateFile, retainNativeUpdateDirectory, observesUpdateFiles, realUpdateFileIo, releaseAbandonedUpdateClaim, UPDATE_CLAIM_SUFFIX, UPDATE_TRANSIENT_SLOT_SUFFIXES, type OwnedNativeUpdateFile, type NativeUpdateDirectoryOwner, type UpdateFileIo } from './update-file-io.js';
+export { captureUpdateFileIo, realUpdateFileIo, releaseAbandonedUpdateClaim, retainNativeUpdateDirectory, UPDATE_TRANSACTION_SUFFIXES, type NativeUpdateDirectoryOwner, type UpdateFileIo } from './update-file-io.js';
 import { dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import { compareSemanticVersions, parseSemanticVersion } from './semantic-version.js';
 import { assertDaemonNativePayloadPins, createDaemonNativeRenameGuard, inspectDaemonNativeInstallation, parseDaemonCiArtifact, resolveDaemonNativeTargets, retainDaemonNativeFiles, type DaemonNativeTarget, type DaemonNativeRenameGuard, type DaemonPreviousReader, type DaemonInstallationReceipt, type DaemonCiArtifact } from './daemon-native-cohort.js';
@@ -306,7 +308,8 @@ export class UpdateTransactionContendedError extends Error {
   }
 }
 
-const TRANSIENT_SLOT_SUFFIXES = ['.update-download', '.update-previous', '.rollback-exchange'] as const;
+const TRANSIENT_SLOT_SUFFIXES = UPDATE_TRANSIENT_SLOT_SUFFIXES;
+const CLAIM_SUFFIX = UPDATE_CLAIM_SUFFIX;
 
 /**
  * One operator-facing sentence for a fenced transaction: which retained files
@@ -318,13 +321,15 @@ export function describeTransactionRecovery(receipt: UpdateTransactionReceipt): 
   if (paths.length === 0) return 'Inspect the installation directory before retrying.';
   const listed = `Retained files: ${paths.join(', ')}.`;
   const transient = paths.some(path => TRANSIENT_SLOT_SUFFIXES.some(suffix => path.endsWith(suffix)));
-  const claims = paths.filter(path => path.endsWith('.update-transaction'));
+  const claims = paths.filter(path => path.endsWith(CLAIM_SUFFIX));
   if (!receipt.committed && receipt.phase === 'claim' && receipt.recoveryErrors.length === 0 && !transient && claims.length > 0) {
-    // With no download, saved-previous or exchange slot left, an interrupted
-    // transaction either never renamed anything or finished every rename, so
-    // the installed files are whole and only its claims block the next one.
-    return `${listed} An earlier update or install stopped while holding the installation, but no partial file is left beside any target,`
-      + ` so the installed files are whole. After confirming no goodvibes install or update is running, remove ${claims.join(', ')} and retry.`;
+    // A claim this attempt could not take and could not release (see
+    // releaseAbandonedUpdateClaim): a fence left by a failed update, a
+    // rollback, or a holder that may still run. A rollback exchanges target
+    // by target with no slot between them, so nothing on disk says how far it got.
+    return `${listed} An earlier update, rollback or install stopped while holding the installation and its claim could not be released automatically.`
+      + ' Check that no goodvibes install or update is running and that each program reports the version you expect (--version);'
+      + ` then remove ${claims.join(', ')} and re-run the installer, which puts one complete version in place.`;
   }
   return `${listed} Inspect them before retrying; never remove a .update-transaction file while a .update-download, .update-previous or .rollback-exchange file remains beside its target.`;
 }
@@ -502,7 +507,10 @@ function transact(
         // nothing here was touched, and this attempt is simply retryable.
         const holder = blockedClaim ? liveClaimHolder(path.claim, io) : null;
         if (holder) { blockedClaim = false; throw new UpdateTransactionContendedError(holder.pid, holder.startedAt); }
-        throw error;
+        // A claim left by an update whose process is gone, with nothing partial beside its targets, is released and taken.
+        physical();
+        if (!blockedClaim || !releaseAbandonedUpdateClaim(path.claim, io)) throw error;
+        create(path.claim, claimData, 0o600); blockedClaim = false;
       }
       claims.push(path.claim); activeClaims.add(path.claim); current();
     }

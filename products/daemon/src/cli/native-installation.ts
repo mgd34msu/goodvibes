@@ -1,7 +1,7 @@
 /** Read-only native receipt admission shared by the source installer and launcher. */
 import { lstatSync, readFileSync } from 'node:fs';
 import { isAbsolute, join, parse, resolve, sep } from 'node:path';
-import { assertDaemonNativePayloadBytes, compareVersions, parseDaemonCiArtifact, parseDaemonInstallationReceipt, type DaemonInstallationReceipt } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
+import { assertDaemonNativePayloadBytes, compareVersions, parseDaemonCiArtifact, parseDaemonInstallationReceipt, UPDATE_TRANSACTION_SUFFIXES, type DaemonInstallationReceipt } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
 import { daemonCiPayloads, daemonCiPayloadSpecs, daemonNativeHost, DAEMON_NATIVE_TARGETS, type DaemonNativeTarget, type DaemonArtifactSource, type DaemonCiArtifact } from './native-artifact.ts';
 const PACKAGE = '@goodvibes-jev/daemon';
 const RECEIPT = 'daemon-installation.json';
@@ -50,7 +50,7 @@ export function inspectInstallationIdentity(prefix: string, suffix: '' | '.previ
     catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false; throw error; }
   };
   for (const other of DAEMON_NATIVE_TARGETS.filter(value => value !== target)) {
-    for (const path of daemonCiPayloads(other)) for (const ending of [suffix, '.update-transaction', '.update-download', '.update-previous', '.rollback-exchange']) {
+    for (const path of daemonCiPayloads(other)) for (const ending of [suffix, ...UPDATE_TRANSACTION_SUFFIXES]) {
       const foreign = join(prefix, path) + ending; assertPath(foreign);
       if (exists(foreign)) throw new Error('Installation contains a different native target');
     }

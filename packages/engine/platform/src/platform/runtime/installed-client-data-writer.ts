@@ -8,7 +8,7 @@ import { lstatSync, statSync } from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
 import { assertNativeReaderCompatible, nativeReaderCapabilities, createNativeDataWriteOwner, type NativeDataWriteOwner } from './native-reader-compatibility.js';
 import { retainDaemonNativeFiles } from './daemon-native-cohort.js';
-import { captureUpdateFileIo, realUpdateFileIo } from './update-file-io.js';
+import { captureUpdateFileIo, realUpdateFileIo, releaseAbandonedUpdateClaim, UPDATE_TRANSACTION_SUFFIXES } from './update-file-io.js';
 
 export interface InstalledClientDataOptions {
   readonly moduleUrl: string;
@@ -37,8 +37,10 @@ export function admitInstalledClientDataWriter(options: InstalledClientDataOptio
   const retained = retainDaemonNativeFiles(targets, io);
   const assertCurrent = () => {
     retained();
-    for (const path of paths) for (const suffix of ['.update-transaction', '.update-download', '.update-previous', '.rollback-exchange']) {
-      if (io.exists(path + suffix)) throw new Error('Installed terminal has an unfinished publication transaction');
+    for (const path of paths) for (const suffix of UPDATE_TRANSACTION_SUFFIXES) {
+      if (io.exists(path + suffix) && !releaseAbandonedUpdateClaim(path + suffix, io)) {
+        throw new Error(`Installed terminal has an unfinished update (${path + suffix}); its saved data is published once the update finishes or the installer recovers it`);
+      }
     }
   };
   // Construction is read-only. Unfinished swaps withhold publication when

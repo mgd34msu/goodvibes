@@ -2,13 +2,17 @@
 import { spawn } from 'node:child_process';
 import { lstatSync } from 'node:fs';
 import { join } from 'node:path';
+import { releaseAbandonedUpdateClaim, UPDATE_TRANSACTION_SUFFIXES } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
 import { assertNativeInstallHost, inspectInstallation, targetPaths, validateOwner, type DaemonInstallOwner } from './native-installation.ts';
 
 export function assertNativeInstallationIdle(prefix: string): void {
-  for (const target of targetPaths(prefix)) for (const suffix of ['.update-transaction', '.update-download', '.update-previous', '.rollback-exchange']) {
-    try { lstatSync(target.path + suffix); }
+  for (const target of targetPaths(prefix)) for (const suffix of UPDATE_TRANSACTION_SUFFIXES) {
+    const path = target.path + suffix;
+    try { lstatSync(path); }
     catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue; throw error; }
-    throw new Error('Native installation has an active transaction or retained recovery files; inspect them before launch');
+    // A claim left by an update whose process is gone, with nothing partial beside it, is released here.
+    if (releaseAbandonedUpdateClaim(path)) continue;
+    throw new Error(`Native installation has an unfinished update (${path}); wait for it to finish, or re-run the installer to complete or recover it`);
   }
 }
 

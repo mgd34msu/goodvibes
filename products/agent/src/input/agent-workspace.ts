@@ -25,6 +25,7 @@ import { isAffirmative } from './agent-workspace-command-editor-engine.ts';
 import { workspaceEditorOwnerToolCall, type WorkspaceEditorToolCall } from './agent-workspace-editor-tool-calls.ts';
 import { buildAgentWorkspaceRuntimeSnapshot } from './agent-workspace-snapshot.ts';
 import { checkAgentWorkspaceHostSetup } from './agent-workspace-setup-host-status.ts';
+import { readHostMailboxStatus } from './agent-workspace-host-mailbox.ts';
 import { syncAgentWorkspaceLiveCounters } from './agent-workspace-live-counters.ts';
 import { trySubmitDirectHostActionEditor } from './agent-workspace-direct-editor-submission.ts';
 import { loadHostEmailConnectPrefill, readAgentWorkspaceEmailConnectPrefill, type AgentWorkspaceEmailConnectPrefill } from './agent-workspace-email-connect-editor.ts';
@@ -124,7 +125,27 @@ export class AgentWorkspace {
     // Opened by the shell for a person: take the host reading the setup steps
     // show. A caller with no way to repaint (a model reading the catalogue)
     // has its own asynchronous setup status and does not start one.
-    if (this.requestRender) this.readHostSetup(false);
+    if (this.requestRender) {
+      this.readHostSetup(false);
+      this.readHostMailbox();
+    }
+  }
+
+  /**
+   * The inbox settings are the connected host's: one reading when the
+   * workspace opens, and the snapshot is rebuilt when it lands so the inbox
+   * line says what `/email status` says instead of this process's local copy.
+   */
+  private readHostMailbox(): void {
+    const context = this.context;
+    const reading = readHostMailboxStatus(context);
+    if (!context || !reading) return;
+    void reading.then(() => {
+      if (this.context !== context || !this.active) return;
+      this.runtimeSnapshot = buildAgentWorkspaceRuntimeSnapshot(context);
+      this.clampSelection();
+      this.requestRender?.();
+    });
   }
 
   private requestRender: (() => void) | null = null;

@@ -30,6 +30,7 @@ import { requireSecretsManager } from './commands/runtime-services.ts';
 import { agentDaemonConfigClient, openEffectiveConfigView, routeConfigWrite } from '../config/daemon-config-routing.ts';
 import { MAILBOX_FIELDS, mailboxServiceDeps, persistMailboxField, readMailboxStatus, validateMailboxFieldValue, type MailboxField } from './commands/email-settings.ts';
 import { buildAgentWorkspaceRuntimeSnapshot } from './agent-workspace-snapshot.ts';
+import { readHostMailboxStatus } from './agent-workspace-host-mailbox.ts';
 import type { AgentWorkspaceActionResult, AgentWorkspaceEmailConnectStatus, AgentWorkspaceLocalEditor, AgentWorkspaceRuntimeSnapshot } from './agent-workspace-types.ts';
 
 type FieldReader = (id: string) => string;
@@ -99,7 +100,7 @@ export function createEmailConnectWizardEditor(
   status: AgentWorkspaceEmailConnectStatus | null,
   stored: AgentWorkspaceEmailConnectPrefill | null = null,
 ): AgentWorkspaceLocalEditor {
-  const message = !status
+  const message = !status || status.readingFromHost === true
     ? 'Connect your inbox. Enter your IMAP/SMTP settings; the password is stored through the Agent secret manager, never in plain config.'
     : status.connected
       ? `Currently connected as ${status.username} (${status.imapHost}). Change any value below; the stored settings are filled in, and a blank password keeps the stored one.`
@@ -260,6 +261,8 @@ export async function submitAgentWorkspaceEmailConnectWizardEditor(
     }
 
     host.localEditor = null;
+    // The workspace shows the host's reading of the inbox: take a new one now the host holds the new set.
+    await readHostMailboxStatus(context, { fresh: true });
     host.runtimeSnapshot = buildAgentWorkspaceRuntimeSnapshot(context);
     if (hostHoldsPassword) {
       host.status = 'Inbox settings saved on the host; connection not verified.';

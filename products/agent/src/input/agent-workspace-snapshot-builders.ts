@@ -27,6 +27,7 @@ import { readConnectedHostOperatorToken, type ConnectedHostOperatorToken } from 
 import { summarizePersonaItem, summarizeNoteItem, summarizeResearchRunItem, summarizeRoutineScheduleReceipt, summarizeSkillBundleItem, summarizeSkillItem } from './agent-workspace-local-library-snapshot.ts';
 import { isReviewerHandoffArtifact, summarizeReviewerHandoffArtifact } from './agent-workspace-review-packet-utils.ts';
 import { readMailboxStatus } from './commands/email-settings.ts';
+import { heldHostMailboxReading, readHostMailboxStatus } from './agent-workspace-host-mailbox.ts';
 import { CALENDAR_OAUTH_CLIENT_ID_KEYS } from '../agent/calendar/calendar-oauth-service.ts';
 import { readConfigBoolean, readConfigNumber, readConfigString } from './agent-workspace-snapshot-config.ts';
 import type { AgentWorkspaceCalendarOAuthConfigStatus } from './agent-workspace-calendar-oauth-editor.ts';
@@ -308,13 +309,25 @@ export function buildAgentWorkspaceCompanionAccessSnapshot(context: CommandConte
 
 /**
  * Honest email-connect status for the inbox connect wizard's entry state
- *, config validation only, no network I/O. Best-effort: never
- * throws, returns null on any read failure.
+ *, config validation only, no network I/O. With a connected host the inbox
+ * settings are the host's, so this shows the workspace's reading of the host
+ * (agent-workspace-host-mailbox.ts), the fact `/email status` reports, and says
+ * it is reading until that lands. Best-effort: never throws, returns null on
+ * any read failure.
  */
 export function buildAgentWorkspaceEmailConnectStatus(context: CommandContext): AgentWorkspaceEmailConnectStatus | null {
   try {
+    const host = heldHostMailboxReading();
+    if (host?.state === 'reading') {
+      // A build with no reading under way (a caller that does not repaint) starts the one read; a later build shows it.
+      void readHostMailboxStatus(context);
+      return { connected: false, username: '', imapHost: '', errors: [], readingFromHost: true };
+    }
+    if (host?.state === 'failed') {
+      return { connected: false, username: '', imapHost: '', errors: [`the inbox settings could not be read from the connected host: ${host.reason}`] };
+    }
     const cm = context.platform.configManager as unknown as { get: (key: string) => unknown };
-    const status = readMailboxStatus((key) => cm.get(key));
+    const status = host?.state === 'read' ? host.status : readMailboxStatus((key) => cm.get(key));
     return {
       connected: status.ready,
       username: status.settings.username ?? '',

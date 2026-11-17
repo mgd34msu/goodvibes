@@ -164,6 +164,9 @@ function compactLocalLibraryLines(
 
 /** Email and calendar posture from what is configured, not a fixed instruction. */
 function emailCalendarLine(snapshot: AgentWorkspaceRuntimeSnapshot): ContextLine {
+  if (snapshot.emailConnectStatus?.readingFromHost === true) {
+    return { text: 'Email/calendar: reading the inbox settings from the connected host...', fg: PALETTE.info };
+  }
   const email = snapshot.emailConnectStatus?.connected === true;
   const calendar = snapshot.calendarOAuthConfigStatus?.google === true || snapshot.calendarOAuthConfigStatus?.microsoft === true;
   if (email && calendar) return { text: 'Email/calendar: email connected; calendar sign-in configured.', fg: PALETTE.good };

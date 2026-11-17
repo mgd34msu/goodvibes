@@ -438,6 +438,8 @@ export interface AgentWorkspaceEmailConnectStatus {
   readonly username: string;
   readonly imapHost: string;
   readonly errors: readonly string[];
+  /** The connected host holds the inbox settings and its answer has not landed yet. */
+  readonly readingFromHost?: boolean;
 }
 
 export interface AgentWorkspaceRuntimeSnapshot {

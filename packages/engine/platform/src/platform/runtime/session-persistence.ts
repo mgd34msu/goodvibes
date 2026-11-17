@@ -252,12 +252,6 @@ export function readLastSessionPointer(options?: SessionPersistenceOptions): str
 }
 
 /**
- * Delete a pointer whose session file is gone (retention reclaimed it, the user
- * deleted the session). A one-shot record whose referent no longer exists is
- * dead weight; leaving it means every future load re-resolves the same missing
- * file. Best-effort, and ENOENT is success.
- */
-/**
  * The store file the pointer refers to, or null when the options carry no
  * usable surface. A null here means "no referent check", never "referent missing".
  */
@@ -272,8 +266,17 @@ function resolveLastSessionStorePathIfKnown(
   }
 }
 
+/**
+ * Delete a pointer whose session file is gone (retention reclaimed it, the user
+ * deleted the session). A one-shot record whose referent no longer exists is
+ * dead weight; leaving it means every future load re-resolves the same missing
+ * file. Best-effort, and ENOENT is success. Only a pointer that still names the
+ * missing session is retired: another terminal in the same project may have
+ * pointed it at a live session since it was read.
+ */
 function retireDanglingPointer(sessionId: string, options?: SessionPersistenceOptions): void {
   try {
+    if (readLastSessionPointer(options) !== sessionId) return;
     const pointerPath = resolveLastSessionPointerPath(options);
     unlinkSync(pointerPath);
     logger.info('retired last-session pointer to a session that no longer exists', { sessionId });

@@ -7,5 +7,7 @@ export type { FeedContextMutableInit };
 export type FeedContextStableRefs = Pick<InputFeedContext, FeedContextStableKeys | "burstGuard" | "agentWorkspace" | "processModal" | "liveTailModal">;
 export type FeedContextClosures = Pick<InputFeedContext, FeedContextClosureKeys | "cycleAgentWorkspaceCategory" | "dismissAgentWorkspace">;
 export function buildInitialFeedContext(mutable: FeedContextMutableInit, stable: FeedContextStableRefs, closures: FeedContextClosures): InputFeedContext {
-  return { ...buildContext(mutable, stable, closures), burstSuppressedCount: 0 };
+  // Add to the built context itself: spreading it would copy the composer fields' current values and
+  // detach them from the handler, so typing would edit a copy the screen never draws.
+  return Object.assign(buildContext(mutable, stable, closures), { burstSuppressedCount: 0 });
 }

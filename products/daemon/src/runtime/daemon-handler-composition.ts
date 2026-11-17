@@ -13,6 +13,7 @@ import type { InboxPollingControl, RegisterInboxSurfaceOptions } from '@goodvibe
 import { registerDaemonHandlers, type DaemonHandlerSurfaces, type RoutingRegistration } from '../daemon/handlers/index.js';
 import type { HandlerContext, HandlerLogger, OwnedHandlerSurface } from '../daemon/handlers/context.js';
 import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
+import { daemonReceiptStoreAt, daemonReceiptsPath } from '@goodvibes-jev/engine/platform/platform/daemon/receipts';
 import { createPaymentsServices } from './payments-composition.js';
 import { createOwnerMailRelay } from './owner-mail-relay.js';
 import { inboxPollerGate } from './cluster-composition.js';
@@ -105,6 +106,7 @@ export async function createDaemonHandlerComposition(
     workingDirectory: options.workingDirectory,
     homeDirectory: options.homeDirectory,
     logger: handlerLogger,
+    recordReceipt: (text) => { daemonReceiptStoreAt(daemonReceiptsPath(options.configManager)).record(text); },
     ...(options.nativeMutationHost ? { nativeMutationHost: options.nativeMutationHost } : {}),
     ...(options.hasProfile ? { hasProfile: options.hasProfile } : {}),
   };

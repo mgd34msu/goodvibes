@@ -231,7 +231,10 @@ export function registerRoutingMethods(ctx: HandlerContext): RoutingRegistration
   let initPromise: Promise<void> | null = null;
   const ensureInit = async (): Promise<void> => {
     if (!initPromise) {
-      initPromise = store.init().catch((error) => {
+      initPromise = store.init().then(() => {
+        const recovered = store.recoveryNotice();
+        if (recovered !== undefined) { try { ctx.recordReceipt?.(recovered); } catch { /* the log line stays */ } }
+      }, (error: unknown) => {
         // Allow a later invocation to retry initialization.
         initPromise = null;
         throw error;

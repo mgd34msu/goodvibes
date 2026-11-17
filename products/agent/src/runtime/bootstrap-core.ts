@@ -317,6 +317,8 @@ export async function initializeBootstrapCore(
   const startupNotices = createStartupNotices(() => systemMessageRouterRef.value);
   // A keybindings file that was skipped or overridden would otherwise leave a shortcut silently doing nothing.
   for (const notice of keybindingNotices) startupNotices.report(`[Startup] ${notice}`);
+  // A decision log that had to start empty after damage is said on screen, not only in the log file.
+  if (services.judgment.decisionLogNotice) startupNotices.report(`[Startup] ${services.judgment.decisionLogNotice}`);
   // A rejected load must be seen: later approval operations rethrow the same
   // error with no hint of the cause, and a discarded promise reaches only the log.
   startupNotices.guard(

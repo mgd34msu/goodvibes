@@ -8,6 +8,11 @@ export interface DraftHostContext {
   readonly credentials: DaemonCredentialStore;
   readonly workingDirectory: string;
   readonly nativeMutationHost?: NativeMutationHost | undefined;
+  /**
+   * Keeps a one-line notice for the next terminal or web UI that attaches (the
+   * daemon's receipts). Used once, when a store had to start empty after damage.
+   */
+  readonly recordReceipt?: ((text: string) => void) | undefined;
   readonly logger: {
     info(message: string, meta?: unknown): void;
     warn(message: string, meta?: unknown): void;

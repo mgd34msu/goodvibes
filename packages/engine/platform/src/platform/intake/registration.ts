@@ -32,6 +32,11 @@ export interface InboxSurfaceContext {
   readonly catalog: GatewayMethodCatalog;
   readonly workingDirectory: string;
   readonly logger: IntakeLogger;
+  /**
+   * Keeps a one-line notice for the next terminal or web UI that attaches (the
+   * daemon's receipts). Used once, when a store had to start empty after damage.
+   */
+  readonly recordReceipt?: ((text: string) => void) | undefined;
 }
 
 export interface RegisterInboxSurfaceOptions {
@@ -130,6 +135,8 @@ export function createOwnedInboxSource(
     if (setupFailed) throw startFailed();
     if (closed) throw stopped();
     try { await store.init(); } catch { throw startFailed(); }
+    const recovered = store.recoveryNotice();
+    if (recovered !== undefined) { try { ctx.recordReceipt?.(recovered); } catch { /* the log line stays */ } }
     if (closed) throw stopped();
     // A pushed provider writes as soon as the mirror is open; its reader, not the poll gate, decides where it reads.
     poller.bindPushed();

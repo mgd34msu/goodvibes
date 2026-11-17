@@ -380,6 +380,8 @@ export async function initializeBootstrapCore(
   const startupNoticeBuffer = new StartupNoticeBuffer();
   // A keybindings file that was skipped or overridden would otherwise leave a shortcut silently doing nothing.
   for (const notice of keybindingNotices) startupNoticeBuffer.push(`[Startup] ${notice}`, 'high');
+  // A decision log that had to start empty after damage is said on screen, not only in the log file.
+  if (services.judgment.decisionLogNotice) startupNoticeBuffer.push(`[Startup] ${services.judgment.decisionLogNotice}`, 'high');
   // Smart ref: setting .value auto-flushes the pre-router buffer so events
   // buffered before the SystemMessageRouter attaches are not permanently lost.
   const systemMessageRouterRef = ((): { value: SystemMessageRouter | null } => {

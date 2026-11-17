@@ -165,6 +165,8 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
     const hostedRewind = hostedRewindStorage({ shellPaths, homeDirectory });
     // The daemon's approvals snapshot (approvals.list) reads the decisions the gate reports here.
     disposalScope.registry.add('gate events into the runtime store', registerGateRuntimeEvents(options.runtimeBus, graph.runtimeDispatch));
+    // A decision log that had to start empty after damage reaches the next terminal or web UI that attaches.
+    if (judgment.decisionLogNotice) daemonReceiptStoreAt(daemonReceiptsPath(configManager)).record(judgment.decisionLogNotice);
     const browserJudgment = options.createBrowserJudgment ? options.createBrowserJudgment(judgment)
       : composeBrowserJudgment({ judgment, providers: () => providerRegistry, config: configManager, secrets: secretsManager, methods: gatewayMethods, env: process.env, disposal: disposalScope.registry });
     let browserClosing: Promise<void> | undefined;

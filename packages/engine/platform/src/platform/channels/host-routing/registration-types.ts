@@ -12,6 +12,11 @@ export interface RoutingHostContext {
    * reported in the log and the assignment is still kept.
    */
   readonly hasProfile?: ((profileId: string) => boolean) | undefined;
+  /**
+   * Keeps a one-line notice for the next terminal or web UI that attaches (the
+   * daemon's receipts). Used once, when a store had to start empty after damage.
+   */
+  readonly recordReceipt?: ((text: string) => void) | undefined;
   readonly logger: {
     info(message: string, meta?: unknown): void;
     warn(message: string, meta?: unknown): void;

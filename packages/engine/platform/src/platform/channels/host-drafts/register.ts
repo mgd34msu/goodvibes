@@ -298,7 +298,10 @@ export function registerDraftMethods(
   let initPromise: Promise<void> | null = null;
   const ensureInit = (): Promise<void> => {
     if (initPromise) return initPromise;
-    const pending = store.init();
+    const pending = store.init().then(() => {
+      const recovered = store.recoveryNotice();
+      if (recovered !== undefined) { try { ctx.recordReceipt?.(recovered); } catch { /* the log line stays */ } }
+    });
     initPromise = pending;
     void pending.catch(() => { if (initPromise === pending) initPromise = null; });
     return pending;

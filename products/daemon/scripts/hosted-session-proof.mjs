@@ -4,9 +4,7 @@ import { mkdirSync, readFileSync, readlinkSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { isDeepStrictEqual } from 'node:util';
 import { Agent } from 'undici';
-import { redactionCredential, residualCredential } from '@goodvibes-jev/engine/platform/platform/utils';
 import { sessionEventDecoder, syntheticSystemOneAnswers } from './hosted-session-protocol.mjs';
 
 const pause = () => new Promise(resolve => setTimeout(resolve, 20));
@@ -16,33 +14,19 @@ async function until(check, label, milliseconds = 20_000) {
     assert(Date.now() < deadline, `${label}: deadline exceeded`); await pause(); }
 }
 const writeJson = (path, value) => writeFileSync(path, JSON.stringify(value));
-// Every operation owns fresh privacy authority. Equal wire bodies across
-// independent logger/source operations are valid rereads, not boot retries.
-// Match complete emitted question contracts; a shared question name cannot
-// exempt an unrelated decision from the original two-boot replay bound.
-const scopedPrivacyContracts = [redactionCredential, residualCredential].map(battery => ({
-  name: battery.name,
-  questions: Object.fromEntries(Object.entries(battery.items).map(([name, item]) => [name, item.question])),
-}));
-function scopedPrivacyContract(request) {
-  return scopedPrivacyContracts.find(contract => isDeepStrictEqual(request.body.questions, contract.questions));
-}
 // Decision-model requests the five turns of this proof may make. A ceiling, not
 // an exact count: fewer requests pass, more fail. Each listed question set sits
-// at or just above what a clean run makes (10 in all: completion review 2,
-// provider failure reading 2, the two credential readings 1 each, unit pick 1,
-// activity severity 3). A question set not listed here may be asked once; one
-// asked on every successful turn shows up twice and fails until it is listed.
+// at or just above what a clean run makes (5 in all: completion applicability 2,
+// completion review 2, provider failure reading 1). A question set not listed
+// here may be asked once; one asked on every successful turn shows up twice and
+// fails until it is listed.
 const judgmentRequestCeilings = new Map([
+  ['turn:completion_required', 2],
   ['turn:false_blocker:unanswered:unfinished:unnecessary_permission:unsupported', 2],
   ['turn:before_response:billing:category:connection_failure:context_exceeded:provider_unusable:rate_limited:transient_network', 2],
-  ['turn:lineHasCredential:spanIsCredential', 2],
-  ['turn:credentialRemains', 2],
-  ['turn:fits_n1:pick:unit', 2],
-  ['turn:activity:event:severity', 4],
 ]);
 const unlistedQuestionSetCeiling = 1;
-const totalJudgmentRequestCeiling = 12;
+const totalJudgmentRequestCeiling = 7;
 async function listen(server) {
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
   return server.address().port;
@@ -255,8 +239,10 @@ export async function runHostedSessionProof({ binary, boundary, env, root }) {
     const turnEvents = () => { if (streamError) throw streamError; return events.filter(event => event.value.sessionId === sessionId && event.value.payload).map(event => event.value.payload); };
     const complete = await until(() => turnEvents().find(event => event.type === 'TURN_COMPLETED'), 'successful terminal event');
     const deltas = turnEvents().filter(event => event.type === 'STREAM_DELTA' && event.turnId === complete.turnId);
-    assert(deltas.length >= 2, 'Streaming activity must remain observable during private generation');
-    assert.equal(deltas.map(event => event.content ?? '').join(''), '', 'Draft text must remain private until publication review');
+    // Answers stream as the model writes them, marked provisional until the checked answer stands.
+    assert(deltas.length >= 2, 'Streaming activity must remain observable during generation');
+    assert(deltas.every(event => event.provisional === true), 'Streamed text must be marked provisional until the checked answer');
+    assert.equal(deltas.map(event => event.content ?? '').join(''), marker, 'Streamed text must be the answer as the model wrote it');
     assert.equal(complete.response, marker, 'The checked terminal event must deliver the complete answer');
     assert.equal(turnEvents().filter(event => event.type === 'TURN_COMPLETED' && event.turnId === complete.turnId).length, 1);
     assert(judgmentRequests.some(request => Object.hasOwn(request.body.questions, 'unfinished')), 'The compiled turn must reach completion review');
@@ -313,7 +299,7 @@ export async function runHostedSessionProof({ binary, boundary, env, root }) {
     // references. Retain the originating request instead of searching and
     // serializing the entire collection again for each duplicate group.
     const repeatedQuestionGroups = [...identities.values()].filter(({ count }) => count > 2).map(({ identity, count, request }) => {
-      return { identity, count, questions: Object.keys(request.body.questions).sort(), stateKeys: Object.keys(request.body.state ?? {}).sort(), scopedPrivacy: scopedPrivacyContract(request)?.name };
+      return { identity, count, questions: Object.keys(request.body.questions).sort(), stateKeys: Object.keys(request.body.state ?? {}).sort() };
     });
     // Identical activity text on separate native turns is a separate use.
     // Aggregate wire identity counts cannot establish duplicate work. Bind
@@ -324,8 +310,7 @@ export async function runHostedSessionProof({ binary, boundary, env, root }) {
       const ceiling = judgmentRequestCeilings.get(group) ?? unlistedQuestionSetCeiling;
       assert(count <= ceiling, `Decision-model question set ${group} was asked ${count} times; at most ${ceiling} expected`);
     }
-    const unscopedRepeats = repeatedQuestionGroups.filter(group => group.scopedPrivacy === undefined);
-    assert.deepEqual(unscopedRepeats, [], 'Identical decision-model requests repeated more than twice outside the scoped privacy contracts');
+    assert.deepEqual(repeatedQuestionGroups, [], 'Identical decision-model requests repeated more than twice');
     const identityCounts = {};
     for (const { count } of identities.values()) identityCounts[count] = (identityCounts[count] ?? 0) + 1;
     return { elapsedMs: Date.now() - startedAt, judgmentQuestionGroups: Object.fromEntries(questionGroups), judgmentUniqueIdentities: identities.size, judgmentRequestsPerIdentity: identityCounts,

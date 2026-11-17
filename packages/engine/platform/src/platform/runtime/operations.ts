@@ -236,8 +236,6 @@ export type { IdlePowerServices, IdlePowerServicesDeps } from './idle-power-serv
 // Voice is one instance of it; see runtime/setup-contract.ts.
 export {
   SETUP_INTENT_CONTRACT_PROMPT,
-  SETUP_SOLUTION_SHAPES,
-  mentionsUserTypedCommand,
   renderSetupPlan,
   setupPlanStrings,
   setupStepsOfKind,
